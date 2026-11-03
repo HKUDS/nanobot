@@ -1883,9 +1883,7 @@
     "showArchived": "Show archived",
     "hideArchived": "Hide archived",
     "select": "Select",
-    "cancelSelection": "Cancel selection",
     "selectedCount": "{{count}} selected",
-    "deleteSelected": "Delete",
     "delete": "Delete",
     "newChat": "New topic",
     "groups": {
@@ -1897,6 +1895,14 @@
       "earlier": "Earlier",
       "archived": "Archived"
     }
+  },
+  "archiveConfirm": {
+    "title": "Archive this topic?",
+    "titleMany": "Archive {{count}} topics?",
+    "unarchiveTitle": "Unarchive this topic?",
+    "unarchiveTitleMany": "Unarchive {{count}} topics?",
+    "description": "Conversations are kept. You can unarchive them at any time.",
+    "unarchiveDescription": "These topics will return to the sidebar."
   },
   "deleteConfirm": {
     "title": "Delete this topic?",
@@ -2099,6 +2105,10 @@
       "removeQuotedContext": "Remove quote",
       "modelNotConfigured": "Model not configured",
       "configureModel": "Configure model",
+      "shell": {
+        "run": "Run Shell command",
+        "removeContext": "Remove attachments and quoted text before running a command."
+      },
       "chooseAI": "Choose model",
       "switchModel": "Switch model",
       "manageModels": "Manage presets",
@@ -2307,7 +2317,7 @@
     "actions": "Message actions",
     "streaming": "streaming",
     "delivery": {
-      "sending": "Sending…",
+      "sending": "Sending",
       "failed": "Not sent"
     },
     "assistantTyping": "Assistant is typing",
@@ -2485,8 +2495,9 @@
     "retryRateLimit": "Rate limited",
     "retryServer": "Model unavailable",
     "retryUnknown": "Model request failed",
-    "retryWaiting": "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
-    "retryExhausted": "{{error}}. Ending turn.",
+    "retryWaiting": "{{error}} Retrying in {{seconds}}s",
+    "retrying": "{{error}} Retrying",
+    "retryExhausted": "{{error}} Ending turn",
     "cliActivityRunningOne": "Using {{name}}",
     "cliActivityRanOne": "Used {{name}}",
     "cliActivityFailedOne": "Could not use {{name}}",
@@ -2535,6 +2546,7 @@
     "failedHelp": "The saved task could not be restored safely. Review it before continuing.",
     "resuming": "Restoring interrupted task…",
     "review": "Review the task before continuing. Tools will not be replayed automatically.",
+    "replyPreserved": "Reply saved. You can continue.",
     "safeResume": "Continuing from saved conversation context.",
     "dismiss": "Dismiss",
     "continue": "Continue"
@@ -2659,7 +2671,7 @@
       "authenticationBody": "Sign in again or check the provider’s API key in model settings.",
       "billingTitle": "Model provider quota is unavailable",
       "billingBody": "Add credit or check billing for the provider account, then try again.",
-      "connectionTitle": "Could not connect to the model provider",
+      "connectionTitle": "Model connection failed",
       "timeoutTitle": "Model provider request timed out",
       "rateLimitTitle": "Model provider rate limit reached",
       "serverTitle": "Model provider service error",

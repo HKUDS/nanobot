@@ -1,5 +1,3 @@
-"""Provider wrapper that transparently fails over to fallback models on error."""
-
 # pyright: reportIncompatibleMethodOverride=false, reportIncompatibleVariableOverride=false
 
 from __future__ import annotations
@@ -26,7 +24,6 @@ from nanobot.providers.base import (
 from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name
 
-# Circuit breaker tuned to match OpenAICompatProvider's Responses API breaker.
 _PRIMARY_FAILURE_THRESHOLD = 3
 _PRIMARY_COOLDOWN_S = 60
 _FALLBACK_ERROR_KINDS = frozenset({
@@ -209,11 +206,9 @@ class FallbackProvider(LLMProvider):
         return replace(provider_context, context_window_tokens=context_window_tokens)
 
     def _primary_available(self) -> bool:
-        """Return True if the primary provider is not currently tripped."""
         if self._primary_tripped_at is None:
             return True
         if time.monotonic() - self._primary_tripped_at >= _PRIMARY_COOLDOWN_S:
-            # Half-open: allow one probe attempt.
             return True
         return False
 
@@ -237,7 +232,6 @@ class FallbackProvider(LLMProvider):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        """Retry each provider before advancing through the fallback chain."""
         call_kwargs = dict(kw)
         provider_context = call_kwargs.get("provider_context")
         if isinstance(provider_context, ProviderCallContext):
@@ -356,7 +350,6 @@ class FallbackProvider(LLMProvider):
         on_stream_recover: Callable[[], Awaitable[None]] | None,
         persistent_retry_guard: Callable[[], bool] | None,
     ) -> LLMResponse:
-        """Retry each candidate, deferring terminal events until the chain fails."""
 
         async def _call_chain(**chain_kwargs: Any) -> LLMResponse:
             last_exhausted_message: str | None = None
@@ -663,7 +656,6 @@ class FallbackProvider(LLMProvider):
             "All {} fallback model(s) failed",
             len(self._fallback_presets),
         )
-        # Return the last error response we saw (primary or last fallback).
         if last_response is not None:
             return replace(
                 last_response,

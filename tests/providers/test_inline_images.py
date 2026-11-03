@@ -1,5 +1,3 @@
-"""Exercise inline image preparation at provider SDK and HTTP boundaries."""
-
 from __future__ import annotations
 
 import base64

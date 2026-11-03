@@ -74,7 +74,6 @@ export function ReadingSettings({ preferences, onChange }: {
           />
           <TooltipProvider>
             <Tooltip open={hintOpen} onOpenChange={(open) => {
-              // Keep guidance visible while typing, including pointer/touch focus.
               if (open || document.activeElement !== inputRef.current) setHintOpen(open);
             }}>
               <TooltipTrigger asChild>

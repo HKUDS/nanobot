@@ -1,5 +1,3 @@
-"""Turn-scoped hook assembly for agent runs."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,7 +28,6 @@ class AgentTurnHookSpec:
     metadata: dict[str, Any] | None = None
     session_key: str | None = None
     workspace: Path | None = None
-    tool_hint_max_length: int = 40
     registered_hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     turn_hook_factories: list[AgentTurnHookFactory] = field(default_factory=list)
     registered_hooks: list[AgentHook] = field(default_factory=list)
@@ -48,7 +45,6 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         events=spec.events,
         streaming=spec.streaming,
         session_key=spec.session_key,
-        tool_hint_max_length=spec.tool_hint_max_length,
         log_content=log_content,
     )
     if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:

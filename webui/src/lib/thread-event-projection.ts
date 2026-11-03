@@ -104,10 +104,6 @@ function findStreamingAssistantIndex(
   return null;
 }
 
-/**
- * Find the most recent assistant placeholder that an incoming answer
- * delta should adopt instead of spawning a parallel row.
- */
 function findActiveAssistantPlaceholderIndex(
   prev: UIMessage[],
   turn: UIMessageTurnFields = {},
@@ -848,7 +844,6 @@ function projectFileEdits(
   options.effects?.bodyWrites.add(id);
 }
 
-/** Canonical UI-message reducer shared by WebSocket delivery and transcript replay. */
 export function projectThreadEvent(
   previous: ThreadProjectionState,
   event: ThreadProjectionEvent,
@@ -1053,6 +1048,7 @@ export function projectThreadEvent(
       : undefined;
     const projected = {
       content: event.text,
+      ...(event.render_as === "text" ? { renderAs: event.render_as } : {}),
       ...(media?.length ? { media } : {}),
       ...(latencyMs !== undefined ? { latencyMs } : {}),
       ...(event.source ? { source: event.source } : {}),

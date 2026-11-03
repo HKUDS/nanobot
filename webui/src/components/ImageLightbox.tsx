@@ -69,7 +69,6 @@ export function ImageLightbox({
     return () => window.removeEventListener("keydown", onKey);
   }, [go, onIndexChange, open, total]);
 
-  // Neighbours we want the browser to decode eagerly.
   const preload = useMemo(() => {
     if (index === null || total <= 1) return [] as UIImage[];
     const prev = images[(index - 1 + total) % total];
@@ -151,7 +150,6 @@ export function ImageLightbox({
             <X className="h-4 w-4" aria-hidden />
           </DialogPrimitive.Close>
 
-          {/* Invisible preload — browser decodes adjacent images so prev/next swap is instant. */}
           <div aria-hidden className="hidden">
             {preload.map((img, i) => (
               <img key={`${img.url}-${i}`} src={img.url} alt="" />

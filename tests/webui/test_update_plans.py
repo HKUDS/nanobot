@@ -1,5 +1,3 @@
-"""Authenticated, refresh-safe review and job reads; no installer or server process runs."""
-
 import asyncio
 import json
 import os
@@ -56,7 +54,6 @@ async def test_channel_mutation_preserves_authority_and_invalidates_old_reviews(
 
     fixture = preparation_gateway
     gateway, plan = await preparation_plan(fixture)
-    # Plain HTTP cannot mutate; remote callers do not acquire install authority.
     response = await fetch(gateway, "/api/settings/nanobot-update/channel")
     assert response.status_code == 405
     response = await gateway.http.dispatch_webui_mutation(connection(), CHANNEL, {"channel": "preview", "revision": 0})
@@ -71,7 +68,6 @@ async def test_channel_mutation_preserves_authority_and_invalidates_old_reviews(
     prepared = await gateway.http.dispatch_webui_mutation(connection(local=True), PREPARE, {"id": plan.id})
     assert prepared.status_code == 409
     assert not (fixture.directory / "jobs" / plan.id / "status.json").exists()
-    # Stale tabs cannot overwrite the newer selection; native uses its distributor.
     assert (await gateway.http.dispatch_webui_mutation(connection(local=True), CHANNEL,
                                                      {"channel": "stable", "revision": 0})).status_code == 409
     assert (await fixture.gateway("native").http.dispatch_webui_mutation(connection(local=True), CHANNEL,
@@ -108,7 +104,6 @@ async def test_review_uses_saved_channel_and_rejects_a_change_during_discovery(p
             observed.append(channel)
             if race:
                 service.change_channel(UpdateChannelRequest(channel="stable", revision=1))
-            # Preview subscriptions can receive a final release too.
             return stable.target
 
     monkeypatch.setattr(update_plan, "ReleaseFeed", lambda _: Feed())
@@ -440,7 +435,6 @@ async def test_preparation_is_durable_idempotent_and_independent_of_browser(prep
         directory = fixture.directory / "jobs" / plan.id
         assert JobStatus.read(directory).phase == Phase.PREPARATION_REQUESTED
         await asyncio.wait_for(entered.wait(), 5)
-        # A recreated router has no reference to the original browser's task.
         fresh = fixture.gateway()
         duplicate = await fresh.http.dispatch_webui_mutation(connection(local=True), PREPARE, {"id": plan.id})
         assert duplicate.status_code == 200
@@ -804,8 +798,6 @@ async def test_job_reads_survive_refresh_expiry_and_unavailable_installation(rev
     assert not (directory / "request.json").exists(), "An early journal must not require committed staging"
     assert "webui.update-jobs.read.v1" in webui_contract()["capabilities"]
 
-    # A journal is recoverable without revalidating the expired plan or reading
-    # package metadata; it is not permission to retry or proof a worker is live.
     monkeypatch.setattr(update_plan.time, "time", lambda: plan.expires_at + 1)
     JobStatus(plan_id, Phase.FAILED, 1, True, "https://user:secret@private.example", plan.expires_at).save(directory)
     pending = pending_update_path()
@@ -819,16 +811,12 @@ async def test_job_reads_survive_refresh_expiry_and_unavailable_installation(rev
     assert job["recorded_phase"] == "failed" and job["mutation_started"] is True
     assert job["attempt"] == 1 and job["updated_at"] == plan.expires_at
     assert b"secret" not in response.body
-    # Only the explicit recovery command exposes the launcher's exact location;
-    # job diagnostics and profile paths must remain out of the status payload.
     assert job.pop("recovery_command") == recovery
     assert "private account" not in json.dumps(job)
     assert {"message", "running", "can_retry", "python", "url", "profiles"}.isdisjoint(job)
     assert len(fixture.requests) == 1
     assert not (directory / "approval.json").exists()
 
-    # A completed program restoration is not a successful installation. Keep
-    # the legacy wire phase readable while exposing the precise new result.
     JobStatus(plan_id, Phase.RESTORED, 2, True, "Private recovery detail", plan.expires_at).save(directory)
     response = await fetch(fixture.gateway(), JOB + "?id=" + plan_id)
     job = json.loads(response.body)["job"]
@@ -889,7 +877,6 @@ async def test_cancelled_request_keeps_probe_lease_until_native_work_exits(revie
         assert fixture.requests == []
     finally:
         release.set()
-        # Wait for the probe's actual lease release before restoring Path.home.
         async with asyncio.timeout(5):
             while True:
                 try:

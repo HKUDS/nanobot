@@ -1,5 +1,3 @@
-"""Compatibility helpers while runner tests migrate to immutable runtimes."""
-
 from __future__ import annotations
 
 from typing import Any

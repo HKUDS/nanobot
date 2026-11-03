@@ -137,7 +137,6 @@ async function fetchThreadPage(
   throw new Error("Unsupported history response format")
 }
 
-/** Same recent model-call samples and context boundary as the WebUI usage popover. */
 export async function fetchSessionUsage(
   apiUrl: string,
   apiToken: string,
@@ -229,12 +228,15 @@ export async function fetchHistory(
           })
         } else {
           // A final message can repeat the answer already saved by stream_end.
-          if (stream && stream.turnId === event.turn_id) stream.row.content = event.text
-          else if (!lastAnswer || lastAnswer.turnId !== event.turn_id || lastAnswer.row.content !== event.text) {
+          if (stream && stream.turnId === event.turn_id) {
+            stream.row.content = event.text
+            lastAnswer = stream
+          } else if (!lastAnswer || lastAnswer.turnId !== event.turn_id || lastAnswer.row.content !== event.text) {
             const row: HistoryMessage = { role: "assistant", content: event.text, forkIndex: userIndex }
             messages.push(row)
             lastAnswer = { row, turnId: event.turn_id }
           }
+          if (event.render_as === "text" && lastAnswer) lastAnswer.row.renderAs = event.render_as
           stream = null
         }
         break
@@ -258,7 +260,8 @@ export async function fetchHistory(
     }
   }
   return {
-    messages: messages.filter((row) => row.role !== "assistant" || row.content.trim()),
+    messages: messages.filter((row) => row.role !== "assistant"
+      || (row.renderAs === "text" ? row.content : row.content.trim())),
     hasMoreBefore: payload.page?.has_more_before === true,
     beforeCursor: typeof payload.page?.before_cursor === "string"
       ? payload.page.before_cursor

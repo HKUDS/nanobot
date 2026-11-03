@@ -1,5 +1,3 @@
-"""Agent hook that observes file-editing tools and emits file-edit activity."""
-
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,5 +1,3 @@
-"""Repeated SDK overrides reuse clients without changing execution ownership."""
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
@@ -118,7 +116,7 @@ async def test_nested_signature_changes_are_typed_and_borrowers_are_detached(con
         current = resolve(config, resolver)
         assert current.provider is not second.provider
         second = current
-    assert len(created) == 4  # default, bool, int, float
+    assert len(created) == 4
     await resolver.aclose()
 
 
@@ -133,7 +131,7 @@ async def test_replacement_and_invalidation_do_not_close_active_borrowers(config
     after_invalidate = resolve(config, resolver)
     assert after_invalidate.provider is not before_invalidate.provider
     assert resolve(config, resolver).provider is after_invalidate.provider
-    resolver.refresh()  # No loader is also an explicit invalidation boundary.
+    resolver.refresh()
     after_refresh = resolve(config, resolver)
     assert after_refresh.provider is not after_invalidate.provider
     resolver.adopt_snapshot(factory.build_provider_snapshot(config))
@@ -243,7 +241,6 @@ async def test_sdk_stream_survives_reuse_replacement_and_invalidation(configured
     finally:
         release.set()
         await bot.aclose()
-    # The fixture resolver has its own initial provider, not owned by bot.
     assert all(provider.aclose.await_count == 1 for provider in created[1:])
     await fixture_resolver.aclose()
 
@@ -282,7 +279,7 @@ async def test_equivalent_invalid_fallback_is_not_hidden_by_reuse(configured_ove
     assert (await first.provider.chat(messages=[], model=first.model)).content == "ok"
 
     fallback.extra_headers = {"X-Route": "fixture"}
-    second = resolve(config, resolver)  # Invalid fallback setup must remain lazy.
+    second = resolve(config, resolver)
     second.provider._primary.chat = AsyncMock(return_value=error)
     result = await second.provider.chat(messages=[], model=second.model)
     assert result.finish_reason == "error"

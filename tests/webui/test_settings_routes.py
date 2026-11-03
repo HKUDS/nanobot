@@ -176,7 +176,6 @@ async def test_failed_codex_login_start_still_owns_late_worker(tmp_path, monkeyp
     def login(*, storage, **_kwargs):
         entered.set()
         assert release.wait(3)
-        # The actual SDK can finish its token exchange after start() timed out.
         storage.save(SimpleNamespace(access="late-fixture-token"))
 
     monkeypatch.setattr(oauth, "login_oauth_interactive", login)
@@ -814,8 +813,6 @@ async def test_version_check_and_mcp_requests_share_the_gateway_loop(monkeypatch
 
     def resolve(url, **_kwargs):
         if url == f"{PYPI_URL}/json":
-            # Settle the gateway requests on the next tick of the checking loop,
-            # after discovery has tried to acquire the already-contended lock.
             asyncio.get_running_loop().call_soon(gateway_loop.call_soon_threadsafe, finish.set)
         return True, "", ("93.184.216.34",)
 
@@ -852,7 +849,7 @@ async def test_version_check_and_mcp_requests_share_the_gateway_loop(monkeypatch
         first = asyncio.create_task(client.get("https://mcp.example/first"))
         await asyncio.wait_for(entered.wait(), timeout=5)
         second = asyncio.create_task(client.get("https://mcp.example/second"))
-        await asyncio.sleep(0)  # Let the second gateway request wait on the shared lock.
+        await asyncio.sleep(0)
         try:
             response = await asyncio.wait_for(_router().dispatch(None, request, request.path), timeout=5)
         finally:

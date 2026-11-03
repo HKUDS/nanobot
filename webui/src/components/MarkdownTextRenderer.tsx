@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -86,13 +87,11 @@ type AvailabilityResult = {
   resolve: FilePreviewAvailabilityResolver;
 };
 
-function InferredFileReferenceChip({
-  path,
+function AvailableFileReferenceChip({
   onOpen,
-}: {
-  path: string;
-  onOpen?: (path: string) => void;
-}) {
+  ...props
+}: ComponentProps<typeof FileReferenceChip>) {
+  const path = props.previewPath || props.tooltipPath || props.path;
   const resolve = useFilePreviewAvailabilityResolver();
   const [result, setResult] = useState<AvailabilityResult | null>(null);
 
@@ -118,7 +117,7 @@ function InferredFileReferenceChip({
   );
   return (
     <FileReferenceChip
-      path={path}
+      {...props}
       onOpen={onOpen && resolvedAvailable ? onOpen : undefined}
     />
   );
@@ -360,7 +359,7 @@ function DocumentLink({ href, path, onOpen, children }: {
   // Fragment-only links must not replace the application's hash route.
   if (!href || href.startsWith("#")) return <>{children}</>;
   if (/^(https?:\/\/|mailto:)/i.test(href)) {
-    return <WebLink href={href} className="text-blue-500 underline underline-offset-2 dark:text-blue-300">{children}</WebLink>;
+    return <WebLink href={href} className="text-content-link underline underline-offset-2">{children}</WebLink>;
   }
   if (/^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//")) return <>{children}</>;
   let target = href.split(/[?#]/, 1)[0];
@@ -466,7 +465,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       aria-label={t("message.openLink", { label })}
       className={cn(
         "not-prose inline-flex max-w-full items-center gap-2 align-baseline",
-        "text-blue-500 no-underline underline-offset-2 hover:underline dark:text-blue-300",
+        "text-content-link no-underline underline-offset-2 hover:underline",
       )}
     >
       <span
@@ -522,10 +521,6 @@ function codeFenceFromPreChild(value: ReactNode): { code: string; language?: str
   };
 }
 
-/**
- * Heavy markdown stack (GFM, math, KaTeX, syntax highlighting) kept in a
- * separate chunk so the app shell can paint sooner on refresh.
- */
 export default function MarkdownTextRenderer({
   children,
   className,
@@ -557,13 +552,12 @@ export default function MarkdownTextRenderer({
         const raw = String(kids).replace(/\n$/, "");
         if (!documentPath && isLikelyFilePath(raw)) {
           return (
-            <InferredFileReferenceChip
+            <AvailableFileReferenceChip
               path={raw}
               onOpen={onOpenFilePreview}
             />
           );
         }
-        /** Plain fenced ``` blocks (no language) & wide one-liners: block monospace, not inline pill. */
         const widePlainBlock = raw.includes("\n") || raw.length > 120;
         if (widePlainBlock) {
           return (
@@ -644,7 +638,7 @@ export default function MarkdownTextRenderer({
         if (filePath) {
           const label = nodeText(markdownChildren).trim();
           return (
-            <FileReferenceChip
+            <AvailableFileReferenceChip
               path={label || filePath}
               tooltipPath={filePath}
               previewPath={filePath}
@@ -660,7 +654,7 @@ export default function MarkdownTextRenderer({
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+            className="text-content-link underline underline-offset-2 hover:text-content-link-hover"
             {...props}
           >
             {markdownChildren}
@@ -705,7 +699,7 @@ export default function MarkdownTextRenderer({
           >
             <table
               className={cn(
-                "w-full table-fixed border-collapse text-reading-small",
+                "w-full table-auto border-collapse text-reading-small",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
                 "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
@@ -842,7 +836,7 @@ export default function MarkdownTextRenderer({
         "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
         "prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:font-normal",
         "prose-blockquote:not-italic prose-blockquote:text-foreground/80",
-        "prose-a:text-blue-500 prose-a:underline-offset-2 hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
+        "prose-a:text-content-link prose-a:underline-offset-2 hover:prose-a:text-content-link-hover",
         "prose-hr:my-6",
         "prose-pre:my-0 prose-pre:bg-transparent prose-pre:p-0",
         "prose-code:before:content-none prose-code:after:content-none prose-code:font-normal",

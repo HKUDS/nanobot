@@ -1,5 +1,3 @@
-"""Registration and exec delegation for ripgrep."""
-
 import asyncio
 import os
 import re

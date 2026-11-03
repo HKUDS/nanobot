@@ -1,5 +1,3 @@
-"""Model-facing search failures through real ddgs parsing and aggregation."""
-
 from __future__ import annotations
 
 import json
@@ -31,7 +29,6 @@ from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
     ],
 )
 async def test_ddgs_failure_reaches_model_with_observable_cause(monkeypatch, outcome, expected_header):
-    # Keep the released parser and aggregator, selecting one real engine offline.
     engine = Wikipedia(timeout=1)
     monkeypatch.setattr(DDGS, "_get_engines", lambda *_args: [engine])
     requests: list[str] = []

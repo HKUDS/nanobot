@@ -1,5 +1,6 @@
 import {
   act,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -442,6 +443,31 @@ describe("ThreadComposer — attachments", () => {
 describe("local attachment paths and video ingress", () => {
   const local = { path: "C:\\project\\my clip.mp4", name: "my clip.mp4", size: 12,
     mime: "video/mp4", kind: "video" as const, url: "/api/media/sig/local" };
+
+  it("leaves a path pasted into a bang command as Shell text", () => {
+    const inspect = vi.fn().mockResolvedValue(local);
+    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "!cat " } });
+    input.setSelectionRange(5, 5);
+    const event = createEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    fireEvent(input, event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(inspect).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pending path literal when its draft becomes a bang command", async () => {
+    let complete!: (attachment: typeof local) => void;
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={() => new Promise((resolve) => { complete = resolve; })} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    fireEvent.change(input, { target: { value: `!${local.path}` } });
+    await act(async () => complete(local));
+    expect(input).toHaveValue(`!${local.path}`);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith(`!${local.path}`, undefined, { sideChannel: true, userShell: true });
+  });
 
   it("confirms a large pasted video path and sends only the borrowed reference", async () => {
     const inspect = vi.fn().mockResolvedValue({ ...local, size: 64 * 1024 * 1024 + 1 });

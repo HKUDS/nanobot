@@ -239,7 +239,6 @@ async def test_whatsapp_connect_store_closes_pending_login(
 async def test_native_thread_timeout_keeps_database_and_can_retry_cleanup(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action: str,
 ) -> None:
-    """A cancelled asyncio wrapper cannot prove a native SQLite writer stopped."""
     target = tmp_path / "neonize.db"
     target.write_bytes(b"working-session")
     native_entered, native_release, native_exited = (

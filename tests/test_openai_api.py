@@ -1,5 +1,3 @@
-"""Focused tests for the fixed-session OpenAI-compatible API."""
-
 from __future__ import annotations
 
 import asyncio
@@ -406,7 +404,6 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
 async def test_session_route_preserves_existing_json_identity(
     aiohttp_client, mock_agent, session_id, chat_id, stream,
 ) -> None:
-    """Routing must not normalize or reject previously accepted session IDs."""
     app = create_app(mock_agent, model_name="m", api_key=API_KEY)
     client = await aiohttp_client(app)
 
@@ -516,7 +513,7 @@ async def test_multimodal_content_extracts_text(aiohttp_client, mock_agent) -> N
     assert call_kwargs["session_key"] == API_SESSION_KEY
     assert call_kwargs["channel"] == "api"
     assert call_kwargs["chat_id"] == API_CHAT_ID
-    assert len(call_kwargs.get("media") or []) >= 0  # base64 images saved to disk
+    assert len(call_kwargs.get("media") or []) >= 0
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
@@ -621,19 +618,21 @@ async def test_empty_response_falls_back_without_retry(aiohttp_client) -> None:
 
 @pytest.mark.asyncio
 async def test_process_direct_accepts_media() -> None:
-    """process_direct should forward media paths to _process_message."""
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
-    from nanobot.bus.runtime_events import RuntimeEventPublisher
 
     loop = AgentLoop.__new__(AgentLoop)
     loop._session_locks = {}
     loop.bus = MessageBus()
-    loop.runtime_event_publisher = RuntimeEventPublisher(loop.bus)
+    loop.turn_delivery_factory = TurnDeliveryFactory(loop.bus)
+    loop.runtime_event_publisher = loop.turn_delivery_factory.runtime_event_publisher
 
     captured_msg = None
 
-    async def fake_process(msg, *, session_key="", on_progress=None, on_stream=None, on_stream_end=None, ephemeral=False):
+    async def fake_process(
+        msg, *, session_key="", on_progress=None, on_stream=None, on_stream_end=None, ephemeral=False, delivery=None,
+    ):
         nonlocal captured_msg
         captured_msg = msg
         return None

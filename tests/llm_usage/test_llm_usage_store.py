@@ -1,5 +1,3 @@
-"""Tests for the SQLite LLM usage store."""
-
 from __future__ import annotations
 
 import sqlite3

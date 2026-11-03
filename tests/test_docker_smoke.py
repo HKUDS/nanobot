@@ -1,5 +1,3 @@
-"""Exercise the Docker smoke script's failure and resource-ownership contract."""
-
 from __future__ import annotations
 
 import json
@@ -84,7 +82,6 @@ def test_smoke_failure_preserves_exit_and_cleans_only_owned_resources(docker_bou
     assert "All checks passed" not in result.stdout
     _assert_owned_cleanup(calls)
     if stage == "status":
-        # Valid-looking output must never turn a failed status process green.
         assert "nanobot Status" in result.stdout
 
 

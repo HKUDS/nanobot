@@ -152,7 +152,6 @@ for (const width of [1440, 390]) {
         expect(middle.paint[index], `${selector} must not snap to the target palette`).not.toBe(after[index]);
         expect(middle.paint[index], `${selector} must leave the old palette`).not.toBe(before[index]);
       }
-      // These in-flow wrappers now reveal their painted parent instead of adding a second canvas.
       expect(middle.footer).toBe("rgba(0, 0, 0, 0)");
       expect(middle.sidebarFooter).toBe("rgba(0, 0, 0, 0)");
       expect(middle.gradient).toBe(middle.paint[0]);
@@ -216,7 +215,6 @@ for (const width of [1440, 390]) {
       await expect(toggle).toBeFocused();
       expect(await input.boundingBox()).toEqual(box);
       await page.screenshot({ path: test.info().outputPath(`crossfade-${width}-${initial}-mid.png`), animations: "allow" });
-      // Keyboard input still reaches the live DOM while the native snapshots are paused.
       await page.keyboard.press("Space");
       for (let step = 0; step < 20 && !await input.evaluate(node => node === document.activeElement); step++) {
         await page.keyboard.press("Tab");
@@ -243,20 +241,45 @@ test("browsers without View Transitions keep a working palette fade", async ({ p
     Object.defineProperty(document, "startViewTransition", { value: undefined });
   });
   await page.goto("/browser/fixture.html?case=theme-toggle&chat");
+  const pane = page.locator(".workbench-pane");
+  const sampleHandle = await pane.evaluateHandle(node => {
+    const sample: { before: string; midpoint: string | null; transitions: number; duration: number | null } = {
+      before: getComputedStyle(node).backgroundColor, midpoint: null, transitions: 0, duration: null,
+    };
+    const observer = new MutationObserver(() => {
+      if (!document.documentElement.classList.contains("dark")) return;
+      observer.disconnect();
+      // Capture at the class commit, before a protocol round-trip can outlive the fade.
+      const paint = node.getAnimations().filter(animation => animation instanceof CSSTransition
+        && animation.transitionProperty === "background-color");
+      sample.transitions = paint.length;
+      const duration = paint[0]?.effect?.getTiming().duration;
+      sample.duration = typeof duration === "number" ? duration : null;
+      if (sample.duration !== null) {
+        paint.forEach(animation => { animation.pause(); animation.currentTime = sample.duration! / 2; });
+      }
+      sample.midpoint = getComputedStyle(node).backgroundColor;
+      paint.forEach(animation => animation.finish());
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return sample;
+  });
   await page.getByRole("button", { name: "Toggle theme from header", exact: true }).click();
   await expect(page.locator("html")).toHaveClass(/dark/);
-  const midpoint = await page.locator(".workbench-pane").evaluate(async node => {
-    await new Promise(requestAnimationFrame);
-    const paint = node.getAnimations().filter(animation => animation instanceof CSSTransition);
-    paint.forEach(animation => { animation.pause(); animation.currentTime = 140; });
-    const color = getComputedStyle(node).backgroundColor;
-    paint.forEach(animation => animation.finish());
-    return color;
-  });
-  expect(midpoint).not.toBe("rgb(48, 48, 48)");
-  expect(midpoint).not.toBe("rgb(255, 255, 255)");
+  const sample = await sampleHandle.jsonValue();
+  await sampleHandle.dispose();
+  expect(sample.transitions).toBe(1);
+  expect(sample.duration).toBeGreaterThan(0);
+  expect(sample.before).toBe("rgb(255, 255, 255)");
+  expect(sample.midpoint).not.toBeNull();
+  expect(sample.midpoint).not.toBe("rgb(48, 48, 48)");
+  expect(sample.midpoint).not.toBe(sample.before);
   await expect.poll(() => page.locator("html").getAttribute("data-theme-transition")).toBeNull();
-  await expect(page.getByRole("textbox")).toBeEditable();
+  await expect(pane).toHaveCSS("background-color", "rgb(48, 48, 48)");
+  const input = page.getByRole("textbox");
+  await expect(input).toBeEditable();
+  await input.fill("Editing remains available after the fallback fade");
+  await expect(input).toHaveValue("Editing remains available after the fallback fade");
 });
 
 test("a browser-skipped transition still applies the theme and releases the toggle", async ({ page }) => {

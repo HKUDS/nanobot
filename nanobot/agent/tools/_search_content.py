@@ -1,5 +1,3 @@
-"""Build one bounded grep page from streams of located source lines."""
-
 from __future__ import annotations
 
 import re

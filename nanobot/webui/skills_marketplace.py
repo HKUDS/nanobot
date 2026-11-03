@@ -1,5 +1,3 @@
-"""Search and install skills from public Agent Skills catalogs."""
-
 from __future__ import annotations
 
 import asyncio
@@ -57,7 +55,6 @@ _weekly_cache_expires_at = 0.0
 
 
 def _response_json_object(response: httpx.Response) -> dict[str, Any] | None:
-    """Narrow an untyped HTTP JSON response at the external-data boundary."""
     payload = cast(object, response.json())
     return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
 
@@ -118,7 +115,6 @@ async def _trending_skills_sh_skills(
     *,
     limit: int,
 ) -> dict[str, Any]:
-    """Return a source-diverse snapshot of skills.sh's real 24-hour leaderboard."""
     try:
         async with _skills_client() as client:
             response = await client.get(_TRENDING_URL)

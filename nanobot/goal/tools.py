@@ -1,5 +1,3 @@
-"""Sustained-goal tools with explicit user opt-in at the execution boundary."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
@@ -13,7 +11,7 @@ from nanobot.agent.goal_permission import (
     revoke_goal_mutation_permission,
 )
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import RequestContext, ToolContext, current_request_context
+from nanobot.agent.tools.context import RequestContext, current_request_context
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventContext
@@ -28,7 +26,6 @@ from nanobot.session.goal_state import (
     parse_goal_state,
     sustained_goal_active,
 )
-from nanobot.session.turn_continuation import reset_goal_continuation_rounds
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.prompt_templates import render_template
 
@@ -64,12 +61,16 @@ class _GoalToolsMixin:
 
     async def _session(self) -> Session | None:
         request_ctx = current_request_context()
-        if request_ctx is None:
+        if request_ctx is None or not request_ctx.persist_session:
             return None
         key = request_ctx.session_key
-        if not key:
+        generation = request_ctx.session_generation
+        if not key or not generation:
             return None
-        return await self._sessions.state.get_header(key)
+        session = await self._sessions.state.read_header(key)
+        if session is None or session.generation != generation:
+            return None
+        return session
 
     def _goal_mutation_allowed(self) -> bool:
         return current_request_context() is not None and goal_mutation_allowed()
@@ -79,7 +80,6 @@ class _GoalToolsMixin:
         sess: Session,
         blob: dict[str, Any],
         *,
-        reset_continuation: bool = False,
         revoke_permission: bool = False,
     ) -> None:
         saved = False
@@ -89,8 +89,6 @@ class _GoalToolsMixin:
             def change(metadata: dict[str, Any]) -> None:
                 metadata[GOAL_STATE_KEY] = deepcopy(blob)
                 discard_legacy_goal_state_key(metadata)
-                if reset_continuation:
-                    reset_goal_continuation_rounds(metadata)
             _, sess.metadata = await self._sessions.state.mutate_metadata(
                 sess.key, change, expected_generation=sess.generation,
             )
@@ -152,18 +150,8 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         _GoalToolsMixin.__init__(self, sessions, bus)
 
     @classmethod
-    def create(cls, ctx: ToolContext) -> Tool:
-        sess = ctx.sessions
-        if sess is None:
-            raise RuntimeError("CreateGoalTool requires an initialized session manager")
-        return cls(
-            sessions=sess,
-            bus=ctx.bus,
-        )
-
-    @classmethod
-    def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.sessions is not None
+    def bind(cls, sessions: SessionManager, bus: MessageBus | None) -> Tool:
+        return cls(sessions=sessions, bus=bus)
 
     @property
     def name(self) -> str:
@@ -238,7 +226,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             "ui_summary": summary,
             "started_at": _iso_now(),
         }
-        await self._save_goal_state(sess, blob, reset_continuation=True)
+        await self._save_goal_state(sess, blob)
         extra = f"\nSummary line: {summary}" if summary else ""
         return (
             "Goal recorded. Keep working toward the objective using ordinary tools. "
@@ -283,18 +271,8 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         _GoalToolsMixin.__init__(self, sessions, bus)
 
     @classmethod
-    def create(cls, ctx: ToolContext) -> Tool:
-        sess = ctx.sessions
-        if sess is None:
-            raise RuntimeError("UpdateGoalTool requires an initialized session manager")
-        return cls(
-            sessions=sess,
-            bus=ctx.bus,
-        )
-
-    @classmethod
-    def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.sessions is not None
+    def bind(cls, sessions: SessionManager, bus: MessageBus | None) -> Tool:
+        return cls(sessions=sessions, bus=bus)
 
     @property
     def name(self) -> str:
@@ -352,7 +330,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                 "previous_objective": str(prior.get("objective") or ""),
                 "recap": (recap or "").strip(),
             }
-            await self._save_goal_state(sess, blob, reset_continuation=True)
+            await self._save_goal_state(sess, blob)
             extra = f"\nSummary line: {summary}" if summary else ""
             return "Goal replaced. Continue toward the new objective using ordinary tools." + extra
 

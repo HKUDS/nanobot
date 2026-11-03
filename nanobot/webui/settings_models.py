@@ -407,7 +407,6 @@ def _provider_settings_rows(
     selected_provider: str | None,
     oauth_status: OAuthStatusReader,
 ) -> list[dict[str, Any]]:
-    """Return one Settings row per provider family while preserving legacy configs."""
     aliases: dict[str, list[Any]] = {}
     for spec in PROVIDERS:
         if spec.settings_alias_for:
@@ -525,7 +524,6 @@ def _model_shutdown_date(row: object) -> date | None:
 
 
 def _model_catalog_row_active(row: object, *, on: date | None = None) -> bool:
-    """True when a provider catalog row should stay in the advisory model list."""
     shutdown = _model_shutdown_date(row)
     if shutdown is None:
         return True
@@ -828,7 +826,6 @@ def _model_configuration_slug(label: str) -> str:
 
 
 def _model_configuration_name(value: str) -> str:
-    """Validate a user-facing preset name without inventing a second identity."""
     name = value.strip()
     if not name:
         raise WebUISettingsError("configuration name is required")
@@ -855,7 +852,6 @@ def _model_configuration_name_exists(
 
 
 def _rename_model_configuration(config: Config, old_name: str, new_name: str) -> bool:
-    """Rename one preset and every config reference to it."""
     if old_name == new_name:
         return False
     if _model_configuration_name_exists(config, new_name, exclude=old_name):
@@ -916,7 +912,6 @@ def _provider_display_name_exists(
 
 
 def _unique_model_configuration_name(config: Config, label: str) -> str:
-    """Return a stable, unused preset name for a migrated model configuration."""
     try:
         base = _model_configuration_slug(label)
     except WebUISettingsError:
@@ -1962,7 +1957,6 @@ class ModelSettingsHandler:
             self._remove_pending_work = None
 
     def _refresh_runtime_config(self) -> None:
-        """Make a successful model-settings mutation visible to live clients now."""
         if self.settings.refresh_runtime_config is not None:
             self.settings.refresh_runtime_config()
 

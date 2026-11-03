@@ -1112,7 +1112,10 @@ describe("ThreadShell", () => {
     portal.remove();
   });
 
-  it("keeps inferred file paths non-interactive when the availability probe fails", async () => {
+  it.each([
+    { kind: "inferred", content: "Unreadable file: `prompts/dream.md`", path: "prompts/dream.md" },
+    { kind: "explicit", content: "[Python code](／home/example/workspace/model_check.py)", path: "／home/example/workspace/model_check.py" },
+  ])("keeps $kind file references non-interactive when the availability probe fails", async ({ content, path }) => {
     await preloadMarkdownText();
     const client = makeClient();
     let resolveProbe!: (value: Response) => void;
@@ -1123,7 +1126,7 @@ describe("ThreadShell", () => {
       const url = String(input);
       if (url.includes("websocket%3Apreview-error/webui-thread")) {
         return Promise.resolve(httpJson(transcriptFromSimpleMessages([
-          { role: "assistant", content: "Unreadable file: `prompts/dream.md`" },
+          { role: "assistant", content },
         ])));
       }
       if (url.includes("websocket%3Apreview-error/file-preview?")) return probe;
@@ -1146,7 +1149,7 @@ describe("ThreadShell", () => {
 
     const reference = await screen.findByTestId("inline-file-path");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("file-preview?path=prompts%2Fdream.md&probe=1"),
+      expect.stringContaining(`file-preview?path=${encodeURIComponent(path)}&probe=1`),
       expect.anything(),
     ));
     await act(async () => {
@@ -1552,7 +1555,6 @@ describe("ThreadShell", () => {
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
     emit("notice-a", true);
     expect(notice()).not.toBeInTheDocument();
-    // A new turn can notify again; it does not inherit the previous dismissal.
     emit("notice-a", false);
     emit("notice-a", true);
     expect(notice()).toBeVisible();
@@ -5154,7 +5156,6 @@ describe("ThreadShell", () => {
       ),
     );
 
-    // No banner yet: only appears once the client emits a matching error.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     await act(async () => {});
@@ -5204,7 +5205,7 @@ describe("ThreadShell", () => {
     });
 
     const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent("无法连接模型提供商");
+    expect(banner).toHaveTextContent("模型连接异常");
     expect(banner).toHaveTextContent(
       "已尝试 4 次，仍未成功。可稍后继续或切换模型。",
     );
@@ -5221,7 +5222,7 @@ describe("ThreadShell", () => {
         });
       });
       expect(screen.getAllByRole("alert")).toHaveLength(1);
-      expect(screen.getByRole("alert")).toHaveTextContent("无法连接模型提供商");
+      expect(screen.getByRole("alert")).toHaveTextContent("模型连接异常");
       expect(screen.getByRole("button", { name: "继续" })).toBeEnabled();
     }
 
@@ -5721,7 +5722,7 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
 
-  it("allows project selection before first input and locks it after acceptance without duplicating the sidebar label", async () => {
+  it.each([true, undefined])("locks saved topics with projectLocked=%s independently of displayed history", async (projectLocked) => {
     const client = makeClient();
     const scope = { project_path: "/srv/alpha", project_name: "alpha", access_mode: "restricted" as const };
     const props = {
@@ -5733,7 +5734,7 @@ describe("ThreadShell", () => {
     expect(await screen.findByRole("button", { name: "Switch directory" })).toBeEnabled();
     expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
 
-    rerender(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked: true }} />));
+    rerender(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked }} />));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
     expect(screen.getByRole("button", { name: "Workspace access mode: Default Permission" })).toBeEnabled();

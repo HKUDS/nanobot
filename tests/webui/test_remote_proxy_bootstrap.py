@@ -1,5 +1,3 @@
-"""An optional host capability survives the authenticated bootstrap proxy."""
-
 import json
 from unittest.mock import MagicMock
 

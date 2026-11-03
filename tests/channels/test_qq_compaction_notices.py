@@ -27,7 +27,7 @@ def _make_channel(tmp_path, **config_kwargs) -> QQChannel:
         app_id="test_app", secret="test_secret", media_dir=str(tmp_path), **config_kwargs,
     )
     channel = QQChannel(config, MessageBus())
-    channel._client = object()  # truthy: pass the initialized check
+    channel._client = object()
     return channel
 
 

@@ -832,11 +832,12 @@ export function ModelsSettings({
                                 ) : null}
                               </span>
                               {preset ? (
-                                <TruncatedTextTooltip
-                                  text={primary
-                                    ? `${preset.model}  ${formatModelContextWindow(preset.context_window_tokens)}  ${preset.reasoning_effort || t("settings.values.default")}`
-                                    : preset.model}
-                                  className={cn("mt-1 block whitespace-pre text-muted-foreground", primary ? "text-[13px] leading-5" : "text-[12px]")} />
+                                <span className={cn("mt-1 flex min-w-0 items-baseline gap-2 text-muted-foreground", primary ? "text-[13px] leading-5" : "text-[12px]")}>
+                                  <TruncatedTextTooltip text={preset.model} />
+                                  <TruncatedTextTooltip
+                                    text={`${formatModelContextWindow(preset.context_window_tokens)}  ${preset.reasoning_effort || t("settings.values.default")}`}
+                                    className="max-w-[75%] shrink-0 whitespace-pre" />
+                                </span>
                               ) : null}
                             </span>
                           </button>

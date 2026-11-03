@@ -1677,9 +1677,7 @@
     "showArchived": "Hiện mục đã lưu trữ",
     "hideArchived": "Ẩn mục đã lưu trữ",
     "select": "Chọn",
-    "cancelSelection": "Hủy chọn",
     "selectedCount": "Đã chọn {{count}} mục",
-    "deleteSelected": "Xóa",
     "delete": "Xóa",
     "newChat": "Chủ đề mới",
     "groups": {
@@ -1691,6 +1689,14 @@
       "earlier": "Trước đó",
       "archived": "Đã lưu trữ"
     }
+  },
+  "archiveConfirm": {
+    "title": "Lưu trữ chủ đề này?",
+    "titleMany": "Lưu trữ {{count}} chủ đề?",
+    "unarchiveTitle": "Bỏ lưu trữ chủ đề này?",
+    "unarchiveTitleMany": "Bỏ lưu trữ {{count}} chủ đề?",
+    "description": "Lịch sử trò chuyện vẫn được giữ lại. Bạn có thể bỏ lưu trữ bất cứ lúc nào.",
+    "unarchiveDescription": "Các chủ đề này sẽ xuất hiện lại trên thanh bên."
   },
   "deleteConfirm": {
     "title": "Xóa cuộc trò chuyện này?",
@@ -1893,6 +1899,10 @@
       "removeQuotedContext": "Xóa trích dẫn",
       "modelNotConfigured": "Chưa cấu hình mô hình",
       "configureModel": "Cấu hình mô hình",
+      "shell": {
+        "run": "Chạy lệnh Shell",
+        "removeContext": "Xóa tệp đính kèm và văn bản trích dẫn trước khi chạy lệnh."
+      },
       "chooseAI": "Chọn mô hình",
       "switchModel": "Đổi mô hình",
       "manageModels": "Quản lý bộ thiết lập",
@@ -2101,7 +2111,7 @@
     "actions": "Thao tác tin nhắn",
     "streaming": "đang truyền",
     "delivery": {
-      "sending": "Đang gửi…",
+      "sending": "Đang gửi",
       "failed": "Chưa gửi"
     },
     "assistantTyping": "Trợ lý đang nhập",
@@ -2307,8 +2317,9 @@
     "retryRateLimit": "Đã đạt giới hạn yêu cầu",
     "retryServer": "Mô hình không khả dụng",
     "retryUnknown": "Yêu cầu mô hình thất bại",
-    "retryWaiting": "{{error}}, thử lại sau {{seconds}} giây, lần thử {{attempt}}",
-    "retryExhausted": "{{error}}, đang kết thúc lượt",
+    "retryWaiting": "{{error}} Thử lại sau {{seconds}} giây",
+    "retrying": "{{error}} Đang thử lại",
+    "retryExhausted": "{{error}} Đang kết thúc lượt",
     "cliActivityRunningOne": "Đang dùng {{name}}",
     "cliActivityRanOne": "Đã dùng {{name}}",
     "cliActivityFailedOne": "Không thể dùng {{name}}",
@@ -2329,6 +2340,7 @@
     "failedHelp": "Không thể khôi phục an toàn tác vụ đã lưu. Hãy xem lại trước khi tiếp tục.",
     "resuming": "Đang khôi phục tác vụ bị gián đoạn…",
     "review": "Hãy xem lại tác vụ trước khi tiếp tục. Công cụ sẽ không tự động chạy lại.",
+    "replyPreserved": "Câu trả lời đã được lưu. Bạn có thể tiếp tục.",
     "safeResume": "Đang tiếp tục từ ngữ cảnh hội thoại đã lưu.",
     "dismiss": "Bỏ qua",
     "continue": "Tiếp tục"
@@ -2453,7 +2465,7 @@
       "authenticationBody": "Đăng nhập lại hoặc kiểm tra khóa API trong cài đặt mô hình.",
       "billingTitle": "Hạn mức của nhà cung cấp mô hình không khả dụng",
       "billingBody": "Hãy nạp thêm tín dụng hoặc kiểm tra thanh toán của tài khoản nhà cung cấp rồi thử lại.",
-      "connectionTitle": "Không thể kết nối với nhà cung cấp mô hình",
+      "connectionTitle": "Lỗi kết nối mô hình",
       "timeoutTitle": "Yêu cầu tới nhà cung cấp mô hình đã hết thời gian chờ",
       "rateLimitTitle": "Đã đạt giới hạn yêu cầu của nhà cung cấp mô hình",
       "serverTitle": "Lỗi dịch vụ nhà cung cấp mô hình",

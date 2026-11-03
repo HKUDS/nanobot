@@ -1,5 +1,3 @@
-"""Real process leases, not PID files or mocked lock acquisition."""
-
 import subprocess
 import sys
 import time
@@ -73,7 +71,7 @@ def test_multiple_runtimes_block_update_until_last_process_exits(isolated_instal
     with child_lease(isolated_installation, sys.prefix) as first:
         with child_lease(isolated_installation, sys.prefix):
             with installation_access():
-                pass  # Shared leases do not prevent normal multi-profile use.
+                pass
             with pytest.raises(InstallationBusyError, match="Stop its nanobot gateways"):
                 with installation_access(updating=True):
                     pytest.fail("Update entered a busy installation")

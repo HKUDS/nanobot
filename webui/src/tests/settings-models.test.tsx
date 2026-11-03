@@ -831,12 +831,50 @@ describe("Settings models", () => {
     expect(screen.getByRole("heading", { name: "Model presets" })).toHaveClass("settings-section-title");
     expect(screen.queryByRole("heading", { name: "Fallback presets" })).not.toBeInTheDocument();
     const summary = within(screen.getByTestId("model-call-order-row-primary"));
-    expect(summary.getByText(`${payload.model_presets[0].model} 256K Default`)).toBeInTheDocument();
+    expect(summary.getByText(payload.model_presets[0].model)).toBeInTheDocument();
+    expect(summary.getByText("256K Default")).toBeInTheDocument();
 
     await togglePresetEditor();
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     fireEvent.change(screen.getByLabelText("Context window"), { target: { value: "128k" } });
-    expect(summary.getByText(`${payload.model_presets[0].model} 256K Default`)).toBeInTheDocument();
+    expect(summary.getByText("256K Default")).toBeInTheDocument();
+  });
+
+  it("shows each preset's own summary before and after changing the primary", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    payload.model_presets[0].context_window_tokens = 262_144;
+    payload.model_presets[1].context_window_tokens = 128_000;
+    payload.model_presets[1].reasoning_effort = "xhigh";
+    const disabledPreset = {
+      ...payload.model_presets[1],
+      name: "disabled",
+      model: "openai/other-model",
+      context_window_tokens: 1_048_576,
+      reasoning_effort: "none",
+    };
+    payload.model_presets.push(disabledPreset);
+    requestMutationMock.mockResolvedValueOnce({ ...payload, model_call_order: ["backup", "primary"] });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+
+    const expectSummaries = () => {
+      for (const [name, model, settings] of [
+        ["primary", payload.model_presets[0].model, "256K Default"],
+        ["backup", payload.model_presets[1].model, "128K xhigh"],
+        ["disabled", disabledPreset.model, "1M none"],
+      ]) {
+        const row = within(screen.getByTestId(`model-call-order-row-${name}`));
+        expect(row.getByText(model)).toBeInTheDocument();
+        expect(row.getByText(settings)).toBeInTheDocument();
+      }
+    };
+    expectSummaries();
+    fireEvent.keyDown(screen.getByTestId("model-call-order-row-backup"), { key: "ArrowUp" });
+    await waitFor(() => expect(within(screen.getByTestId("model-call-order-row-backup"))
+      .getByText("Primary")).toBeInTheDocument());
+    expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_call_order.update", { order: ["backup", "primary"] }, 20_000,
+    );
+    expectSummaries();
   });
 
   it.each([
@@ -914,7 +952,8 @@ describe("Settings models", () => {
 
     const newPrimary = screen.getByTestId("model-call-order-row-backup");
     expect(within(newPrimary).getByText("Primary")).toBeInTheDocument();
-    expect(within(newPrimary).getByText(`${backupPreset.model} 200K Default`)).toBeInTheDocument();
+    expect(within(newPrimary).getByText(backupPreset.model)).toBeInTheDocument();
+    expect(within(newPrimary).getByText("200K Default")).toBeInTheDocument();
     fireEvent.click(within(screen.getByTestId("model-call-order-row-primary")).getByRole("button", { name: "Configure" }));
     fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
     expect(screen.getByLabelText("Temperature")).toHaveValue(0.4);

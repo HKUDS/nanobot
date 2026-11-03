@@ -75,7 +75,6 @@ def test_convert_user_content_coerces_typeless_dict():
 
 
 def test_convert_user_content_coerces_mixed_typeless():
-    """Multiple typeless items and non-dict items are all handled."""
     result = AnthropicProvider._convert_user_content([
         42,
         {"key": "val"},
@@ -108,7 +107,6 @@ def test_convert_assistant_message_repairs_history_tool_arguments():
 
 
 def test_anthropic_sanitizes_invalid_tool_ids_consistently():
-    """Invalid restored IDs must be valid for Anthropic and keep pairs matched."""
     blocks = AnthropicProvider._assistant_blocks({
         "role": "assistant",
         "content": None,
@@ -130,7 +128,6 @@ def test_anthropic_sanitizes_invalid_tool_ids_consistently():
 
 
 def test_anthropic_sanitized_tool_ids_avoid_simple_collisions():
-    """Replacement-only sanitizing would collapse these two ids to call_a."""
     blocks = AnthropicProvider._assistant_blocks({
         "role": "assistant",
         "content": None,

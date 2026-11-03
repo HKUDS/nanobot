@@ -76,7 +76,6 @@ async def test_exec_session_completed_before_deadline_keeps_output_for_late_poll
         )
         sid = _session_id(initial)
         await asyncio.wait_for(manager._sessions[sid].process.wait(), timeout=3)
-        # Read only after the original deadline: completion must not turn into a timeout.
         await asyncio.sleep(1.1)
 
         final = await session_tool.execute(session_id=sid, timeout_ms=0)

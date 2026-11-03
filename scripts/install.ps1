@@ -258,7 +258,6 @@ function Install-WithPipx {
     }
     $Environment = Join-Path $ToolDir $Package
     if (Test-Path -LiteralPath (Join-Path $Environment "pipx_metadata.json")) {
-        # Keep this stdlib bootstrap check in sync with install.sh.
         $Inspect = @'
 import json
 import re

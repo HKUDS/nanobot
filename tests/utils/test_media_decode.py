@@ -1,5 +1,3 @@
-"""Tests for ``nanobot.utils.media_decode``."""
-
 from __future__ import annotations
 
 import base64
@@ -136,7 +134,6 @@ def test_unknown_mime_falls_back_to_bin(tmp_path) -> None:
 
 
 def test_default_limit_is_10mb(tmp_path) -> None:
-    """Backwards-compatible default — the API path depends on this."""
     assert DEFAULT_MAX_BYTES == 10 * 1024 * 1024
     assert MAX_FILE_SIZE == 10 * 1024 * 1024
 

@@ -7,7 +7,7 @@ import pytest
 
 from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.outbound_events import ProgressEvent
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.email.runtime import EmailChannel, EmailConfig
@@ -29,7 +29,6 @@ def _make_config(**overrides) -> EmailConfig:
         smtp_password="secret",
         mark_seen=True,
         allow_from=["*"],
-        # Disable auth verification by default so existing tests are unaffected
         verify_dkim=False,
         verify_spf=False,
     )
@@ -115,7 +114,6 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     ]
     assert skipped_uids == set()
 
-    # Same UID should be deduped in-process.
     items_again, skipped_again = channel._fetch_new_messages()
     assert items_again == []
     assert skipped_again == set()
@@ -364,16 +362,13 @@ def test_apply_post_actions_batch_fallback_caches_uid_store_failure(monkeypatch)
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
     channel._apply_post_actions_batch(["123", "124"])
 
-    # UID STORE should be attempted only once, then cached as unsupported.
     assert [call for call in fake.uid_calls if call[0] == "STORE"] == [("STORE", "123", "+FLAGS", "(\\Deleted)")]
     assert fake.search_calls == [(None, "UID", "123"), (None, "UID", "124")]
     assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted"), (b"2", "+FLAGS", "\\Deleted")]
-    # With post_action_expunge=False (default), no broad expunge is called
     assert fake.expunge_calls == 0
 
 
 def test_apply_post_actions_batch_delete_with_post_action_expunge_true_no_uidplus(monkeypatch) -> None:
-    """When post_action_expunge=True and UIDPLUS is unsupported, broad expunge IS called."""
     class FakeIMAP:
         def __init__(self) -> None:
             self.uid_calls: list[tuple] = []
@@ -419,7 +414,6 @@ def test_apply_post_actions_batch_delete_with_post_action_expunge_true_no_uidplu
     channel._apply_post_actions_batch(["123", "124"])
 
     assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted"), (b"2", "+FLAGS", "\\Deleted")]
-    # Broad expunge called because post_action_expunge=True
     assert fake.expunge_calls == 2
 
 
@@ -548,7 +542,6 @@ def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) ->
     assert skipped_uids == {"123"}
     assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
 
-    # Same UID should still be deduped after being ignored.
     items_again, skipped_again = channel._fetch_new_messages()
     assert items_again == []
     assert skipped_again == set()
@@ -569,7 +562,6 @@ def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) ->
             {"from_address": "", "smtp_username": "other@smtp.com", "imap_username": "bot@example.com"},
             "bot@example.com",
         ),
-        # Case-insensitive: inbound From arrives upper-cased.
         (
             {"from_address": "bot@example.com", "smtp_username": "other@smtp.com", "imap_username": "other@imap.com"},
             "BOT@EXAMPLE.COM",
@@ -814,7 +806,14 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_skips_progress_messages_before_smtp(monkeypatch) -> None:
+@pytest.mark.parametrize("event", [
+    ProgressEvent(tool_hint=True, tool_events=[{
+        "phase": "start", "call_id": "call-1", "name": "exec",
+        "arguments": {"command": "git status"},
+    }]),
+    ProgressEvent(tool_events=[{"phase": "end", "call_id": "call-1", "name": "exec"}]),
+], ids=["tool-start", "tool-end"])
+async def test_send_skips_progress_messages_before_smtp(monkeypatch, event) -> None:
     called = {"smtp": False}
 
     def _smtp_factory(*_args, **_kwargs):
@@ -825,21 +824,18 @@ async def test_send_skips_progress_messages_before_smtp(monkeypatch) -> None:
 
     channel = EmailChannel(_make_config(), MessageBus())
 
-    await channel.send(
-        OutboundMessage(
-            channel="email",
-            chat_id="alice@example.com",
-            content="",
-            event=ProgressEvent(tool_events=[{"phase": "end", "name": "exec"}]),
-        )
+    msg = outbound_message_for_event(
+        channel="email",
+        chat_id="alice@example.com",
+        event=event,
     )
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
 
     assert called["smtp"] is False
 
 
 @pytest.mark.asyncio
 async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
-    """When auto_reply_enabled=False, replies should be skipped but proactive sends allowed."""
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
             self.sent_messages: list[EmailMessage] = []
@@ -872,10 +868,8 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
     cfg.auto_reply_enabled = False
     channel = EmailChannel(cfg, MessageBus())
 
-    # Mark alice as someone who sent us an email (making this a "reply")
     channel._last_subject_by_chat["alice@example.com"] = "Previous email"
 
-    # A policy rejection must not look like successful delivery to the manager.
     with pytest.raises(DeliveryRejectedError, match="auto_reply_enabled"):
         await channel.send(
             OutboundMessage(
@@ -886,7 +880,6 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
         )
     assert fake_instances == []
 
-    # Reply with force_send=True should be sent
     await channel.send(
         OutboundMessage(
             channel="email",
@@ -901,7 +894,6 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> None:
-    """Proactive emails (not replies) should be sent even when auto_reply_enabled=False."""
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
             self.sent_messages: list[EmailMessage] = []
@@ -934,8 +926,6 @@ async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> Non
     cfg.auto_reply_enabled = False
     channel = EmailChannel(cfg, MessageBus())
 
-    # bob@example.com has never sent us an email (proactive send)
-    # This should be sent even with auto_reply_enabled=False
     await channel.send(
         OutboundMessage(
             channel="email",
@@ -1034,15 +1024,10 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
 
     assert len(items) == 1
     assert items[0]["subject"] == "Status"
-    # uid("SEARCH", None, "SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
     assert fake.search_args is not None
     assert fake.search_args[1:] == ("SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
     assert fake.store_calls == []
 
-
-# ---------------------------------------------------------------------------
-# Security: Anti-spoofing tests for Authentication-Results verification
-# ---------------------------------------------------------------------------
 
 def _make_fake_imap(raw: bytes, uid: bytes = b"500"):
     """Return a FakeIMAP class pre-loaded with the given raw email."""
@@ -1079,7 +1064,6 @@ def _make_fake_imap(raw: bytes, uid: bytes = b"500"):
 
 
 def test_spoofed_email_rejected_when_verify_enabled(monkeypatch) -> None:
-    """An email without Authentication-Results should be rejected when verify_dkim=True."""
     raw = _make_raw_email(subject="Spoofed", body="Malicious payload")
     fake = _make_fake_imap(raw)
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
@@ -1096,7 +1080,6 @@ def test_spoofed_email_rejected_when_verify_enabled(monkeypatch) -> None:
 
 
 def test_email_with_valid_auth_results_accepted(monkeypatch) -> None:
-    """An email with spf=pass and dkim=pass should be accepted."""
     raw = _make_raw_email(
         subject="Legit",
         body="Hello from verified sender",
@@ -1119,7 +1102,6 @@ def test_email_with_valid_auth_results_accepted(monkeypatch) -> None:
 
 
 def test_email_with_partial_auth_rejected(monkeypatch) -> None:
-    """An email with only spf=pass but no dkim=pass should be rejected when verify_dkim=True."""
     raw = _make_raw_email(
         subject="Partial",
         body="Only SPF passes",
@@ -1258,7 +1240,6 @@ def test_trusted_relaxed_domain_alignment_accepts_legitimate_subdomain_auth(monk
 
 
 def test_backward_compat_verify_disabled(monkeypatch) -> None:
-    """When verify_dkim=False and verify_spf=False, emails without auth headers are accepted."""
     raw = _make_raw_email(subject="NoAuth", body="No auth headers present")
     fake = _make_fake_imap(raw)
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
@@ -1271,7 +1252,6 @@ def test_backward_compat_verify_disabled(monkeypatch) -> None:
 
 
 def test_email_content_tagged_with_email_context(monkeypatch) -> None:
-    """Email content should be prefixed with [EMAIL-CONTEXT] for LLM isolation."""
     raw = _make_raw_email(subject="Tagged", body="Check the tag")
     fake = _make_fake_imap(raw)
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
@@ -1287,11 +1267,9 @@ def test_email_content_tagged_with_email_context(monkeypatch) -> None:
 
 
 def test_check_authentication_results_method() -> None:
-    """Unit test for trusted, aligned Authentication-Results parsing."""
     from email import policy
     from email.parser import BytesParser
 
-    # No Authentication-Results header
     msg_no_auth = EmailMessage()
     msg_no_auth["From"] = "alice@example.com"
     msg_no_auth.set_content("test")
@@ -1304,7 +1282,6 @@ def test_check_authentication_results_method() -> None:
     assert spf is False
     assert dkim is False
 
-    # Both pass
     msg_both = EmailMessage()
     msg_both["From"] = "alice@example.com"
     msg_both["Authentication-Results"] = (
@@ -1316,7 +1293,6 @@ def test_check_authentication_results_method() -> None:
     assert spf is True
     assert dkim is True
 
-    # SPF pass, DKIM fail
     msg_spf_only = EmailMessage()
     msg_spf_only["From"] = "alice@example.com"
     msg_spf_only["Authentication-Results"] = (
@@ -1328,7 +1304,6 @@ def test_check_authentication_results_method() -> None:
     assert spf is True
     assert dkim is False
 
-    # DKIM pass, SPF fail
     msg_dkim_only = EmailMessage()
     msg_dkim_only["From"] = "alice@example.com"
     msg_dkim_only["Authentication-Results"] = (
@@ -1339,11 +1314,6 @@ def test_check_authentication_results_method() -> None:
     spf, dkim = channel._check_authentication_results(parsed, "alice@example.com")
     assert spf is False
     assert dkim is True
-
-
-# ---------------------------------------------------------------------------
-# Attachment extraction tests
-# ---------------------------------------------------------------------------
 
 
 def _make_raw_email_with_attachment(
@@ -1403,7 +1373,6 @@ def test_fetch_new_messages_ignores_unauthorized_sender_before_attachments(monke
 
 
 def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:
-    """PDF attachment is saved to media dir and path returned in media list."""
     monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
 
     raw = _make_raw_email_with_attachment()
@@ -1424,7 +1393,6 @@ def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:
 
 
 def test_extract_attachments_disabled_by_default(monkeypatch) -> None:
-    """With no allowed_attachment_types (default), no attachments are extracted."""
     raw = _make_raw_email_with_attachment()
     fake = _make_fake_imap(raw)
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
@@ -1440,7 +1408,6 @@ def test_extract_attachments_disabled_by_default(monkeypatch) -> None:
 
 
 def test_extract_attachments_mime_type_filter(tmp_path, monkeypatch) -> None:
-    """Non-allowed MIME types are skipped."""
     monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
 
     raw = _make_raw_email_with_attachment(
@@ -1464,7 +1431,6 @@ def test_extract_attachments_mime_type_filter(tmp_path, monkeypatch) -> None:
 
 
 def test_extract_attachments_empty_allowed_types_rejects_all(tmp_path, monkeypatch) -> None:
-    """Empty allowed_attachment_types means no types are accepted."""
     monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
 
     raw = _make_raw_email_with_attachment(
@@ -1488,7 +1454,6 @@ def test_extract_attachments_empty_allowed_types_rejects_all(tmp_path, monkeypat
 
 
 def test_extract_attachments_wildcard_pattern(tmp_path, monkeypatch) -> None:
-    """Glob patterns like 'image/*' match attachment MIME types."""
     monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
 
     raw = _make_raw_email_with_attachment(
@@ -1512,7 +1477,6 @@ def test_extract_attachments_wildcard_pattern(tmp_path, monkeypatch) -> None:
 
 
 def test_extract_attachments_size_limit(tmp_path, monkeypatch) -> None:
-    """Attachments exceeding max_attachment_size are skipped."""
     monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
 
     raw = _make_raw_email_with_attachment(
@@ -1535,10 +1499,8 @@ def test_extract_attachments_size_limit(tmp_path, monkeypatch) -> None:
 
 
 def test_extract_attachments_max_count(tmp_path, monkeypatch) -> None:
-    """Only max_attachments_per_email are saved."""
     monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
 
-    # Build email with 3 attachments
     msg = EmailMessage()
     msg["From"] = "alice@example.com"
     msg["To"] = "bot@example.com"
@@ -1571,7 +1533,6 @@ def test_extract_attachments_max_count(tmp_path, monkeypatch) -> None:
 
 
 def test_extract_attachments_sanitizes_filename(tmp_path, monkeypatch) -> None:
-    """Path traversal in filenames is neutralized."""
     monkeypatch.setattr("nanobot.channels.email.runtime.get_media_dir", lambda ch: tmp_path)
 
     raw = _make_raw_email_with_attachment(
@@ -1587,18 +1548,11 @@ def test_extract_attachments_sanitizes_filename(tmp_path, monkeypatch) -> None:
     assert len(items) == 1
     assert len(items[0]["media"]) == 1
     saved_path = Path(items[0]["media"][0])
-    # File must be inside the media dir, not escaped via path traversal
     assert saved_path.parent == tmp_path
-
-
-# ---------------------------------------------------------------------------
-# Agent-initiated file attachment tests (send with media)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_send_with_single_file_attachment(tmp_path, monkeypatch) -> None:
-    """Agent sends an email with a single file attached."""
     sent_messages: list[EmailMessage] = []
 
     class FakeSMTP:
@@ -1622,7 +1576,6 @@ async def test_send_with_single_file_attachment(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr("nanobot.channels.email.runtime.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
 
-    # Create a real temp file to attach
     attachment = tmp_path / "report.pdf"
     attachment.write_bytes(b"%PDF-1.4 fake pdf content")
 
@@ -1641,7 +1594,6 @@ async def test_send_with_single_file_attachment(tmp_path, monkeypatch) -> None:
     assert sent["To"] == "alice@example.com"
     assert sent.is_multipart(), "Email with attachment should be multipart"
 
-    # Walk parts to find the attachment
     attachment_parts = []
     for part in sent.walk():
         if part.get_content_disposition() == "attachment":
@@ -1655,7 +1607,6 @@ async def test_send_with_single_file_attachment(tmp_path, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_send_with_multiple_file_attachments(tmp_path, monkeypatch) -> None:
-    """Agent sends an email with multiple files attached."""
     sent_messages: list[EmailMessage] = []
 
     class FakeSMTP:
@@ -1712,7 +1663,6 @@ async def test_send_with_multiple_file_attachments(tmp_path, monkeypatch) -> Non
 
 @pytest.mark.asyncio
 async def test_send_skips_missing_attachment_file(tmp_path, monkeypatch) -> None:
-    """Non-existent attachment file is skipped without breaking the send."""
     sent_messages: list[EmailMessage] = []
 
     class FakeSMTP:
@@ -1760,7 +1710,6 @@ async def test_send_skips_missing_attachment_file(tmp_path, monkeypatch) -> None
     for part in sent.walk():
         if part.get_content_disposition() == "attachment":
             attachment_parts.append(part)
-    # Only the existing file should be attached
     assert len(attachment_parts) == 1
     assert attachment_parts[0].get_filename() == "real.txt"
     body = sent.get_body(preferencelist=("plain",))
@@ -1770,7 +1719,6 @@ async def test_send_skips_missing_attachment_file(tmp_path, monkeypatch) -> None
 
 @pytest.mark.asyncio
 async def test_send_skips_oversized_attachment_file(tmp_path, monkeypatch) -> None:
-    """Attachment exceeding max_attachment_size is skipped with a visible note."""
     sent_messages: list[EmailMessage] = []
 
     class FakeSMTP:
@@ -1815,7 +1763,6 @@ async def test_send_skips_oversized_attachment_file(tmp_path, monkeypatch) -> No
 
 @pytest.mark.asyncio
 async def test_send_limits_outbound_attachment_count(tmp_path, monkeypatch) -> None:
-    """Only max_attachments_per_email outbound attachments are included."""
     sent_messages: list[EmailMessage] = []
 
     class FakeSMTP:
@@ -1869,7 +1816,6 @@ async def test_send_limits_outbound_attachment_count(tmp_path, monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_send_with_unknown_mime_type_attachment(tmp_path, monkeypatch) -> None:
-    """File with unknown extension gets application/octet-stream MIME type."""
     sent_messages: list[EmailMessage] = []
 
     class FakeSMTP:
@@ -1922,7 +1868,6 @@ async def test_send_with_unknown_mime_type_attachment(tmp_path, monkeypatch) -> 
 
 @pytest.mark.asyncio
 async def test_send_with_media_and_reply_subject_and_in_reply_to(tmp_path, monkeypatch) -> None:
-    """Attachments work together with reply subject and In-Reply-To headers."""
     sent_messages: list[EmailMessage] = []
 
     class FakeSMTP:

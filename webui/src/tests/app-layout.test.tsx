@@ -1134,7 +1134,6 @@ describe("App layout", () => {
     window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    // Wait for the existing chat's lazy composer before opening its sidebar menu.
     await screen.findByRole("button", { name: "Workspace access mode: Full Access" });
     const projectSection = screen.getByRole("region", { name: "selected-project" });
     fireEvent.contextMenu(within(projectSection).getByRole("button", { name: "selected-project" }));
@@ -2375,6 +2374,45 @@ describe("App layout", () => {
     expect(document.body.style.pointerEvents).not.toBe("none");
   }, 15_000);
 
+  it.each([false, true])("archives only persisted selected topics in one sidebar update (draft=%s)", async (includeDraft) => {
+    mockSessions = ["a", "b", "c"].map((id) => ({
+      key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
+      createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
+      title: `Topic ${id}`, preview: "",
+      projectLocked: includeDraft && id === "a" ? false : undefined,
+    }));
+    mockFetchRoutes({
+      "/api/webui/sidebar-state": { pinned_keys: ["websocket:chat-a", "websocket:chat-b"] },
+    });
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await within(sidebar).findByRole("button", { name: "Topic a" });
+    fireEvent.pointerDown(within(sidebar).getByLabelText("Topic actions for Topic a"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: includeDraft ? "Archive this topic?" : "Archive 2 topics?",
+    });
+    expect(setSidebarStateSpy).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+
+    await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
+    expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
+      archived_keys: includeDraft ? ["websocket:chat-b"] : ["websocket:chat-a", "websocket:chat-b"],
+      pinned_keys: includeDraft ? ["websocket:chat-a"] : [],
+    }));
+    expect(window.location.hash).toBe(includeDraft ? "#/chat/websocket%3Achat-a" : "#/chat/websocket%3Achat-c");
+    expect(within(sidebar).getByRole("button", { name: "Topic c" })).toBeInTheDocument();
+    if (includeDraft) expect(within(sidebar).getByRole("button", { name: "Topic a" })).toBeInTheDocument();
+    else expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "Topic b" })).not.toBeInTheDocument();
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+  });
+
   it("deletes multiple selected topics through one confirmation", async () => {
     mockSessions = [
       {
@@ -2414,9 +2452,23 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Second chat" }));
     expect(within(sidebar).getByText("2 selected")).toBeInTheDocument();
 
+    const automationReads: Array<(jobs: SessionAutomationJob[]) => void> = [];
+    getSessionAutomationsSpy.mockImplementation(() => new Promise((resolve) => automationReads.push(resolve)));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
+    fireEvent.click(document.body);
+    expect(screen.getByTestId("delete-selection-bar")).toHaveTextContent("2 selected");
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+    await act(async () => automationReads.forEach((resolve) => resolve([])));
+    expect(await screen.findByText("Delete 2 conversations?")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Escape" });
+    expect(screen.getByTestId("delete-selection-bar")).toHaveTextContent("2 selected");
+    expect(deleteChatSpy).not.toHaveBeenCalled();
+
+    getSessionAutomationsSpy.mockResolvedValue([]);
     fireEvent.click(within(sidebar).getByRole("button", { name: "Delete" }));
     expect(await screen.findByText("Delete 2 conversations?")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
 
     await waitFor(() => expect(deleteChatSpy).toHaveBeenCalledTimes(2));
     expect(deleteChatSpy.mock.calls.map(([key]) => key)).toEqual([

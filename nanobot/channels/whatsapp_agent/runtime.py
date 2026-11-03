@@ -92,7 +92,6 @@ AUTH_FAILURE_MESSAGE = (
     "channels.whatsapp_agent.token."
 )
 
-# Placeholders for media-only messages, matching other nanobot channels.
 _MEDIA_PLACEHOLDERS = {
     "image": "[image]",
     "video": "[video]",
@@ -177,9 +176,6 @@ class WhatsAppAgentChannel(BaseChannel):
         self._typing_task: asyncio.Task[None] | None = None
         self._pending_sends: dict[int, _PendingSend] = {}
 
-    # ------------------------------------------------------------------
-    # Transport helpers
-    # ------------------------------------------------------------------
 
     def progress_transport_defaults(self) -> tuple[bool, bool]:
         """Keep progress traffic opt-in; each hint spends the send budget."""
@@ -244,7 +240,6 @@ class WhatsAppAgentChannel(BaseChannel):
         files: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
     ) -> tuple[int, Any]:
-        """Perform one paced API request and decode a JSON body when present."""
         client = self._client
         if client is None:
             raise ChannelNotReadyError("WhatsApp Agent Platform channel is not connected")
@@ -278,7 +273,6 @@ class WhatsAppAgentChannel(BaseChannel):
         files: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
     ) -> Any:
-        """Perform a request that must succeed, raising a classified error."""
         status_code, payload = await self._request(
             method,
             path,
@@ -297,9 +291,6 @@ class WhatsAppAgentChannel(BaseChannel):
             raise WhatsAppAgentAuthError(str(error))
         raise WhatsAppAgentAPIError(error)
 
-    # ------------------------------------------------------------------
-    # Durable state
-    # ------------------------------------------------------------------
 
     def _state_path(self) -> Path:
         configured = self.config.state_dir.strip()
@@ -307,7 +298,6 @@ class WhatsAppAgentChannel(BaseChannel):
         return base / "state.json"
 
     def _load_state(self) -> None:
-        """Load the cursor, resetting it when the token identifies a new agent."""
         path = self._state_path()
         self._state = WhatsAppAgentState.load(path)
         if self._state.reset_for_token(self.config.token):
@@ -324,9 +314,6 @@ class WhatsAppAgentChannel(BaseChannel):
         # that cannot survive a restart (including the first-start boundary).
         self._state.save(self._state_path())
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     async def start(self) -> None:
         if not self.config.token.strip():
@@ -384,7 +371,6 @@ class WhatsAppAgentChannel(BaseChannel):
         backoff: float,
         last_poll: float,
     ) -> tuple[float, float]:
-        """Apply the documented recovery for a failed poll."""
         if error.poll_replaced:
             self.logger.error(
                 "Another poller replaced this WhatsApp Agent poll (409). "
@@ -413,12 +399,8 @@ class WhatsAppAgentChannel(BaseChannel):
         if client is not None:
             await client.aclose()
 
-    # ------------------------------------------------------------------
-    # Polling
-    # ------------------------------------------------------------------
 
     async def _poll_once(self) -> PollBatch | None:
-        """Run one long poll. Returns None when the timeout elapsed empty."""
         if self._state.offset is None:
             # An offset-less 204 has no cursor. Repeating that request skips
             # traffic between polls. Start at the documented retained cursor
@@ -447,7 +429,6 @@ class WhatsAppAgentChannel(BaseChannel):
         return parse_poll_batch(payload)
 
     async def _process_batch(self, batch: PollBatch) -> None:
-        """Handle one batch in order, persisting progress as it goes."""
         for receipt in batch.statuses:
             self._state.note_status(receipt.wamid, receipt.status)
 
@@ -476,12 +457,8 @@ class WhatsAppAgentChannel(BaseChannel):
             self._state.accept_offset(batch.next_offset)
         self._persist()
 
-    # ------------------------------------------------------------------
-    # Inbound handling
-    # ------------------------------------------------------------------
 
     async def _dispatch(self, message: PlatformMessage) -> None:
-        """Route one inbound message into the agent pipeline."""
         if message.kind == "reaction":
             # Reactions are receive-only on this platform and carry no reply.
             self.logger.debug(
@@ -518,7 +495,6 @@ class WhatsAppAgentChannel(BaseChannel):
         )
 
     async def _acknowledge(self, wamid: str) -> None:
-        """Mark read and start the typing indicator, best effort."""
         body: dict[str, Any] = {
             "messaging_product": "whatsapp",
             "status": "read",
@@ -541,7 +517,6 @@ class WhatsAppAgentChannel(BaseChannel):
             self._start_typing(wamid)
 
     def _start_typing(self, wamid: str) -> None:
-        """Refresh the typing indicator while the turn is running."""
         self._cancel_typing_task()
 
         async def _refresh() -> None:
@@ -582,7 +557,6 @@ class WhatsAppAgentChannel(BaseChannel):
             await task
 
     async def _materialize(self, message: PlatformMessage) -> tuple[list[str], str]:
-        """Download attached media and build the agent-visible content."""
         caption = message.text or (message.media.caption if message.media else "")
         if message.media is None or not self.config.download_media:
             return [], caption
@@ -609,12 +583,8 @@ class WhatsAppAgentChannel(BaseChannel):
                 content = label
         return [str(path)], content
 
-    # ------------------------------------------------------------------
-    # Media download
-    # ------------------------------------------------------------------
 
     async def _download_media(self, message: PlatformMessage) -> Path | None:
-        """Fetch inbound media bytes and store them under the media directory."""
         media = message.media
         if media is None:
             return None
@@ -669,7 +639,6 @@ class WhatsAppAgentChannel(BaseChannel):
         return path
 
     async def _fetch_media_bytes(self, url: str, limit: int) -> bytes:
-        """Download media bytes with the bearer token and a hard size cap."""
         client = self._client
         if client is None:
             raise RuntimeError("WhatsApp Agent Platform channel is not connected")
@@ -720,12 +689,8 @@ class WhatsAppAgentChannel(BaseChannel):
         digest = hashlib.sha256(message.wamid.encode("utf-8")).hexdigest()[:12]
         return get_media_dir(self.name) / f"{name}-{digest}{suffix}"
 
-    # ------------------------------------------------------------------
-    # Outbound
-    # ------------------------------------------------------------------
 
     def _recipient(self) -> str:
-        """Return the creator identifier the API accepts in ``to``."""
         if self._state.creator_id:
             return self._state.creator_id
         return ""
@@ -736,7 +701,6 @@ class WhatsAppAgentChannel(BaseChannel):
             msg.event.notify or self.show_compaction_notices
         ):
             return
-        # ChannelManager already applies the progress/tool-hint opt-in policy.
 
         to = self._recipient()
         if not to:
@@ -800,7 +764,6 @@ class WhatsAppAgentChannel(BaseChannel):
         self._remember_sent(response)
 
     def _remember_sent(self, response: Any) -> None:
-        """Record the outbound wamid that later receipts refer to."""
         if not isinstance(response, dict):
             return
         body = cast(dict[str, Any], response)
@@ -815,7 +778,6 @@ class WhatsAppAgentChannel(BaseChannel):
             self._state.note_status(wamid, "sent")
 
     async def _send_media(self, to: str, media_path: str) -> None:
-        """Upload a local file and send it as the matching message type."""
         path = Path(media_path).expanduser()
         if not path.is_file():
             self.logger.warning("Skipping missing WhatsApp Agent media: {}", media_path)

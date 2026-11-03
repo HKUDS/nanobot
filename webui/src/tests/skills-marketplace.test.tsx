@@ -118,7 +118,6 @@ describe("useSkills", () => {
     fireEvent.keyDown(input, { key: "Tab" });
     expect(input).toHaveValue("$simple-pr-review ");
 
-    // A later open must also refresh removals without remounting the page.
     vi.mocked(fetchSkills).mockResolvedValue({ skills: [] });
     fireEvent.change(input, { target: { value: "$", selectionStart: 1 } });
     await act(async () => {});

@@ -1,5 +1,3 @@
-"""Subagent manager for background task execution."""
-
 from __future__ import annotations
 
 import asyncio
@@ -509,7 +507,6 @@ class SubagentManager:
         )
 
     def _subagent_tools_config(self) -> ToolsConfig:
-        """Build a ToolsConfig scoped for subagent use."""
         return ToolsConfig(
             exec=self.tools_config.exec,
             web=self.tools_config.web,
@@ -523,7 +520,6 @@ class SubagentManager:
         tools_config: ToolsConfig | None = None,
         exec_manager: ExecSessionManager | None = None,
     ) -> ToolRegistry:
-        """Build an isolated subagent tool registry via ToolLoader."""
         root = self.workspace if workspace is None else workspace
         registry = ToolRegistry()
         cfg = tools_config if tools_config is not None else self._subagent_tools_config()
@@ -715,7 +711,6 @@ class SubagentManager:
         return outcome.result
 
     async def _run_subagent(self, record: _SubagentTask) -> str:
-        """Execute once, seal the outcome, then clean up and publish once."""
         status = record.status
         task_text, label = status.task_description, status.label
         record.begun = True
@@ -754,7 +749,6 @@ class SubagentManager:
         return outcome.result
 
     async def _run_admitted_subagent(self, record: _SubagentTask) -> _SubagentOutcome:
-        """Execute the admitted task with task-owned shell resources."""
         status, origin, runtime = record.status, record.origin, record.runtime
         task_id, label = status.task_id, status.label
         origin_message_id, workspace_scope = record.origin_message_id, record.workspace_scope
@@ -897,7 +891,6 @@ class SubagentManager:
         error: str | None = None,
         partial_result: bool = False,
     ) -> None:
-        """Announce the subagent result to the main agent via the message bus."""
         status_text = {
             "ok": "completed successfully", "cancelled": "was cancelled",
             "incomplete": "stopped before completing the task",
@@ -950,7 +943,6 @@ class SubagentManager:
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
 
     def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
-        """Build a focused system prompt for the subagent."""
         from nanobot.agent.skills import SkillsLoader
 
         agent_workspace = self.workspace.expanduser().resolve()

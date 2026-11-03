@@ -1,5 +1,3 @@
-"""Runtime-specific helper functions and constants."""
-
 from __future__ import annotations
 
 import re
@@ -163,7 +161,6 @@ def workspace_violation_signature(
 
 
 def _normalize_violation_target(raw: str) -> str:
-    """Normalize *raw* path so that equivalent spellings collide on the same key."""
     try:
         normalized = Path(raw).expanduser().resolve().as_posix()
     except Exception:

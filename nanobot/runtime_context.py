@@ -1,5 +1,3 @@
-"""Optional, persistent context appended to the current user prompt."""
-
 from __future__ import annotations
 
 import json

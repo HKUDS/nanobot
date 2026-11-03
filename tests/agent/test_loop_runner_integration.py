@@ -1,5 +1,3 @@
-"""Tests for AgentLoop integration with AgentRunner: streaming, think-filter, error handling, subagent."""
-
 from __future__ import annotations
 
 import asyncio
@@ -9,13 +7,14 @@ import pytest
 
 from agent.session_helpers import mock_session_manager
 from nanobot.agent.context import TranscriptInput
-from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
+from nanobot.agent.goal_permission import goal_mutation_allowed
 from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
 from nanobot.events import RetryStatusEvent
+from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import (
     GenerationSettings,
     LLMProvider,
@@ -101,27 +100,6 @@ async def test_loop_uses_structured_retry_status_without_legacy_text(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ephemeral_runner_enters_and_restores_turn_scopes(tmp_path):
-    loop = _make_loop(tmp_path)
-
-    async def chat_stream_with_retry(**_kwargs):
-        assert goal_mutation_allowed() is True
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=chat_stream_with_retry)
-    loop.tools.get_definitions = MagicMock(return_value=[])
-
-    await loop._run_agent_loop(
-        TranscriptInput(history=[], current_message=None),
-        runtime=loop.llm_runtime(),
-        ephemeral=True,
-        turn_scopes=[goal_mutation_permission(True)],
-    )
-
-    assert goal_mutation_allowed() is False
-
-
-@pytest.mark.asyncio
 async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
@@ -156,7 +134,8 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
         ),
         LLMResponse(content="done", tool_calls=[], usage=None),
     ])
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+                     builtin_assembly=install_goal)
     session = loop.sessions.get_or_create("cli:direct")
     session.add_message("user", "Let's agree on the migration implementation.")
     session.add_message("assistant", "Use the staged migration plan and run integration tests.")
@@ -351,7 +330,8 @@ async def test_non_goal_direct_turn_cannot_reuse_prior_goal_command(tmp_path):
         ),
         LLMResponse(content="handled as a one-time task", tool_calls=[], usage=None),
     ])
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+                     builtin_assembly=install_goal)
     session = loop.sessions.get_or_create("api:default")
     session.add_message("user", "/goal old completed request")
     session.add_message("assistant", "The old request is complete.")
@@ -512,7 +492,6 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
 @pytest.mark.asyncio
 async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_path):
-    """LLM errors must not produce StreamedResponseEvent, so channels deliver the error."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus

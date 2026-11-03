@@ -1,5 +1,3 @@
-"""Filesystem configuration shared by the tools and root schema."""
-
 from nanobot.config_base import Base
 
 

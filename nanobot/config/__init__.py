@@ -1,5 +1,3 @@
-"""Configuration module for nanobot."""
-
 from __future__ import annotations
 
 from importlib import import_module
@@ -12,7 +10,6 @@ if TYPE_CHECKING:
         get_cli_history_path,
         get_cron_dir,
         get_data_dir,
-        get_legacy_sessions_dir,
         get_logs_dir,
         get_media_dir,
         get_runtime_subdir,
@@ -38,7 +35,6 @@ _EXPORTS = {
     "get_workspace_path": "nanobot.config.paths",
     "is_default_workspace": "nanobot.config.paths",
     "get_cli_history_path": "nanobot.config.paths",
-    "get_legacy_sessions_dir": "nanobot.config.paths",
 }
 
 
@@ -70,5 +66,4 @@ __all__ = [
     "get_workspace_path",
     "is_default_workspace",
     "get_cli_history_path",
-    "get_legacy_sessions_dir",
 ]

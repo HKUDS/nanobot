@@ -1,5 +1,3 @@
-"""Helpers for keeping the bundled WebUI build in sync with source checkouts."""
-
 from __future__ import annotations
 
 import os
@@ -192,8 +190,10 @@ def build_webui_bundle(
     using_bun = Path(command_runner).stem.lower() == "bun"
 
     _emit(output, f"Building bundled WebUI with `{command_runner}`...")
+    # Reinstall the locked tree: Bun's incremental install can retain the old
+    # hoisting layout after a source upgrade and omit new nested major versions.
     _run_frontend_command(
-        [command_runner, "install", *(["--frozen-lockfile"] if using_bun else [])],
+        [command_runner, "install", *(["--frozen-lockfile", "--force"] if using_bun else [])],
         cwd=resolved_source,
         subprocess_run=subprocess_run,
     )

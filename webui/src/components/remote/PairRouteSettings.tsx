@@ -5,7 +5,6 @@ import { remoteAction } from "@/lib/remote-instances";
 import { useRemoteConnections } from "./remote-context";
 import { PairRouteSettingsView } from "./PairRouteSettingsView";
 
-/** An explicit escape hatch for a VPN/bound-interface route, not a new SSH form. */
 export function PairRouteSettings({ id, onSaved, showHint = true }: { id: string; onSaved?: () => void; showHint?: boolean }) {
   const { t } = useTranslation();
   const { client } = useClient();

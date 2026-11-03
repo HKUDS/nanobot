@@ -15,7 +15,6 @@ const sessions: ChatSummary[] = ["a", "b"].map((suffix) => ({
   preview: "",
 }));
 
-// Synthetic backend-boundary reproduction, not an original user recording.
 export function HistoryHydrationFixture() {
   const [client] = useState(() => new NanobotClient({
     url: `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/nan311-fixture-ws`,

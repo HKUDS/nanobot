@@ -1,5 +1,3 @@
-"""Explicit audience policy for operation notifications."""
-
 from typing import Literal
 
 from nanobot.bus.outbound_events import (

@@ -48,7 +48,6 @@ for (const width of [1280, 390]) {
       expect(await action.boundingBox()).toEqual(bounds);
       expect(await model.boundingBox()).toEqual(modelBounds);
 
-      // Reverse mid-transition, then send before the new icon has settled.
       await input.fill("");
       await input.fill("A newer draft");
       await action.click();

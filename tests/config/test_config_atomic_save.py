@@ -1,5 +1,3 @@
-"""Tests for atomic config.json writes."""
-
 from __future__ import annotations
 
 import json
@@ -48,4 +46,4 @@ def test_save_config_preserves_existing_file_when_write_fails(
         save_config(Config(), path)
 
     assert path.read_text(encoding="utf-8") == before
-    assert json.loads(before)  # still valid JSON
+    assert json.loads(before)

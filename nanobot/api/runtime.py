@@ -1,5 +1,3 @@
-"""Background process control for the WebUI-managed OpenAI-compatible API."""
-
 from __future__ import annotations
 
 import hashlib

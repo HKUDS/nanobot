@@ -8,14 +8,15 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-# Check optional Slack dependencies before running tests
 try:
     import slack_sdk  # noqa: F401
 except ImportError:
     pytest.skip("Slack dependencies not installed (slack-sdk)", allow_module_level=True)
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent, outbound_message_for_event
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.manager import ChannelManager
 from nanobot.channels.slack.runtime import SLACK_MAX_MESSAGE_LEN, SlackChannel, SlackConfig
 from nanobot.config.network import NetworkConfig
 
@@ -142,8 +143,34 @@ async def test_send_uses_thread_for_channel_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_structured_tool_start_sends_text_in_thread() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+    channel.tool_hint_max_length = 20
+    msg = outbound_message_for_event(
+        channel="slack",
+        chat_id="C123",
+        event=ProgressEvent(tool_hint=True, tool_events=[{
+            "phase": "start", "call_id": "call-1", "name": "web_search",
+            "arguments": {"query": "abcdefghijklmnopqrstuvwxyz"},
+        }]),
+        metadata={"slack": {"thread_ts": "1700000000.000100", "channel_type": "channel"}},
+    )
+
+    await ChannelManager._send_once(channel, channel.prepare_tool_events(msg))
+
+    assert fake_web.chat_post_calls == [{
+        "channel": "C123",
+        "text": 'search "abcdefghijklmnopqrs…"',
+        "thread_ts": "1700000000.000100",
+    }]
+    assert msg.content == ""
+    assert msg.event.content == ""
+
+
+@pytest.mark.asyncio
 async def test_send_omits_thread_for_dm_root_messages() -> None:
-    """DM root replies should not be threaded; metadata carries thread_ts=None."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     fake_web = _FakeAsyncWebClient()
     channel._web_client = fake_web
@@ -167,7 +194,6 @@ async def test_send_omits_thread_for_dm_root_messages() -> None:
 
 @pytest.mark.asyncio
 async def test_send_keeps_thread_for_dm_thread_messages() -> None:
-    """When the user replies inside a DM thread, bot replies stay in the same thread."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     fake_web = _FakeAsyncWebClient()
     channel._web_client = fake_web
@@ -251,7 +277,6 @@ async def test_send_renders_buttons_on_last_message_chunk() -> None:
 
 @pytest.mark.asyncio
 async def test_send_with_buttons_keeps_text_beyond_section_limit() -> None:
-    """Button messages render via blocks, so every char must land in a section."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     fake_web = _FakeAsyncWebClient()
     channel._web_client = fake_web
@@ -492,7 +517,6 @@ async def test_with_thread_context_fetches_root_once() -> None:
 
 @pytest.mark.asyncio
 async def test_with_thread_context_fetches_replies_in_dm_thread() -> None:
-    """DM threads should also pull thread history (not only channel threads)."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     channel._bot_user_id = "UBOT"
     fake_web = _FakeAsyncWebClient()
@@ -521,7 +545,6 @@ async def test_with_thread_context_fetches_replies_in_dm_thread() -> None:
 
 @pytest.mark.asyncio
 async def test_dm_root_message_has_no_thread_ts_and_no_thread_session() -> None:
-    """A top-level DM should not synthesize a thread_ts and uses the default session."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     channel._bot_user_id = "UBOT"
     channel._web_client = _FakeAsyncWebClient()
@@ -552,7 +575,6 @@ async def test_dm_root_message_has_no_thread_ts_and_no_thread_session() -> None:
 
 @pytest.mark.asyncio
 async def test_dm_thread_message_keeps_thread_ts_and_threaded_session() -> None:
-    """A DM message inside a real thread should preserve thread_ts and isolate the session."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     channel._bot_user_id = "UBOT"
     channel._web_client = _FakeAsyncWebClient()
@@ -601,7 +623,6 @@ def _channel_mention_request(envelope_id: str, ts: str) -> SimpleNamespace:
 
 @pytest.mark.asyncio
 async def test_channel_root_message_uses_thread_scoped_session() -> None:
-    """A channel mention that opens a thread belongs to that thread's session."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     channel._bot_user_id = "UBOT"
     channel._web_client = _FakeAsyncWebClient()
@@ -620,7 +641,6 @@ async def test_channel_root_message_uses_thread_scoped_session() -> None:
 
 @pytest.mark.asyncio
 async def test_channel_root_messages_do_not_share_one_session() -> None:
-    """Two threads opened in the same channel must not collapse into one session."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     channel._bot_user_id = "UBOT"
     channel._web_client = _FakeAsyncWebClient()
@@ -642,7 +662,6 @@ async def test_channel_root_messages_do_not_share_one_session() -> None:
 
 @pytest.mark.asyncio
 async def test_channel_root_message_without_reply_in_thread_uses_channel_session() -> None:
-    """With reply_in_thread disabled no thread is opened, so the channel session is used."""
     channel = SlackChannel(SlackConfig(enabled=True, reply_in_thread=False), MessageBus())
     channel._bot_user_id = "UBOT"
     channel._web_client = _FakeAsyncWebClient()
@@ -661,7 +680,6 @@ async def test_channel_root_message_without_reply_in_thread_uses_channel_session
 
 @pytest.mark.asyncio
 async def test_channel_thread_reply_keeps_thread_session() -> None:
-    """A reply inside a channel thread stays in the session opened by the root message."""
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     channel._bot_user_id = "UBOT"
     channel._web_client = _FakeAsyncWebClient()
@@ -808,11 +826,8 @@ def test_allowlist_policy_restricts_to_approved_channels() -> None:
     )
     channel._bot_user_id = "UBOT"
 
-    # In an approved channel without require_mention, respond to anything.
     assert channel._should_respond_in_channel("message", "anything", "C_OK") is True
-    # An unapproved channel is always rejected.
     assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_NOPE") is False
-    # _is_allowed also gates on the channel allowlist.
     assert channel._is_allowed("U1", "C_OK", "channel") is True
     assert channel._is_allowed("U1", "C_NOPE", "channel") is False
 
@@ -829,12 +844,9 @@ def test_allowlist_with_require_mention_needs_both_channel_and_mention() -> None
     )
     channel._bot_user_id = "UBOT"
 
-    # Approved channel + mention -> respond.
     assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_OK") is True
     assert channel._should_respond_in_channel("message", "<@UBOT> hi", "C_OK") is True
-    # Approved channel but no mention -> stay quiet.
     assert channel._should_respond_in_channel("message", "just chatting", "C_OK") is False
-    # Mention in an unapproved channel -> stay quiet.
     assert channel._should_respond_in_channel("app_mention", "<@UBOT> hi", "C_NOPE") is False
 
 
@@ -867,9 +879,6 @@ def test_to_mrkdwn_still_converts_unfenced_markdown_tables() -> None:
     assert out.splitlines() == ["*a*: 1", "*b*: 2", "", "*a*: 3", "*b*: 4"]
 
 
-# ── file download SSRF ─────────────────────────────────────────────
-
-
 def _patch_download_transport(
     monkeypatch: pytest.MonkeyPatch,
     handler: Callable[[httpx.Request], httpx.Response],
@@ -896,7 +905,6 @@ def _patch_download_validation(
 
 @pytest.mark.asyncio
 async def test_download_blocks_ssrf_target(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An internal file URL is rejected before the transport sees it."""
     requests: list[httpx.Request] = []
     validated: list[str] = []
 
@@ -920,7 +928,6 @@ async def test_download_blocks_ssrf_target(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.asyncio
 async def test_download_blocks_unsafe_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Redirect targets are validated before the redirected request is sent."""
     requests: list[httpx.Request] = []
     validated: list[str] = []
 
@@ -950,7 +957,6 @@ async def test_download_follows_safe_redirect(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Public redirects still download the file without forwarding cross-host auth."""
     requests: list[httpx.Request] = []
     validated: list[str] = []
 

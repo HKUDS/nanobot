@@ -1,5 +1,3 @@
-"""Convert Chat Completions messages/tools to Responses API format."""
-
 from __future__ import annotations
 
 import json

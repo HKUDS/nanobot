@@ -1,5 +1,3 @@
-"""Identity of a complete scheduled turn, not a separate forwarding address."""
-
 import hashlib
 import json
 from dataclasses import asdict, dataclass

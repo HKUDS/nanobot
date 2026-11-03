@@ -1,5 +1,3 @@
-"""Path policy and real git range regressions for the CI selector."""
-
 import html
 import json
 import os
@@ -32,6 +30,7 @@ def selected(result):
         ("tests/test_docker.sh", {"docker"}),
         ("tests/webui/fixtures/runtime-config-keys.json", {"python", "webui"}),
         ("tests/session/fixtures/sqlite_v1.sql", {"python"}),
+        ("scripts/docker_upgrade_smoke.py", {"docker"}),
         ("tests/fixtures/sigstore/bundle_v3.txt", {"python", "native"}),
         ("tests/fixtures/sigstore/bundle_v3.txt.sigstore", {"python", "native"}),
         ("tests/fixtures/sigstore/README.md", set()),
@@ -61,7 +60,7 @@ def selected(result):
         ("tests/providers/test_cached_tokens.py", {"python"}),
         ("scripts/pytest_timing.py", {"python"}),
         ("tests/scripts/test_pytest_timing.py", {"python"}),
-        ("scripts/verify_packaged_update.py", {"python", "native"}),
+        ("scripts/verify_packaged_update.py", {"python", "docker", "native"}),
         ("scripts/check_client_import_boundaries.mjs", {"webui", "tui"}),
         (".github/workflows/release-candidate.yml", {"python", "native"}),
         (".github/workflows/release-approve.yml", {"python", "native"}),
@@ -76,7 +75,6 @@ def selected(result):
     ],
 )
 def test_existing_path_policy(path, expected):
-    # These are reachable repository inputs, not merely invented glob matches.
     assert (ROOT / path).is_file()
     result = classify_paths([path])
     assert selected(result) == expected

@@ -1,5 +1,3 @@
-"""Web search provider usage fetchers for /status command."""
-
 from __future__ import annotations
 
 import os
@@ -12,8 +10,8 @@ class SearchUsageInfo:
     """Structured usage info returned by a provider fetcher."""
 
     provider: str
-    supported: bool = False          # True if the provider has a usage API
-    error: str | None = None         # Set when the API call failed
+    supported: bool = False
+    error: str | None = None
 
     # Usage counters (None = not available for this provider)
     used: int | None = None
@@ -43,7 +41,6 @@ class SearchUsageInfo:
         elif self.used is not None:
             lines.append(f"   Usage: {self.used} requests")
 
-        # Tavily breakdown
         breakdown_parts: list[str] = []
         if self.search_used is not None:
             breakdown_parts.append(f"Search: {self.search_used}")
@@ -86,12 +83,7 @@ async def fetch_search_usage(
         return SearchUsageInfo(provider=p, supported=False)
 
 
-# ---------------------------------------------------------------------------
-# Tavily
-# ---------------------------------------------------------------------------
-
 async def _fetch_tavily_usage(api_key: str | None) -> SearchUsageInfo:
-    """Fetch usage from GET https://api.tavily.com/usage."""
     import httpx
 
     key = api_key or os.environ.get("TAVILY_API_KEY", "")
@@ -126,31 +118,11 @@ async def _fetch_tavily_usage(api_key: str | None) -> SearchUsageInfo:
 
 
 def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
-    """
-    Parse Tavily /usage response.
-
-    Actual API response shape:
-    {
-      "account": {
-        "current_plan": "Researcher",
-        "plan_usage": 20,
-        "plan_limit": 1000,
-        "search_usage": 20,
-        "crawl_usage": 0,
-        "extract_usage": 0,
-        "map_usage": 0,
-        "research_usage": 0,
-        "paygo_usage": 0,
-        "paygo_limit": null
-      }
-    }
-    """
     raw_account = data.get("account")
     account = cast(dict[str, Any], raw_account) if isinstance(raw_account, dict) else {}
     used = _optional_int(account.get("plan_usage"))
     limit = _optional_int(account.get("plan_limit"))
 
-    # Compute remaining
     remaining = None
     if used is not None and limit is not None:
         remaining = max(0, limit - used)
@@ -168,7 +140,6 @@ def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
 
 
 def _optional_int(value: Any) -> int | None:
-    """Coerce JSON numerics (including string forms) to int; else None."""
     if value is None:
         return None
     try:

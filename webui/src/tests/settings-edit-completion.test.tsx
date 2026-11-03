@@ -205,7 +205,6 @@ describe("settings edit completion", () => {
   });
 });
 
-// Exercise the real controller and portaled editor, not only the completion primitive.
 describe("model editor completion boundaries", () => {
   installSettingsViewTestHooks();
 

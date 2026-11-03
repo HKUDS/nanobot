@@ -1,5 +1,3 @@
-"""Signal channel implementation using signal-cli daemon JSON-RPC interface."""
-
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +6,7 @@ import re
 import shutil
 import unicodedata
 from collections import deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,14 +62,12 @@ _SIG_CELL_STRIP_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def _as_json_object(value: object) -> dict[str, Any] | None:
-    """Return an untrusted JSON value only when it is an object."""
     if isinstance(value, dict):
         return cast(dict[str, Any], value)
     return None
 
 
 def _as_json_object_list(value: object) -> list[dict[str, Any]]:
-    """Return the object members of an untrusted JSON array."""
     if not isinstance(value, list):
         return []
     return [cast(dict[str, Any], item) for item in cast(list[object], value) if isinstance(item, dict)]
@@ -90,14 +86,12 @@ def _utf16_len(s: str) -> int:
 
 
 def _sig_strip_cell(s: str) -> str:
-    """Strip inline markdown from a table cell for plain-text rendering."""
     for pattern, repl in _SIG_CELL_STRIP_PATTERNS:
         s = pattern.sub(repl, s)
     return s.strip()
 
 
 def _sig_render_table(table_lines: list[str]) -> str:
-    """Render a markdown pipe-table as fixed-width plain text."""
 
     def dw(s: str) -> int:
         return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
@@ -129,11 +123,6 @@ def _sig_render_table(table_lines: list[str]) -> str:
 
 
 def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
-    """Convert markdown text to Signal plain text + textStyle ranges.
-
-    Returns ``(plain_text, text_styles)`` where ``text_styles`` are
-    ``"start:length:STYLE"`` strings for the signal-cli ``textStyle`` parameter.
-    """
     if not text:
         return text, []
 
@@ -147,7 +136,6 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
 
     text = _SIG_CODE_BLOCK_RE.sub(save_code, text)
 
-    # Detect and render pipe-tables line by line.
     lines = text.split("\n")
     rebuilt: list[str] = []
     i = 0
@@ -168,7 +156,6 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
             i += 1
     text = "\n".join(rebuilt)
 
-    # Phase 2 (run-based): process inline patterns.
     runs: list[_Run] = [_Run(text)]
 
     def transform(
@@ -190,28 +177,21 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
                 new_runs.append(_Run(run.text[pos:], run.styles))
         runs[:] = new_runs
 
-    # Restore code/table placeholders as opaque MONOSPACE runs.
     transform(
         _SIG_TOKEN_RE,
         lambda m, s: [_Run(protected[int(m.group(1))], s | {"MONOSPACE"}, opaque=True)],
     )
 
-    # Inline code (opaque).
     transform(_SIG_INLINE_CODE_RE, lambda m, s: [_Run(m.group(1), s | {"MONOSPACE"}, opaque=True)])
 
-    # Headers → bold plain text.
     transform(_SIG_HEADER_RE, lambda m, s: [_Run(m.group(1), s | {"BOLD"})])
 
-    # Blockquotes → strip marker.
     transform(_SIG_BLOCKQUOTE_RE, lambda m, s: [_Run(m.group(1), s)])
 
-    # Bullet lists → bullet character.
     transform(_SIG_BULLET_RE, lambda m, s: [_Run("• ", s)])
 
-    # Numbered lists → normalize spacing.
     transform(_SIG_OLIST_RE, lambda m, s: [_Run(m.group(1) + ". ", s)])
 
-    # Links → "text (url)" or bare url when text equals url.
     def _link_runs(m: re.Match[str], s: frozenset[str]) -> list[_Run]:
         link_text, url = m.group(1), m.group(2)
 
@@ -227,10 +207,8 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
     # Bold (before italic so ** doesn't interfere).
     transform(_SIG_BOLD_RE, lambda m, s: [_Run(m.group(1) or m.group(2), s | {"BOLD"})])
 
-    # Italic (single * or _).
     transform(_SIG_ITALIC_RE, lambda m, s: [_Run(m.group(1) or m.group(2), s | {"ITALIC"})])
 
-    # Strikethrough: ~~text~~ (standard) or ~text~ (single-tilde variant).
     transform(_SIG_STRIKE_RE, lambda m, s: [_Run(m.group(1) or m.group(2), s | {"STRIKETHROUGH"})])
 
     # Phase 3: assemble output. Offsets and lengths are emitted in UTF-16 code
@@ -385,8 +363,6 @@ class SignalChannel(BaseChannel):
         self._account_id_aliases: set[str] = set()
         self._remember_account_id_alias(self.config.phone_number)
 
-        # Rolling message buffer for group context (group_id -> deque of messages)
-        # Each message is a dict with: sender_name, sender_number, content, timestamp
         self._group_buffers: dict[str, deque[_BufferedMessage]] = {}
 
     def is_allowed(self, sender_id: str) -> bool:
@@ -471,7 +447,6 @@ class SignalChannel(BaseChannel):
         await self._start_http_mode()
 
     async def _start_http_mode(self) -> None:
-        """Start Signal channel using Server-Sent Events for receiving messages."""
         base_url = f"http://{self.config.daemon_host}:{self.config.daemon_port}"
         reconnect_delay_s = 1.0
         max_reconnect_delay_s = 30.0
@@ -480,12 +455,10 @@ class SignalChannel(BaseChannel):
             try:
                 self.logger.info("Connecting to signal-cli daemon at {}...", base_url)
 
-                # Create HTTP client
                 self._http = httpx.AsyncClient(
                     timeout=self._HTTP_TIMEOUT_SECONDS, base_url=base_url
                 )
 
-                # Test connection
                 try:
                     response = await self._http.get("/api/v1/check")
                     if response.status_code == 200:
@@ -497,14 +470,10 @@ class SignalChannel(BaseChannel):
                 except Exception as e:
                     raise ConnectionRefusedError(f"signal-cli daemon not responding: {e}")
 
-                # Reset reconnect delay after successful connection check.
                 reconnect_delay_s = 1.0
 
-                # Ensure account-level typing indicators are enabled.
                 await self._ensure_typing_indicators_enabled()
 
-                # Start SSE receiver and supervise it. If it exits while we're still
-                # running, treat it as a disconnect and reconnect.
                 self._sse_task = asyncio.create_task(self._sse_receive_loop())
                 await self._sse_task
                 if self._running:
@@ -549,7 +518,6 @@ class SignalChannel(BaseChannel):
         """Stop the Signal channel."""
         self._running = False
 
-        # Stop SSE task
         if self._sse_task:
             self._sse_task.cancel()
             try:
@@ -557,11 +525,9 @@ class SignalChannel(BaseChannel):
             except asyncio.CancelledError:
                 pass
 
-        # Cancel active typing indicators
         for chat_id in list(self._typing_tasks):
             await self._stop_typing(chat_id)
 
-        # Close HTTP client
         if self._http:
             await self._http.aclose()
             self._http = None
@@ -612,7 +578,6 @@ class SignalChannel(BaseChannel):
                 await self._stop_typing(msg.chat_id, send_stop=False)
 
     async def _sse_receive_loop(self) -> None:
-        """Receive messages via Server-Sent Events (HTTP mode)."""
         if not self._http:
             raise RuntimeError("HTTP client not initialized for Signal SSE stream")
 
@@ -627,19 +592,16 @@ class SignalChannel(BaseChannel):
 
                 self.logger.info("Subscribed to Signal messages via SSE")
 
-                # Buffer for accumulating SSE data across multiple lines
                 event_buffer: list[str] = []
 
                 async for line in response.aiter_lines():
                     if not self._running:
                         break
 
-                    # SSE format handling
                     if isinstance(line, str):  # pyright: ignore[reportUnnecessaryIsInstance]
                         # Empty line signals end of event
                         if not line or line == ":":
                             if event_buffer:
-                                # Try to parse the accumulated data
                                 data_str = ""
                                 try:
                                     data_str = "\n".join(event_buffer)
@@ -657,7 +619,6 @@ class SignalChannel(BaseChannel):
                                 finally:
                                     event_buffer = []
 
-                        # "data:" line - accumulate it
                         elif line.startswith("data:"):
                             # SSE spec: strip one optional leading space after "data:".
                             event_buffer.append(line[6:] if line[5:6] == " " else line[5:])
@@ -672,8 +633,8 @@ class SignalChannel(BaseChannel):
             self.logger.error("Error in SSE receive loop: {}", e)
             raise
 
-    @asynccontextmanager  # pyright: ignore[reportDeprecated]
-    async def _safe_handle(self, action: str, payload: Any = None) -> AsyncIterator[None]:
+    @asynccontextmanager
+    async def _safe_handle(self, action: str, payload: Any = None) -> AsyncGenerator[None, None]:
         """Swallow and log any exception from a top-level handler block.
 
         Logs `self.logger.error` with the action name, the exception, and a
@@ -690,16 +651,13 @@ class SignalChannel(BaseChannel):
             self.logger.opt(exception=True).error(text)
 
     async def _handle_receive_notification(self, params: dict[str, Any]) -> None:
-        """Handle incoming message notification from signal-cli."""
         async with self._safe_handle("receive notification", params):
-            # Extract envelope from SSE notification: {"envelope": {...}}
             envelope = _as_json_object(params.get("envelope"))
 
             if envelope is None:
                 self.logger.debug("No envelope found in params")
                 return
 
-            # Extract sender information
             sender_parts = self._collect_sender_id_parts(envelope)
             source_name_value = envelope.get("sourceName")
             source_name = source_name_value if isinstance(source_name_value, str) else None
@@ -716,20 +674,16 @@ class SignalChannel(BaseChannel):
                 for part in sender_parts:
                     self._remember_account_id_alias(part)
 
-            # Check different message types
             data_message = _as_json_object(envelope.get("dataMessage"))
             sync_message = _as_json_object(envelope.get("syncMessage"))
             receipt_message = _as_json_object(envelope.get("receiptMessage"))
 
-            # Ignore receipt messages (delivery/read receipts)
             if receipt_message:
                 return
 
-            # Handle data messages (incoming messages from others)
             if data_message:
                 await self._handle_data_message(sender_id, sender_number, data_message, source_name)
 
-            # Handle sync messages (messages sent from another device)
             elif sync_message and (sent_msg := _as_json_object(sync_message.get("sentMessage"))):
                 destination = sent_msg.get("destination") or sent_msg.get("destinationNumber")
                 if destination:
@@ -744,7 +698,6 @@ class SignalChannel(BaseChannel):
         data_message: dict[str, Any],
         sender_name: str | None,
     ) -> None:
-        """Handle a data message (text, attachments, etc.)."""
         message_value = data_message.get("message")
         message_text = message_value if isinstance(message_value, str) else ""
         attachments = _as_json_object_list(data_message.get("attachments"))
@@ -841,12 +794,6 @@ class SignalChannel(BaseChannel):
         sender_name: str | None,
         timestamp: int | None,
     ) -> tuple[bool, str]:
-        """Decide whether to route an inbound message past DM/group policy.
-
-        Returns ``(allow, chat_id)``. Has one side effect: when a group
-        message passes the enabled+allowlist gates, it is appended to the
-        group's rolling context buffer before the mention check.
-        """
         if is_group_message:
             chat_id = group_id or sender_number
             if not self.config.group.enabled:
@@ -881,7 +828,6 @@ class SignalChannel(BaseChannel):
                 return False, chat_id
             return True, chat_id
 
-        # Direct message
         chat_id = sender_number
         if not self.config.dm.enabled:
             self.logger.debug("Ignoring DM from {} (DMs disabled)", sender_id)
@@ -905,12 +851,6 @@ class SignalChannel(BaseChannel):
         is_group_message: bool,
         chat_id: str,
     ) -> tuple[str, list[str]]:
-        """Build ``(content, media_paths)`` for an inbound message.
-
-        Pulls in group context, strips bot mentions, prefixes the sender's
-        display name on group messages, and copies any attachments from
-        signal-cli's storage into the channel media dir.
-        """
         content_parts: list[str] = []
         media_paths: list[str] = []
 
@@ -963,23 +903,11 @@ class SignalChannel(BaseChannel):
         message_text: str,
         timestamp: int | None,
     ) -> None:
-        """
-        Add a message to the group's rolling buffer.
-
-        Args:
-            group_id: The group ID
-            sender_name: Display name of sender
-            sender_number: Phone number of sender
-            message_text: The message content
-            timestamp: Message timestamp
-        """
-        # Create buffer for this group if it doesn't exist
         if group_id not in self._group_buffers:
             self._group_buffers[group_id] = deque[_BufferedMessage](
                 maxlen=self.config.group_message_buffer_size
             )
 
-        # Add message to buffer (deque will automatically drop oldest when full)
         self._group_buffers[group_id].append(
             {
                 "sender_name": sender_name,
@@ -997,40 +925,26 @@ class SignalChannel(BaseChannel):
         )
 
     def _get_group_buffer_context(self, group_id: str) -> str:
-        """
-        Get formatted context from the group's message buffer.
-
-        Args:
-            group_id: The group ID
-
-        Returns:
-            Formatted string of recent messages (excluding the current one)
-        """
         if group_id not in self._group_buffers:
             return ""
 
         buffer = self._group_buffers[group_id]
-        if len(buffer) <= 1:  # Only current message, no context
+        if len(buffer) <= 1:
             return ""
 
         # Format all messages except the last one (which is the current message)
         # We want to show context BEFORE the mention
-        context_messages = list(buffer)[:-1]  # Exclude the last (current) message
+        context_messages = list(buffer)[:-1]
 
         lines: list[str] = []
         for msg in context_messages:
             sender = msg["sender_name"]
-            content = msg["content"][:200]  # Limit to 200 chars per message
+            content = msg["content"][:200]
             lines.append(f"{sender}: {content}")
 
         return "\n".join(lines)
 
     def _signal_attachments_dir(self) -> Path:
-        """Return the directory signal-cli writes inbound attachments to.
-
-        Defaults to ``~/.local/share/signal-cli/attachments`` (the daemon's
-        platform default on Linux) when ``config.attachments_dir`` is unset.
-        """
         configured = self.config.attachments_dir
         if configured:
             return Path(configured).expanduser()
@@ -1080,14 +994,12 @@ class SignalChannel(BaseChannel):
         return bool(sender_variants & allow_variants)
 
     def _remember_account_id_alias(self, value: str | None) -> None:
-        """Remember known bot identifiers for mention matching."""
         if not value:
             return
         for candidate in self._normalize_signal_id(value):
             self._account_id_aliases.add(candidate)
 
     def _id_matches_account(self, value: str | None) -> bool:
-        """Return True when an identifier refers to the bot account."""
         if not value:
             return False
         return any(
@@ -1199,21 +1111,9 @@ class SignalChannel(BaseChannel):
         return (start, 1)
 
     def _should_respond_in_group(self, message_text: str, mentions: list[dict[str, Any]]) -> bool:
-        """
-        Determine if the bot should respond to a group message.
-
-        Args:
-            message_text: The message text content
-            mentions: List of mentions from Signal (format: [{"number": "+1234567890", "start": 0, "length": 10}])
-
-        Returns:
-            True if bot should respond, False otherwise
-        """
-        # Group reply behavior is controlled only by group.require_mention.
         if not self.config.group.require_mention:
             return True
 
-        # If mention is required, check if bot was mentioned.
         for mention in mentions:
             for mention_id in self._mention_id_candidates(mention):
                 if self._id_matches_account(mention_id):
@@ -1239,7 +1139,6 @@ class SignalChannel(BaseChannel):
             self.logger.debug("Accepting leading placeholder mention without mention metadata")
             return True
 
-        # Fallback: check for configured phone number in plain text.
         if message_text and self.config.phone_number:
             for account_id in self._normalize_signal_id(self.config.phone_number):
                 if account_id and account_id in message_text:
@@ -1248,23 +1147,9 @@ class SignalChannel(BaseChannel):
         return False
 
     def _strip_bot_mention(self, text: str, mentions: list[dict[str, Any]]) -> str:
-        """
-        Remove bot mentions from message text.
-
-        Signal mentions are embedded in the text, so we need to remove them based on
-        the mentions array which provides start position and length.
-
-        Args:
-            text: Original message text
-            mentions: List of mention objects with start/length positions
-
-        Returns:
-            Text with bot mentions removed
-        """
         if not text:
             return text
 
-        # Build a list of (start, length) tuples for our bot's mentions
         bot_mentions: list[tuple[int, int]] = []
         for mention in mentions:
             mention_ids = self._mention_id_candidates(mention)
@@ -1272,12 +1157,10 @@ class SignalChannel(BaseChannel):
             if not span:
                 continue
 
-            # Strip matched bot mentions by ID.
             if any(self._id_matches_account(mention_id) for mention_id in mention_ids):
                 bot_mentions.append(span)
                 continue
 
-            # Also strip identifier-less leading mention spans (handle mentions).
             if not mention_ids:
                 start, _ = span
                 if not text[:start].strip():
@@ -1292,7 +1175,6 @@ class SignalChannel(BaseChannel):
         # This prevents position shifts when removing earlier mentions
         bot_mentions.sort(reverse=True)
 
-        # Remove each mention
         for start, length in bot_mentions:
             if start >= len(text):
                 continue
@@ -1307,19 +1189,16 @@ class SignalChannel(BaseChannel):
         return "=" in chat_id or (len(chat_id) > 40 and "-" not in chat_id)
 
     def _recipient_params(self, chat_id: str) -> dict[str, Any]:
-        """Build recipient params for signal-cli JSON-RPC methods."""
         if self._is_group_chat_id(chat_id):
             return {"groupId": chat_id}
         return {"recipient": [chat_id]}
 
     async def _start_typing(self, chat_id: str) -> None:
-        """Start periodic typing indicator updates for a chat."""
         await self._stop_typing(chat_id, send_stop=False)
         await self._send_typing(chat_id)
         self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
 
     async def _stop_typing(self, chat_id: str, send_stop: bool = True) -> None:
-        """Stop typing indicator updates for a chat."""
         task = self._typing_tasks.pop(chat_id, None)
         had_task = task is not None
         if task and not task.done():
@@ -1333,7 +1212,6 @@ class SignalChannel(BaseChannel):
             await self._send_typing(chat_id, stop=True)
 
     async def _typing_loop(self, chat_id: str) -> None:
-        """Send typing updates periodically until cancelled."""
         try:
             while self._running:
                 await asyncio.sleep(self._TYPING_REFRESH_SECONDS)
@@ -1346,7 +1224,6 @@ class SignalChannel(BaseChannel):
     async def _send_typing(
         self, chat_id: str, stop: bool = False, quiet_success: bool = False
     ) -> None:
-        """Send a typing START/STOP message via signal-cli."""
         action = "stop" if stop else "start"
         if (
             not self._is_group_chat_id(chat_id)
@@ -1386,7 +1263,6 @@ class SignalChannel(BaseChannel):
         )
 
     async def _ensure_typing_indicators_enabled(self) -> None:
-        """Enable typing indicators on the bot account."""
         response = await self._send_request("updateConfiguration", {"typingIndicators": True})
         if "error" in response:
             self.logger.warning(
@@ -1398,12 +1274,9 @@ class SignalChannel(BaseChannel):
     async def _send_request(
         self, method: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Send a JSON-RPC request via HTTP and wait for response."""
-        # Generate request ID
         self._request_id += 1
         request_id = self._request_id
 
-        # Build JSON-RPC request
         request: dict[str, Any] = {"jsonrpc": "2.0", "method": method, "id": request_id}
 
         if params:
@@ -1412,7 +1285,6 @@ class SignalChannel(BaseChannel):
         return await self._send_http_request(request)
 
     async def _send_http_request(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Send JSON-RPC request via HTTP."""
         if not self._http:
             raise RuntimeError("Not connected to signal-cli daemon")
 

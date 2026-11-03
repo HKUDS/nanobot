@@ -1,5 +1,3 @@
-"""Terminal capability metadata is authenticated and does not allocate tokens."""
-
 import json
 from types import SimpleNamespace
 

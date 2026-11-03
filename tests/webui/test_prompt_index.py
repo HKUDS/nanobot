@@ -1,5 +1,3 @@
-"""Complete, lightweight navigation uses the same IDs and cursors as replay."""
-
 import json
 import time
 
@@ -33,11 +31,10 @@ def test_complete_index_and_bidirectional_pages_without_loading_model_messages(h
     assert page["events"][0]["text"] == "question 42"
     assert page["page"]["user_message_offset"] == 42
     assert page["page"]["has_more_before"] and page["page"]["has_more_after"]
-    assert stats.parsed_records < 40  # Not the 360-record transcript.
+    assert stats.parsed_records < 40
     newer = history.build(key, after=page["page"]["after_cursor"], limit=6)
     older = history.build(key, before=newer["page"]["before_cursor"], limit=6)
     assert older["events"] == page["events"]
-    # Warm navigation uses the committed revision and cached summaries.
     with monkeypatch.context() as patch:
         patch.setattr("nanobot.session.display_history.HistoryReader.navigation", lambda _: (_ for _ in ()).throw(AssertionError("replayed history")))
         assert history.prompts(key) == index
@@ -106,7 +103,6 @@ def test_summary_deltas_rebuild_after_append_rewrite_eviction_and_delete(history
     assert appended["replaceFrom"] == 100
     assert len(appended["prompts"]) == 1
     assert [*initial["prompts"], *appended["prompts"]] == history.prompts(key)
-    # A late answer changes the last preview; it must replace that prompt, not append it.
     history.append(key, {"event": "message", "text": "answer", "turn_id": "next"})
     changed = history.prompt_response(key, appended["revision"])
     assert changed["replaceFrom"] == 100
@@ -116,7 +112,7 @@ def test_summary_deltas_rebuild_after_append_rewrite_eviction_and_delete(history
     replaced = history.prompt_response(key, changed["revision"])
     assert replaced["replaceFrom"] == 0
     assert len(replaced["prompts"]) == 1
-    transcript._PROMPT_SNAPSHOTS.clear()  # Restart/eviction sends a complete response.
+    transcript._PROMPT_SNAPSHOTS.clear()
     assert history.prompt_response(key, replaced["revision"])["replaceFrom"] == 0
     history.sessions.delete_session(key)
     assert history.prompt_response(key, replaced["revision"])["prompts"] == ()
@@ -183,8 +179,6 @@ async def test_recovered_public_index_and_page_validators_include_canonical_time
             Request(path, Headers([*auth, ("If-None-Match", response.headers["ETag"])])), path,
         )
         assert unchanged.status_code == 304
-    # A canonical-only update must invalidate the recovered display even when
-    # transcript artifacts and the session's updated_at are unchanged.
     session = await manager.state.get(key)
     session.messages[0]["timestamp"] = "2026-06-02T10:01:00+00:00"
     await manager.state.finish_turn(session)
@@ -252,14 +246,12 @@ async def test_cached_history_routes_skip_replay_and_canonical_reads(history, tm
             Request(conditional, Headers([*auth, ("If-None-Match", previous.headers["ETag"])])), path.split("?")[0],
         )
         assert response.status_code == 304 and not response.body
-    # An ordinary directory read also reuses the view, with or without `since`.
     for suffix in ("", "?since=" + prompts["revision"]):
         response = await gateway.http._dispatch_session_routes(Request(base + "/prompts" + suffix, Headers(auth)), base + "/prompts")
         assert response.status_code == 200
         data = json.loads(response.body)
         assert data["prompts"] == ([] if suffix else prompts["prompts"])
         assert data["replaceFrom"] == (3 if suffix else 0)
-    # Eviction must not turn a valid conditional request into a replay either.
     transcript._PROMPT_SNAPSHOTS.clear()
     for path, previous in initial.items():
         response = await gateway.http._dispatch_session_routes(
@@ -333,7 +325,6 @@ def test_indexed_backfill_preserves_unique_in_suffix_matching(history, tmp_path,
         history.append(key, {"event": "message", "text": answer})
         history.append(key, {"event": "turn_end"})
     prompts = history.prompts(key, session_messages_loader=lambda: messages)
-    # A unique intervening answer advances the alignment past the first duplicate.
     assert len(prompts) == (len(answers) if with_anchor else 1)
     page = history.build(key, limit=1, session_messages=messages)
     users = [event for event in page["events"] if event["event"] == "user_message"]

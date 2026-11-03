@@ -26,7 +26,6 @@ interface RecoveryNoticeOptions {
   onDismiss: () => void
 }
 
-/** A quiet action surface for a gateway-owned interrupted turn. */
 export class RecoveryNotice {
   readonly root: BoxRenderable
   private readonly title: TextRenderable

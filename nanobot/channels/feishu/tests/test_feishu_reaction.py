@@ -1,6 +1,5 @@
 # ruff: noqa: E402
 
-"""Tests for Feishu reaction add/remove and auto-cleanup on stream end."""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -37,9 +36,6 @@ def _mock_reaction_create_response(reaction_id: str = "reaction_001", success: b
     return resp
 
 
-# ── _add_reaction_sync ──────────────────────────────────────────────────────
-
-
 class TestAddReactionSync:
     def test_returns_reaction_id_on_success(self):
         ch = _make_channel()
@@ -66,9 +62,6 @@ class TestAddReactionSync:
         assert ch._add_reaction_sync("om_001", "THUMBSUP") is None
 
 
-# ── _add_reaction (async) ───────────────────────────────────────────────────
-
-
 class TestAddReactionAsync:
     @pytest.mark.asyncio
     async def test_returns_reaction_id(self):
@@ -83,9 +76,6 @@ class TestAddReactionAsync:
         ch._client = None
         result = await ch._add_reaction("om_001", "THUMBSUP")
         assert result is None
-
-
-# ── _remove_reaction_sync ───────────────────────────────────────────────────
 
 
 class TestRemoveReactionSync:
@@ -107,7 +97,6 @@ class TestRemoveReactionSync:
         resp.msg = "not found"
         ch._client.im.v1.message_reaction.delete.return_value = resp
 
-        # Should not raise
         ch._remove_reaction_sync("om_001", "rx_42")
         ch._client.im.v1.message_reaction.delete.assert_called_once()
 
@@ -115,12 +104,8 @@ class TestRemoveReactionSync:
         ch = _make_channel()
         ch._client.im.v1.message_reaction.delete.side_effect = RuntimeError("network error")
 
-        # Should not raise
         ch._remove_reaction_sync("om_001", "rx_42")
         ch._client.im.v1.message_reaction.delete.assert_called_once()
-
-
-# ── _remove_reaction (async) ────────────────────────────────────────────────
 
 
 class TestRemoveReactionAsync:
@@ -142,9 +127,6 @@ class TestRemoveReactionAsync:
         await ch._remove_reaction("om_001", "rx_42")
 
         ch._remove_reaction_sync.assert_not_called()
-
-
-# ── send_delta stream end: reaction auto-cleanup ────────────────────────────
 
 
 class TestStreamEndReactionCleanup:
@@ -227,7 +209,6 @@ class TestStreamEndReactionCleanup:
 
     @pytest.mark.asyncio
     async def test_no_removal_when_resuming(self):
-        """resuming=True means more tool-call rounds follow; reaction must persist."""
         ch = _make_channel()
         ch.config.done_emoji = "DONE"
         ch._reaction_ids["om_001"] = "rx_42"
@@ -243,19 +224,16 @@ class TestStreamEndReactionCleanup:
 
         ch._remove_reaction.assert_not_called()
         ch._add_reaction.assert_not_called()
-        # OnIt reaction id is still tracked for the eventual final stream end
         assert ch._reaction_ids.get("om_001") == "rx_42"
 
     @pytest.mark.asyncio
     async def test_done_emoji_only_on_final_stream_end(self):
-        """Across resuming rounds, done_emoji is added only on the final round."""
         ch = _make_channel()
         ch.config.done_emoji = "DONE"
         ch._reaction_ids.update({"om_001": "rx_42", "om_other": "rx_other"})
         ch._remove_reaction = AsyncMock()
         ch._add_reaction = AsyncMock()
 
-        # Intermediate stream end (more tool calls coming).
         await ch.send_delta(
             "oc_chat1", "",
             metadata={"message_id": "om_001"},
@@ -267,7 +245,6 @@ class TestStreamEndReactionCleanup:
 
         assert ch._reaction_ids == {"om_001": "rx_42", "om_other": "rx_other"}
 
-        # Final stream end (resuming=False): OnIt removed, done_emoji added.
         await ch.send_delta(
             "oc_chat1", "",
             metadata={"message_id": "om_001"},

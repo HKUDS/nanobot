@@ -1,5 +1,3 @@
-"""Tests for token-bounded session history replay."""
-
 from __future__ import annotations
 
 from pathlib import Path

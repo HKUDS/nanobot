@@ -1,5 +1,3 @@
-"""Napcat (OneBot v11) channel for QQ, over WebSocket."""
-
 from __future__ import annotations
 
 import asyncio
@@ -51,7 +49,6 @@ class NapcatConfig(Base):
     # Falls back to `group_policy` when a group_id isn't listed.
     group_policy_overrides: dict[str, GroupPolicy] = Field(default_factory=dict)
     welcome_new_members: bool = True
-    # Hard cap for inbound image downloads. Bigger images are dropped.
     max_image_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
 
 
@@ -80,9 +77,6 @@ class NapcatChannel(BaseChannel):
         self._bot_outbound_ids: deque[int] = deque(maxlen=2000)
         self._background_tasks: set[asyncio.Task[None]] = set()
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     async def start(self) -> None:
         if not self.config.ws_url:
@@ -92,11 +86,11 @@ class NapcatChannel(BaseChannel):
         self._running = True
         self._http = aiohttp.ClientSession(timeout=_DOWNLOAD_TIMEOUT)
 
-        backoff = iter((5, 10))  # then 30s forever
+        backoff = iter((5, 10))
         while self._running:
             try:
                 await self._run_once()
-                backoff = iter((5, 10))  # reset after a clean session
+                backoff = iter((5, 10))
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -183,12 +177,8 @@ class NapcatChannel(BaseChannel):
                 fut.set_exception(err)
         self._pending.clear()
 
-    # ------------------------------------------------------------------
-    # Frame dispatch
-    # ------------------------------------------------------------------
 
     async def _dispatch_frame(self, raw: str | bytes) -> None:
-        # logger.debug("dispatch frame {}", raw)
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
@@ -198,7 +188,6 @@ class NapcatChannel(BaseChannel):
             return
         frame = cast(dict[str, Any], payload)
 
-        # Action response: identified by `echo` and absence of post_type.
         if "echo" in frame and frame.get("post_type") is None:
             echo = frame.get("echo")
             fut = self._pending.pop(echo, None) if isinstance(echo, str) else None
@@ -233,9 +222,6 @@ class NapcatChannel(BaseChannel):
 
         task.add_done_callback(_done)
 
-    # ------------------------------------------------------------------
-    # Inbound: messages
-    # ------------------------------------------------------------------
 
     async def _on_message(self, ev: dict[str, Any]) -> None:
         msg_id = ev.get("message_id")
@@ -372,7 +358,6 @@ class NapcatChannel(BaseChannel):
             return True
         if policy == "mention":
             return False
-        # Probability case: float in [0.0, 1.0].
         return random.random() < float(policy)
 
     @staticmethod
@@ -385,9 +370,6 @@ class NapcatChannel(BaseChannel):
         label = nickname or str(user_id)
         return f"{label}: {text}"
 
-    # ------------------------------------------------------------------
-    # Inbound: notices (member joined etc.)
-    # ------------------------------------------------------------------
 
     async def _on_notice(self, ev: dict[str, Any]) -> None:
         if ev.get("notice_type") != "group_increase" or not self.config.welcome_new_members:
@@ -421,22 +403,17 @@ class NapcatChannel(BaseChannel):
         )
 
     async def _lookup_member_name(self, group_id: int, user_id: int) -> str:
-        """Lookup group member nickname. Fallback to user id."""
         try:
             resp = await self._call_action(
                 "get_group_member_info",
                 {"group_id": group_id, "user_id": user_id, "no_cache": True},
             )
             data = resp.get("data", {})
-            # logger.debug("get_group_member_info: {}", resp)
             return data.get("card") or data.get("nickname") or str(user_id)
         except Exception as e:
             logger.warning("napcat: get_group_member_info failed: {}", e)
             return str(user_id)
 
-    # ------------------------------------------------------------------
-    # Outbound
-    # ------------------------------------------------------------------
 
     async def send(self, msg: OutboundMessage) -> None:
         if isinstance(msg.event, ContextCompactionEvent) and not (
@@ -519,15 +496,11 @@ class NapcatChannel(BaseChannel):
         finally:
             self._pending.pop(echo, None)
 
-    # ------------------------------------------------------------------
-    # Image download
-    # ------------------------------------------------------------------
 
     async def _download_image(self, info: dict[str, Any]) -> str | None:
         url = info.get("url")
         if not isinstance(url, str):
             return None
-        # logger.debug("napcat: downloading image from {}", url)
         if self._http is None:
             return None
         ok, err = validate_url_target(url)
@@ -536,7 +509,6 @@ class NapcatChannel(BaseChannel):
             return None
         max_bytes = self.config.max_image_bytes
 
-        # Reject upfront when napcat tells us the size and it's too big.
         try:
             declared_size = int(info["file_size"])
             if declared_size > max_bytes:

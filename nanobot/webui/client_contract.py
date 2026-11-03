@@ -63,7 +63,6 @@ def assess_webui_contract(value: object) -> Compatibility:
     }
     if not isinstance(value, dict):
         return result
-    # Only the mapping shape is established here; validate each value below.
     data = cast(dict[object, object], value)
     version = data.get("version")
     if isinstance(version, str) and len(version) <= 80 and version.isprintable():

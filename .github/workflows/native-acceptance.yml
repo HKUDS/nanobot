@@ -13,12 +13,13 @@ on:
       manifest_sha256:
         type: string
         default: ''
-      linux_artifact_id:
+      candidate_artifact_id:
         type: string
         default: ''
-      windows_artifact_id:
+      platforms:
+        description: Native runner and wheel pairs; ordinary PRs keep the two-platform budget
         type: string
-        default: ''
+        default: '[{"os":"ubuntu-latest","target":"linux-x64","wheel_tag":"manylinux_2_17_x86_64"},{"os":"windows-latest","target":"win32-x64","wheel_tag":"win_amd64"}]'
 
 permissions:
   contents: read
@@ -31,13 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux-x64
-            wheel_tag: manylinux_2_17_x86_64
-          - os: windows-latest
-            target: win32-x64
-            wheel_tag: win_amd64
+        include: ${{ fromJSON(inputs.platforms) }}
     defaults:
       run:
         shell: bash
@@ -81,7 +76,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           # Producer IDs survive a failed-jobs-only retry without rebuilding bytes.
-          artifact-ids: ${{ matrix.target == 'linux-x64' && inputs.linux_artifact_id || inputs.windows_artifact_id }}
+          artifact-ids: ${{ inputs.candidate_artifact_id }}
           merge-multiple: true
           path: ${{ runner.temp }}/native-wheel
 
@@ -113,6 +108,21 @@ jobs:
             --commit "$ACCEPTANCE_COMMIT" --gateway \
             --report "$RUNNER_TEMP/native-install-report.json"
 
+      - name: Install ConPTY acceptance driver
+        if: runner.os == 'Windows'
+        run: python -m pip install --disable-pip-version-check pywinpty==3.0.5
+
+      - name: Install Linux CJK diagram fonts
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y fonts-noto-cjk
+
+      - name: Verify packaged terminal interaction and native render latency
+        run: |
+          python tui/scripts/native_smoke.py --wheel "$ACCEPTANCE_WHEEL" \
+            --report "$RUNNER_TEMP/native-tui-report.json"
+
       - name: Verify packaged upgrades and automatic service recovery
         run: |
           python -I scripts/verify_packaged_update.py \
@@ -128,6 +138,7 @@ jobs:
           path: |
             ${{ runner.temp }}/native-input.json
             ${{ runner.temp }}/native-install-report.json
+            ${{ runner.temp }}/native-tui-report.json
             ${{ runner.temp }}/packaged-update/packaged-update-report.json
             ${{ runner.temp }}/packaged-update/packaged-update-timings.json
             ${{ runner.temp }}/packaged-update/*/result.json

@@ -321,8 +321,6 @@ def test_oauth_registry_keeps_flow_that_starts_while_cancellation_is_pending():
     removal.start()
     try:
         assert cancelling.wait(1)
-        # Another request can register between register/start in the first login,
-        # while its cancellation is waiting for the provider's commit lock.
         registry.register("xai_grok", "another", _Flow())
         flow.thread.start()
         allow_cancel.set()

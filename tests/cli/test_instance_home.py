@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from nanobot.cli.commands import app
 from nanobot.config import home as instance_home
 from nanobot.config import loader
-from nanobot.config.paths import get_cli_history_path, get_legacy_sessions_dir, get_media_dir
+from nanobot.config.paths import get_cli_history_path, get_media_dir
 from nanobot.config.schema import Config
 
 
@@ -54,7 +54,6 @@ def test_home_paths_and_saved_workspace(tmp_path):
     assert Config().workspace_path == tmp_path / "workspace"
     assert get_media_dir() == tmp_path / "media"
     assert get_cli_history_path() == tmp_path / "history" / "cli_history"
-    assert get_legacy_sessions_dir() == tmp_path / "sessions"
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "custom")
     loader.save_config(config)

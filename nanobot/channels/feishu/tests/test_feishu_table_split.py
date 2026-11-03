@@ -6,7 +6,6 @@ list of card elements into groups so that each group contains at most one
 table, allowing nanobot to send multiple cards instead of failing.
 """
 
-# Check optional Feishu dependencies before running tests
 try:
     from nanobot.channels import feishu
     FEISHU_AVAILABLE = getattr(feishu, "FEISHU_AVAILABLE", False)
@@ -54,7 +53,6 @@ def test_single_table_stays_in_one_group() -> None:
 
 
 def test_two_tables_split_into_two_groups() -> None:
-    # Use different row values so the two tables are not equal
     t1 = {
         "tag": "table",
         "columns": [{"tag": "column", "name": "c0", "display_name": "A", "width": "auto"}],
@@ -70,10 +68,8 @@ def test_two_tables_split_into_two_groups() -> None:
     els = [_md("before"), t1, _md("between"), t2, _md("after")]
     result = split(els)
     assert len(result) == 2
-    # First group: text before table-1 + table-1
     assert t1 in result[0]
     assert t2 not in result[0]
-    # Second group: text between tables + table-2 + text after
     assert t2 in result[1]
     assert t1 not in result[1]
 
@@ -110,6 +106,5 @@ def test_non_table_elements_before_first_table_kept_in_first_group() -> None:
     head = _md("head")
     t1, t2 = _table(), _table()
     result = split([head, t1, t2])
-    # head + t1 in group 0; t2 in group 1
     assert result[0] == [head, t1]
     assert result[1] == [t2]

@@ -1,5 +1,3 @@
-"""Exercise Windows gateway shutdown through real, isolated CLI processes."""
-
 import asyncio
 import ctypes
 import http.client
@@ -130,7 +128,7 @@ def _event_security(handle: int) -> str:
         ) == 0
         assert security.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token))
         size = wintypes.DWORD()
-        security.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))  # TokenUser
+        security.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
         assert size.value > 0
         user = ctypes.create_string_buffer(size.value)
         assert security.GetTokenInformation(token, 1, user, len(user), ctypes.byref(size))
@@ -163,7 +161,7 @@ def test_shutdown_signal_is_private_process_bound_and_latched(tmp_path: Path) ->
         assert signal is not None and signal._handle is not None
         owner, dacl = _event_security(signal._handle)[2:].split("D:", 1)
         assert dacl.startswith("P(A;;") and dacl.endswith(f";;;{owner})")
-        assert dacl.count("(") == 1  # One owner-only allow ACE, no inherited grants.
+        assert dacl.count("(") == 1
         assert request_windows_shutdown(pid + 1, identity, token) is False
         assert request_windows_shutdown(pid, identity + "1", token) is False
         other = WindowsShutdownEvent(pid, identity)
@@ -173,7 +171,7 @@ def test_shutdown_signal_is_private_process_bound_and_latched(tmp_path: Path) ->
             kernel = ctypes.WinDLL("kernel32", use_last_error=True)
             kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
             kernel.WaitForSingleObject.restype = wintypes.DWORD
-            assert kernel.WaitForSingleObject(other._handle, 0) == 258  # Still unsignaled.
+            assert kernel.WaitForSingleObject(other._handle, 0) == 258
         finally:
             other.close()
         assert request_windows_shutdown(pid, identity, token) is True
@@ -189,7 +187,7 @@ def test_cancelling_shutdown_listener_drains_its_native_wait(tmp_path: Path) -> 
         async def cancel_listener() -> None:
             shutdown = asyncio.Event()
             listener = asyncio.create_task(runtime.wait_for_shutdown_request(shutdown))
-            await asyncio.sleep(0)  # Admit the wait before exercising ordinary runtime cancellation.
+            await asyncio.sleep(0)
             listener.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(listener, timeout=2)
@@ -265,9 +263,9 @@ def test_windows_stop_forces_only_its_stalled_tree(tmp_path: Path, published: bo
         assert process.wait(timeout=5) != 0
         assert not runtime.process_is_running(child_pid)
         assert not runtime.paths.state_path.exists()
-        assert elapsed < 5  # Missing signals must not consume the 20-second grace.
+        assert elapsed < 5
         if published:
-            assert elapsed >= 1  # A delivered request retains the caller's grace period.
+            assert elapsed >= 1
     finally:
         if process.poll() is None:
             runtime.stop(timeout_s=0)

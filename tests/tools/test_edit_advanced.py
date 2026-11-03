@@ -1,26 +1,11 @@
-"""Tests for advanced EditFileTool enhancements inspired by claude-code:
-- Delete-line newline cleanup
-- Smart quote normalization (curly ↔ straight)
-- Quote style preservation in replacements
-- Indentation preservation when fallback match is trimmed
-- Trailing whitespace stripping for new_text
-- File size protection
-- Stale detection with content-equality fallback
-"""
-
 import os
 
 import pytest
 
 from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
 
-# ---------------------------------------------------------------------------
-# Delete-line newline cleanup
-# ---------------------------------------------------------------------------
-
 
 class TestDeleteLineCleanup:
-    """When new_text='' and deleting a line, trailing newline should be consumed."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -38,7 +23,6 @@ class TestDeleteLineCleanup:
         f.write_bytes(content.replace("\n", newline).encode("utf-8"))
         result = await tool.execute(path=str(f), old_text=f"{indent}line2", new_text="")
         assert "Patch applied:" in result
-        # Should not leave a blank line where line2 was
         assert f.read_bytes() == f"{prefix}line3\n".replace("\n", newline).encode("utf-8")
 
     @pytest.mark.asyncio
@@ -81,7 +65,6 @@ class TestDeleteLineCleanup:
 
     @pytest.mark.asyncio
     async def test_delete_preserves_content_when_not_trailing_newline(self, tool, tmp_path):
-        """Deleting a word mid-line should not consume extra characters."""
         f = tmp_path / "a.py"
         f.write_text("hello world here\n", encoding="utf-8")
         result = await tool.execute(path=str(f), old_text="world ", new_text="")
@@ -89,13 +72,7 @@ class TestDeleteLineCleanup:
         assert f.read_text() == "hello here\n"
 
 
-# ---------------------------------------------------------------------------
-# Smart quote normalization
-# ---------------------------------------------------------------------------
-
-
 class TestQuoteStylePreservation:
-    """When quote-normalized matching occurs, replacement should preserve actual quote style."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -126,13 +103,7 @@ class TestQuoteStylePreservation:
         assert f.read_text(encoding="utf-8") == "it’s better\n"
 
 
-# ---------------------------------------------------------------------------
-# Indentation preservation
-# ---------------------------------------------------------------------------
-
-
 class TestIndentationPreservation:
-    """Replacement should keep outer indentation when trim fallback matched."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -183,13 +154,7 @@ class TestIndentationPreservation:
         compile(f.read_text(encoding="utf-8"), str(f), "exec")
 
 
-# ---------------------------------------------------------------------------
-# Failure diagnostics
-# ---------------------------------------------------------------------------
-
-
 class TestEditDiagnostics:
-    """Failure paths should offer actionable hints."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -222,13 +187,7 @@ class TestEditDiagnostics:
         assert "letter case differs" in result.lower()
 
 
-# ---------------------------------------------------------------------------
-# Advanced fallback replacement behavior
-# ---------------------------------------------------------------------------
-
-
 class TestAdvancedReplaceAll:
-    """replace_all should work correctly for fallback-based matches too."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -277,13 +236,7 @@ class TestAdvancedReplaceAll:
         assert f.read_text(encoding="utf-8") == "    message = “goodbye”\n"
 
 
-# ---------------------------------------------------------------------------
-# Trailing whitespace stripping on new_text
-# ---------------------------------------------------------------------------
-
-
 class TestTrailingWhitespaceStrip:
-    """new_text trailing whitespace should be stripped (except .md files)."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -336,7 +289,6 @@ class TestTrailingWhitespaceStrip:
             path=str(f), old_text="old ", new_text="new ", replace_all=True,
         )
         assert "Patch applied:" in result
-        # Preserve existing suffix whitespace; only clean the replacement's line endings.
         expected = "new value\nnew\nnew   \nnew"
         assert f.read_bytes() == expected.replace("\n", newline).encode("utf-8")
 
@@ -350,18 +302,11 @@ class TestTrailingWhitespaceStrip:
         )
         assert "Patch applied:" in result
         content = f.read_text()
-        # Trailing spaces should be preserved for markdown
         assert "Title  " in content
         assert "Subtitle  " in content
 
 
-# ---------------------------------------------------------------------------
-# File size protection
-# ---------------------------------------------------------------------------
-
-
 class TestFileSizeProtection:
-    """Editing extremely large files should be rejected."""
 
     @pytest.fixture()
     def tool(self, tmp_path):
@@ -381,7 +326,7 @@ class TestFileSizeProtection:
 
             @property
             def st_size(self):
-                return 2 * 1024 * 1024 * 1024  # 2 GiB
+                return 2 * 1024 * 1024 * 1024
 
         import unittest.mock
         with unittest.mock.patch.object(type(f), 'stat', return_value=FakeStat(f.stat())):
@@ -390,13 +335,7 @@ class TestFileSizeProtection:
         assert "too large" in result.lower() or "size" in result.lower()
 
 
-# ---------------------------------------------------------------------------
-# Stale detection with content-equality fallback
-# ---------------------------------------------------------------------------
-
-
 class TestStaleDetectionContentFallback:
-    """When mtime changed but file content is unchanged, edit should proceed without warning."""
 
     @pytest.fixture()
     def read_tool(self, tmp_path):
@@ -412,11 +351,9 @@ class TestStaleDetectionContentFallback:
         f.write_text("hello world", encoding="utf-8")
         await read_tool.execute(path=str(f))
 
-        # Bump mtime without changing content.
         stat = f.stat()
         os.utime(f, (stat.st_atime, stat.st_mtime + 10))
 
         result = await edit_tool.execute(path=str(f), old_text="world", new_text="earth")
         assert "Patch applied:" in result
-        # Should NOT warn about modification since content is the same
         assert "modified" not in result.lower()

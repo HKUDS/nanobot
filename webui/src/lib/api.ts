@@ -228,7 +228,7 @@ export async function listSessions(
       runStartedAt: s.run_started_at ?? null,
       recoveryState: s.recovery_state ?? null,
       workspaceScope: s.workspace_scope ?? null,
-      projectLocked: s.project_locked,
+      projectLocked: s.project_locked ?? true,
       handle,
     };
   });

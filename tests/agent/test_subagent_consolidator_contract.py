@@ -1,5 +1,3 @@
-"""Public construction and execution contracts for subagent consolidation."""
-
 import asyncio
 import hashlib
 import json
@@ -44,7 +42,6 @@ class _EvidenceProvider(LLMProvider):
         return "test"
 
     def estimate_prompt_tokens(self, messages, tools, model):
-        # Deterministic provider counter; no tokenizer cache or network dependency.
         return len(json.dumps([messages, tools])) // 2, "test-provider"
 
     async def chat(self, messages, tools=None, **kwargs):

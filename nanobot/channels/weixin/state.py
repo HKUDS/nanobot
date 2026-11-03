@@ -1,5 +1,3 @@
-"""WeChat-owned persisted login-state detection."""
-
 from __future__ import annotations
 
 import json

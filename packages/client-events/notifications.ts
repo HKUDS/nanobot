@@ -1,4 +1,3 @@
-/** Transport notifications shared by the browser and terminal clients. */
 export type RecoveryStatus = "resuming" | "awaiting_user" | "recovered" | "failed"
 
 export interface RecoveryState {
@@ -8,6 +7,7 @@ export interface RecoveryState {
   attempts?: number
   can_continue?: boolean
   failure_error_kind?: string
+  reply_preserved?: boolean
 }
 
 export type CompactionReason = "idle" | "context_pressure" | "manual" | "provider_native"
@@ -63,6 +63,7 @@ export function isRecoveryState(value: unknown): value is RecoveryState {
     && optional(value.attempts, "number")
     && optional(value.can_continue, "boolean")
     && optional(value.failure_error_kind, "string")
+    && optional(value.reply_preserved, "boolean")
 }
 
 /** Undefined means another protocol family; null means a malformed notification. */

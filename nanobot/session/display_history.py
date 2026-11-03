@@ -1,5 +1,3 @@
-"""Durable display facts, separate from provider/model messages and transports."""
-
 from __future__ import annotations
 
 import json
@@ -57,14 +55,6 @@ class HistoryFact:
             HistoryKind(value["kind"]), value["content"], value["turn_id"],
             value["phase"], value["sequence"], value["created_at_ms"],
         )
-
-
-@dataclass(frozen=True)
-class HistoryImport:
-    key: str
-    facts: list[HistoryFact]
-    created_at_ms: int = 0
-    updated_at_ms: int = 0
 
 
 @dataclass(frozen=True)

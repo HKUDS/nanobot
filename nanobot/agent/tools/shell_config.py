@@ -1,5 +1,3 @@
-"""Execution configuration shared by shell/session tools and the root schema."""
-
 from collections.abc import Mapping
 from typing import Literal, cast
 

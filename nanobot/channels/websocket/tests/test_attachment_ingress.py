@@ -1,4 +1,3 @@
-"""Production listener regressions for HTTP upload + small WS references."""
 import asyncio
 import json
 import threading
@@ -203,7 +202,6 @@ async def test_real_listener_large_binary_and_reference_delivery(gateway, mime, 
         path = Path(inbound.media[0])
         assert path.read_bytes() == raw
         assert path.parent == channel.gateway.uploads.store.media_dir
-        # Lost ACK retry must not resolve a consumed reference or dispatch twice.
         await ws.send(json.dumps(frame))
         await event(ws, "message_accepted")
         with pytest.raises(TimeoutError):
@@ -275,7 +273,6 @@ async def test_http_policy_rejection_does_not_leave_files(gateway, mime, body):
 
 async def test_one_shot_handshake_token_is_not_an_upload_credential(gateway):
     channel, _, http_url, _ = gateway
-    # Use the same one-shot token registry as the bootstrap endpoint.
     issued = channel.gateway.tokens.issue_token(60, audience="webui")
     ws_url = http_url.replace("http://", "ws://") + "/ws?token=" + issued
     async with connect(ws_url) as ws, aiohttp.ClientSession() as http:

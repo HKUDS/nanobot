@@ -22,7 +22,6 @@ from nanobot.utils.workspace_prompts import (
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
-# Cap for a workspace-local heartbeat evaluator prompt override.
 EVALUATOR_PROMPT_MAX_CHARS = WORKSPACE_PROMPT_MAX_CHARS
 
 

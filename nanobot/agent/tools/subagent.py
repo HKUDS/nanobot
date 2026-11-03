@@ -1,5 +1,3 @@
-"""Tool for creating, messaging, cancelling, and inspecting session-owned tasks."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations

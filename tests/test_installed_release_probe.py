@@ -1,5 +1,3 @@
-"""Protect the real release probe from accepting an incomplete built frontend."""
-
 import json
 import socket
 import subprocess
@@ -21,10 +19,8 @@ def test_probe_waits_for_listener_teardown_after_redirector_exit(monkeypatch):
         listener.bind(("127.0.0.1", 0))
         listener.listen()
         port = listener.getsockname()[1]
-        # A still-live listener cannot count as cleaned up.
         with pytest.raises(ValueError, match="listener remained reachable"):
             _wait_for_closed_listeners((port,), timeout=0)
-        # Model the kernel completing teardown after the first observation.
         monkeypatch.setattr("scripts.verify_installed_release.time.sleep", lambda _: listener.close())
         _wait_for_closed_listeners((port,))
 
@@ -37,7 +33,6 @@ def test_isolation_retains_windows_cpu_identity_without_developer_paths():
         "SYSTEMROOT", "PROCESSOR_ARCHITECTURE", "PROCESSOR_ARCHITEW6432",
     )}
     assert host_environment(environment) == expected
-    # The installer and installed-package probe apply this boundary separately.
     assert host_environment(host_environment(environment)) == expected
 
 
@@ -97,7 +92,6 @@ def test_gateway_probe_reports_failed_cli_start_and_reaps_its_child(tmp_path, mo
     children = []
 
     def failed_cli(command, **kwargs):
-        # A missing runtime dependency makes the installed CLI exit before binding.
         child = popen([command[0], "-I", "-c",
                        "print('candidate startup failed'); raise SystemExit(7)"], **kwargs)
         children.append(child)

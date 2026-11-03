@@ -1,5 +1,3 @@
-"""Tools for finding and reading persisted conversations."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
@@ -54,6 +52,7 @@ def _session_ref(session_key: str) -> str:
 class _SessionTool(Tool):
     def __init__(self, sessions: SessionManager) -> None:
         self._access = SessionHistoryReader(sessions)
+        self._handles = SessionHandleResolver(sessions)
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -81,7 +80,7 @@ class _SessionTool(Tool):
     )
 )
 class SearchSessionsTool(_SessionTool):
-    """Find persisted sessions without changing them."""
+    """Find persisted conversations and their public handles."""
 
     @property
     def name(self) -> str:
@@ -90,10 +89,10 @@ class SearchSessionsTool(_SessionTool):
     @property
     def description(self) -> str:
         return (
-            "Search other persisted conversation sessions by title or recent visible message "
-            "text. Use this only when the user asks about a past conversation or when prior "
-            "discussion is needed to answer. Results contain bounded excerpts; use "
-            "read_session for more context. When citing a result, link its title to the exact "
+            "Search other persisted conversations by title or visible message text. Use when "
+            "past discussion is relevant or to find the target of a user-requested session "
+            "message. Results include @handles for read_session and send_session_message "
+            "when available, plus bounded excerpts. When citing a result, link its title to the exact "
             "session_ref using Markdown. The current session is excluded."
         )
 
@@ -111,6 +110,7 @@ class SearchSessionsTool(_SessionTool):
             _SEARCH_LIMIT,
             exclude_session_key=current_request_session_key(),
         )
+        handles = await self._handles.alist_all_by_key() if matches else {}
         needle = query.casefold()
         result = {
             "notice": _UNTRUSTED_NOTICE,
@@ -119,6 +119,10 @@ class SearchSessionsTool(_SessionTool):
                 {
                     "session_key": match["session_key"],
                     "session_ref": _session_ref(match["session_key"]),
+                    "handle": (
+                        f"@{handles[match['session_key']].name}"
+                        if match["session_key"] in handles else None
+                    ),
                     "title": match["title"],
                     "updated_at": match["updated_at"],
                     "excerpts": [
@@ -155,10 +159,6 @@ class SearchSessionsTool(_SessionTool):
 )
 class ReadSessionTool(_SessionTool):
     """Read bounded visible history from one persisted session."""
-
-    def __init__(self, sessions: SessionManager) -> None:
-        super().__init__(sessions)
-        self._handles = SessionHandleResolver(sessions)
 
     @property
     def name(self) -> str:

@@ -1,5 +1,3 @@
-"""Exercise the CI timing artifact with real pytest reports, without child processes."""
-
 import json
 
 import pytest

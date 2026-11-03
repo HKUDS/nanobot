@@ -1,5 +1,3 @@
-"""Transactional SQLite storage for private conversation state."""
-
 from __future__ import annotations
 
 import json
@@ -13,7 +11,7 @@ from pathlib import Path
 from typing import Any, TypeVar, cast
 
 from nanobot.providers.base import ProviderConversationState
-from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
+from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     Session,
@@ -96,9 +94,29 @@ def _create_schema_v2(db: sqlite3.Connection) -> None:
         db.execute(statement)
 
 
+def _create_schema_v3(db: sqlite3.Connection) -> None:
+    # Empty chats can be archived before their first persisted message.
+    db.execute("""CREATE TABLE session_archives (
+        key TEXT PRIMARY KEY, archived_at TEXT NOT NULL
+    )""")
+
+
+def _create_schema_v4(db: sqlite3.Connection) -> None:
+    db.execute("""CREATE TABLE session_archives_v4 (
+        key TEXT PRIMARY KEY REFERENCES sessions(key)
+            ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
+        archived_at TEXT NOT NULL
+    )""")
+    db.execute("""INSERT INTO session_archives_v4 (key, archived_at)
+        SELECT archives.key, archives.archived_at FROM session_archives AS archives
+        JOIN sessions ON sessions.key = archives.key""")
+    db.execute("DROP TABLE session_archives")
+    db.execute("ALTER TABLE session_archives_v4 RENAME TO session_archives")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
-    _create_schema_v1, _create_schema_v2,
+    _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4,
 )
 
 
@@ -183,9 +201,8 @@ class SqliteSessionStore:
             if owned:
                 connection.close()
 
-    def initialize(self, workspace: Path) -> None:
-        """Upgrade the schema and import legacy sessions in one atomic transaction."""
-        workspace = workspace.expanduser().resolve(strict=False)
+    def initialize(self) -> None:
+        """Initialize or upgrade the SQLite schema."""
         # WAL is persistent and must be enabled outside a transaction.
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
@@ -211,22 +228,6 @@ class SqliteSessionStore:
             for target, migrate in enumerate(_SCHEMA_MIGRATIONS[version:], start=version + 1):
                 migrate(db)
                 db.execute(f"PRAGMA user_version = {target}")
-            marker = db.execute(
-                "SELECT value FROM storage_meta WHERE key='jsonl_import'"
-            ).fetchone()
-            if marker is None:
-                from nanobot.session.jsonl_migration import migrate_jsonl
-
-                migrate_jsonl(self, workspace)
-                db.execute("INSERT INTO storage_meta (key, value) VALUES ('jsonl_import', 'complete')")
-            elif marker[0] != "complete":
-                raise RuntimeError(
-                    f"invalid JSONL migration marker in {self.path}: {marker[0]!r}; "
-                    "restore a valid database backup or repair the marker explicitly"
-                )
-        from nanobot.session.jsonl_migration import finish_workspace_migration
-
-        finish_workspace_migration(self, workspace)
 
     def _metadata(self, db: sqlite3.Connection, key: str, raw: str) -> dict[str, Any]:
         metadata = _object(raw)
@@ -420,36 +421,6 @@ class SqliteSessionStore:
                 "updated_at": session.updated_at.isoformat(),
                 "metadata": session.metadata, "messages": session.messages}
 
-    def migrate_history(
-        self, name: str, collect: Callable[[list[SessionInfo]], list[HistoryImport]],
-    ) -> None:
-        """Commit a channel-owned legacy import and its once-only marker together."""
-        with self.transaction() as db:
-            marker = db.execute("SELECT value FROM storage_meta WHERE key=?", (name,)).fetchone()
-            if marker is not None:
-                if marker[0] != "complete":
-                    raise RuntimeError(f"invalid history import marker: {name}")
-                return
-            for item in collect(self.list_sessions()):
-                session = self.load(item.key, history=False)
-                if session is None:
-                    session = Session(key=item.key)
-                    if item.created_at_ms:
-                        session.created_at = datetime.fromtimestamp(item.created_at_ms / 1000)
-                    if item.updated_at_ms:
-                        session.updated_at = datetime.fromtimestamp(item.updated_at_ms / 1000)
-                    self.save(session)
-                revision = self.project_history(item.key, lambda reader: reader.revision)
-                if revision is not None and revision[1] >= 0:
-                    raise SessionConflictError(f"history already exists before import: {item.key}")
-                self.append_history(item.key, item.facts, expected_generation=session.generation)
-                db.execute("UPDATE history_heads SET updated_at_ms=max(updated_at_ms, ?) WHERE session_key=?",
-                           (item.updated_at_ms, item.key))
-                # Import ownership survives deletion: another namespace must not
-                # mistake this instance-wide backup for a new orphan later.
-                db.execute("INSERT INTO storage_meta (key, value) VALUES (?, 'complete')", (f"{name}:{item.key}",))
-            db.execute("INSERT INTO storage_meta (key, value) VALUES (?, 'complete')", (name,))
-
     def project_history(self, key: str, project: Callable[[HistoryReader], _T]) -> _T:
         """Project durable display facts and canonical messages from one snapshot."""
         with self.transaction(write=False) as db:
@@ -524,9 +495,47 @@ class SqliteSessionStore:
         return True
 
 
-    def delete(self, key: str) -> bool:
+    def archives_imported(self) -> bool:
+        with self.transaction(write=False) as db:
+            return db.execute("SELECT 1 FROM storage_meta WHERE key='session_archives_imported'").fetchone() is not None
+
+    def archived_keys(self) -> list[str]:
+        with self.transaction(write=False) as db:
+            encoded = db.execute("SELECT json_group_array(key) FROM (SELECT key FROM session_archives ORDER BY key)").fetchone()[0]
+            return cast(list[str], json.loads(encoded))
+
+    def import_archives(self, keys: list[str]) -> list[str]:
         with self.transaction() as db:
-            return db.execute("DELETE FROM sessions WHERE key=?", (key,)).rowcount > 0
+            if self.archives_imported():
+                return self.archived_keys()
+            imported = self.set_archived_keys(keys)
+            db.execute("INSERT INTO storage_meta (key, value) VALUES ('session_archives_imported', '1')")
+            return imported
+
+    def set_archived_keys(self, keys: list[str]) -> list[str]:
+        with self.transaction() as db:
+            current = set(self.archived_keys())
+            requested = set(keys)
+            # Existing memberships are valid by FK; only new keys need validation.
+            added = requested - current
+            if added:
+                added = {row[0] for row in db.execute(
+                    "SELECT key FROM sessions WHERE key IN (SELECT value FROM json_each(?))",
+                    (_encode(list(added)),),
+                )}
+            target = (requested & current) | added
+            db.executemany("DELETE FROM session_archives WHERE key=?", ((key,) for key in current - target))
+            now = datetime.now().isoformat()
+            db.executemany("INSERT INTO session_archives (key, archived_at) VALUES (?, ?)", ((key, now) for key in target - current))
+            return sorted(target)
+
+    def delete(self, key: str, *, preserve_archive: bool = False) -> bool:
+        with self.transaction() as db:
+            archived = False
+            if not preserve_archive:
+                archived = db.execute("DELETE FROM session_archives WHERE key=?", (key,)).rowcount > 0
+            deleted = db.execute("DELETE FROM sessions WHERE key=?", (key,)).rowcount > 0
+            return archived or deleted
 
     def list_sessions(self) -> list[SessionInfo]:
         with self.transaction(write=False) as db:
@@ -575,7 +584,6 @@ class SqliteSessionStore:
                     ORDER BY sessions.updated_at DESC
                 )
             """).fetchone()[0]
-            # The SQL projection constructs this list and its dictionary fields.
             rows = cast(list[dict[str, Any]], json.loads(encoded))
             for row in rows:
                 row["path"] = str(self.path)

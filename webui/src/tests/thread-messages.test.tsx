@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Window as HappyWindow } from "happy-dom";
 
 import {
   assistantForkFlags,
@@ -62,7 +63,17 @@ describe("ThreadMessages", () => {
     link.focus();
     expect(fireEvent.keyDown(link, { key: "F10", shiftKey: true })).toBe(true);
     expect(link).toHaveFocus();
-    expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+    expect(link).toHaveAttribute("href", "https://example.com/?q=one#two");
+    expect(link).toHaveAttribute("target", "_blank");
+    // Happy DOM follows native links; verify the event without accessing the network.
+    const navigation = (window as unknown as HappyWindow).happyDOM.settings.navigation;
+    const previous = navigation.disableMainFrameNavigation;
+    navigation.disableMainFrameNavigation = true;
+    try {
+      expect(fireEvent.click(link, { ctrlKey: true })).toBe(true);
+    } finally {
+      navigation.disableMainFrameNavigation = previous;
+    }
   });
 
   it.each(["diff", "collapsed_diff"] as const)(
