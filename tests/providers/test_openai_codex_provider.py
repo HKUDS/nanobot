@@ -11,9 +11,10 @@ import pytest
 from loguru import logger
 
 import nanobot.providers.base as provider_base
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.events import ContextCompactionEvent, EventSink
 from nanobot.providers.factory import make_provider
+from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.openai_codex_provider import (
     OpenAICodexProvider,
     _build_codex_http_error,
@@ -38,6 +39,89 @@ def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
         "nanobot.providers.openai_codex_provider.get_codex_token",
         fake_token,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    ("input_budget", "fail_after_compaction", "with_fallback"),
+    [(None, False, False), (1000, False, False), (1000, True, False), (1000, False, True)],
+    ids=["optional", "compaction-error", "generation-error", "persistent-fallback"],
+)
+async def test_image_retry_cannot_bypass_required_compaction(
+    monkeypatch, stream, input_budget, fail_after_compaction, with_fallback,
+) -> None:
+    _mock_codex_token(monkeypatch)
+    provider = OpenAICodexProvider(default_model="gpt-5.6-sol")
+    history = {"role": "user", "content": "earlier discussion " * (10 if fail_after_compaction else 1000)}
+    question = {"role": "user", "content": [
+        {"type": "text", "text": "Describe this image."},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+    ]}
+    state = build_responses_state(
+        provider=provider._responses_state_provider(), model="gpt-5.6-sol",
+        input_items=[history], output_items=[],
+    ).with_pending_messages([question])
+    submitted = []
+    bodies = []
+    notices: list[ContextCompactionEvent] = []
+    compact_item = {"type": "compaction", "encrypted_content": "synthetic compacted state"}
+
+    async def observe(event):
+        if isinstance(event, ContextCompactionEvent):
+            notices.append(event)
+
+    async def request(_url, _headers, body, **_kwargs):
+        compacting = body["input"][-1].get("type") == "compaction_trigger"
+        submitted.append("compaction" if compacting else "generation")
+        bodies.append(body)
+        if compacting and fail_after_compaction:
+            return provider_base.LLMResponse(content=None, provider_state=build_responses_state(
+                provider=provider._responses_state_provider(), model="gpt-5.6-sol",
+                input_items=body["input"], output_items=[compact_item],
+            ))
+        if len(submitted) == (2 if fail_after_compaction else 1):
+            raise _CodexHTTPError("fixture rejection", status_code=400, error_code="unsupported_value")
+        return provider_base.LLMResponse(content="accepted without images")
+
+    monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", request)
+    caller = FallbackProvider(
+        primary=provider,
+        fallback_presets=[ModelPresetConfig(model="openai-codex/gpt-5.6-sol", provider="openai_codex")],
+        provider_factory=lambda _preset: provider,
+    ) if with_fallback else provider
+    invoke = caller.chat_stream_with_retry if stream else caller.chat_with_retry
+    try:
+        response = await invoke(
+            [history, question], max_tokens=64,
+            retry_mode="persistent" if with_fallback else "standard",
+            provider_context=provider_base.ProviderCallContext(
+                conversation_state=state, context_window_tokens=10000,
+                compaction_input_budget=input_budget, events=EventSink(observe),
+            ),
+        )
+        if input_budget is not None:
+            assert submitted == (["compaction", "generation"] if fail_after_compaction else ["compaction"])
+            assert response.finish_reason == "error"
+            assert response.error_status_code == 400
+            assert response.error_code == "unsupported_value"
+            assert question["content"][1]["type"] == "image_url"
+            if fail_after_compaction:
+                assert response.provider_compaction_applied is True
+                assert response.provider_compaction_state is not None
+                assert responses_state_items(response.provider_compaction_state) == [compact_item]
+                assert response.provider_compaction_scope == "prior_context"
+                assert [notice.phase for notice in notices] == ["started", "succeeded"]
+                assert response.provider_compaction_event_id == notices[0].compaction_id == notices[1].compaction_id
+            else:
+                assert response.preserve_provider_state_on_error is True
+        else:
+            assert submitted == ["generation", "generation"]
+            assert response.content == "accepted without images"
+            assert "data:image/png;base64,abc" not in str(bodies[-1])
+            assert question["content"][1]["type"] == "text"
+    finally:
+        await provider.aclose()
 
 
 def test_codex_default_model_matches_curated_flagship() -> None:

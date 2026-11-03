@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -1721,8 +1721,14 @@ class LLMProvider(ABC):
             or self.is_arrearage_response(response)
         ):
             return response
-        stripped = self._strip_image_content(kw["messages"])
         provider_context = kw.get("provider_context")
+        if (
+            isinstance(provider_context, ProviderCallContext)
+            and provider_context.compaction_input_budget is not None
+        ):
+            # Stateless image repair cannot satisfy required native compaction.
+            return response
+        stripped = self._strip_image_content(kw["messages"])
         stripped_context: ProviderCallContext | None = None
         if isinstance(provider_context, ProviderCallContext):
             state = provider_context.conversation_state
@@ -1732,13 +1738,7 @@ class LLMProvider(ABC):
                 or self._contains_image_content(state.payload)
             ):
                 # Native payloads may retain images: rebuild from the public transcript.
-                stripped_context = ProviderCallContext(
-                    context_window_tokens=provider_context.context_window_tokens,
-                    session_id=provider_context.session_id,
-                    events=provider_context.events,
-                    response_preset=provider_context.response_preset,
-                    response_is_fallback=provider_context.response_is_fallback,
-                )
+                stripped_context = replace(provider_context, conversation_state=None)
         if stripped is None and stripped_context is None:
             return response
         logger.warning("Non-transient LLM error with image content, retrying without images")
