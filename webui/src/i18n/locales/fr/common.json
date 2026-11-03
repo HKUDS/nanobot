@@ -1733,7 +1733,6 @@
     "error": "Erreur de connexion"
   },
   "thread": {
-    "modelResponding": "Le modèle répond",
     "subagents": {
       "stopFailed": "Impossible d’arrêter cette tâche.",
       "stopTask": "Arrêter {{label}}",

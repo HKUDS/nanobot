@@ -167,7 +167,6 @@ export interface UIMessage {
     runId: string;
     sequence: number;
     turnSeq?: number;
-    phase: "started" | "completed" | "failed" | "cancelled";
     retiredRunIds: string[];
     /** Only a completed request with actual usage advances context freshness. */
     usageTurnSeq?: number;

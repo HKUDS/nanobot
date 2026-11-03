@@ -1733,7 +1733,6 @@
     "error": "接続エラー"
   },
   "thread": {
-    "modelResponding": "モデルが応答中",
     "subagents": {
       "stopFailed": "このタスクを停止できませんでした。",
       "stopTask": "{{label}} を停止",

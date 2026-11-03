@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseWebuiThreadPayload } from "@/lib/api";
-import { composerUsageSnapshots, isModelResponding } from "@/lib/model-request";
+import { composerUsageSnapshots } from "@/lib/model-request";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadTranscript } from "@/lib/thread-transcript";
 import type { ThreadProjectionEvent } from "@/lib/types";
@@ -36,19 +36,16 @@ describe("model request snapshots", () => {
     }
     const started = request(7);
     events.push(started); project(transcript, started);
-    expect(isModelResponding(transcript.messages, envelope.turn_id)).toBe(true);
     expect(composerUsageSnapshots(transcript.messages).at(-1)?.usage?.context_tokens).toBe(103);
     const answer: ThreadProjectionEvent = { ...envelope, event: "delta", text: "answer", turn_seq: 8 };
     events.push(answer); project(transcript, answer);
     expect(composerUsageSnapshots(transcript.messages)).toHaveLength(1);
     const end: ThreadProjectionEvent = { ...envelope, event: "turn_end", turn_seq: 9, usage: usage(3), round_usages: rounds(3) };
     events.push(end); project(transcript, end);
-    expect(isModelResponding(transcript.messages, envelope.turn_id)).toBe(false);
     expect(composerUsageSnapshots(transcript.messages).flatMap((entry) => entry.roundUsages ?? [])).toHaveLength(3);
     const replay = new ThreadTranscript();
     events.forEach((event) => project(replay, event, true));
     expect(composerUsageSnapshots(replay.messages).at(-1)?.usage).toEqual(usage(3));
-    expect(isModelResponding(replay.messages, envelope.turn_id)).toBe(false);
     project(transcript, request(10, { usage: usage(99) }));
     expect(composerUsageSnapshots(transcript.messages).at(-1)?.usage).toEqual(usage(3));
   });
@@ -112,7 +109,6 @@ describe("model request snapshots", () => {
     project(restored, request(4, { usage: usage(99) }));
     expect(composerUsageSnapshots(restored.messages).at(-1)?.usage).toEqual(usage(3));
     expect(projectWebuiThreadMessages(restored.messages)).toEqual([]);
-    expect(isModelResponding(restored.messages, null)).toBe(false);
   });
 
   it("reconciles reconnect history without replacing newer live usage", () => {
@@ -125,7 +121,6 @@ describe("model request snapshots", () => {
     expect(composerUsageSnapshots(transcript.messages).at(-1)?.usage).toEqual(usage(2));
     const fresh = new ThreadTranscript();
     expect(fresh.accept(parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [initial, request(2)] }), fresh.begin("initial"))).toBe(true);
-    expect(isModelResponding(fresh.messages, envelope.turn_id)).toBe(true);
     expect(composerUsageSnapshots(fresh.messages).at(-1)?.roundUsages).toHaveLength(1);
   });
 
@@ -147,6 +142,5 @@ describe("model request snapshots", () => {
     const snapshot = composerUsageSnapshots(replay.messages).at(-1)!;
     expect(snapshot.roundUsages).toHaveLength(8);
     expect(snapshot.roundUsages?.[0].prompt_tokens).toBe(102);
-    expect(isModelResponding(replay.messages, envelope.turn_id)).toBe(true);
   });
 });

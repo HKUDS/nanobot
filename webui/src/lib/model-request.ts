@@ -35,13 +35,3 @@ export function composerUsageSnapshots(messages: UIMessage[]): ComposerUsageSnap
     return [row];
   });
 }
-
-export function isModelResponding(messages: UIMessage[], activeTurnId: string | null): boolean {
-  if (!activeTurnId) return false;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].turnId !== activeTurnId) continue;
-    const snapshot = messages[index].modelRequest;
-    if (snapshot) return !snapshot.ended && snapshot.phase === "started";
-  }
-  return false;
-}

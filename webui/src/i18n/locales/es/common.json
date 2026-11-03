@@ -1734,7 +1734,6 @@
     "error": "Error de conexión"
   },
   "thread": {
-    "modelResponding": "El modelo está respondiendo",
     "subagents": {
       "stopFailed": "No se pudo detener esta tarea.",
       "stopTask": "Detener {{label}}",

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { composerUsageSnapshots, isModelResponding } from "@/lib/model-request";
+import { composerUsageSnapshots } from "@/lib/model-request";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
@@ -720,7 +720,6 @@ export function ThreadShell({
   const canonicalRunTurnId = chatId && messagesReady && turnActive
     ? client.getRunTurnId(chatId)
     : null;
-  const activeRunTurnId = turnActive ? canonicalRunTurnId ?? historyActiveTurnId : null;
   const viewportTurnId = messagesReady && turnActive
     ? canonicalRunTurnId
       ?? rememberedViewportTurnId
@@ -1271,9 +1270,6 @@ export function ThreadShell({
 
   const composer = (
     <div className={composerVariant === "hero" ? "thread-composer-stack is-hero" : "thread-composer-stack"}>
-      {isModelResponding(messages, activeRunTurnId) ? (
-        <p role="status" className="px-3 text-xs text-muted-foreground">{t("thread.modelResponding")}</p>
-      ) : null}
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
           model={modelFallback.model}
@@ -1314,7 +1310,7 @@ export function ThreadShell({
           disabled={!chatId}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
-          activeTurnId={activeRunTurnId}
+          activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) ?? historyActiveTurnId : null}
           completedTurnIds={messagesReady && !recoveryNeedsDecision
             && chatId && !client.hasUnsettledRun(chatId) ? queueCompletedTurnIds : undefined}
           placeholder={

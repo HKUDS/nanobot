@@ -872,7 +872,6 @@ export function projectThreadEvent(
       runId: event.run_id,
       sequence: event.sequence,
       turnSeq: event.turn_seq,
-      phase: event.phase,
       ...((event.phase === "completed" || event.phase === "failed")
         && (event.usage?.request_count ?? 0) > (
           previousRequest?.runId === event.run_id ? previousRequest.usage?.request_count ?? 0 : 0

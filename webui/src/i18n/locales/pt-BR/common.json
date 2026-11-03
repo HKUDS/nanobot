@@ -1747,7 +1747,6 @@
     "error": "Erro de conexão"
   },
   "thread": {
-    "modelResponding": "Modelo respondendo",
     "subagents": {
       "stopFailed": "Não foi possível interromper esta tarefa.",
       "stopTask": "Interromper {{label}}",

@@ -1939,7 +1939,6 @@
     "error": "Connection error"
   },
   "thread": {
-    "modelResponding": "Model responding",
     "subagents": {
       "stopFailed": "Could not stop this task.",
       "stopTask": "Stop {{label}}",

@@ -1939,7 +1939,6 @@
     "error": "连接出错"
   },
   "thread": {
-    "modelResponding": "模型处理中",
     "subagents": {
       "stopFailed": "无法停止此任务。",
       "stopTask": "停止 {{label}}",
