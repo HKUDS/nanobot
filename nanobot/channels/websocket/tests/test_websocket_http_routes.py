@@ -1546,6 +1546,34 @@ async def test_channel_connect_runtime_import_error_is_not_reported_as_unsupport
 
 
 @pytest.mark.asyncio
+async def test_whatsapp_connect_reports_libmagic_failure(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.channels.whatsapp import runtime as whatsapp
+    from nanobot.channels.whatsapp.manifest import PLUGIN
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.load_channel_plugin", lambda _name: PLUGIN,
+    )
+
+    def missing_libmagic():
+        raise whatsapp.WhatsAppDependencyError("WhatsApp could not load libmagic.")
+
+    monkeypatch.setattr(whatsapp, "_load_neonize", missing_libmagic)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.connect.start",
+        {"channel": "whatsapp", "force": True},
+    )
+
+    assert response.status_code == 400
+    assert "WhatsApp could not load libmagic" in response.text
+
+
+@pytest.mark.asyncio
 async def test_feishu_connect_routes_write_config_and_hot_reload(
     bus: MagicMock,
     tmp_path: Path,
