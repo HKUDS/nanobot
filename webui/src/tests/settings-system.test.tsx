@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -562,7 +562,8 @@ describe("Settings system domains", () => {
       },
     });
 
-    renderSettingsView();
+    const client = { requestMutation: requestMutationMock, status: "open", onStatus: () => () => {} } as never;
+    renderSettingsView({ client });
 
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
     const uninstall = screen.getByRole("button", { name: "Uninstall app" });
@@ -579,7 +580,12 @@ describe("Settings system domains", () => {
     expect(await screen.findByText("Uninstalled CLI for AnyGen.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-
+    cleanup();
+    fetchMock.mockClear();
+    renderSettingsView({ client, initialSettings: settingsPayload() });
+    expect(screen.getByText("AnyGen")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Uninstall app" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("cli-apps"))).toHaveLength(0);
   });
 
   it("keeps runtime dependencies out of Apps and explains chat mentions", async () => {

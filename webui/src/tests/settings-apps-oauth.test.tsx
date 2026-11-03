@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
@@ -423,11 +423,17 @@ describe("SettingsView Apps catalog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderSettingsView({ initialSection: "apps" });
+    const client = { requestMutation: requestMutationMock, status: "open", onStatus: () => () => {} } as never;
+    renderSettingsView({ client, initialSection: "apps" });
     fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
 
     expect(await screen.findByRole("button", { name: "Xmind" }))
       .toHaveAccessibleDescription("Connecting…");
+    cleanup();
+    renderSettingsView({ client, initialSection: "apps", initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+    expect(screen.getByRole("button", { name: "Xmind" })).toHaveAccessibleDescription("Connecting…");
+    expect(mcpPresetRequests).toBe(1);
     expect(await screen.findByRole(
       "button",
       { name: "Manage Xmind" },

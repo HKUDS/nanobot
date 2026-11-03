@@ -20,6 +20,7 @@ import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnect
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
+import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { SidebarDeleteDecision, SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
@@ -1518,6 +1519,8 @@ function Shell({
     void request.then(clearRequest, clearRequest);
     return request;
   }, [getToken]);
+
+  useEffect(() => client.onReady(() => invalidateToolsCatalog(client)), [client]);
 
   useEffect(() => {
     if (!pageVisible) return undefined;
