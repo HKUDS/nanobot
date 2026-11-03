@@ -41,6 +41,10 @@ const content = `# 阅读，让思路自然延续
 | 标题 Heading | 清楚的内容层级 | 保留结构，而非所有文字同大 |
 | Code | configuration.readingTextSize | 完整显示，必要时在局部滚动 |
 
+| $T$ | $q-p$ | 实测梯度 $\\frac{1}{T}(q-p)$ | 式（4）预测 $\\frac{\\delta}{NT^2}$ |
+| --- | --- | --- | --- |
+| 1 | $[0.0208,\\ -0.0179,\\ -0.0031]$ | $[1.45,-0.52,-0.93]\\times10^{-3}$ | $[1.33,-0.33,-1.00]\\times10^{-3}$ |
+
 \`\`\`typescript
 // 中文注释与 English code
 const preference = { readingTextSize: "standard" };

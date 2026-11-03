@@ -699,7 +699,7 @@ export default function MarkdownTextRenderer({
           >
             <table
               className={cn(
-                "w-full table-fixed border-collapse text-reading-small",
+                "w-full table-auto border-collapse text-reading-small",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
                 "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
