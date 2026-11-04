@@ -1,7 +1,6 @@
-import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { createGraphSimulation, updateGraphSimulation } from "@/lib/context-graph";
-import { useGraphPresentation } from "@/components/thread/useGraphPresentation";
+import { createGraphSimulation, updateGraphSimulation, startGraphSettlement } from "@/lib/context-graph";
+import { createGraphPresentation } from "@/components/thread/graph-presentation";
 import type { ContextGraph } from "@/lib/types";
 
 const first: ContextGraph = { nodes: [{ path: "a.md", name: "a.md", state: "loaded", tokens: 100 }], edges: [] };
@@ -25,16 +24,36 @@ describe("context graph continuity", () => {
     sim.stop();
   });
 
-  it("reverses an in-flight exit from its current opacity when scrubbing back", async () => {
-    const { result, rerender } = renderHook(({ graph }) => useGraphPresentation(graph, null, false), { initialProps: { graph: next } });
-    await waitFor(() => expect(result.current.nodes.find((node) => node.path === "b.md")!.presence).toBeGreaterThan(0.7));
-    rerender({ graph: first });
-    await waitFor(() => expect(result.current.nodes.find((node) => node.path === "b.md")!.presence).toBeLessThan(0.5));
-    const fading = result.current.nodes.find((node) => node.path === "b.md")!.presence;
+  it("settles reduced motion in slices to the same finite layout", () => {
+    const previous = new Map([["a.md", { x: 50, y: 80 }], ["b.md", { x: 150, y: 130 }]]);
+    const reference = createGraphSimulation(next, previous, 600, 300).stop();
+    const sliced = createGraphSimulation(next, previous, 600, 300).stop();
+    reference.alpha(1).alphaTarget(0).tick(300);
+    const advance = startGraphSettlement(sliced);
+    expect(advance(0)).toBe(false);
+    let slices = 1;
+    while (!advance(0)) slices++;
+    expect(slices).toBe(299);
+    expect(sliced.nodes().map(({ x, y }) => ({ x, y }))).toEqual(reference.nodes().map(({ x, y }) => ({ x, y })));
+    expect(sliced.nodes().every((node) => node.vx === 0 && node.vy === 0)).toBe(true);
+    expect(sliced.alpha()).toBe(0);
+  });
+
+  it("reverses an in-flight exit from its current opacity when a graph returns", () => {
+    const presentation = createGraphPresentation();
+    presentation.update(next, null);
+    for (let index = 0; index < 20; index++) presentation.advance(1000 / 60, false);
+    const node = () => presentation.frame.nodes.find((item) => item.path === "b.md")!;
+    expect(node().presence).toBeGreaterThan(0.7);
+    presentation.update(first, null);
+    for (let index = 0; index < 8; index++) presentation.advance(1000 / 60, false);
+    const fading = node().presence;
     expect(fading).toBeGreaterThan(0);
-    rerender({ graph: next });
-    expect(result.current.nodes.find((node) => node.path === "b.md")!.presence).toBeCloseTo(fading);
-    await waitFor(() => expect(result.current.nodes.find((node) => node.path === "b.md")!.presence).toBeGreaterThan(0.9));
-    expect(result.current.edges).toHaveLength(1);
+    expect(fading).toBeLessThan(0.5);
+    presentation.update(next, null);
+    expect(node().presence).toBe(fading);
+    for (let index = 0; index < 20; index++) presentation.advance(1000 / 60, false);
+    expect(node().presence).toBeGreaterThan(0.9);
+    expect(presentation.frame.edges).toHaveLength(1);
   });
 });

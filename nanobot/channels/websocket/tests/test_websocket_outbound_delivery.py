@@ -574,14 +574,15 @@ async def test_ready_activity_group_commits_before_ordered_fanout(history, monke
         if index < 2:
             entered[index].set()
             await release[index].wait()
-        await append(key, facts, **kwargs)
+        return await append(key, facts, **kwargs)
 
     monkeypatch.setattr(history.sessions.state, "append_history", gated_append)
     usage = LLMUsage.reported(input_tokens=100, output_tokens=20)
+    graph = {"nodes": [{"path": "/workspace/guide.md", "name": "guide.md", "state": "loaded", "tokens": 100}], "edges": []}
     events = [
-        ModelRequestEvent("request", "run", 1, "started"),
+        ModelRequestEvent("request", "run", 1, "started", context_graph=graph),
         RetryStatusEvent(state="cleared", attempt=1, max_attempts=None, error_kind="unknown"),
-        ModelRequestEvent("request", "run", 2, "completed", usage=usage, round_usages=(usage,)),
+        ModelRequestEvent("request", "run", 2, "completed", usage=usage, round_usages=(usage,), context_graph=graph),
         ProgressEvent(tool_hint=True, tool_events=[{"call_id": "tool", "name": "read", "phase": "start"}]),
         ProgressEvent(tool_events=[{"call_id": "tool", "name": "read", "phase": "end", "result": "complete"}]),
     ]
@@ -612,12 +613,14 @@ async def test_ready_activity_group_commits_before_ordered_fanout(history, monke
             "model_request", "retry_status", "model_request", "message", "message", "message", "turn_end", "session_updated",
         ]
         assert frames[2]["usage"] == usage.to_turn_dict()
+        assert frames[0]["context_graph"] == frames[2]["context_graph"] == graph
         assert frames[4]["tool_events"][0]["result"] == "complete"
         assert [len(facts) for facts in writes] == [1, 4, 1, 1]
         durable = history.read(f"websocket:{chat}")
         assert [row["turn_seq"] for row in durable] == list(range(1, 8))
         assert durable[4]["tool_events"][0]["result"] == "complete"
         assert durable[-1]["event"] == "turn_end"
+        assert all(row["context_graph"] == graph for row in durable if row["event"] == "model_request")
         late_frames = [json.loads(late.sent.get_nowait()) for _ in range(late.sent.qsize())]
         assert [frame["event"] for frame in late_frames] == ["message", "turn_end", "session_updated"]
         assert late_frames[0]["text"] == "answer"

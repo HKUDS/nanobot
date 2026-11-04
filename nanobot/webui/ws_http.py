@@ -29,7 +29,7 @@ from websockets.http11 import Response
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.application import builtin_command_palette
-from nanobot.context_graph import ContextSnapshot
+from nanobot.context_graph import ContextGraph, ContextSnapshot
 from nanobot.cron.binding import CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -363,6 +363,47 @@ class _PreparedThreadResponse:
     session_key: str
     session_version: tuple[str, int] | None
     missing_context_event: dict[str, Any] | None
+
+
+def _encode_thread_response(data: dict[str, Any], *, graph_references: bool, **kwargs: Any) -> Response:
+    if graph_references:
+        graphs: dict[str, object] = {}
+        references: dict[int, tuple[str, ContextGraph]] = {}
+        nodes: list[object] = []
+        edges: list[object] = []
+        node_ids: dict[int, int] = {}
+        edge_ids: dict[int, int] = {}
+
+        def index(value: object, values: list[object], ids: dict[int, int]) -> int:
+            identity = id(value)
+            if identity not in ids:
+                ids[identity] = len(values)
+                values.append(value)
+            return ids[identity]
+
+        def reference(graph: ContextGraph) -> str:
+            identity = id(graph)
+            if identity not in references:
+                key = str(len(graphs))
+                references[identity] = (key, graph)
+                graphs[key] = {
+                    "nodes": [index(node, nodes, node_ids) for node in graph["nodes"]],
+                    "edges": [index(edge, edges, edge_ids) for edge in graph["edges"]],
+                }
+            return references[identity][0]
+
+        for event in data.get("events", []):
+            if "context_graph" in event:
+                event["context_graph_ref"] = reference(event.pop("context_graph"))
+            snapshot = event.get("context_snapshot")
+            if isinstance(snapshot, dict) and "graph" in snapshot:
+                snapshot = cast(dict[str, Any], snapshot)
+                event["context_snapshot"] = {**snapshot, "graph_ref": reference(snapshot["graph"])}
+                event["context_snapshot"].pop("graph")
+        data["context_graphs"] = graphs
+        data["context_graph_nodes"] = nodes
+        data["context_graph_edges"] = edges
+    return _http_json_response(data, **kwargs)
 
 
 class GatewayHTTPHandler:
@@ -1143,7 +1184,8 @@ class GatewayHTTPHandler:
                         if snapshot is not None:
                             prepared.missing_context_event["context_snapshot"] = snapshot
                 response = await asyncio.to_thread(
-                    _http_json_response, prepared.data,
+                    _encode_thread_response, prepared.data,
+                    graph_references=_query_first(_parse_query(request.path), "context_graph_encoding") == "references-v1",
                     accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
                     extra_headers=prepared.headers, metrics=diagnostics.response,
                 )
@@ -1248,6 +1290,7 @@ class GatewayHTTPHandler:
         include_model_requests = _query_first(query, "include_model_requests") == "1"
         revision_variant = {
             "include_model_requests": include_model_requests,
+            "context_graph_encoding": _query_first(query, "context_graph_encoding"),
             "active_turn_id": active_turn_id,
             "active_turn_started_at": active_turn_started_at,
             "active_turn_transcript_persistence_failed": (

@@ -725,12 +725,14 @@ class SessionState:
 
     async def append_history(
         self, key: str, facts: Sequence[HistoryFact], *, expected_generation: str | None,
-    ) -> None:
-        """Append to an existing session; None selects its current generation."""
+        skip_invalid: bool = False,
+    ) -> list[str]:
+        """Serialize owned facts in the worker; None selects the current generation."""
         records = list(facts)
-        await self._execute(
+        return await self._execute(
             key,
-            lambda: self._store.append_history(key, deepcopy(records), expected_generation=expected_generation),
+            lambda: self._store.append_history(key, records, expected_generation=expected_generation,
+                                               skip_invalid=skip_invalid),
             operation_name="append_history",
         )
 

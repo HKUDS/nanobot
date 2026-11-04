@@ -53,10 +53,17 @@ export function updateGraphSimulation(simulation: ReturnType<typeof forceSimulat
   const outerRadius = Math.max(0, ...[...existing.values()].map((node) => Math.hypot(node.x - width / 2, node.y - height / 2)));
   const ringWidth = Math.sqrt(area / Math.PI + outerRadius ** 2) - outerRadius;
   const spread = Math.sqrt(area);
+  const adjacent = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const sources = adjacent.get(edge.source) ?? [];
+    sources.push(edge.target); adjacent.set(edge.source, sources);
+    const targets = adjacent.get(edge.target) ?? [];
+    targets.push(edge.source); adjacent.set(edge.target, targets);
+  }
   const nodes = graph.nodes.map((node): GraphParticle => {
     const retained = existing.get(node.path);
     if (retained) return retained;
-    const neighbours = graph.edges.flatMap((edge) => edge.source === node.path ? [edge.target] : edge.target === node.path ? [edge.source] : [])
+    const neighbours = (adjacent.get(node.path) ?? [])
       .map((path) => placed.get(path)).filter((point): point is GraphPosition => !!point);
     let position = previous.get(node.path);
     if (!position && neighbours.length) position = {
@@ -81,13 +88,18 @@ export function updateGraphSimulation(simulation: ReturnType<typeof forceSimulat
   simulation.force<ReturnType<typeof forceY<GraphParticle>>>("y")!.y(height / 2);
 }
 
-/** Reduced-motion users receive the final layout without a spatial entrance. */
-export function settleGraphSimulation(simulation: ReturnType<typeof createGraphSimulation>) {
+/** Finish the same finite layout in short slices without painting intermediate positions. */
+export function startGraphSettlement(simulation: ReturnType<typeof createGraphSimulation>) {
   simulation.stop().alpha(1).alphaTarget(0);
-  const ticks = Math.ceil(Math.log(simulation.alphaMin()) / Math.log(1 - simulation.alphaDecay()));
-  simulation.tick(ticks);
-  for (const node of simulation.nodes()) { node.vx = 0; node.vy = 0; }
-  simulation.alpha(0);
+  let remaining = Math.ceil(Math.log(simulation.alphaMin()) / Math.log(1 - simulation.alphaDecay()));
+  return (budgetMs = 4) => {
+    const deadline = performance.now() + budgetMs;
+    do { simulation.tick(); remaining--; } while (remaining > 0 && performance.now() < deadline);
+    if (remaining > 0) return false;
+    for (const node of simulation.nodes()) { node.vx = 0; node.vy = 0; }
+    simulation.alpha(0);
+    return true;
+  };
 }
 
 export function nodeRadius(node: ContextGraphNode): number {
@@ -96,9 +108,9 @@ export function nodeRadius(node: ContextGraphNode): number {
 
 
 
-export function isContextInspection(value: unknown): value is ContextInspection {
+export function isContextInspection(value: unknown, validateGraph: typeof isContextGraph = isContextGraph): value is ContextInspection {
   return typeof value === "object" && value !== null
-    && "graph" in value && isContextGraph(value.graph)
+    && "graph" in value && validateGraph(value.graph)
     && "estimated_tokens" in value && typeof value.estimated_tokens === "number"
     && Number.isFinite(value.estimated_tokens) && value.estimated_tokens >= 0
     && "context_window_tokens" in value && typeof value.context_window_tokens === "number"

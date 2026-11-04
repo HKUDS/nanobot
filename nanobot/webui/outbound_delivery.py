@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -73,6 +74,12 @@ WebUIAudience: TypeAlias = ChatAudience | Literal["all_connections", "authentica
 _ACTIVITY_BATCH_BYTES = 128 * 1024
 
 
+async def _encode_payload(payload: Mapping[str, object]) -> str:
+    if "context_graph" in payload or "context_snapshot" in payload:
+        return await asyncio.to_thread(json.dumps, payload, ensure_ascii=False)
+    return json.dumps(payload, ensure_ascii=False)
+
+
 class WebUIOutboundTransport(Protocol):
     """Snapshot recipients and enqueue already projected public JSON frames."""
 
@@ -134,7 +141,9 @@ class WebUIOutboundDelivery:
         *,
         label: str,
     ) -> None:
-        raw = json.dumps(payload, ensure_ascii=False)
+        if not recipients:
+            return
+        raw = await _encode_payload(payload)
         for connection in recipients:
             await self._transport.webui_send_raw(connection, raw, label=label)
 
@@ -195,7 +204,7 @@ class WebUIOutboundDelivery:
                     msg.chat_id, body, metadata=msg.metadata, phase="activity", include_source=progress is not None,
                 )
             try:
-                raw = json.dumps(body, ensure_ascii=False)
+                raw = await _encode_payload(body)
                 size = len(raw.encode("utf-8"))
             except (TypeError, ValueError, RecursionError) as exc:
                 logger.warning("WebUI activity encoding failed for {}: {}", msg.chat_id, exc)

@@ -1,4 +1,4 @@
-import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ContextInspector } from "@/components/thread/ContextInspector";
@@ -33,31 +33,15 @@ describe("Context inspector", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("reveals filenames on hover and fades them in when zooming", async () => {
+  it("exposes every graph node as a named keyboard control", async () => {
     const user = userEvent.setup();
     render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
     const node = await screen.findByRole("button", { name: "a.md" });
-    const label = screen.getByText("a.md");
-    expect(label).toHaveStyle({ opacity: "0" });
-    await user.hover(node.querySelector("span span")!);
-    expect(label).toHaveStyle({ opacity: "1" });
-    await user.unhover(node.querySelector("span span")!);
-    expect(label).toHaveStyle({ opacity: "0" });
-    const zoom = (deltaY: number) => {
-      const event = createEvent.wheel(node);
-      Object.defineProperties(event, { deltaY: { value: deltaY }, clientX: { value: 100 }, clientY: { value: 100 } });
-      fireEvent(node, event);
-    };
-    zoom(-400);
-    expect(Number(label.style.opacity)).toBeGreaterThan(0);
-    expect(Number(label.style.opacity)).toBeLessThan(1);
-    await user.hover(node.querySelector("span span")!);
-    expect(label).toHaveStyle({ opacity: "1" });
-    await user.unhover(node.querySelector("span span")!);
-    expect(Number(label.style.opacity)).toBeGreaterThan(0);
-    expect(Number(label.style.opacity)).toBeLessThan(1);
-    zoom(1000);
-    expect(label).toHaveStyle({ opacity: "0" });
+    expect(screen.getByRole("button", { name: "b.md" })).toBeInTheDocument();
+    act(() => node.focus());
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText("About 100 tokens")).toBeVisible();
+    expect(node).toHaveFocus();
   });
 
   it("opens the selected file through the supplied preview action without loading its context", async () => {
@@ -65,9 +49,9 @@ describe("Context inspector", () => {
     const user = userEvent.setup();
     render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} onOpenFile={open} />);
     const node = await screen.findByRole("button", { name: "a.md" });
-    await user.hover(node.querySelector("span span")!);
+    await user.hover(node);
     expect(screen.queryByText("About 100 tokens")).not.toBeInTheDocument();
-    await user.click(node.querySelector("span span")!);
+    await user.click(node);
     expect(await screen.findByText("About 100 tokens")).toBeVisible();
     expect(open).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Open file" }));

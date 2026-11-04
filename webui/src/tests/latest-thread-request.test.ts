@@ -43,7 +43,7 @@ describe("shared latest thread requests", () => {
     const surviving = fetchLatestWebuiThread(client, "token", KEY);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Ashared/webui-thread?limit=40&direction=latest&include_model_requests=1",
+      "/api/sessions/websocket%3Ashared/webui-thread?limit=40&direction=latest&include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({ headers: { Authorization: "Bearer token", "If-None-Match": '"cached"' } }),
     );
     const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });

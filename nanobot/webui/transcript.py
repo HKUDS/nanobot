@@ -21,13 +21,18 @@ from loguru import logger
 
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_TURN_ID
 from nanobot.command.builtin import USER_SHELL_COMMAND
-from nanobot.context_graph import parse_context_graph, parse_context_snapshot
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.display_history import (
     HISTORY_GENERATION_METADATA_KEY,
     HistoryFact,
     HistoryReader,
+)
+from nanobot.session.history_graph import (
+    decode_graph,
+    decode_snapshot,
+    graph_decoding,
+    graph_size_adjustment,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
@@ -234,7 +239,7 @@ def _record_json_line(record: dict[str, Any]) -> str:
 def _records_bytes(records: list[dict[str, Any]]) -> int:
     total = 0
     for record in records:
-        total += len(_record_json_line(record).encode("utf-8")) + 1
+        total += len(_record_json_line(record).encode("utf-8")) + graph_size_adjustment(record) + 1
     return total
 
 
@@ -582,9 +587,6 @@ class WebUITranscriptRecorder:
         for event in events:
             try:
                 fact = fact_from_record(_record_for_append(event))
-                if len(events) > 1:
-                    # An invalid member must not roll back otherwise valid activity.
-                    fact.encode()
                 facts.append(fact)
             except (ValueError, TypeError) as exc:
                 self._log.warning("history append failed for {}: {}", chat_id, exc)
@@ -592,8 +594,12 @@ class WebUITranscriptRecorder:
         if not facts:
             return False
         try:
-            await self.sessions.state.append_history(webui_session_key(chat_id), facts,
-                                                     expected_generation=generation)
+            errors = await self.sessions.state.append_history(webui_session_key(chat_id), facts,
+                                                              expected_generation=generation,
+                                                              skip_invalid=len(events) > 1)
+            for error in errors:
+                self._log.warning("history append failed for {}: {}", chat_id, error)
+            valid = valid and not errors
         except (OSError, ValueError, TypeError, sqlite3.Error, SessionConflictError, SessionOperationQueueFullError) as exc:
             self._log.warning("history append failed for {}: {}", chat_id, exc)
             return False
@@ -1511,7 +1517,7 @@ def _client_projection_event(
             "compaction_id": compaction_id,
             "phase": phase,
         }
-        if (snapshot := parse_context_snapshot(record.get("context_snapshot"))) is not None:
+        if (snapshot := decode_snapshot(record.get("context_snapshot"))) is not None:
             projected["context_snapshot"] = snapshot
         reason = record.get("reason")
         if isinstance(reason, str) and reason in {"idle", "context_pressure", "manual", "provider_native"}:
@@ -1533,7 +1539,7 @@ def _client_projection_event(
             projected.update(request_id=request_id, run_id=run_id, sequence=sequence, phase=phase)
             if "request_usage" in record:
                 projected["request_usage"] = _sanitize_turn_usage(record["request_usage"]) or None
-            if (graph := parse_context_graph(record.get("context_graph"))) is not None:
+            if (graph := decode_graph(record.get("context_graph"))) is not None:
                 projected["context_graph"] = graph
         latency_ms = record.get("latency_ms")
         if isinstance(latency_ms, int | float) and latency_ms >= 0:
@@ -1764,6 +1770,7 @@ def build_session_thread_response(
             "active_turn_id": turn_id if active else None}
 
 
+@graph_decoding()
 def build_webui_thread_response(
     session_key: str,
     *,
