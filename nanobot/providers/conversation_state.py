@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from typing import Any, cast
 
@@ -42,10 +43,12 @@ class ProviderConversationStateController:
         messages: list[dict[str, Any]],
         state: ProviderConversationState | None = None,
         session_id: str | None = None,
+        checkpoint_callback: Callable[[ProviderConversationState], Awaitable[None]] | None = None,
     ) -> None:
         self._provider = provider
         self._model = model
         self._session_id = session_id
+        self._checkpoint_callback = checkpoint_callback
         self._state = (
             state
             if state is not None
@@ -141,11 +144,19 @@ class ProviderConversationStateController:
         )
         supplemental = deepcopy(supplemental_messages or [])
         self._request_messages = deepcopy(request_messages)
-        request_state = self._state.with_pending_messages([
-            *self._state.pending_messages,
-            *request_messages,
-            *supplemental,
-        ])
+        durable_pending = deepcopy([*self._state.pending_messages, *request_messages])
+        request_state = self._state.with_pending_messages([*durable_pending, *supplemental])
+        boundary = len(messages)
+
+        async def accept_compaction(state: ProviderConversationState) -> None:
+            durable = state.with_pending_messages(durable_pending)
+            if self._checkpoint_callback is not None:
+                await self._checkpoint_callback(durable)
+            self._state = durable
+            self._boundary = boundary
+            self._seal_boundary(messages)
+            self._request_messages = []
+
         return ProviderCallContext(
             conversation_state=request_state,
             context_window_tokens=(
@@ -154,6 +165,7 @@ class ProviderConversationStateController:
                 else None
             ),
             session_id=self._session_id,
+            on_native_compaction=accept_compaction,
         )
 
     def observe_response(

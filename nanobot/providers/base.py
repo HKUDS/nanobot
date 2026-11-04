@@ -27,7 +27,12 @@ from nanobot.events import (
     RetryWaitEvent,
 )
 from nanobot.llm_usage.types import LLMUsage as LLMUsage
-from nanobot.providers.compaction import ProviderCompactionEvents, provider_compaction_scope
+from nanobot.providers.compaction import (
+    NativeCompaction,
+    ProviderCompactionEvents,
+    ProviderStateCommitError,
+    provider_compaction_scope,
+)
 from nanobot.providers.generation import GenerationSettings as GenerationSettings
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import sanitize_surrogates_deep
@@ -281,6 +286,27 @@ class ProviderCallContext:
     compaction_input_budget: int | None = None
     # Owned by one retry chain, shared only by its provider attempts.
     compaction: ProviderCompactionEvents | None = field(default=None, repr=False, compare=False)
+    on_native_compaction: Callable[[ProviderConversationState], Awaitable[None]] | None = field(
+        default=None, repr=False, compare=False,
+    )
+
+    @property
+    def accepted_compaction(self) -> NativeCompaction | None:
+        initial = self.conversation_state
+        accepted = self.compaction.accepted if self.compaction is not None else None
+        if initial is None or accepted is None:
+            return None
+        current = accepted.state
+        if (initial.kind, initial.provider, initial.model, initial.version) != (
+            current.kind, current.provider, current.model, current.version,
+        ):
+            return None
+        return accepted
+
+    @property
+    def current_conversation_state(self) -> ProviderConversationState | None:
+        accepted = self.accepted_compaction
+        return accepted.state if accepted is not None else self.conversation_state
 
 
 @dataclass
@@ -1073,6 +1099,8 @@ class LLMProvider(ABC):
                 stream=False,
             )
             raise
+        except ProviderStateCommitError:
+            raise
         except Exception as exc:
             response = self._error_response_from_exception(exc)
         return await self._observe_llm_call_async(
@@ -1216,6 +1244,8 @@ class LLMProvider(ABC):
                 started_at_ns=started_at_ns,
                 stream=True,
             )
+            raise
+        except ProviderStateCommitError:
             raise
         except Exception as exc:
             response = self._error_response_from_exception(exc)
@@ -1426,7 +1456,9 @@ class LLMProvider(ABC):
 
         context = kw.get("provider_context")
         events = context.events if isinstance(context, ProviderCallContext) else NO_EVENTS
-        async with provider_compaction_scope(events) as compaction:
+        async with provider_compaction_scope(
+            events, context.compaction if isinstance(context, ProviderCallContext) else None,
+        ) as compaction:
             if isinstance(context, ProviderCallContext):
                 kw["provider_context"] = replace(context, compaction=compaction)
             return await self._run_with_retry(
