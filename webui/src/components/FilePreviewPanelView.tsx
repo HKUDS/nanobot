@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { createPortal } from "react-dom";
+import { SidebarPanelActionsContext } from "@/components/ui/sidebar-panel";
 import { useTranslation } from "react-i18next";
 import { AlertCircle } from "lucide-react";
 
@@ -23,6 +25,7 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
   onOpenFilePreview?: (path: string) => void;
 }) {
   const { t } = useTranslation();
+  const actionsHost = useContext(SidebarPanelActionsContext);
   const [mode, setMode] = useState<"preview" | "source">("preview");
   const previewKind = fileKindForPath(path);
   const markdown = state.status === "ready" && state.payload.kind !== "image"
@@ -38,15 +41,13 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
       : state.message ?? t("filePreview.failed", { defaultValue: "Could not preview this file." }))
     : null;
 
+  const modeControl = <SegmentedControl value={mode} onChange={setMode} ariaLabel={t("filePreview.displayMode")}
+    options={[{ value: "preview", label: t("filePreview.preview") }, { value: "source", label: t("filePreview.source") }]}
+    itemClassName="px-3 [@media(pointer:coarse)]:min-h-9" />;
+
   return (
     <section aria-label={t("filePreview.aria")} data-testid="file-preview-panel" className="flex min-h-0 flex-1 flex-col">
-          {markdown ? (
-            <div className="flex shrink-0 items-center justify-end px-4 py-2">
-              <SegmentedControl value={mode} onChange={setMode} ariaLabel={t("filePreview.displayMode")}
-                options={[{ value: "preview", label: t("filePreview.preview") }, { value: "source", label: t("filePreview.source") }]}
-                itemClassName="px-3 [@media(pointer:coarse)]:min-h-9" />
-            </div>
-          ) : null}
+          {markdown && (actionsHost ? createPortal(modeControl, actionsHost) : <div className="flex shrink-0 justify-end px-4 py-2">{modeControl}</div>)}
           <div key={mode} data-file-preview-scroll tabIndex={0}
             className="min-h-0 flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
             {state.status === "loading" ? (
@@ -57,7 +58,7 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
                   {previewKind === "image" ? <div className="flex h-full items-center justify-center p-4">
                     <div className="aspect-[8/5] w-full max-w-sm rounded-compact bg-muted/40" />
                   </div> : <>
-                    {previewKind === "markdown" ? <div className="flex justify-end px-4 py-2">
+                    {previewKind === "markdown" && !actionsHost ? <div className="flex justify-end px-4 py-2">
                       <div className="inline-flex min-h-8 items-center gap-1 rounded-full bg-muted/40 p-1 text-ui-label">
                         {[t("filePreview.preview"), t("filePreview.source")].map((label) => <span key={label} className="invisible px-3 py-1 [@media(pointer:coarse)]:min-h-9">{label}</span>)}
                       </div>
