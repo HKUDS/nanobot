@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ContextInspector } from "@/components/thread/ContextInspector";
@@ -15,19 +15,22 @@ const snapshots: ContextSnapshot[] = [
 ];
 
 describe("Context inspector", () => {
-  it("reviews matching graph and usage snapshots and returns to latest on release", async () => {
-    render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
-    const slider = screen.getByRole("slider");
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
-    fireEvent.pointerDown(slider, { button: 0, pointerId: 1, clientX: 120 });
-    expect(screen.getByText("2/2")).toBeVisible();
-    fireEvent.pointerMove(slider, { pointerId: 1, clientX: 96 });
-    expect(screen.getByText("1/2")).toBeVisible();
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
-    expect(screen.queryByRole("button", { name: "b.md" })).not.toBeInTheDocument();
-    fireEvent.pointerUp(slider, { pointerId: 1 });
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
-    await waitFor(() => expect(screen.getByRole("button", { name: "b.md" })).toBeInTheDocument());
+  it("plays from the first snapshot to the current graph without pausing", () => {
+    vi.useFakeTimers();
+    try {
+      render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
+      const play = screen.getByRole("button", { name: "Play context history" });
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
+      fireEvent.click(play);
+      expect(play).toBeDisabled();
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+      act(() => vi.advanceTimersByTime(750));
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
+      act(() => vi.advanceTimersByTime(750));
+      expect(play).toBeEnabled();
+      fireEvent.click(play);
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+    } finally { vi.useRealTimers(); }
   });
 
   it("reveals filenames on hover and fades them in when zooming", async () => {
@@ -71,4 +74,18 @@ describe("Context inspector", () => {
     expect(open).toHaveBeenCalledWith("/a.md");
     expect(snapshots[1].graph.nodes[1].state).toBe("discovered");
   });
+});
+
+
+it("stops playback at compaction and shows the new baseline", async () => {
+  const { rerender } = render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
+  fireEvent.click(screen.getByRole("button", { name: "Play context history" }));
+  const compacted: ContextSnapshot = { id: "compacted", graph: { nodes: [{ path: "/system.md", name: "system.md", state: "loaded", tokens: 300 }], edges: [] },
+    estimatedTokens: 1500, contextWindowTokens: 10000 };
+  rerender(<ContextInspector context={null} rounds={[]} snapshots={[compacted]} />);
+  expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "15");
+  expect(screen.getByText("≈15%")).toBeVisible();
+  await waitFor(() => expect(screen.queryByRole("button", { name: "a.md" })).not.toBeInTheDocument());
+  expect(screen.getByRole("button", { name: "system.md" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
 });

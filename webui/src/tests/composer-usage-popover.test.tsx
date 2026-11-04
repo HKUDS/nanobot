@@ -37,14 +37,49 @@ describe("Context sidebar", () => {
   it("mounts in the conversation's side slot and closes with Escape from its controls", async () => {
     const user = userEvent.setup();
     const host = document.createElement("section");
+    Object.defineProperty(host, "clientWidth", { value: 900 });
     document.body.append(host);
     const view = render(<ComposerUsagePopover sidebarHost={host} context={null} rounds={[]} snapshots={[first]} />);
     await user.click(screen.getByTestId("composer-context-usage"));
     const sidebar = within(host).getByRole("complementary");
-    act(() => within(sidebar).getByRole("slider").focus());
+    act(() => within(sidebar).getByRole("button", { name: "Close" }).focus());
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.getByTestId("composer-context-usage")).toHaveFocus());
     expect(screen.getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "false");
     view.unmount(); host.remove();
   });
+  it("keeps the open sidebar and playback when its trigger moves between responsive slots", async () => {
+    const user = userEvent.setup();
+    const toolbar = document.createElement("span");
+    const footer = document.createElement("span");
+    document.body.append(toolbar, footer);
+    const content = (host: HTMLElement) => <ComposerUsagePopover triggerHost={host} context={null} rounds={[]}
+      snapshots={[first, { ...first, id: "2", usage: { prompt_tokens: 2000 } }]} />;
+    const view = render(content(toolbar));
+    await user.click(within(toolbar).getByTestId("composer-context-usage"));
+    const sidebar = screen.getByRole("complementary");
+    await user.click(within(sidebar).getByRole("button", { name: "Play context history" }));
+    view.rerender(content(footer));
+    expect(screen.getByRole("complementary")).toBe(sidebar);
+    expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+    expect(within(footer).getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "true");
+    await user.click(within(footer).getByTestId("composer-context-usage"));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    view.unmount(); toolbar.remove(); footer.remove();
+  });
+
+  it("opens a pane-contained drawer with a visible close control on narrow panes", async () => {
+    const user = userEvent.setup();
+    const host = document.createElement("section");
+    Object.defineProperty(host, "clientWidth", { value: 600 });
+    document.body.append(host);
+    const view = render(<ComposerUsagePopover sidebarHost={host} context={null} rounds={[]} snapshots={[first]} />);
+    await user.click(screen.getByTestId("composer-context-usage"));
+    const drawer = within(host).getByRole("dialog", { name: "Context usage" });
+    await user.click(within(drawer).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByTestId("composer-context-usage")).toHaveFocus();
+    view.unmount(); host.remove();
+  });
+
 });

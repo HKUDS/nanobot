@@ -6,7 +6,7 @@ from typing import Literal
 
 from loguru import logger
 
-from nanobot.context_graph import ContextGraph
+from nanobot.context_graph import ContextGraph, ContextSnapshot
 from nanobot.llm_usage.types import LLMUsage
 
 
@@ -59,6 +59,7 @@ class ContextCompactionEvent(AgentEvent):
     # Interactive clients still consume every phase when this is false.
     notify: bool = False
     reason: CompactionReason | None = None
+    context_snapshot: ContextSnapshot | None = None
 
 
 @dataclass(frozen=True)

@@ -7,12 +7,15 @@ from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
-from nanobot.utils.helpers import estimate_message_tokens
+from nanobot.utils.helpers import estimate_message_tokens, estimate_prompt_tokens_chain
+
+if TYPE_CHECKING:
+    from nanobot.providers.base import LLMProvider
 
 
 class ContextNode(TypedDict):
@@ -187,3 +190,31 @@ def graph_from_messages(messages: Sequence[Mapping[str, Any]]) -> ContextGraph:
                 nodes.setdefault(target, {"path": target, "name": Path(target).name, "state": "discovered", "tokens": 0})
                 edges[path, target] = {"source": path, "target": target}
     return {"nodes": list(nodes.values()), "edges": list(edges.values())}
+
+
+class ContextSnapshot(TypedDict):
+    graph: ContextGraph
+    estimated_tokens: int
+    context_window_tokens: int
+
+
+def build_context_snapshot(
+    messages: list[dict[str, Any]], tools: list[dict[str, Any]], *,
+    provider: "LLMProvider", model: str, context_window_tokens: int,
+) -> ContextSnapshot:
+    tokens, _ = estimate_prompt_tokens_chain(provider, model, messages, tools)
+    return {"graph": graph_from_messages(messages), "estimated_tokens": tokens,
+            "context_window_tokens": context_window_tokens}
+
+
+def parse_context_snapshot(value: object) -> ContextSnapshot | None:
+    if not isinstance(value, dict):
+        return None
+    value = cast(dict[str, object], value)
+    graph = parse_context_graph(value.get("graph"))
+    tokens, window = value.get("estimated_tokens"), value.get("context_window_tokens")
+    if graph is None or not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
+        return None
+    if not isinstance(window, int) or isinstance(window, bool) or window <= 0:
+        return None
+    return {"graph": graph, "estimated_tokens": tokens, "context_window_tokens": window}

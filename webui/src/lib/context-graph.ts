@@ -1,4 +1,4 @@
-import type { ContextGraph, ContextGraphNode } from "@/lib/types";
+import type { ContextGraph, ContextGraphNode, ContextInspection, ContextSnapshot, UIMessage, UIModelRequestSnapshot } from "@/lib/types";
 import { forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationNodeDatum } from "d3-force";
 
 export function isContextGraph(value: unknown): value is ContextGraph {
@@ -94,3 +94,30 @@ export function nodeRadius(node: ContextGraphNode): number {
   return node.state === "discovered" ? 3.5 : Math.max(4, Math.min(12.5, Math.sqrt(node.tokens) * 0.215));
 }
 
+
+
+export function isContextInspection(value: unknown): value is ContextInspection {
+  return typeof value === "object" && value !== null
+    && "graph" in value && isContextGraph(value.graph)
+    && "estimated_tokens" in value && typeof value.estimated_tokens === "number"
+    && Number.isFinite(value.estimated_tokens) && value.estimated_tokens >= 0
+    && "context_window_tokens" in value && typeof value.context_window_tokens === "number"
+    && Number.isFinite(value.context_window_tokens) && value.context_window_tokens > 0;
+}
+
+export function composerContextSnapshots(
+  messages: UIMessage[], requests: ReadonlyMap<string, UIModelRequestSnapshot>,
+): ContextSnapshot[] {
+  const boundary = messages.filter((message) => message.compaction?.phase === "succeeded").at(-1);
+  const baseline = boundary?.compaction?.contextSnapshot;
+  const snapshots = Array.from(requests.entries()).sort((a, b) => a[1].createdAt - b[1].createdAt)
+    .flatMap(([turnId, request]) => (request.contextSnapshots ?? []).filter((snapshot) => {
+      if (!boundary) return true;
+      if (turnId === boundary.turnId) {
+        return snapshot.turnSeq !== undefined && boundary.compaction?.turnSeq !== undefined
+          && snapshot.turnSeq > boundary.compaction.turnSeq;
+      }
+      return request.createdAt > boundary.createdAt;
+    }));
+  return [...(baseline ? [baseline] : []), ...snapshots];
+}

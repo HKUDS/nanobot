@@ -11,7 +11,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.context_graph import ContextGraph
+from nanobot.context_graph import ContextGraph, ContextSnapshot
 from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
@@ -110,6 +110,7 @@ class ModelRequestWirePayload(_ChatWirePayload):
 
 
 class ContextCompactionWirePayload(_ChatWirePayload):
+    context_snapshot: NotRequired[ContextSnapshot]
     event: Literal["context_compaction"]
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
@@ -240,6 +241,8 @@ def encode_context_compaction(
     }
     if event.reason is not None:
         payload["reason"] = event.reason
+    if event.context_snapshot is not None:
+        payload["context_snapshot"] = event.context_snapshot
     return payload
 
 

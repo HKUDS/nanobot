@@ -61,7 +61,11 @@ from nanobot.command.builtin import register_core_commands
 from nanobot.command.router import CommandExpansion, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.context_graph import CONTEXT_SOURCE_HISTORY_META, retained_source_metadata
+from nanobot.context_graph import (
+    CONTEXT_SOURCE_HISTORY_META,
+    ContextSnapshot,
+    retained_source_metadata,
+)
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
@@ -75,6 +79,7 @@ from nanobot.runtime_context import (
     append_runtime_context,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
+    runtime_context_source_metadata,
 )
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
@@ -569,6 +574,13 @@ class AgentLoop:
             session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
             return None
 
+    async def inspect_session_context(self, session_key: str) -> ContextSnapshot | None:
+        session = await self.sessions.state.read(session_key)
+        if session is None or not session.last_archived:
+            return None
+        runtime = self._resolve_session_runtime(session, recover_removed=True) or self.llm_runtime()
+        return await asyncio.to_thread(self.consolidator.context_snapshot, session, runtime=runtime)
+
     async def runtime_for_session(
         self,
         session: Session,
@@ -744,6 +756,8 @@ class AgentLoop:
             )
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
+            if source_meta := runtime_context_source_metadata(text, runtime_context_blocks or ()):
+                extra[CONTEXT_SOURCE_HISTORY_META] = source_meta
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
@@ -1190,6 +1204,8 @@ class AgentLoop:
                     )
                     if runtime_marker is not None:
                         row["_meta"][RUNTIME_CONTEXT_MESSAGE_META] = runtime_marker
+                    if source_meta := runtime_context_source_metadata(row["content"], blocks):
+                        row["_meta"].update(source_meta)
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"

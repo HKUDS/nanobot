@@ -1,4 +1,4 @@
-import { isContextGraph } from "@/lib/context-graph";
+import { isContextGraph, isContextInspection } from "@/lib/context-graph";
 import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
   ApiServicePayload,
@@ -384,6 +384,7 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
       if (value.text !== undefined && typeof value.text !== "string") break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
+      if (value.context_snapshot !== undefined && !isContextInspection(value.context_snapshot)) break;
       if (typeof value.compaction_id !== "string" || !value.compaction_id
         || !isCompactionPhase(value.phase)
         || (value.reason !== undefined && !isCompactionReason(value.reason))) break;

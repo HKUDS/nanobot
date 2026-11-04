@@ -11,11 +11,11 @@ import { createGraphSimulation, updateGraphSimulation, settleGraphSimulation, ty
 import type { ContextGraph, ContextSnapshot } from "@/lib/types";
 import type { ComposerContextUsage, ComposerRoundUsage } from "./ComposerUsagePopover";
 
+import { ContextReplayButton } from "./ContextReplayButton";
 import { useGraphPresentation, type GraphPresentation } from "./useGraphPresentation";
 
 const EMPTY_GRAPH: ContextGraph = { nodes: [], edges: [] };
-const sidebarSurface = "shadow-none ring-1 ring-border/40";
-const surface = "select-none rounded-[20px] bg-background shadow-[0_2px_5px_rgb(0_0_0/0.03),0_8px_24px_rgb(0_0_0/0.07)]";
+const surface = "context-inspector-surface select-none rounded-[20px] bg-card";
 
 function FileGraph({ graph, expanded, onExpand, onOpenFile, sidebar = false }: {
   graph: ContextGraph; expanded: boolean; sidebar?: boolean; onExpand: () => void; onOpenFile?: (path: string) => void;
@@ -137,7 +137,7 @@ function FileGraph({ graph, expanded, onExpand, onOpenFile, sidebar = false }: {
   };
   useLayoutEffect(() => { paint.current(); });
   const currentPaths = new Set(graph.nodes.map((node) => node.path));
-  return <div ref={container} className={cn(surface, sidebar && sidebarSurface, "relative isolate overflow-clip touch-none cursor-grab active:cursor-grabbing", sidebar ? "min-h-0 flex-1" : expanded ? "h-[min(65dvh,600px)]" : "h-[300px]")}
+  return <div ref={container} className={cn(surface, "relative isolate overflow-clip touch-none cursor-grab active:cursor-grabbing", sidebar ? "min-h-0 flex-1" : expanded ? "h-[min(65dvh,600px)]" : "h-[300px]")}
     onPointerDown={(e) => { if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return; viewInteracted.current = true; pan.current = { id: e.pointerId, x: e.clientX, y: e.clientY }; e.currentTarget.setPointerCapture(e.pointerId); setActive(null); }}
     onPointerMove={(e) => { if (dragging.current) return; const previous = pan.current; if (!previous || previous.id !== e.pointerId) return; const dx = e.clientX - previous.x, dy = e.clientY - previous.y; pan.current = { id: e.pointerId, x: e.clientX, y: e.clientY }; setView((old) => ({ ...old, x: old.x + dx, y: old.y + dy })); }}
     onPointerUp={() => { pan.current = null; }} onPointerCancel={() => { pan.current = null; }} onLostPointerCapture={() => { pan.current = null; }}
@@ -221,51 +221,53 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   const layoutId = useId();
   const reducedMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [replay, setReplay] = useState<{ frames: readonly ContextSnapshot[]; index: number } | null>(null);
   const [meterHover, setMeterHover] = useState(false);
-  const drag = useRef<{ x: number; index: number } | null>(null);
-  const index = selected === null ? snapshots.length - 1 : Math.min(selected, snapshots.length - 1);
-  const snapshot = snapshots[index];
+  const epoch = snapshots[0]?.id;
+  useEffect(() => { setReplay(null); }, [epoch]);
+  useEffect(() => {
+    if (!replay) return;
+    const timer = window.setTimeout(() => setReplay((current) => current && current.index + 1 < current.frames.length
+      ? { ...current, index: current.index + 1 } : null), 750);
+    return () => window.clearTimeout(timer);
+  }, [replay]);
+  const snapshot = replay ? replay.frames[replay.index] : snapshots.at(-1);
   const latestRound = rounds.at(-1);
-  const tokens = snapshot ? snapshot.usage?.context_tokens ?? snapshot.usage?.prompt_tokens : context?.contextTokens;
+  const tokens = snapshot?.estimatedTokens ?? snapshot?.usage?.context_tokens ?? snapshot?.usage?.prompt_tokens ?? context?.contextTokens;
+  const estimated = snapshot?.estimatedTokens !== undefined || (!snapshot?.usage && context?.estimated);
   const windowTokens = snapshot?.contextWindowTokens ?? context?.contextWindowTokens;
   const used = tokens !== undefined && windowTokens ? Math.min(100, tokens / windowTokens * 100) : null;
   const cached = snapshot ? snapshot.usage?.cached_tokens : latestRound?.cachedTokens;
   const input = snapshot ? snapshot.usage?.prompt_tokens : latestRound?.inputTokens;
   const cachedWidth = cached !== undefined && windowTokens ? Math.min(used ?? 0, cached / windowTokens * 100) : 0;
   const duration = snapshot ? snapshot.usage?.generation_ms : latestRound?.generationMs;
-  const reset = () => { drag.current = null; setSelected(null); };
   const content = (large: boolean) => <motion.div layoutId={layoutId} transition={{ duration: reducedMotion ? 0 : 0.25, ease: [0.2, 0, 0, 1] }} className={cn("flex flex-col gap-3", sidebar && !large && "h-full min-h-0")}>
     <FileGraph graph={snapshot?.graph ?? EMPTY_GRAPH} expanded={large} sidebar={sidebar && !large} onExpand={() => setExpanded(!large)} onOpenFile={onOpenFile ? (path) => { setExpanded(false); onOpenFile(path); } : undefined} />
-    <div onPointerEnter={() => setMeterHover(true)} onPointerLeave={() => { if (!drag.current) setMeterHover(false); }} className={cn(surface, sidebar && !large && sidebarSurface, "relative flex h-14 shrink-0 items-center gap-4 px-4 transition-transform duration-150 ease-out motion-reduce:transition-none", meterHover && "scale-[1.015]")}>
-      <div role="slider" tabIndex={0} aria-label={t("thread.composer.context.history")}
-        aria-valuemin={0} aria-valuemax={Math.max(0, snapshots.length - 1)} aria-valuenow={Math.max(0, index)}
-        aria-valuetext={used === null ? undefined : `${Math.round(used)}%`}
-        onFocus={() => setMeterHover(true)} onBlur={() => { reset(); setMeterHover(false); }}
-        onPointerDown={(e) => { if (e.button !== 0) return; e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, index: snapshots.length - 1 }; setMeterHover(true); }}
-        onPointerMove={(e) => { if (drag.current && snapshots.length) setSelected(Math.max(0, Math.min(snapshots.length - 1, drag.current.index + Math.round((e.clientX - drag.current.x) / 24)))); }}
-        onPointerUp={(e) => { reset(); if (e.pointerType !== "mouse") setMeterHover(false); }} onPointerCancel={() => { reset(); setMeterHover(false); }} onLostPointerCapture={reset}
-        onKeyDown={(e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); setSelected(Math.max(0, Math.min(snapshots.length - 1, index + (e.key === "ArrowLeft" ? -1 : 1)))); } if (e.key === "Escape" || e.key === "End") reset(); }}
-        className="flex h-11 flex-1 touch-none cursor-ew-resize items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <div className="flex shrink-0 items-center gap-3">
+    <div onPointerEnter={() => setMeterHover(true)} onPointerLeave={() => setMeterHover(false)} className={cn(surface, "relative flex h-14 min-w-0 flex-1 items-center gap-4 px-4 transition-transform duration-150 ease-out motion-reduce:transition-none", meterHover && "scale-[1.015]")}>
+      <div className="flex h-11 flex-1 items-center">
         <div role="progressbar" aria-label={t("thread.composer.context.contextTitle")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={used === null ? undefined : Math.round(used)} className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <span className="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/45 transition-[width] duration-150 ease-out motion-reduce:transition-none" style={{ width: `${used ?? 0}%` }} />
           <span className="absolute inset-y-0 left-0 rounded-full bg-orange-500 transition-[width] duration-150 ease-out motion-reduce:transition-none" style={{ width: `${cachedWidth}%` }} />
         </div>
       </div>
-      <span className="text-sm tabular-nums">{used === null ? "—" : `${Math.round(used)}%`}</span>
-      {meterHover && <div className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 min-w-48 rounded-xl bg-popover px-3 py-2.5 font-sans text-xs font-normal leading-5 shadow-lg">
+      <span className="text-sm tabular-nums">{used === null ? "—" : `${estimated ? "≈" : ""}${Math.round(used)}%`}</span>
+      {meterHover && (cached !== undefined || duration !== undefined || replay !== null) && <div className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 min-w-48 rounded-xl bg-popover px-3 py-2.5 font-sans text-xs font-normal leading-5 shadow-lg">
         <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-6 gap-y-1">
           {cached !== undefined && !!input && <><dt className="text-muted-foreground">{t("thread.composer.context.cacheHitRate")}</dt><dd className="whitespace-nowrap text-right tabular-nums text-popover-foreground">{Math.round(cached / input * 100)}%</dd></>}
           {duration !== undefined && <><dt className="text-muted-foreground">{t("thread.composer.context.duration")}</dt><dd className="whitespace-nowrap text-right tabular-nums text-popover-foreground">{formatTurnLatency(duration)}</dd></>}
-          <dt className={cn("text-muted-foreground", snapshots.length === 0 && "col-span-2")}>{t("thread.composer.context.dragHistory")}</dt>
-          {snapshots.length > 0 && <dd className="whitespace-nowrap text-right tabular-nums text-muted-foreground">{index + 1}/{snapshots.length}</dd>}
+          {replay && <><dt className="text-muted-foreground">{t("thread.composer.context.history")}</dt>
+            <dd className="text-right tabular-nums text-muted-foreground">{replay.index + 1}/{replay.frames.length}</dd></>}
         </dl>
       </div>}
+    </div>
+    <ContextReplayButton disabled={replay !== null || snapshots.length < 2}
+      onPlay={() => { setMeterHover(false); setReplay({ frames: [...snapshots], index: 0 }); }} />
     </div>
   </motion.div>;
   return <LayoutGroup>
     {!expanded && content(false)}
-    <Dialog open={expanded} onOpenChange={(open) => { setExpanded(open); reset(); }}>
+    <Dialog open={expanded} onOpenChange={setExpanded}>
       <DialogContent showCloseButton={false} aria-describedby={undefined} overlayClassName="context-expanded-overlay bg-background/30 backdrop-blur-md" className="w-[min(960px,calc(100vw-2rem))] max-w-none border-0 bg-transparent p-0 shadow-none !animate-none">
         <DialogTitle className="sr-only">{t("thread.composer.context.panelTitle")}</DialogTitle>
         {content(true)}

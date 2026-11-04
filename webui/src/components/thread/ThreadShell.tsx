@@ -76,13 +76,16 @@ import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
+import { composerContextSnapshots } from "@/lib/context-graph";
 import { useClient } from "@/providers/ClientProvider";
 
 function latestComposerContextUsage(messages: ComposerUsageSnapshot[]): ComposerContextUsage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.compacted) {
-      return null;
+      return message.estimatedContextTokens !== undefined
+        ? { contextTokens: message.estimatedContextTokens, contextWindowTokens: message.contextWindowTokens, estimated: true }
+        : null;
     }
     const contextTokens = message.usage?.context_tokens;
     if (
@@ -107,6 +110,7 @@ function recentComposerRoundUsage(messages: ComposerUsageSnapshot[]): ComposerRo
   const seenTurns = new Set<string>();
   for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
     const message = messages[index];
+    if (message.compacted) break;
     const turnKey = message.turnId || message.id;
     if (seenTurns.has(turnKey)) {
       continue;
@@ -708,13 +712,9 @@ export function ThreadShell({
     () => recentComposerRoundUsage(usageSnapshots),
     [usageSnapshots],
   );
-  const contextGraphSnapshots = useMemo(() => {
-    const snapshots = Array.from(modelRequests.values()).sort((a, b) => a.createdAt - b.createdAt)
-      .flatMap((request) => request.contextSnapshots ?? []).slice(-32);
-    return usageSnapshots.at(-1)?.compacted
-      ? [...snapshots, { id: "compacted", graph: { nodes: [], edges: [] } }]
-      : snapshots;
-  }, [modelRequests, usageSnapshots]);
+  const contextGraphSnapshots = useMemo(
+    () => composerContextSnapshots(messages, modelRequests), [messages, modelRequests],
+  );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
   const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"
@@ -1528,7 +1528,7 @@ export function ThreadShell({
             retryStatus={retryStatus}
             emptyState={emptyState}
             initialLoading={initialHistoryLoading}
-            composer={composerPortalTarget === undefined || ((previewOpen || contextSidebarOpen) && composerActive) ? composer : null}
+            composer={composerPortalTarget === undefined || (previewOpen && composerActive) ? composer : null}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
@@ -1555,7 +1555,7 @@ export function ThreadShell({
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
         : null}
-      {composerPortalTarget && !(previewOpen || contextSidebarOpen) ? createPortal(
+      {composerPortalTarget && !previewOpen ? createPortal(
         <div
           hidden={!composerActive}
           aria-hidden={!composerActive}

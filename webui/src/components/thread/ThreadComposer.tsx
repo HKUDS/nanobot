@@ -1179,6 +1179,7 @@ export function ThreadComposer({
   const formRef = useRef<HTMLFormElement>(null);
   const tabFocusRequested = useRef(false);
   const [compactControls, setCompactControls] = useState(false);
+  const [usageTriggerHost, setUsageTriggerHost] = useState<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     // Automatic session focus should not open the hint; keyboard navigation should.
@@ -2599,7 +2600,7 @@ export function ThreadComposer({
   ) : null;
   const usageInMeta = mobileWorkspaceControls || compactControls;
   const usageControl = !voiceRecorder.isRecording && (contextUsage || recentRoundUsage.length || contextSnapshots.length) ? (
-    <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} snapshots={contextSnapshots} onOpenFile={onOpenContextFile} showLabel={usageInMeta} compactLabel={mobileWorkspaceControls} sidebarHost={contextSidebarHost} open={contextSidebarOpen} onOpenChange={onContextSidebarOpenChange} />
+    <ComposerUsagePopover triggerHost={usageTriggerHost} context={contextUsage} rounds={recentRoundUsage} snapshots={contextSnapshots} onOpenFile={onOpenContextFile} showLabel={usageInMeta} compactLabel={mobileWorkspaceControls} sidebarHost={contextSidebarHost} open={contextSidebarOpen} onOpenChange={onContextSidebarOpenChange} />
   ) : null;
   const inputTextClasses = cn(
     // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
@@ -2914,7 +2915,7 @@ export function ThreadComposer({
             )}
           >
             {modelControl}
-            {!usageInMeta ? usageControl : null}
+            {!usageInMeta && usageControl ? <span className="contents" ref={setUsageTriggerHost} /> : null}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2991,12 +2992,13 @@ export function ThreadComposer({
           </div>
           {usageInMeta && usageControl || mobileWorkspaceControls && accessControl ? (
             <div className={cn("ml-auto flex shrink-0 items-center gap-1", mobileWorkspaceControls && "h-11 max-w-[calc(100%-3rem)]")}>
-              {usageInMeta ? usageControl : null}
+              {usageInMeta && usageControl ? <span className="contents" ref={setUsageTriggerHost} /> : null}
               {mobileWorkspaceControls ? accessControl : null}
             </div>
           ) : null}
         </div>
       ) : null}
+      {usageControl}
     </form>
   );
 }

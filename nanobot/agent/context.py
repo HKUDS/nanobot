@@ -15,6 +15,7 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
     append_runtime_context,
+    runtime_context_source_metadata,
 )
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.session.keys import last_channel_from_metadata
@@ -99,7 +100,7 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        parts.append(render_template("agent/tool_contract.md"))
+        parts.append(render_template("agent/tool_contract.md", track_source=True))
 
         project_path = root.expanduser().resolve()
         if project_path != self.workspace.expanduser().resolve():
@@ -129,7 +130,7 @@ class ContextBuilder:
                 workspace=root,
             )
         if skills_summary:
-            parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
+            parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary, track_source=True))
 
         if session_summary and session_summary["text"] != "(nothing)":
             parts.append(
@@ -149,6 +150,7 @@ class ContextBuilder:
 
         return render_template(
             "agent/identity.md",
+            track_source=True,
             workspace_path=workspace_path,
             agent_workspace_path=agent_workspace_path,
             runtime=runtime,
@@ -287,7 +289,6 @@ class ContextBuilder:
                 *transcript.history,
             ]
             messages[0]["_meta"] = source_metadata(messages[0]["content"], sources.copy())
-            sources.clear()
             if transcript.current_message is None:
                 return messages
 
@@ -297,8 +298,6 @@ class ContextBuilder:
                 current_role=transcript.current_role,
                 runtime_context_blocks=transcript.runtime_context_blocks,
             )
-            if sources and isinstance(current.get("content"), str):
-                current["_meta"] = {**current.get("_meta", {}), **source_metadata(current["content"], sources.copy())}
             messages.append(current)
             return messages
 
@@ -324,6 +323,8 @@ class ContextBuilder:
             current["_meta"] = {
                 RUNTIME_CONTEXT_MESSAGE_META: runtime_context_meta,
             }
+        if source_meta := runtime_context_source_metadata(merged, blocks):
+            current["_meta"] = {**current.get("_meta", {}), **source_meta}
         return current
 
     def build_user_content(

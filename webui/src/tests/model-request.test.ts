@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseWebuiThreadPayload } from "@/lib/api";
+import { composerContextSnapshots } from "@/lib/context-graph";
 import { composerUsageSnapshots } from "@/lib/model-request";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadTranscript } from "@/lib/thread-transcript";
@@ -74,10 +75,10 @@ describe("model request snapshots", () => {
     expect(latest().compacted).toBe(false);
     send({ ...envelope, event: "context_compaction", compaction_id: "compact", phase: "succeeded", turn_seq: 3 });
     expect(latest().compacted).toBe(true);
-    expect(latest().roundUsages).toEqual(rounds(1));
+    expect(latest().roundUsages).toBeUndefined();
     send(request(4, { usage: usage(1), round_usages: rounds(1) }));
     expect(latest().compacted).toBe(true);
-    expect(latest().roundUsages).toEqual(rounds(1));
+    expect(latest().roundUsages).toBeUndefined();
     expect(projectWebuiThreadMessages(transcript.messages).map((row) => row.kind)).toEqual(["compaction"]);
     const smaller = { ...usage(2), context_tokens: 50 };
     send(request(5, { request_id: "request-4", phase: "completed", usage: smaller, round_usages: rounds(2) }));
@@ -100,7 +101,7 @@ describe("model request snapshots", () => {
     ] as ThreadProjectionEvent[]) project(transcript, event, persisted);
     const snapshot = composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)!;
     expect(snapshot.compacted).toBe(true);
-    expect(snapshot.roundUsages).toEqual(rounds(1));
+    expect(snapshot.roundUsages).toBeUndefined();
   });
 
   it("preserves legacy compaction invalidation and historical rounds without request events", () => {
@@ -216,4 +217,33 @@ describe("model request snapshots", () => {
     expect(snapshot.roundUsages).toHaveLength(8);
     expect(snapshot.roundUsages?.[0].prompt_tokens).toBe(102);
   });
+});
+
+
+it.each([false, true])("starts a new graph history and estimated meter at compaction (persisted=%s)", (persisted) => {
+  const transcript = new ThreadTranscript();
+  const oldGraph = { nodes: [{ path: "/read.md", name: "read.md", state: "loaded" as const, tokens: 300 }], edges: [] };
+  const systemGraph = { nodes: [{ path: "/SOUL.md", name: "SOUL.md", state: "loaded" as const, tokens: 40 }], edges: [] };
+  project(transcript, request(1, { context_graph: oldGraph, phase: "completed", usage: usage(1) }), persisted);
+  const event = parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [{ ...envelope, event: "context_compaction", compaction_id: "boundary",
+    phase: "succeeded", turn_seq: 2, context_snapshot: { graph: systemGraph, estimated_tokens: 1200, context_window_tokens: 10000 } }] }).events[0];
+  expect(event).not.toBeNull();
+  if (!event) throw new Error("Compaction snapshot rejected");
+  project(transcript, event, persisted);
+  expect(composerContextSnapshots(transcript.messages, transcript.modelRequests)).toEqual([
+    { id: "compaction-boundary", graph: systemGraph, estimatedTokens: 1200, contextWindowTokens: 10000 },
+  ]);
+  expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)).toMatchObject({
+    compacted: true, estimatedContextTokens: 1200, contextWindowTokens: 10000,
+  });
+  const reloadedRequests = new Map(transcript.modelRequests);
+  reloadedRequests.set("older-turn", {
+    ...transcript.modelRequests.get("turn")!, createdAt: 0,
+    contextSnapshots: [{ id: "older-request", graph: oldGraph, turnSeq: 1 }],
+  });
+  expect(composerContextSnapshots(transcript.messages, reloadedRequests).map((s) => s.id))
+    .toEqual(["compaction-boundary"]);
+  project(transcript, request(3, { context_graph: systemGraph, phase: "completed", usage: { context_tokens: 1300, request_count: 2 } }), persisted);
+  expect(composerContextSnapshots(transcript.messages, transcript.modelRequests).map((s) => s.id)).toEqual(["compaction-boundary", "request-3"]);
+  expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)).toMatchObject({ compacted: false, usage: { context_tokens: 1300 } });
 });

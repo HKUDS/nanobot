@@ -59,7 +59,7 @@ const LazyHighlightedCode = lazy(async () => {
           customStyle={{
             background: "transparent",
             margin: 0,
-            padding: chrome === "none" ? "0.75rem 1rem" : "1rem 3.5rem 1rem 1.25rem",
+            padding: viewportHighlight ? "0.75rem 1rem 0.75rem 0.5rem" : chrome === "none" ? "0.75rem 1rem" : "1rem 3.5rem 1rem 1.25rem",
             fontFamily: "inherit",
             fontSize: "inherit",
             lineHeight: "inherit",
@@ -134,7 +134,7 @@ function CodeTextBlock({
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
         chrome === "default"
           ? "py-4 pl-5 pr-14"
-          : compact ? "px-4 py-3" : "p-3",
+          : compact ? "py-3 pl-2 pr-4" : "p-3",
         className,
       )}
       data-testid={testId}
@@ -143,7 +143,7 @@ function CodeTextBlock({
         {showLineNumbers && compact ? (
           <span className="flex min-w-max">
             <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground"
-              style={{ minWidth: "4.25em" }}>{lines.map((_, index) => index + 1).join("\n")}</span>
+              style={{ minWidth: `calc(${String(lines.length).length}ch + 1.15rem)` }}>{lines.map((_, index) => index + 1).join("\n")}</span>
             <span>{renderText(code)}</span>
           </span>
         ) : showLineNumbers ? (

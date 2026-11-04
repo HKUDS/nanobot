@@ -8,6 +8,7 @@ type Role = "user" | "assistant" | "tool" | "system";
 type MessageKind = "message" | "trace" | "compaction";
 
 export interface UIContextCompaction extends ContextCompaction {
+  contextSnapshot?: ContextSnapshot;
   /** Lifecycle event sequence, independent of the row's display position. */
   turnSeq?: number;
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
@@ -195,7 +196,15 @@ export interface ContextGraph {
   edges: { source: string; target: string }[];
 }
 
+export interface ContextInspection {
+  graph: ContextGraph;
+  estimated_tokens: number;
+  context_window_tokens: number;
+}
+
 export interface ContextSnapshot {
+  turnSeq?: number;
+  estimatedTokens?: number;
   id: string;
   graph: ContextGraph;
   usage?: TurnUsage;
@@ -1566,7 +1575,8 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
-  | (NotificationEvent & InboundTurnMetadata)
+  | (Exclude<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata)
+  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection })
   | ({
       event: "file_edit";
       chat_id: string;

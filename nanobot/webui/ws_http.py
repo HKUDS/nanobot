@@ -29,6 +29,7 @@ from websockets.http11 import Response
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.application import builtin_command_palette
+from nanobot.context_graph import ContextSnapshot
 from nanobot.cron.binding import CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -390,6 +391,7 @@ class GatewayHTTPHandler:
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None,
         subagent_manager: SubagentManager | None = None,
+        inspect_session_context: Callable[[str], Awaitable[ContextSnapshot | None]] | None = None,
         discard_session: Callable[[str], Awaitable[None]] | None = None,
         log: Any = logger,
     ) -> None:
@@ -397,6 +399,7 @@ class GatewayHTTPHandler:
         self.session_manager = session_manager
         self.sidebar_state = WebUISidebarState(session_manager.state if session_manager is not None else None)
         self.static_dist_path = static_dist_path
+        self.inspect_session_context = inspect_session_context
         self.runtime_model_name = runtime_model_name
         self.bus = bus
         self.tokens = tokens
@@ -1094,6 +1097,14 @@ class GatewayHTTPHandler:
         )
 
     async def _handle_webui_thread_get_async(self, request: WsRequest, key: str) -> Response:
+        current_context = None
+        decoded_key = _decode_api_key(key)
+        if (self.inspect_session_context is not None and self.check_api_token(request)
+                and decoded_key is not None and _is_websocket_channel_session_key(decoded_key)
+                and _query_first(_parse_query(request.path), "include_model_requests") == "1"
+                and not _query_first(_parse_query(request.path), "before")
+                and not _query_first(_parse_query(request.path), "after")):
+            current_context = await self.inspect_session_context(decoded_key)
         diagnostics = _WebUIThreadDiagnostics()
         loop = asyncio.get_running_loop()
         expected_sample_at = loop.time() + 0.05
@@ -1112,7 +1123,7 @@ class GatewayHTTPHandler:
         timer = loop.call_later(0.05, sample_event_loop_lag)
         started = time.perf_counter()
         def project(request: WsRequest, key: str, *, history: HistoryReader) -> Response:
-            return self._handle_webui_thread_get(request, key, history=history, diagnostics=diagnostics)
+            return self._handle_webui_thread_get(request, key, history=history, diagnostics=diagnostics, current_context=current_context)
 
         try:
             response = await self._project_session_history(request, key, project)
@@ -1170,6 +1181,7 @@ class GatewayHTTPHandler:
         *,
         history: HistoryReader,
         diagnostics: _WebUIThreadDiagnostics | None = None,
+        current_context: ContextSnapshot | None = None,
     ) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -1215,6 +1227,7 @@ class GatewayHTTPHandler:
         include_model_requests = _query_first(query, "include_model_requests") == "1"
         revision_variant = {
             "include_model_requests": include_model_requests,
+            "current_context": current_context,
             "active_turn_id": active_turn_id,
             "active_turn_started_at": active_turn_started_at,
             "active_turn_transcript_persistence_failed": (
@@ -1260,6 +1273,14 @@ class GatewayHTTPHandler:
             diagnostics.build_ms = (time.perf_counter() - build_started) * 1000
         if data is None:
             return _http_error(404, "webui thread not found")
+        if current_context is not None:
+            for event in reversed(data.get("events", [])):
+                if event.get("event") == "model_request":
+                    break
+                if event.get("event") == "context_compaction" and event.get("phase") == "succeeded":
+                    if "context_snapshot" not in event:
+                        event["context_snapshot"] = current_context
+                    break
         data["workspace_scope"] = scope.payload()
         revision_variant["session_version"] = self._read_session_version(decoded_key)
         final_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)

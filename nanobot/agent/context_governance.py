@@ -21,6 +21,7 @@ from uuid import uuid4
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
+from nanobot.context_graph import build_context_snapshot, retained_source_metadata, source_metadata
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
@@ -215,6 +216,11 @@ class ContextCompactionState:
                     prefix[index]["content"] = (
                         f"{content}\n\n---\n\n{archived_context}"
                     )
+                    if metadata := retained_source_metadata(content, prefix[index].get("_meta")):
+                        prefix[index]["_meta"] = {
+                            **prefix[index].get("_meta", {}),
+                            **source_metadata(prefix[index]["content"], metadata["context_sources"]),
+                        }
                     return prefix
             return [{"role": "system", "content": archived_context}, *prefix]
 
@@ -408,6 +414,17 @@ class ContextGovernor:
                         merged.get("content"),
                         injection.get("content"),
                     )
+                receipts = [
+                    receipt
+                    for original in (prepared[-1], injection)
+                    if (metadata := retained_source_metadata(original.get("content"), original.get("_meta")))
+                    for receipt in metadata["context_sources"]
+                ]
+                if receipts and isinstance(merged["content"], str):
+                    merged["_meta"] = {
+                        **merged.get("_meta", {}),
+                        **source_metadata(merged["content"], receipts),
+                    }
                 prepared[-1] = merged
                 continue
             prepared.append(injection)
@@ -711,6 +728,11 @@ class ContextGovernor:
                 compaction_id=compaction_id,
                 phase="succeeded",
                 reason="context_pressure",
+                context_snapshot=await self.prepare_in_background(
+                    build_context_snapshot, prepared, state.config.tools.get_definitions(),
+                    provider=state.config.provider, model=state.config.model,
+                    context_window_tokens=state.config.context_window_tokens or 0,
+                ),
             ),
         )
         return prepared

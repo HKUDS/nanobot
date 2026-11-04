@@ -896,6 +896,27 @@
       visibility: hidden;
     }
   }
+  @media (max-width: 639px) {
+    .context-drawer-backdrop {
+      animation: context-drawer-backdrop-in 150ms cubic-bezier(0.2, 0, 0, 1);
+      transition: background-color 150ms cubic-bezier(0.2, 0, 0, 1), backdrop-filter 150ms cubic-bezier(0.2, 0, 0, 1);
+    }
+    .context-drawer-backdrop:has(.context-drawer-panel[data-state="closed"]) {
+      animation: none;
+      background-color: transparent;
+      backdrop-filter: blur(0px);
+    }
+  }
+  @keyframes context-drawer-backdrop-in {
+    from { background-color: transparent; backdrop-filter: blur(0px); }
+    to { background-color: rgb(0 0 0 / 0.25); backdrop-filter: blur(8px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .context-drawer-backdrop { animation: none; transition: none; }
+  }
+  .thread-preview-layout:has(.context-drawer-panel) > .thread-conversation {
+    visibility: visible;
+  }
   .thread-preview-layout[data-preview-open] > .thread-conversation {
     --thread-header-position: relative;
   }
@@ -1201,16 +1222,21 @@
   }
 }
 
-.thread-composer-surface {
+.thread-composer-surface,
+.context-inspector-surface {
   --composer-shadow-color: 240 10% 16%;
   --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
+.thread-composer-surface {
   transition: var(--theme-paint-transition, background-color 160ms ease-out, box-shadow 160ms ease-out), opacity 160ms ease-out;
   container-name: thread-composer;
   container-type: inline-size;
 }
 
-.dark .thread-composer-surface {
+.dark .thread-composer-surface,
+.dark .context-inspector-surface {
   --composer-shadow-color: 240 12% 3%;
 }
 
@@ -1219,7 +1245,7 @@
 }
 
 @media (forced-colors: active) {
-  .thread-composer-surface { outline: 1px solid CanvasText; }
+  .thread-composer-surface, .context-inspector-surface { outline: 1px solid CanvasText; }
   .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
 }
 

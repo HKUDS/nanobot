@@ -1,13 +1,16 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SidebarPanel } from "@/components/ui/sidebar-panel";
 import { ContextInspector } from "./ContextInspector";
 import type { ContextSnapshot } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export interface ComposerContextUsage {
+  estimated?: boolean;
   contextTokens: number;
   contextWindowTokens?: number;
 }
@@ -52,6 +55,7 @@ export function ComposerUsagePopover({
   showLabel = false,
   compactLabel = false,
   sidebarHost,
+  triggerHost,
   open: controlledOpen,
   onOpenChange,
 }: {
@@ -62,21 +66,27 @@ export function ComposerUsagePopover({
   showLabel?: boolean;
   compactLabel?: boolean;
   sidebarHost?: HTMLElement | null;
+  triggerHost?: HTMLElement | null;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [localOpen, setLocalOpen] = useState(false);
   const open = controlledOpen ?? localOpen;
-  const setOpen = (next: boolean) => { setLocalOpen(next); onOpenChange?.(next); };
+  const interactedOutside = useRef(false);
+  const setOpen = (next: boolean) => { if (next) interactedOutside.current = false; setLocalOpen(next); onOpenChange?.(next); };
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const sidebarRef = useRef<HTMLElement>(null);
+  const [narrow, setNarrow] = useState(false);
   useEffect(() => {
-    if (open && (sidebarHost?.clientWidth ?? window.innerWidth) < 780) {
-      sidebarRef.current?.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
-    }
-  }, [open, sidebarHost]);
+    const measure = () => setNarrow((sidebarHost?.clientWidth ?? window.innerWidth) < 780);
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (sidebarHost) observer.observe(sidebarHost);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+  }, [sidebarHost]);
   const close = () => { setOpen(false); requestAnimationFrame(() => triggerRef.current?.focus()); };
   const normalizedRounds = useMemo(() => normalizeRounds(rounds), [rounds]);
   const hasContext = !!context
@@ -107,7 +117,7 @@ export function ComposerUsagePopover({
     ? detailsLabel
     : t("thread.composer.context.tooltip", {
         defaultValue: "Context {{percent}}%",
-        percent: contextPercentage,
+        percent: `${context?.estimated ? "≈" : ""}${contextPercentage}`,
       });
   const triggerLabel = contextPercentage === null
     ? detailsLabel
@@ -176,23 +186,50 @@ export function ComposerUsagePopover({
         )}
         {showTextLabel ? (
           <span aria-hidden className="whitespace-nowrap tabular-nums">
-            {compactLabel && contextPercentage !== null ? `${contextPercentage}%` : contextDescription}
+            {compactLabel && contextPercentage !== null ? `${context?.estimated ? "≈" : ""}${contextPercentage}%` : contextDescription}
           </span>
         ) : null}
       </button>
   );
 
-  return <TooltipProvider>
+  const triggerWithTooltip = <TooltipProvider>
     <Tooltip>
       <TooltipTrigger asChild>{trigger}</TooltipTrigger>
       <TooltipContent side="top" className="text-xs">{contextDescription}</TooltipContent>
     </Tooltip>
-    {open && createPortal(
-      <SidebarPanel width={420} floating={!sidebarHost} ref={sidebarRef} id={panelId} aria-label={t("thread.composer.context.panelTitle")} data-testid="context-sidebar"
-        onKeyDown={(event) => { if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); close(); } }}
-        >
-          <ContextInspector sidebar context={context} rounds={rounds} snapshots={snapshots}
-            onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />
-      </SidebarPanel>, sidebarHost ?? document.body)}
   </TooltipProvider>;
+
+  const header = <>
+    <span className="min-w-0 flex-1 truncate text-sm font-medium">{t("thread.composer.context.panelTitle")}</span>
+    <button type="button" aria-label={t("common.close")} onClick={close}
+      className="touch-target grid size-10 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <X className="size-4" />
+    </button>
+  </>;
+  const inspector = <ContextInspector sidebar context={context} rounds={rounds} snapshots={snapshots}
+    onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
+  const onPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); close(); }
+  };
+
+  return <>
+    {triggerHost === undefined ? triggerWithTooltip : triggerHost && createPortal(triggerWithTooltip, triggerHost)}
+    {narrow ? <Dialog open={open} onOpenChange={setOpen} modal={!sidebarHost}>
+      <DialogContent portalContainer={sidebarHost} placement="bottom" id={panelId} aria-describedby={undefined}
+        data-testid="context-sidebar"
+        overlayClassName={cn("context-drawer-backdrop", sidebarHost && "absolute bg-black/25 backdrop-blur-[8px] sm:bg-transparent sm:backdrop-blur-none")}
+        className="context-drawer-panel flex h-[85%] min-h-0 max-w-none flex-col gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        onCloseAutoFocus={(event) => { event.preventDefault(); if (!interactedOutside.current) triggerRef.current?.focus({ preventScroll: true }); }}
+        onInteractOutside={(event) => {
+          if (event.target instanceof Node && triggerRef.current?.contains(event.target)) event.preventDefault();
+          else interactedOutside.current = true;
+        }}>
+        <DialogTitle className="sr-only">{t("thread.composer.context.panelTitle")}</DialogTitle>
+        {inspector}
+      </DialogContent>
+    </Dialog> : open && createPortal(<SidebarPanel width={420} floating={!sidebarHost} ref={sidebarRef} id={panelId}
+      header={header} aria-label={t("thread.composer.context.panelTitle")} data-testid="context-sidebar" onKeyDown={onPanelKeyDown}>
+      {inspector}
+    </SidebarPanel>, sidebarHost ?? document.body)}
+  </>;
 }

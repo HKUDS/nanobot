@@ -21,7 +21,7 @@ from nanobot.agent.skill_metadata import (
 from nanobot.agent.skill_metadata import (
     valid_skill_metadata as valid_skill_metadata,
 )
-from nanobot.context_graph import record_source
+from nanobot.context_graph import capture_sources, record_source
 from nanobot.runtime_context import RuntimeContextBlock
 
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
@@ -234,11 +234,13 @@ class SkillsLoader:
             return None
         always_active = set(self.get_always_skills())
         skill_names = [name for name in skill_names if name not in always_active]
-        content = self.load_skills_for_context(skill_names)
+        with capture_sources() as sources:
+            content = self.load_skills_for_context(skill_names)
         if not content:
             return None
         return RuntimeContextBlock(
             source="explicit_skills",
+            context_sources=tuple(sources),
             content=(
                 "[Active Skills — instructions for this user turn]\n"
                 f"{content}\n"

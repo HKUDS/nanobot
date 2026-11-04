@@ -21,7 +21,7 @@ from loguru import logger
 
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_TURN_ID
 from nanobot.command.builtin import USER_SHELL_COMMAND
-from nanobot.context_graph import parse_context_graph
+from nanobot.context_graph import parse_context_graph, parse_context_snapshot
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.display_history import (
@@ -1511,6 +1511,8 @@ def _client_projection_event(
             "compaction_id": compaction_id,
             "phase": phase,
         }
+        if (snapshot := parse_context_snapshot(record.get("context_snapshot"))) is not None:
+            projected["context_snapshot"] = snapshot
         reason = record.get("reason")
         if isinstance(reason, str) and reason in {"idle", "context_pressure", "manual", "provider_native"}:
             projected["reason"] = reason
