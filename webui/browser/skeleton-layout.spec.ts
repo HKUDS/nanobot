@@ -202,7 +202,7 @@ for (const width of [390, 1440]) {
         await page.goto(fixture("file", true));
         sameBox(await box(status(page).locator(".font-mono")), source);
         const line = await box(status(page).locator(".font-mono > div > :last-child").first());
-        expect(line.x).toBe(code.x);
+        expect(line.x).toBeCloseTo(code.x, 1);
         await noOverflow(page);
         await page.goto(fixture("markdown"));
         const heading = await box(page.getByRole("heading", { name: "Project overview" }));

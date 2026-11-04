@@ -68,10 +68,10 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
                       {["w-full", "w-5/6", "w-3/4"].map((width) => <div key={width} className="mt-4 flex h-[1lh] items-center">
                         <div className={`h-3 rounded bg-muted/40 ${width}`} />
                       </div>)}
-                    </div> : <div className="px-4 py-3 font-mono text-code">
+                    </div> : <div className="py-3 pl-2 pr-4 font-mono text-code">
                       {["w-2/3", "w-full", "w-5/6", "w-3/4", "w-1/2", "w-3/5"].map((width) => <div key={width} className="flex h-[1lh] items-center">
-                        <div className="w-[4.25em] shrink-0 pr-[1.15rem]"><div className="ml-auto h-3 w-2 rounded bg-muted/40" /></div>
-                        <div className={`h-3 max-w-[calc(100%-4.25em)] rounded bg-muted/40 ${width}`} />
+                        <div className="w-[calc(1ch+1.15rem)] shrink-0 pr-[1.15rem]"><div className="ml-auto h-3 w-2 rounded bg-muted/40" /></div>
+                        <div className={`h-3 max-w-[calc(100%-1ch-1.15rem)] rounded bg-muted/40 ${width}`} />
                       </div>)}
                     </div>}
                   </>}
