@@ -190,7 +190,7 @@ export interface UIModelRequestSnapshot {
   retiredRunIds: string[];
   createdAt: number;
   completedAt?: number;
-  /** Only a completed request with actual usage advances context freshness. */
+  /** Completed or failed requests advance context freshness only when usage.request_count increases. */
   usageTurnSeq?: number;
   ended?: boolean;
   usage?: TurnUsage;

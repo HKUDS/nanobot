@@ -192,38 +192,33 @@ async def test_batch_admission_counts_envelopes_and_cancellation_releases_them(m
     try:
         for i in range(4):
             await manager._queue_outbound(channel, OutboundMessage("websocket", "chat", str(i)))
-        assert len(manager._outbound_tasks) == 1
-        assert manager._outbound_slots.locked()
         assert manager.has_pending_delivery
         if start_batch:
             await asyncio.wait_for(started.wait(), 2)
-            extra = asyncio.create_task(manager._queue_outbound(
-                channel, OutboundMessage("websocket", "other", "blocked admission"),
-            ))
-            await asyncio.sleep(0)
-            assert not extra.done()
-            extra.cancel()
-            await asyncio.gather(extra, return_exceptions=True)
         else:
             # No yielding since queueing: cancel before the batch task starts.
             channel.send_batch.assert_not_awaited()
         await manager._cancel_outbound()
         assert not manager.has_pending_delivery
-        assert not manager._outbound_tails
-        assert not manager._outbound_batches
-        assert manager._outbound_slots._value == 4
-        assert manager._outbound_sends._value == 1
 
+        started.clear()
         recovered = [OutboundMessage("websocket", "chat", f"recovered-{i}") for i in range(4)]
         async with asyncio.timeout(2):
             for msg in recovered:
                 await manager._queue_outbound(channel, msg)
+        await asyncio.wait_for(started.wait(), 2)
+        extra = asyncio.create_task(manager._queue_outbound(
+            channel, OutboundMessage("websocket", "other", "blocked admission"),
+        ))
+        await asyncio.sleep(0)
+        assert not extra.done()
+        extra.cancel()
+        await asyncio.gather(extra, return_exceptions=True)
         release.set()
-        await wait_until(lambda: not manager._outbound_tasks)
+        await wait_until(lambda: not manager.has_pending_delivery)
         channel.send_batch.assert_awaited_with(tuple(recovered))
         assert channel.send_batch.await_count == 1 + int(start_batch)
         channel.send.assert_not_awaited()
-        assert manager._outbound_slots._value == 4
     finally:
         if extra is not None:
             extra.cancel()

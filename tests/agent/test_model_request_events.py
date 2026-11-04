@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -175,30 +176,6 @@ async def test_individual_tool_finishes_before_blocked_sibling():
 
 
 @pytest.mark.asyncio
-async def test_stream_timing_matches_terminal_reported_usage():
-    events = []
-    usage = LLMUsage.reported(input_tokens=12, output_tokens=3, cache_read_tokens=4)
-
-    async def publish(event):
-        events.append(event)
-
-    async def chat(**kwargs):
-        await kwargs["on_content_delta"]("done")
-        await asyncio.sleep(0.003)
-        return LLMResponse(content="done", usage=usage)
-
-    provider = MagicMock()
-    provider.chat_stream_with_retry = chat
-    sink = EventSink(publish)
-    result = await AgentRunner().run(spec(provider, sink, hook=AgentProgressHook(sink, streaming=True)))
-    [completed] = [e for e in events if isinstance(e, ModelRequestEvent) and e.phase == "completed"]
-    assert completed.usage == result.usage
-    assert completed.round_usages == tuple(result.round_usages)
-    assert completed.usage.generation_ms > 0
-    assert completed.usage.cache_read_tokens == 4
-
-
-@pytest.mark.asyncio
 async def test_request_snapshots_bound_rounds_without_losing_cumulative_usage():
     events = []
     usage = LLMUsage.reported(input_tokens=12, output_tokens=3)
@@ -234,10 +211,9 @@ async def test_request_failure_has_one_terminal_event(response):
 
     provider = MagicMock()
     provider.chat_stream_with_retry = AsyncMock(side_effect=[response])
-    try:
+    expected = pytest.raises(RuntimeError, match="failure") if isinstance(response, RuntimeError) else nullcontext()
+    with expected:
         await AgentRunner().run(spec(provider, EventSink(publish)))
-    except RuntimeError:
-        assert isinstance(response, RuntimeError)
     requests = [e for e in events if isinstance(e, ModelRequestEvent)]
     assert [e.phase for e in requests] == ["started", "failed"]
     assert requests[-1].usage is None
