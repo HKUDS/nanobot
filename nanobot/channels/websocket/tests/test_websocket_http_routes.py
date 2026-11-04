@@ -2566,6 +2566,7 @@ async def test_session_delete_removes_unpersisted_new_chat(
     project.mkdir()
     channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=_free_port())
     connection = AsyncMock()
+    channel._webui_connections.add(connection)
     connection.remote_address = ("127.0.0.1", 50123)
     connection.request.headers = {"Host": "localhost"}
 
@@ -2716,6 +2717,7 @@ async def test_remote_new_chat_accepts_server_project_path_and_full_access(
     other_project.mkdir()
     channel = _ch(bus, workspace_path=tmp_path, port=_free_port())
     connection = AsyncMock()
+    channel._webui_connections.add(connection)
     connection.remote_address = ("192.168.1.5", 50123)
     connection.request = _FakeReq(
         {

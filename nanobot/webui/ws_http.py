@@ -448,15 +448,6 @@ class GatewayHTTPHandler:
             mcp_oauth_redirect_uri=self._mcp_oauth_redirect_uri,
         )
 
-    def workspace_project_selection_available(self, connection: Any) -> bool:
-        """Return whether an authenticated WebUI may submit a server path.
-
-        Project paths are interpreted by the gateway, not by the browser. The
-        WebUI route and WebSocket handshake already authenticate the caller,
-        so remote clients can use the manual server-path picker as well.
-        """
-        return True
-
 
     def check_api_token(self, request: WsRequest) -> bool:
         if getattr(request, "_nanobot_trusted_proxy_authenticated", False):
@@ -1726,15 +1717,13 @@ class GatewayHTTPHandler:
             return _http_error(401, "Unauthorized")
         return _http_json_response(
             self.workspaces.payload(
-                can_change_project=self.workspace_project_selection_available(connection),
+                can_change_project=True,  # This HTTP route requires owner API authentication.
             )
         )
 
     def _handle_workspace_favorite(self, connection: Any, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if not self.workspace_project_selection_available(connection):
-            return _http_error(403, "project selection is unavailable for this connection")
         payload = _mutation_payload(request) or {}
         try:
             favorites = self.workspaces.set_favorite_project(payload.get("path"), payload.get("pinned"))
@@ -1747,8 +1736,6 @@ class GatewayHTTPHandler:
     async def _handle_workspace_resolve_project(self, connection: Any, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if not self.workspace_project_selection_available(connection):
-            return _http_error(403, "project selection is unavailable for this connection")
         payload = _mutation_payload(request) or {}
         try:
             project = self.workspaces.resolve_project(payload.get("path"))
@@ -1759,8 +1746,6 @@ class GatewayHTTPHandler:
     async def _handle_workspace_directories(self, connection: Any, request: WsRequest) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if not self.workspace_project_selection_available(connection):
-            return _http_error(403, "project selection is unavailable for this connection")
         query = _parse_query(request.path)
         try:
             payload = await asyncio.to_thread(
