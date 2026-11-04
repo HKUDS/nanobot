@@ -46,7 +46,7 @@ def test_accepted_handoff_uses_the_producer_id_and_requires_native_success():
     jobs = workflow("release-candidate.yml")["jobs"]
     assert jobs["candidate"]["outputs"]["prepared_artifact_id"] == "${{ steps.prepared.outputs.artifact-id }}"
     verified = jobs["verified"]
-    assert set(verified["needs"]) == {"candidate", "native"}
+    assert set(verified["needs"]) == {"plan", "candidate", "native"}
     gate = verified["steps"][0]
     assert gate["env"]["NATIVE_RESULT"] == "${{ needs.native.result }}"
     assert gate["run"] == 'test "$BUILD_RESULT" = success && test "$NATIVE_RESULT" = success'
