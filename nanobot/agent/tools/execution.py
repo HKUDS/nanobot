@@ -63,7 +63,7 @@ async def execute_tool_calls(
     model_messages: list[dict[str, Any]] | None = None,
     compacted_tool_results: set[str] | None = None,
     on_settled: Callable[[list[ToolCallResult]], Awaitable[None]] | None = None,
-) -> tuple[list[Any], list[dict[str, str]]]:
+) -> None:
     """Own tool tasks through settlement, including results whose notification failed."""
     @cache
     def read_results() -> dict[str, str]:
@@ -130,8 +130,6 @@ async def execute_tool_calls(
         settled = [result for result in tool_results if result is not None]
         if settled and on_settled is not None:
             await on_settled(settled)
-
-    return [entry.result for entry in settled], [entry.event for entry in settled]
 
 
 async def _execute_tool_call_inner(

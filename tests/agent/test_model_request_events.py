@@ -142,6 +142,7 @@ async def test_live_round_usage_folds_recovery_before_tool_finishes():
 @pytest.mark.asyncio
 async def test_individual_tool_finishes_before_blocked_sibling():
     emitted = []
+    settled = []
     fast_finished = asyncio.Event()
     release = asyncio.Event()
     tools = MagicMock()
@@ -163,6 +164,7 @@ async def test_individual_tool_finishes_before_blocked_sibling():
         tools, [ToolCallRequest("slow", "slow", {}), ToolCallRequest("fast", "fast", {})],
         concurrent=True, external_lookup_counts={}, workspace_violation_counts={},
         hook=AgentProgressHook(EventSink(publish)), context=AgentHookContext(0, []),
+        on_settled=AsyncMock(side_effect=settled.extend),
     ))
     try:
         await asyncio.wait_for(fast_finished.wait(), 2)
@@ -170,8 +172,8 @@ async def test_individual_tool_finishes_before_blocked_sibling():
         assert not any(e["call_id"] == "slow" and e["phase"] == "end" for e in emitted)
     finally:
         release.set()
-        results, _ = await task
-    assert results == ["slow", "fast"]
+        await task
+    assert [completed.result for completed in settled] == ["slow", "fast"]
     assert [(e["call_id"], e["phase"]) for e in emitted].count(("fast", "end")) == 1
 
 
