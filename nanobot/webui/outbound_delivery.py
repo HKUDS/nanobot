@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
@@ -26,6 +26,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.events import ModelRequestEvent
 from nanobot.pairing.events import PairingChanged
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
@@ -69,6 +70,7 @@ class ChatAudience:
 
 
 WebUIAudience: TypeAlias = ChatAudience | Literal["all_connections", "authenticated_webui"]
+_ACTIVITY_BATCH_BYTES = 128 * 1024
 
 
 class WebUIOutboundTransport(Protocol):
@@ -135,6 +137,79 @@ class WebUIOutboundDelivery:
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in recipients:
             await self._transport.webui_send_raw(connection, raw, label=label)
+
+    def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
+        def activity(msg: OutboundMessage) -> bool:
+            event = msg.event
+            return (
+                not msg.media and not msg.metadata.get(WEBUI_RESTART_CONTROL_METADATA_KEY)
+                and (
+                    isinstance(event, ModelRequestEvent | RetryStatusEvent)
+                    or isinstance(event, ProgressEvent) and not (
+                        event.reasoning or event.reasoning_delta or event.reasoning_end or event.file_edit_events
+                    )
+                )
+            )
+
+        generation = following.metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        turn_id = following.metadata.get(WEBUI_TURN_METADATA_KEY)
+        return (
+            activity(previous) and activity(following)
+            and previous.chat_id == following.chat_id
+            and isinstance(generation, str) and bool(generation)
+            and isinstance(turn_id, str) and bool(turn_id)
+            and all(previous.metadata.get(key) == following.metadata.get(key) for key in (
+                HISTORY_GENERATION_METADATA_KEY, WEBUI_TURN_METADATA_KEY, WEBSOCKET_TURN_OWNER_METADATA_KEY,
+            ))
+            and self._temporary_chats.should_persist_transcript(following.chat_id)
+        )
+
+    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
+        """Commit ready activity together, then publish each original frame in order."""
+        first = messages[0]
+        frames: list[tuple[tuple[ServerConnection, ...], str, str]] = []
+        records: list[dict[str, Any]] = []
+        byte_count = 0
+
+        async def flush() -> None:
+            if records:
+                await self._transcripts.append_many(first.chat_id, records, metadata=first.metadata)
+            for recipients, raw, label in frames:
+                for connection in recipients:
+                    await self._transport.webui_send_raw(connection, raw, label=label)
+            frames.clear()
+            records.clear()
+
+        for msg in messages:
+            progress = msg.event if isinstance(msg.event, ProgressEvent) else None
+            if progress is not None:
+                body = self._message_payload(msg, progress)
+                persistent, label = True, " "
+            else:
+                notification = project_notification(msg.chat_id, msg.event, msg.metadata)
+                assert notification is not None
+                body = dict(notification.payload)
+                persistent = notification.persistence == "turn_activity"
+                label = f" {body['event']} "
+            if persistent:
+                self._transcripts.prepare_event(
+                    msg.chat_id, body, metadata=msg.metadata, phase="activity", include_source=progress is not None,
+                )
+            try:
+                raw = json.dumps(body, ensure_ascii=False)
+                size = len(raw.encode("utf-8"))
+            except (TypeError, ValueError, RecursionError) as exc:
+                logger.warning("WebUI activity encoding failed for {}: {}", msg.chat_id, exc)
+                continue
+            if frames and byte_count + size > _ACTIVITY_BATCH_BYTES:
+                await flush()
+                byte_count = 0
+            recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
+            frames.append((recipients, raw, label))
+            if persistent:
+                records.append({**body, "text": msg.content} if progress is not None else body)
+            byte_count += size
+        await flush()
 
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
@@ -299,8 +374,7 @@ class WebUIOutboundDelivery:
             chat_id, persisted=persisted, metadata=metadata, phase=phase,
         )
 
-    async def _send_message(self, msg: OutboundMessage, progress: ProgressEvent | None) -> None:
-        recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
+    def _message_payload(self, msg: OutboundMessage, progress: ProgressEvent | None) -> dict[str, Any]:
         text = msg.content
         user_shell = msg.metadata.get(INBOUND_META_USER_SHELL) is True
         payload: MessageWirePayload = {
@@ -333,11 +407,15 @@ class WebUIOutboundDelivery:
             payload["agent_ui"] = agent_ui
         if progress:
             payload["kind"] = "tool_hint" if progress.tool_hint else "progress"
-        body: dict[str, Any] = dict(payload)
+        return dict(payload)
+
+    async def _send_message(self, msg: OutboundMessage, progress: ProgressEvent | None) -> None:
+        recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
+        body = self._message_payload(msg, progress)
         await self._persist_turn_transcript_event(
             msg.chat_id, body, metadata=msg.metadata,
             phase="activity" if progress else "answer", include_source=True,
-            transcript_overrides={"text": text},
+            transcript_overrides={"text": msg.content},
         )
         await self._fanout(recipients, body, label=" ")
 

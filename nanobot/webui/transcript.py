@@ -565,20 +565,38 @@ class WebUITranscriptRecorder:
     async def append(
         self, chat_id: str, event: dict[str, Any], *, metadata: dict[str, Any] | None,
     ) -> bool:
+        return await self.append_many(chat_id, [event], metadata=metadata)
+
+    async def append_many(
+        self, chat_id: str, events: Sequence[dict[str, Any]], *, metadata: dict[str, Any] | None,
+    ) -> bool:
         if self.sessions is None:
             return True  # A transport-only channel has no durable session service.
         generation = (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY)
         if not isinstance(generation, str) or not generation:
             self._log.warning("history event has no admitted generation for {}", chat_id)
             return False
+        facts: list[HistoryFact] = []
+        valid = True
+        for event in events:
+            try:
+                fact = fact_from_record(_record_for_append(event))
+                if len(events) > 1:
+                    # An invalid member must not roll back otherwise valid activity.
+                    fact.encode()
+                facts.append(fact)
+            except (ValueError, TypeError) as exc:
+                self._log.warning("history append failed for {}: {}", chat_id, exc)
+                valid = False
+        if not facts:
+            return False
         try:
-            fact = fact_from_record(_record_for_append(event))
-            await self.sessions.state.append_history(webui_session_key(chat_id), [fact],
+            await self.sessions.state.append_history(webui_session_key(chat_id), facts,
                                                      expected_generation=generation)
         except (OSError, ValueError, TypeError, sqlite3.Error, SessionConflictError, SessionOperationQueueFullError) as exc:
             self._log.warning("history append failed for {}: {}", chat_id, exc)
             return False
-        return True
+        return valid
 
     def _next_turn_seq(self, chat_id: str, turn_id: str) -> int:
         key = (chat_id, turn_id)
@@ -1293,7 +1311,7 @@ def build_webui_trace_detail_response(
         events = [
             event
             for record in lines[group.start:group.stop]
-            if (
+            if record.get("event") != "model_request" and (
                 event := _client_projection_event(
                     record,
                     augment_user_media=None,
@@ -1564,6 +1582,10 @@ def _client_projection_deferred_trace_groups(
         trace_count = 0
 
     for index, record in enumerate(lines):
+        # Usage belongs to the turn, not the activity body. It must not split
+        # one deferred tool group into many eagerly loaded fragments.
+        if record.get("event") == "model_request":
+            continue
         is_activity = (
             record.get("event") == "message"
             and record.get("kind") in {"tool_hint", "progress"}
@@ -1621,7 +1643,7 @@ def _client_projection_events(
     deferred_groups = _client_projection_deferred_trace_groups(lines)
     deferred_until = 0
     for index, record in enumerate(lines):
-        if index < deferred_until:
+        if index < deferred_until and record.get("event") != "model_request":
             continue
         if record.get("event") == WEBUI_FORK_MARKER_EVENT:
             if fork_boundary_event_index is None:
@@ -1648,7 +1670,10 @@ def _client_projection_events(
             )
             event["text"] = _trace_summary(last_text)
             event.pop("tool_events", None)
-            receipts = _projection_receipts(lines[group.start:group.stop])
+            receipts = _projection_receipts([
+                grouped for grouped in lines[group.start:group.stop]
+                if grouped.get("event") != "model_request"
+            ])
             if receipts:
                 event["projection_receipts"] = receipts
             if detail_ref is not None:

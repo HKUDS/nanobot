@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { composerUsageSnapshots } from "@/lib/model-request";
+import { composerUsageSnapshots, type ComposerUsageSnapshot } from "@/lib/model-request";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
@@ -78,8 +78,7 @@ import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-function latestComposerContextUsage(rows: UIMessage[]): ComposerContextUsage | null {
-  const messages = composerUsageSnapshots(rows);
+function latestComposerContextUsage(messages: ComposerUsageSnapshot[]): ComposerContextUsage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.compacted) {
@@ -103,8 +102,7 @@ function latestComposerContextUsage(rows: UIMessage[]): ComposerContextUsage | n
   return null;
 }
 
-function recentComposerRoundUsage(rows: UIMessage[]): ComposerRoundUsage[] {
-  const messages = composerUsageSnapshots(rows);
+function recentComposerRoundUsage(messages: ComposerUsageSnapshot[]): ComposerRoundUsage[] {
   const recent: ComposerRoundUsage[] = [];
   const seenTurns = new Set<string>();
   for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
@@ -585,6 +583,7 @@ export function ThreadShell({
   }, [chatId, onTurnEnd]);
   const {
     messages,
+    modelRequests,
     messagesKey,
     messagesReady,
     isStreaming,
@@ -696,13 +695,14 @@ export function ThreadShell({
   useEffect(() => {
     if (hasAppMentions) requestMentionCatalogs();
   }, [hasAppMentions, requestMentionCatalogs]);
+  const usageSnapshots = useMemo(() => composerUsageSnapshots(messages, modelRequests), [messages, modelRequests]);
   const composerContextUsage = useMemo(
-    () => latestComposerContextUsage(messages),
-    [messages],
+    () => latestComposerContextUsage(usageSnapshots),
+    [usageSnapshots],
   );
   const composerRoundUsage = useMemo(
-    () => recentComposerRoundUsage(messages),
-    [messages],
+    () => recentComposerRoundUsage(usageSnapshots),
+    [usageSnapshots],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.

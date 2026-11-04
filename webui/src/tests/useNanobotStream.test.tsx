@@ -3856,12 +3856,12 @@ it("projects active model usage without ending the turn and ignores late usage a
       sequence: 2, turn_seq: 2, phase: "started" });
   });
   expect(result.current.isStreaming).toBe(true);
-  expect(composerUsageSnapshots(result.current.messages).at(-1)?.usage?.context_tokens).toBe(105000);
+  expect(composerUsageSnapshots(result.current.messages, result.current.modelRequests).at(-1)?.usage?.context_tokens).toBe(105000);
   act(() => result.current.stop());
   expect(result.current.isStreaming).toBe(false);
   act(() => fake.emit("chat-model", { ...envelope, event: "model_request", request_id: "late", run_id: "run",
     sequence: 3, turn_seq: 3, phase: "completed", usage: { prompt_tokens: 999, completion_tokens: 1,
       context_tokens: 999, request_count: 2 } }));
   expect(result.current.isStreaming).toBe(false);
-  expect(composerUsageSnapshots(result.current.messages).at(-1)?.usage?.context_tokens).toBe(105000);
+  expect(composerUsageSnapshots(result.current.messages, result.current.modelRequests).at(-1)?.usage?.context_tokens).toBe(105000);
 });

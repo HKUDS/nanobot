@@ -31,29 +31,29 @@ describe("model request snapshots", () => {
     for (let count = 1; count <= 3; count++) {
       const event = request(count * 2, { phase: "completed", usage: usage(count), round_usages: rounds(count), context_window_tokens: 128000 });
       events.push(event); project(transcript, event);
-      expect(composerUsageSnapshots(transcript.messages).at(-1)?.usage?.request_count).toBe(count);
-      expect(composerUsageSnapshots(transcript.messages).at(-1)?.roundUsages).toHaveLength(count);
+      expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)?.usage?.request_count).toBe(count);
+      expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)?.roundUsages).toHaveLength(count);
     }
     const started = request(7);
     events.push(started); project(transcript, started);
-    expect(composerUsageSnapshots(transcript.messages).at(-1)?.usage?.context_tokens).toBe(103);
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)?.usage?.context_tokens).toBe(103);
     const answer: ThreadProjectionEvent = { ...envelope, event: "delta", text: "answer", turn_seq: 8 };
     events.push(answer); project(transcript, answer);
-    expect(composerUsageSnapshots(transcript.messages)).toHaveLength(1);
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests)).toHaveLength(1);
     const end: ThreadProjectionEvent = { ...envelope, event: "turn_end", turn_seq: 9, usage: usage(3), round_usages: rounds(3) };
     events.push(end); project(transcript, end);
-    expect(composerUsageSnapshots(transcript.messages).flatMap((entry) => entry.roundUsages ?? [])).toHaveLength(3);
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).flatMap((entry) => entry.roundUsages ?? [])).toHaveLength(3);
     const replay = new ThreadTranscript();
     events.forEach((event) => project(replay, event, true));
-    expect(composerUsageSnapshots(replay.messages).at(-1)?.usage).toEqual(usage(3));
+    expect(composerUsageSnapshots(replay.messages, replay.modelRequests).at(-1)?.usage).toEqual(usage(3));
     project(transcript, request(10, { usage: usage(99) }));
-    expect(composerUsageSnapshots(transcript.messages).at(-1)?.usage).toEqual(usage(3));
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)?.usage).toEqual(usage(3));
   });
 
   it.each([false, true])("invalidates compacted context until fresh completion (persisted=%s)", (persisted) => {
     const transcript = new ThreadTranscript();
     const send = (event: ThreadProjectionEvent) => project(transcript, event, persisted);
-    const latest = () => composerUsageSnapshots(transcript.messages).at(-1)!;
+    const latest = () => composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)!;
     send(request(1, { phase: "completed", usage: usage(1), round_usages: rounds(1) }));
     expect(projectWebuiThreadMessages(transcript.messages)).toEqual([]);
     send({ ...envelope, event: "context_compaction", compaction_id: "compact", phase: "started", turn_seq: 2 });
@@ -84,7 +84,7 @@ describe("model request snapshots", () => {
       { ...envelope, event: "context_compaction", compaction_id: "compact", phase: "succeeded", turn_seq: 3 },
       { ...envelope, event: "turn_end", turn_seq: 4, usage: usage(1), round_usages: rounds(1) },
     ] as ThreadProjectionEvent[]) project(transcript, event, persisted);
-    const snapshot = composerUsageSnapshots(transcript.messages).at(-1)!;
+    const snapshot = composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)!;
     expect(snapshot.compacted).toBe(true);
     expect(snapshot.roundUsages).toEqual(rounds(1));
   });
@@ -94,7 +94,7 @@ describe("model request snapshots", () => {
     project(transcript, { ...envelope, event: "delta", text: "answer", turn_seq: 1 });
     project(transcript, { ...envelope, event: "turn_end", usage: usage(1), round_usages: rounds(1), turn_seq: 2 });
     project(transcript, { ...envelope, turn_id: "compact-turn", event: "context_compaction", compaction_id: "compact", phase: "succeeded", turn_seq: 1 });
-    const snapshots = composerUsageSnapshots(transcript.messages);
+    const snapshots = composerUsageSnapshots(transcript.messages, transcript.modelRequests);
     expect(snapshots.at(-1)?.compacted).toBe(true);
     expect(snapshots.flatMap((row) => row.roundUsages ?? [])).toEqual(rounds(1));
   });
@@ -107,7 +107,7 @@ describe("model request snapshots", () => {
     project(transcript, request(1, { run_id: "new-run", turn_seq: 3, usage: usage(3) }));
     const restored = new ThreadTranscript([], transcript.save());
     project(restored, request(4, { usage: usage(99) }));
-    expect(composerUsageSnapshots(restored.messages).at(-1)?.usage).toEqual(usage(3));
+    expect(composerUsageSnapshots(restored.messages, restored.modelRequests).at(-1)?.usage).toEqual(usage(3));
     expect(projectWebuiThreadMessages(restored.messages)).toEqual([]);
   });
 
@@ -118,10 +118,69 @@ describe("model request snapshots", () => {
     const read = transcript.begin("latest");
     project(transcript, request(2, { phase: "completed", usage: usage(2), round_usages: rounds(2) }));
     expect(transcript.accept({ schemaVersion: 3, projection: "events", events: [initial] }, read)).toBe(true);
-    expect(composerUsageSnapshots(transcript.messages).at(-1)?.usage).toEqual(usage(2));
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)?.usage).toEqual(usage(2));
     const fresh = new ThreadTranscript();
     expect(fresh.accept(parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [initial, request(2)] }), fresh.begin("initial"))).toBe(true);
-    expect(composerUsageSnapshots(fresh.messages).at(-1)?.roundUsages).toHaveLength(1);
+    expect(composerUsageSnapshots(fresh.messages, fresh.modelRequests).at(-1)?.roundUsages).toHaveLength(1);
+  });
+
+  it("retains proactive usage without body rows across history and clears it with a completed history reset", () => {
+    const transcript = new ThreadTranscript();
+    const events: ThreadProjectionEvent[] = [
+      { ...envelope, turn_id: "old", event: "message", text: "Old answer", turn_seq: 1, created_at_ms: 1000 },
+      { ...envelope, turn_id: "old", event: "turn_end", turn_seq: 2, usage: usage(1), round_usages: rounds(1) },
+    ];
+    const body = { schemaVersion: 3 as const, projection: "events" as const, events, completed_turn_ids: ["old"] };
+    expect(transcript.accept(body, transcript.begin("initial"))).toBe(true);
+    const read = transcript.begin("latest");
+    project(transcript, request(1, { phase: "completed", created_at_ms: 2000, usage: usage(2), round_usages: rounds(2) }));
+    expect(transcript.accept(body, read)).toBe(true);
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).map((row) => row.usage)).toEqual([usage(1), usage(2)]);
+    project(transcript, { ...envelope, event: "turn_end", turn_seq: 2, usage: usage(2), round_usages: rounds(2) });
+    const restored = new ThreadTranscript([], transcript.save());
+    expect(composerUsageSnapshots(restored.messages, restored.modelRequests).at(-1)?.usage).toEqual(usage(2));
+    expect(restored.accept({ schemaVersion: 3, projection: "events", events: [] }, restored.begin("latest"))).toBe(true);
+    expect(composerUsageSnapshots(restored.messages, restored.modelRequests)).toEqual([]);
+  });
+
+  it("backfills missed answer and tool history while retaining newer live usage", () => {
+    const transcript = new ThreadTranscript();
+    const user: ThreadProjectionEvent = { ...envelope, event: "user_message", text: "question", starts_turn: true, turn_seq: 0 };
+    const initial = request(1);
+    project(transcript, user);
+    project(transcript, initial);
+    const read = transcript.begin("latest");
+    const latest = request(3, { turn_seq: 5, phase: "completed", usage: usage(2), round_usages: rounds(2), context_window_tokens: 128000 });
+    project(transcript, latest);
+    const events: ThreadProjectionEvent[] = [user, initial,
+      request(2, { phase: "completed", usage: usage(1), round_usages: rounds(1) }),
+      { ...envelope, event: "stream_end", turn_seq: 3, stream_id: "missed-answer", text: "missed answer", resuming: true },
+      { ...envelope, event: "message", turn_seq: 4, kind: "tool_hint", text: "", tool_events: [{
+        version: 1, name: "read_file", call_id: "missed-tool", phase: "end",
+        arguments: { path: "example.txt" }, result: "missed tool result",
+      }] },
+    ];
+    expect(transcript.accept({ schemaVersion: 3, projection: "events", events,
+      active_turn_id: "turn", completed_turn_ids: [], has_pending_tool_calls: true }, read)).toBe(true);
+    expect(transcript.messages.map((row) => row.content)).toContain("missed answer");
+    expect(transcript.messages.flatMap((row) => row.toolEvents ?? [])).toMatchObject([
+      { call_id: "missed-tool", phase: "end", result: "missed tool result" },
+    ]);
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)).toMatchObject({
+      usage: usage(2), roundUsages: rounds(2), contextWindowTokens: 128000,
+    });
+    const restored = new ThreadTranscript([], transcript.save());
+    const final: ThreadProjectionEvent = { ...envelope, event: "turn_end", turn_seq: 6,
+      usage: usage(3), round_usages: rounds(3), context_window_tokens: 64000 };
+    project(restored, final);
+    expect(composerUsageSnapshots(restored.messages, restored.modelRequests).at(-1)).toMatchObject({
+      usage: usage(3), roundUsages: rounds(3), contextWindowTokens: 64000,
+    });
+    const reloaded = new ThreadTranscript();
+    expect(reloaded.accept({ schemaVersion: 3, projection: "events", events: [...events, latest, final],
+      completed_turn_ids: ["turn"] }, reloaded.begin("initial"))).toBe(true);
+    expect(composerUsageSnapshots(reloaded.messages, reloaded.modelRequests).at(-1)?.usage).toEqual(usage(3));
+    expect(reloaded.messages.map((row) => row.content)).toContain("missed answer");
   });
 
   it.each([false, true])("does not treat a missing-usage completion as fresh after compaction (replay=%s)", (persisted) => {
@@ -130,16 +189,16 @@ describe("model request snapshots", () => {
     project(transcript, { ...envelope, event: "context_compaction", compaction_id: "compact", phase: "succeeded", turn_seq: 2 }, persisted);
     project(transcript, request(3, { usage: usage(1), round_usages: rounds(1) }), persisted);
     project(transcript, request(4, { phase: "completed", usage: usage(1), round_usages: rounds(1) }), persisted);
-    expect(composerUsageSnapshots(transcript.messages).at(-1)?.compacted).toBe(true);
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)?.compacted).toBe(true);
     project(transcript, request(5, { phase: "failed", usage: usage(2), round_usages: rounds(2) }), persisted);
-    expect(composerUsageSnapshots(transcript.messages).at(-1)?.compacted).toBe(false);
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)?.compacted).toBe(false);
   });
 
   it("keeps active history snapshots and bounds rounds to the latest eight calls", () => {
     const replay = new ThreadTranscript();
     project(replay, request(1, { phase: "completed", usage: usage(10), round_usages: rounds(10) }), true);
     project(replay, request(2), true);
-    const snapshot = composerUsageSnapshots(replay.messages).at(-1)!;
+    const snapshot = composerUsageSnapshots(replay.messages, replay.modelRequests).at(-1)!;
     expect(snapshot.roundUsages).toHaveLength(8);
     expect(snapshot.roundUsages?.[0].prompt_tokens).toBe(102);
   });

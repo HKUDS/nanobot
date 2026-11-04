@@ -24,7 +24,7 @@ from nanobot.agent.context_governance import (
 from nanobot.agent.execution_policy import ExecutionControlError
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
-from nanobot.agent.tools.execution import execute_tool_calls
+from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent
 from nanobot.llm_usage.context import (
@@ -516,7 +516,67 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
-                results, new_events = await execute_tool_calls(
+                async def settle_tool_results(completed: list[ToolCallResult]) -> None:
+                    tool_events.extend(entry.event for entry in completed)
+                    tools_used.extend(
+                        entry.tool_call.name for entry in completed
+                        if entry.event.get("status") == "ok"
+                    )
+                    context.tool_results = [entry.result for entry in completed]
+                    context.tool_events = [entry.event for entry in completed]
+                    completed_by_id = {entry.tool_call.id: entry for entry in completed}
+                    interrupted = len(completed) != len(response.tool_calls)
+                    completed_tool_results: list[dict[str, Any]] = []
+                    for tool_call in response.tool_calls:
+                        entry = completed_by_id.get(tool_call.id)
+                        tool_message: dict[str, Any] = {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": tool_call.name,
+                        }
+                        if entry is not None:
+                            tool_message["content"] = self.context_governor.normalize_tool_result(
+                                governance_config,
+                                tool_call.id,
+                                tool_call.name,
+                                entry.result,
+                            )
+                        else:
+                            # Close interrupted calls as recovery does, without
+                            # inventing a result or permitting an implicit retry.
+                            tool_message["content"] = (
+                                "Error: Task interrupted; this tool's outcome is unknown. "
+                                "Check its effects before retrying."
+                            )
+                            tool_message["_recovery_interrupted"] = True
+                        messages.append(tool_message)
+                        completed_tool_results.append(tool_message)
+                    checkpoint_model_messages = (
+                        await self.prepare_prompt(
+                            self.context_governor.prepare_messages_for_model, governance_config,
+                            messages,
+                        )
+                        if response.provider_state is not None and not interrupted
+                        else None
+                    )
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "tools_completed",
+                            "iteration": iteration,
+                            "model": spec.runtime.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": completed_tool_results,
+                            "pending_tool_calls": [],
+                            "provider_state": conversation_state.checkpoint(
+                                messages,
+                                model_messages=checkpoint_model_messages,
+                            ) if not interrupted else None,
+                        },
+                        messages,
+                    )
+
+                await execute_tool_calls(
                     spec.tools,
                     response.tool_calls,
                     concurrent=spec.concurrent_tools,
@@ -526,53 +586,7 @@ class AgentRunner:
                     context=context,
                     model_messages=messages_for_model,
                     compacted_tool_results=request_state.compacted_tool_results,
-                )
-                tool_events.extend(new_events)
-                tools_used.extend(
-                    tool_call.name
-                    for tool_call, event in zip(response.tool_calls, new_events)
-                    if event.get("status") == "ok"
-                )
-                context.tool_results = list(results)
-                context.tool_events = list(new_events)
-                completed_tool_results: list[dict[str, Any]] = []
-                for tool_call, result in zip(response.tool_calls, results):
-                    tool_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_call.name,
-                        "content": self.context_governor.normalize_tool_result(
-                            governance_config,
-                            tool_call.id,
-                            tool_call.name,
-                            result,
-                        ),
-                    }
-                    messages.append(tool_message)
-                    completed_tool_results.append(tool_message)
-                checkpoint_model_messages = (
-                    await self.prepare_prompt(
-                        self.context_governor.prepare_messages_for_model, governance_config,
-                        messages,
-                    )
-                    if response.provider_state is not None
-                    else None
-                )
-                await self._emit_checkpoint(
-                    spec,
-                    {
-                        "phase": "tools_completed",
-                        "iteration": iteration,
-                        "model": spec.runtime.model,
-                        "assistant_message": assistant_message,
-                        "completed_tool_results": completed_tool_results,
-                        "pending_tool_calls": [],
-                        "provider_state": conversation_state.checkpoint(
-                            messages,
-                            model_messages=checkpoint_model_messages,
-                        ),
-                    },
-                    messages,
+                    on_settled=settle_tool_results,
                 )
                 empty_content_retries = 0
                 length_recovery_parts.clear()

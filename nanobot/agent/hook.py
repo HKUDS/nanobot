@@ -110,7 +110,10 @@ class AgentHook:
         pass
 
     async def on_tool_execution_event(self, context: AgentHookContext) -> None:
-        """One call's start or terminal result; context is isolated from siblings."""
+        """One call's start or terminal result; context is isolated from siblings.
+
+        Cancellation notification is best-effort; channels own queued delivery.
+        """
         pass
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:

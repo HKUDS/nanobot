@@ -43,9 +43,6 @@ export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
     const prepared = prepareMessage(original);
     let message = prepared.message;
     if (prepared.hidden || (message.turnId && hiddenTurns.has(message.turnId))) continue;
-    // A proactive request may precede any text; its snapshot is not a chat bubble.
-    if (message.modelRequest && message.role === "assistant" && !message.content
-      && !message.reasoning && !message.kind && !message.media?.length && !message.isStreaming) continue;
     if (message.role === "user" && Number.isFinite(message.createdAt)) {
       latestStart = message.createdAt;
       if (message.turnId) starts.set(message.turnId, message.createdAt);

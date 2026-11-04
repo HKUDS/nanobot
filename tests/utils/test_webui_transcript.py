@@ -474,7 +474,8 @@ def test_many_short_trace_rows_are_bounded_and_resolved(history, tmp_path, monke
     assert detail["events"][-1]["text"] == f"tool_{trace_count - 1}(value)"
 
 
-def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(history) -> None:
+@pytest.mark.parametrize("with_model_requests", [False, True])
+def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(history, with_model_requests) -> None:
     key = "websocket:summary-receipts"
     history.append(key, {"event": "user", "text": "run tools", "turn_id": "turn-T", "turn_seq": 1})
     members = [("turn-T", 3), ("turn-T", 4), ("turn-U", 2), ("turn-T", 8)]
@@ -483,13 +484,25 @@ def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(his
             "event": "message", "kind": "progress", "text": f'exec({"x" * 10_000})',
             "turn_id": turn_id, "turn_seq": sequence, "turn_phase": "activity",
         })
+        if with_model_requests and (turn_id, sequence) == ("turn-T", 4):
+            history.append(key, {
+                "event": "model_request", "turn_id": "turn-T", "turn_seq": 5,
+                "request_id": "request-one", "run_id": "run-one", "sequence": 2,
+                "phase": "completed", "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+            })
     history.append(key, {"event": "turn_end", "turn_id": "turn-T", "turn_seq": 9})
     original_rows = history.read(key)
 
-    payload = history.build(key)
+    payload = history.build(key, include_model_requests=True)
 
     assert payload is not None
-    assert len(payload["events"]) == 3
+    assert len(payload["events"]) == 3 + int(with_model_requests)
+    if with_model_requests:
+        request = payload["events"][2]
+        assert (request["event"], request["turn_seq"], request["usage"]["prompt_tokens"]) == ("model_request", 5, 100)
+        legacy = history.build(key)
+        assert legacy is not None
+        assert len(legacy["events"]) == 3
     summary = payload["events"][1]
     assert summary["trace_detail"]["traceCount"] == len(members)
     assert summary["projection_receipts"] == [

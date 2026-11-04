@@ -162,19 +162,6 @@ export interface UIMessage {
   usage?: TurnUsage;
   /** Logical model rounds in display order; runner-level recovery calls are aggregated. */
   roundUsages?: RoundUsage[];
-  /** Turn-owned model snapshot, independent of answer/tool streaming. */
-  modelRequest?: {
-    runId: string;
-    sequence: number;
-    turnSeq?: number;
-    retiredRunIds: string[];
-    /** Only a completed request with actual usage advances context freshness. */
-    usageTurnSeq?: number;
-    ended?: boolean;
-    usage?: TurnUsage;
-    roundUsages?: RoundUsage[];
-    contextWindowTokens?: number;
-  };
   /** Configured context-window capacity for the model used by this turn. */
   contextWindowTokens?: number;
   /** Lightweight provenance for proactive assistant messages. */
@@ -193,6 +180,22 @@ export interface UIMessage {
   /** Ephemeral delivery lifecycle for optimistic user messages. */
   deliveryStatus?: MessageDeliveryStatus;
   deliveryErrorKind?: MessageDeliveryErrorKind;
+}
+
+/** Turn-owned telemetry, not a transcript row or body-history source. */
+export interface UIModelRequestSnapshot {
+  runId: string;
+  sequence: number;
+  turnSeq?: number;
+  retiredRunIds: string[];
+  createdAt: number;
+  completedAt?: number;
+  /** Only a completed request with actual usage advances context freshness. */
+  usageTurnSeq?: number;
+  ended?: boolean;
+  usage?: TurnUsage;
+  roundUsages?: RoundUsage[];
+  contextWindowTokens?: number;
 }
 
 export interface UICliAppAttachment {
