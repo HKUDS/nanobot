@@ -4,7 +4,6 @@ export type ComposerUsageSnapshot = Pick<UIMessage,
   "id" | "turnId" | "createdAt" | "completedAt" | "usage" | "roundUsages" | "contextWindowTokens"
 > & { compacted?: boolean };
 
-/** History and body admission have independent telemetry frontiers. */
 export function reconcileModelRequest(
   current: UIModelRequestSnapshot | undefined,
   incoming: UIModelRequestSnapshot,

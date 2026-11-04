@@ -46,8 +46,6 @@ _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class ToolCallResult:
-    """A completed result retained independently of its progress notification."""
-
     tool_call: ToolCallRequest
     result: Any
     event: dict[str, str]

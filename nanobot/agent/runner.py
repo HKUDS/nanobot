@@ -450,7 +450,6 @@ class AgentRunner:
             request_messages = await self.prepare_prompt(
                 request_state.compaction.request_messages, messages,
             )
-            # Start the live slot at the same boundary as the terminal round.
             request_state.recent_round_usages.append(None)
             response, raw_usage = await self._request_model(
                 spec,
@@ -946,8 +945,6 @@ class AgentRunner:
         if record_timing is not None:
             record_timing(response)
         if response.usage is not None:
-            # Use exactly the same reported-usage/timing normalization as the
-            # terminal accounting path; missing usage remains absent live.
             reported_usage = response.usage.with_timing(
                 generation_ms=response.generation_ms, ttft_ms=response.ttft_ms,
             )

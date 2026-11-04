@@ -165,10 +165,6 @@ class WebUIOutboundDelivery:
         )
 
     async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
-        """Attempt persistence per bounded chunk, then send encodable frames in order.
-
-        Rejected history records do not suppress live delivery.
-        """
         first = messages[0]
         frames: list[tuple[tuple[ServerConnection, ...], str, str]] = []
         records: list[dict[str, Any]] = []
