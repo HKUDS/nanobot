@@ -18,7 +18,13 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ModelPresetConfig
-from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ProviderCallContext, ToolCallRequest
+from nanobot.providers.base import (
+    LLMProvider,
+    LLMResponse,
+    LLMUsage,
+    ProviderCallContext,
+    ToolCallRequest,
+)
 from nanobot.providers.compaction import ProviderStateCommitError
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.providers.fallback_provider import FallbackProvider
