@@ -1125,7 +1125,7 @@ class AgentLoop:
                 except asyncio.QueueEmpty:
                     break
 
-            async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
+            async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any] | None:
                 content = pending_msg.content
                 image_paths = pending_msg.media if pending_msg.media else None
                 if image_paths:
@@ -1157,6 +1157,10 @@ class AgentLoop:
                         message_metadata=_prompt_scope_metadata(metadata),
                         session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
                     )
+                    # A follow-up cannot inherit another input's tool authority.
+                    # Leave it for the FIFO worker to run with its own scope.
+                    if scope != effective_scope:
+                        return None
                     pending_request = RequestContext(
                         channel=pending_msg.channel,
                         chat_id=pending_msg.chat_id,
@@ -1209,7 +1213,10 @@ class AgentLoop:
                     # owns completion, command dispatch, and control metadata.
                     if not self._can_inject_message(pending_msg):
                         break
-                    converted.append(await _to_user_message(pending_msg))
+                    row = await _to_user_message(pending_msg)
+                    if row is None:
+                        break
+                    converted.append(row)
                     consumed_inputs.append(pending_msg)
                 if execution_scope is not None:
                     try:

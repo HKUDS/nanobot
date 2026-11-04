@@ -17,6 +17,7 @@ from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_
 from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import GenerationSettings, LLMResponse, LLMUsage, ToolCallRequest
 from nanobot.runtime_context import public_history_messages
+from nanobot.security.workspace_access import current_workspace_scope
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -46,6 +47,49 @@ async def loop(tmp_path):
         yield agent
     finally:
         await agent.aclose()
+
+
+@pytest.mark.parametrize("followup_scope", ["same", "restricted", "other-project"])
+async def test_unified_followup_keeps_its_workspace_authority(loop, tmp_path, followup_scope):
+    loop._unified_session = True
+    project = tmp_path / "other-project"
+    project.mkdir()
+    initial_scope = {"project_path": str(tmp_path), "access_mode": "full"}
+    next_scope = {
+        "project_path": str(project if followup_scope == "other-project" else tmp_path),
+        "access_mode": "restricted" if followup_scope == "restricted" else "full",
+    }
+    observed = []
+
+    async def chat(**kwargs):
+        scope = current_workspace_scope()
+        observed.append(scope.metadata())
+        if len(observed) == 1:
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="websocket", sender_id="client", chat_id="followup", content="second",
+                metadata={"workspace_scope": next_scope},
+            ))
+            async with asyncio.timeout(3):
+                while loop._pending_queues["unified:default"].empty():
+                    await asyncio.sleep(0)
+        return LLMResponse(content="done")
+
+    loop.provider.chat_stream_with_retry = chat
+    loop.runner.run = AsyncMock(wraps=loop.runner.run)
+    worker = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="websocket", sender_id="owner", chat_id="initial", content="first",
+            metadata={"workspace_scope": initial_scope},
+        ))
+        async with asyncio.timeout(5):
+            while not observed or "unified:default" in loop._pending_queues:
+                await asyncio.sleep(0.01)
+        assert observed == [initial_scope, next_scope]
+        assert loop.runner.run.await_count == (1 if followup_scope == "same" else 2)
+    finally:
+        loop.stop()
+        await asyncio.wait_for(worker, timeout=3)
 
 
 @pytest.mark.parametrize("rejection", ["stop", "followup", "replaced-followup", "idle"])

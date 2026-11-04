@@ -164,7 +164,7 @@ class WebUICommandRouter:
         self._message_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
-        return self._http_router.workspace_project_selection_available(connection)
+        return connection in self._webui_connections
 
     async def send_webui_protocol_error(
         self,
@@ -285,6 +285,37 @@ class WebUICommandRouter:
                 **({"turn_id": turn_id} if turn_id else {}),
             )
             return None
+
+    async def dispatch_legacy_message(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        chat_id: str,
+        content: str,
+    ) -> None:
+        """Authorize legacy text frames through the same workspace boundary."""
+        scope = await self.workspace_scope_or_error(
+            connection,
+            lambda: self._workspaces.scope_for_message(
+                {}, chat_id=chat_id, chat_running=False,
+                can_change_project=self.workspace_project_selection_available(connection),
+            ),
+            chat_id=chat_id,
+        )
+        if scope is None:
+            return
+        await self._transport.webui_dispatch_message(
+            sender_id=client_id, chat_id=chat_id, content=content,
+            media=None,
+            metadata={
+                "remote": getattr(connection, "remote_address", None),
+                WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
+            },
+            is_dm=False,
+            session_key=None,
+            require_existing_session=False,
+            session_generation=None,
+        )
 
     async def dispatch(
         self,

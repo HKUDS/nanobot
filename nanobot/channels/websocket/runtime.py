@@ -853,12 +853,8 @@ class WebSocketChannel(BaseChannel):
                 # WebSocket already authenticates at handshake time (token),
                 # so pairing is not applicable. Treat as non-DM to avoid
                 # sending pairing codes to an already-authenticated client.
-                await self._handle_message(
-                    sender_id=client_id,
-                    chat_id=default_chat_id,
-                    content=content,
-                    metadata={"remote": getattr(connection, "remote_address", None)},
-                    is_dm=False,
+                await self._commands.dispatch_legacy_message(
+                    connection, client_id, default_chat_id, content,
                 )
         except Exception as e:
             self.logger.debug("connection ended: {}", e)

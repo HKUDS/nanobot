@@ -1782,6 +1782,7 @@ async def test_webui_message_scope_inherits_persisted_session_scope(
         gateway=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
     )
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = ("127.0.0.1", 50123)
     conn.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
 
@@ -1847,6 +1848,7 @@ async def test_persisted_project_rejects_scope_changes_but_keeps_access_controls
         await controller.persist_scope(chat_id, scope)
 
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = ("203.0.113.8", 50123)
     await channel._dispatch_envelope(conn, "remote-client", {
         "type": command, "chat_id": chat_id, "turn_id": "scope-change",
@@ -2018,6 +2020,7 @@ async def test_webui_scope_expands_home_project_path(
         gateway=_basic_handler(bus, session_manager=SessionManager(tmp_path / "sessions"), workspace_path=default_workspace),
     )
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = ("127.0.0.1", 50123)
 
     await channel._dispatch_envelope(
@@ -2055,6 +2058,7 @@ async def test_webui_scope_rejects_missing_project_path(bus: MagicMock, tmp_path
         gateway=_basic_handler(bus, session_manager=SessionManager(tmp_path / "sessions"), workspace_path=default_workspace),
     )
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = ("127.0.0.1", 50123)
 
     await channel._dispatch_envelope(
@@ -2092,6 +2096,7 @@ async def test_webui_scope_rejects_running_scope_change(bus: MagicMock, tmp_path
         gateway=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
     )
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = ("127.0.0.1", 50123)
     conn.request = SimpleNamespace(headers=Headers({"Host": "localhost:8765"}))
 
@@ -2151,6 +2156,7 @@ async def test_webui_set_workspace_scope_rejects_running_chat(bus: MagicMock, tm
         gateway=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
     )
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = ("127.0.0.1", 50123)
 
     await channel._dispatch_envelope(
@@ -2331,6 +2337,7 @@ async def test_remote_webui_scope_allows_full_access_for_custom_scope(
         gateway=_basic_handler(bus, session_manager=sessions, workspace_path=default_workspace),
     )
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = ("203.0.113.8", 50123)
 
     await channel._dispatch_envelope(
@@ -2375,6 +2382,7 @@ async def test_native_webui_scope_allows_custom_scope_without_loopback(
         ),
     )
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = None
 
     await channel._dispatch_envelope(
@@ -6862,6 +6870,7 @@ async def test_webui_access_mode_can_toggle_back_to_full(bus, tmp_path, headers)
                                default_restrict_to_workspace=True),
     )
     conn = AsyncMock()
+    channel._webui_connections.add(conn)
     conn.remote_address = ("127.0.0.1", 50123)
     conn.request = SimpleNamespace(headers=headers)
     for mode in ("full", "restricted", "full"):

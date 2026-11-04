@@ -314,15 +314,20 @@ class WebUIWorkspaceController:
         data = await self._sessions.state.read_metadata(session_key)
         return self._scope_from_snapshot(data)
 
-    def _scope_from_snapshot(self, data: dict[str, Any] | None) -> WorkspaceScope:
+    def _scope_from_snapshot(
+        self, data: dict[str, Any] | None, *, default_scope: WorkspaceScope | None = None,
+    ) -> WorkspaceScope:
+        if default_scope is None:
+            default_scope = self.default_scope()
         if not isinstance(data, dict):
-            return self.default_scope()
+            return default_scope
         metadata = data.get("metadata", {})
         if not isinstance(metadata, dict) or WORKSPACE_SCOPE_METADATA_KEY not in metadata:
-            return self.default_scope()
+            return default_scope
         metadata_data = cast(dict[str, Any], metadata)
         return self._scope_from_metadata_value(
-            cast(object, metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY))
+            cast(object, metadata_data.get(WORKSPACE_SCOPE_METADATA_KEY)),
+            default_scope=default_scope,
         )
 
     def _validate_existing_project(self, metadata: Mapping[str, Any], scope: WorkspaceScope) -> None:
@@ -393,17 +398,23 @@ class WebUIWorkspaceController:
         session_key: str | None,
         can_change_project: bool,
     ) -> WorkspaceScope:
+        baseline = default_workspace_scope(
+            self._default_workspace,
+            self._default_restrict_to_workspace,
+            source_channel=_WEBUI_SCOPE_CHANNEL,
+        )
+        default = self.default_scope() if can_change_project else baseline
         data = (
             await self._sessions.state.read_metadata(session_key)
             if self._sessions is not None and session_key else None
         )
         if data is not None:
-            current = self._scope_from_snapshot(data)
+            current = self._scope_from_snapshot(data, default_scope=default)
         elif session_key and (draft := self._draft_scopes.get(session_key)) is not None:
             self._draft_scopes.move_to_end(session_key)
             current = draft
         else:
-            current = self.default_scope()
+            current = default
         raw = envelope.get(WORKSPACE_SCOPE_METADATA_KEY)
         if raw is None:
             scope = current
@@ -416,7 +427,9 @@ class WebUIWorkspaceController:
             )
         if data is not None:
             self._validate_existing_project(data["metadata"], scope)
-        if not can_change_project and not _scope_change_is_non_escalating(current, scope):
+        # An owner's draft, saved scope or UI preference cannot authorize a client.
+        # Its ceiling is operator config, including deliberately unrestricted use.
+        if not can_change_project and not _scope_change_is_non_escalating(baseline, scope):
             raise WorkspaceScopeError(
                 "project selection is unavailable for this connection",
                 status=403,
