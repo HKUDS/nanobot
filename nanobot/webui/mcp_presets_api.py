@@ -1335,7 +1335,10 @@ async def mcp_presets_settings_action(
             )
             if reload_mcp is not None:
                 payload = attach_mcp_hot_reload_result(payload, await reload_mcp())
-            return payload
+            return attach_mcp_runtime_status(
+                payload,
+                mcp_runtime_status() if mcp_runtime_status is not None else None,
+            )
     if action == "test":
         payload = await mcp_presets_test_action(query, config_path=config_path)
         return attach_mcp_runtime_status(
