@@ -429,25 +429,6 @@ class ExecTool(Tool):
             if guard_error:
                 return guard_error
 
-        if self.sandbox:
-            if _IS_WINDOWS:
-                logger.warning(
-                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
-                    self.sandbox,
-                )
-            else:
-                workspace = workspace_root or cwd
-                wrapped = wrap_command(
-                    self.sandbox,
-                    shlex.join(command) if isinstance(command, list) else command,
-                    workspace,
-                    cwd,
-                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
-                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
-                )
-                command = shlex.split(wrapped) if isinstance(command, list) else wrapped
-                cwd = str(Path(workspace).resolve())
-
         effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
@@ -463,6 +444,39 @@ class ExecTool(Tool):
         shell_program, shell_error = self._resolve_shell(shell)
         if shell_error:
             return shell_error
+
+        if self.sandbox:
+            if _IS_WINDOWS:
+                logger.warning(
+                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
+                    self.sandbox,
+                )
+            else:
+                # The host launches the sandbox, not a caller-selected shell.
+                # Shell selection, profiles and PATH setup run after confinement.
+                if isinstance(command, list):
+                    payload = shlex.join(command)
+                else:
+                    interpreter = shell_program or shutil.which("bash") or "/bin/bash"
+                    args = [interpreter]
+                    if login and Path(interpreter).name in {"bash", "zsh"}:
+                        args.append("-l")
+                    payload = shlex.join([*args, "-c", command])
+                workspace = workspace_root or cwd
+                command = shlex.split(wrap_command(
+                    self.sandbox,
+                    payload,
+                    workspace,
+                    cwd,
+                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
+                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                ))
+                # Project/tool and inherited PATH can contain writable programs.
+                launcher = shutil.which(command[0], path=os.defpath)
+                if launcher is None:
+                    return ToolResult.error(f"Error: sandbox launcher not found: {command[0]}")
+                command[0] = str(Path(launcher).absolute())
+                cwd = str(Path(workspace).resolve())
 
         return _PreparedCommand(
             command=command,
