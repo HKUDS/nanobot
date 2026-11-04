@@ -21,7 +21,12 @@ from uuid import uuid4
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
-from nanobot.context_graph import build_context_snapshot, retained_source_metadata, source_metadata
+from nanobot.context_graph import (
+    build_context_snapshot,
+    discard_source_metadata,
+    retained_source_metadata,
+    source_metadata,
+)
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
@@ -522,6 +527,7 @@ class ContextGovernor:
                 # so a later turn does not restore content the model never received.
                 replacements[prepared[index]["tool_call_id"]] = notice
                 prepared[index] = {**prepared[index], "content": notice}
+                discard_source_metadata(prepared[index])
 
     def request_pressure(
         self,
@@ -705,6 +711,7 @@ class ContextGovernor:
             for message in compaction.raw_messages[compaction.raw_accepted_boundary:]:
                 if message.get("role") == "tool" and message.get("tool_call_id") in replacements:
                     message["content"] = replacements[message["tool_call_id"]]
+                    discard_source_metadata(message)
             # Responses-style state is append-only. Replacing H with a
             # checkpoint requires a fresh request; a successful response may
             # establish a new provider-owned state at the rewritten boundary.
@@ -1092,4 +1099,5 @@ class ContextGovernor:
                 if updated is messages:
                     updated = [dict(m) for m in messages]
                 updated[idx]["content"] = normalized
+                discard_source_metadata(updated[idx])
         return updated

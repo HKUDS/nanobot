@@ -122,7 +122,7 @@ def runtime_context_source_metadata(
     content: object, blocks: Sequence[RuntimeContextBlock],
 ) -> SourceMetadata | None:
     receipts = [receipt for block in blocks for receipt in block.context_sources]
-    return source_metadata(content, receipts) if receipts and isinstance(content, str) else None
+    return source_metadata(content, receipts) if receipts else None
 
 
 def append_runtime_context(

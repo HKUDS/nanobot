@@ -137,7 +137,7 @@ function SkeletonSurface() {
             : surface === "automations" ? <AutomationsSettings payload={empty ? null : { jobs }} loading={loading} filter="all" actionKey={null} error={state === "error" ? "Preview read failed" : null}
               onFilterChange={noop} onAction={noop} onRequestEdit={noop} onRequestDelete={noop} />
               : surface === "skill-detail" ? <SkillsCatalogSettings skills={[skill]} />
-                : surface === "session-jobs" ? <SessionInfoPopoverView title="Project review" jobs={empty ? [] : jobs} loading={loading} loadFailed={state === "error"} now={now}
+                : surface === "session-jobs" ? <SessionInfoPopoverView jobs={empty ? [] : jobs} loading={loading} loadFailed={state === "error"} now={now}
                   onAction={async () => jobs} onEdit={async () => jobs} />
                   : surface === "linear-members" ? <LinearMemberAccessView snapshot={{ payload: empty ? null : members, loading, error: state === "error" ? "Preview read failed" : null, saves: {} }} onLoad={noop} onSetAllowed={noop} /> : null}
         </main>}

@@ -398,6 +398,7 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
         || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < 0
         || !["started", "completed", "failed", "cancelled"].includes(String(value.phase))
         || (value.usage !== undefined && !isUsage(value.usage))
+        || (value.request_usage != null && !isUsage(value.request_usage))
         || (value.round_usages !== undefined && (!Array.isArray(value.round_usages) || !value.round_usages.every(isUsage)))
         || (value.context_window_tokens !== undefined && (typeof value.context_window_tokens !== "number"
           || !Number.isFinite(value.context_window_tokens) || value.context_window_tokens < 0))) break;

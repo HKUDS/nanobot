@@ -26,6 +26,7 @@ class ModelRequestEvent(AgentEvent):
     round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
     context_graph: ContextGraph | None = None
+    request_usage: LLMUsage | None = None
 
 
 @dataclass(frozen=True)

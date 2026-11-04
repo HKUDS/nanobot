@@ -247,3 +247,13 @@ it.each([false, true])("starts a new graph history and estimated meter at compac
   expect(composerContextSnapshots(transcript.messages, transcript.modelRequests).map((s) => s.id)).toEqual(["compaction-boundary", "request-3"]);
   expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)).toMatchObject({ compacted: false, usage: { context_tokens: 1300 } });
 });
+
+it.each(["failed", "cancelled", "completed"] as const)("does not borrow previous usage for a %s request without measurement", (phase) => {
+  const transcript = new ThreadTranscript();
+  const graph = { nodes: [{ path: "/a.md", name: "a.md", state: "loaded" as const, tokens: 20 }], edges: [] };
+  project(transcript, request(1, { phase: "completed", context_graph: graph, request_usage: usage(1), round_usages: rounds(1) }));
+  project(transcript, request(2, { phase, context_graph: graph, request_usage: null, round_usages: rounds(1) }));
+  const frames = composerContextSnapshots(transcript.messages, transcript.modelRequests);
+  expect(frames[0].usage).toEqual(usage(1));
+  expect(frames[1].usage).toBeUndefined();
+});

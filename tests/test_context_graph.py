@@ -202,3 +202,37 @@ def test_compacted_context_keeps_system_sources_and_counts_tools_and_summary(tmp
     restored = record_from_fact(fact_from_record(event), session.key)
     projected = _client_projection_event(restored, augment_user_media=None, augment_assistant_media=None, augment_assistant_text=None)
     assert projected['context_snapshot'] == snapshot
+
+
+async def test_read_file_ignores_invalid_markdown_link_targets(tmp_path: Path):
+    from nanobot.agent.tools.base import ToolResult
+    from nanobot.agent.tools.filesystem import ReadFileTool
+
+    path = tmp_path / "guide.md"
+    path.write_text("[Invalid](foo%00.md)\n[Guide](valid.md)", encoding="utf-8")
+    result = await ReadFileTool(workspace=tmp_path).execute(path=str(path))
+    assert isinstance(result, ToolResult)
+    assert "[Invalid](foo%00.md)" in str(result)
+    assert result.context_sources[0]["links"] == [str(tmp_path / "valid.md")]
+
+
+def test_image_with_explicit_skill_retains_sources_across_history(tmp_path: Path):
+    from nanobot.agent.context import ContextBuilder
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.session.manager import Session
+
+    skill = tmp_path / "skills" / "example"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: example\ndescription: Example\n---\n[Guide](guide.md)")
+    image = tmp_path / "image.png"
+    image.write_bytes(bytes.fromhex("89504e470d0a1a0a") + b"image")
+    current = ContextBuilder(tmp_path).build_current_message("$example", media=[str(image)])
+    assert isinstance(current["content"], list)
+    graph = graph_from_messages([current])
+    assert graph["nodes"][0]["state"] == "loaded"
+    assert graph["edges"] == [{"source": str(skill / "SKILL.md"), "target": str(skill / "guide.md")}]
+    session = Session(key="test:image-skill")
+    object.__new__(AgentLoop)._save_turn(session, [current], skip=0)
+    assert graph_from_messages(session.get_history()) == graph
+    current["content"][-1]["text"] = "Compacted text"
+    assert graph_from_messages([current]) == {"nodes": [], "edges": []}

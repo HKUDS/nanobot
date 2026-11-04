@@ -18,7 +18,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
@@ -349,8 +349,20 @@ def _resolve_bootstrap_model_name(
     return _default_model_name_from_config(config_path) or ""
 
 
-class _HistoryProjection(Protocol):
-    def __call__(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response: ...
+_ProjectionResult = TypeVar("_ProjectionResult", covariant=True)
+
+
+class _HistoryProjection(Protocol[_ProjectionResult]):
+    def __call__(self, request: WsRequest, key: str, *, history: HistoryReader) -> _ProjectionResult: ...
+
+
+@dataclass
+class _PreparedThreadResponse:
+    data: dict[str, Any]
+    headers: list[tuple[str, str]]
+    session_key: str
+    session_version: tuple[str, int] | None
+    missing_context_event: dict[str, Any] | None
 
 
 class GatewayHTTPHandler:
@@ -1051,8 +1063,8 @@ class GatewayHTTPHandler:
         return self.session_manager.read_session_version(key) if self.session_manager is not None else None
 
     async def _project_session_history(
-        self, request: WsRequest, key: str, project: _HistoryProjection,
-    ) -> Response:
+        self, request: WsRequest, key: str, project: _HistoryProjection[_ProjectionResult],
+    ) -> _ProjectionResult | Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         decoded = _decode_api_key(key)
@@ -1097,14 +1109,6 @@ class GatewayHTTPHandler:
         )
 
     async def _handle_webui_thread_get_async(self, request: WsRequest, key: str) -> Response:
-        current_context = None
-        decoded_key = _decode_api_key(key)
-        if (self.inspect_session_context is not None and self.check_api_token(request)
-                and decoded_key is not None and _is_websocket_channel_session_key(decoded_key)
-                and _query_first(_parse_query(request.path), "include_model_requests") == "1"
-                and not _query_first(_parse_query(request.path), "before")
-                and not _query_first(_parse_query(request.path), "after")):
-            current_context = await self.inspect_session_context(decoded_key)
         diagnostics = _WebUIThreadDiagnostics()
         loop = asyncio.get_running_loop()
         expected_sample_at = loop.time() + 0.05
@@ -1122,11 +1126,29 @@ class GatewayHTTPHandler:
 
         timer = loop.call_later(0.05, sample_event_loop_lag)
         started = time.perf_counter()
-        def project(request: WsRequest, key: str, *, history: HistoryReader) -> Response:
-            return self._handle_webui_thread_get(request, key, history=history, diagnostics=diagnostics, current_context=current_context)
+        def project(request: WsRequest, key: str, *, history: HistoryReader) -> Response | _PreparedThreadResponse:
+            return self._handle_webui_thread_get(request, key, history=history, diagnostics=diagnostics)
 
         try:
-            response = await self._project_session_history(request, key, project)
+            prepared = await self._project_session_history(request, key, project)
+            if isinstance(prepared, _PreparedThreadResponse):
+                if prepared.missing_context_event is not None and self.inspect_session_context is not None:
+                    # Reconstructed prompts can change outside the session revision (for example SOUL.md).
+                    prepared.headers = list(_NO_STORE_HEADERS)
+                    prepared.data.pop("revision", None)
+                    snapshot = await self.inspect_session_context(prepared.session_key)
+                    # Both the projected checkpoint and reconstruction must belong to the same session version.
+                    version = await asyncio.to_thread(self._read_session_version, prepared.session_key)
+                    if version == prepared.session_version:
+                        if snapshot is not None:
+                            prepared.missing_context_event["context_snapshot"] = snapshot
+                response = await asyncio.to_thread(
+                    _http_json_response, prepared.data,
+                    accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+                    extra_headers=prepared.headers, metrics=diagnostics.response,
+                )
+            else:
+                response = prepared
         finally:
             active = False
             timer.cancel()
@@ -1181,8 +1203,7 @@ class GatewayHTTPHandler:
         *,
         history: HistoryReader,
         diagnostics: _WebUIThreadDiagnostics | None = None,
-        current_context: ContextSnapshot | None = None,
-    ) -> Response:
+    ) -> Response | _PreparedThreadResponse:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         decoded_key = _decode_api_key(key)
@@ -1227,7 +1248,6 @@ class GatewayHTTPHandler:
         include_model_requests = _query_first(query, "include_model_requests") == "1"
         revision_variant = {
             "include_model_requests": include_model_requests,
-            "current_context": current_context,
             "active_turn_id": active_turn_id,
             "active_turn_started_at": active_turn_started_at,
             "active_turn_transcript_persistence_failed": (
@@ -1273,13 +1293,14 @@ class GatewayHTTPHandler:
             diagnostics.build_ms = (time.perf_counter() - build_started) * 1000
         if data is None:
             return _http_error(404, "webui thread not found")
-        if current_context is not None:
+        missing_context_event = None
+        if include_model_requests and before is None and after is None:
             for event in reversed(data.get("events", [])):
                 if event.get("event") == "model_request":
                     break
                 if event.get("event") == "context_compaction" and event.get("phase") == "succeeded":
                     if "context_snapshot" not in event:
-                        event["context_snapshot"] = current_context
+                        missing_context_event = event
                     break
         data["workspace_scope"] = scope.payload()
         revision_variant["session_version"] = self._read_session_version(decoded_key)
@@ -1288,11 +1309,10 @@ class GatewayHTTPHandler:
         if final_revision is not None and final_revision == initial_revision:
             response_headers.append(("ETag", _quoted_etag(final_revision)))
             data["revision"] = final_revision
-        return _http_json_response(
-            data,
-            accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
-            extra_headers=response_headers,
-            metrics=diagnostics.response if diagnostics is not None else None,
+        return _PreparedThreadResponse(
+            data=data, headers=response_headers, session_key=decoded_key,
+            session_version=revision_variant["session_version"],
+            missing_context_event=missing_context_event if final_revision == initial_revision else None,
         )
 
     def _handle_webui_trace_detail_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:

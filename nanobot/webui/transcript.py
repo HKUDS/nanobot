@@ -1531,6 +1531,8 @@ def _client_projection_event(
             ):
                 return None
             projected.update(request_id=request_id, run_id=run_id, sequence=sequence, phase=phase)
+            if "request_usage" in record:
+                projected["request_usage"] = _sanitize_turn_usage(record["request_usage"]) or None
             if (graph := parse_context_graph(record.get("context_graph"))) is not None:
                 projected["context_graph"] = graph
         latency_ms = record.get("latency_ms")

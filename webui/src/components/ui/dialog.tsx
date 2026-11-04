@@ -98,10 +98,10 @@ const DialogContent = React.forwardRef<
     settleAnimation.current?.cancel();
     if (backdropFrame.current !== null) cancelAnimationFrame(backdropFrame.current);
   }, []);
-  const finishDrag = (button: HTMLButtonElement, cancelled: boolean) => {
+  const finishDrag = (button: HTMLButtonElement, pointerId: number, cancelled: boolean) => {
     const drag = gesture.current;
     const node = contentNode.current;
-    if (!drag || !node) return;
+    if (!drag || drag.id !== pointerId || !node) return;
     gesture.current = null;
     suppressClick.current = drag.moved;
     if (!drag.moved) {
@@ -180,6 +180,14 @@ const DialogContent = React.forwardRef<
   }, [layoutAnchor, placement, centerInLayoutAnchor]);
   const contentRef = React.useCallback((node: HTMLDivElement | null) => {
     contentNode.current = node;
+    if (!node) {
+      settleAnimation.current?.cancel();
+      settleAnimation.current = null;
+      if (backdropFrame.current !== null) cancelAnimationFrame(backdropFrame.current);
+      backdropFrame.current = null;
+      dragBackdrop.current = null;
+      gesture.current = null;
+    }
     setContainer(node);
     if (typeof ref === "function") ref(node);
     else if (ref) ref.current = node;
@@ -247,9 +255,9 @@ const DialogContent = React.forwardRef<
                   paintBackdrop(distance, contentNode.current.offsetHeight);
                 }
               }}
-              onPointerUp={(event) => finishDrag(event.currentTarget, false)}
-              onPointerCancel={(event) => finishDrag(event.currentTarget, true)}
-              onLostPointerCapture={(event) => finishDrag(event.currentTarget, true)}
+              onPointerUp={(event) => finishDrag(event.currentTarget, event.pointerId, false)}
+              onPointerCancel={(event) => finishDrag(event.currentTarget, event.pointerId, true)}
+              onLostPointerCapture={(event) => finishDrag(event.currentTarget, event.pointerId, true)}
               onClick={(event) => { if (suppressClick.current) { event.preventDefault(); suppressClick.current = false; } }}
               className={cn("absolute grid place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none", placement === "bottom" ? "left-1/2 top-0 h-8 w-16 -translate-x-1/2 touch-none cursor-grab active:cursor-grabbing" : "right-2.5 top-2.5 h-7 w-7")}>
               {placement === "bottom" ? <span aria-hidden="true" className="h-1 w-9 rounded-full bg-current opacity-40" /> : <X className="h-4 w-4" />}

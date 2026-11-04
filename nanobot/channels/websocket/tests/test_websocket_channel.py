@@ -7004,3 +7004,52 @@ async def test_history_model_request_opt_in_preserves_old_clients_cursors_and_et
     assert old_page["events"] == [event for event in modern_page["events"] if event["event"] != "model_request"]
     assert old_page["page"]["loaded_event_count"] == len(old_page["events"])
     assert modern_page["page"]["loaded_event_count"] == len(modern_page["events"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["missing", "present", "new_request", "raced"])
+async def test_thread_hydrates_only_current_legacy_compaction(history, tmp_path, monkeypatch, state):
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:legacy-context"
+    snapshot = {"graph": {"nodes": [], "edges": []}, "estimated_tokens": 100, "context_window_tokens": 1000}
+    history.append(key, {"event": "user", "chat_id": "legacy-context", "text": "hello"})
+    compact = {"event": "context_compaction", "compaction_id": "compact", "phase": "succeeded"}
+    if state == "present":
+        compact["context_snapshot"] = snapshot
+    history.append(key, compact)
+    if state == "new_request":
+        history.append(key, {"event": "model_request", "request_id": "request", "run_id": "run", "sequence": 1, "phase": "started"})
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path, session_manager=history.sessions)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+
+    async def inspect(session_key):
+        assert session_key == key
+        if state == "raced":
+            await history.sessions.state.update_metadata(key, {"changed": True})
+        return snapshot
+
+    inspector = AsyncMock(side_effect=inspect)
+    gateway.http.inspect_session_context = inspector
+    encoded = quote(key, safe="")
+    path = f"/api/sessions/{encoded}/webui-thread?include_model_requests=1"
+    request = Request(path, Headers([("Authorization", "Bearer tok")]))
+    response = await gateway.http._handle_webui_thread_get_async(request, encoded)
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    event = next(event for event in body["events"] if event["event"] == "context_compaction")
+    if state in {"missing", "present"}:
+        assert event["context_snapshot"] == snapshot
+    else:
+        assert "context_snapshot" not in event
+    assert inspector.await_count == (1 if state in {"missing", "raced"} else 0)
+    if state in {"missing", "raced"}:
+        assert "ETag" not in response.headers
+    else:
+        cached_request = Request(path, Headers([("Authorization", "Bearer tok"), ("If-None-Match", response.headers["ETag"])]))
+        cached = await gateway.http._handle_webui_thread_get_async(cached_request, encoded)
+        assert cached.status_code == 304
+        assert inspector.await_count == (1 if state == "missing" else 0)

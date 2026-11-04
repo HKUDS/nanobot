@@ -1633,6 +1633,7 @@ export type InboundEvent =
     }
   | ({
       event: "model_request";
+      request_usage?: TurnUsage | null;
       context_graph?: ContextGraph;
       chat_id: string;
       request_id: string;

@@ -98,6 +98,7 @@ class TurnEndWirePayload(_ChatWirePayload):
 
 
 class ModelRequestWirePayload(_ChatWirePayload):
+    request_usage: dict[str, int] | None
     context_graph: NotRequired[ContextGraph]
     event: Literal["model_request"]
     request_id: str
@@ -265,6 +266,7 @@ def project_notification(
             "event": "model_request", "chat_id": chat_id,
             "request_id": event.request_id, "run_id": event.run_id,
             "sequence": event.sequence, "phase": event.phase,
+            "request_usage": event.request_usage.to_turn_dict() if event.request_usage is not None else None,
         }
         if event.context_graph is not None:
             payload["context_graph"] = event.context_graph

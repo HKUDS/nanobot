@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -86,10 +87,14 @@ def source_receipt(path: Path, content: str, *, loaded: bool = True) -> SourceRe
     parser = REFERENCE_PARSERS.get(path.suffix.lower()) if loaded else None
     if parser:
         for href in parser.references(content):
-            parsed = urlsplit(href)
-            if parsed.scheme or parsed.netloc or not parsed.path:
+            try:
+                parsed = urlsplit(href)
+                if parsed.scheme or parsed.netloc or not parsed.path:
+                    continue
+                target = str((path.parent / unquote(parsed.path)).resolve())
+            except (ValueError, OSError, RuntimeError):
+                # Link text is untrusted; invalid paths must not break prompt assembly.
                 continue
-            target = str((path.parent / unquote(parsed.path)).resolve())
             if target != str(path) and target not in links:
                 links.append(target)
             if len(links) >= 128:
@@ -103,16 +108,23 @@ def record_source(path: Path, content: str, *, loaded: bool = True) -> None:
         sources.append(source_receipt(path, content, loaded=loaded))
 
 
-def source_metadata(content: str, sources: list[SourceReceipt]) -> SourceMetadata:
-    return {"context_sources": sources, "context_source_hash": hashlib.sha256(content.encode()).hexdigest()}
+def _content_hash(content: object) -> str:
+    serialized = content if isinstance(content, str) else json.dumps(content, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+def source_metadata(content: object, sources: list[SourceReceipt]) -> SourceMetadata:
+    return {"context_sources": sources, "context_source_hash": _content_hash(content)}
 
 
 def retained_source_metadata(content: object, value: object) -> SourceMetadata | None:
     """Validate provenance when saving or restoring message history."""
-    if not isinstance(content, str) or not isinstance(value, dict):
+    if not isinstance(content, (str, list)) or not isinstance(value, dict):
         return None
+    content = cast(str | list[object], content)
     value = cast(dict[str, object], value)
-    if value.get("context_source_hash") != hashlib.sha256(content.encode()).hexdigest():
+    content_hash = _content_hash(content)
+    if value.get("context_source_hash") != content_hash:
         return None
     raw_sources = value.get("context_sources")
     if not isinstance(raw_sources, list):
@@ -133,7 +145,20 @@ def retained_source_metadata(content: object, value: object) -> SourceMetadata |
         if not all(isinstance(link, str) for link in cast(list[object], links)):
             return None
         sources.append({"path": path, "name": name, "tokens": tokens, "links": cast(list[str], links), "loaded": loaded})
-    return source_metadata(content, sources) if sources else None
+    return {"context_sources": sources, "context_source_hash": content_hash} if sources else None
+
+
+def discard_source_metadata(message: dict[str, Any]) -> None:
+    """Remove receipts when governance replaces the originating content."""
+    if not isinstance(message.get("_meta"), dict):
+        return
+    metadata = dict(message["_meta"])
+    metadata.pop("context_sources", None)
+    metadata.pop("context_source_hash", None)
+    if metadata:
+        message["_meta"] = metadata
+    else:
+        message.pop("_meta", None)
 
 
 def parse_context_graph(value: object) -> ContextGraph | None:

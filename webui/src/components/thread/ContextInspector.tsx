@@ -233,7 +233,7 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   }, [replay]);
   const snapshot = replay ? replay.frames[replay.index] : snapshots.at(-1);
   const latestRound = rounds.at(-1);
-  const tokens = snapshot?.estimatedTokens ?? snapshot?.usage?.context_tokens ?? snapshot?.usage?.prompt_tokens ?? context?.contextTokens;
+  const tokens = snapshot ? snapshot.estimatedTokens ?? snapshot.usage?.context_tokens ?? snapshot.usage?.prompt_tokens : context?.contextTokens;
   const estimated = snapshot?.estimatedTokens !== undefined || (!snapshot?.usage && context?.estimated);
   const windowTokens = snapshot?.contextWindowTokens ?? context?.contextWindowTokens;
   const used = tokens !== undefined && windowTokens ? Math.min(100, tokens / windowTokens * 100) : null;

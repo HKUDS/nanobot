@@ -887,7 +887,8 @@ export function projectThreadEvent(
       ...(event.context_window_tokens !== undefined ? { contextWindowTokens: event.context_window_tokens } : {}),
       ...(event.context_graph ? { contextSnapshots: [
         ...(previousRequest?.contextSnapshots ?? []).filter((s) => s.id !== event.request_id),
-        { id: event.request_id, turnSeq: event.turn_seq, graph: event.context_graph, usage: event.phase === "started" ? undefined : event.round_usages?.at(-1), contextWindowTokens: event.context_window_tokens },
+        { id: event.request_id, turnSeq: event.turn_seq, graph: event.context_graph, usage: event.request_usage === undefined
+          ? (event.phase === "completed" ? event.round_usages?.at(-1) : undefined) : event.request_usage ?? undefined, contextWindowTokens: event.context_window_tokens },
       ] } : {}),
     };
     state.modelRequests = new Map(state.modelRequests).set(event.turn_id, modelRequest);

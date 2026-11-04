@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SidebarPanel } from "@/components/ui/sidebar-panel";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -250,7 +251,23 @@ function ImageViewports() {
 }
 
 const base = "webui/src/components/ui/";
+function Sidebars() {
+  const { t } = useGalleryTranslation();
+  const [open, setOpen] = useState(true);
+  return <div className="space-y-3">
+    <Button onClick={() => setOpen(!open)}>{t("controls.sidebarPanel.toggle")}</Button>
+    <div className="thread-preview-layout relative h-64 overflow-hidden rounded-xl border">
+      {open && <SidebarPanel width={320} header={<span>{t("controls.sidebarPanel.title")}</span>}>
+        <p className="p-4 text-sm">{t("controls.sidebarPanel.content")}</p>
+      </SidebarPanel>}
+    </div>
+  </div>;
+}
+
 export const foundationExamples: ComponentExample[] = [
+  { title: "controls.sidebarPanel.title", files: ["sidebar-panel"], Preview: Sidebars,
+    description: "controls.sidebarPanel.description", options: "controls.sidebarPanel.options",
+    code: '<SidebarPanel width={320} header={<span>Details</span>}>{children}</SidebarPanel>' },
   { title: "controls.button.title", files: ["button"], Preview: Buttons,
     description: "controls.button.description",
     options: "controls.button.options",
