@@ -474,7 +474,8 @@ def test_many_short_trace_rows_are_bounded_and_resolved(history, tmp_path, monke
     assert detail["events"][-1]["text"] == f"tool_{trace_count - 1}(value)"
 
 
-def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(history) -> None:
+@pytest.mark.parametrize("with_model_requests", [False, True])
+def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(history, with_model_requests) -> None:
     key = "websocket:summary-receipts"
     history.append(key, {"event": "user", "text": "run tools", "turn_id": "turn-T", "turn_seq": 1})
     members = [("turn-T", 3), ("turn-T", 4), ("turn-U", 2), ("turn-T", 8)]
@@ -483,13 +484,25 @@ def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(his
             "event": "message", "kind": "progress", "text": f'exec({"x" * 10_000})',
             "turn_id": turn_id, "turn_seq": sequence, "turn_phase": "activity",
         })
+        if with_model_requests and (turn_id, sequence) == ("turn-T", 4):
+            history.append(key, {
+                "event": "model_request", "turn_id": "turn-T", "turn_seq": 5,
+                "request_id": "request-one", "run_id": "run-one", "sequence": 2,
+                "phase": "completed", "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+            })
     history.append(key, {"event": "turn_end", "turn_id": "turn-T", "turn_seq": 9})
     original_rows = history.read(key)
 
-    payload = history.build(key)
+    payload = history.build(key, include_model_requests=True)
 
     assert payload is not None
-    assert len(payload["events"]) == 3
+    assert len(payload["events"]) == 3 + int(with_model_requests)
+    if with_model_requests:
+        request = payload["events"][2]
+        assert (request["event"], request["turn_seq"], request["usage"]["prompt_tokens"]) == ("model_request", 5, 100)
+        legacy = history.build(key)
+        assert legacy is not None
+        assert len(legacy["events"]) == 3
     summary = payload["events"][1]
     assert summary["trace_detail"]["traceCount"] == len(members)
     assert summary["projection_receipts"] == [
@@ -639,6 +652,10 @@ def test_build_response_reports_fork_boundary_from_marker(history, tmp_path, mon
         {"event": "message", "chat_id": "fork", "text": "answer1"},
     ):
         history.append(key, ev)
+    history.append(key, {
+        "event": "model_request", "chat_id": "fork", "request_id": "request",
+        "run_id": "run", "sequence": 2, "phase": "completed", "round_usages": [],
+    })
     history.append(key, {"event": "fork_marker"})
     history.append(key, {"event": "user", "chat_id": "fork", "text": "new branch"})
 
@@ -649,6 +666,9 @@ def test_build_response_reports_fork_boundary_from_marker(history, tmp_path, mon
         "round1", "answer1", "new branch",
     ]
     assert out["fork_boundary_event_index"] == 2
+    modern = history.build(key, include_model_requests=True)
+    assert modern is not None
+    assert modern["fork_boundary_event_index"] == 3
 
 
 def test_thread_response_does_not_mark_completed_message_tool_tail_pending(history,
@@ -1232,3 +1252,33 @@ def test_existing_shell_output_uses_canonical_command_identity_not_bang_text(his
     assert answer.get("render_as") == ("text" if command else None)
     assert history.read(key)[1]["text"] == output
     assert messages[1]["content"] == output
+
+
+@pytest.mark.parametrize("phase", ["started", "completed", "failed", "cancelled"])
+def test_model_request_persists_through_reconnect_projection(history, tmp_path, phase):
+    from nanobot.events import ModelRequestEvent
+    from nanobot.providers.base import LLMUsage
+    from nanobot.session.manager import SessionManager
+    from nanobot.webui.outbound_wire import project_notification
+
+    key = "websocket:requests"
+    history.append(key, {"event": "user", "chat_id": "requests", "text": "hello"})
+    usage = LLMUsage.reported(input_tokens=12, output_tokens=3)
+    projection = project_notification("requests", ModelRequestEvent(
+        request_id="request", run_id="run", sequence=2, phase=phase,
+        usage=usage, round_usages=(usage,) * 10, context_window_tokens=32000,
+    ))
+    assert projection is not None
+    assert projection.persistence == "turn_activity"
+    assert projection.deliver_offline
+    record = {**projection.payload, "turn_id": "turn", "turn_seq": 2}
+    history.append(key, record)
+    reopened = SessionManager(tmp_path)
+    response = reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(
+        key, history=snapshot, include_model_requests=True,
+    ))
+    assert response is not None
+    [event] = [e for e in response["events"] if e["event"] == "model_request"]
+    assert {field: event[field] for field in record} == record
+    assert len(event["round_usages"]) == 8
+    assert event["usage"] == usage.to_turn_dict()

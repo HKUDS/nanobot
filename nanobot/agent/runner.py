@@ -6,7 +6,8 @@ from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, Literal, ParamSpec, TypeVar, cast
+from uuid import uuid4
 
 from loguru import logger
 
@@ -23,9 +24,9 @@ from nanobot.agent.context_governance import (
 from nanobot.agent.execution_policy import ExecutionControlError
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
-from nanobot.agent.tools.execution import execute_tool_calls
+from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.events import NO_EVENTS, EventSink
+from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent
 from nanobot.llm_usage.context import (
     LLMUsageSource,
     bind_llm_usage_source,
@@ -42,6 +43,7 @@ from nanobot.providers.base import (
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.summary import SessionSummaryCheckpoint
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -448,6 +450,7 @@ class AgentRunner:
             request_messages = await self.prepare_prompt(
                 request_state.compaction.request_messages, messages,
             )
+            request_state.recent_round_usages.append(None)
             response, raw_usage = await self._request_model(
                 spec,
                 request_messages,
@@ -512,7 +515,67 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
-                results, new_events = await execute_tool_calls(
+                async def settle_tool_results(completed: list[ToolCallResult]) -> None:
+                    tool_events.extend(entry.event for entry in completed)
+                    tools_used.extend(
+                        entry.tool_call.name for entry in completed
+                        if entry.event.get("status") == "ok"
+                    )
+                    context.tool_results = [entry.result for entry in completed]
+                    context.tool_events = [entry.event for entry in completed]
+                    completed_by_id = {entry.tool_call.id: entry for entry in completed}
+                    interrupted = len(completed) != len(response.tool_calls)
+                    completed_tool_results: list[dict[str, Any]] = []
+                    for tool_call in response.tool_calls:
+                        entry = completed_by_id.get(tool_call.id)
+                        tool_message: dict[str, Any] = {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": tool_call.name,
+                        }
+                        if entry is not None:
+                            tool_message["content"] = self.context_governor.normalize_tool_result(
+                                governance_config,
+                                tool_call.id,
+                                tool_call.name,
+                                entry.result,
+                            )
+                        else:
+                            # Close interrupted calls as recovery does, without
+                            # inventing a result or permitting an implicit retry.
+                            tool_message["content"] = (
+                                "Error: Task interrupted; this tool's outcome is unknown. "
+                                "Check its effects before retrying."
+                            )
+                            tool_message["_recovery_interrupted"] = True
+                        messages.append(tool_message)
+                        completed_tool_results.append(tool_message)
+                    checkpoint_model_messages = (
+                        await self.prepare_prompt(
+                            self.context_governor.prepare_messages_for_model, governance_config,
+                            messages,
+                        )
+                        if response.provider_state is not None and not interrupted
+                        else None
+                    )
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "tools_completed",
+                            "iteration": iteration,
+                            "model": spec.runtime.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": completed_tool_results,
+                            "pending_tool_calls": [],
+                            "provider_state": conversation_state.checkpoint(
+                                messages,
+                                model_messages=checkpoint_model_messages,
+                            ) if not interrupted else None,
+                        },
+                        messages,
+                    )
+
+                await execute_tool_calls(
                     spec.tools,
                     response.tool_calls,
                     concurrent=spec.concurrent_tools,
@@ -522,53 +585,7 @@ class AgentRunner:
                     context=context,
                     model_messages=messages_for_model,
                     compacted_tool_results=request_state.compacted_tool_results,
-                )
-                tool_events.extend(new_events)
-                tools_used.extend(
-                    tool_call.name
-                    for tool_call, event in zip(response.tool_calls, new_events)
-                    if event.get("status") == "ok"
-                )
-                context.tool_results = list(results)
-                context.tool_events = list(new_events)
-                completed_tool_results: list[dict[str, Any]] = []
-                for tool_call, result in zip(response.tool_calls, results):
-                    tool_message = {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": tool_call.name,
-                        "content": self.context_governor.normalize_tool_result(
-                            governance_config,
-                            tool_call.id,
-                            tool_call.name,
-                            result,
-                        ),
-                    }
-                    messages.append(tool_message)
-                    completed_tool_results.append(tool_message)
-                checkpoint_model_messages = (
-                    await self.prepare_prompt(
-                        self.context_governor.prepare_messages_for_model, governance_config,
-                        messages,
-                    )
-                    if response.provider_state is not None
-                    else None
-                )
-                await self._emit_checkpoint(
-                    spec,
-                    {
-                        "phase": "tools_completed",
-                        "iteration": iteration,
-                        "model": spec.runtime.model,
-                        "assistant_message": assistant_message,
-                        "completed_tool_results": completed_tool_results,
-                        "pending_tool_calls": [],
-                        "provider_state": conversation_state.checkpoint(
-                            messages,
-                            model_messages=checkpoint_model_messages,
-                        ),
-                    },
-                    messages,
+                    on_settled=settle_tool_results,
                 )
                 empty_content_retries = 0
                 length_recovery_parts.clear()
@@ -609,6 +626,7 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
+                request_state.recent_round_usages.append(None)
                 response = await self._request_finalization_retry(
                     spec,
                     messages_for_model,
@@ -885,6 +903,59 @@ class AgentRunner:
             ),
         }
 
+    async def _invoke_model(
+        self, spec: AgentRunSpec, state: ModelRequestState, kwargs: dict[str, Any],
+        *, record_timing: Callable[[LLMResponse], None] | None = None,
+    ) -> LLMResponse:
+        """Observe the logical provider invocation, after request preparation.
+
+        Physical retries/fallbacks and provider-internal pre-request compaction
+        remain inside the call. Post-return compaction summarization is outside.
+        Only provider-returned usage is published here, never estimated zeros.
+        Callers reserve a live round slot; recovery invocations update it.
+        """
+        request_id = uuid4().hex
+
+        async def emit(phase: Literal["started", "completed", "failed", "cancelled"]) -> None:
+            state.request_sequence += 1
+            if not spec.events.accepts(ModelRequestEvent):
+                return
+            await spec.events.emit(ModelRequestEvent(
+                request_id=request_id, run_id=state.request_run_id,
+                sequence=state.request_sequence, phase=phase,
+                usage=state.request_usage,
+                round_usages=tuple(usage for usage in state.recent_round_usages if usage is not None),
+                context_window_tokens=spec.runtime.context_window_tokens,
+            ))
+
+        try:
+            await emit("started")
+            _raise_if_cancelling()
+            response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)
+            _raise_if_cancelling()
+        except asyncio.CancelledError:
+            try:
+                await shield_and_drain(emit("cancelled"))
+            except asyncio.CancelledError:
+                pass
+            raise
+        except Exception:
+            await emit("failed")
+            raise
+        if record_timing is not None:
+            record_timing(response)
+        if response.usage is not None:
+            reported_usage = response.usage.with_timing(
+                generation_ms=response.generation_ms, ttft_ms=response.ttft_ms,
+            )
+            state.request_usage = self._merge_usage(state.request_usage, reported_usage)
+            state.recent_round_usages[-1] = self._merge_usage(
+                state.recent_round_usages[-1], reported_usage,
+            )
+        del state.recent_round_usages[:-8]
+        await emit("failed" if response.finish_reason == "error" else "completed")
+        return response
+
     async def _request_model(
         self,
         spec: AgentRunSpec,
@@ -1018,7 +1089,14 @@ class AgentRunner:
                 on_tool_call_delta=_provider_tool_event,
                 on_stream_recover=_stream_recover,
             )
-        coro = spec.runtime.provider.chat_stream_with_retry(**kwargs)
+        def record_timing(response: LLMResponse) -> None:
+            _pause_generation()
+            if first_output_at is not None:
+                response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
+            if generation_elapsed_s > 0:
+                response.generation_ms = max(1, round(generation_elapsed_s * 1000))
+
+        coro = self._invoke_model(spec, request_state, kwargs, record_timing=record_timing)
 
         # Providers bound the wait for each stream event, including reasoning and tool deltas.
         request_started_at = time.perf_counter()
@@ -1032,10 +1110,6 @@ class AgentRunner:
         _pause_generation()
         await _close_native_reasoning()
         _end_stream_segment()
-        if first_output_at is not None:
-            response.ttft_ms = max(0, round((first_output_at - request_started_at) * 1000))
-        if generation_elapsed_s > 0:
-            response.generation_ms = max(1, round(generation_elapsed_s * 1000))
         await self.context_governor.summarize_provider_compaction(
             request_state,
             response,
@@ -1205,6 +1279,7 @@ class AgentRunner:
             if iteration > spec.max_iterations
             else self._budget_exhausted_finalization_messages(request_messages)
         )
+        request_state.recent_round_usages.append(None)
         try:
             response = await self._request_no_tools(
                 spec,
@@ -1261,7 +1336,7 @@ class AgentRunner:
             transcript=transcript,
         )
         _raise_if_cancelling()
-        response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)
+        response = await self._invoke_model(spec, request_state, kwargs)
         _raise_if_cancelling()
         await self.context_governor.summarize_provider_compaction(
             request_state,

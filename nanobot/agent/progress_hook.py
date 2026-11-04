@@ -125,8 +125,7 @@ class AgentProgressHook(AgentHook):
                 thought = self._strip_think(context.response.content if context.response else None)
                 if thought:
                     await self._publish(ProgressEvent(content=thought))
-            tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
-            await self._publish(ProgressEvent(tool_hint=True, tool_events=tool_events))
+
         for tc in context.tool_calls:
             args_str = (
                 json.dumps(tc.arguments, ensure_ascii=False)[:200]
@@ -148,15 +147,16 @@ class AgentProgressHook(AgentHook):
         else:
             self._reasoning_open = False
 
+    async def on_tool_execution_event(self, context: AgentHookContext) -> None:
+        if self._publish:
+            finished = bool(context.tool_events)
+            payloads = (
+                build_tool_event_finish_payloads(context) if finished
+                else [build_tool_event_start_payload(tc) for tc in context.tool_calls]
+            )
+            await self._publish(ProgressEvent(tool_hint=not finished, tool_events=payloads))
+
     async def after_iteration(self, context: AgentHookContext) -> None:
-        if (
-            self._publish
-            and context.tool_calls
-            and context.tool_events
-        ):
-            tool_events = build_tool_event_finish_payloads(context)
-            if tool_events:
-                await self._publish(ProgressEvent(tool_events=tool_events))
         u = context.usage
         logger.debug(
             "LLM usage: input={} output={} cache_read={} cache_write={} source={}",

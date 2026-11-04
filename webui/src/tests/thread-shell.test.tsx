@@ -1032,6 +1032,38 @@ describe("ThreadShell", () => {
     expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(4);
   });
 
+  it("updates composer usage from active model snapshots without changing the body", async () => {
+    const client = makeClient();
+    const envelope = { chat_id: "live-usage", turn_id: "live-turn" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Alive-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, projection: "events", active_turn_id: "live-turn", has_pending_tool_calls: true,
+            events: [{ ...envelope, event: "user_message", text: "Waiting for answer", starts_turn: true, turn_seq: 0 }] })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    render(wrap(client, <ThreadShell
+      session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />));
+    await screen.findByText("Waiting for answer");
+    act(() => client._emitChat("live-usage", { ...envelope, event: "model_request", request_id: "first", run_id: "run",
+      phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
+      usage: { prompt_tokens: 100, completion_tokens: 10, context_tokens: 100, request_count: 1 },
+      round_usages: [{ prompt_tokens: 100, completion_tokens: 10 }],
+    }));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    expect(trigger).toHaveAccessibleName("Context 10%. Open context usage");
+    act(() => client._emitChat("live-usage", { ...envelope, event: "model_request", request_id: "second", run_id: "run",
+      phase: "completed", sequence: 2, turn_seq: 2, context_window_tokens: 1000,
+      usage: { prompt_tokens: 300, completion_tokens: 20, context_tokens: 200, request_count: 2 },
+      round_usages: [{ prompt_tokens: 100, completion_tokens: 10 }, { prompt_tokens: 200, completion_tokens: 10 }],
+    }));
+    expect(trigger).toHaveAccessibleName("Context 20%. Open context usage");
+    fireEvent.click(trigger);
+    expect(await screen.findAllByTestId("round-usage-bar")).toHaveLength(2);
+    expect(screen.getByText("Waiting for answer")).toBeInTheDocument();
+  });
+
   it.each([false, true])("restores context after compaction only with newer usage (%s)", async (newReply) => {
     const client = makeClient();
     const messages: UIMessage[] = [

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { composerUsageSnapshots, type ComposerUsageSnapshot } from "@/lib/model-request";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
@@ -77,18 +78,15 @@ import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage | null {
+function latestComposerContextUsage(messages: ComposerUsageSnapshot[]): ComposerContextUsage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.kind === "compaction" && message.compaction?.phase === "succeeded") {
+    if (message.compacted) {
       return null;
     }
     const contextTokens = message.usage?.context_tokens;
     if (
-      message.role !== "assistant"
-      || message.kind === "trace"
-      || message.isStreaming
-      || typeof contextTokens !== "number"
+      typeof contextTokens !== "number"
       || !Number.isFinite(contextTokens)
       || contextTokens < 0
     ) {
@@ -104,23 +102,19 @@ function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage
   return null;
 }
 
-function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
+function recentComposerRoundUsage(messages: ComposerUsageSnapshot[]): ComposerRoundUsage[] {
   const recent: ComposerRoundUsage[] = [];
   const seenTurns = new Set<string>();
   for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
     const message = messages[index];
     const turnKey = message.turnId || message.id;
-    if (
-      message.role !== "assistant"
-      || message.kind === "trace"
-      || message.isStreaming
-      || seenTurns.has(turnKey)
-    ) {
+    if (seenTurns.has(turnKey)) {
       continue;
     }
 
-    seenTurns.add(turnKey);
     const rounds: RoundUsage[] = message.roundUsages ?? [];
+    if (!rounds.length) continue;
+    seenTurns.add(turnKey);
     for (let roundIndex = rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
       const round = rounds[roundIndex];
       const inputTokens = round.prompt_tokens;
@@ -589,6 +583,7 @@ export function ThreadShell({
   }, [chatId, onTurnEnd]);
   const {
     messages,
+    modelRequests,
     messagesKey,
     messagesReady,
     isStreaming,
@@ -700,13 +695,14 @@ export function ThreadShell({
   useEffect(() => {
     if (hasAppMentions) requestMentionCatalogs();
   }, [hasAppMentions, requestMentionCatalogs]);
+  const usageSnapshots = useMemo(() => composerUsageSnapshots(messages, modelRequests), [messages, modelRequests]);
   const composerContextUsage = useMemo(
-    () => latestComposerContextUsage(displayMessages),
-    [displayMessages],
+    () => latestComposerContextUsage(usageSnapshots),
+    [usageSnapshots],
   );
   const composerRoundUsage = useMemo(
-    () => recentComposerRoundUsage(displayMessages),
-    [displayMessages],
+    () => recentComposerRoundUsage(usageSnapshots),
+    [usageSnapshots],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.

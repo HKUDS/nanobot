@@ -8,6 +8,7 @@ from agent.runner_helpers import make_run_spec
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.context_governance import ContextWindowExceededError
 from nanobot.config.schema import AgentDefaults
+from nanobot.events import EventSink, ModelRequestEvent
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -609,6 +610,7 @@ async def test_runner_returns_max_iterations_fallback():
 async def test_runner_uses_no_tools_finalization_after_max_iterations():
     from nanobot.agent.runner import AgentRunner
 
+    publish = AsyncMock()
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
@@ -644,6 +646,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        events=EventSink(publish),
     ))
 
     assert result.stop_reason == "max_iterations"
@@ -664,6 +667,10 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
         (1, 1),
         (10, 7),
     ]
+    completed = [call.args[0] for call in publish.await_args_list
+                 if isinstance(call.args[0], ModelRequestEvent) and call.args[0].phase == "completed"]
+    assert completed[-1].round_usages == tuple(result.round_usages)
+    assert completed[-1].usage == result.usage
 
 
 @pytest.mark.asyncio
@@ -671,6 +678,7 @@ async def test_runner_accounts_for_malformed_retry_and_no_tools_recovery():
     from nanobot.agent.hook import AgentHook
     from nanobot.agent.runner import AgentRunner
 
+    publish = AsyncMock()
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
@@ -703,6 +711,7 @@ async def test_runner_accounts_for_malformed_retry_and_no_tools_recovery():
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=hook,
+        events=EventSink(publish),
     ))
 
     assert result.final_content == "recovered answer"
@@ -722,6 +731,11 @@ async def test_runner_accounts_for_malformed_retry_and_no_tools_recovery():
     assert result.usage is not None
     assert (result.usage.input_tokens, result.usage.output_tokens) == (60, 6)
     assert [(item.input_tokens, item.output_tokens) for item in result.round_usages] == [(60, 6)]
+    completed = [call.args[0] for call in publish.await_args_list
+                 if isinstance(call.args[0], ModelRequestEvent) and call.args[0].phase == "completed"]
+    assert [len(event.round_usages) for event in completed] == [1, 1, 1]
+    assert completed[-1].round_usages == tuple(result.round_usages)
+    assert completed[-1].usage == result.usage
 
 
 @pytest.mark.asyncio
@@ -766,6 +780,7 @@ async def test_runner_replaces_empty_tool_result_with_marker():
 async def test_runner_retries_empty_final_response_with_summary_prompt():
     from nanobot.agent.runner import AgentRunner
 
+    publish = AsyncMock()
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
@@ -794,6 +809,7 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        events=EventSink(publish),
     ))
 
     assert result.final_content == "final answer"
@@ -809,6 +825,10 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
         (5, 1),
         (3, 7),
     ]
+    completed = [call.args[0] for call in publish.await_args_list
+                 if isinstance(call.args[0], ModelRequestEvent) and call.args[0].phase == "completed"]
+    assert completed[-1].round_usages == tuple(result.round_usages)
+    assert completed[-1].usage == result.usage
 
 
 @pytest.mark.asyncio
@@ -1190,7 +1210,7 @@ async def test_runner_carries_retry_notifications_in_provider_context():
     assert "on_retry_wait" not in captured
     event = RetryWaitEvent("waiting")
     await captured["provider_context"].events.emit(event)
-    retry_wait_cb.assert_awaited_once_with(event)
+    retry_wait_cb.assert_any_await(event)
 
 
 @pytest.mark.asyncio

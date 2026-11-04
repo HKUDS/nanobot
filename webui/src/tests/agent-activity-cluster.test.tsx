@@ -185,7 +185,7 @@ describe("AgentActivityCluster", () => {
       .toHaveAttribute("aria-label", `${path} 編集`);
   });
 
-  it("loads deferred trace details only after completed activity is expanded", async () => {
+  it.each(["exec(…)", ""])("loads deferred trace details only after completed activity is expanded (summary=%s)", async (summary) => {
     const onLoadTraceDetails = vi.fn();
     render(
       <AgentActivityCluster
@@ -193,8 +193,8 @@ describe("AgentActivityCluster", () => {
           id: "t-deferred",
           role: "tool",
           kind: "trace",
-          content: "exec(…)",
-          traces: ["exec(…)"],
+          content: summary,
+          traces: summary ? [summary] : [],
           traceDetail: {
             ref: "9.tr-deadbeefdeadbeef",
             bytes: 40_000,

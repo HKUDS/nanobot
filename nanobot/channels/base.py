@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -116,6 +117,22 @@ class BaseChannel(ABC):
         A normal return confirms this adapter completed, not a recipient read receipt.
         """
         pass
+
+    def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
+        """Opt in to sending adjacent, unscheduled envelopes together.
+
+        The synchronous predicate must preserve channel-owned event, turn and
+        generation boundaries. Returning True requires implementing ``send_batch``.
+        """
+        return False
+
+    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
+        """Send an ordered batch approved by ``can_batch_send``.
+
+        The manager does not retry a batch: a failure may follow partial delivery.
+        Like ``send``, returning confirms completion of the adapter's work.
+        """
+        raise NotImplementedError("Channels opting into batching must implement send_batch")
 
     def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
         """Project tool activity once before delivery; override for native UI.

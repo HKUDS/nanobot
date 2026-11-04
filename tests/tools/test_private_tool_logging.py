@@ -239,16 +239,18 @@ async def test_search_refresh_traceback_cannot_capture_private_call_arguments(
         lambda message: rendered.append(str(message)), format="{message}",
         diagnose=True, backtrace=True,
     )
+    settled = []
     try:
         with request_context(RequestContext(channel="websocket", chat_id="test", log_content=log_content)):
-            results, _ = await execute_tool_calls(
+            await execute_tool_calls(
                 tools, [ToolCallRequest(id="test", name="web_search", arguments={"query": _SECRET})],
                 concurrent=False, external_lookup_counts={}, workspace_violation_counts={},
                 hook=AgentHook(), context=AgentHookContext(iteration=1, messages=[]),
+                on_settled=AsyncMock(side_effect=settled.extend),
             )
     finally:
         logger.remove(sink)
-    assert results == ["synthetic result"]
+    assert [completed.result for completed in settled] == ["synthetic result"]
     assert "Failed to refresh web search config" in "\n".join(rendered)
     assert (_SECRET in "\n".join(rendered)) is log_content
 

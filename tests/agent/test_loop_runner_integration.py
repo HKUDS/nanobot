@@ -13,7 +13,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
-from nanobot.events import RetryStatusEvent
+from nanobot.events import ModelRequestEvent, RetryStatusEvent
 from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import (
     GenerationSettings,
@@ -92,11 +92,14 @@ async def test_loop_uses_structured_retry_status_without_legacy_text(tmp_path):
 
     assert result is not None
     assert captured["provider_context"].events.accepts(RetryStatusEvent)
-    assert bus.outbound_size == 1
-    outbound = bus.outbound.get_nowait()
-    assert isinstance(outbound.event, RetryStatusEvent)
-    assert outbound.event.state == "waiting"
-    assert outbound.chat_id == "chat-a"
+    outbound = [bus.outbound.get_nowait() for _ in range(bus.outbound_size)]
+    assert [type(message.event) for message in outbound] == [
+        ModelRequestEvent, RetryStatusEvent, ModelRequestEvent,
+    ]
+    retry = outbound[1].event
+    assert isinstance(retry, RetryStatusEvent)
+    assert retry.state == "waiting"
+    assert all(message.chat_id == "chat-a" for message in outbound)
 
 
 @pytest.mark.asyncio

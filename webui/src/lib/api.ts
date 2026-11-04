@@ -387,6 +387,19 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
         || !isCompactionPhase(value.phase)
         || (value.reason !== undefined && !isCompactionReason(value.reason))) break;
       return value as unknown as ThreadProjectionEvent;
+    case "model_request": {
+      const isUsage = (usage: unknown) => isRecord(usage)
+        && Object.values(usage).every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0);
+      if (typeof value.request_id !== "string" || !value.request_id
+        || typeof value.run_id !== "string" || !value.run_id
+        || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < 0
+        || !["started", "completed", "failed", "cancelled"].includes(String(value.phase))
+        || (value.usage !== undefined && !isUsage(value.usage))
+        || (value.round_usages !== undefined && (!Array.isArray(value.round_usages) || !value.round_usages.every(isUsage)))
+        || (value.context_window_tokens !== undefined && (typeof value.context_window_tokens !== "number"
+          || !Number.isFinite(value.context_window_tokens) || value.context_window_tokens < 0))) break;
+      return value as unknown as ThreadProjectionEvent;
+    }
     case "turn_end":
       return value as unknown as ThreadProjectionEvent;
   }
@@ -436,6 +449,7 @@ export async function fetchWebuiThread(
   if (options?.direction) params.set("direction", options.direction);
   if (options?.before) params.set("before", options.before);
   if (options?.after) params.set("after", options.after);
+  params.set("include_model_requests", "1");
   const query = params.toString();
   const suffix = query ? `?${query}` : "";
   const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;

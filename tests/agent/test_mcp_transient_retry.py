@@ -790,13 +790,16 @@ async def test_resource_prompt_results_keep_runtime_classification(case):
         assert direct == (with_tool_error_hint(expected) if failed else expected)
 
         hook = _RecordingToolHook()
-        outputs, events = await execute_tool_calls(
+        settled = []
+        await execute_tool_calls(
             registry, [call], concurrent=False, external_lookup_counts={},
             workspace_violation_counts={}, hook=hook,
             context=AgentHookContext(iteration=0, messages=[]),
+            on_settled=AsyncMock(side_effect=settled.extend),
         )
-        assert events[0]["status"] == ("error" if failed else "ok")
-        assert expected in outputs[0]
+        [completed] = settled
+        assert completed.event["status"] == ("error" if failed else "ok")
+        assert expected in completed.result
         assert hook.errors == ([expected] if failed else [])
         assert hook.successes == ([] if failed else [expected])
 

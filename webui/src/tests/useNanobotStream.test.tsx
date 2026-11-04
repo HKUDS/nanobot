@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
+import { composerUsageSnapshots } from "@/lib/model-request";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import type { NanobotClient, StreamError } from "@/lib/nanobot-client";
 import type {
@@ -3836,4 +3837,31 @@ describe("live canonical event projection", () => {
       "Recovered answer.",
     ]);
   });
+});
+
+
+it("projects active model usage without ending the turn and ignores late usage after stop", () => {
+  const fake = fakeClient();
+  const { result } = renderHook(() => useNanobotStream("chat-model", EMPTY_MESSAGES), {
+    wrapper: wrap(fake.client),
+  });
+  const envelope = { chat_id: "chat-model", turn_id: "turn-model" };
+  act(() => {
+    fake.emit("chat-model", { ...envelope, event: "goal_status", status: "running", started_at: 1700 });
+    fake.emit("chat-model", { ...envelope, event: "user_message", text: "hello", starts_turn: true, turn_seq: 0 });
+    fake.emit("chat-model", { ...envelope, event: "model_request", request_id: "first", run_id: "run",
+      sequence: 1, turn_seq: 1, phase: "completed", usage: { prompt_tokens: 105000, completion_tokens: 100,
+        context_tokens: 105000, request_count: 1 }, round_usages: [{ prompt_tokens: 105000, completion_tokens: 100 }] });
+    fake.emit("chat-model", { ...envelope, event: "model_request", request_id: "second", run_id: "run",
+      sequence: 2, turn_seq: 2, phase: "started" });
+  });
+  expect(result.current.isStreaming).toBe(true);
+  expect(composerUsageSnapshots(result.current.messages, result.current.modelRequests).at(-1)?.usage?.context_tokens).toBe(105000);
+  act(() => result.current.stop());
+  expect(result.current.isStreaming).toBe(false);
+  act(() => fake.emit("chat-model", { ...envelope, event: "model_request", request_id: "late", run_id: "run",
+    sequence: 3, turn_seq: 3, phase: "completed", usage: { prompt_tokens: 999, completion_tokens: 1,
+      context_tokens: 999, request_count: 2 } }));
+  expect(result.current.isStreaming).toBe(false);
+  expect(composerUsageSnapshots(result.current.messages, result.current.modelRequests).at(-1)?.usage?.context_tokens).toBe(105000);
 });

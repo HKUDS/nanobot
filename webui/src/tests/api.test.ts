@@ -32,6 +32,7 @@ import {
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
+  fetchSubagentThread,
   fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
   importMcpConfig,
@@ -97,11 +98,19 @@ describe("webui API helpers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("fetches a subagent thread from its parent session", async () => {
+    await fetchSubagentThread("tok", "websocket:chat-1", "task-1");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/subagents/task-1/webui-thread",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+  });
+
   it("percent-encodes websocket keys when fetching webui-thread snapshot", async () => {
     await fetchWebuiThread("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
@@ -117,7 +126,7 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D",
+      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D&include_model_requests=1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
@@ -163,7 +172,7 @@ describe("webui API helpers", () => {
     })).resolves.toBe(cached);
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1",
       expect.objectContaining({
         headers: {
           Authorization: "Bearer tok",
