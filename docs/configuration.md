@@ -2375,6 +2375,8 @@ The tool result distinguishes a hard-runtime termination from inactivity. With `
 Silence is not proof that a command is stuck: builds, downloads, and buffered programs can be quiet while working. Only bytes received through stdout or stderr count as activity; output redirected to files is not observed, and reading logs does not refresh the inactivity clock. Inactivity checks do not detect prompts or supply answers. Choose `"terminate"` only when stopping a quiet command is acceptable, and use a finite hard runtime when total execution time must remain bounded. Shell sessions are not durable jobs and should not be used as a replacement for a scheduler or service manager. A command that detaches a background service and exits is not a managed job; these timing checks do not manage that service afterward.
 
 
+With a Unix sandbox enabled, the selected shell and any requested login profile run inside the sandbox, with its workspace-scoped `HOME`. Custom interpreters outside the exposed system paths require an explicit read-only bind. Tool PATH settings affect commands inside the sandbox, not selection of the host launcher. Install `bwrap` in the operating system's default executable search path (normally `/bin:/usr/bin`); a custom parent or tool `PATH` cannot override that launcher. Seatbelt uses `/usr/bin/sandbox-exec`. A missing or failed launcher never falls back to unsandboxed execution.
+
 ## Pairing
 
 Pairing lets users get access to the bot through a simple code exchange — no config editing required. This works for both new users and existing users connecting from a new channel (e.g. someone already approved on Telegram now setting up Discord).
