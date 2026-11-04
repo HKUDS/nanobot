@@ -61,6 +61,7 @@ from nanobot.command.builtin import register_core_commands
 from nanobot.command.router import CommandExpansion, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.context_graph import CONTEXT_SOURCE_HISTORY_META, retained_source_metadata
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
@@ -2592,6 +2593,8 @@ class AgentLoop:
                         value = cast(dict[str, Any], internal_meta).get(key)
                         if isinstance(value, str) and value:
                             entry[key] = value
+            if source_meta := retained_source_metadata(entry.get("content"), cast(object, internal_meta)):
+                entry[CONTEXT_SOURCE_HISTORY_META] = source_meta
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "user" and isinstance(followup_id, str) and followup_id:

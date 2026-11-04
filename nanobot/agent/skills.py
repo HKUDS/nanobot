@@ -21,6 +21,7 @@ from nanobot.agent.skill_metadata import (
 from nanobot.agent.skill_metadata import (
     valid_skill_metadata as valid_skill_metadata,
 )
+from nanobot.context_graph import record_source
 from nanobot.runtime_context import RuntimeContextBlock
 
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
@@ -191,11 +192,14 @@ class SkillsLoader:
         Returns:
             Formatted skills content.
         """
-        parts = [
-            f"### Skill: {name}\n\n{self._strip_frontmatter(markdown)}"
-            for name in skill_names
-            if (markdown := self.load_skill(name))
-        ]
+        parts: list[str] = []
+        entries = {entry["name"]: entry for entry in self.list_skills(filter_unavailable=False)}
+        for name in skill_names:
+            if markdown := self.load_skill(name):
+                content = self._strip_frontmatter(markdown)
+                parts.append(f"### Skill: {name}\n\n{content}")
+                if name in entries:
+                    record_source(Path(entries[name]["path"]), content)
         return "\n\n---\n\n".join(parts)
 
     def get_explicitly_invoked_skills(self, text: str) -> list[str]:
@@ -297,6 +301,7 @@ class SkillsLoader:
             lines = [f"### {label} (`{display_root}`)"]
             for entry in entries:
                 skill_name = entry["name"]
+                record_source(Path(entry["path"]), "", loaded=False)
                 desc = self.get_skill_description(skill_name)
                 relative_path = Path(entry["path"]).relative_to(root).as_posix()
                 lines.append(f"- **{skill_name}** — {desc}  `{relative_path}`")

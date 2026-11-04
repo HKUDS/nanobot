@@ -11,6 +11,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
+from nanobot.context_graph import ContextGraph
 from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
@@ -97,6 +98,7 @@ class TurnEndWirePayload(_ChatWirePayload):
 
 
 class ModelRequestWirePayload(_ChatWirePayload):
+    context_graph: NotRequired[ContextGraph]
     event: Literal["model_request"]
     request_id: str
     run_id: str
@@ -261,6 +263,8 @@ def project_notification(
             "request_id": event.request_id, "run_id": event.run_id,
             "sequence": event.sequence, "phase": event.phase,
         }
+        if event.context_graph is not None:
+            payload["context_graph"] = event.context_graph
         if event.usage is not None:
             payload["usage"] = event.usage.to_turn_dict()
         payload["round_usages"] = [usage.to_turn_dict() for usage in event.round_usages[-8:]]

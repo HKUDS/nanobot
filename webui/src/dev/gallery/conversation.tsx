@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { ComposerUsagePopover, type ComposerRoundUsage } from "@/components/thread/ComposerUsagePopover";
+import type { ContextSnapshot } from "@/lib/types";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { ModelPresetBadge, type ModelPresetOption } from "@/components/thread/ModelPresetBadge";
@@ -102,14 +103,30 @@ function ModelPresetPreview() {
   </div>;
 }
 
+const contextSnapshots: ContextSnapshot[] = [0, 1, 2].map((round) => ({
+  id: `context-example-${round}`, contextWindowTokens: 128000,
+  usage: { prompt_tokens: 28000 + round * 7300, context_tokens: 28000 + round * 7300, cached_tokens: 20000 + round * 7000, generation_ms: 8200 },
+  graph: {
+    nodes: [
+      { path: "/workspace/MEMORY.md", name: "MEMORY.md", state: "loaded", tokens: 2100 },
+      { path: "/workspace/SOUL.md", name: "SOUL.md", state: "loaded", tokens: 380 },
+      { path: "/workspace/AGENTS.md", name: "AGENTS.md", state: "loaded", tokens: 1400 },
+      { path: "/workspace/skills/nanobot-document/SKILL.md", name: "nanobot-document", state: "loaded", tokens: 550 },
+      { path: "/workspace/skills/nanobot-document/references/architecture.md", name: "architecture.md", state: round ? "loaded" : "discovered", tokens: round * 1600 },
+      { path: "/workspace/skills/nanobot-document/references/configuration.md", name: "configuration.md", state: "discovered", tokens: 0 },
+    ],
+    edges: ["architecture.md", "configuration.md"].map((name) => ({ source: "/workspace/skills/nanobot-document/SKILL.md", target: `/workspace/skills/nanobot-document/references/${name}` })),
+  },
+}));
+
 function UsagePreview() {
   const { t } = useGalleryTranslation();
-  const [mode, setMode] = useState<"normal" | "caution" | "critical" | "rounds_only" | "sheet">("normal");
+  const [mode, setMode] = useState<"normal" | "caution" | "critical" | "rounds_only">("normal");
   const tokens = mode === "critical" ? 192_000 : mode === "caution" ? 162_000 : 18_500;
   return <div className="space-y-4">
-    <StatePicker label={t("previews.usage.state")} value={mode} options={["normal", "caution", "critical", "rounds_only", "sheet"]} onChange={setMode} />
+    <StatePicker label={t("previews.usage.state")} value={mode} options={["normal", "caution", "critical", "rounds_only"]} onChange={setMode} />
     <ComposerUsagePopover context={mode === "rounds_only" ? null : { contextTokens: tokens, contextWindowTokens: 200_000 }}
-      rounds={rounds} showLabel bottomSheet={mode === "sheet"} />
+      rounds={rounds} snapshots={contextSnapshots} showLabel />
     <p className="text-sm text-muted-foreground">{t("previews.usage.hint")}</p>
   </div>;
 }

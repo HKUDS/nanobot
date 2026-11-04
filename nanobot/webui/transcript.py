@@ -21,6 +21,7 @@ from loguru import logger
 
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_TURN_ID
 from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.context_graph import parse_context_graph
 from nanobot.runtime_context import public_history_message
 from nanobot.session.automation_turns import is_automation_kind
 from nanobot.session.display_history import (
@@ -1528,6 +1529,8 @@ def _client_projection_event(
             ):
                 return None
             projected.update(request_id=request_id, run_id=run_id, sequence=sequence, phase=phase)
+            if (graph := parse_context_graph(record.get("context_graph"))) is not None:
+                projected["context_graph"] = graph
         latency_ms = record.get("latency_ms")
         if isinstance(latency_ms, int | float) and latency_ms >= 0:
             projected["latency_ms"] = int(latency_ms)

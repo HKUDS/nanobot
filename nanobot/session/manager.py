@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, TypedDict, TypeVar, cast
 from uuid import uuid4
 
+from nanobot.context_graph import CONTEXT_SOURCE_HISTORY_META, retained_source_metadata
 from nanobot.providers.base import ProviderConversationState
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
@@ -301,6 +302,8 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
+            if source_meta := retained_source_metadata(content, message.get(CONTEXT_SOURCE_HISTORY_META)):
+                entry["_meta"] = source_meta
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]

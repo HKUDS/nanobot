@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { composerUsageSnapshots, type ComposerUsageSnapshot } from "@/lib/model-request";
@@ -540,6 +540,10 @@ export function ThreadShell({
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
+  const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
+  const [sidebarEnterWidth, setSidebarEnterWidth] = useState(0);
+  const [contextSidebarHost, setContextSidebarHost] = useState<HTMLElement | null>(null);
+  const setSidebarHost = useCallback((node: HTMLElement | null) => { shellRef.current = node; setContextSidebarHost(node); }, []);
   const [closingPreview, setClosingPreview] = useState<{ key: string; state: FilePreviewState } | null>(null);
   const filePreviewClosing = closingPreview?.key === previewSessionKey;
   const visiblePreview = filePreviewClosing ? closingPreview.state : previewState;
@@ -704,6 +708,13 @@ export function ThreadShell({
     () => recentComposerRoundUsage(usageSnapshots),
     [usageSnapshots],
   );
+  const contextGraphSnapshots = useMemo(() => {
+    const snapshots = Array.from(modelRequests.values()).sort((a, b) => a.createdAt - b.createdAt)
+      .flatMap((request) => request.contextSnapshots ?? []).slice(-32);
+    return usageSnapshots.at(-1)?.compacted
+      ? [...snapshots, { id: "compacted", graph: { nodes: [], edges: [] } }]
+      : snapshots;
+  }, [modelRequests, usageSnapshots]);
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
   const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"
@@ -1132,9 +1143,19 @@ export function ThreadShell({
   }, []);
 
   const handleOpenFilePreview = useCallback((path: string) => {
+    setSidebarEnterWidth(shellRef.current?.querySelector(".file-preview-pane")?.getBoundingClientRect().width ?? 0);
+    setContextSidebarOpen(false);
     cancelPreviewClose();
     openFile(path);
   }, [cancelPreviewClose, openFile]);
+
+  const handleContextSidebarOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      setSidebarEnterWidth(previewOpen ? filePreviewWidth : 0);
+      cancelPreviewClose(); closePreview();
+    }
+    setContextSidebarOpen(open);
+  }, [previewOpen, filePreviewWidth, cancelPreviewClose, closePreview]);
 
   const handleClosePreviewTab = useCallback((id: string) => {
     if (previewState.tabs.length === 1) handleCloseFilePreview();
@@ -1325,6 +1346,11 @@ export function ThreadShell({
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
           recentRoundUsage={composerRoundUsage}
+          contextSnapshots={contextGraphSnapshots}
+          onOpenContextFile={handleOpenFilePreview}
+          contextSidebarHost={contextSidebarHost}
+          contextSidebarOpen={contextSidebarOpen}
+          onContextSidebarOpenChange={handleContextSidebarOpenChange}
           variant={composerVariant}
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
@@ -1379,6 +1405,11 @@ export function ThreadShell({
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
           recentRoundUsage={composerRoundUsage}
+          contextSnapshots={contextGraphSnapshots}
+          onOpenContextFile={handleOpenFilePreview}
+          contextSidebarHost={contextSidebarHost}
+          contextSidebarOpen={contextSidebarOpen}
+          onContextSidebarOpenChange={handleContextSidebarOpenChange}
           variant="hero"
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
@@ -1420,10 +1451,11 @@ export function ThreadShell({
     </div>
   );
   const sessionInfoAction = historyKey ? (
-    <SessionInfoPopover client={client} sessionKey={historyKey} token={token} title={title} />
+    <SessionInfoPopover client={client} sessionKey={historyKey} token={token} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator
+      shortcutEnabled={composerActive}
       messages={displayMessages}
       prompts={promptNavigation.prompts}
       onJumpToPrompt={(promptId) => viewportRef.current?.jumpToUserPrompt(promptId)}
@@ -1460,7 +1492,7 @@ export function ThreadShell({
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
-    <section ref={shellRef} data-preview-open={previewOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
+    <section ref={setSidebarHost} style={{ "--sidebar-enter-width": `${sidebarEnterWidth}px`, "--sidebar-enter-mobile-width": sidebarEnterWidth ? "100%" : "0px" } as CSSProperties} data-preview-open={previewOpen || contextSidebarOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
       <div ref={setConversationElement} className={cn(
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
         headerPortalTarget === undefined && !hideHeader && "thread-workspace",
@@ -1496,7 +1528,7 @@ export function ThreadShell({
             retryStatus={retryStatus}
             emptyState={emptyState}
             initialLoading={initialHistoryLoading}
-            composer={composerPortalTarget === undefined ? composer : null}
+            composer={composerPortalTarget === undefined || ((previewOpen || contextSidebarOpen) && composerActive) ? composer : null}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
@@ -1523,11 +1555,12 @@ export function ThreadShell({
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
         : null}
-      {composerPortalTarget ? createPortal(
+      {composerPortalTarget && !(previewOpen || contextSidebarOpen) ? createPortal(
         <div
           hidden={!composerActive}
           aria-hidden={!composerActive}
           data-testid={composerActive ? "active-pane-composer" : undefined}
+          data-active-composer={composerActive || undefined}
         >
           {composer}
         </div>,

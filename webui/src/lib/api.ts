@@ -1,3 +1,4 @@
+import { isContextGraph } from "@/lib/context-graph";
 import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
   ApiServicePayload,
@@ -388,6 +389,7 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
         || (value.reason !== undefined && !isCompactionReason(value.reason))) break;
       return value as unknown as ThreadProjectionEvent;
     case "model_request": {
+      if (value.context_graph !== undefined && !isContextGraph(value.context_graph)) break;
       const isUsage = (usage: unknown) => isRecord(usage)
         && Object.values(usage).every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0);
       if (typeof value.request_id !== "string" || !value.request_id

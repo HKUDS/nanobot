@@ -855,6 +855,23 @@
   .thread-preview-layout {
     container: thread-preview-layout / inline-size;
   }
+  .context-expanded-overlay[data-state="open"] {
+    animation: context-backdrop-in 250ms ease-out;
+  }
+  .context-expanded-overlay[data-state="closed"] {
+    animation: context-backdrop-in 250ms ease-out reverse;
+  }
+  @keyframes context-backdrop-in {
+    from { opacity: 0; backdrop-filter: blur(0); }
+    to { opacity: 1; backdrop-filter: blur(12px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .context-expanded-overlay { animation: none !important; }
+  }
+  /* Sidebars share the full pane height with a local conversation composer. */
+  .workbench-composer-footer:not(:has([data-active-composer])) {
+    display: none;
+  }
   /* A split needs 420px for the conversation plus 360px for the preview.
      Narrow workbench panes use the same contained overlay as a phone. */
   @container thread-preview-layout (min-width: 780px) {
@@ -866,7 +883,7 @@
       flex-shrink: 0;
     }
     .file-preview-content {
-      width: var(--file-preview-width);
+      width: calc(var(--file-preview-width) - 1rem);
       padding-bottom: 0;
     }
     .file-preview-resize {

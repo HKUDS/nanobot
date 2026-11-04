@@ -183,7 +183,27 @@ export interface UIMessage {
 }
 
 /** Turn-owned telemetry, not a transcript row or body-history source. */
+export interface ContextGraphNode {
+  path: string;
+  name: string;
+  state: "loaded" | "discovered";
+  tokens: number;
+}
+
+export interface ContextGraph {
+  nodes: ContextGraphNode[];
+  edges: { source: string; target: string }[];
+}
+
+export interface ContextSnapshot {
+  id: string;
+  graph: ContextGraph;
+  usage?: TurnUsage;
+  contextWindowTokens?: number;
+}
+
 export interface UIModelRequestSnapshot {
+  contextSnapshots?: ContextSnapshot[];
   runId: string;
   sequence: number;
   turnSeq?: number;
@@ -1603,6 +1623,7 @@ export type InboundEvent =
     }
   | ({
       event: "model_request";
+      context_graph?: ContextGraph;
       chat_id: string;
       request_id: string;
       run_id: string;

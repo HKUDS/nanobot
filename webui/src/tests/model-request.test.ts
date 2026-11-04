@@ -18,6 +18,20 @@ function project(transcript: ThreadTranscript, event: ThreadProjectionEvent, per
 }
 
 describe("model request snapshots", () => {
+  it("replays each request's matching file graph and usage after reload", () => {
+    const transcript = new ThreadTranscript();
+    const first = { nodes: [{ path: "/a.md", name: "a.md", state: "loaded" as const, tokens: 100 }], edges: [] };
+    const second = { nodes: [...first.nodes, { path: "/b.md", name: "b.md", state: "discovered" as const, tokens: 0 }], edges: [{ source: "/a.md", target: "/b.md" }] };
+    for (const event of [
+      request(1, { request_id: "first", context_graph: first }),
+      request(2, { request_id: "first", phase: "completed", context_graph: first, round_usages: rounds(1) }),
+      request(3, { request_id: "second", context_graph: second }),
+      request(4, { request_id: "second", phase: "completed", context_graph: second, round_usages: rounds(2) }),
+    ]) project(transcript, event, true);
+    expect(transcript.modelRequests.get("turn")?.contextSnapshots?.map((snapshot) => ({
+      graph: snapshot.graph, tokens: snapshot.usage?.prompt_tokens,
+    }))).toEqual([{ graph: first, tokens: 100 }, { graph: second, tokens: 101 }]);
+  });
   it("validates request identity, phase, sequence, and usage at the history boundary", () => {
     for (const invalid of [{ phase: "unknown" }, { sequence: -1 }, { run_id: null }, { usage: { context_tokens: "123" } }]) {
       expect(() => parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [{ ...request(1), ...invalid }] })).toThrow();

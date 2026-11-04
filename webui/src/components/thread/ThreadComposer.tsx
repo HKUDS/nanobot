@@ -241,6 +241,11 @@ interface ThreadComposerProps {
   onManageModels?: () => void;
   contextUsage?: ComposerContextUsage | null;
   recentRoundUsage?: readonly ComposerRoundUsage[];
+  contextSnapshots?: readonly import("@/lib/types").ContextSnapshot[];
+  onOpenContextFile?: (path: string) => void;
+  contextSidebarHost?: HTMLElement | null;
+  contextSidebarOpen?: boolean;
+  onContextSidebarOpenChange?: (open: boolean) => void;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   onMentionSearch?: () => void;
@@ -1080,6 +1085,11 @@ export function ThreadComposer({
   onManageModels,
   contextUsage = null,
   recentRoundUsage = [],
+  contextSnapshots = [],
+  onOpenContextFile,
+  contextSidebarHost,
+  contextSidebarOpen,
+  onContextSidebarOpenChange,
   variant = "thread",
   slashCommands = [],
   onMentionSearch,
@@ -2588,8 +2598,8 @@ export function ThreadComposer({
     />
   ) : null;
   const usageInMeta = mobileWorkspaceControls || compactControls;
-  const usageControl = !voiceRecorder.isRecording && (contextUsage || recentRoundUsage.length) ? (
-    <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} showLabel={usageInMeta} compactLabel={mobileWorkspaceControls} bottomSheet={usageInMeta} />
+  const usageControl = !voiceRecorder.isRecording && (contextUsage || recentRoundUsage.length || contextSnapshots.length) ? (
+    <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} snapshots={contextSnapshots} onOpenFile={onOpenContextFile} showLabel={usageInMeta} compactLabel={mobileWorkspaceControls} sidebarHost={contextSidebarHost} open={contextSidebarOpen} onOpenChange={onContextSidebarOpenChange} />
   ) : null;
   const inputTextClasses = cn(
     // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.

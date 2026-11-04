@@ -10,6 +10,7 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools import sessions as session_tools
 from nanobot.apps.cli import utils as cli_app_utils
+from nanobot.context_graph import capture_sources, record_source, source_metadata
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
@@ -112,6 +113,9 @@ class ContextBuilder:
             memory = self.memory.read_memory()
             if memory and not self._is_template_content(memory, "memory/MEMORY.md"):
                 parts.append(memory)
+                record_source(self.memory.memory_file, memory)
+            elif self.memory.memory_file.is_file():
+                record_source(self.memory.memory_file, "", loaded=False)
 
         with self.skills.snapshot():
             active_skills = self.skills.get_always_skills()
@@ -194,12 +198,15 @@ class ContextBuilder:
                 ):
                     content = load_bundled_template("SOUL.md") or content
                 if not content.strip():
+                    record_source(file_path, "", loaded=False)
                     continue
                 if filename in self._SKIPPABLE_DEFAULTS and self._is_template_content(
                     content, filename
                 ):
+                    record_source(file_path, "", loaded=False)
                     continue
                 parts.append(f"## {filename}\n\n{content}")
+                record_source(file_path, content)
 
         return "\n\n".join(parts) if parts else ""
 
@@ -266,7 +273,7 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
-        with self.skills.snapshot():
+        with self.skills.snapshot(), capture_sources() as sources:
             messages: list[dict[str, Any]] = [
                 {
                     "role": "system",
@@ -279,6 +286,8 @@ class ContextBuilder:
                 },
                 *transcript.history,
             ]
+            messages[0]["_meta"] = source_metadata(messages[0]["content"], sources.copy())
+            sources.clear()
             if transcript.current_message is None:
                 return messages
 
@@ -288,6 +297,8 @@ class ContextBuilder:
                 current_role=transcript.current_role,
                 runtime_context_blocks=transcript.runtime_context_blocks,
             )
+            if sources and isinstance(current.get("content"), str):
+                current["_meta"] = {**current.get("_meta", {}), **source_metadata(current["content"], sources.copy())}
             messages.append(current)
             return messages
 

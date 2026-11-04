@@ -18,6 +18,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.context_graph import source_receipt
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
@@ -406,7 +407,8 @@ class ReadFileTool(_FsTool):
             self._file_states.record_read(
                 fp, offset=offset, limit=limit, content_hash=content_hash, result=result,
             )
-            return result
+            visible = "\n".join(line.split("| ", 1)[-1] for line in result.splitlines() if "| " in line)
+            return ToolResult(result, context_sources=[source_receipt(fp, visible)])
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:

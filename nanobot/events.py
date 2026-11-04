@@ -6,6 +6,7 @@ from typing import Literal
 
 from loguru import logger
 
+from nanobot.context_graph import ContextGraph
 from nanobot.llm_usage.types import LLMUsage
 
 
@@ -24,6 +25,7 @@ class ModelRequestEvent(AgentEvent):
     usage: LLMUsage | None = None
     round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
+    context_graph: ContextGraph | None = None
 
 
 @dataclass(frozen=True)

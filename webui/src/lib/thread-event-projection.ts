@@ -885,6 +885,10 @@ export function projectThreadEvent(
       ...(event.usage !== undefined ? { usage: event.usage } : {}),
       ...(event.round_usages !== undefined ? { roundUsages: event.round_usages.slice(-8) } : {}),
       ...(event.context_window_tokens !== undefined ? { contextWindowTokens: event.context_window_tokens } : {}),
+      ...(event.context_graph ? { contextSnapshots: [
+        ...(previousRequest?.contextSnapshots ?? []).filter((s) => s.id !== event.request_id),
+        { id: event.request_id, graph: event.context_graph, usage: event.phase === "started" ? undefined : event.round_usages?.at(-1), contextWindowTokens: event.context_window_tokens },
+      ].slice(-32) } : {}),
     };
     state.modelRequests = new Map(state.modelRequests).set(event.turn_id, modelRequest);
     return state;
