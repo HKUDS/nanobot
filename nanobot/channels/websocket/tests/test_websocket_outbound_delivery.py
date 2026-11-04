@@ -660,6 +660,7 @@ async def test_activity_batches_keep_replaced_session_generations_separate(histo
 @pytest.mark.asyncio
 async def test_cancelled_activity_batch_settles_admitted_write_without_fanout(history, monkeypatch) -> None:
     import threading
+
     from nanobot.bus.outbound_events import ProgressEvent
 
     channel = _channel(history.sessions)
