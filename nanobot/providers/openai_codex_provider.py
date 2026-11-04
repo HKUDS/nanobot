@@ -28,7 +28,11 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
 )
-from nanobot.providers.compaction import provider_compaction_scope
+from nanobot.providers.compaction import (
+    NativeCompaction,
+    ProviderStateCommitError,
+    provider_compaction_scope,
+)
 from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.oauth_catalog_cache import (
     OAuthCatalogAuthRequiredError,
@@ -217,7 +221,7 @@ class OpenAICodexProvider(LLMProvider):
         model = model or self.default_model
         sanitized_messages = self._sanitize_empty_content(messages)
         sanitized_state = (
-            provider_context.conversation_state if provider_context is not None else None
+            provider_context.current_conversation_state if provider_context is not None else None
         )
         if sanitized_state is not None:
             sanitized_state = sanitized_state.with_pending_messages(
@@ -260,16 +264,20 @@ class OpenAICodexProvider(LLMProvider):
         )
 
         stage = "oauth_token"
-        native_compaction_state: ProviderConversationState | None = None
-        native_compaction_event_id: str | None = None
+        accepted = provider_context.accepted_compaction if provider_context and replayed else None
+        native_compaction_state = accepted.summary_state if accepted is not None else None
+        native_compaction_event_id = accepted.event_id if accepted is not None else None
         events = provider_context.events if provider_context is not None else NO_EVENTS
 
         def finish_compaction(result: LLMResponse) -> LLMResponse:
-            if native_compaction_state is not None and not result.provider_compaction_applied:
-                result.provider_compaction_applied = True
-                result.provider_compaction_state = native_compaction_state
-                result.provider_compaction_scope = "prior_context"
-                result.provider_compaction_event_id = native_compaction_event_id
+            if native_compaction_state is not None:
+                if result.finish_reason == "error":
+                    result.preserve_provider_state_on_error = True
+                if not result.provider_compaction_applied:
+                    result.provider_compaction_applied = True
+                    result.provider_compaction_state = native_compaction_state
+                    result.provider_compaction_scope = "prior_context"
+                    result.provider_compaction_event_id = native_compaction_event_id
             return result
 
         input_budget = (
@@ -361,7 +369,10 @@ class OpenAICodexProvider(LLMProvider):
                 finally:
                     tracer.close()
 
-            if self.supports_native_compaction(model) and replayed and sanitized_state is not None:
+            if (
+                accepted is None and self.supports_native_compaction(model)
+                and replayed and sanitized_state is not None
+            ):
                 stage = "codex_compaction"
 
                 async with provider_compaction_scope(
@@ -377,10 +388,9 @@ class OpenAICodexProvider(LLMProvider):
                             validate=responses_compaction_items,
                         )
                         native_compaction_event_id = compaction_id
-                        await compaction.finish("succeeded")
                         return compacted
 
-                    native_compaction_state = await self._responses.compact_before_request(
+                    compacted_states = await self._responses.compact_before_request(
                         body, state=sanitized_state,
                         provider=self._responses_state_provider(), model=_strip_model_prefix(model),
                         context_window_tokens=(
@@ -389,6 +399,15 @@ class OpenAICodexProvider(LLMProvider):
                         max_output_tokens=max_tokens, input_budget=input_budget,
                         send=send_compaction,
                     )
+                    if compacted_states is not None:
+                        continuation, native_compaction_state = compacted_states
+                        assert native_compaction_event_id is not None
+                        await compaction.accept(
+                            NativeCompaction(
+                                continuation, native_compaction_state, native_compaction_event_id,
+                            ),
+                            provider_context.on_native_compaction if provider_context else None,
+                        )
 
             if input_budget is not None:
                 estimated = estimate_prompt_tokens([{
@@ -407,6 +426,8 @@ class OpenAICodexProvider(LLMProvider):
             stage = "codex_request"
             result = await _send(body, emit_deltas=True, trace_name="codex_request")
             return finish_compaction(result)
+        except ProviderStateCommitError:
+            raise
         except Exception as e:
             response = _codex_error_response(e)
             if input_budget is not None and stage != "codex_request":

@@ -1070,13 +1070,18 @@ class AgentLoop:
         request_context: RequestContext | None = None,
         provider_state: ProviderConversationState | None = None,
         initial_message: InboundMessage | None = None,
+        commit_session: bool = True,
     ) -> AgentRunResult:
         self._sync_subagent_runtime_limits()
 
         ephemeral = ephemeral or (session is not None and not session.policy.persist)
+        # Detached SDK turns can share a durable key without owning that session.
+        retain_session_state = (
+            commit_session and session is not None and (not ephemeral or not session.policy.persist)
+        )
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
-            if session is None or ephemeral:
+            if session is None or not retain_session_state:
                 return
             public_payload = dict(payload)
             preceding = Session(key=session.key)
@@ -1084,6 +1089,7 @@ class AgentLoop:
             public_payload["preceding_messages"] = preceding.messages
             public_payload["consumed_followup_ids"] = sorted(preceding.consumed_followup_ids)
             private_state = public_payload.pop("provider_state", None)
+            previous_state = session.provider_state
             public_payload.pop(self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY, None)
             if "provider_state" in payload and (
                 private_state is None
@@ -1093,7 +1099,11 @@ class AgentLoop:
                 public_payload[self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY] = (
                     self._PROVIDER_STATE_CHECKPOINT_VERSION
                 )
-            await self._set_runtime_checkpoint(session, public_payload)
+            try:
+                await self._set_runtime_checkpoint(session, public_payload)
+            except BaseException:
+                session.provider_state = previous_state
+                raise
 
         async def _drain_pending(
             *,
@@ -1373,7 +1383,7 @@ class AgentLoop:
             reset_workspace_scope(workspace_token)
             reset_request_context(request_token)
             reset_file_states(file_state_token)
-        if session is not None and not ephemeral:
+        if session is not None and retain_session_state:
             session.provider_state = result.provider_state
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
@@ -2273,7 +2283,7 @@ class AgentLoop:
                 ])
             )
             if (
-                not ctx.ephemeral
+                (not ctx.ephemeral or not session.policy.persist)
                 and (ctx.kind is TurnKind.USER or subagent_followup_persisted)
             ):
                 session.provider_state = ctx.provider_state
@@ -2318,6 +2328,7 @@ class AgentLoop:
                 provider_state=ctx.provider_state,
                 initial_message=ctx.msg,
                 events=ctx.events,
+                commit_session=ctx.commit_session,
             )
         ctx.final_content = result.final_content
         ctx.all_messages = result.messages
@@ -2618,7 +2629,6 @@ class AgentLoop:
         session: Session,
         payload: dict[str, Any],
     ) -> None:
-        session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         await self.sessions.state.checkpoint_view(session, payload)
 
     def _mark_pending_user_turn(self, session: Session) -> None:

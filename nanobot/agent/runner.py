@@ -39,6 +39,7 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
 )
+from nanobot.providers.compaction import ProviderStateCommitError
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.summary import SessionSummaryCheckpoint
@@ -377,12 +378,25 @@ class AgentRunner:
         pending_length_segment: tuple[AgentHookContext, str] | None = None
         had_injections = False
         pending_stream_content: str | None = None
+
+        async def checkpoint_compaction(state: ProviderConversationState) -> None:
+            await self._emit_checkpoint(spec, {
+                "phase": "model_input",
+                "iteration": iteration,
+                "model": spec.runtime.model,
+                "assistant_message": None,
+                "completed_tool_results": [],
+                "pending_tool_calls": [],
+                "provider_state": state,
+            }, messages)
+
         conversation_state = ProviderConversationStateController(
             provider=spec.runtime.provider,
             model=spec.runtime.model,
             messages=messages,
             state=spec.provider_state,
             session_id=spec.session_key,
+            checkpoint_callback=checkpoint_compaction,
         )
         governance_config = ContextGovernanceConfig(
             provider=spec.runtime.provider,
@@ -1212,6 +1226,8 @@ class AgentRunner:
                 request_state=request_state,
                 transcript=messages,
             )
+        except ProviderStateCommitError:
+            raise
         except Exception:
             logger.opt(exception=tool_log_content_allowed()).error(
                 "Budget-exhausted finalization failed for {}; using fallback",
@@ -1390,7 +1406,10 @@ class AgentRunner:
                 start = len(spec.initial_messages)
             # Replacing the checkpoint must retain every earlier round of this
             # run, including follow-ups consumed since the accepted input.
-            batch_size = 1 + len(payload["completed_tool_results"])
+            batch_size = (
+                0 if payload["phase"] == "model_input"
+                else 1 + len(payload["completed_tool_results"])
+            )
             await callback({
                 **payload,
                 "preceding_messages": messages[start:len(messages) - batch_size],

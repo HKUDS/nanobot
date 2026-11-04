@@ -167,7 +167,7 @@ def responses_state_items(
 
 
 def responses_state_context_tokens(state: ProviderConversationState) -> int:
-    """Return the last server-reported active context size."""
+    """Return the reported active size or a locally estimated compacted prefix size."""
     value = state.payload.get(_CONTEXT_TOKENS_KEY)
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
