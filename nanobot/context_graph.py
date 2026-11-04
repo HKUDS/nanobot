@@ -7,15 +7,19 @@ import json
 from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
 
-from nanobot.utils.helpers import estimate_message_tokens, estimate_prompt_tokens_chain
+from nanobot.utils.helpers import estimate_prompt_tokens_chain
+from nanobot.utils.token_encoding import get_token_encoding
 
 if TYPE_CHECKING:
+    from tiktoken import Encoding
+
     from nanobot.providers.base import LLMProvider
 
 
@@ -55,11 +59,39 @@ class ReferenceParser(Protocol):
 
 class MarkdownReferences:
     def references(self, content: str) -> Iterator[str]:
+        if len(content) <= 128_000:
+            yield from self._cached_references(content)
+        else:
+            yield from self._references(content)
+
+    @staticmethod
+    @lru_cache(maxsize=16)
+    def _cached_references(content: str) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(MarkdownReferences._references(content)))
+
+    @staticmethod
+    def _references(content: str) -> Iterator[str]:
         for block in MarkdownIt("commonmark").parse(content):
             for token in block.children or ():
                 if token.type == "link_open" and (href := token.attrGet("href")):
                     if isinstance(href, str):
                         yield href
+
+
+@lru_cache(maxsize=16)
+def _encoded_source_tokens(content: str, encoding: Encoding) -> int:
+    return len(encoding.encode_ordinary(content))
+
+
+def _source_tokens(content: str) -> int:
+    encoding = get_token_encoding()
+    if encoding is not None:
+        try:
+            return (_encoded_source_tokens(content, encoding) if len(content) <= 128_000
+                    else len(encoding.encode_ordinary(content)))
+        except Exception:
+            pass
+    return len(content.encode("utf-8"))
 
 
 REFERENCE_PARSERS: dict[str, ReferenceParser] = {
@@ -86,7 +118,11 @@ def source_receipt(path: Path, content: str, *, loaded: bool = True) -> SourceRe
     links: list[str] = []
     parser = REFERENCE_PARSERS.get(path.suffix.lower()) if loaded else None
     if parser:
+        seen: set[str] = set()
         for href in parser.references(content):
+            if href in seen:
+                continue
+            seen.add(href)
             try:
                 parsed = urlsplit(href)
                 if parsed.scheme or parsed.netloc or not parsed.path:
@@ -99,7 +135,7 @@ def source_receipt(path: Path, content: str, *, loaded: bool = True) -> SourceRe
                 links.append(target)
             if len(links) >= 128:
                 break
-    return {"path": str(path), "name": path.parent.name if path.name == "SKILL.md" else path.name, "tokens": max(0, estimate_message_tokens({"content": content}) - 4) if loaded else 0,
+    return {"path": str(path), "name": path.parent.name if path.name == "SKILL.md" else path.name, "tokens": _source_tokens(content) if loaded else 0,
             "links": links, "loaded": loaded}
 
 
@@ -212,7 +248,8 @@ def graph_from_messages(messages: Sequence[Mapping[str, Any]]) -> ContextGraph:
                 node["state"] = "loaded"
                 node["tokens"] += source["tokens"]
             for target in source["links"]:
-                nodes.setdefault(target, {"path": target, "name": Path(target).name, "state": "discovered", "tokens": 0})
+                if target not in nodes:
+                    nodes[target] = {"path": target, "name": Path(target).name, "state": "discovered", "tokens": 0}
                 edges[path, target] = {"source": path, "target": target}
     return {"nodes": list(nodes.values()), "edges": list(edges.values())}
 

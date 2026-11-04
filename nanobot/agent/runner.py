@@ -934,6 +934,10 @@ class AgentRunner:
         """
         request_id = uuid4().hex
         request_usage: LLMUsage | None = None
+        context_graph = (
+            await self.context_governor.prepare_in_background(graph_from_messages, kwargs["messages"])
+            if spec.events.accepts(ModelRequestEvent) else None
+        )
 
         async def emit(phase: Literal["started", "completed", "failed", "cancelled"]) -> None:
             state.request_sequence += 1
@@ -945,7 +949,7 @@ class AgentRunner:
                 usage=state.request_usage,
                 round_usages=tuple(usage for usage in state.recent_round_usages if usage is not None),
                 context_window_tokens=spec.runtime.context_window_tokens,
-                context_graph=graph_from_messages(kwargs["messages"]),
+                context_graph=context_graph,
                 request_usage=request_usage,
             ))
 

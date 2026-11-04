@@ -281,3 +281,34 @@ async def test_request_without_usage_does_not_reuse_previous_measurement():
     assert completed[0].request_usage == usage
     assert completed[1].request_usage is None
     assert completed[1].usage == usage
+
+
+@pytest.mark.asyncio
+async def test_request_graph_describes_input_before_provider_normalization(tmp_path):
+    from nanobot.context_graph import source_metadata, source_receipt
+
+    content = "[Guide](guide.md)"
+    messages = [{"role": "user", "content": content, "_meta": source_metadata(
+        content, [source_receipt(tmp_path / "source.md", content)],
+    )}]
+    events = []
+
+    async def publish(event):
+        if isinstance(event, ModelRequestEvent):
+            events.append(event)
+
+    async def provider_call(**kwargs):
+        kwargs["messages"][0]["content"] = "Provider-normalized content"
+        return LLMResponse(content="done")
+
+    provider = MagicMock()
+    provider.chat_stream_with_retry = provider_call
+    runner = AgentRunner()
+    run_spec = spec(provider, EventSink(publish))
+    run_spec.initial_messages = messages
+    await runner.run(run_spec)
+    assert [event.phase for event in events] == ["started", "completed"]
+    assert events[0].context_graph == events[1].context_graph
+    assert events[1].context_graph["edges"] == [
+        {"source": str(tmp_path / "source.md"), "target": str(tmp_path / "guide.md")},
+    ]

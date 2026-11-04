@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from nanobot.context_graph import graph_from_messages, source_metadata, source_receipt
 
 
@@ -21,6 +23,74 @@ def test_markdown_discovers_only_real_local_links_without_reading_targets(tmp_pa
     assert source["links"] == [str(tmp_path / "references" / "guide.md"), str(tmp_path / "other.md")]
     graph = graph_from_messages([{"content": content, "_meta": source_metadata(content, [source])}])
     assert [node["state"] for node in graph["nodes"]] == ["loaded", "discovered", "discovered"]
+
+
+def test_repeated_source_analysis_resolves_links_in_the_current_directory(tmp_path: Path):
+    content = "[Guide](guide.md)"
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    link = first / "guide.md"
+    link.symlink_to(tmp_path / "original.md")
+    assert source_receipt(first / "SKILL.md", content)["links"] == [str(tmp_path / "original.md")]
+    assert source_receipt(second / "SKILL.md", content)["links"] == [str(second / "guide.md")]
+    link.unlink()
+    link.symlink_to(tmp_path / "replacement.md")
+    assert source_receipt(first / "SKILL.md", content)["links"] == [str(tmp_path / "replacement.md")]
+    assert source_receipt(first / "SKILL.md", "[New](new.md)")["links"] == [str(first / "new.md")]
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_file_analysis_leaves_the_event_loop_available(tmp_path: Path, monkeypatch, cancel: bool):
+    import asyncio
+    import threading
+
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.context_graph import REFERENCE_PARSERS
+
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    class SlowReferences:
+        def references(self, content):
+            loop.call_soon_threadsafe(entered.set)
+            assert release.wait(2), "File analysis prevented the event loop from responding"
+            yield "guide.md"
+
+    monkeypatch.setitem(REFERENCE_PARSERS, ".md", SlowReferences())
+    path = tmp_path / "source.md"
+    path.write_text("[Guide](guide.md)")
+    task = asyncio.create_task(ReadFileTool(workspace=tmp_path).execute(path=str(path)))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        assert not task.done()
+        if cancel:
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+    finally:
+        release.set()
+    if cancel:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return
+    result = await task
+    assert result.context_sources[0]["links"] == [str(tmp_path / "guide.md")]
+
+
+def test_source_token_estimate_updates_when_tokenizer_becomes_available(tmp_path: Path, monkeypatch):
+    import tiktoken
+
+    import nanobot.context_graph as context_graph
+
+    content = "Hello world"
+    monkeypatch.setattr(context_graph, "get_token_encoding", lambda: None)
+    assert source_receipt(tmp_path / "source.txt", content)["tokens"] == len(content.encode())
+    encoding = tiktoken.get_encoding("cl100k_base")
+    monkeypatch.setattr(context_graph, "get_token_encoding", lambda: encoding)
+    assert source_receipt(tmp_path / "source.txt", content)["tokens"] == len(encoding.encode_ordinary(content))
 
 
 def test_compacted_or_removed_content_no_longer_counts_as_loaded(tmp_path: Path):
