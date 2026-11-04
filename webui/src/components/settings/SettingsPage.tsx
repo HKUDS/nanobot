@@ -230,20 +230,20 @@ export function SettingsPage({
               {!showSidebar && settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
                 onRestart={restartViaSettingsSurface} isRestarting={restartInProgress} /> : null}
             </div>
-            <SettingsFeature onBeforeClose={controller.imageEdits.needsCompletion() ? controller.imageEdits.commit : undefined} title={t("settings.rows.imageGeneration")} enabled={capabilityState.imageGenerationForm.enabled}
+            <SettingsFeature onClose={() => { void controller.imageEdits.commit(); }} title={t("settings.rows.imageGeneration")} enabled={capabilityState.imageGenerationForm.enabled}
               error={capabilityState.imageGenerationForm.enabled && !settings.image_generation.providers.find((provider) => provider.name === capabilityState.imageGenerationForm.provider)?.configured
                 ? t("settings.image.missingCredential") : capabilityState.capabilityErrors.image}
               disabled={restartInProgress || capabilityState.imageGenerationSaving} initialOpen={activeSection === "image"}
               onChange={(enabled) => capabilityState.setImageGenerationForm((prev) => ({ ...prev, enabled }))}>
               {renderSection("image", true)}
             </SettingsFeature>
-            <SettingsFeature onBeforeClose={controller.transcriptionEdits.needsCompletion() ? controller.transcriptionEdits.commit : undefined} title={t("settings.rows.transcription")} enabled={capabilityState.transcriptionForm.enabled}
+            <SettingsFeature onClose={() => { void controller.transcriptionEdits.commit(); }} title={t("settings.rows.transcription")} enabled={capabilityState.transcriptionForm.enabled}
               error={capabilityState.capabilityErrors.voice}
               disabled={restartInProgress || capabilityState.transcriptionSaving} initialOpen={activeSection === "voice"}
               onChange={(enabled) => capabilityState.setTranscriptionForm((prev) => ({ ...prev, enabled }))}>
               {renderSection("voice", true)}
             </SettingsFeature>
-            <SettingsFeature onBeforeClose={controller.webEdits.needsCompletion() ? controller.webEdits.commit : undefined} title={t("settings.runtimeConfig.groups.web.title")}
+            <SettingsFeature onClose={() => { void controller.webEdits.commit(); }} title={t("settings.runtimeConfig.groups.web.title")}
               enabled={settings.runtime_config ? state.value("tools.web.enable") === true : settings.web.enable}
               disabled={restartInProgress || state.saving === "web" || !settings.runtime_config}
               initialOpen={activeSection === "browser"} error={state.errors.web || capabilityState.capabilityErrors.web}
