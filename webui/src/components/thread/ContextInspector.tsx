@@ -21,17 +21,20 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   const layoutId = useId();
   const reducedMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
-  const [replay, setReplay] = useState<{ frames: readonly ContextSnapshot[]; index: number } | null>(null);
+  const [replay, setReplay] = useState<{ frames: readonly ContextSnapshot[]; index: number; startedAt: number; interval: number } | null>(null);
   const [readyGraph, setReadyGraph] = useState<ContextGraph | null>(null);
   const [meterHover, setMeterHover] = useState(false);
   const epoch = snapshots[0]?.id;
   useEffect(() => { setReplay(null); }, [epoch]);
   useEffect(() => {
-    if (!replay || (reducedMotion && readyGraph !== replay.frames[replay.index].graph)) return;
+    if (!replay || readyGraph !== replay.frames[replay.index].graph) return;
+    // Keep a shared timeline instead of adding rendering time to every step.
+    // Advance only after painting each snapshot, even when catching up.
+    const remaining = replay.startedAt + (replay.index + 1) * replay.interval - performance.now();
     const timer = window.setTimeout(() => setReplay((current) => current && current.index + 1 < current.frames.length
-      ? { ...current, index: current.index + 1 } : null), 750);
+      ? { ...current, index: current.index + 1 } : null), Math.max(0, remaining));
     return () => window.clearTimeout(timer);
-  }, [replay, readyGraph, reducedMotion]);
+  }, [replay, readyGraph]);
   const snapshot = replay ? replay.frames[replay.index] : snapshots.at(-1);
   const latestRound = rounds.at(-1);
   const tokens = snapshot ? snapshot.estimatedTokens ?? snapshot.usage?.context_tokens ?? snapshot.usage?.prompt_tokens : context?.contextTokens;
@@ -67,7 +70,12 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
       </div>}
     </div>
     <ContextReplayButton disabled={replay !== null || snapshots.length < 2}
-      onPlay={() => { setMeterHover(false); setReplay({ frames: [...snapshots], index: 0 }); }} />
+      onPlay={() => {
+        setMeterHover(false);
+        // Scale by request count: our replay unit is a snapshot, not a graph edge.
+        const stepsPerSecond = Math.min(20, Math.max(5, 0.5 * Math.sqrt(snapshots.length)));
+        setReplay({ frames: [...snapshots], index: 0, startedAt: performance.now(), interval: 1000 / stepsPerSecond });
+      }} />
     </div>
   </motion.div>;
   return <LayoutGroup>

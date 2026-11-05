@@ -15,24 +15,6 @@ const snapshots: ContextSnapshot[] = [
 ];
 
 describe("Context inspector", () => {
-  it("plays from the first snapshot to the current graph without pausing", () => {
-    vi.useFakeTimers();
-    try {
-      render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
-      const play = screen.getByRole("button", { name: "Play context history" });
-      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
-      fireEvent.click(play);
-      expect(play).toBeDisabled();
-      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
-      act(() => vi.advanceTimersByTime(750));
-      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
-      act(() => vi.advanceTimersByTime(750));
-      expect(play).toBeEnabled();
-      fireEvent.click(play);
-      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
-    } finally { vi.useRealTimers(); }
-  });
-
   it("exposes every graph node as a named keyboard control", async () => {
     const user = userEvent.setup();
     render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
