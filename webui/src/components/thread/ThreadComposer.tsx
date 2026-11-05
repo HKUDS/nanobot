@@ -2382,6 +2382,14 @@ export function ThreadComposer({
   ]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    // The input owns this controlled hint, even before the portal's Escape
+    // listener mounts or after Radix has prevented the native event.
+    if (e.key === "Escape" && placeholderHintOpen && !e.nativeEvent.isComposing && !mentionInput.isComposing) {
+      e.preventDefault();
+      setPlaceholderHintOpen(false);
+      setPlaceholderHintRequested(false);
+      return;
+    }
     mentionInput.onKeyDown(e);
     if (e.defaultPrevented || e.nativeEvent.isComposing || mentionInput.isComposing) return;
     if (showCliAppMenu) {
@@ -2835,10 +2843,7 @@ export function ThreadComposer({
                 />
               </TooltipTrigger>
               {placeholderHintOpen ? (
-                <TooltipContent side="top" align="start" onEscapeKeyDown={() => {
-                  setPlaceholderHintOpen(false);
-                  setPlaceholderHintRequested(false);
-                }} style={{ "--placeholder-hint-bottom-gap": `${placeholderHintBottomGap}px` } as CSSProperties}
+                <TooltipContent side="top" align="start" style={{ "--placeholder-hint-bottom-gap": `${placeholderHintBottomGap}px` } as CSSProperties}
                   className="pointer-events-none max-w-[min(24rem,calc(100vw-2rem))] whitespace-normal break-words text-sm data-[side=bottom]:mt-[var(--placeholder-hint-bottom-gap)]">
                   {resolvedPlaceholder}
                 </TooltipContent>
