@@ -1,5 +1,6 @@
 import hashlib
 import io
+import json
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -88,7 +89,8 @@ async def test_search_marketplace_skills_filters_and_marks_installed(
                 "provider": "skills_sh",
                 "installs": 42,
                 "url": "https://skills.sh/acme/agent-skills/react-testing",
-                "installed": True,
+                "installed": False,
+                "installation_status": "unknown",
                 "install_supported": True,
                 "metric": "installs_total",
             }
@@ -162,6 +164,7 @@ async def test_search_skillhub_skills_normalizes_provider_metadata(
             "downloads": 142525,
             "url": "https://skillhub.cn/skills/tencent-adm/ima-skills",
             "installed": False,
+            "installation_status": "available",
             "install_supported": True,
             "metric": "installs_total",
             "version": "1.1.8",
@@ -355,7 +358,7 @@ async def test_install_marketplace_skill_uses_official_cli_and_workspace(
         returncode = 0
 
         async def communicate(self) -> tuple[bytes, None]:
-            skill_dir = tmp_path / "skills" / "react-testing"
+            skill_dir = Path(seen["cwd"]) / "skills" / "react-testing"
             skill_dir.mkdir(parents=True)
             (skill_dir / "SKILL.md").write_text(
                 "---\nname: react-testing\n---\n",
@@ -403,7 +406,9 @@ async def test_install_marketplace_skill_uses_official_cli_and_workspace(
         "--copy",
         "--yes",
     )
-    assert seen["cwd"] == str(tmp_path.resolve())
+    assert Path(seen["cwd"]).parent == tmp_path.resolve() / "skills"
+    assert not Path(seen["cwd"]).exists()
+    assert (tmp_path / "skills" / "react-testing" / "SKILL.md").is_file()
     assert seen["env"]["DISABLE_TELEMETRY"] == "1"
 
 
@@ -560,6 +565,9 @@ async def test_install_marketplace_skill_is_idempotent(
     skill_dir = tmp_path / "skills" / "already-here"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("---\nname: already-here\n---\n", encoding="utf-8")
+    (skill_dir / ".nanobot-origin.json").write_text(json.dumps({
+        "provider": "skills_sh", "source": "acme/agent-skills", "skill_id": "already-here",
+    }), encoding="utf-8")
     launch = pytest.fail
     monkeypatch.setattr(
         "nanobot.webui.skills_marketplace.asyncio.create_subprocess_exec",
