@@ -22,7 +22,6 @@ class SourceMetadata(TypedDict):
 
 
 _sources: ContextVar[list[SourceReceipt] | None] = ContextVar("context_sources", default=None)
-CONTEXT_SOURCE_HISTORY_META = "_context_sources"
 
 
 @contextmanager
@@ -74,7 +73,7 @@ def parse_source_metadata(value: object) -> SourceMetadata | None:
 
 
 def sources_from_messages(messages: Sequence[Mapping[str, Any]]) -> tuple[SourceReceipt, ...]:
-    """Collect file-use records from the current compaction epoch."""
+    """Collect supplied prompt sources; tool reads are observed separately."""
     return tuple(source for message in messages
                  if (metadata := parse_source_metadata(message.get("_meta")))
                  for source in metadata["context_sources"])

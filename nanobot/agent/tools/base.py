@@ -12,7 +12,6 @@ if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
     from nanobot.agent.tools.context import ToolContext
-    from nanobot.context_sources import SourceReceipt
     from nanobot.runtime_context import RuntimeContextProvider
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
@@ -199,12 +198,10 @@ class ToolResult(str):
     """String-compatible tool output with structured status."""
 
     is_error: bool
-    context_sources: list[SourceReceipt]
 
-    def __new__(cls, content: str, *, is_error: bool = False, context_sources: list[SourceReceipt] | None = None) -> ToolResult:
+    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
-        obj.context_sources = context_sources or []
         return obj
 
     @classmethod

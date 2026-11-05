@@ -25,6 +25,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
+from nanobot.context_graph import ContextGraph, graph_from_sources
 from nanobot.events import ModelRequestEvent
 from nanobot.pairing.events import PairingChanged
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
@@ -33,6 +34,7 @@ from nanobot.session.webui_turns import (
     mark_websocket_turn_transcript_persistence_failed,
     websocket_turn_transcript_persistence_failed,
 )
+from nanobot.webui.context_observer import ContextGraphObserver
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
@@ -81,13 +83,6 @@ async def _encode_payload(payload: Mapping[str, object]) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
-async def _project_notification(msg: OutboundMessage) -> NotificationProjection | None:
-    # Only request snapshots need graph work; token deltas stay on their cheap path.
-    if isinstance(msg.event, ModelRequestEvent) and msg.event.context_sources:
-        return await asyncio.to_thread(project_notification, msg.chat_id, msg.event, msg.metadata)
-    return project_notification(msg.chat_id, msg.event, msg.metadata)
-
-
 class WebUIOutboundTransport(Protocol):
     """Snapshot recipients and enqueue already projected public JSON frames."""
 
@@ -115,8 +110,29 @@ class WebUIOutboundDelivery:
         self._transcripts = transcripts
         self._temporary_chats = temporary_chats
         self._session_projection = session_projection
+        self._context_graph = ContextGraphObserver(transcripts.sessions)
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
         self._reasoning_text_buffers: dict[tuple[str, str], list[str]] = {}
+
+    async def _project_notification(self, msg: OutboundMessage) -> NotificationProjection | None:
+        event = msg.event
+        if not isinstance(event, ModelRequestEvent | ContextCompactionEvent):
+            return project_notification(msg.chat_id, event, msg.metadata)
+        persistent = self._temporary_chats.should_persist_transcript(msg.chat_id)
+        if isinstance(event, ModelRequestEvent) and event.context_sources is not None:
+            graph: ContextGraph = {"nodes": [], "edges": []}
+            try:
+                graph = await asyncio.to_thread(graph_from_sources, event.context_sources)
+                graph = await self._context_graph.snapshot(msg.chat_id, graph, msg.metadata, persistent=persistent)
+            except Exception:
+                logger.exception("Unable to restore context graph")
+            return project_notification(msg.chat_id, event, msg.metadata, context_graph=graph)
+        if isinstance(event, ContextCompactionEvent) and event.phase == "succeeded":
+            try:
+                await self._context_graph.reset(msg.chat_id, msg.metadata, persistent=persistent)
+            except Exception:
+                logger.exception("Unable to reset context graph")
+        return project_notification(msg.chat_id, event, msg.metadata)
 
     def bind_pairing(self, bus: MessageBus, *, channel: str) -> Callable[[], None]:
         async def queue_changed(event: PairingChanged) -> None:
@@ -124,8 +140,10 @@ class WebUIOutboundDelivery:
 
         return bus.subscribe(queue_changed, PairingChanged)
 
-    def discard(self, chat_id: str) -> None:
+    def discard(self, chat_id: str, *, complete: bool = False) -> None:
         """Forget unclosed streams when a turn ends or its chat is discarded."""
+        if not complete or self._temporary_chats.should_persist_transcript(chat_id):
+            self._context_graph.discard(chat_id)
         for buffers in (self._stream_text_buffers, self._reasoning_text_buffers):
             for key in tuple(buffers):
                 if key[0] == chat_id:
@@ -199,10 +217,10 @@ class WebUIOutboundDelivery:
         for msg in messages:
             progress = msg.event if isinstance(msg.event, ProgressEvent) else None
             if progress is not None:
-                body = self._message_payload(msg, progress)
+                body = await self._message_payload(msg, progress)
                 persistent, label = True, " "
             else:
-                notification = await _project_notification(msg)
+                notification = await self._project_notification(msg)
                 assert notification is not None
                 body = dict(notification.payload)
                 persistent = notification.persistence == "turn_activity"
@@ -265,7 +283,7 @@ class WebUIOutboundDelivery:
                     body["provenance"] = event.provenance
                 await self._fanout(recipients, body, label=" user_message ")
             return
-        notification = await _project_notification(msg)
+        notification = await self._project_notification(msg)
         if notification is not None:
             if recipients or notification.deliver_offline:
                 await self._send_payload(
@@ -390,7 +408,7 @@ class WebUIOutboundDelivery:
             chat_id, persisted=persisted, metadata=metadata, phase=phase,
         )
 
-    def _message_payload(self, msg: OutboundMessage, progress: ProgressEvent | None) -> dict[str, Any]:
+    async def _message_payload(self, msg: OutboundMessage, progress: ProgressEvent | None) -> dict[str, Any]:
         text = msg.content
         user_shell = msg.metadata.get(INBOUND_META_USER_SHELL) is True
         payload: MessageWirePayload = {
@@ -418,6 +436,13 @@ class WebUIOutboundDelivery:
             payload["latency_ms"] = int(latency)
         if progress and progress.tool_events:
             payload["tool_events"] = project_tool_events(progress.tool_events)
+            if progress.working_directory is not None:
+                for tool_event in payload["tool_events"]:
+                    tool_event["working_directory"] = progress.working_directory
+            await self._context_graph.observe_tools(
+                msg.chat_id, payload["tool_events"], msg.metadata,
+                persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),
+            )
         agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
         if agent_ui is not None:
             payload["agent_ui"] = agent_ui
@@ -427,7 +452,7 @@ class WebUIOutboundDelivery:
 
     async def _send_message(self, msg: OutboundMessage, progress: ProgressEvent | None) -> None:
         recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
-        body = self._message_payload(msg, progress)
+        body = await self._message_payload(msg, progress)
         await self._persist_turn_transcript_event(
             msg.chat_id, body, metadata=msg.metadata,
             phase="activity" if progress else "answer", include_source=True,
@@ -545,7 +570,7 @@ class WebUIOutboundDelivery:
             if persisted:
                 # A durable incomplete marker allows HTTP recovery after restart.
                 clear_websocket_turn_if_current(chat_id, turn_owner)
-            self.discard(chat_id)
+            self.discard(chat_id, complete=True)
         await self._fanout(recipients, body, label=f" {body['event']} ")
 
     async def _send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:

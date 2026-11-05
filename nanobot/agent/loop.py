@@ -61,10 +61,6 @@ from nanobot.command.builtin import register_core_commands
 from nanobot.command.router import CommandExpansion, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.context_sources import (
-    CONTEXT_SOURCE_HISTORY_META,
-    parse_source_metadata,
-)
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
@@ -748,8 +744,6 @@ class AgentLoop:
             )
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
-            if source_meta := runtime_context_source_metadata(runtime_context_blocks or ()):
-                extra[CONTEXT_SOURCE_HISTORY_META] = source_meta
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             followup_id = msg.metadata.get(PENDING_FOLLOWUP_ID_KEY)
@@ -2601,8 +2595,6 @@ class AgentLoop:
                         value = cast(dict[str, Any], internal_meta).get(key)
                         if isinstance(value, str) and value:
                             entry[key] = value
-            if source_meta := parse_source_metadata(cast(object, internal_meta)):
-                entry[CONTEXT_SOURCE_HISTORY_META] = source_meta
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "user" and isinstance(followup_id, str) and followup_id:

@@ -257,6 +257,7 @@ class NotificationProjection:
 
 def project_notification(
     chat_id: str, event: AgentEvent | None, metadata: Mapping[str, object] | None = None,
+    *, context_graph: ContextGraph | None = None,
 ) -> NotificationProjection | None:
     """Keep notification serialization and persistence decisions at one boundary."""
     if isinstance(event, ModelRequestEvent):
@@ -267,7 +268,7 @@ def project_notification(
             "request_usage": event.request_usage.to_turn_dict() if event.request_usage is not None else None,
         }
         if event.context_sources is not None:
-            payload["context_graph"] = graph_from_sources(event.context_sources)
+            payload["context_graph"] = context_graph if context_graph is not None else graph_from_sources(event.context_sources)
         if event.usage is not None:
             payload["usage"] = event.usage.to_turn_dict()
         payload["round_usages"] = [usage.to_turn_dict() for usage in event.round_usages[-8:]]

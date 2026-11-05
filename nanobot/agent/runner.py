@@ -23,11 +23,10 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.execution_policy import ExecutionControlError
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.context_sources import source_metadata, sources_from_messages
+from nanobot.context_sources import sources_from_messages
 from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent
 from nanobot.llm_usage.context import (
     LLMUsageSource,
@@ -564,8 +563,6 @@ class AgentRunner:
                                 "Check its effects before retrying."
                             )
                             tool_message["_recovery_interrupted"] = True
-                        if entry is not None and isinstance(entry.result, ToolResult) and entry.result.context_sources:
-                            tool_message["_meta"] = source_metadata(entry.result.context_sources)
                         messages.append(tool_message)
                         completed_tool_results.append(tool_message)
                     checkpoint_model_messages = (

@@ -1046,7 +1046,6 @@ class Consolidator:
     ):
         self.store = store
         self.sessions = sessions
-        self._resolve_prompt_context = resolve_prompt_context
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self.archiver = MemoryArchiver(

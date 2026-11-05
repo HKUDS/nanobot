@@ -772,3 +772,51 @@ async def test_unencodable_tool_argument_does_not_discard_neighboring_activity(h
         assert [row["text"] for row in history.read(f"websocket:{chat}")] == ["first", "last"]
     finally:
         await channel.stop()
+
+
+@pytest.mark.parametrize("batched", [False, True])
+async def test_context_observer_orders_reads_requests_and_compaction(history, tmp_path, batched):
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent, TurnEndEvent
+    from nanobot.events import ModelRequestEvent
+    from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+
+    (tmp_path / "guide.md").write_text("[Reference](reference.md)")
+    result = await ReadFileTool(workspace=tmp_path).execute(path="guide.md")
+    tool = {"name": "read_file", "call_id": "read", "phase": "end",
+            "arguments": {"path": "guide.md"}, "result": result}
+    channel = _channel(history.sessions)
+    chat = "observed-context"
+
+    async def message(event):
+        return await history.message(channel="websocket", chat_id=chat, content="", event=event,
+                                     metadata={WEBUI_TURN_METADATA_KEY: "turn"})
+
+    events = [
+        ModelRequestEvent("before", "run", 1, "started", context_sources=()),
+        ProgressEvent(tool_events=[tool], working_directory=str(tmp_path)),
+        ModelRequestEvent("after", "run", 2, "started", context_sources=()),
+    ]
+    messages = [await message(event) for event in events]
+    if batched:
+        await channel.send_batch(messages)
+    else:
+        for msg in messages:
+            await channel.send(msg)
+    requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
+    assert requests[0]["context_graph"] == {"nodes": [], "edges": []}
+    graph = requests[-1]["context_graph"]
+    assert [(node["name"], node["state"]) for node in graph["nodes"]] == [
+        ("guide.md", "loaded"), ("reference.md", "discovered"),
+    ]
+    # End-of-turn cleanup and a fresh delivery service must recover display state.
+    await channel.send(await message(TurnEndEvent()))
+    channel = _channel(history.sessions)
+    await channel.send(await message(ContextCompactionEvent("failed", "failed")))
+    await channel.send(await message(ModelRequestEvent("restored", "run", 3, "started", context_sources=())))
+    requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
+    assert requests[-1]["context_graph"] == graph
+    await channel.send(await message(ContextCompactionEvent("done", "succeeded")))
+    await channel.send(await message(ModelRequestEvent("reset", "run", 4, "started", context_sources=())))
+    requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
+    assert requests[-1]["context_graph"] == {"nodes": [], "edges": []}

@@ -1,6 +1,5 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
-import asyncio
 import difflib
 import hashlib
 import mimetypes
@@ -19,9 +18,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.file_references import source_receipt
 from nanobot.security.workspace_access import current_tool_workspace
-from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
@@ -287,12 +284,6 @@ class ReadFileTool(_FsTool):
         force: bool = False,
         **kwargs: Any,
     ) -> Any:
-        return await shield_and_drain(asyncio.to_thread(self._read, path, offset, limit, pages, force))
-
-    def _read(
-        self, path: str | None, offset: int, limit: int | None,
-        pages: str | None, force: bool,
-    ) -> Any:
         try:
             if not path:
                 return ToolResult.error("Error reading file: Unknown path")
@@ -403,7 +394,6 @@ class ReadFileTool(_FsTool):
                 end = start + len(trimmed)
                 result = "\n".join(trimmed)
 
-            visible = result.partition("| ")[2] if line_truncated else "\n".join(all_lines[start:end])
             if line_truncated:
                 result += (
                     f"\n\n(Line {offset} truncated; its remaining characters are not shown. "
@@ -416,7 +406,7 @@ class ReadFileTool(_FsTool):
             self._file_states.record_read(
                 fp, offset=offset, limit=limit, content_hash=content_hash, result=result,
             )
-            return ToolResult(result, context_sources=[source_receipt(fp, visible)])
+            return result
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:

@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -52,45 +51,6 @@ def test_repeated_source_analysis_resolves_links_in_the_current_directory(tmp_pa
     assert source_receipt(first / "SKILL.md", "[New](new.md)")["links"] == [str(first / "new.md")]
 
 
-@pytest.mark.parametrize("cancel", [False, True])
-async def test_file_analysis_leaves_the_event_loop_available(tmp_path: Path, monkeypatch, cancel: bool):
-    import asyncio
-    import threading
-
-    from nanobot.agent.tools.filesystem import ReadFileTool
-    from nanobot.file_references import REFERENCE_PARSERS
-
-    entered = asyncio.Event()
-    release = threading.Event()
-    loop = asyncio.get_running_loop()
-
-    class SlowReferences:
-        def references(self, content):
-            loop.call_soon_threadsafe(entered.set)
-            assert release.wait(2), "File analysis prevented the event loop from responding"
-            yield "guide.md"
-
-    monkeypatch.setitem(REFERENCE_PARSERS, ".md", SlowReferences())
-    path = tmp_path / "source.md"
-    path.write_text("[Guide](guide.md)")
-    task = asyncio.create_task(ReadFileTool(workspace=tmp_path).execute(path=str(path)))
-    try:
-        await asyncio.wait_for(entered.wait(), 2)
-        assert not task.done()
-        if cancel:
-            task.cancel()
-            await asyncio.sleep(0)
-            assert not task.done()
-    finally:
-        release.set()
-    if cancel:
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        return
-    result = await task
-    assert result.context_sources[0]["links"] == [str(tmp_path / "guide.md")]
-
-
 def test_source_token_estimate_updates_when_tokenizer_becomes_available(tmp_path: Path, monkeypatch):
     import tiktoken
 
@@ -102,25 +62,6 @@ def test_source_token_estimate_updates_when_tokenizer_becomes_available(tmp_path
     encoding = tiktoken.get_encoding("cl100k_base")
     monkeypatch.setattr(context_graph, "get_token_encoding", lambda: encoding)
     assert source_receipt(tmp_path / "source.txt", content)["tokens"] == len(encoding.encode_ordinary(content))
-
-
-def test_message_rewriting_preserves_read_facts_until_compaction(tmp_path: Path):
-    content = "[Child](child.md)"
-    metadata = source_metadata([source_receipt(tmp_path / "parent.md", content)])
-    assert graph_from_messages([{"content": "Summary of earlier work", "_meta": metadata}])["nodes"][0]["state"] == "loaded"
-    assert graph_from_messages([]) == {"nodes": [], "edges": []}
-
-
-def test_retained_partial_reads_accumulate_without_loading_entire_file(tmp_path: Path):
-    path = tmp_path / "large.md"
-    messages = []
-    for content in ["First fragment", "Second fragment"]:
-        receipt = source_receipt(path, content)
-        messages.append({"content": content, "_meta": source_metadata([receipt])})
-    graph = graph_from_messages(messages)
-    assert len(graph["nodes"]) == 1
-    assert graph["nodes"][0]["tokens"] == sum(source_receipt(path, text)["tokens"] for text in ["First fragment", "Second fragment"])
-    assert graph_from_messages(messages[1:])["nodes"][0]["tokens"] < graph["nodes"][0]["tokens"]
 
 
 def test_system_sources_track_actual_injection_and_skill_metadata(tmp_path: Path):
@@ -135,27 +76,6 @@ def test_system_sources_track_actual_injection_and_skill_metadata(tmp_path: Path
     assert by_path[str(tmp_path / "SOUL.md")]["state"] == "loaded"
     assert by_path[str(skill / "SKILL.md")]["state"] == "discovered"
     assert str(skill / "ref.md") not in by_path
-
-
-def test_file_provenance_survives_saved_turn_and_replay(tmp_path: Path):
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.session.manager import Session
-
-    content = "[Reference](reference.md)"
-    message = {"role": "tool", "tool_call_id": "read-1", "content": content,
-               "_meta": source_metadata([source_receipt(tmp_path / "guide.md", content)])}
-    session = Session(key="test:context-graph")
-    loop = object.__new__(AgentLoop)
-    loop._save_turn(session, [
-        {"role": "user", "content": "Read the guide"},
-        {"role": "assistant", "content": "", "tool_calls": [
-            {"id": "read-1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
-        ]}, message,
-    ], skip=0)
-    restored = Session(key=session.key, messages=json.loads(json.dumps(session.messages)))
-    assert graph_from_messages(restored.get_history()) == graph_from_messages([message])
-    restored.commit_summary_checkpoint("Guide reviewed")
-    assert graph_from_messages(restored.get_history()) == {"nodes": [], "edges": []}
 
 
 def test_default_workspace_files_are_discoverable_without_claiming_loaded(tmp_path: Path):
@@ -188,10 +108,8 @@ def test_graph_survives_webui_history_boundary(tmp_path: Path):
     assert projected["context_graph"] == graph
 
 
-def test_explicit_skill_provenance_in_current_message_and_history(tmp_path: Path):
+def test_explicit_skill_sources_in_current_message(tmp_path: Path):
     from nanobot.agent.context import ContextBuilder
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.session.manager import Session
 
     skill = tmp_path / 'skills' / 'example'
     skill.mkdir(parents=True)
@@ -205,13 +123,9 @@ def test_explicit_skill_provenance_in_current_message_and_history(tmp_path: Path
     assert nodes[str(skill / 'SKILL.md')]['state'] == 'loaded'
     assert nodes[str(skill / 'references/guide.md')]['state'] == 'discovered'
     assert graph['edges'] == [{'source': str(skill / 'SKILL.md'), 'target': str(skill / 'references/guide.md')}]
-    session = Session(key='test:explicit-skill')
-    loop = object.__new__(AgentLoop)
-    loop._save_turn(session, [current], skip=0)
-    assert graph_from_messages(session.get_history()) == graph
 
 
-async def test_queued_skill_provenance_survives_request_and_early_persistence(tmp_path: Path):
+async def test_queued_skill_sources_reach_the_request(tmp_path: Path):
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
@@ -237,8 +151,7 @@ async def test_queued_skill_provenance_survives_request_and_early_persistence(tm
                              runtime=runtime, original_user_text='$example')
     blocks = await loop._resolve_runtime_context_for_request(request, loop.tools)
     assert await loop._persist_user_message_early(message, session, runtime_context_blocks=blocks)
-    persisted_graph = graph_from_messages(session.get_history())
-    assert next(node for node in persisted_graph['nodes'] if node['path'] == str(skill / 'SKILL.md'))['state'] == 'loaded'
+    expected_graph = graph_from_sources([source for block in blocks for source in block.context_sources])
 
     pending = asyncio.Queue()
     await pending.put(message)
@@ -247,25 +160,23 @@ async def test_queued_skill_provenance_survives_request_and_early_persistence(tm
     injected = [m for call in provider.chat_stream_with_retry.call_args_list
                 for m in call.kwargs['messages'] if m.get('role') == 'user' and '$example' in str(m.get('content'))]
     assert injected
-    assert graph_from_messages([injected[-1]]) == persisted_graph
+    assert graph_from_messages([injected[-1]]) == expected_graph
 
 
 async def test_read_file_ignores_invalid_markdown_link_targets(tmp_path: Path):
-    from nanobot.agent.tools.base import ToolResult
     from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.webui.context_observer import read_source
 
     path = tmp_path / "guide.md"
     path.write_text("[Invalid](foo%00.md)\n[Guide](valid.md)", encoding="utf-8")
     result = await ReadFileTool(workspace=tmp_path).execute(path=str(path))
-    assert isinstance(result, ToolResult)
     assert "[Invalid](foo%00.md)" in str(result)
-    assert result.context_sources[0]["links"] == [str(tmp_path / "valid.md")]
+    source = read_source({"name": "read_file", "phase": "end", "arguments": {"path": str(path)}, "result": result})
+    assert source["links"] == [str(tmp_path / "valid.md")]
 
 
-def test_image_with_explicit_skill_retains_sources_across_history(tmp_path: Path):
+def test_image_with_explicit_skill_reports_sources(tmp_path: Path):
     from nanobot.agent.context import ContextBuilder
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.session.manager import Session
 
     skill = tmp_path / "skills" / "example"
     skill.mkdir(parents=True)
@@ -277,8 +188,5 @@ def test_image_with_explicit_skill_retains_sources_across_history(tmp_path: Path
     graph = graph_from_messages([current])
     assert graph["nodes"][0]["state"] == "loaded"
     assert graph["edges"] == [{"source": str(skill / "SKILL.md"), "target": str(skill / "guide.md")}]
-    session = Session(key="test:image-skill")
-    object.__new__(AgentLoop)._save_turn(session, [current], skip=0)
-    assert graph_from_messages(session.get_history()) == graph
     current["content"][-1]["text"] = "Compacted text"
     assert graph_from_messages([current]) == graph
