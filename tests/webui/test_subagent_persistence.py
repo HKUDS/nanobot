@@ -387,7 +387,8 @@ async def test_task_changes_use_parent_chat_events_and_saved_child_observations(
                     "Investigate configuration", origin_channel="websocket", origin_chat_id=chat,
                     session_key=f"websocket:{chat}", origin_turn_id="finished-parent-turn", runtime=runtime,
                 )
-                await asyncio.wait_for(entered.get(), 2)
+                # The checkpoint uses real storage; this checks routing, not disk latency.
+                await asyncio.wait_for(entered.get(), 30)
             first, sibling = manager.statuses_for_session("websocket:parent")
             foreign, = manager.statuses_for_session("websocket:other")
             parent = await sessions.state.read("websocket:parent")
