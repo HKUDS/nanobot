@@ -890,6 +890,8 @@
     }
     .file-preview-content {
       width: calc(var(--file-preview-width) - 1rem);
+      /* Align with the composer surface: 0.75rem dock + 0.375rem form inset. */
+      bottom: calc(1.125rem + env(safe-area-inset-bottom));
       padding-bottom: 0;
     }
     .file-preview-resize {
