@@ -622,6 +622,15 @@ main()
                         if predicate(event):
                             return event
 
+            # Bound each model round, not all 16 durable rounds with one deadline.
+            # Drain the real client while the gateway advances to the stop barrier.
+            for request_count in range(1, 17):
+                await receive_until(lambda event: (
+                    event.get("event") == "model_request"
+                    and event.get("phase") == "completed"
+                    and event.get("usage", {}).get("request_count") == request_count
+                ))
+
             if stop_during_checkpoint:
                 await asyncio.wait_for(checkpoint_waiting.wait(), 20)
                 await ws.send(json.dumps({"type": "message", "chat_id": chat_id,

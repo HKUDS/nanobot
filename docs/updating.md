@@ -2,6 +2,17 @@
 
 Use the update method that owns your installation. If your version does not include the WebUI updater, first upgrade through the original installer or package manager. This does not convert an existing installation into an installer-managed one.
 
+## Upgrade older JSONL installations through 0.4.0
+
+Version 0.4.1 uses SQLite conversation history and the shared `network.proxy` configuration. It no longer imports old JSONL model history or WebUI transcripts, or converts per-feature proxy settings. If you use 0.3.5 or older, or still have unimported JSONL history, do not skip directly to 0.4.1.
+
+1. Stop all writers and back up the complete instance, including the configuration directory and workspace.
+2. Select version **0.4.0** explicitly through the original installation method, preserving existing extras, constraints and installation ownership.
+3. Start 0.4.0 with the same instance selectors. Let it import the old history, then open existing conversations and verify both messages and displayed history. Check proxy settings and save the migrated shared-proxy configuration before continuing.
+4. Stop the instance and back up the migrated data. Upgrade to 0.4.1 through the same installation method, then verify the running version, old conversations, a new message and another restart.
+
+Keep the original backup and retained JSONL import backups. Do not delete or overwrite old data to resolve a missing-history problem. Instances already using SQLite history and the shared proxy configuration can upgrade directly from 0.4.0.
+
 ## Update from the WebUI
 
 1. Open the blue update entry in the sidebar or **Settings → About → Update**. Opening the dialog only checks the installation; it does not install or restart anything.
