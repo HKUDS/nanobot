@@ -20,6 +20,7 @@ export function createGraphPresentation() {
     get frame() { return frame; },
     update(graph: ContextGraph, focus: string | null) {
       highlighted = focus;
+      const previouslyWanted = wanted;
       wanted = new Set(graph.nodes.map((node) => node.path));
       wantedEdges = new Set(graph.edges.map(edgeKey));
       related = new Set([focus]);
@@ -31,7 +32,8 @@ export function createGraphPresentation() {
         const previous = nodes.get(node.path);
         if (previous) {
           if (node.state !== "loaded") previous.labelRemaining = 0;
-          else if (previous.state !== "loaded") previous.labelRemaining = 1600;
+          // A replay can reintroduce a node before its exit animation removes it.
+          else if (previous.state !== "loaded" || !previouslyWanted.has(node.path)) previous.labelRemaining = 1600;
           Object.assign(previous, node);
         }
         else nodes.set(node.path, { ...node, presence: 0, emphasis: 1, focus: 0, radius: nodeRadius(node), loaded: Number(node.state === "loaded"), labelRemaining: node.state === "loaded" ? 1600 : 0 });

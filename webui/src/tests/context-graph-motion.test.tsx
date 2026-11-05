@@ -8,6 +8,24 @@ const next: ContextGraph = { nodes: [...first.nodes, { path: "b.md", name: "b.md
   edges: [{ source: "a.md", target: "b.md" }] };
 
 describe("context graph continuity", () => {
+  it("reintroduces a loaded filename when fast replay reverses its unfinished exit", () => {
+    const presentation = createGraphPresentation();
+    const loaded: ContextGraph = { nodes: [{ path: "loop.py", name: "loop.py", state: "loaded", tokens: 200 }], edges: [] };
+    presentation.update(loaded, null);
+    presentation.advance(2000, true);
+    presentation.update({ nodes: [], edges: [] }, null);
+    presentation.advance(200, false);
+    const exiting = presentation.frame.nodes[0];
+    expect(exiting.presence).toBeGreaterThan(0);
+    expect(exiting.labelRemaining).toBe(0);
+    presentation.update(loaded, null);
+    expect(presentation.frame.nodes[0]).toBe(exiting);
+    expect(exiting.labelRemaining).toBe(1600);
+    presentation.advance(300, false);
+    presentation.update(loaded, "loop.py");
+    expect(exiting.labelRemaining).toBe(1300);
+  });
+
   it("briefly introduces new labels without restarting existing labels on graph or focus updates", () => {
     const presentation = createGraphPresentation();
     presentation.update(first, null);

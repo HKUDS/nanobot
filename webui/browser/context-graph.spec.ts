@@ -87,7 +87,7 @@ declare global {
 
 test.describe("normal-motion file loading", () => {
   test.use({ reducedMotion: "no-preference" });
-  test("introduces a loaded Python filename after the graph has been idle, then fades it out", async ({ page }) => {
+  test("introduces a loaded Python filename after idle and again during fast history replay", async ({ page }) => {
     await page.addInitScript(() => {
       window.pythonLabelPaints = [];
       const fillText = CanvasRenderingContext2D.prototype.fillText;
@@ -111,6 +111,9 @@ test.describe("normal-motion file loading", () => {
     const paints = await page.evaluate(() => window.pythonLabelPaints.length);
     await page.waitForTimeout(200);
     expect(await page.evaluate(() => window.pythonLabelPaints.length)).toBe(paints);
+    await page.evaluate(() => { window.pythonLabelPaints = []; });
+    await page.getByRole("button", { name: "Play context history" }).click();
+    await expect.poll(() => page.evaluate(() => window.pythonLabelPaints.some((alpha) => alpha > 0.9))).toBe(true);
   });
 });
 
