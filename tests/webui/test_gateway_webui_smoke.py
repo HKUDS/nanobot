@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -567,7 +568,8 @@ async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during
     config["providers"]["custom"]["apiBase"] = f"http://127.0.0.1:{model_port}/v1"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     launcher = """
-import asyncio, sys, urllib.request
+import asyncio, faulthandler, sys, urllib.request
+from pathlib import Path
 from nanobot.session.state import SessionState
 original = SessionState.checkpoint_view
 barrier_url = sys.argv[3]
@@ -587,7 +589,12 @@ SessionState.checkpoint_view = checkpoint
 home, config = sys.argv[1:3]
 sys.argv = ['nanobot', '--home', home, 'gateway', '--config', config]
 from nanobot.cli.entry import main
-main()
+with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
+    faulthandler.dump_traceback_later(10, repeat=True, file=stacks)
+    try:
+        main()
+    finally:
+        faulthandler.cancel_dump_traceback_later()
 """
     env = {key: value for key, value in os.environ.items() if not key.startswith("NANOBOT_")}
     env.update({"HOME": str(home), "USERPROFILE": str(home), "APPDATA": str(home),
@@ -708,6 +715,11 @@ main()
                 except subprocess.TimeoutExpired:
                     process.kill()
                     await asyncio.to_thread(process.wait, timeout=10)
+                    stacks = tmp_path / "gateway-stacks.log"
+                    if stacks.exists():
+                        frames = re.findall(r'File "[^"\n]*[/\\]([^/\\"\n]+)", line (\d+) in (\w+)',
+                                            stacks.read_text(encoding="utf-8"))
+                        print("Gateway shutdown stack locations:", frames[-80:])
                     raise
         finally:
             await server.cleanup()
