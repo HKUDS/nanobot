@@ -481,12 +481,14 @@ def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
 async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during_checkpoint: bool) -> None:
     """Exercise the actual gateway and WebSocket with a synthetic local model."""
     checkpoint_waiting = asyncio.Event()
+    release_checkpoint = asyncio.Event()
     closing_request = asyncio.Event()
     release_close = asyncio.Event()
     requests: list[dict] = []
 
     async def barrier(_request: web.Request) -> web.Response:
         checkpoint_waiting.set()
+        await release_checkpoint.wait()
         return web.Response(text="ready")
 
     async def model(request: web.Request) -> web.StreamResponse:
@@ -691,11 +693,21 @@ main()
                     assert state["goal_state"] == {"active": False}
     finally:
         release_close.set()
-        if process is not None and process.poll() is None:
-            if sys.platform == "win32":
-                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                               capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            else:
-                process.terminate()
-            process.wait(timeout=30)
-        await server.cleanup()
+        release_checkpoint.set()
+        try:
+            if process is not None and process.poll() is None:
+                if sys.platform == "win32":
+                    subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                   capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                else:
+                    process.terminate()
+                try:
+                    # A cancelled checkpoint can still have its HTTP thread waiting
+                    # for this loop's barrier response. Keep serving until it exits.
+                    await asyncio.to_thread(process.wait, timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    await asyncio.to_thread(process.wait, timeout=10)
+                    raise
+        finally:
+            await server.cleanup()
