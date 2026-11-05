@@ -40,7 +40,7 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   const tokens = snapshot ? snapshot.estimatedTokens ?? snapshot.usage?.context_tokens ?? snapshot.usage?.prompt_tokens : context?.contextTokens;
   const estimated = snapshot?.estimatedTokens !== undefined || (!snapshot?.usage && context?.estimated);
   const windowTokens = snapshot?.contextWindowTokens ?? context?.contextWindowTokens;
-  const tokenNumbers = new Intl.NumberFormat(i18n.language);
+  const tokenNumbers = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 });
   const hasTokenUsage = tokens !== undefined || !!windowTokens;
   const used = tokens !== undefined && windowTokens ? Math.min(100, tokens / windowTokens * 100) : null;
   const cached = snapshot ? snapshot.usage?.cached_tokens : latestRound?.cachedTokens;
@@ -65,8 +65,8 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
       {meterHover && (hasTokenUsage || cached !== undefined || duration !== undefined || replay !== null) && <div className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 min-w-48 rounded-xl bg-popover px-3 py-2.5 font-sans text-xs font-normal leading-5 shadow-lg">
         <dl className="grid grid-cols-[auto_auto] items-baseline gap-x-6 gap-y-1">
           {hasTokenUsage && <><dt className="whitespace-nowrap text-muted-foreground">{t("thread.composer.context.panelTitle")}</dt><dd className="whitespace-nowrap text-right tabular-nums text-popover-foreground">{t("thread.composer.context.tokenUsage", {
-            used: tokens === undefined ? "—" : `${estimated ? "≈" : ""}${tokenNumbers.format(tokens)}`,
-            limit: windowTokens ? tokenNumbers.format(windowTokens) : "—",
+            used: tokens === undefined ? "—" : `${estimated ? "≈" : ""}${tokenNumbers.format(tokens / 1000)}k`,
+            limit: windowTokens ? `${tokenNumbers.format(windowTokens / 1000)}k` : "—",
           })}</dd></>}
           {cached !== undefined && !!input && <><dt className="text-muted-foreground">{t("thread.composer.context.cacheHitRate")}</dt><dd className="whitespace-nowrap text-right tabular-nums text-popover-foreground">{Math.round(cached / input * 100)}%</dd></>}
           {duration !== undefined && <><dt className="text-muted-foreground">{t("thread.composer.context.duration")}</dt><dd className="whitespace-nowrap text-right tabular-nums text-popover-foreground">{formatTurnLatency(duration)}</dd></>}
