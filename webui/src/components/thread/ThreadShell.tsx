@@ -549,7 +549,9 @@ export function ThreadShell({
   const inlineComposer = composerPortalTarget === undefined || (sidebarOpen && composerActive);
   const composerDestination = inlineComposer ? localComposerHost : composerPortalTarget;
   useLayoutEffect(() => {
-    if (!composerDestination) { composerMount.remove(); return; }
+    // The inline host ref arrives on the next render. Keep the focused input
+    // attached until that destination is ready.
+    if (!composerDestination) { if (!inlineComposer) composerMount.remove(); return; }
     if (composerMount.parentElement === composerDestination) return;
     // Move the host, not the React subtree: drafts, graph replay and exit presence survive.
     const focused = document.activeElement instanceof HTMLElement && composerMount.contains(document.activeElement)
@@ -560,7 +562,7 @@ export function ThreadShell({
     composerDestination.appendChild(composerMount);
     focused?.focus({ preventScroll: true });
     if (range && selection) { selection.removeAllRanges(); selection.addRange(range); }
-  }, [composerDestination, composerMount]);
+  }, [composerDestination, composerMount, inlineComposer]);
   useLayoutEffect(() => () => composerMount.remove(), [composerMount]);
   const [filePreviewMaxWidth, setFilePreviewMaxWidth] = useState(FILE_PREVIEW_MAX_WIDTH);
   const filePreviewWidth = clampFilePreviewWidth(previewState.width, filePreviewMaxWidth);
@@ -577,6 +579,23 @@ export function ThreadShell({
   const shellRef = useRef<HTMLElement | null>(null);
   const [conversationElement, setConversationElement] = useState<HTMLDivElement | null>(null);
   const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const shell = contextSidebarHost;
+    const surface = composerSurfaceRef.current;
+    if (!sidebarOpen || !inlineComposer || !shell || !surface) return;
+    // Metadata can wrap below the input card. Align sidebars to the visible
+    // surface, rather than assuming a fixed composer/footer padding.
+    const alignSidebar = () => {
+      const inset = shell.getBoundingClientRect().bottom - surface.getBoundingClientRect().bottom;
+      shell.style.setProperty("--sidebar-bottom-inset", `${Math.max(0, inset)}px`);
+    };
+    alignSidebar();
+    const observer = new ResizeObserver(alignSidebar);
+    observer.observe(shell);
+    observer.observe(composerMount);
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, [contextSidebarHost, sidebarOpen, inlineComposer, composerDestination, composerMount]);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const filePreviewResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -1361,6 +1380,7 @@ export function ThreadShell({
           contextSidebarOpen={contextSidebarOpen}
           onContextSidebarOpenChange={handleContextSidebarOpenChange}
           variant={composerVariant}
+          surfaceRef={composerSurfaceRef}
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
           cliApps={cliApps}

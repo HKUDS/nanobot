@@ -13,7 +13,7 @@ import { paintGraph, readGraphPalette, type GraphPalette } from "./graph-canvas"
 const surface = "context-inspector-surface select-none rounded-[20px] bg-card";
 
 export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch, expanded, onExpand, onOpenFile, onReady, sidebar = false }: {
-  graph: ContextGraph; epoch?: string; expanded: boolean; onExpand: () => void; onOpenFile?: (path: string) => void; onReady?: (graph: ContextGraph) => void; sidebar?: boolean;
+  graph: ContextGraph; epoch?: string; expanded: boolean; onExpand?: () => void; onOpenFile?: (path: string) => void; onReady?: (graph: ContextGraph) => void; sidebar?: boolean;
 }) {
   const { t } = useTranslation();
   const container = useRef<HTMLDivElement>(null);
@@ -115,7 +115,10 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
     const visibility = () => { clock.current.previous = 0; if (document.hidden) { cancelAnimationFrame(clock.current.frame); clock.current.frame = 0; } else schedule(); };
     document.addEventListener("visibilitychange", visibility);
     window.addEventListener("resize", schedule);
-    const intersection = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(([entry]) => {
+    const intersection = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
+      // Drawer entry can batch offscreen and onscreen records together. The
+      // newest record owns visibility; the first can leave painting suspended.
+      const entry = entries[entries.length - 1];
       clock.current.visible = entry.isIntersecting;
       if (entry.isIntersecting) { clock.current.previous = 0; schedule(); }
       else { cancelAnimationFrame(clock.current.frame); clock.current.frame = 0; clock.current.previous = 0; }
@@ -219,6 +222,9 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
     onPointerDown={(e) => {
       if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target)) return;
       if (e.button !== 0 || !e.isPrimary || (e.target instanceof Element && e.target.closest("button"))) return;
+      // Keep the node's managed focus. Touch compatibility mouse events would
+      // otherwise focus the drawer and immediately dismiss its node popover.
+      e.preventDefault();
       interacted.current = true;
       const path = nodeAt(e.clientX, e.clientY, e.pointerType === "mouse" ? 12 : 22);
       if (path) {
@@ -263,10 +269,10 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
       interacted.current = false; setView({ k, x: size.width / 2 - (left + right) / 2 * k, y: (size.height + 22) / 2 - (top + bottom) / 2 * k });
     }}>
     <span ref={paletteProbe} aria-hidden className="invisible absolute bg-background text-muted-foreground" />
-    <button type="button" onClick={onExpand} aria-label={t(expanded ? "thread.composer.context.collapse" : "thread.composer.context.expand")}
+    {onExpand && <button type="button" onClick={onExpand} aria-label={t(expanded ? "thread.composer.context.collapse" : "thread.composer.context.expand")}
       className="absolute right-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-background/90 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-    </button>
+    </button>}
     {!graph.nodes.length && !frame.nodes.length && <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-muted-foreground">{t("thread.composer.context.noFiles")}</p>}
     <canvas ref={canvas} aria-hidden="true" className="absolute inset-0 size-full" />
     {controls}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ContextInspector } from "@/components/thread/ContextInspector";
+import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initializeI18n } from "@/i18n";
 import type { ContextSnapshot } from "@/lib/types";
@@ -27,6 +28,11 @@ function Fixture() {
     nodes: [...frames[1].graph.nodes, { path: "/worker.py", name: "worker.py", state: "loaded" as const, tokens: 200 }], edges: frames[1].graph.edges,
   } }] : frames;
   const [opened, setOpened] = useState("");
+  const [sidebarHost, setSidebarHost] = useState<HTMLElement | null>(null);
+  if (new URLSearchParams(location.search).has("drawer")) return <main ref={setSidebarHost} className="relative" style={{ height: "100dvh" }}>
+    <ComposerUsagePopover sidebarHost={sidebarHost} context={null} rounds={[]} snapshots={frames} onOpenFile={setOpened} />
+    <output>{opened}</output>
+  </main>;
   return <main className="mx-auto max-w-2xl p-4"><ContextInspector context={null} rounds={[]} snapshots={showLarge ? large : inspectedFrames} onOpenFile={setOpened} /><output>{opened}</output>{new URLSearchParams(location.search).has("pair") && <section aria-label="Second graph"><ContextInspector context={null} rounds={[]} snapshots={frames} /></section>}<button onClick={() => setShowLarge(true)}>Load 500 nodes</button><button onClick={() => setPythonLoaded(true)}>Read Python file</button></main>;
 }
 await initializeI18n();

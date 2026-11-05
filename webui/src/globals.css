@@ -890,8 +890,7 @@
     }
     .file-preview-content {
       width: calc(var(--file-preview-width) - 1rem);
-      /* Align with the composer surface: 0.75rem dock + 0.375rem form inset. */
-      bottom: calc(1.125rem + env(safe-area-inset-bottom));
+      bottom: var(--sidebar-bottom-inset, calc(1.125rem + env(safe-area-inset-bottom)));
       padding-bottom: 0;
     }
     .file-preview-resize {
@@ -993,9 +992,8 @@
     display: inline;
   }
 
-  /* Markdown tables wrap cell text to fit the conversation column. The
-     renderer's overflow-x:auto wrapper remains a fallback for content that
-     cannot shrink. */
+  /* Markdown table cells retain whole-word minimum widths. The renderer's
+     overflow-x:auto wrapper contains tables wider than the preview or chat. */
 
   .thread-viewport-scrollbar {
     overflow-x: hidden;

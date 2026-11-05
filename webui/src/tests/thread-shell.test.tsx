@@ -1067,10 +1067,12 @@ describe("ThreadShell", () => {
     const host = document.querySelector(".thread-preview-layout")!;
     Object.defineProperty(host, "clientWidth", { value: 1000 });
     fireEvent(window, new Event("resize"));
+    act(() => input.focus());
     fireEvent.click(trigger);
     expect(host.querySelector(".thread-conversation")).toContainElement(input);
     expect(footer).not.toContainElement(input);
     expect(input).toHaveValue("Preserve this draft");
+    expect(input).toHaveFocus();
     expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
     expect(await screen.findByRole("button", { name: "second.md" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play context history" })).toBeEnabled();

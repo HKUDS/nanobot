@@ -55,6 +55,40 @@ test("graph keyboard controls, pointer hit targets, pixels and replay agree", as
 
 test.describe("touch graph", () => {
   test.use({ viewport: { width: 390, height: 740 }, hasTouch: true });
+  test("recovers batched drawer visibility, replays and opens a file by touch", async ({ page }) => {
+    await page.addInitScript(() => {
+      const NativeObserver = window.IntersectionObserver;
+      window.IntersectionObserver = class extends NativeObserver {
+        constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+          super((entries, observer) => {
+            // Captured on a real drawer entrance under CPU throttling: the
+            // offscreen record and subsequent onscreen record share a callback.
+            const latest = entries[entries.length - 1];
+            callback(latest.isIntersecting
+              ? [{ ...latest, isIntersecting: false }, ...entries]
+              : entries, observer);
+          }, options);
+        }
+      };
+    });
+    await page.goto("/browser/context-graph.html?single&drawer");
+    await page.getByTestId("composer-context-usage").tap();
+    const canvas = page.locator("canvas");
+    const box = (await canvas.boundingBox())!;
+    await expect.poll(() => dotWidth(canvas, box.width / 2, box.height / 2)).toBeGreaterThan(0);
+    const replay = page.getByRole("button", { name: "Play context history" });
+    await replay.click();
+    await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+    await expect(replay).toBeEnabled();
+    await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
+    const settledBox = (await canvas.boundingBox())!;
+    await page.touchscreen.tap(settledBox.x + settledBox.width / 2, settledBox.y + settledBox.height / 2);
+    const openFile = page.getByRole("button", { name: "Open file", exact: true });
+    await expect(openFile).toBeVisible();
+    await openFile.tap();
+    await expect(page.locator("output")).toHaveText("/a.md");
+    await expect(page.getByTestId("context-sidebar")).toHaveCount(0);
+  });
   test("keeps a 44px touch target and redraws on theme changes", async ({ page }) => {
     await page.goto("/browser/context-graph.html?single");
     const node = page.getByRole("button", { name: "a.md", exact: true });
@@ -62,6 +96,10 @@ test.describe("touch graph", () => {
     const canvas = page.locator("canvas");
     const box = (await canvas.boundingBox())!;
     await expect.poll(() => dotWidth(canvas, box.width / 2, box.height / 2)).toBeGreaterThan(0);
+    const color = () => canvas.evaluate((element: HTMLCanvasElement) => Array.from(element.getContext("2d")!.getImageData(element.width / 2, element.height / 2, 1, 1).data));
+    const before = await color();
+    await page.evaluate(() => document.documentElement.classList.add("dark"));
+    await expect.poll(color).not.toEqual(before);
     const x = box.x + box.width / 2, y = box.y + box.height / 2;
     await page.touchscreen.tap(x + 21, y);
     await expect(page.getByText("About 100 tokens")).toBeVisible();
@@ -70,10 +108,6 @@ test.describe("touch graph", () => {
     await expect(node).toBeFocused();
     await page.touchscreen.tap(x + 23, y);
     await expect(page.getByText("About 100 tokens")).toHaveCount(0);
-    const color = () => canvas.evaluate((element: HTMLCanvasElement) => Array.from(element.getContext("2d")!.getImageData(element.width / 2, element.height / 2, 1, 1).data));
-    const before = await color();
-    await page.evaluate(() => document.documentElement.classList.add("dark"));
-    await expect.poll(color).not.toEqual(before);
   });
 });
 

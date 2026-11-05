@@ -171,7 +171,7 @@ export function ComposerUsagePopover({
     </Tooltip>
   </TooltipProvider>;
 
-  const inspector = <ContextInspector sidebar context={context} rounds={rounds} snapshots={snapshots}
+  const inspector = <ContextInspector sidebar expandable={!narrow} context={context} rounds={rounds} snapshots={snapshots}
     onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
   const onPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); close(); }

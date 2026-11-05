@@ -13,9 +13,9 @@ import { ContextReplayButton } from "./ContextReplayButton";
 const EMPTY_GRAPH: ContextGraph = { nodes: [], edges: [] };
 const surface = "context-inspector-surface select-none rounded-[20px] bg-card";
 
-export function ContextInspector({ context, rounds, snapshots, onOpenFile, sidebar = false }: {
+export function ContextInspector({ context, rounds, snapshots, onOpenFile, sidebar = false, expandable = true }: {
   context: ComposerContextUsage | null; rounds: readonly ComposerRoundUsage[];
-  snapshots: readonly ContextSnapshot[]; onOpenFile?: (path: string) => void; sidebar?: boolean;
+  snapshots: readonly ContextSnapshot[]; onOpenFile?: (path: string) => void; sidebar?: boolean; expandable?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const layoutId = useId();
@@ -52,7 +52,7 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   openFileCallback.current = onOpenFile;
   const openFile = useCallback((path: string) => { setExpanded(false); openFileCallback.current?.(path); }, []);
   const content = (large: boolean) => <motion.div layoutId={layoutId} transition={{ duration: reducedMotion ? 0 : 0.25, ease: [0.2, 0, 0, 1] }} className={cn("flex flex-col gap-3", sidebar && !large && "h-full min-h-0")}>
-    <ContextGraphScene graph={snapshot?.graph ?? EMPTY_GRAPH} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={toggleExpanded} onOpenFile={onOpenFile ? openFile : undefined} />
+    <ContextGraphScene graph={snapshot?.graph ?? EMPTY_GRAPH} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? toggleExpanded : undefined} onOpenFile={onOpenFile ? openFile : undefined} />
     <div className="flex shrink-0 items-center gap-3">
     <div onPointerEnter={() => setMeterHover(true)} onPointerLeave={() => setMeterHover(false)} className={cn(surface, "relative flex h-14 min-w-0 flex-1 items-center gap-4 px-4 transition-transform duration-150 ease-out motion-reduce:transition-none", meterHover && "scale-[1.015]")}>
       <div className="flex h-11 flex-1 items-center">
