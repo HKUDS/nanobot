@@ -7,7 +7,6 @@ import { AlertCircle } from "lucide-react";
 
 import { CodeBlock } from "@/components/CodeBlock";
 import { MarkdownText } from "@/components/MarkdownText";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { fileKindForPath, splitFilePath } from "@/components/FileReferenceChip";
 import type { FilePreviewPayload } from "@/lib/types";
@@ -42,9 +41,11 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
       : state.message ?? t("filePreview.failed", { defaultValue: "Could not preview this file." }))
     : null;
 
-  const modeControl = <SegmentedControl value={mode} onChange={setMode} ariaLabel={t("filePreview.displayMode")}
-    options={[{ value: "preview", label: t("filePreview.preview") }, { value: "source", label: t("filePreview.source") }]}
-    itemClassName="px-3 [@media(pointer:coarse)]:min-h-9" />;
+  const modeLabel = t(mode === "preview" ? "filePreview.source" : "filePreview.preview");
+  const modeControl = <button type="button" onClick={() => setMode(value => value === "preview" ? "source" : "preview")}
+    className="touch-target inline-flex h-8 items-center justify-center rounded-control px-3 text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    {modeLabel}
+  </button>;
 
   return (
     <section aria-label={t("filePreview.aria")} data-testid="file-preview-panel" className="flex min-h-0 flex-1 flex-col">
@@ -61,8 +62,8 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
                     <div className="aspect-[8/5] w-full max-w-sm rounded-compact bg-muted/40" />
                   </div> : <>
                     {previewKind === "markdown" && !actionsHost ? <div className="flex justify-end px-4 py-2">
-                      <div className="inline-flex min-h-8 items-center gap-1 rounded-full bg-muted/40 p-1 text-ui-label">
-                        {[t("filePreview.preview"), t("filePreview.source")].map((label) => <span key={label} className="invisible px-3 py-1 [@media(pointer:coarse)]:min-h-9">{label}</span>)}
+                      <div className="inline-flex h-8 items-center rounded-control bg-muted/40 px-3 text-xs">
+                        <span className="invisible">{modeLabel}</span>
                       </div>
                     </div> : null}
                     {previewKind === "markdown" && mode === "preview" ? <div className="markdown-content px-5 pb-6 pt-1 sm:px-6">
