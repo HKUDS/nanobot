@@ -707,7 +707,7 @@ describe("ThreadComposer", () => {
     fireEvent.click(screen.getByTestId("composer-context-usage"));
     const meter = screen.getByRole("progressbar", { name: "Context" });
     fireEvent.pointerEnter(meter.parentElement!.parentElement!);
-    expect(screen.getByText("KV cache hit rate")).toBeInTheDocument();
+    expect(screen.getByText("Cache hit rate")).toBeInTheDocument();
     expect(screen.getByText("89%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
   });
@@ -719,7 +719,7 @@ describe("ThreadComposer", () => {
     const meter = screen.getByRole("progressbar", { name: "Context" });
     expect(meter).toHaveAttribute("aria-valuenow", "7");
     fireEvent.pointerEnter(meter.parentElement!.parentElement!);
-    expect(screen.queryByText("KV cache hit rate")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cache hit rate")).not.toBeInTheDocument();
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {
