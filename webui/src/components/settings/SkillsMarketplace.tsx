@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Info,
@@ -61,6 +61,11 @@ export function SkillsMarketplace({
   const [installError, setInstallError] = useState("");
   const [provider, setProvider] = useState<MarketplaceProvider>("all");
   const [selected, setSelected] = useState<MarketplaceSkillSummary | null>(null);
+  const installTrigger = useRef<HTMLElement | null>(null);
+  const selectSkill = (skill: MarketplaceSkillSummary) => {
+    installTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSelected(skill);
+  };
   // Refresh server-owned installation facts only when the local inventory changes.
   const inventory = installedSkills.map((skill) => `${skill.source}:${skill.name}`).sort().join("\n");
   const [installRevision, setInstallRevision] = useState(0);
@@ -267,7 +272,7 @@ export function SkillsMarketplace({
               installing={installing}
               trends={trends}
               grouped={provider === "all"}
-              onSelect={setSelected}
+              onSelect={selectSkill}
             />
           ) : (
             <div className="px-5 py-10 text-center text-[13px] text-muted-foreground">
@@ -294,7 +299,7 @@ export function SkillsMarketplace({
               installing={installing}
               trends={trends}
               grouped={provider === "all"}
-              onSelect={setSelected}
+              onSelect={selectSkill}
             />
           )}
         </div>
@@ -306,7 +311,10 @@ export function SkillsMarketplace({
           if (!open) setSelected(null);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          installTrigger.current?.focus();
+        }}>
           <AlertDialogHeader>
             <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-control bg-amber-500/10 text-amber-700 dark:text-amber-300">
               <ShieldAlert className="h-5 w-5" aria-hidden />
@@ -535,10 +543,10 @@ function MarketplaceSkillRow({
           </a>
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-[12px] text-muted-foreground">
-          {skill.source}
+          <span className="truncate" title={skill.source}>{skill.source}</span>
           {skill.version ? <span>v{skill.version}</span> : null}
           {skill.provider === "skills_sh" ? (
-            <>
+            <span className="shrink-0">
               {skill.metric === "installs_24h"
                 ? t("settings.skills.marketplaceInstalls24h", {
                     count: skill.installs,
@@ -550,7 +558,7 @@ function MarketplaceSkillRow({
                     formattedCount: skill.installs.toLocaleString(),
                     defaultValue: "{{formattedCount}} installs",
                   })}
-            </>
+            </span>
           ) : null}
         </div>
         {conflict ? (

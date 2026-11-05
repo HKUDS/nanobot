@@ -197,3 +197,19 @@ async def test_two_installers_cannot_replace_the_winning_source(
     rows = (await search_marketplace_skills(NAME, tmp_path))["skills"]
     winner = next(row for row in rows if row["installed"])
     assert (tmp_path / "skills" / NAME / "SKILL.md").read_text() == winner["source"]
+
+
+@pytest.mark.asyncio
+async def test_receipt_write_failure_leaves_no_partial_install_and_retry_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, installer: list[Path], catalog: None,
+) -> None:
+    with monkeypatch.context() as failure:
+        def fail_write(*_args: object) -> None:
+            raise OSError("disk full")
+
+        failure.setattr("nanobot.webui.skills_marketplace.atomic_write_text", fail_write)
+        with pytest.raises(OSError, match="disk full"):
+            await install_marketplace_skill(SOURCE, NAME, tmp_path)
+    assert list((tmp_path / "skills").iterdir()) == []
+    assert all(not row["installed"] for row in (await search_marketplace_skills(NAME, tmp_path))["skills"])
+    assert (await install_marketplace_skill(SOURCE, NAME, tmp_path))["installed"]

@@ -524,6 +524,10 @@ async def test_install_skillhub_skill_checks_fingerprint_and_extracts_safely(
         "version": "1.1.8",
     }
     assert (tmp_path / "skills" / "ima-skills" / "SKILL.md").read_bytes() == skill_content
+    assert json.loads((tmp_path / "skills" / "ima-skills" / ".nanobot-origin.json").read_text()) == {
+        "provider": "skillhub", "source": "", "skill_id": "ima-skills",
+    }
+    assert (await install_marketplace_skill("", "ima-skills", tmp_path, provider="skillhub"))["already_installed"]
 
 
 @pytest.mark.parametrize(
