@@ -1229,7 +1229,8 @@
 }
 
 .thread-composer-surface,
-.context-inspector-surface {
+.context-inspector-surface,
+.side-panel-surface {
   --composer-shadow-color: 240 10% 16%;
   --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
@@ -1242,7 +1243,8 @@
 }
 
 .dark .thread-composer-surface,
-.dark .context-inspector-surface {
+.dark .context-inspector-surface,
+.dark .side-panel-surface {
   --composer-shadow-color: 240 12% 3%;
 }
 
@@ -1251,7 +1253,7 @@
 }
 
 @media (forced-colors: active) {
-  .thread-composer-surface, .context-inspector-surface { outline: 1px solid CanvasText; }
+  .thread-composer-surface, .context-inspector-surface, .side-panel-surface { outline: 1px solid CanvasText; }
   .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
 }
 

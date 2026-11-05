@@ -55,7 +55,7 @@ describe("CodeBlock", () => {
 
   it.each([
     ["many lines", "x\n".repeat(60_000)],
-    ["many short lines", "\n".repeat(2_000)],
+    ["many short lines", "\n".repeat(5_000)],
     ["a minified line", "x".repeat(2_001) + "😀tail"],
   ])("keeps an oversized file preview (%s) complete without a huge token/line DOM", (_name, code) => {
     const { container } = render(<CodeBlock code={code} language="html" chrome="none"
@@ -63,6 +63,15 @@ describe("CodeBlock", () => {
     expect(screen.queryByTestId("highlighted-code")).not.toBeInTheDocument();
     expect(screen.getByTestId("plain-code-fallback").querySelector("code > span > span:last-child")?.textContent).toBe(code);
     expect(container.querySelectorAll("*").length).toBeLessThan(10);
+  });
+
+  it("highlights a normal Python module longer than 2000 lines", async () => {
+    const code = Array.from({ length: 2800 }, (_, index) => `def function_${index}(): return "a realistic source line"`).join("\n");
+    render(<CodeBlock code={code} language="python" chrome="none"
+      showLineNumbers wrapLongLines={false} viewportHighlight />);
+    const highlighted = await screen.findByTestId("highlighted-code");
+    expect(highlighted).toHaveAttribute("data-language", "python");
+    expect(highlighted.textContent).toBe(code);
   });
 
   it("paints large preview text before enhancing it, and cancels enhancement on unmount", async () => {
