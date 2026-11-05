@@ -3755,7 +3755,9 @@ async def test_restart_notice_retries_until_running_channel_accepts_delivery():
 
     notice = RestartNotice(channel="discord", chat_id="123", started_at_raw="")
     with patch("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,)):
-        await mgr._send_restart_notice_when_started(notice, timeout_s=0.1, poll_s=0.01)
+        # Test delivery retries, not a 100 ms scheduling deadline under CI load.
+        async with asyncio.timeout(3):
+            await mgr._send_restart_notice_when_started(notice)
 
     assert channel.attempts == 2
     assert channel.sent is not None
