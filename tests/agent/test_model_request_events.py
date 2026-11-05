@@ -285,11 +285,13 @@ async def test_request_without_usage_does_not_reuse_previous_measurement():
 
 @pytest.mark.asyncio
 async def test_request_graph_describes_input_before_provider_normalization(tmp_path):
-    from nanobot.context_graph import source_metadata, source_receipt
+    from nanobot.context_sources import source_metadata
+    from nanobot.file_references import source_receipt
+    from nanobot.webui.outbound_wire import project_notification
 
     content = "[Guide](guide.md)"
     messages = [{"role": "user", "content": content, "_meta": source_metadata(
-        content, [source_receipt(tmp_path / "source.md", content)],
+        [source_receipt(tmp_path / "source.md", content)],
     )}]
     events = []
 
@@ -308,7 +310,26 @@ async def test_request_graph_describes_input_before_provider_normalization(tmp_p
     run_spec.initial_messages = messages
     await runner.run(run_spec)
     assert [event.phase for event in events] == ["started", "completed"]
-    assert events[0].context_graph == events[1].context_graph
-    assert events[1].context_graph["edges"] == [
+    assert events[0].context_sources == events[1].context_sources
+    projection = project_notification("test", events[1])
+    assert projection.payload["context_graph"]["edges"] == [
         {"source": str(tmp_path / "source.md"), "target": str(tmp_path / "guide.md")},
     ]
+
+
+async def test_graph_projection_failure_does_not_prevent_model_request(monkeypatch):
+    from nanobot.webui.outbound_wire import project_notification
+
+    def broken_projection(sources):
+        raise RuntimeError("graph projection failed")
+
+    monkeypatch.setattr("nanobot.webui.outbound_wire.graph_from_sources", broken_projection)
+
+    async def publish(event):
+        project_notification("test", event)
+
+    provider = MagicMock()
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    result = await AgentRunner().run(spec(provider, EventSink(publish)))
+    provider.chat_stream_with_retry.assert_awaited_once()
+    assert result.messages[-1]["content"] == "done"

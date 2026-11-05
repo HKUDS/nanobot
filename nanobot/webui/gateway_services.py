@@ -11,7 +11,6 @@ from nanobot.channels.websocket.attachment_http import AttachmentHTTP
 from nanobot.channels.websocket.attachment_store import AttachmentStore
 from nanobot.config.loader import get_config_path
 from nanobot.config.paths import get_media_dir
-from nanobot.context_graph import ContextSnapshot
 from nanobot.webui.gateway_endpoint import WebUIGatewayEndpoint
 from nanobot.webui.gateway_tokens import GatewayTokenStore
 from nanobot.webui.ingress_policy import DEFAULT_WEBUI_INGRESS_POLICY, WebUIIngressPolicy
@@ -82,7 +81,6 @@ def build_gateway_services(
     skill_state_action: Callable[[set[str]], None] | None = None,
     recovery_action: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
     subagent_manager: SubagentManager | None = None,
-    inspect_session_context: Callable[[str], Awaitable[ContextSnapshot | None]] | None = None,
     discard_session: Callable[[str], Awaitable[None]] | None = None,
     logger: Any = default_logger,
 ) -> GatewayServices:
@@ -152,7 +150,6 @@ def build_gateway_services(
         skill_state_action=skill_state_action,
         recovery_action=recovery_action,
         subagent_manager=subagent_manager,
-        inspect_session_context=inspect_session_context,
         discard_session=discard_session,
         log=logger,
     )

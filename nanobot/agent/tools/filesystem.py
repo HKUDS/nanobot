@@ -19,7 +19,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.context_graph import source_receipt
+from nanobot.file_references import source_receipt
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path

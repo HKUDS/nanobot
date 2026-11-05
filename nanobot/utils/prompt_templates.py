@@ -11,7 +11,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
-from nanobot.context_graph import record_source
+from nanobot.context_sources import record_source
 
 _TEMPLATES_ROOT = Path(__file__).resolve().parent.parent / "templates"
 

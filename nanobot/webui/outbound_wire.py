@@ -11,7 +11,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.context_graph import ContextGraph, ContextSnapshot
+from nanobot.context_graph import ContextGraph, ContextSnapshot, graph_from_sources
 from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
@@ -242,8 +242,6 @@ def encode_context_compaction(
     }
     if event.reason is not None:
         payload["reason"] = event.reason
-    if event.context_snapshot is not None:
-        payload["context_snapshot"] = event.context_snapshot
     return payload
 
 
@@ -268,8 +266,8 @@ def project_notification(
             "sequence": event.sequence, "phase": event.phase,
             "request_usage": event.request_usage.to_turn_dict() if event.request_usage is not None else None,
         }
-        if event.context_graph is not None:
-            payload["context_graph"] = event.context_graph
+        if event.context_sources is not None:
+            payload["context_graph"] = graph_from_sources(event.context_sources)
         if event.usage is not None:
             payload["usage"] = event.usage.to_turn_dict()
         payload["round_usages"] = [usage.to_turn_dict() for usage in event.round_usages[-8:]]

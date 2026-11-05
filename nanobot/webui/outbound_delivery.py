@@ -45,6 +45,7 @@ from nanobot.webui.outbound_wire import (
     GoalStateWirePayload,
     GoalStatusWirePayload,
     MessageWirePayload,
+    NotificationProjection,
     RuntimeModelWirePayload,
     SessionUpdatedWirePayload,
     StreamWirePayload,
@@ -78,6 +79,13 @@ async def _encode_payload(payload: Mapping[str, object]) -> str:
     if "context_graph" in payload or "context_snapshot" in payload:
         return await asyncio.to_thread(json.dumps, payload, ensure_ascii=False)
     return json.dumps(payload, ensure_ascii=False)
+
+
+async def _project_notification(msg: OutboundMessage) -> NotificationProjection | None:
+    # Only request snapshots need graph work; token deltas stay on their cheap path.
+    if isinstance(msg.event, ModelRequestEvent) and msg.event.context_sources:
+        return await asyncio.to_thread(project_notification, msg.chat_id, msg.event, msg.metadata)
+    return project_notification(msg.chat_id, msg.event, msg.metadata)
 
 
 class WebUIOutboundTransport(Protocol):
@@ -194,7 +202,7 @@ class WebUIOutboundDelivery:
                 body = self._message_payload(msg, progress)
                 persistent, label = True, " "
             else:
-                notification = project_notification(msg.chat_id, msg.event, msg.metadata)
+                notification = await _project_notification(msg)
                 assert notification is not None
                 body = dict(notification.payload)
                 persistent = notification.persistence == "turn_activity"
@@ -257,7 +265,7 @@ class WebUIOutboundDelivery:
                     body["provenance"] = event.provenance
                 await self._fanout(recipients, body, label=" user_message ")
             return
-        notification = project_notification(msg.chat_id, event, msg.metadata)
+        notification = await _project_notification(msg)
         if notification is not None:
             if recipients or notification.deliver_offline:
                 await self._send_payload(

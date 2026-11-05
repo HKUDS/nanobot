@@ -21,7 +21,7 @@ from nanobot.agent.skill_metadata import (
 from nanobot.agent.skill_metadata import (
     valid_skill_metadata as valid_skill_metadata,
 )
-from nanobot.context_graph import capture_sources, record_source
+from nanobot.context_sources import capture_sources, record_source
 from nanobot.runtime_context import RuntimeContextBlock
 
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")

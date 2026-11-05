@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-from nanobot.context_graph import SourceMetadata, SourceReceipt, source_metadata
+from nanobot.context_sources import SourceMetadata, SourceReceipt, source_metadata
 
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import RequestContext
@@ -119,10 +119,10 @@ async def resolve_runtime_context(
 
 
 def runtime_context_source_metadata(
-    content: object, blocks: Sequence[RuntimeContextBlock],
+    blocks: Sequence[RuntimeContextBlock],
 ) -> SourceMetadata | None:
     receipts = [receipt for block in blocks for receipt in block.context_sources]
-    return source_metadata(content, receipts) if receipts else None
+    return source_metadata(receipts) if receipts else None
 
 
 def append_runtime_context(

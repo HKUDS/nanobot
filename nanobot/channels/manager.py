@@ -36,7 +36,6 @@ from nanobot.channels.contracts import (
 from nanobot.channels.outbox import RETRY_SECONDS, DeliveryOutbox
 from nanobot.channels.registry import channel_default_enabled
 from nanobot.config.schema import Config
-from nanobot.context_graph import ContextSnapshot
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.security.workspace_policy import resolve_allowed_path
 from nanobot.utils.restart import (
@@ -118,7 +117,6 @@ class ChannelManager:
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None,
         webui_subagent_manager: SubagentManager | None = None,
-        webui_inspect_session_context: Callable[[str], Awaitable[ContextSnapshot | None]] | None = None,
         webui_discard_session: Callable[[str], Awaitable[None]] | None = None,
         config_path: Path | None = None,
     ):
@@ -145,7 +143,6 @@ class ChannelManager:
         self._webui_skill_state_action = webui_skill_state_action
         self._webui_recovery_action = webui_recovery_action
         self._webui_subagent_manager = webui_subagent_manager
-        self._webui_inspect_session_context = webui_inspect_session_context
         self._webui_discard_session = webui_discard_session
         self.channels: dict[str, BaseChannel] = {}
         self._channel_owners: dict[str, str] = {}
@@ -238,7 +235,6 @@ class ChannelManager:
                 skill_state_action=self._webui_skill_state_action,
                 recovery_action=self._webui_recovery_action,
                 subagent_manager=self._webui_subagent_manager,
-                inspect_session_context=self._webui_inspect_session_context,
                 discard_session=self._webui_discard_session,
                 logger=logger,
             )

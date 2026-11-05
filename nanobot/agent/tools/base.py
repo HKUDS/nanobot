@@ -12,7 +12,7 @@ if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
     from nanobot.agent.tools.context import ToolContext
-    from nanobot.context_graph import SourceReceipt
+    from nanobot.context_sources import SourceReceipt
     from nanobot.runtime_context import RuntimeContextProvider
 
 _ToolT = TypeVar("_ToolT", bound="Tool")

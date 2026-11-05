@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.context_graph import graph_from_messages, source_metadata, source_receipt
+from nanobot.context_graph import graph_from_sources
+from nanobot.context_sources import source_metadata, sources_from_messages
+from nanobot.file_references import source_receipt
+
+
+def graph_from_messages(messages):
+    return graph_from_sources(sources_from_messages(messages))
 
 
 def test_markdown_discovers_only_real_local_links_without_reading_targets(tmp_path: Path):
@@ -21,7 +27,7 @@ def test_markdown_discovers_only_real_local_links_without_reading_targets(tmp_pa
 """
     source = source_receipt(tmp_path / "SKILL.md", content)
     assert source["links"] == [str(tmp_path / "references" / "guide.md"), str(tmp_path / "other.md")]
-    graph = graph_from_messages([{"content": content, "_meta": source_metadata(content, [source])}])
+    graph = graph_from_messages([{"content": content, "_meta": source_metadata([source])}])
     assert [node["state"] for node in graph["nodes"]] == ["loaded", "discovered", "discovered"]
 
 
@@ -32,7 +38,12 @@ def test_repeated_source_analysis_resolves_links_in_the_current_directory(tmp_pa
     first.mkdir()
     second.mkdir()
     link = first / "guide.md"
-    link.symlink_to(tmp_path / "original.md")
+    try:
+        link.symlink_to(tmp_path / "original.md")
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
     assert source_receipt(first / "SKILL.md", content)["links"] == [str(tmp_path / "original.md")]
     assert source_receipt(second / "SKILL.md", content)["links"] == [str(second / "guide.md")]
     link.unlink()
@@ -47,7 +58,7 @@ async def test_file_analysis_leaves_the_event_loop_available(tmp_path: Path, mon
     import threading
 
     from nanobot.agent.tools.filesystem import ReadFileTool
-    from nanobot.context_graph import REFERENCE_PARSERS
+    from nanobot.file_references import REFERENCE_PARSERS
 
     entered = asyncio.Event()
     release = threading.Event()
@@ -83,7 +94,7 @@ async def test_file_analysis_leaves_the_event_loop_available(tmp_path: Path, mon
 def test_source_token_estimate_updates_when_tokenizer_becomes_available(tmp_path: Path, monkeypatch):
     import tiktoken
 
-    import nanobot.context_graph as context_graph
+    import nanobot.file_references as context_graph
 
     content = "Hello world"
     monkeypatch.setattr(context_graph, "get_token_encoding", lambda: None)
@@ -93,10 +104,10 @@ def test_source_token_estimate_updates_when_tokenizer_becomes_available(tmp_path
     assert source_receipt(tmp_path / "source.txt", content)["tokens"] == len(encoding.encode_ordinary(content))
 
 
-def test_compacted_or_removed_content_no_longer_counts_as_loaded(tmp_path: Path):
+def test_message_rewriting_preserves_read_facts_until_compaction(tmp_path: Path):
     content = "[Child](child.md)"
-    metadata = source_metadata(content, [source_receipt(tmp_path / "parent.md", content)])
-    assert graph_from_messages([{"content": "Summary of earlier work", "_meta": metadata}]) == {"nodes": [], "edges": []}
+    metadata = source_metadata([source_receipt(tmp_path / "parent.md", content)])
+    assert graph_from_messages([{"content": "Summary of earlier work", "_meta": metadata}])["nodes"][0]["state"] == "loaded"
     assert graph_from_messages([]) == {"nodes": [], "edges": []}
 
 
@@ -105,7 +116,7 @@ def test_retained_partial_reads_accumulate_without_loading_entire_file(tmp_path:
     messages = []
     for content in ["First fragment", "Second fragment"]:
         receipt = source_receipt(path, content)
-        messages.append({"content": content, "_meta": source_metadata(content, [receipt])})
+        messages.append({"content": content, "_meta": source_metadata([receipt])})
     graph = graph_from_messages(messages)
     assert len(graph["nodes"]) == 1
     assert graph["nodes"][0]["tokens"] == sum(source_receipt(path, text)["tokens"] for text in ["First fragment", "Second fragment"])
@@ -132,7 +143,7 @@ def test_file_provenance_survives_saved_turn_and_replay(tmp_path: Path):
 
     content = "[Reference](reference.md)"
     message = {"role": "tool", "tool_call_id": "read-1", "content": content,
-               "_meta": source_metadata(content, [source_receipt(tmp_path / "guide.md", content)])}
+               "_meta": source_metadata([source_receipt(tmp_path / "guide.md", content)])}
     session = Session(key="test:context-graph")
     loop = object.__new__(AgentLoop)
     loop._save_turn(session, [
@@ -167,7 +178,7 @@ def test_graph_survives_webui_history_boundary(tmp_path: Path):
 
     content = "Read me"
     graph = graph_from_messages([{"content": content, "_meta": source_metadata(
-        content, [source_receipt(tmp_path / "guide.md", content)],
+        [source_receipt(tmp_path / "guide.md", content)],
     )}])
     event = {"event": "model_request", "request_id": "request", "run_id": "run",
              "sequence": 1, "phase": "completed", "context_graph": graph}
@@ -239,41 +250,6 @@ async def test_queued_skill_provenance_survives_request_and_early_persistence(tm
     assert graph_from_messages([injected[-1]]) == persisted_graph
 
 
-def test_compacted_context_keeps_system_sources_and_counts_tools_and_summary(tmp_path: Path):
-    from unittest.mock import MagicMock
-
-    from nanobot.agent.context import ContextBuilder
-    from nanobot.agent.memory import Consolidator, MemoryStore
-    from nanobot.providers.base import GenerationSettings
-    from nanobot.session.manager import Session
-    from nanobot.utils.llm_runtime import LLMRuntime
-    from nanobot.webui.history import fact_from_record, record_from_fact
-    from nanobot.webui.transcript import _client_projection_event
-
-    (tmp_path / 'SOUL.md').write_text('Be precise.', encoding='utf-8')
-    builder = ContextBuilder(tmp_path)
-    provider = MagicMock()
-    provider.estimate_prompt_tokens.return_value = (0, 'none')
-    provider.generation = GenerationSettings(max_tokens=100)
-    runtime = LLMRuntime.capture(provider, 'test', context_window_tokens=10000)
-    definitions = [{'type': 'function', 'function': {'name': 'read_file', 'description': 'Read a file. ' * 80,
-                    'parameters': {'type': 'object', 'properties': {'path': {'type': 'string'}}}}}]
-    consolidator = Consolidator(MemoryStore(tmp_path), MagicMock(), builder.build_messages, lambda: definitions)
-    session = Session(key='websocket:compact-graph')
-    session.add_message('user', 'Read old.md')
-    session.commit_summary_checkpoint('The old file was reviewed.')
-    snapshot = consolidator.context_snapshot(session, runtime=runtime)
-    names = {node['name'] for node in snapshot['graph']['nodes']}
-    assert {'identity.md', 'tool_contract.md', 'SOUL.md'} <= names
-    without_tools = Consolidator(MemoryStore(tmp_path), MagicMock(), builder.build_messages, lambda: [])
-    assert snapshot['estimated_tokens'] > without_tools.context_snapshot(session, runtime=runtime)['estimated_tokens'] > 0
-    assert snapshot['context_window_tokens'] == 10000
-    event = {'event': 'context_compaction', 'compaction_id': 'compact', 'phase': 'succeeded', 'context_snapshot': snapshot}
-    restored = record_from_fact(fact_from_record(event), session.key)
-    projected = _client_projection_event(restored, augment_user_media=None, augment_assistant_media=None, augment_assistant_text=None)
-    assert projected['context_snapshot'] == snapshot
-
-
 async def test_read_file_ignores_invalid_markdown_link_targets(tmp_path: Path):
     from nanobot.agent.tools.base import ToolResult
     from nanobot.agent.tools.filesystem import ReadFileTool
@@ -305,4 +281,4 @@ def test_image_with_explicit_skill_retains_sources_across_history(tmp_path: Path
     object.__new__(AgentLoop)._save_turn(session, [current], skip=0)
     assert graph_from_messages(session.get_history()) == graph
     current["content"][-1]["text"] = "Compacted text"
-    assert graph_from_messages([current]) == {"nodes": [], "edges": []}
+    assert graph_from_messages([current]) == graph

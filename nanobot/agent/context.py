@@ -10,7 +10,7 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools import sessions as session_tools
 from nanobot.apps.cli import utils as cli_app_utils
-from nanobot.context_graph import capture_sources, record_source, source_metadata
+from nanobot.context_sources import capture_sources, record_source, source_metadata
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
@@ -288,7 +288,7 @@ class ContextBuilder:
                 },
                 *transcript.history,
             ]
-            messages[0]["_meta"] = source_metadata(messages[0]["content"], sources.copy())
+            messages[0]["_meta"] = source_metadata(sources.copy())
             if transcript.current_message is None:
                 return messages
 
@@ -323,7 +323,7 @@ class ContextBuilder:
             current["_meta"] = {
                 RUNTIME_CONTEXT_MESSAGE_META: runtime_context_meta,
             }
-        if source_meta := runtime_context_source_metadata(merged, blocks):
+        if source_meta := runtime_context_source_metadata(blocks):
             current["_meta"] = {**current.get("_meta", {}), **source_meta}
         return current
 

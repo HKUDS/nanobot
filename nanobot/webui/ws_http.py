@@ -29,7 +29,7 @@ from websockets.http11 import Response
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.application import builtin_command_palette
-from nanobot.context_graph import ContextGraph, ContextSnapshot
+from nanobot.context_graph import ContextGraph
 from nanobot.cron.binding import CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -360,9 +360,6 @@ class _HistoryProjection(Protocol[_ProjectionResult]):
 class _PreparedThreadResponse:
     data: dict[str, Any]
     headers: list[tuple[str, str]]
-    session_key: str
-    session_version: tuple[str, int] | None
-    missing_context_event: dict[str, Any] | None
 
 
 def _encode_thread_response(data: dict[str, Any], *, graph_references: bool, **kwargs: Any) -> Response:
@@ -444,7 +441,6 @@ class GatewayHTTPHandler:
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None,
         subagent_manager: SubagentManager | None = None,
-        inspect_session_context: Callable[[str], Awaitable[ContextSnapshot | None]] | None = None,
         discard_session: Callable[[str], Awaitable[None]] | None = None,
         log: Any = logger,
     ) -> None:
@@ -452,7 +448,6 @@ class GatewayHTTPHandler:
         self.session_manager = session_manager
         self.sidebar_state = WebUISidebarState(session_manager.state if session_manager is not None else None)
         self.static_dist_path = static_dist_path
-        self.inspect_session_context = inspect_session_context
         self.runtime_model_name = runtime_model_name
         self.bus = bus
         self.tokens = tokens
@@ -1173,16 +1168,6 @@ class GatewayHTTPHandler:
         try:
             prepared = await self._project_session_history(request, key, project)
             if isinstance(prepared, _PreparedThreadResponse):
-                if prepared.missing_context_event is not None and self.inspect_session_context is not None:
-                    # Reconstructed prompts can change outside the session revision (for example SOUL.md).
-                    prepared.headers = list(_NO_STORE_HEADERS)
-                    prepared.data.pop("revision", None)
-                    snapshot = await self.inspect_session_context(prepared.session_key)
-                    # Both the projected checkpoint and reconstruction must belong to the same session version.
-                    version = await asyncio.to_thread(self._read_session_version, prepared.session_key)
-                    if version == prepared.session_version:
-                        if snapshot is not None:
-                            prepared.missing_context_event["context_snapshot"] = snapshot
                 response = await asyncio.to_thread(
                     _encode_thread_response, prepared.data,
                     graph_references=_query_first(_parse_query(request.path), "context_graph_encoding") == "references-v1",
@@ -1336,15 +1321,6 @@ class GatewayHTTPHandler:
             diagnostics.build_ms = (time.perf_counter() - build_started) * 1000
         if data is None:
             return _http_error(404, "webui thread not found")
-        missing_context_event = None
-        if include_model_requests and before is None and after is None:
-            for event in reversed(data.get("events", [])):
-                if event.get("event") == "model_request":
-                    break
-                if event.get("event") == "context_compaction" and event.get("phase") == "succeeded":
-                    if "context_snapshot" not in event:
-                        missing_context_event = event
-                    break
         data["workspace_scope"] = scope.payload()
         revision_variant["session_version"] = self._read_session_version(decoded_key)
         final_revision = webui_transcript_revision(decoded_key, history=history, variant=revision_variant)
@@ -1353,9 +1329,7 @@ class GatewayHTTPHandler:
             response_headers.append(("ETag", _quoted_etag(final_revision)))
             data["revision"] = final_revision
         return _PreparedThreadResponse(
-            data=data, headers=response_headers, session_key=decoded_key,
-            session_version=revision_variant["session_version"],
-            missing_context_event=missing_context_event if final_revision == initial_revision else None,
+            data=data, headers=response_headers,
         )
 
     def _handle_webui_trace_detail_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:

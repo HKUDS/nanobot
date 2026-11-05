@@ -27,7 +27,7 @@ from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.context_graph import graph_from_messages, source_metadata
+from nanobot.context_sources import source_metadata, sources_from_messages
 from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent
 from nanobot.llm_usage.context import (
     LLMUsageSource,
@@ -565,7 +565,7 @@ class AgentRunner:
                             )
                             tool_message["_recovery_interrupted"] = True
                         if entry is not None and isinstance(entry.result, ToolResult) and entry.result.context_sources:
-                            tool_message["_meta"] = source_metadata(str(entry.result), entry.result.context_sources)
+                            tool_message["_meta"] = source_metadata(entry.result.context_sources)
                         messages.append(tool_message)
                         completed_tool_results.append(tool_message)
                     checkpoint_model_messages = (
@@ -934,8 +934,8 @@ class AgentRunner:
         """
         request_id = uuid4().hex
         request_usage: LLMUsage | None = None
-        context_graph = (
-            await self.context_governor.prepare_in_background(graph_from_messages, kwargs["messages"])
+        context_sources = (
+            sources_from_messages(kwargs["messages"])
             if spec.events.accepts(ModelRequestEvent) else None
         )
 
@@ -949,7 +949,7 @@ class AgentRunner:
                 usage=state.request_usage,
                 round_usages=tuple(usage for usage in state.recent_round_usages if usage is not None),
                 context_window_tokens=spec.runtime.context_window_tokens,
-                context_graph=context_graph,
+                context_sources=context_sources,
                 request_usage=request_usage,
             ))
 

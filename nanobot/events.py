@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from loguru import logger
 
-from nanobot.context_graph import ContextGraph, ContextSnapshot
 from nanobot.llm_usage.types import LLMUsage
+
+if TYPE_CHECKING:
+    from nanobot.context_sources import SourceReceipt
 
 
 class AgentEvent:
@@ -25,7 +27,7 @@ class ModelRequestEvent(AgentEvent):
     usage: LLMUsage | None = None
     round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
-    context_graph: ContextGraph | None = None
+    context_sources: tuple[SourceReceipt, ...] | None = None
     request_usage: LLMUsage | None = None
 
 
@@ -60,7 +62,6 @@ class ContextCompactionEvent(AgentEvent):
     # Interactive clients still consume every phase when this is false.
     notify: bool = False
     reason: CompactionReason | None = None
-    context_snapshot: ContextSnapshot | None = None
 
 
 @dataclass(frozen=True)

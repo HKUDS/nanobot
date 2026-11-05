@@ -579,10 +579,11 @@ async def test_ready_activity_group_commits_before_ordered_fanout(history, monke
     monkeypatch.setattr(history.sessions.state, "append_history", gated_append)
     usage = LLMUsage.reported(input_tokens=100, output_tokens=20)
     graph = {"nodes": [{"path": "/workspace/guide.md", "name": "guide.md", "state": "loaded", "tokens": 100}], "edges": []}
+    sources = ({"path": "/workspace/guide.md", "name": "guide.md", "loaded": True, "tokens": 100, "links": []},)
     events = [
-        ModelRequestEvent("request", "run", 1, "started", context_graph=graph),
+        ModelRequestEvent("request", "run", 1, "started", context_sources=sources),
         RetryStatusEvent(state="cleared", attempt=1, max_attempts=None, error_kind="unknown"),
-        ModelRequestEvent("request", "run", 2, "completed", usage=usage, round_usages=(usage,), context_graph=graph),
+        ModelRequestEvent("request", "run", 2, "completed", usage=usage, round_usages=(usage,), context_sources=sources),
         ProgressEvent(tool_hint=True, tool_events=[{"call_id": "tool", "name": "read", "phase": "start"}]),
         ProgressEvent(tool_events=[{"call_id": "tool", "name": "read", "phase": "end", "result": "complete"}]),
     ]

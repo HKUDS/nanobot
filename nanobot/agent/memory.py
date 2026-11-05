@@ -18,7 +18,6 @@ from uuid import uuid4
 
 from loguru import logger
 
-from nanobot.context_graph import ContextSnapshot, build_context_snapshot
 from nanobot.events import NO_EVENTS, CompactionReason, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
@@ -1138,20 +1137,6 @@ class Consolidator:
             return []
         return session.get_history()
 
-    def context_snapshot(self, session: Session, *, runtime: LLMRuntime) -> ContextSnapshot:
-        channel = session.key.split(":", 1)[0] if ":" in session.key else None
-        workspace = None
-        if self._resolve_prompt_context is not None:
-            channel, workspace = self._resolve_prompt_context(session)
-        messages = self._build_messages(
-            history=self._full_replay_history(session), current_message=None,
-            channel=channel, workspace=workspace,
-            session_summary=session_summary_from_metadata(session.metadata, fallback_last_active=session.updated_at),
-        )
-        return build_context_snapshot(messages, self._get_tool_definitions(),
-                                      provider=runtime.provider, model=runtime.model,
-                                      context_window_tokens=runtime.context_window_tokens)
-
     def estimate_session_prompt_tokens(
         self,
         session: Session,
@@ -1264,7 +1249,6 @@ class Consolidator:
                     phase="succeeded",
                     notify=notify,
                     reason=reason,
-                    context_snapshot=await asyncio.to_thread(self.context_snapshot, session, runtime=runtime),
                 ),
             )
 

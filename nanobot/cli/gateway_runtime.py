@@ -828,7 +828,6 @@ def _run_claimed_gateway(
         webui_skill_state_action=_webui_skill_state_action,
         webui_recovery_action=recovery.handle_action,
         webui_subagent_manager=agent.subagents,
-        webui_inspect_session_context=agent.inspect_session_context,
         webui_discard_session=agent.discard_session,
         config_path=Path(config_path),
     )

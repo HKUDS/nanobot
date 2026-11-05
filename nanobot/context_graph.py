@@ -1,26 +1,12 @@
-"""File provenance for context inspection, kept outside model-visible text."""
+"""Client graph projection of file-use facts and persisted snapshot validation."""
 
 from __future__ import annotations
 
-import hashlib
-import json
-from collections.abc import Generator, Iterator, Mapping, Sequence
-from contextlib import contextmanager
-from contextvars import ContextVar
-from functools import lru_cache
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast
-from urllib.parse import unquote, urlsplit
+from typing import Literal, TypedDict, cast
 
-from markdown_it import MarkdownIt
-
-from nanobot.utils.helpers import estimate_prompt_tokens_chain
-from nanobot.utils.token_encoding import get_token_encoding
-
-if TYPE_CHECKING:
-    from tiktoken import Encoding
-
-    from nanobot.providers.base import LLMProvider
+from nanobot.context_sources import SourceReceipt
 
 
 class ContextNode(TypedDict):
@@ -38,163 +24,6 @@ class ContextEdge(TypedDict):
 class ContextGraph(TypedDict):
     nodes: list[ContextNode]
     edges: list[ContextEdge]
-
-
-class SourceReceipt(TypedDict):
-    path: str
-    name: str
-    tokens: int
-    links: list[str]
-    loaded: bool
-
-
-class SourceMetadata(TypedDict):
-    context_sources: list[SourceReceipt]
-    context_source_hash: str
-
-
-class ReferenceParser(Protocol):
-    def references(self, content: str) -> Iterator[str]: ...
-
-
-class MarkdownReferences:
-    def references(self, content: str) -> Iterator[str]:
-        if len(content) <= 128_000:
-            yield from self._cached_references(content)
-        else:
-            yield from self._references(content)
-
-    @staticmethod
-    @lru_cache(maxsize=16)
-    def _cached_references(content: str) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(MarkdownReferences._references(content)))
-
-    @staticmethod
-    def _references(content: str) -> Iterator[str]:
-        for block in MarkdownIt("commonmark").parse(content):
-            for token in block.children or ():
-                if token.type == "link_open" and (href := token.attrGet("href")):
-                    if isinstance(href, str):
-                        yield href
-
-
-@lru_cache(maxsize=16)
-def _encoded_source_tokens(content: str, encoding: Encoding) -> int:
-    return len(encoding.encode_ordinary(content))
-
-
-def _source_tokens(content: str) -> int:
-    encoding = get_token_encoding()
-    if encoding is not None:
-        try:
-            return (_encoded_source_tokens(content, encoding) if len(content) <= 128_000
-                    else len(encoding.encode_ordinary(content)))
-        except Exception:
-            pass
-    return len(content.encode("utf-8"))
-
-
-REFERENCE_PARSERS: dict[str, ReferenceParser] = {
-    ".md": MarkdownReferences(),
-    ".markdown": MarkdownReferences(),
-}
-_sources: ContextVar[list[SourceReceipt] | None] = ContextVar("context_sources", default=None)
-CONTEXT_SOURCE_HISTORY_META = "_context_sources"
-
-
-@contextmanager
-def capture_sources() -> Generator[list[SourceReceipt]]:
-    sources: list[SourceReceipt] = []
-    token = _sources.set(sources)
-    try:
-        yield sources
-    finally:
-        _sources.reset(token)
-
-
-def source_receipt(path: Path, content: str, *, loaded: bool = True) -> SourceReceipt:
-    """Discover links without opening, checking, or fetching their targets."""
-    path = path.resolve()
-    links: list[str] = []
-    parser = REFERENCE_PARSERS.get(path.suffix.lower()) if loaded else None
-    if parser:
-        seen: set[str] = set()
-        for href in parser.references(content):
-            if href in seen:
-                continue
-            seen.add(href)
-            try:
-                parsed = urlsplit(href)
-                if parsed.scheme or parsed.netloc or not parsed.path:
-                    continue
-                target = str((path.parent / unquote(parsed.path)).resolve())
-            except (ValueError, OSError, RuntimeError):
-                # Link text is untrusted; invalid paths must not break prompt assembly.
-                continue
-            if target != str(path) and target not in links:
-                links.append(target)
-            if len(links) >= 128:
-                break
-    return {"path": str(path), "name": path.parent.name if path.name == "SKILL.md" else path.name, "tokens": _source_tokens(content) if loaded else 0,
-            "links": links, "loaded": loaded}
-
-
-def record_source(path: Path, content: str, *, loaded: bool = True) -> None:
-    if (sources := _sources.get()) is not None:
-        sources.append(source_receipt(path, content, loaded=loaded))
-
-
-def _content_hash(content: object) -> str:
-    serialized = content if isinstance(content, str) else json.dumps(content, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(serialized.encode()).hexdigest()
-
-
-def source_metadata(content: object, sources: list[SourceReceipt]) -> SourceMetadata:
-    return {"context_sources": sources, "context_source_hash": _content_hash(content)}
-
-
-def retained_source_metadata(content: object, value: object) -> SourceMetadata | None:
-    """Validate provenance when saving or restoring message history."""
-    if not isinstance(content, (str, list)) or not isinstance(value, dict):
-        return None
-    content = cast(str | list[object], content)
-    value = cast(dict[str, object], value)
-    content_hash = _content_hash(content)
-    if value.get("context_source_hash") != content_hash:
-        return None
-    raw_sources = value.get("context_sources")
-    if not isinstance(raw_sources, list):
-        return None
-    sources: list[SourceReceipt] = []
-    for raw_source in cast(list[object], raw_sources):
-        if not isinstance(raw_source, dict):
-            return None
-        source = cast(dict[str, object], raw_source)
-        path, name, tokens = source.get("path"), source.get("name"), source.get("tokens")
-        links, loaded = source.get("links"), source.get("loaded")
-        if not isinstance(path, str) or not isinstance(name, str):
-            return None
-        if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
-            return None
-        if not isinstance(loaded, bool) or not isinstance(links, list):
-            return None
-        if not all(isinstance(link, str) for link in cast(list[object], links)):
-            return None
-        sources.append({"path": path, "name": name, "tokens": tokens, "links": cast(list[str], links), "loaded": loaded})
-    return {"context_sources": sources, "context_source_hash": content_hash} if sources else None
-
-
-def discard_source_metadata(message: dict[str, Any]) -> None:
-    """Remove receipts when governance replaces the originating content."""
-    if not isinstance(message.get("_meta"), dict):
-        return
-    metadata = dict(message["_meta"])
-    metadata.pop("context_sources", None)
-    metadata.pop("context_source_hash", None)
-    if metadata:
-        message["_meta"] = metadata
-    else:
-        message.pop("_meta", None)
 
 
 def parse_context_graph(value: object) -> ContextGraph | None:
@@ -233,24 +62,20 @@ def parse_context_graph(value: object) -> ContextGraph | None:
     return {"nodes": nodes, "edges": edges}
 
 
-def graph_from_messages(messages: Sequence[Mapping[str, Any]]) -> ContextGraph:
-    """Only count receipts whose exact originating content is still retained."""
+def graph_from_sources(sources: Sequence[SourceReceipt]) -> ContextGraph:
+    """Project files used in this epoch, regardless of subsequent text edits."""
     nodes: dict[str, ContextNode] = {}
     edges: dict[tuple[str, str], ContextEdge] = {}
-    for message in messages:
-        meta = retained_source_metadata(message.get("content"), message.get("_meta"))
-        if meta is None:
-            continue
-        for source in meta["context_sources"]:
-            path = source["path"]
-            node = nodes.setdefault(path, {"path": path, "name": source["name"], "state": "discovered", "tokens": 0})
-            if source["loaded"]:
-                node["state"] = "loaded"
-                node["tokens"] += source["tokens"]
-            for target in source["links"]:
-                if target not in nodes:
-                    nodes[target] = {"path": target, "name": Path(target).name, "state": "discovered", "tokens": 0}
-                edges[path, target] = {"source": path, "target": target}
+    for source in sources:
+        path = source["path"]
+        node = nodes.setdefault(path, {"path": path, "name": source["name"], "state": "discovered", "tokens": 0})
+        if source["loaded"]:
+            node["state"] = "loaded"
+            node["tokens"] += source["tokens"]
+        for target in source["links"]:
+            if target not in nodes:
+                nodes[target] = {"path": target, "name": Path(target).name, "state": "discovered", "tokens": 0}
+            edges[path, target] = {"source": path, "target": target}
     return {"nodes": list(nodes.values()), "edges": list(edges.values())}
 
 
@@ -258,15 +83,6 @@ class ContextSnapshot(TypedDict):
     graph: ContextGraph
     estimated_tokens: int
     context_window_tokens: int
-
-
-def build_context_snapshot(
-    messages: list[dict[str, Any]], tools: list[dict[str, Any]], *,
-    provider: "LLMProvider", model: str, context_window_tokens: int,
-) -> ContextSnapshot:
-    tokens, _ = estimate_prompt_tokens_chain(provider, model, messages, tools)
-    return {"graph": graph_from_messages(messages), "estimated_tokens": tokens,
-            "context_window_tokens": context_window_tokens}
 
 
 def parse_context_snapshot(value: object) -> ContextSnapshot | None:

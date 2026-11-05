@@ -61,11 +61,9 @@ from nanobot.command.builtin import register_core_commands
 from nanobot.command.router import CommandExpansion, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
-from nanobot.context_graph import (
+from nanobot.context_sources import (
     CONTEXT_SOURCE_HISTORY_META,
-    ContextSnapshot,
-    retained_source_metadata,
-    source_metadata,
+    parse_source_metadata,
 )
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
 from nanobot.llm_usage.context import source_from_request
@@ -575,13 +573,6 @@ class AgentLoop:
             session.metadata.pop(SESSION_MODEL_PRESET_METADATA_KEY, None)
             return None
 
-    async def inspect_session_context(self, session_key: str) -> ContextSnapshot | None:
-        session = await self.sessions.state.read(session_key)
-        if session is None or not session.last_archived:
-            return None
-        runtime = self._resolve_session_runtime(session, recover_removed=True) or self.llm_runtime()
-        return await asyncio.to_thread(self.consolidator.context_snapshot, session, runtime=runtime)
-
     async def runtime_for_session(
         self,
         session: Session,
@@ -757,7 +748,7 @@ class AgentLoop:
             )
             if runtime_context_meta is not None:
                 extra[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
-            if source_meta := runtime_context_source_metadata(text, runtime_context_blocks or ()):
+            if source_meta := runtime_context_source_metadata(runtime_context_blocks or ()):
                 extra[CONTEXT_SOURCE_HISTORY_META] = source_meta
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
@@ -1205,7 +1196,7 @@ class AgentLoop:
                     )
                     if runtime_marker is not None:
                         row["_meta"][RUNTIME_CONTEXT_MESSAGE_META] = runtime_marker
-                    if source_meta := runtime_context_source_metadata(row["content"], blocks):
+                    if source_meta := runtime_context_source_metadata(blocks):
                         row["_meta"].update(source_meta)
                 if (
                     pending_msg.sender_id == "subagent"
@@ -2610,8 +2601,8 @@ class AgentLoop:
                         value = cast(dict[str, Any], internal_meta).get(key)
                         if isinstance(value, str) and value:
                             entry[key] = value
-            if source_meta := retained_source_metadata(message.get("content"), cast(object, internal_meta)):
-                entry[CONTEXT_SOURCE_HISTORY_META] = source_metadata(entry.get("content"), source_meta["context_sources"])
+            if source_meta := parse_source_metadata(cast(object, internal_meta)):
+                entry[CONTEXT_SOURCE_HISTORY_META] = source_meta
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "user" and isinstance(followup_id, str) and followup_id:
