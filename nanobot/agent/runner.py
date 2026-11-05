@@ -26,7 +26,6 @@ from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.context_sources import sources_from_messages
 from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent
 from nanobot.llm_usage.context import (
     LLMUsageSource,
@@ -931,10 +930,6 @@ class AgentRunner:
         """
         request_id = uuid4().hex
         request_usage: LLMUsage | None = None
-        context_sources = (
-            sources_from_messages(kwargs["messages"])
-            if spec.events.accepts(ModelRequestEvent) else None
-        )
 
         async def emit(phase: Literal["started", "completed", "failed", "cancelled"]) -> None:
             state.request_sequence += 1
@@ -946,11 +941,12 @@ class AgentRunner:
                 usage=state.request_usage,
                 round_usages=tuple(usage for usage in state.recent_round_usages if usage is not None),
                 context_window_tokens=spec.runtime.context_window_tokens,
-                context_sources=context_sources,
                 request_usage=request_usage,
             ))
 
         try:
+            if spec.hook is not None:
+                await spec.hook.before_model_request()
             await emit("started")
             _raise_if_cancelling()
             response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)

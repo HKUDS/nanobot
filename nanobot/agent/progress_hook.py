@@ -163,11 +163,12 @@ class AgentProgressHook(AgentHook):
                 build_tool_event_finish_payloads(context) if finished
                 else [build_tool_event_start_payload(tc) for tc in context.tool_calls]
             )
-            directory = None
             for payload in payloads:
                 call_id = payload["call_id"]
                 directory = self._tool_workspaces.pop(call_id, None) if finished else self._tool_workspaces.get(call_id)
-            await self._publish(ProgressEvent(tool_hint=not finished, tool_events=payloads, working_directory=directory))
+                if directory is not None:
+                    payload["working_directory"] = directory
+            await self._publish(ProgressEvent(tool_hint=not finished, tool_events=payloads))
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         u = context.usage

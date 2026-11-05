@@ -6,8 +6,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
-from nanobot.context_sources import SourceMetadata, SourceReceipt, source_metadata
-
 if TYPE_CHECKING:
     from nanobot.agent.tools.context import RequestContext
 
@@ -30,7 +28,6 @@ class RuntimeContextBlock:
 
     source: str
     content: str
-    context_sources: tuple[SourceReceipt, ...] = ()
 
 
 def normalize_webui_quote(value: Any) -> str | None:
@@ -93,7 +90,7 @@ def normalize_runtime_context_blocks(result: RuntimeContextResult) -> list[Runti
         if not source:
             raise ValueError("runtime context block source must not be empty")
         if content:
-            blocks.append(RuntimeContextBlock(source=source, content=content, context_sources=block.context_sources))
+            blocks.append(RuntimeContextBlock(source=source, content=content))
     return blocks
 
 
@@ -116,13 +113,6 @@ async def resolve_runtime_context(
     for provider in providers:
         blocks.extend(normalize_runtime_context_blocks(await provider(request)))
     return blocks
-
-
-def runtime_context_source_metadata(
-    blocks: Sequence[RuntimeContextBlock],
-) -> SourceMetadata | None:
-    receipts = [receipt for block in blocks for receipt in block.context_sources]
-    return source_metadata(receipts) if receipts else None
 
 
 def append_runtime_context(

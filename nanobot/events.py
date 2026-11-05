@@ -2,14 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from loguru import logger
 
 from nanobot.llm_usage.types import LLMUsage
-
-if TYPE_CHECKING:
-    from nanobot.context_sources import SourceReceipt
 
 
 class AgentEvent:
@@ -27,7 +24,6 @@ class ModelRequestEvent(AgentEvent):
     usage: LLMUsage | None = None
     round_usages: tuple[LLMUsage, ...] = ()
     context_window_tokens: int | None = None
-    context_sources: tuple[SourceReceipt, ...] | None = None
     request_usage: LLMUsage | None = None
 
 

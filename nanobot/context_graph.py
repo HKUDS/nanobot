@@ -71,7 +71,7 @@ def graph_from_sources(sources: Sequence[SourceReceipt]) -> ContextGraph:
         node = nodes.setdefault(path, {"path": path, "name": source["name"], "state": "discovered", "tokens": 0})
         if source["loaded"]:
             node["state"] = "loaded"
-            node["tokens"] += source["tokens"]
+            node["tokens"] = max(node["tokens"], source["tokens"])
         for target in source["links"]:
             if target not in nodes:
                 nodes[target] = {"path": target, "name": Path(target).name, "state": "discovered", "tokens": 0}

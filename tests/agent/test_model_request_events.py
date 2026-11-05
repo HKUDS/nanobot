@@ -284,52 +284,30 @@ async def test_request_without_usage_does_not_reuse_previous_measurement():
 
 
 @pytest.mark.asyncio
-async def test_request_graph_describes_input_before_provider_normalization(tmp_path):
-    from nanobot.context_sources import source_metadata
-    from nanobot.file_references import source_receipt
-    from nanobot.webui.outbound_wire import project_notification
+async def test_prepared_request_observers_run_before_request_event_and_provider():
+    from nanobot.agent.hook import AgentHook, CompositeHook
 
-    content = "[Guide](guide.md)"
-    messages = [{"role": "user", "content": content, "_meta": source_metadata(
-        [source_receipt(tmp_path / "source.md", content)],
-    )}]
-    events = []
+    order = []
+    class Observer(AgentHook):
+        async def before_model_request(self):
+            order.append("observer")
+
+    class BrokenObserver(AgentHook):
+        async def before_model_request(self):
+            raise RuntimeError("observation failed")
 
     async def publish(event):
         if isinstance(event, ModelRequestEvent):
-            events.append(event)
+            order.append(event.phase)
 
     async def provider_call(**kwargs):
-        kwargs["messages"][0]["content"] = "Provider-normalized content"
+        order.append("provider")
         return LLMResponse(content="done")
 
     provider = MagicMock()
     provider.chat_stream_with_retry = provider_call
-    runner = AgentRunner()
     run_spec = spec(provider, EventSink(publish))
-    run_spec.initial_messages = messages
-    await runner.run(run_spec)
-    assert [event.phase for event in events] == ["started", "completed"]
-    assert events[0].context_sources == events[1].context_sources
-    projection = project_notification("test", events[1])
-    assert projection.payload["context_graph"]["edges"] == [
-        {"source": str(tmp_path / "source.md"), "target": str(tmp_path / "guide.md")},
-    ]
-
-
-async def test_graph_projection_failure_does_not_prevent_model_request(monkeypatch):
-    from nanobot.webui.outbound_wire import project_notification
-
-    def broken_projection(sources):
-        raise RuntimeError("graph projection failed")
-
-    monkeypatch.setattr("nanobot.webui.outbound_wire.graph_from_sources", broken_projection)
-
-    async def publish(event):
-        project_notification("test", event)
-
-    provider = MagicMock()
-    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
-    result = await AgentRunner().run(spec(provider, EventSink(publish)))
-    provider.chat_stream_with_retry.assert_awaited_once()
-    assert result.messages[-1]["content"] == "done"
+    run_spec.hook = CompositeHook([BrokenObserver(), Observer()])
+    result = await AgentRunner().run(run_spec)
+    assert result.final_content == "done"
+    assert order == ["observer", "started", "provider", "completed"]

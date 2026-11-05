@@ -25,7 +25,8 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
-from nanobot.context_graph import ContextGraph, graph_from_sources
+from nanobot.context_graph import ContextGraph
+from nanobot.context_sources import PromptSourcesEvent
 from nanobot.events import ModelRequestEvent
 from nanobot.pairing.events import PairingChanged
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
@@ -119,15 +120,14 @@ class WebUIOutboundDelivery:
         if not isinstance(event, ModelRequestEvent | ContextCompactionEvent):
             return project_notification(msg.chat_id, event, msg.metadata)
         persistent = self._temporary_chats.should_persist_transcript(msg.chat_id)
-        if isinstance(event, ModelRequestEvent) and event.context_sources is not None:
+        if isinstance(event, ModelRequestEvent):
             graph: ContextGraph = {"nodes": [], "edges": []}
             try:
-                graph = await asyncio.to_thread(graph_from_sources, event.context_sources)
-                graph = await self._context_graph.snapshot(msg.chat_id, graph, msg.metadata, persistent=persistent)
+                graph = await self._context_graph.snapshot(msg.chat_id, msg.metadata, persistent=persistent)
             except Exception:
                 logger.exception("Unable to restore context graph")
             return project_notification(msg.chat_id, event, msg.metadata, context_graph=graph)
-        if isinstance(event, ContextCompactionEvent) and event.phase == "succeeded":
+        if event.phase == "succeeded":
             try:
                 await self._context_graph.reset(msg.chat_id, msg.metadata, persistent=persistent)
             except Exception:
@@ -247,6 +247,12 @@ class WebUIOutboundDelivery:
 
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
+        if isinstance(event, PromptSourcesEvent):
+            await self._context_graph.observe_prompt(
+                msg.chat_id, event.sources, msg.metadata,
+                persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),
+            )
+            return
         if isinstance(event, PairingChanged):
             await self._fanout(
                 self._transport.webui_recipients("authenticated_webui"),
@@ -436,9 +442,6 @@ class WebUIOutboundDelivery:
             payload["latency_ms"] = int(latency)
         if progress and progress.tool_events:
             payload["tool_events"] = project_tool_events(progress.tool_events)
-            if progress.working_directory is not None:
-                for tool_event in payload["tool_events"]:
-                    tool_event["working_directory"] = progress.working_directory
             await self._context_graph.observe_tools(
                 msg.chat_id, payload["tool_events"], msg.metadata,
                 persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),

@@ -92,6 +92,10 @@ class AgentHook:
     async def on_finally(self, context: AgentRunHookContext) -> None:
         pass
 
+    async def before_model_request(self) -> None:
+        """Observe a prepared logical request, including recovery requests."""
+        pass
+
     async def before_iteration(self, context: AgentHookContext) -> None:
         pass
 
@@ -206,6 +210,9 @@ class CompositeHook(AgentHook):
                 logger.opt(exception=tool_log_content_allowed()).error(
                     "AgentHook.{} error in {}", method_name, type(h).__name__,
                 )
+
+    async def before_model_request(self) -> None:
+        await self._for_each_hook_safe("before_model_request")
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)

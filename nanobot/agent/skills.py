@@ -21,7 +21,7 @@ from nanobot.agent.skill_metadata import (
 from nanobot.agent.skill_metadata import (
     valid_skill_metadata as valid_skill_metadata,
 )
-from nanobot.context_sources import capture_sources, record_source
+from nanobot.context_sources import record_source
 from nanobot.runtime_context import RuntimeContextBlock
 
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
@@ -167,7 +167,7 @@ class SkillsLoader:
         with self.snapshot():
             return self._load_skill(name)
 
-    def _load_skill(self, name: str) -> str | None:
+    def _load_skill(self, name: str, *, for_context: bool = False) -> str | None:
         skills = self.list_skills(filter_unavailable=False)
         available = {skill["name"] for skill in skills}
         resolved = name if name in available else self._skill_aliases().get(name, name)
@@ -176,10 +176,14 @@ class SkillsLoader:
             return None
         snapshot = self._snapshot.get()
         if snapshot is not None and resolved in snapshot.documents:
-            return snapshot.documents[resolved]
-        content = Path(entry["path"]).read_text(encoding="utf-8")
-        if snapshot is not None:
-            snapshot.documents[resolved] = content
+            content = snapshot.documents[resolved]
+        else:
+            content = Path(entry["path"]).read_text(encoding="utf-8")
+            if snapshot is not None:
+                snapshot.documents[resolved] = content
+        if for_context:
+            content = self._strip_frontmatter(content)
+            record_source(Path(entry["path"]), content)
         return content
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
@@ -192,14 +196,12 @@ class SkillsLoader:
         Returns:
             Formatted skills content.
         """
-        parts: list[str] = []
-        entries = {entry["name"]: entry for entry in self.list_skills(filter_unavailable=False)}
-        for name in skill_names:
-            if markdown := self.load_skill(name):
-                content = self._strip_frontmatter(markdown)
-                parts.append(f"### Skill: {name}\n\n{content}")
-                if name in entries:
-                    record_source(Path(entries[name]["path"]), content)
+        with self.snapshot():
+            parts = [
+                f"### Skill: {name}\n\n{content}"
+                for name in skill_names
+                if (content := self._load_skill(name, for_context=True))
+            ]
         return "\n\n---\n\n".join(parts)
 
     def get_explicitly_invoked_skills(self, text: str) -> list[str]:
@@ -234,13 +236,11 @@ class SkillsLoader:
             return None
         always_active = set(self.get_always_skills())
         skill_names = [name for name in skill_names if name not in always_active]
-        with capture_sources() as sources:
-            content = self.load_skills_for_context(skill_names)
+        content = self.load_skills_for_context(skill_names)
         if not content:
             return None
         return RuntimeContextBlock(
             source="explicit_skills",
-            context_sources=tuple(sources),
             content=(
                 "[Active Skills — instructions for this user turn]\n"
                 f"{content}\n"

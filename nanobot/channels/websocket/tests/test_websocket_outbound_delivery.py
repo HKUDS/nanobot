@@ -578,12 +578,18 @@ async def test_ready_activity_group_commits_before_ordered_fanout(history, monke
 
     monkeypatch.setattr(history.sessions.state, "append_history", gated_append)
     usage = LLMUsage.reported(input_tokens=100, output_tokens=20)
-    graph = {"nodes": [{"path": "/workspace/guide.md", "name": "guide.md", "state": "loaded", "tokens": 100}], "edges": []}
-    sources = ({"path": "/workspace/guide.md", "name": "guide.md", "loaded": True, "tokens": 100, "links": []},)
+    from nanobot.context_graph import graph_from_sources
+    from nanobot.context_sources import PromptSource, PromptSourcesEvent
+    from nanobot.file_references import source_receipt
+    source = PromptSource(tmp_path / "guide.md", "Guide content")
+    graph = graph_from_sources([source_receipt(source.path, source.content)])
+    await channel.send(OutboundMessage(
+        "websocket", chat, "", metadata=metadata, event=PromptSourcesEvent((source,)),
+    ))
     events = [
-        ModelRequestEvent("request", "run", 1, "started", context_sources=sources),
+        ModelRequestEvent("request", "run", 1, "started"),
         RetryStatusEvent(state="cleared", attempt=1, max_attempts=None, error_kind="unknown"),
-        ModelRequestEvent("request", "run", 2, "completed", usage=usage, round_usages=(usage,), context_sources=sources),
+        ModelRequestEvent("request", "run", 2, "completed", usage=usage, round_usages=(usage,)),
         ProgressEvent(tool_hint=True, tool_events=[{"call_id": "tool", "name": "read", "phase": "start"}]),
         ProgressEvent(tool_events=[{"call_id": "tool", "name": "read", "phase": "end", "result": "complete"}]),
     ]
@@ -793,9 +799,9 @@ async def test_context_observer_orders_reads_requests_and_compaction(history, tm
                                      metadata={WEBUI_TURN_METADATA_KEY: "turn"})
 
     events = [
-        ModelRequestEvent("before", "run", 1, "started", context_sources=()),
-        ProgressEvent(tool_events=[tool], working_directory=str(tmp_path)),
-        ModelRequestEvent("after", "run", 2, "started", context_sources=()),
+        ModelRequestEvent("before", "run", 1, "started"),
+        ProgressEvent(tool_events=[{**tool, "working_directory": str(tmp_path)}]),
+        ModelRequestEvent("after", "run", 2, "started"),
     ]
     messages = [await message(event) for event in events]
     if batched:
@@ -813,10 +819,10 @@ async def test_context_observer_orders_reads_requests_and_compaction(history, tm
     await channel.send(await message(TurnEndEvent()))
     channel = _channel(history.sessions)
     await channel.send(await message(ContextCompactionEvent("failed", "failed")))
-    await channel.send(await message(ModelRequestEvent("restored", "run", 3, "started", context_sources=())))
+    await channel.send(await message(ModelRequestEvent("restored", "run", 3, "started")))
     requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
     assert requests[-1]["context_graph"] == graph
     await channel.send(await message(ContextCompactionEvent("done", "succeeded")))
-    await channel.send(await message(ModelRequestEvent("reset", "run", 4, "started", context_sources=())))
+    await channel.send(await message(ModelRequestEvent("reset", "run", 4, "started")))
     requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
     assert requests[-1]["context_graph"] == {"nodes": [], "edges": []}

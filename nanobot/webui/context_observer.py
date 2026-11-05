@@ -12,7 +12,7 @@ from typing import Any, cast
 from loguru import logger
 
 from nanobot.context_graph import ContextGraph, ContextNode, graph_from_sources
-from nanobot.context_sources import SourceReceipt, parse_source_metadata
+from nanobot.context_sources import PromptSource, SourceReceipt, parse_source_receipt
 from nanobot.file_references import source_receipt
 from nanobot.session.display_history import (
     HISTORY_GENERATION_METADATA_KEY,
@@ -77,10 +77,10 @@ class _State:
 
     def apply(self, event: Mapping[str, Any], turn_id: str | None = None) -> None:
         call_id = event.get("call_id")
-        metadata = parse_source_metadata({"context_sources": [event.get("context_source")]})
-        if not isinstance(call_id, str) or (turn_id, call_id) in self.calls or metadata is None:
+        source = parse_source_receipt(event.get("context_source"))
+        if not isinstance(call_id, str) or (turn_id, call_id) in self.calls or source is None:
             return
-        self.graph = merge_graph(self.graph, graph_from_sources(metadata["context_sources"]), accumulate=True)
+        self.graph = merge_graph(self.graph, graph_from_sources([source]), accumulate=True)
         self.calls.add((turn_id, call_id))
 
 
@@ -152,11 +152,25 @@ class ContextGraphObserver:
                 # A presentation parser failure must not lose the tool result.
                 logger.exception("Unable to observe file read for context graph")
 
+    async def observe_prompt(
+        self, chat_id: str, sources: tuple[PromptSource, ...], metadata: Mapping[str, Any], *, persistent: bool,
+    ) -> None:
+        if not sources:
+            return
+        def project() -> ContextGraph:
+            receipts = [source_receipt(source.path, source.content, loaded=source.loaded) for source in sources]
+            return graph_from_sources(receipts)
+        try:
+            graph = await asyncio.to_thread(project)
+            state = await self._state(chat_id, metadata, persistent=persistent)
+            state.graph = merge_graph(state.graph, graph)
+        except Exception:
+            logger.exception("Unable to observe prompt sources for context graph")
+
     async def snapshot(
-        self, chat_id: str, initial: ContextGraph, metadata: Mapping[str, Any], *, persistent: bool,
+        self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
     ) -> ContextGraph:
         state = await self._state(chat_id, metadata, persistent=persistent)
-        state.graph = merge_graph(state.graph, initial)
         return state.graph
 
     async def reset(self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool) -> None:

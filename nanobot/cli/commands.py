@@ -65,6 +65,7 @@ from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates  #
 from nanobot.utils.helpers import (  # noqa: E402
     sync_workspace_templates,
 )
+from nanobot.webui.context_source_hook import create_context_source_hook  # noqa: E402
 
 # Backward-compatible import for callers that used the former module location.
 SafeFileHistory = cli_terminal.SafeFileHistory
@@ -388,7 +389,7 @@ def serve(
             runtime_config, bus,
             provider=unconfigured_provider,
             session_manager=session_manager,
-            hook_factories=[create_file_edit_activity_hook],
+            hook_factories=[create_file_edit_activity_hook, create_context_source_hook],
             tool_registry=tools,
             builtin_assembly=install_goal,
         )

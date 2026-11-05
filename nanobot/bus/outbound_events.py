@@ -29,7 +29,6 @@ class ProgressEvent(AgentEvent):
     reasoning_end: bool = False
     stream_id: str | None = None
     tool_events: list[dict[str, Any]] | None = None
-    working_directory: str | None = None
     file_edit_events: list[dict[str, Any]] | None = None
 
 

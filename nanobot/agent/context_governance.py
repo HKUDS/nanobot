@@ -21,7 +21,6 @@ from uuid import uuid4
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
-from nanobot.context_sources import parse_source_metadata, source_metadata
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
@@ -409,17 +408,6 @@ class ContextGovernor:
                         merged.get("content"),
                         injection.get("content"),
                     )
-                receipts = [
-                    receipt
-                    for original in (prepared[-1], injection)
-                    if (metadata := parse_source_metadata(original.get("_meta")))
-                    for receipt in metadata["context_sources"]
-                ]
-                if receipts and isinstance(merged["content"], str):
-                    merged["_meta"] = {
-                        **merged.get("_meta", {}),
-                        **source_metadata(receipts),
-                    }
                 prepared[-1] = merged
                 continue
             prepared.append(injection)

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
+
+from nanobot.events import AgentEvent
 
 
 class SourceReceipt(TypedDict):
@@ -17,16 +20,25 @@ class SourceReceipt(TypedDict):
     loaded: bool
 
 
-class SourceMetadata(TypedDict):
-    context_sources: list[SourceReceipt]
+@dataclass(frozen=True)
+class PromptSource:
+    path: Path
+    content: str
+    loaded: bool = True
 
 
-_sources: ContextVar[list[SourceReceipt] | None] = ContextVar("context_sources", default=None)
+@dataclass(frozen=True)
+class PromptSourcesEvent(AgentEvent):
+    sources: tuple[PromptSource, ...]
+
+
+_sources: ContextVar[list[PromptSource] | None] = ContextVar("context_sources", default=None)
 
 
 @contextmanager
-def capture_sources() -> Generator[list[SourceReceipt]]:
-    sources: list[SourceReceipt] = []
+def capture_sources() -> Generator[list[PromptSource]]:
+    """Observe builder reads in one run, including its prompt worker tasks."""
+    sources: list[PromptSource] = []
     token = _sources.set(sources)
     try:
         yield sources
@@ -36,44 +48,23 @@ def capture_sources() -> Generator[list[SourceReceipt]]:
 
 def record_source(path: Path, content: str, *, loaded: bool = True) -> None:
     if (sources := _sources.get()) is not None:
-        from nanobot.file_references import source_receipt
-
-        sources.append(source_receipt(path, content, loaded=loaded))
-
-
-def source_metadata(sources: list[SourceReceipt]) -> SourceMetadata:
-    return {"context_sources": sources}
+        # Keep parsing and token estimation out of prompt construction.
+        sources.append(PromptSource(path, content, loaded))
 
 
-def parse_source_metadata(value: object) -> SourceMetadata | None:
-    """Validate persisted read facts, independent of later message edits."""
+def parse_source_receipt(value: object) -> SourceReceipt | None:
+    """Validate one persisted file-read fact at the display history boundary."""
     if not isinstance(value, dict):
         return None
-    value = cast(dict[str, object], value)
-    raw_sources = value.get("context_sources")
-    if not isinstance(raw_sources, list):
+    source = cast(dict[str, object], value)
+    path, name, tokens = source.get("path"), source.get("name"), source.get("tokens")
+    links, loaded = source.get("links"), source.get("loaded")
+    if not isinstance(path, str) or not isinstance(name, str):
         return None
-    sources: list[SourceReceipt] = []
-    for raw_source in cast(list[object], raw_sources):
-        if not isinstance(raw_source, dict):
-            return None
-        source = cast(dict[str, object], raw_source)
-        path, name, tokens = source.get("path"), source.get("name"), source.get("tokens")
-        links, loaded = source.get("links"), source.get("loaded")
-        if not isinstance(path, str) or not isinstance(name, str):
-            return None
-        if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
-            return None
-        if not isinstance(loaded, bool) or not isinstance(links, list):
-            return None
-        if not all(isinstance(link, str) for link in cast(list[object], links)):
-            return None
-        sources.append({"path": path, "name": name, "tokens": tokens, "links": cast(list[str], links), "loaded": loaded})
-    return {"context_sources": sources} if sources else None
-
-
-def sources_from_messages(messages: Sequence[Mapping[str, Any]]) -> tuple[SourceReceipt, ...]:
-    """Collect supplied prompt sources; tool reads are observed separately."""
-    return tuple(source for message in messages
-                 if (metadata := parse_source_metadata(message.get("_meta")))
-                 for source in metadata["context_sources"])
+    if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
+        return None
+    if not isinstance(loaded, bool) or not isinstance(links, list):
+        return None
+    if not all(isinstance(link, str) for link in cast(list[object], links)):
+        return None
+    return {"path": path, "name": name, "tokens": tokens, "links": cast(list[str], links), "loaded": loaded}

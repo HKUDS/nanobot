@@ -74,7 +74,6 @@ from nanobot.runtime_context import (
     append_runtime_context,
     resolve_runtime_context,
     runtime_context_blocks_from_metadata,
-    runtime_context_source_metadata,
 )
 from nanobot.security.workspace_access import (
     WORKSPACE_SCOPE_METADATA_KEY,
@@ -1190,8 +1189,6 @@ class AgentLoop:
                     )
                     if runtime_marker is not None:
                         row["_meta"][RUNTIME_CONTEXT_MESSAGE_META] = runtime_marker
-                    if source_meta := runtime_context_source_metadata(blocks):
-                        row["_meta"].update(source_meta)
                 if (
                     pending_msg.sender_id == "subagent"
                     and metadata.get("injected_event") == "subagent_result"

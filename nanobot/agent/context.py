@@ -10,12 +10,11 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools import sessions as session_tools
 from nanobot.apps.cli import utils as cli_app_utils
-from nanobot.context_sources import capture_sources, record_source, source_metadata
+from nanobot.context_sources import record_source
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
     append_runtime_context,
-    runtime_context_source_metadata,
 )
 from nanobot.security.workspace_access import WorkspaceScopeResolver
 from nanobot.session.keys import last_channel_from_metadata
@@ -275,7 +274,7 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
-        with self.skills.snapshot(), capture_sources() as sources:
+        with self.skills.snapshot():
             messages: list[dict[str, Any]] = [
                 {
                     "role": "system",
@@ -288,7 +287,6 @@ class ContextBuilder:
                 },
                 *transcript.history,
             ]
-            messages[0]["_meta"] = source_metadata(sources.copy())
             if transcript.current_message is None:
                 return messages
 
@@ -323,8 +321,6 @@ class ContextBuilder:
             current["_meta"] = {
                 RUNTIME_CONTEXT_MESSAGE_META: runtime_context_meta,
             }
-        if source_meta := runtime_context_source_metadata(blocks):
-            current["_meta"] = {**current.get("_meta", {}), **source_meta}
         return current
 
     def build_user_content(

@@ -7,6 +7,7 @@ from nanobot.agent.hook import AgentHookContext
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.context_graph import graph_from_sources
+from nanobot.context_sources import PromptSource
 from nanobot.events import EventSink
 from nanobot.file_references import REFERENCE_PARSERS, source_receipt
 from nanobot.providers.base import ToolCallRequest
@@ -54,11 +55,12 @@ async def test_hook_captures_working_directory_at_start(tmp_path, monkeypatch):
         0, [], tool_calls=[call], tool_results=[result], tool_events=[{"status": "ok"}],
     ))
     finished = emitted[-1]
-    source = read_source({**finished.tool_events[0], "working_directory": finished.working_directory})
+    source = read_source(finished.tool_events[0])
     assert source["path"] == str(first / "loop.py")
 
 
-async def test_analysis_runs_off_loop_and_failure_keeps_read_result(tmp_path, monkeypatch):
+@pytest.mark.parametrize("prompt", [False, True])
+async def test_analysis_runs_off_loop_and_failure_keeps_read_result(tmp_path, monkeypatch, prompt):
     entered = asyncio.Event()
     release = threading.Event()
     loop = asyncio.get_running_loop()
@@ -77,7 +79,10 @@ async def test_analysis_runs_off_loop_and_failure_keeps_read_result(tmp_path, mo
     assert "1| [Guide](other.md)" in result
     event = read_event(path, result)
     observer = ContextGraphObserver(None)
-    task = asyncio.create_task(observer.observe_tools("chat", [event], {}, persistent=False))
+    task = asyncio.create_task(
+        observer.observe_prompt("chat", (PromptSource(path, "[Guide](other.md)"),), {}, persistent=False)
+        if prompt else observer.observe_tools("chat", [event], {}, persistent=False)
+    )
     try:
         await asyncio.wait_for(entered.wait(), 2)
         assert not task.done()
@@ -85,7 +90,7 @@ async def test_analysis_runs_off_loop_and_failure_keeps_read_result(tmp_path, mo
         release.set()
     await task
     assert event["result"] == result
-    assert await observer.snapshot("chat", EMPTY, {}, persistent=False) == EMPTY
+    assert await observer.snapshot("chat", {}, persistent=False) == EMPTY
 
 
 async def test_display_history_restores_reads_and_resets_at_compaction(tmp_path):
@@ -104,16 +109,18 @@ async def test_display_history_restores_reads_and_resets_at_compaction(tmp_path)
         # A read is recoverable even if the run stops before the next model request.
         observer = ContextGraphObserver(sessions)
         initial = graph_from_sources([source_receipt(tmp_path / "SOUL.md", "Be precise")])
-        graph = await observer.snapshot("graph", initial, metadata, persistent=True)
+        await observer.observe_prompt("graph", (PromptSource(tmp_path / "SOUL.md", "Be precise"),), metadata, persistent=True)
+        graph = await observer.snapshot("graph", metadata, persistent=True)
         assert {node["name"] for node in graph["nodes"]} == {"loop.py", "SOUL.md"}
         await persist({"event": "model_request", "context_graph": graph})
         # Repeated initial sources and a process restart do not inflate estimates.
         observer = ContextGraphObserver(sessions)
-        assert await observer.snapshot("graph", initial, metadata, persistent=True) == graph
+        assert await observer.snapshot("graph", metadata, persistent=True) == graph
         await observer.reset("graph", metadata, persistent=True)
         await persist({"event": "context_compaction", "phase": "succeeded", "compaction_id": "compact"})
         observer = ContextGraphObserver(sessions)
-        assert await observer.snapshot("graph", initial, metadata, persistent=True) == initial
+        await observer.observe_prompt("graph", (PromptSource(tmp_path / "SOUL.md", "Be precise"),), metadata, persistent=True)
+        assert await observer.snapshot("graph", metadata, persistent=True) == initial
     finally:
         await sessions.state.aclose()
 
@@ -123,11 +130,11 @@ async def test_partial_reads_deduplicate_calls_and_isolate_chats(tmp_path):
     first = read_event(tmp_path / "loop.py", "1| first", call_id="a")
     second = read_event(tmp_path / "loop.py", "2| second", call_id="b")
     await observer.observe_tools("one", [first, first, second], {}, persistent=False)
-    graph = await observer.snapshot("one", EMPTY, {}, persistent=False)
+    graph = await observer.snapshot("one", {}, persistent=False)
     assert graph["nodes"][0]["tokens"] == first["context_source"]["tokens"] + second["context_source"]["tokens"]
-    assert await observer.snapshot("two", EMPTY, {}, persistent=False) == EMPTY
+    assert await observer.snapshot("two", {}, persistent=False) == EMPTY
     observer.discard("one")
-    assert await observer.snapshot("one", EMPTY, {}, persistent=False) == EMPTY
+    assert await observer.snapshot("one", {}, persistent=False) == EMPTY
 
 
 @pytest.mark.parametrize("result,phase", [
@@ -137,7 +144,23 @@ async def test_partial_reads_deduplicate_calls_and_isolate_chats(tmp_path):
 async def test_non_read_results_keep_existing_graph(tmp_path, result, phase):
     observer = ContextGraphObserver(None)
     initial = graph_from_sources([source_receipt(tmp_path / "guide.md", "Original")])
-    await observer.snapshot("chat", initial, {}, persistent=False)
+    await observer.observe_prompt("chat", (PromptSource(tmp_path / "guide.md", "Original"),), {}, persistent=False)
     event = {**read_event(tmp_path / "guide.md", result), "phase": phase}
     await observer.observe_tools("chat", [event], {}, persistent=False)
-    assert await observer.snapshot("chat", EMPTY, {}, persistent=False) == initial
+    assert await observer.snapshot("chat", {}, persistent=False) == initial
+
+
+async def test_prompt_rebuild_deduplicates_files_and_compaction_refreshes_sources(tmp_path):
+    observer = ContextGraphObserver(None)
+    source = PromptSource(tmp_path / "AGENTS.md", "[Rules](rules.md)")
+    await observer.observe_prompt("chat", (source, source), {}, persistent=False)
+    expected = graph_from_sources([source_receipt(source.path, source.content)])
+    assert await observer.snapshot("chat", {}, persistent=False) == expected
+    await observer.observe_prompt("chat", (source,), {}, persistent=False)
+    assert await observer.snapshot("chat", {}, persistent=False) == expected
+    await observer.reset("chat", {}, persistent=False)
+    refreshed = PromptSource(source.path, "[New rules](new.md)")
+    await observer.observe_prompt("chat", (refreshed,), {}, persistent=False)
+    assert await observer.snapshot("chat", {}, persistent=False) == graph_from_sources([
+        source_receipt(refreshed.path, refreshed.content),
+    ])
