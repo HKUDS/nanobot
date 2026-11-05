@@ -4534,6 +4534,7 @@ describe("session composer drafts", () => {
     view.rerender(composer("unchanged-draft"));
     expect(screen.getByRole("textbox")).toHaveValue("send once");
     if (attachment) await screen.findByRole("img", { name: "draft.png" });
+    fireEvent.click(screen.getByRole("textbox"));
     await act(async () => resolveSend(true));
     view.unmount();
     expect(new ComposerDraftStore().get("unchanged-draft", true)).toBeUndefined();

@@ -61,9 +61,7 @@ for (const width of [1440, 390]) {
       const bubble = page.locator("[data-user-text-bubble]");
       const text = bubble.locator("p");
       const trigger = page.locator("[data-message-block-menu-trigger]");
-      const fontSize = width === 390
-        ? { small: 15, standard: 16, large: 18 }[size]
-        : { small: 16, standard: 18, large: 20 }[size];
+      const fontSize = { small: 15, standard: 16, large: 18 }[size];
       await expect(text).toHaveCSS("font-size", `${fontSize}px`);
       await bubble.hover();
       await expect(trigger).toBeVisible();

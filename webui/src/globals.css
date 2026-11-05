@@ -1498,7 +1498,8 @@
   .thread-composer-collapsible-layout {
     container: composer-layout / inline-size;
   }
-  .thread-composer-collapsible .thread-composer-input textarea:placeholder-shown {
+  /* A wrapped placeholder must not resize the empty composer. */
+  .thread-composer-input textarea:placeholder-shown {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
