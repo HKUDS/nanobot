@@ -880,6 +880,53 @@ async def test_webui_skills_marketplace_routes_search_and_install(
 
 
 @pytest.mark.asyncio
+async def test_webui_skill_source_identity_reaches_public_reads_and_mutations(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "skills" / "agent-browser"
+    directory.mkdir(parents=True)
+    content = "---\nname: agent-browser\n---\nKeep my local skill.\n"
+    (directory / "SKILL.md").write_text(content, encoding="utf-8")
+    (directory / ".nanobot-origin.json").write_text(json.dumps({
+        "provider": "skills_sh", "source": "vercel-labs/agent-browser", "skill_id": "agent-browser",
+    }), encoding="utf-8")
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"skills": [
+            {"skillId": "agent-browser", "source": "vercel-labs/agent-browser"},
+            {"skillId": "agent-browser", "source": "101-skills/superpowers"},
+        ]})
+
+    monkeypatch.setattr("nanobot.webui.skills_marketplace._skills_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ))
+    port = _free_port()
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        headers = {"Authorization": f"Bearer {channel.gateway.tokens.issue_api_token(300)}"}
+        for endpoint in ("search?q=agent-browser&provider=skills_sh", "trending?provider=skills_sh"):
+            response = await _http_get(f"http://127.0.0.1:{port}/api/webui/skills/{endpoint}", headers=headers)
+            assert response.status_code == 200
+            assert [row["installation_status"] for row in response.json()["skills"]] == ["installed", "conflict"]
+        # Old callers send no provider or new status fields; the host still enforces identity.
+        wrong = await _webui_mutate(channel, "skill.install", {
+            "source": "101-skills/superpowers", "skill": "agent-browser",
+        }, headers=headers)
+        assert wrong.status_code == 409
+        same = await _webui_mutate(channel, "skill.install", {
+            "source": "vercel-labs/agent-browser", "skill": "agent-browser",
+        }, headers=headers)
+        assert same.status_code == 200
+        assert same.json()["last_action"]["already_installed"] is True
+        assert any(skill["name"] == "agent-browser" for skill in same.json()["skills"])
+        assert (directory / "SKILL.md").read_text(encoding="utf-8") == content
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_webui_skill_install_rejects_overlapping_requests(
     bus: MagicMock,
     tmp_path: Path,
