@@ -1884,8 +1884,7 @@
       }
     },
     "composer": {
-      "placeholderThread": "Nhập / để xem lệnh, @ để chọn cuộc trò chuyện hoặc ứng dụng, $ để chọn kỹ năng",
-      "placeholderHero": "Nhập / để xem lệnh, @ để chọn cuộc trò chuyện hoặc ứng dụng, $ để chọn kỹ năng",
+      "placeholder": "Nhập / để xem lệnh, @ để chọn cuộc trò chuyện hoặc ứng dụng, $ để chọn kỹ năng",
       "placeholderOpening": "Đang mở chủ đề mới…",
       "inputAria": "Ô nhập tin nhắn",
       "goalStateStrip": "Mục tiêu: {{label}}",

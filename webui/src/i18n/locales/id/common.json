@@ -1884,8 +1884,7 @@
       }
     },
     "composer": {
-      "placeholderThread": "Ketik / untuk melihat perintah, @ untuk memilih percakapan atau aplikasi, $ untuk memilih keterampilan",
-      "placeholderHero": "Ketik / untuk melihat perintah, @ untuk memilih percakapan atau aplikasi, $ untuk memilih keterampilan",
+      "placeholder": "Ketik / untuk melihat perintah, @ untuk memilih percakapan atau aplikasi, $ untuk memilih keterampilan",
       "placeholderOpening": "Membuka topik baru…",
       "inputAria": "Input pesan",
       "goalStateStrip": "Tujuan: {{label}}",

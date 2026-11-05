@@ -1885,8 +1885,7 @@
       }
     },
     "composer": {
-      "placeholderThread": "Escribe / para ver comandos, @ para mencionar conversaciones o aplicaciones y $ para elegir habilidades",
-      "placeholderHero": "Escribe / para ver comandos, @ para mencionar conversaciones o aplicaciones y $ para elegir habilidades",
+      "placeholder": "Escribe / para ver comandos, @ para mencionar conversaciones o aplicaciones y $ para elegir habilidades",
       "placeholderOpening": "Abriendo un nuevo tema…",
       "inputAria": "Entrada de mensaje",
       "goalStateStrip": "Objetivo: {{label}}",

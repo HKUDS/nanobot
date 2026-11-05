@@ -1313,11 +1313,6 @@ export function ThreadShell({
           activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) ?? historyActiveTurnId : null}
           completedTurnIds={messagesReady && !recoveryNeedsDecision
             && chatId && !client.hasUnsettledRun(chatId) ? queueCompletedTurnIds : undefined}
-          placeholder={
-            composerVariant === "hero"
-              ? t("thread.composer.placeholderHero")
-              : t("thread.composer.placeholderThread")
-          }
           modelLabel={modelBadgeLabel}
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
@@ -1371,11 +1366,7 @@ export function ThreadShell({
           disabled={booting}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
-          placeholder={
-            booting
-              ? t("thread.composer.placeholderOpening")
-              : t("thread.composer.placeholderHero")
-          }
+          placeholder={booting ? t("thread.composer.placeholderOpening") : undefined}
           modelLabel={modelBadgeLabel}
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}

@@ -2090,8 +2090,7 @@
       }
     },
     "composer": {
-      "placeholderThread": "Type / for commands, @ for chats or apps, $ for skills",
-      "placeholderHero": "Type / for commands, @ for chats or apps, $ for skills",
+      "placeholder": "Type / for commands, @ for chats or apps, $ for skills",
       "placeholderOpening": "Opening a new topic…",
       "inputAria": "Message input",
       "goalStateStrip": "Goal: {{label}}",
