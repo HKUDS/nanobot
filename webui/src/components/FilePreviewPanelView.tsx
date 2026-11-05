@@ -1,3 +1,4 @@
+import { surfaceFocusProps } from "@/lib/surface-focus";
 import { useContext, useState } from "react";
 import { createPortal } from "react-dom";
 import { SidebarPanelActionsContext } from "@/components/ui/sidebar-panel";
@@ -49,7 +50,8 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
     <section aria-label={t("filePreview.aria")} data-testid="file-preview-panel" className="flex min-h-0 flex-1 flex-col">
           {markdown && (actionsHost ? createPortal(modeControl, actionsHost) : <div className="flex shrink-0 justify-end px-4 py-2">{modeControl}</div>)}
           <div key={mode} data-file-preview-scroll tabIndex={0}
-            className="min-h-0 flex-1 overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
+            {...surfaceFocusProps}
+            className="min-h-0 flex-1 overflow-auto outline-none data-[keyboard-focus]:ring-2 data-[keyboard-focus]:ring-inset data-[keyboard-focus]:ring-ring/60">
             {state.status === "loading" ? (
               <div role="status" aria-label={t("filePreview.loading", { defaultValue: "Loading preview..." })}
                 className="h-full" aria-busy="true">

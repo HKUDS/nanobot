@@ -1,3 +1,4 @@
+import { surfaceFocusProps } from "@/lib/surface-focus";
 import { useEffect, useId, useRef, type PointerEvent, type ReactNode } from "react";
 import { SidebarPanel } from "@/components/ui/sidebar-panel";
 import { PanelRightClose, X } from "lucide-react";
@@ -97,8 +98,8 @@ export function PreviewPane({ tabs, activeId, width, isClosing, onSelect, onClos
         className="file-preview-resize group absolute inset-y-0 left-0 z-20 hidden w-2 cursor-col-resize touch-none justify-start focus-visible:outline-none">
         <span aria-hidden className="h-full w-px bg-foreground/25 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
       </button>
-      <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-${tabs.findIndex((tab) => tab.id === activeId)}`} tabIndex={0}
-        className="flex min-h-0 flex-1 flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+      <div role="tabpanel" {...surfaceFocusProps} id={`${id}-panel`} aria-labelledby={`${id}-tab-${tabs.findIndex((tab) => tab.id === activeId)}`} tabIndex={0}
+        className="flex min-h-0 flex-1 flex-col outline-none data-[keyboard-focus]:ring-2 data-[keyboard-focus]:ring-inset data-[keyboard-focus]:ring-ring">
         {children}
       </div>
   </SidebarPanel>;

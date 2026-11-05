@@ -1255,6 +1255,7 @@
 @media (forced-colors: active) {
   .thread-composer-surface, .context-inspector-surface, .side-panel-surface { outline: 1px solid CanvasText; }
   .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
+  [data-keyboard-focus] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
 
 .thread-composer-footer-actions {
