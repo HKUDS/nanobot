@@ -1216,7 +1216,7 @@ export function ThreadComposer({
     ));
   }, [activeTurnId, isStreaming, pendingQueueKey, setQueuedPrompt]);
 
-  const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholderThread");
+  const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholder");
 
   const maxAttachments = ingressLimits?.attachments.max_count
     ?? MAX_ATTACHMENTS_PER_MESSAGE;

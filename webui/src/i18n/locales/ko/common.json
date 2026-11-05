@@ -1884,8 +1884,7 @@
       }
     },
     "composer": {
-      "placeholderThread": "메시지를 입력하세요…",
-      "placeholderHero": "하고 싶은 일을 알려 주세요",
+      "placeholder": "/로 명령어 보기, @로 대화나 앱 선택, $로 스킬 선택",
       "placeholderOpening": "새 주제를 여는 중…",
       "inputAria": "메시지 입력",
       "goalStateStrip": "목표: {{label}}",

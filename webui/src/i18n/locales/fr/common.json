@@ -1884,8 +1884,7 @@
       }
     },
     "composer": {
-      "placeholderThread": "Saisissez votre message…",
-      "placeholderHero": "Décrivez ce que vous souhaitez faire",
+      "placeholder": "Tapez / pour voir les commandes, @ pour les conversations ou les applis, $ pour les compétences",
       "placeholderOpening": "Ouverture d’un nouveau sujet…",
       "inputAria": "Champ de message",
       "goalStateStrip": "Objectif: {{label}}",
