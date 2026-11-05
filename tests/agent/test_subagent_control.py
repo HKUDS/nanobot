@@ -150,9 +150,12 @@ async def test_sdk_ephemeral_delegation_never_persists_on_later_flush(
         assert [row["key"] for row in loop.sessions.list_sessions()] == [key]
     finally:
         loop.stop()
-        await asyncio.wait_for(consumer, timeout=2)
-        logger.remove(sink)
-        await bot.aclose()
+        try:
+            # Bound cleanup without imposing a two-second disk/thread shutdown contract.
+            await asyncio.wait_for(consumer, timeout=30)
+        finally:
+            logger.remove(sink)
+            await bot.aclose()
 
 
 @pytest.mark.asyncio
