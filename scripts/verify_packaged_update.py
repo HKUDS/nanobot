@@ -44,6 +44,8 @@ TWO_JOURNEY_SCENARIOS = {"upgrade-again", "import-failure", "restart-failure", "
 # Each lane retains the existing per-command deadlines and cleanup. This outer
 # bound also covers a stuck controller; it is not permission to leave it running.
 LANE_TIMEOUT = 30 * 60
+PREFLIGHT_MODULES = {"update_handoff.py", "update_worker.py", "update_plan.py", "update_stop.py",
+                     "update_profiles.py", "release_feed.py", "installation_lock.py", "data_access.py"}
 
 
 def digest(path: Path) -> str:
@@ -78,6 +80,14 @@ def phase_failure(root: Path, phase: str, error: Exception) -> None:
         } else "incomplete")
         record["mutation_started"] = status["mutation_started"] is True
         record["recovery_needs_attention"] = read(directory / "supervision.json").get("state") == "needs_attention"
+        preflight = read(directory / "acceptance-preflight.json")
+        record["preflight_error"] = (preflight["error_type"] if preflight["error_type"] in {
+            "ValueError", "OSError", "RuntimeError", "ReleaseFeedError", "InstallationBusyError",
+            "TimeoutError", "CalledProcessError", "FileNotFoundError", "PermissionError",
+        } else "OtherException")
+        record["preflight_frames"] = [[row[0], row[1]] for row in preflight["frames"]
+                                      if isinstance(row, list) and len(row) >= 2
+                                      and row[0] in PREFLIGHT_MODULES and type(row[1]) is int]
     write(root / "phase-failure.json", record)
 
 
@@ -190,6 +200,22 @@ def transport():
                     raise OSError('Injected backup write failure')
 '''.encode() + needle)
         files["nanobot/update_worker.py"] = worker
+        # Observe an old-runtime preflight refusal without changing its decision,
+        # shutdown, worker or recovery semantics. Never export exception values.
+        handoff = files["nanobot/update_handoff.py"].replace(b"\r\n", b"\n")
+        files["nanobot/update_handoff.py"] = replace_once(handoff, b"    except Exception:\n", f'''    except Exception as acceptance_error:
+        from nanobot.update_worker import write_record
+        acceptance_trace = acceptance_error.__traceback__
+        acceptance_frames = []
+        while acceptance_trace is not None:
+            acceptance_name = Path(acceptance_trace.tb_frame.f_code.co_filename).name
+            if acceptance_name in {sorted(PREFLIGHT_MODULES)!r}:
+                acceptance_frames.append([acceptance_name, acceptance_trace.tb_lineno])
+            acceptance_trace = acceptance_trace.tb_next
+        write_record(directory / 'acceptance-preflight.json', {{
+            'error_type': type(acceptance_error).__name__, 'frames': acceptance_frames,
+        }})
+'''.encode())
         if scenario == "restore-interruption":
             needle = b"    os.rename(original, environment)\n"
             files["nanobot/update_fallback.py"] = replace_once(files["nanobot/update_fallback.py"].replace(b"\r\n", b"\n"), needle, b'''    if not (directory / 'restore-fault-fired').exists():
