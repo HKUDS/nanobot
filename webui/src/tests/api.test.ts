@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   changeAutomationChat,
+  parseWebuiThreadPayload,
   cancelMcpOAuth,
   configureChannel,
   completeMcpOAuth,
@@ -110,7 +111,7 @@ describe("webui API helpers", () => {
     await fetchWebuiThread("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
@@ -126,7 +127,7 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D&include_model_requests=1",
+      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D&include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
@@ -172,7 +173,7 @@ describe("webui API helpers", () => {
     })).resolves.toBe(cached);
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({
         headers: {
           Authorization: "Bearer tok",
@@ -1421,5 +1422,58 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
+  });
+});
+
+describe("context graph response dictionaries", () => {
+  const graph = { nodes: [{ path: "/guide.md", name: "guide.md", tokens: 10, state: "loaded" }], edges: [] };
+  const request = (id: string, fields: Record<string, unknown>) => ({
+    event: "model_request", chat_id: "chat", request_id: id, run_id: "run", sequence: 2,
+    phase: "completed", ...fields,
+  });
+  const payload = (events: unknown[], fields: Record<string, unknown> = {}) => ({ schemaVersion: 3, projection: "events", events, ...fields });
+
+  it("resolves repeated graphs and checkpoint graphs into shared domain objects", () => {
+    const result = parseWebuiThreadPayload(payload([
+      request("one", { context_graph_ref: "0", request_usage: { context_tokens: 20 } }),
+      request("two", { context_graph_ref: "0", request_usage: null }),
+      { event: "context_compaction", chat_id: "chat", compaction_id: "compact", phase: "succeeded",
+        context_snapshot: { graph_ref: "0", estimated_tokens: 10, context_window_tokens: 100 } },
+    ], { context_graphs: { "0": { nodes: [0], edges: [] } }, context_graph_nodes: graph.nodes, context_graph_edges: graph.edges }));
+    const requests = result.events.filter((event) => event.event === "model_request");
+    expect(requests[0].context_graph).toBe(requests[1].context_graph);
+    expect(requests[0].context_graph).toEqual(graph);
+    expect(requests[1].request_usage).toBeNull();
+    expect(result.events[2]).toMatchObject({ context_snapshot: { graph } });
+  });
+
+  it("preserves a growing timeline while sharing unchanged node and edge entities", () => {
+    const nodes = Array.from({ length: 300 }, (_, index) => ({ path: `/${index}.md`, name: `${index}.md`, tokens: 10, state: "loaded" }));
+    const edges = nodes.slice(1).map((node, index) => ({ source: nodes[index].path, target: node.path }));
+    const descriptors = Object.fromEntries(Array.from({ length: 50 }, (_, index) => [String(index), {
+      nodes: Array.from({ length: 251 + index }, (_, n) => n),
+      edges: Array.from({ length: 250 + index }, (_, n) => n),
+    }]));
+    const result = parseWebuiThreadPayload(payload(Array.from({ length: 50 }, (_, index) => request(String(index), { context_graph_ref: String(index) })), {
+      context_graphs: descriptors, context_graph_nodes: nodes, context_graph_edges: edges,
+    }));
+    const requests = result.events.filter((event) => event.event === "model_request");
+    for (let index = 0; index < requests.length; index += 1) {
+      expect(requests[index].context_graph?.nodes).toEqual(nodes.slice(0, 251 + index));
+      expect(requests[index].context_graph?.edges).toEqual(edges.slice(0, 250 + index));
+    }
+    expect(requests[0].context_graph).not.toBe(requests[1].context_graph);
+    expect(requests[0].context_graph?.nodes[0]).toBe(requests[49].context_graph?.nodes[0]);
+    expect(requests[0].context_graph?.edges[0]).toBe(requests[49].context_graph?.edges[0]);
+  });
+
+  it("continues to accept inline graphs from older hosts", () => {
+    const result = parseWebuiThreadPayload(payload([request("one", { context_graph: graph })]));
+    expect(result.events[0]).toMatchObject({ context_graph: graph });
+  });
+
+  it("rejects unknown references and invalid dictionary entries", () => {
+    expect(() => parseWebuiThreadPayload(payload([request("one", { context_graph_ref: "missing" })], { context_graphs: {}, context_graph_nodes: [], context_graph_edges: [] }))).toThrow("Unknown context graph reference");
+    expect(() => parseWebuiThreadPayload(payload([], { context_graphs: { "0": { nodes: [], edges: [0] } }, context_graph_nodes: [], context_graph_edges: [{ source: "missing", target: "missing" }] }))).toThrow("Invalid context graph entity table");
   });
 });

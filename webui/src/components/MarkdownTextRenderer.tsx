@@ -1,3 +1,4 @@
+import { surfaceFocusProps } from "@/lib/surface-focus";
 import {
   Children,
   isValidElement,
@@ -686,7 +687,7 @@ export default function MarkdownTextRenderer({
         void _node;
         return (
           <div
-            data-testid="markdown-data-table"
+            data-testid="markdown-data-table" {...surfaceFocusProps}
             data-table-kind="data"
             role="region"
             tabIndex={0}
@@ -694,7 +695,7 @@ export default function MarkdownTextRenderer({
             className={cn(
               "not-prose mb-5 mt-3 w-full max-w-full overflow-x-auto rounded-lg",
               "border border-border/65 bg-muted/20",
-              "overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "overscroll-x-contain outline-none data-[keyboard-focus]:ring-2 data-[keyboard-focus]:ring-ring",
             )}
           >
             <table
@@ -703,9 +704,9 @@ export default function MarkdownTextRenderer({
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
                 "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
-                "[&_th]:[overflow-wrap:anywhere]",
+                "[&_th]:[overflow-wrap:normal]",
                 "[&_td]:border-b [&_td]:border-border/55 [&_td]:px-3 [&_td]:py-2",
-                "[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]",
+                "[&_td]:whitespace-normal [&_td]:[overflow-wrap:normal]",
                 "[&_th:not(:last-child)]:border-r [&_th:not(:last-child)]:border-border/45",
                 "[&_td:not(:last-child)]:border-r [&_td:not(:last-child)]:border-border/45",
                 "[&_tbody_tr:last-child_td]:border-b-0",

@@ -5,6 +5,7 @@ from typing import Any
 
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA
 from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
+from nanobot.session.history_graph import expand_graph_fields
 from nanobot.webui.session_identity import webui_chat_id
 
 _EVENTS = {
@@ -31,7 +32,7 @@ _CONTENT_FIELDS = frozenset({
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
     "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason", "render_as",
-    "request_id", "run_id", "sequence",
+    "request_usage", "request_id", "run_id", "sequence", "context_graph", "context_snapshot",
 })
 
 
@@ -63,14 +64,14 @@ def fact_from_record(record: Mapping[str, Any]) -> HistoryFact:
     return fact
 
 
-def record_from_fact(fact: HistoryFact, key: str) -> dict[str, Any]:
+def record_from_fact(fact: HistoryFact, key: str, *, expand_graphs: bool = True) -> dict[str, Any]:
     if fact.kind in _MESSAGE_KINDS.values():
         event = "message"
         message_kind = next(name for name, kind in _MESSAGE_KINDS.items() if kind is fact.kind)
     else:
         event = next(name for name, kind in _EVENTS.items() if kind is fact.kind)
         message_kind = None
-    record = {"event": event, "chat_id": webui_chat_id(key), **fact.content,
+    record = {"event": event, "chat_id": webui_chat_id(key), **(expand_graph_fields(fact.content) if expand_graphs else fact.content),
               "created_at_ms": fact.created_at_ms}
     if message_kind:
         record["kind"] = message_kind
@@ -86,6 +87,6 @@ def record_from_fact(fact: HistoryFact, key: str) -> dict[str, Any]:
 def turn_records(
     history: HistoryReader, ordinal: int, *, max_records: int | None = None, max_bytes: int | None = None,
 ) -> list[dict[str, Any]]:
-    return [{**record_from_fact(fact, history.key),
+    return [{**record_from_fact(fact, history.key, expand_graphs=False),
              "_webui_replay_identity": f"turn:{ordinal}:record:{position}"}
             for position, fact in history.read_entries(ordinal, max_records=max_records, max_bytes=max_bytes)]

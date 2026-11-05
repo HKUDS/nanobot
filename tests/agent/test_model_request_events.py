@@ -257,3 +257,57 @@ def test_model_requests_are_optional_for_non_webui_channels():
     for channel in ("telegram", "slack", "cli", "discord"):
         assert not notification_is_deliverable(ModelRequestEvent, channel=channel, publish_lifecycle=True)
     assert notification_is_deliverable(ModelRequestEvent, channel="websocket", publish_lifecycle=True)
+
+
+@pytest.mark.asyncio
+async def test_request_without_usage_does_not_reuse_previous_measurement():
+    events = []
+    usage = LLMUsage.reported(input_tokens=12, output_tokens=3)
+
+    async def publish(event):
+        if isinstance(event, ModelRequestEvent):
+            events.append(event)
+
+    provider = MagicMock()
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest("c", "tool", {})], usage=usage),
+        LLMResponse(content="done"),
+    ])
+    run_spec = spec(provider, EventSink(publish))
+    run_spec.tools.prepare_call.return_value = (None, {}, None)
+    run_spec.tools.execute = AsyncMock(return_value="ok")
+    await AgentRunner().run(run_spec)
+    completed = [event for event in events if event.phase == "completed"]
+    assert completed[0].request_usage == usage
+    assert completed[1].request_usage is None
+    assert completed[1].usage == usage
+
+
+@pytest.mark.asyncio
+async def test_prepared_request_observers_run_before_request_event_and_provider():
+    from nanobot.agent.hook import AgentHook, CompositeHook
+
+    order = []
+    class Observer(AgentHook):
+        async def before_model_request(self):
+            order.append("observer")
+
+    class BrokenObserver(AgentHook):
+        async def before_model_request(self):
+            raise RuntimeError("observation failed")
+
+    async def publish(event):
+        if isinstance(event, ModelRequestEvent):
+            order.append(event.phase)
+
+    async def provider_call(**kwargs):
+        order.append("provider")
+        return LLMResponse(content="done")
+
+    provider = MagicMock()
+    provider.chat_stream_with_retry = provider_call
+    run_spec = spec(provider, EventSink(publish))
+    run_spec.hook = CompositeHook([BrokenObserver(), Observer()])
+    result = await AgentRunner().run(run_spec)
+    assert result.final_content == "done"
+    assert order == ["observer", "started", "provider", "completed"]

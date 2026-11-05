@@ -306,7 +306,7 @@ describe("durable run recovery", () => {
     await reopen();
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Ainactive/webui-thread?limit=40&direction=latest&include_model_requests=1",
+      "/api/sessions/websocket%3Ainactive/webui-thread?limit=40&direction=latest&include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({ headers: { Authorization: "Bearer renewed-token" } }),
     );
     expect(client.getRunStartedAt("inactive")).toBeNull();

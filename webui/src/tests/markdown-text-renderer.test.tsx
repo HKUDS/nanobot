@@ -742,9 +742,9 @@ describe("MarkdownTextRenderer", () => {
     expect(table).toHaveTextContent("nanobot");
     expect(table).toHaveClass(
       "[&_th]:whitespace-normal",
-      "[&_th]:[overflow-wrap:anywhere]",
+      "[&_th]:[overflow-wrap:normal]",
       "[&_td]:whitespace-normal",
-      "[&_td]:[overflow-wrap:anywhere]",
+      "[&_td]:[overflow-wrap:normal]",
     );
     expect(container.firstElementChild).toHaveClass("space-y-4");
     expect(container.firstElementChild).not.toHaveClass("space-y-0");

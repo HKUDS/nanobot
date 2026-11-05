@@ -18,7 +18,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
@@ -29,6 +29,7 @@ from websockets.http11 import Response
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.application import builtin_command_palette
+from nanobot.context_graph import ContextGraph
 from nanobot.cron.binding import CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -348,8 +349,58 @@ def _resolve_bootstrap_model_name(
     return _default_model_name_from_config(config_path) or ""
 
 
-class _HistoryProjection(Protocol):
-    def __call__(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response: ...
+_ProjectionResult = TypeVar("_ProjectionResult", covariant=True)
+
+
+class _HistoryProjection(Protocol[_ProjectionResult]):
+    def __call__(self, request: WsRequest, key: str, *, history: HistoryReader) -> _ProjectionResult: ...
+
+
+@dataclass
+class _PreparedThreadResponse:
+    data: dict[str, Any]
+    headers: list[tuple[str, str]]
+
+
+def _encode_thread_response(data: dict[str, Any], *, graph_references: bool, **kwargs: Any) -> Response:
+    if graph_references:
+        graphs: dict[str, object] = {}
+        references: dict[int, tuple[str, ContextGraph]] = {}
+        nodes: list[object] = []
+        edges: list[object] = []
+        node_ids: dict[int, int] = {}
+        edge_ids: dict[int, int] = {}
+
+        def index(value: object, values: list[object], ids: dict[int, int]) -> int:
+            identity = id(value)
+            if identity not in ids:
+                ids[identity] = len(values)
+                values.append(value)
+            return ids[identity]
+
+        def reference(graph: ContextGraph) -> str:
+            identity = id(graph)
+            if identity not in references:
+                key = str(len(graphs))
+                references[identity] = (key, graph)
+                graphs[key] = {
+                    "nodes": [index(node, nodes, node_ids) for node in graph["nodes"]],
+                    "edges": [index(edge, edges, edge_ids) for edge in graph["edges"]],
+                }
+            return references[identity][0]
+
+        for event in data.get("events", []):
+            if "context_graph" in event:
+                event["context_graph_ref"] = reference(event.pop("context_graph"))
+            snapshot = event.get("context_snapshot")
+            if isinstance(snapshot, dict) and "graph" in snapshot:
+                snapshot = cast(dict[str, Any], snapshot)
+                event["context_snapshot"] = {**snapshot, "graph_ref": reference(snapshot["graph"])}
+                event["context_snapshot"].pop("graph")
+        data["context_graphs"] = graphs
+        data["context_graph_nodes"] = nodes
+        data["context_graph_edges"] = edges
+    return _http_json_response(data, **kwargs)
 
 
 class GatewayHTTPHandler:
@@ -1048,8 +1099,8 @@ class GatewayHTTPHandler:
         return self.session_manager.read_session_version(key) if self.session_manager is not None else None
 
     async def _project_session_history(
-        self, request: WsRequest, key: str, project: _HistoryProjection,
-    ) -> Response:
+        self, request: WsRequest, key: str, project: _HistoryProjection[_ProjectionResult],
+    ) -> _ProjectionResult | Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         decoded = _decode_api_key(key)
@@ -1111,11 +1162,20 @@ class GatewayHTTPHandler:
 
         timer = loop.call_later(0.05, sample_event_loop_lag)
         started = time.perf_counter()
-        def project(request: WsRequest, key: str, *, history: HistoryReader) -> Response:
+        def project(request: WsRequest, key: str, *, history: HistoryReader) -> Response | _PreparedThreadResponse:
             return self._handle_webui_thread_get(request, key, history=history, diagnostics=diagnostics)
 
         try:
-            response = await self._project_session_history(request, key, project)
+            prepared = await self._project_session_history(request, key, project)
+            if isinstance(prepared, _PreparedThreadResponse):
+                response = await asyncio.to_thread(
+                    _encode_thread_response, prepared.data,
+                    graph_references=_query_first(_parse_query(request.path), "context_graph_encoding") == "references-v1",
+                    accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+                    extra_headers=prepared.headers, metrics=diagnostics.response,
+                )
+            else:
+                response = prepared
         finally:
             active = False
             timer.cancel()
@@ -1170,7 +1230,7 @@ class GatewayHTTPHandler:
         *,
         history: HistoryReader,
         diagnostics: _WebUIThreadDiagnostics | None = None,
-    ) -> Response:
+    ) -> Response | _PreparedThreadResponse:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
         decoded_key = _decode_api_key(key)
@@ -1215,6 +1275,7 @@ class GatewayHTTPHandler:
         include_model_requests = _query_first(query, "include_model_requests") == "1"
         revision_variant = {
             "include_model_requests": include_model_requests,
+            "context_graph_encoding": _query_first(query, "context_graph_encoding"),
             "active_turn_id": active_turn_id,
             "active_turn_started_at": active_turn_started_at,
             "active_turn_transcript_persistence_failed": (
@@ -1267,11 +1328,8 @@ class GatewayHTTPHandler:
         if final_revision is not None and final_revision == initial_revision:
             response_headers.append(("ETag", _quoted_etag(final_revision)))
             data["revision"] = final_revision
-        return _http_json_response(
-            data,
-            accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
-            extra_headers=response_headers,
-            metrics=diagnostics.response if diagnostics is not None else None,
+        return _PreparedThreadResponse(
+            data=data, headers=response_headers,
         )
 
     def _handle_webui_trace_detail_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:

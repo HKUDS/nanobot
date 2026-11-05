@@ -62,7 +62,7 @@ function ThemeChatFixture({ theme, toggle }: { theme: "light" | "dark"; toggle: 
           <ThreadViewport messages={messages} isStreaming={false} conversationKey={activeKey}
             navigationFrame={context.navigationFrame} composer={null} />
           <ThreadHistoryStatus loading={false} error={null} exhausted onRetry={noop} />
-          {context.composerPortalTarget && createPortal(composer, context.composerPortalTarget)}
+          {context.composerPortalTarget && createPortal(<div data-active-composer>{composer}</div>, context.composerPortalTarget)}
         </div>} />
     </div>
   </main>;

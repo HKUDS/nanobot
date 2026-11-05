@@ -929,6 +929,7 @@ class AgentRunner:
         Callers reserve a live round slot; recovery invocations update it.
         """
         request_id = uuid4().hex
+        request_usage: LLMUsage | None = None
 
         async def emit(phase: Literal["started", "completed", "failed", "cancelled"]) -> None:
             state.request_sequence += 1
@@ -940,9 +941,12 @@ class AgentRunner:
                 usage=state.request_usage,
                 round_usages=tuple(usage for usage in state.recent_round_usages if usage is not None),
                 context_window_tokens=spec.runtime.context_window_tokens,
+                request_usage=request_usage,
             ))
 
         try:
+            if spec.hook is not None:
+                await spec.hook.before_model_request()
             await emit("started")
             _raise_if_cancelling()
             response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)
@@ -962,6 +966,7 @@ class AgentRunner:
             reported_usage = response.usage.with_timing(
                 generation_ms=response.generation_ms, ttft_ms=response.ttft_ms,
             )
+            request_usage = reported_usage
             state.request_usage = self._merge_usage(state.request_usage, reported_usage)
             state.recent_round_usages[-1] = self._merge_usage(
                 state.recent_round_usages[-1], reported_usage,

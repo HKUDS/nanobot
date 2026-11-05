@@ -1858,8 +1858,6 @@
       "sessionInfo": "セッション詳細"
     },
     "sessionInfo": {
-      "title": "セッション",
-      "untitled": "無題のトピック",
       "automations": "自動タスク",
       "count": "{{count}}",
       "loading": "自動タスクを読み込み中...",
@@ -1911,15 +1909,21 @@
       "reauthFallback": "今回の応答には代替モデルを使用しました。",
       "reauthSettings": "モデル設定を開く",
       "context": {
+          "loaded": "読み込み済み",
+          "unloaded": "未読み込み",
+          "expand": "コンテキストを拡大",
+          "collapse": "コンテキストを縮小",
+          "noFiles": "コンテキストはまだ記録されていません",
+          "estimatedNodeTokens": "約 {{value}} トークン",
+          "openFile": "ファイルを開く",
+          "history": "コンテキスト履歴",
+          "playHistory": "コンテキストの変化を再生",
         "tooltip": "コンテキスト {{percent}}%",
         "detailsLabel": "コンテキスト使用量を開く",
         "panelTitle": "コンテキスト使用量",
         "contextTitle": "コンテキスト",
-        "recentRounds": "最近のラウンド",
-        "inputTrend": "入力トークン",
-        "input": "入力トークン",
-        "cacheHitRate": "KV キャッシュヒット率",
-        "output": "出力トークン",
+        "cacheHitRate": "キャッシュヒット率",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "生成時間"
       },
       "queued": {
@@ -2147,8 +2151,7 @@
     "fileEditDiffTruncated": "差分は切り詰められました。完全な変更はファイルを開いて確認してください。",
     "usage": {
       "context": "最新のコンテキスト: {{tokens}}{{capacity}} トークン",
-      "requests": "モデルリクエスト {{count}} 回",
-      "estimated": "推定使用量を含みます"
+      "requests": "モデルリクエスト {{count}} 回"
     },
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",

@@ -202,7 +202,7 @@ for (const width of [390, 1440]) {
         await page.goto(fixture("file", true));
         sameBox(await box(status(page).locator(".font-mono")), source);
         const line = await box(status(page).locator(".font-mono > div > :last-child").first());
-        expect(line.x).toBe(code.x);
+        expect(line.x).toBeCloseTo(code.x, 1);
         await noOverflow(page);
         await page.goto(fixture("markdown"));
         const heading = await box(page.getByRole("heading", { name: "Project overview" }));
@@ -216,7 +216,7 @@ for (const width of [390, 1440]) {
         await noOverflow(page);
         await page.goto(fixture("markdown"));
         await expect(page.getByRole("heading", { name: "Project overview" })).toBeVisible();
-        await page.getByTestId("file-preview-panel").locator(".segmented-control button").nth(1).click();
+        await page.getByTestId("file-preview-panel").getByRole("button", { name: locale === "en" ? "Source" : "原文", exact: true }).click();
         await expect(page.getByTestId("viewport-code-rows")).toBeVisible();
         const markdownSource = await box(page.locator("pre"));
         await page.getByTestId("reload-preview").click();

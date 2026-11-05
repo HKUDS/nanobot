@@ -58,7 +58,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -93,7 +92,7 @@ describe("SessionInfoPopover", () => {
     let finish!: (response: Response) => void;
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     const user = userEvent.setup();
-    const view = render(<SessionInfoPopover client={client} sessionKey="websocket:chat-1" token="tok" title="Release work" />);
+    const view = render(<SessionInfoPopover client={client} sessionKey="websocket:chat-1" token="tok" />);
     await user.click(screen.getByRole("button", { name: "Session details" }));
     expect(screen.getByRole("status", { name: "Loading automations..." })).toHaveAttribute("aria-busy", "true");
     await act(async () => finish(automationsResponse([automationJob()])));
@@ -107,7 +106,7 @@ describe("SessionInfoPopover", () => {
     await act(async () => fail(new Error("Refresh failed")));
     expect(screen.getByRole("button", { name: /Morning check/ })).toBeVisible();
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    view.rerender(<SessionInfoPopover client={client} sessionKey="websocket:chat-2" token="tok" title="Other project" />);
+    view.rerender(<SessionInfoPopover client={client} sessionKey="websocket:chat-2" token="tok" />);
     expect(screen.queryByRole("button", { name: /Morning check/ })).not.toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Loading automations..." })).toBeVisible();
     await act(async () => finish(automationsResponse([])));
@@ -128,7 +127,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -165,7 +163,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -189,14 +186,12 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="@hyperframes 使用指南"
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "会话详情" }));
 
-    expect(await screen.findByText("会话")).toBeInTheDocument();
-    expect(screen.getByText("自动任务")).toBeInTheDocument();
+    expect(await screen.findByText("自动任务")).toBeInTheDocument();
     expect(screen.getByText("Morning check")).toBeInTheDocument();
     expect(screen.getByText(/下次/)).toBeInTheDocument();
     expect(screen.queryByText("Session")).not.toBeInTheDocument();
@@ -217,7 +212,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -255,7 +249,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -284,7 +277,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -314,7 +306,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 

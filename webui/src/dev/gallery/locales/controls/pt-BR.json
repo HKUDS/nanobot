@@ -504,5 +504,12 @@
     "view": "Ver convite",
     "dismissed": "Nunca mais lembrar selecionado na prévia",
     "starred": "Link do GitHub selecionado na prévia"
+  },
+  "sidebarPanel": {
+    "title": "Painel lateral",
+    "toggle": "Alternar painel",
+    "content": "Os detalhes permanecem no painel atual.",
+    "description": "Um painel lateral não modal com uma transição de abertura compartilhada.",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

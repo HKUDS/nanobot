@@ -1,3 +1,4 @@
+import { isContextGraph, isContextInspection } from "@/lib/context-graph";
 import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
   ApiServicePayload,
@@ -10,6 +11,7 @@ import type {
   ChannelConnectPayload,
   ChannelValidationPayload,
   ChatSummary,
+  ContextGraph,
   CliAppsPayload,
   FilePreviewPayload,
   FileReferenceMetadata,
@@ -315,7 +317,7 @@ function isProjectionTraceDetail(value: unknown): boolean {
     && value.traceCount >= 0;
 }
 
-function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
+function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet<unknown> = new Set()): ThreadProjectionEvent {
   if (!isRecord(value) || typeof value.event !== "string" || typeof value.chat_id !== "string") {
     throw new Error("Invalid WebUI thread event");
   }
@@ -383,11 +385,13 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
       if (value.text !== undefined && typeof value.text !== "string") break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
+      if (value.context_snapshot !== undefined && !isContextInspection(value.context_snapshot, (graph): graph is ContextGraph => validatedGraphs.has(graph) || isContextGraph(graph))) break;
       if (typeof value.compaction_id !== "string" || !value.compaction_id
         || !isCompactionPhase(value.phase)
         || (value.reason !== undefined && !isCompactionReason(value.reason))) break;
       return value as unknown as ThreadProjectionEvent;
     case "model_request": {
+      if (value.context_graph !== undefined && !validatedGraphs.has(value.context_graph) && !isContextGraph(value.context_graph)) break;
       const isUsage = (usage: unknown) => isRecord(usage)
         && Object.values(usage).every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0);
       if (typeof value.request_id !== "string" || !value.request_id
@@ -395,6 +399,7 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
         || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < 0
         || !["started", "completed", "failed", "cancelled"].includes(String(value.phase))
         || (value.usage !== undefined && !isUsage(value.usage))
+        || (value.request_usage != null && !isUsage(value.request_usage))
         || (value.round_usages !== undefined && (!Array.isArray(value.round_usages) || !value.round_usages.every(isUsage)))
         || (value.context_window_tokens !== undefined && (typeof value.context_window_tokens !== "number"
           || !Number.isFinite(value.context_window_tokens) || value.context_window_tokens < 0))) break;
@@ -413,12 +418,57 @@ export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPay
   if (value.projection !== "events" || !Array.isArray(value.events)) {
     throw new Error("Invalid WebUI thread events");
   }
-  const events = value.events.map(parseThreadProjectionEvent);
-  return {
-    ...value,
-    projection: "events",
-    events,
-  } as unknown as WebuiThreadPersistedPayload;
+  const graphs = new Map<string, ContextGraph>();
+  if (value.context_graphs !== undefined) {
+    if (!isRecord(value.context_graphs)) throw new Error("Invalid context graph dictionary");
+    const table = { nodes: value.context_graph_nodes, edges: value.context_graph_edges };
+    if (!isContextGraph(table)) throw new Error("Invalid context graph entity table");
+    const resolveIndex = <T,>(entries: readonly T[], index: unknown): T => {
+      if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index >= entries.length) {
+        throw new Error("Unknown context graph entity reference");
+      }
+      return entries[index];
+    };
+    for (const [key, descriptor] of Object.entries(value.context_graphs)) {
+      if (!isRecord(descriptor) || !Array.isArray(descriptor.nodes) || !Array.isArray(descriptor.edges)) {
+        throw new Error("Invalid context graph dictionary entry");
+      }
+      const nodes = descriptor.nodes.map((index: unknown) => resolveIndex(table.nodes, index));
+      const paths = new Set(nodes.map((node) => node.path));
+      const edges = descriptor.edges.map((index: unknown) => {
+        const edge = resolveIndex(table.edges, index);
+        if (!paths.has(edge.source) || !paths.has(edge.target)) throw new Error("Invalid context graph edge reference");
+        return edge;
+      });
+      graphs.set(key, { nodes, edges });
+    }
+  }
+  const validatedGraphs = new Set(graphs.values());
+  const resolveGraph = (key: unknown): ContextGraph => {
+    const graph = typeof key === "string" ? graphs.get(key) : undefined;
+    if (!graph) throw new Error("Unknown context graph reference");
+    return graph;
+  };
+  const events = value.events.map((raw) => {
+    if (!isRecord(raw)) return parseThreadProjectionEvent(raw);
+    const event = { ...raw };
+    if (event.context_graph_ref !== undefined) {
+      if (event.context_graph !== undefined) throw new Error("Ambiguous context graph reference");
+      event.context_graph = resolveGraph(event.context_graph_ref);
+      delete event.context_graph_ref;
+    }
+    if (isRecord(event.context_snapshot) && event.context_snapshot.graph_ref !== undefined) {
+      if (event.context_snapshot.graph !== undefined) throw new Error("Ambiguous context graph reference");
+      const { graph_ref, ...snapshot } = event.context_snapshot;
+      event.context_snapshot = { ...snapshot, graph: resolveGraph(graph_ref) };
+    }
+    return parseThreadProjectionEvent(event, validatedGraphs);
+  });
+  const body: Record<string, unknown> = { ...value, projection: "events", events };
+  delete body.context_graphs;
+  delete body.context_graph_nodes;
+  delete body.context_graph_edges;
+  return body as unknown as WebuiThreadPersistedPayload;
 }
 
 function parseWebuiThreadTraceDetailPayload(value: unknown): WebuiThreadTraceDetailPayload {
@@ -432,7 +482,7 @@ function parseWebuiThreadTraceDetailPayload(value: unknown): WebuiThreadTraceDet
   }
   return {
     message_id: value.message_id,
-    events: value.events.map(parseThreadProjectionEvent),
+    events: value.events.map((event) => parseThreadProjectionEvent(event)),
   };
 }
 
@@ -450,6 +500,7 @@ export async function fetchWebuiThread(
   if (options?.before) params.set("before", options.before);
   if (options?.after) params.set("after", options.after);
   params.set("include_model_requests", "1");
+  params.set("context_graph_encoding", "references-v1");
   const query = params.toString();
   const suffix = query ? `?${query}` : "";
   const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;

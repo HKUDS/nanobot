@@ -3700,10 +3700,10 @@ async def test_durable_incomplete_marker_stays_pending_without_safe_session_reco
 
     original_append = history.sessions.state.append_history
 
-    async def fail_answer(session_key, facts, *, expected_generation):
+    async def fail_answer(session_key, facts, *, expected_generation, skip_invalid=False):
         if any(fact.kind is HistoryKind.ANSWER for fact in facts):
             raise OSError("transient disk failure")
-        await original_append(session_key, facts, expected_generation=expected_generation)
+        return await original_append(session_key, facts, expected_generation=expected_generation, skip_invalid=skip_invalid)
 
     monkeypatch.setattr(history.sessions.state, "append_history", fail_answer)
 
@@ -3807,10 +3807,10 @@ async def test_http_replay_recovers_marked_answer_from_session_after_gateway_res
 
     original_append = history.sessions.state.append_history
 
-    async def fail_answer(session_key, facts, *, expected_generation):
+    async def fail_answer(session_key, facts, *, expected_generation, skip_invalid=False):
         if any(fact.kind is HistoryKind.ANSWER for fact in facts):
             raise OSError("transient disk failure")
-        await original_append(session_key, facts, expected_generation=expected_generation)
+        return await original_append(session_key, facts, expected_generation=expected_generation, skip_invalid=skip_invalid)
 
     monkeypatch.setattr(history.sessions.state, "append_history", fail_answer)
     await channel.send(await history.message(
@@ -7004,3 +7004,99 @@ async def test_history_model_request_opt_in_preserves_old_clients_cursors_and_et
     assert old_page["events"] == [event for event in modern_page["events"] if event["event"] != "model_request"]
     assert old_page["page"]["loaded_event_count"] == len(old_page["events"])
     assert modern_page["page"]["loaded_event_count"] == len(modern_page["events"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["missing", "present", "new_request"])
+async def test_thread_replays_durable_compaction_boundaries(history, tmp_path, monkeypatch, state):
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:legacy-context"
+    snapshot = {"graph": {"nodes": [], "edges": []}, "estimated_tokens": 100, "context_window_tokens": 1000}
+    history.append(key, {"event": "user", "chat_id": "legacy-context", "text": "hello"})
+    compact = {"event": "context_compaction", "compaction_id": "compact", "phase": "succeeded"}
+    if state == "present":
+        compact["context_snapshot"] = snapshot
+    history.append(key, compact)
+    if state == "new_request":
+        history.append(key, {"event": "model_request", "request_id": "request", "run_id": "run", "sequence": 1, "phase": "started"})
+    gateway = _basic_handler(MagicMock(), workspace_path=tmp_path, session_manager=history.sessions)
+    gateway.tokens.api_tokens["tok"] = time.monotonic() + 300.0
+
+    encoded = quote(key, safe="")
+    path = f"/api/sessions/{encoded}/webui-thread?include_model_requests=1"
+    request = Request(path, Headers([("Authorization", "Bearer tok")]))
+    response = await gateway.http._handle_webui_thread_get_async(request, encoded)
+    assert response.status_code == 200
+    body = json.loads(response.body)
+    event = next(event for event in body["events"] if event["event"] == "context_compaction")
+    assert event["phase"] == "succeeded"
+    assert event["compaction_id"] == "compact"
+    if state == "present":
+        assert event["context_snapshot"] == snapshot
+    else:
+        # Historical reads must not invent a snapshot from today's disk files.
+        assert "context_snapshot" not in event
+    cached_request = Request(path, Headers([("Authorization", "Bearer tok"), ("If-None-Match", response.headers["ETag"])]))
+    cached = await gateway.http._handle_webui_thread_get_async(cached_request, encoded)
+    assert cached.status_code == 304
+
+
+@pytest.mark.asyncio
+async def test_context_graph_dictionary_pages_are_self_contained_and_opt_in(history):
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    key = "websocket:graph-pages"
+    graph = {"nodes": [{"path": "/guide.md", "name": "guide.md", "tokens": 10, "state": "loaded"}], "edges": []}
+    for number in range(3):
+        history.append(key, {"event": "user", "text": f"question {number}"})
+        history.append(key, {"event": "model_request", "request_id": str(number), "run_id": str(number), "sequence": 2, "phase": "completed", "context_graph": graph, "request_usage": {"context_tokens": number + 10}})
+        history.append(key, {"event": "context_compaction", "compaction_id": str(number), "phase": "succeeded", "context_snapshot": {"graph": graph, "estimated_tokens": 5, "context_window_tokens": 100}})
+        history.append(key, {"event": "turn_end"})
+    channel = _ch(MagicMock(), session_manager=history.sessions)
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
+    encoded = quote(key, safe="")
+
+    async def fetch(before=None, compact=False, etag=None):
+        query = "include_model_requests=1&limit=1"
+        if before:
+            query += "&before=" + quote(before, safe="")
+        if compact:
+            query += "&context_graph_encoding=references-v1"
+        headers = [("Authorization", "Bearer tok")]
+        if etag:
+            headers.append(("If-None-Match", etag))
+        return await channel.gateway.http._handle_webui_thread_get_async(Request(f"/api/sessions/{encoded}/webui-thread?{query}", Headers(headers)), encoded)
+
+    before = None
+    seen = []
+    for _ in range(3):
+        old_response = await fetch(before)
+        compact_response = await fetch(before, compact=True, etag=old_response.headers["ETag"])
+        assert compact_response.status_code == 200
+        old = json.loads(old_response.body)
+        compact = json.loads(compact_response.body)
+        assert "context_graphs" not in old
+        assert len(compact["context_graphs"]) == 1
+        assert compact["context_graph_nodes"] == graph["nodes"]
+        assert compact["context_graph_edges"] == graph["edges"]
+        decoded_graphs = {key: {
+            "nodes": [compact["context_graph_nodes"][index] for index in descriptor["nodes"]],
+            "edges": [compact["context_graph_edges"][index] for index in descriptor["edges"]],
+        } for key, descriptor in compact["context_graphs"].items()}
+        for event in compact["events"]:
+            if "context_graph_ref" in event:
+                event["context_graph"] = decoded_graphs[event.pop("context_graph_ref")]
+                seen.append(event["request_id"])
+            if "context_snapshot" in event:
+                snapshot = event["context_snapshot"]
+                snapshot["graph"] = decoded_graphs[snapshot.pop("graph_ref")]
+        assert compact["events"] == old["events"]
+        assert compact["page"]["before_cursor"] == old["page"]["before_cursor"]
+        before = compact["page"]["before_cursor"]
+    assert seen == ["2", "1", "0"]

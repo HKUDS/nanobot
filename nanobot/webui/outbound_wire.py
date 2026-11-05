@@ -11,6 +11,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
+from nanobot.context_graph import ContextGraph, ContextSnapshot
 from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
@@ -97,6 +98,8 @@ class TurnEndWirePayload(_ChatWirePayload):
 
 
 class ModelRequestWirePayload(_ChatWirePayload):
+    request_usage: dict[str, int] | None
+    context_graph: NotRequired[ContextGraph]
     event: Literal["model_request"]
     request_id: str
     run_id: str
@@ -108,6 +111,7 @@ class ModelRequestWirePayload(_ChatWirePayload):
 
 
 class ContextCompactionWirePayload(_ChatWirePayload):
+    context_snapshot: NotRequired[ContextSnapshot]
     event: Literal["context_compaction"]
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
@@ -253,6 +257,7 @@ class NotificationProjection:
 
 def project_notification(
     chat_id: str, event: AgentEvent | None, metadata: Mapping[str, object] | None = None,
+    *, context_graph: ContextGraph | None = None,
 ) -> NotificationProjection | None:
     """Keep notification serialization and persistence decisions at one boundary."""
     if isinstance(event, ModelRequestEvent):
@@ -260,7 +265,10 @@ def project_notification(
             "event": "model_request", "chat_id": chat_id,
             "request_id": event.request_id, "run_id": event.run_id,
             "sequence": event.sequence, "phase": event.phase,
+            "request_usage": event.request_usage.to_turn_dict() if event.request_usage is not None else None,
         }
+        if context_graph is not None:
+            payload["context_graph"] = context_graph
         if event.usage is not None:
             payload["usage"] = event.usage.to_turn_dict()
         payload["round_usages"] = [usage.to_turn_dict() for usage in event.round_usages[-8:]]

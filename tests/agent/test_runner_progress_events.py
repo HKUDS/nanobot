@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -64,6 +65,7 @@ async def test_start_and_finish_events_emitted() -> None:
                 "error": None,
                 "files": [],
                 "embeds": [],
+                "working_directory": str(Path.cwd()),
             }],
         ),
         (
@@ -79,6 +81,7 @@ async def test_start_and_finish_events_emitted() -> None:
                 "error": None,
                 "files": [],
                 "embeds": [],
+                "working_directory": str(Path.cwd()),
             }],
         ),
     ]
@@ -140,7 +143,7 @@ async def test_streamed_content_is_not_repeated_before_tool_execution() -> None:
     assert progress[0] == ("", True, [{
         "version": 1, "phase": "start", "call_id": "call1", "name": "custom_tool",
         "arguments": {"path": "foo.txt"}, "result": None, "error": None,
-        "files": [], "embeds": [],
+        "files": [], "embeds": [], "working_directory": str(Path.cwd()),
     }])
     assert all(item[0] != "I will inspect it." for item in progress)
 

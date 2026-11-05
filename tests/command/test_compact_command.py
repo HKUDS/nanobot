@@ -195,10 +195,8 @@ async def test_compacted_session_waits_for_new_input_without_continuation(
     loop.provider.chat_stream_with_retry.assert_awaited_once()
     sent = loop.provider.chat_stream_with_retry.call_args.kwargs["messages"]
     expected_summary = reloaded.metadata["_last_summary"] if summary != "(nothing)" else None
-    assert sent[0] == {
-        "role": "system",
-        "content": loop.context.build_system_prompt(channel="cli", session_summary=expected_summary),
-    }
+    assert sent[0]["role"] == "system"
+    assert sent[0]["content"] == loop.context.build_system_prompt(channel="cli", session_summary=expected_summary)
     assert [message["role"] for message in sent] == ["system", "user"]
     assert sent[1]["content"].startswith("hi\n\n")
     assert "File access: no workspace restriction." in sent[1]["content"]

@@ -1,7 +1,54 @@
 import { MemoryLruCache } from "./memory-lru-cache";
 import { parseWebuiThreadPayload } from "./api";
 import { readReloadCache, removeReloadCache, writeReloadCache } from "./reload-cache";
-import type { WebuiThreadPersistedPayload } from "./types";
+import type { ContextGraph, WebuiThreadPersistedPayload } from "./types";
+
+/** Persist shared graph entities instead of expanding them in every replay frame. */
+function reloadPayload(body: WebuiThreadPersistedPayload): unknown {
+  function table<T extends object>(key: (value: T) => string) {
+    const values: T[] = [];
+    const identities = new Map<T, number>();
+    const keys = new Map<string, number>();
+    return { values, index(value: T): number {
+      const known = identities.get(value);
+      if (known !== undefined) return known;
+      const valueKey = key(value);
+      let index = keys.get(valueKey);
+      if (index === undefined) {
+        index = values.length;
+        values.push(value);
+        keys.set(valueKey, index);
+      }
+      identities.set(value, index);
+      return index;
+    } };
+  }
+  const nodes = table<ContextGraph["nodes"][number]>((node) => JSON.stringify([node.path, node.name, node.tokens, node.state]));
+  const edges = table<ContextGraph["edges"][number]>((edge) => JSON.stringify([edge.source, edge.target]));
+  const references = new Map<ContextGraph, string>();
+  const graphs: Record<string, { nodes: number[]; edges: number[] }> = {};
+  const reference = (graph: ContextGraph): string => {
+    const known = references.get(graph);
+    if (known !== undefined) return known;
+    const key = String(references.size);
+    references.set(graph, key);
+    graphs[key] = { nodes: graph.nodes.map(nodes.index), edges: graph.edges.map(edges.index) };
+    return key;
+  };
+  const events = body.events.map((event) => {
+    if (event.event === "model_request" && event.context_graph) {
+      const { context_graph, ...rest } = event;
+      return { ...rest, context_graph_ref: reference(context_graph) };
+    }
+    if (event.event === "context_compaction" && event.context_snapshot) {
+      const { graph, ...snapshot } = event.context_snapshot;
+      return { ...event, context_snapshot: { ...snapshot, graph_ref: reference(graph) } };
+    }
+    return event;
+  });
+  return references.size ? { ...body, events, context_graphs: graphs,
+    context_graph_nodes: nodes.values, context_graph_edges: edges.values } : body;
+}
 
 /** Bounded canonical replay cache; the most recent snapshot also survives tab reloads. */
 export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload> {
@@ -32,7 +79,7 @@ export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload
 
   override set(key: string, body: WebuiThreadPersistedPayload): void {
     super.set(key, body);
-    if (super.get(key)) writeReloadCache("thread", { key, body });
+    if (super.get(key)) writeReloadCache("thread", { key, body: reloadPayload(body) });
     for (const listener of this.listeners.get(key) ?? []) listener(body);
   }
 

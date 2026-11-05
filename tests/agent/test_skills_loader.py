@@ -657,3 +657,25 @@ def test_check_requirements_tolerates_null_requires_and_lists(tmp_path: Path) ->
         "missing_bins": [],
         "missing_env": [],
     }
+
+
+def test_context_skills_observe_resolved_alias_and_share_discovery(tmp_path, monkeypatch):
+    from nanobot.context_sources import capture_sources
+
+    path = _write_skill(tmp_path / "skills", "canonical", metadata_json={}, body="# Instructions")
+    loader = SkillsLoader(tmp_path, builtin_skills_dir=tmp_path / "builtin")
+    monkeypatch.setattr(loader, "_skill_aliases", lambda: {"legacy": "canonical"})
+    discover = loader._discover_skills
+    discoveries = []
+
+    def counted_discovery():
+        discoveries.append(True)
+        return discover()
+
+    monkeypatch.setattr(loader, "_discover_skills", counted_discovery)
+    with capture_sources() as sources:
+        content = loader.load_skills_for_context(["legacy", "canonical"])
+    assert content.count("# Instructions") == 2
+    assert [source.path for source in sources] == [path, path]
+    assert all(source.content == "# Instructions" for source in sources)
+    assert len(discoveries) == 1

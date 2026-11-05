@@ -10,15 +10,16 @@ function textOf(node: Row): string {
   return node.type === "text" ? String(node.value ?? "") : (node.children ?? []).map(textOf).join("");
 }
 
-const CodeChunk = memo(function CodeChunk({ rows, text, start, stylesheet, useInlineStyles, highlighted }: RowsProps & {
+const CodeChunk = memo(function CodeChunk({ rows, text, start, stylesheet, useInlineStyles, highlighted, lineNumberWidth }: RowsProps & {
   text: string;
   start: number;
   highlighted: boolean;
+  lineNumberWidth: string;
 }) {
   return (
     <span data-code-chunk={start / CHUNK_LINES} className="flex min-w-max">
       <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground"
-        style={{ minWidth: "4.25em" }}>
+        style={{ minWidth: lineNumberWidth }}>
         {rows.map((_, index) => start + index + 1).join("\n")}
       </span>
       <span data-highlighted={highlighted}>
@@ -78,7 +79,8 @@ export function ViewportCodeRows({ rows, stylesheet, useInlineStyles }: RowsProp
   return (
     <span ref={rootRef} className="block min-w-max" data-testid="viewport-code-rows">
       {chunks.map((chunk, index) => <CodeChunk key={chunk.start} {...chunk}
-        stylesheet={tokenStyles} useInlineStyles={useInlineStyles} highlighted={visible.has(index)} />)}
+        stylesheet={tokenStyles} useInlineStyles={useInlineStyles} highlighted={visible.has(index)}
+        lineNumberWidth={`calc(${String(rows.length).length}ch + 1.15rem)`} />)}
     </span>
   );
 }

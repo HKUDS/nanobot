@@ -65,6 +65,13 @@ describe("CodeBlock", () => {
     expect(container.querySelectorAll("*").length).toBeLessThan(10);
   });
 
+  it("keeps a Python module beyond the preview budget available as complete plain text", () => {
+    const code = Array.from({ length: 2800 }, (_, index) => `def function_${index}(): return "a realistic source line"`).join("\n");
+    render(<CodeBlock code={code} language="python" chrome="none"
+      showLineNumbers wrapLongLines={false} viewportHighlight />);
+    expect(screen.getByTestId("plain-code-fallback").querySelector("code > span > span:last-child")?.textContent).toBe(code);
+  });
+
   it("paints large preview text before enhancing it, and cancels enhancement on unmount", async () => {
     const callbacks = new Map<number, FrameRequestCallback>();
     let next = 0;

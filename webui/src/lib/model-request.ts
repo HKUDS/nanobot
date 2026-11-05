@@ -2,7 +2,7 @@ import type { UIMessage, UIModelRequestSnapshot } from "@/lib/types";
 
 export type ComposerUsageSnapshot = Pick<UIMessage,
   "id" | "turnId" | "createdAt" | "completedAt" | "usage" | "roundUsages" | "contextWindowTokens"
-> & { compacted?: boolean };
+> & { compacted?: boolean; estimatedContextTokens?: number };
 
 export function reconcileModelRequest(
   current: UIModelRequestSnapshot | undefined,
@@ -44,12 +44,20 @@ export function composerUsageSnapshots(
       const compactionSeq = compactions.get(row.turnId!);
       const compacted = compactions.has(row.turnId!) && !(snapshot.usageTurnSeq !== undefined
         && compactionSeq !== undefined && snapshot.usageTurnSeq > compactionSeq);
+      if (compacted) {
+        const baseline = messages.filter((message) => message.turnId === row.turnId
+          && message.compaction?.phase === "succeeded").at(-1)?.compaction?.contextSnapshot;
+        return [{ id: row.id, turnId: row.turnId, createdAt: row.createdAt, compacted: true,
+          estimatedContextTokens: baseline?.estimatedTokens, contextWindowTokens: baseline?.contextWindowTokens }];
+      }
       return [{ id: row.id, turnId: row.turnId, createdAt: row.createdAt, compacted,
         completedAt: snapshot.completedAt ?? row.completedAt, usage: snapshot.usage,
         roundUsages: snapshot.roundUsages, contextWindowTokens: snapshot.contextWindowTokens }];
     }
     if (row.kind === "compaction" && row.compaction?.phase === "succeeded") {
-      return [{ id: row.id, createdAt: row.createdAt, compacted: true }];
+      return [{ id: row.id, createdAt: row.createdAt, compacted: true,
+        estimatedContextTokens: row.compaction.contextSnapshot?.estimatedTokens,
+        contextWindowTokens: row.compaction.contextSnapshot?.contextWindowTokens }];
     }
     if (row.role !== "assistant" || row.kind === "trace" || row.isStreaming) return [];
     return [row];

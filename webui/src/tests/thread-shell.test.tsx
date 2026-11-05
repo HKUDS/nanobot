@@ -947,7 +947,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("renders each logical round in a completed turn as its own usage bar", async () => {
+  it("shows legacy history usage and clears it after successful compaction", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("websocket%3Ausage-chart/webui-thread")) {
@@ -1013,10 +1013,8 @@ describe("ThreadShell", () => {
 
     const trigger = await screen.findByTestId("composer-context-usage");
     fireEvent.click(trigger);
-    expect(await screen.findAllByTestId("round-usage-bar")).toHaveLength(4);
-    expect(screen.getByRole("img", {
-      name: /input tokens 16,400.*KV cache hit rate 99%.*output tokens 236/i,
-    })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "22");
+    expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
     expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
     for (const phase of ["started", "failed"] as const) {
       act(() => client._emitChat("usage-chart", {
@@ -1028,8 +1026,7 @@ describe("ThreadShell", () => {
       event: "context_compaction", chat_id: "usage-chart",
       compaction_id: "success", phase: "succeeded",
     }));
-    expect(trigger).toHaveAccessibleName("Open context usage");
-    expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(4);
+    await waitFor(() => expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument());
   });
 
   it("updates composer usage from active model snapshots without changing the body", async () => {
@@ -1041,7 +1038,10 @@ describe("ThreadShell", () => {
             events: [{ ...envelope, event: "user_message", text: "Waiting for answer", starts_turn: true, turn_seq: 0 }] })
         : { ok: false, status: 404, json: async () => ({}) },
     )));
-    render(wrap(client, <ThreadShell
+    const footer = document.createElement("div");
+    document.body.append(footer);
+    const view = render(wrap(client, <ThreadShell
+      composerPortalTarget={footer}
       session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
       settingsSnapshot={modelSettings("test-model", "deepseek")}
     />));
@@ -1050,6 +1050,7 @@ describe("ThreadShell", () => {
       phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
       usage: { prompt_tokens: 100, completion_tokens: 10, context_tokens: 100, request_count: 1 },
       round_usages: [{ prompt_tokens: 100, completion_tokens: 10 }],
+      context_graph: { nodes: [{ path: "/first.md", name: "first.md", state: "loaded", tokens: 40 }], edges: [] },
     }));
     const trigger = await screen.findByTestId("composer-context-usage");
     expect(trigger).toHaveAccessibleName("Context 10%. Open context usage");
@@ -1057,11 +1058,34 @@ describe("ThreadShell", () => {
       phase: "completed", sequence: 2, turn_seq: 2, context_window_tokens: 1000,
       usage: { prompt_tokens: 300, completion_tokens: 20, context_tokens: 200, request_count: 2 },
       round_usages: [{ prompt_tokens: 100, completion_tokens: 10 }, { prompt_tokens: 200, completion_tokens: 10 }],
+      context_graph: { nodes: [{ path: "/second.md", name: "second.md", state: "loaded", tokens: 60 }], edges: [] },
     }));
     expect(trigger).toHaveAccessibleName("Context 20%. Open context usage");
+    const input = screen.getByRole("textbox");
+    expect(footer).toContainElement(input);
+    fireEvent.change(input, { target: { value: "Preserve this draft" } });
+    const host = document.querySelector(".thread-preview-layout")!;
+    Object.defineProperty(host, "clientWidth", { value: 1000 });
+    fireEvent(window, new Event("resize"));
+    act(() => input.focus());
     fireEvent.click(trigger);
-    expect(await screen.findAllByTestId("round-usage-bar")).toHaveLength(2);
+    expect(host.querySelector(".thread-conversation")).toContainElement(input);
+    expect(footer).not.toContainElement(input);
+    expect(input).toHaveValue("Preserve this draft");
+    expect(input).toHaveFocus();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
+    expect(await screen.findByRole("button", { name: "second.md" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play context history" })).toBeEnabled();
     expect(screen.getByText("Waiting for answer")).toBeInTheDocument();
+    const sidebar = screen.getByTestId("context-sidebar");
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
+    expect(sidebar).toHaveAttribute("data-closing");
+    expect(footer).toContainElement(input);
+    expect(input).toHaveValue("Preserve this draft");
+    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+    view.unmount();
+    footer.remove();
   });
 
   it.each([false, true])("restores context after compaction only with newer usage (%s)", async (newReply) => {
@@ -1090,11 +1114,12 @@ describe("ThreadShell", () => {
       session={session("compact-usage")} title="Compact usage" onToggleSidebar={() => {}}
       settingsSnapshot={modelSettings("test-model", "deepseek")}
     />));
-    const trigger = await screen.findByTestId("composer-context-usage");
+    await screen.findByText("Before compact");
     if (newReply) {
+      const trigger = await screen.findByTestId("composer-context-usage");
       expect(trigger).toHaveAccessibleName("Context 2%. Open context usage");
     } else {
-      expect(trigger).toHaveAccessibleName("Open context usage");
+      expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument();
     }
   });
 

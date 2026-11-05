@@ -2064,8 +2064,6 @@
       "sessionInfo": "Session details"
     },
     "sessionInfo": {
-      "title": "Session",
-      "untitled": "Untitled topic",
       "automations": "Automations",
       "count": "{{count}}",
       "loading": "Loading automations...",
@@ -2117,15 +2115,21 @@
       "reauthFallback": "A fallback model handled this response.",
       "reauthSettings": "Open model settings",
       "context": {
+          "loaded": "Loaded",
+          "unloaded": "Not loaded",
+          "expand": "Expand context panel",
+          "collapse": "Collapse context panel",
+          "noFiles": "No context recorded yet",
+          "estimatedNodeTokens": "About {{value}} tokens",
+          "openFile": "Open file",
+          "history": "Context history",
+          "playHistory": "Play context history",
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",
         "panelTitle": "Context usage",
         "contextTitle": "Context",
-        "recentRounds": "Recent rounds",
-        "inputTrend": "Input tokens",
-        "input": "Input tokens",
-        "cacheHitRate": "KV cache hit rate",
-        "output": "Output tokens",
+        "cacheHitRate": "Cache hit rate",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Generation time"
       },
       "queued": {
@@ -2533,8 +2537,7 @@
     "fileEditDiffTruncated": "Diff truncated. Open the file for the full change.",
     "usage": {
       "context": "Context now: {{tokens}}{{capacity}}",
-      "requests": "{{count}} calls this turn",
-      "estimated": "Includes estimated usage"
+      "requests": "{{count}} calls this turn"
     }
   },
   "recovery": {

@@ -8,6 +8,7 @@ type Role = "user" | "assistant" | "tool" | "system";
 type MessageKind = "message" | "trace" | "compaction";
 
 export interface UIContextCompaction extends ContextCompaction {
+  contextSnapshot?: ContextSnapshot;
   /** Lifecycle event sequence, independent of the row's display position. */
   turnSeq?: number;
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
@@ -183,7 +184,35 @@ export interface UIMessage {
 }
 
 /** Turn-owned telemetry, not a transcript row or body-history source. */
+export interface ContextGraphNode {
+  path: string;
+  name: string;
+  state: "loaded" | "discovered";
+  tokens: number;
+}
+
+export interface ContextGraph {
+  nodes: ContextGraphNode[];
+  edges: { source: string; target: string }[];
+}
+
+export interface ContextInspection {
+  graph: ContextGraph;
+  estimated_tokens: number;
+  context_window_tokens: number;
+}
+
+export interface ContextSnapshot {
+  turnSeq?: number;
+  estimatedTokens?: number;
+  id: string;
+  graph: ContextGraph;
+  usage?: TurnUsage;
+  contextWindowTokens?: number;
+}
+
 export interface UIModelRequestSnapshot {
+  contextSnapshots?: ContextSnapshot[];
   runId: string;
   sequence: number;
   turnSeq?: number;
@@ -1546,7 +1575,8 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
-  | (NotificationEvent & InboundTurnMetadata)
+  | (Exclude<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata)
+  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection })
   | ({
       event: "file_edit";
       chat_id: string;
@@ -1603,6 +1633,8 @@ export type InboundEvent =
     }
   | ({
       event: "model_request";
+      request_usage?: TurnUsage | null;
+      context_graph?: ContextGraph;
       chat_id: string;
       request_id: string;
       run_id: string;

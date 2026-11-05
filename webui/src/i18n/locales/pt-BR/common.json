@@ -1872,8 +1872,6 @@
       "sessionInfo": "Detalhes da sessão"
     },
     "sessionInfo": {
-      "title": "Sessão",
-      "untitled": "Tópico sem título",
       "automations": "Automações",
       "count": "{{count}}",
       "loading": "Carregando automações...",
@@ -1925,15 +1923,21 @@
       "reauthFallback": "Um modelo alternativo respondeu desta vez.",
       "reauthSettings": "Abrir configurações do modelo",
       "context": {
+          "loaded": "Carregado",
+          "unloaded": "Não carregado",
+          "expand": "Expandir contexto",
+          "collapse": "Recolher contexto",
+          "noFiles": "Nenhum contexto registrado ainda",
+          "estimatedNodeTokens": "Cerca de {{value}} tokens",
+          "openFile": "Abrir arquivo",
+          "history": "Histórico de contexto",
+          "playHistory": "Reproduzir histórico do contexto",
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso do contexto",
         "panelTitle": "Uso do contexto",
         "contextTitle": "Contexto",
-        "recentRounds": "Rodadas recentes",
-        "inputTrend": "Tokens de entrada",
-        "input": "Tokens de entrada",
-        "cacheHitRate": "Taxa de acertos do cache KV",
-        "output": "Tokens de saída",
+        "cacheHitRate": "Taxa de acertos de cache",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Tempo de geração"
       },
       "queued": {
@@ -2341,8 +2345,7 @@
     "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa.",
     "usage": {
       "context": "Contexto atual: {{tokens}}{{capacity}}",
-      "requests": "{{count}} chamadas nesta rodada",
-      "estimated": "Inclui uso estimado"
+      "requests": "{{count}} chamadas nesta rodada"
     }
   },
   "recovery": {

@@ -1255,7 +1255,8 @@ def test_existing_shell_output_uses_canonical_command_identity_not_bang_text(his
 
 
 @pytest.mark.parametrize("phase", ["started", "completed", "failed", "cancelled"])
-def test_model_request_persists_through_reconnect_projection(history, tmp_path, phase):
+@pytest.mark.parametrize("measured", [False, True])
+def test_model_request_persists_through_reconnect_projection(history, tmp_path, phase, measured):
     from nanobot.events import ModelRequestEvent
     from nanobot.providers.base import LLMUsage
     from nanobot.session.manager import SessionManager
@@ -1267,6 +1268,7 @@ def test_model_request_persists_through_reconnect_projection(history, tmp_path, 
     projection = project_notification("requests", ModelRequestEvent(
         request_id="request", run_id="run", sequence=2, phase=phase,
         usage=usage, round_usages=(usage,) * 10, context_window_tokens=32000,
+        request_usage=usage if measured else None,
     ))
     assert projection is not None
     assert projection.persistence == "turn_activity"

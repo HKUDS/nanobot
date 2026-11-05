@@ -885,6 +885,11 @@ export function projectThreadEvent(
       ...(event.usage !== undefined ? { usage: event.usage } : {}),
       ...(event.round_usages !== undefined ? { roundUsages: event.round_usages.slice(-8) } : {}),
       ...(event.context_window_tokens !== undefined ? { contextWindowTokens: event.context_window_tokens } : {}),
+      ...(event.context_graph ? { contextSnapshots: [
+        ...(previousRequest?.contextSnapshots ?? []).filter((s) => s.id !== event.request_id),
+        { id: event.request_id, turnSeq: event.turn_seq, graph: event.context_graph, usage: event.request_usage === undefined
+          ? (event.phase === "completed" ? event.round_usages?.at(-1) : undefined) : event.request_usage ?? undefined, contextWindowTokens: event.context_window_tokens },
+      ] } : {}),
     };
     state.modelRequests = new Map(state.modelRequests).set(event.turn_id, modelRequest);
     return state;
@@ -1024,6 +1029,10 @@ export function projectThreadEvent(
 
   if (event.event === "context_compaction") {
     Object.assign(state, closeThreadProjectionAnswer(state));
+    if (event.phase === "succeeded") {
+      state.modelRequests = new Map(Array.from(state.modelRequests, ([turn, request]) =>
+        [turn, { ...request, contextSnapshots: [] }]));
+    }
     const id = `compaction-${event.compaction_id}`;
     const existing = state.messages.findIndex((message) => message.id === id);
     const message: UIMessage = {
@@ -1037,6 +1046,11 @@ export function projectThreadEvent(
         phase: event.phase,
         turnSeq: event.turn_seq,
         reason: event.reason,
+        ...(event.context_snapshot ? { contextSnapshot: {
+          id, graph: event.context_snapshot.graph,
+          estimatedTokens: event.context_snapshot.estimated_tokens,
+          contextWindowTokens: event.context_snapshot.context_window_tokens,
+        } } : {}),
         ...(!options.persisted ? { announce: true } : {}),
       },
       ...positionedTurnFields(state.messages[existing], turnFieldsForProjection(state, event, "activity"), options),

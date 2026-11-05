@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { composerUsageSnapshots, type ComposerUsageSnapshot } from "@/lib/model-request";
@@ -76,13 +76,16 @@ import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
+import { composerContextSnapshots } from "@/lib/context-graph";
 import { useClient } from "@/providers/ClientProvider";
 
 function latestComposerContextUsage(messages: ComposerUsageSnapshot[]): ComposerContextUsage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.compacted) {
-      return null;
+      return message.estimatedContextTokens !== undefined
+        ? { contextTokens: message.estimatedContextTokens, contextWindowTokens: message.contextWindowTokens, estimated: true }
+        : null;
     }
     const contextTokens = message.usage?.context_tokens;
     if (
@@ -107,6 +110,7 @@ function recentComposerRoundUsage(messages: ComposerUsageSnapshot[]): ComposerRo
   const seenTurns = new Set<string>();
   for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
     const message = messages[index];
+    if (message.compacted) break;
     const turnKey = message.turnId || message.id;
     if (seenTurns.has(turnKey)) {
       continue;
@@ -126,22 +130,12 @@ function recentComposerRoundUsage(messages: ComposerUsageSnapshot[]): ComposerRo
       ) {
         continue;
       }
-      const outputTokens = round.completion_tokens;
       const cachedTokens = round.cached_tokens;
-      const estimatedTokens = round.estimated_tokens;
       const generationMs = round.generation_ms;
       recent.push({
-        id: `${turnKey}:${roundIndex}`,
-        timestamp: message.completedAt ?? message.createdAt,
         inputTokens,
-        ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)
-          ? { outputTokens }
-          : {}),
         ...(typeof cachedTokens === "number" && Number.isFinite(cachedTokens)
           ? { cachedTokens }
-          : {}),
-        ...(typeof estimatedTokens === "number" && Number.isFinite(estimatedTokens)
-          ? { estimatedTokens }
           : {}),
         ...(typeof generationMs === "number" && Number.isFinite(generationMs)
           ? { generationMs }
@@ -540,11 +534,36 @@ export function ThreadShell({
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
+  const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
+  const [sidebarEnterWidth, setSidebarEnterWidth] = useState(0);
+  const [contextSidebarHost, setContextSidebarHost] = useState<HTMLElement | null>(null);
+  const setSidebarHost = useCallback((node: HTMLElement | null) => { shellRef.current = node; setContextSidebarHost(node); }, []);
   const [closingPreview, setClosingPreview] = useState<{ key: string; state: FilePreviewState } | null>(null);
   const filePreviewClosing = closingPreview?.key === previewSessionKey;
   const visiblePreview = filePreviewClosing ? closingPreview.state : previewState;
   const activePreview = visiblePreview.tabs.find((tab) => tab.id === visiblePreview.activeId);
   const previewOpen = Boolean(activePreview);
+  const sidebarOpen = previewOpen || contextSidebarOpen;
+  const [localComposerHost, setLocalComposerHost] = useState<HTMLDivElement | null>(null);
+  const [composerMount] = useState(() => document.createElement("div"));
+  const inlineComposer = composerPortalTarget === undefined || (sidebarOpen && composerActive);
+  const composerDestination = inlineComposer ? localComposerHost : composerPortalTarget;
+  useLayoutEffect(() => {
+    // The inline host ref arrives on the next render. Keep the focused input
+    // attached until that destination is ready.
+    if (!composerDestination) { if (!inlineComposer) composerMount.remove(); return; }
+    if (composerMount.parentElement === composerDestination) return;
+    // Move the host, not the React subtree: drafts, graph replay and exit presence survive.
+    const focused = document.activeElement instanceof HTMLElement && composerMount.contains(document.activeElement)
+      ? document.activeElement : null;
+    const selection = document.getSelection();
+    const range = focused && selection?.rangeCount && composerMount.contains(selection.getRangeAt(0).commonAncestorContainer)
+      ? selection.getRangeAt(0).cloneRange() : null;
+    composerDestination.appendChild(composerMount);
+    focused?.focus({ preventScroll: true });
+    if (range && selection) { selection.removeAllRanges(); selection.addRange(range); }
+  }, [composerDestination, composerMount, inlineComposer]);
+  useLayoutEffect(() => () => composerMount.remove(), [composerMount]);
   const [filePreviewMaxWidth, setFilePreviewMaxWidth] = useState(FILE_PREVIEW_MAX_WIDTH);
   const filePreviewWidth = clampFilePreviewWidth(previewState.width, filePreviewMaxWidth);
   const draftKey = session?.key ?? (temporaryChatEnabled ? "new:temporary" : "new:chat");
@@ -560,6 +579,23 @@ export function ThreadShell({
   const shellRef = useRef<HTMLElement | null>(null);
   const [conversationElement, setConversationElement] = useState<HTMLDivElement | null>(null);
   const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const shell = contextSidebarHost;
+    const surface = composerSurfaceRef.current;
+    if (!sidebarOpen || !inlineComposer || !shell || !surface) return;
+    // Metadata can wrap below the input card. Align sidebars to the visible
+    // surface, rather than assuming a fixed composer/footer padding.
+    const alignSidebar = () => {
+      const inset = shell.getBoundingClientRect().bottom - surface.getBoundingClientRect().bottom;
+      shell.style.setProperty("--sidebar-bottom-inset", `${Math.max(0, inset)}px`);
+    };
+    alignSidebar();
+    const observer = new ResizeObserver(alignSidebar);
+    observer.observe(shell);
+    observer.observe(composerMount);
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, [contextSidebarHost, sidebarOpen, inlineComposer, composerDestination, composerMount]);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const filePreviewResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -703,6 +739,9 @@ export function ThreadShell({
   const composerRoundUsage = useMemo(
     () => recentComposerRoundUsage(usageSnapshots),
     [usageSnapshots],
+  );
+  const contextGraphSnapshots = useMemo(
+    () => composerContextSnapshots(messages, modelRequests), [messages, modelRequests],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
@@ -1132,9 +1171,19 @@ export function ThreadShell({
   }, []);
 
   const handleOpenFilePreview = useCallback((path: string) => {
+    setSidebarEnterWidth(shellRef.current?.querySelector(".file-preview-pane")?.getBoundingClientRect().width ?? 0);
+    setContextSidebarOpen(false);
     cancelPreviewClose();
     openFile(path);
   }, [cancelPreviewClose, openFile]);
+
+  const handleContextSidebarOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      setSidebarEnterWidth(previewOpen ? filePreviewWidth : 0);
+      cancelPreviewClose(); closePreview();
+    }
+    setContextSidebarOpen(open);
+  }, [previewOpen, filePreviewWidth, cancelPreviewClose, closePreview]);
 
   const handleClosePreviewTab = useCallback((id: string) => {
     if (previewState.tabs.length === 1) handleCloseFilePreview();
@@ -1325,7 +1374,13 @@ export function ThreadShell({
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
           recentRoundUsage={composerRoundUsage}
+          contextSnapshots={contextGraphSnapshots}
+          onOpenContextFile={handleOpenFilePreview}
+          contextSidebarHost={contextSidebarHost}
+          contextSidebarOpen={contextSidebarOpen}
+          onContextSidebarOpenChange={handleContextSidebarOpenChange}
           variant={composerVariant}
+          surfaceRef={composerSurfaceRef}
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
           cliApps={cliApps}
@@ -1379,6 +1434,11 @@ export function ThreadShell({
           onManageModels={onOpenModelSettings}
           contextUsage={composerContextUsage}
           recentRoundUsage={composerRoundUsage}
+          contextSnapshots={contextGraphSnapshots}
+          onOpenContextFile={handleOpenFilePreview}
+          contextSidebarHost={contextSidebarHost}
+          contextSidebarOpen={contextSidebarOpen}
+          onContextSidebarOpenChange={handleContextSidebarOpenChange}
           variant="hero"
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
@@ -1420,10 +1480,11 @@ export function ThreadShell({
     </div>
   );
   const sessionInfoAction = historyKey ? (
-    <SessionInfoPopover client={client} sessionKey={historyKey} token={token} title={title} />
+    <SessionInfoPopover client={client} sessionKey={historyKey} token={token} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator
+      shortcutEnabled={composerActive}
       messages={displayMessages}
       prompts={promptNavigation.prompts}
       onJumpToPrompt={(promptId) => viewportRef.current?.jumpToUserPrompt(promptId)}
@@ -1460,7 +1521,7 @@ export function ThreadShell({
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
-    <section ref={shellRef} data-preview-open={previewOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
+    <section ref={setSidebarHost} style={{ "--sidebar-enter-width": `${sidebarEnterWidth}px`, "--sidebar-enter-mobile-width": sidebarEnterWidth ? "100%" : "0px" } as CSSProperties} data-preview-open={sidebarOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
       <div ref={setConversationElement} className={cn(
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
         headerPortalTarget === undefined && !hideHeader && "thread-workspace",
@@ -1496,7 +1557,7 @@ export function ThreadShell({
             retryStatus={retryStatus}
             emptyState={emptyState}
             initialLoading={initialHistoryLoading}
-            composer={composerPortalTarget === undefined ? composer : null}
+            composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
@@ -1523,16 +1584,17 @@ export function ThreadShell({
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
         : null}
-      {composerPortalTarget ? createPortal(
+      {createPortal(
         <div
           hidden={!composerActive}
           aria-hidden={!composerActive}
           data-testid={composerActive ? "active-pane-composer" : undefined}
+          data-active-composer={composerActive || undefined}
         >
           {composer}
         </div>,
-        composerPortalTarget,
-      ) : null}
+        composerMount,
+      )}
       {activePreview && previewSessionKey ? (
         <FileActionsProvider key={previewSessionKey} value={fileActions}>
         <PreviewPane
