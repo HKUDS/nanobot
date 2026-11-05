@@ -535,6 +535,7 @@ export function ThreadShell({
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
   const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
+  useLayoutEffect(() => { setContextSidebarOpen(false); }, [previewSessionKey]);
   const [sidebarEnterWidth, setSidebarEnterWidth] = useState(0);
   const [contextSidebarHost, setContextSidebarHost] = useState<HTMLElement | null>(null);
   const setSidebarHost = useCallback((node: HTMLElement | null) => { shellRef.current = node; setContextSidebarHost(node); }, []);
