@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { formatCompactTokenCount } from "@/lib/format";
-import { createGraphSimulation, updateGraphSimulation, startGraphSettlement, type GraphParticle, type GraphPosition } from "@/lib/context-graph";
+import { createGraphSimulation, updateGraphSimulation, advanceGraphSimulation, startGraphSettlement, type GraphParticle, type GraphPosition } from "@/lib/context-graph-layout";
 import type { ContextGraph } from "@/lib/types";
 import { createGraphPresentation } from "./graph-presentation";
 import { paintGraph, readGraphPalette, type GraphPalette } from "./graph-canvas";
@@ -68,7 +68,7 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
       settlement.current = null; state.geometry = true;
     }
     const running = !!sim && (sim.alpha() > sim.alphaMin() || sim.alphaTarget() > 0);
-    if (sim && running && !reducedMotion) { sim.tick(); state.geometry = true; }
+    if (sim && running && !reducedMotion) { advanceGraphSimulation(sim, elapsed); state.geometry = true; }
     const change = presentation.advance(elapsed, reducedMotion);
     if (change.removed) {
       setFrame(presentation.frame);
@@ -86,7 +86,11 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
     const bitmap = canvas.current;
     const context = bitmap?.getContext("2d");
     if (bitmap && context && palette.current) {
-      const ratio = window.devicePixelRatio || 1;
+      // Keep motion within a pixel budget; the final stationary paint restores
+      // native resolution for crisp labels without paying that cost every frame.
+      const ratio = running || change.moving
+        ? Math.min(window.devicePixelRatio || 1, 1.5, Math.sqrt(1_000_000 / (size.width * size.height)))
+        : window.devicePixelRatio || 1;
       const width = Math.round(size.width * ratio), height = Math.round(size.height * ratio);
       if (bitmap.width !== width || bitmap.height !== height) { bitmap.width = width; bitmap.height = height; }
       paintGraph(context, presentation.frame, positions.current, view.current, palette.current, highlighted, focused.current,

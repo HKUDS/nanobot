@@ -1,4 +1,4 @@
-import type { GraphPosition } from "@/lib/context-graph";
+import type { GraphPosition } from "@/lib/context-graph-layout";
 import type { GraphPresentation } from "./graph-presentation";
 
 type RGB = readonly [number, number, number];

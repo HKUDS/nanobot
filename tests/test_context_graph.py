@@ -70,6 +70,63 @@ def test_source_token_estimate_updates_when_tokenizer_becomes_available(tmp_path
     assert source_receipt(tmp_path / "source.txt", content)["tokens"] == len(encoding.encode_ordinary(content))
 
 
+@pytest.mark.asyncio
+async def test_prompt_working_set_reuses_analysis_and_invalidates_changed_content(tmp_path: Path, monkeypatch):
+    from nanobot.context_sources import PromptSource
+    from nanobot.file_references import MarkdownReferences
+    from nanobot.webui.context_observer import ContextGraphObserver
+
+    calls = []
+    original = MarkdownReferences.references
+
+    def references(self, content):
+        calls.append(content)
+        yield from original(self, content)
+
+    monkeypatch.setattr(MarkdownReferences, "references", references)
+    sources = tuple(PromptSource(tmp_path / f"{index}.md", f"{tmp_path} source {index}\n[Guide](guide.md)\n" + "text " * 1600)
+                    for index in range(20))
+    observer = ContextGraphObserver(None)
+    await observer.observe_prompt("chat", sources, {}, persistent=False)
+    await observer.observe_prompt("chat", sources, {}, persistent=False)
+    assert len(calls) == 20
+    moved = tuple(PromptSource(tmp_path / "other" / source.path.name, source.content) for source in sources)
+    await observer.observe_prompt("other-chat", moved, {}, persistent=False)
+    assert len(calls) == 20
+    graph = await observer.snapshot("other-chat", {}, persistent=False)
+    assert str(tmp_path / "other" / "guide.md") in {node["path"] for node in graph["nodes"]}
+    changed = (PromptSource(sources[0].path, f"{tmp_path}\n[New](new.md)"), *sources[1:])
+    await observer.observe_prompt("chat", changed, {}, persistent=False)
+    assert len(calls) == 21
+    graph = await observer.snapshot("chat", {}, persistent=False)
+    assert str(tmp_path / "new.md") in {node["path"] for node in graph["nodes"]}
+
+
+def test_source_analysis_evicts_by_budget_and_preserves_recent_results(tmp_path: Path, monkeypatch):
+    from collections import OrderedDict
+
+    import nanobot.file_references as references
+
+    calls = []
+
+    class Parser:
+        def references(self, content):
+            calls.append(content)
+            yield content.strip() + ".md"
+
+    monkeypatch.setattr(references, "_analysis_cache", OrderedDict())
+    monkeypatch.setattr(references, "_analysis_bytes", 0)
+    monkeypatch.setattr(references, "_ANALYSIS_SOURCE_BYTES", 120)
+    monkeypatch.setitem(references.REFERENCE_PARSERS, ".budget", Parser())
+    source = tmp_path / "source.budget"
+    first, second, third = (name.ljust(60) for name in ("first", "second", "third"))
+    for content in (first, second, first, third, first):
+        assert source_receipt(source, content)["links"] == [str(tmp_path / (content.strip() + ".md"))]
+    assert calls == [first, second, third]
+    source_receipt(source, second)
+    assert calls == [first, second, third, second]
+
+
 def test_system_sources_track_actual_injection_and_skill_metadata(tmp_path: Path):
     from nanobot.agent.context import ContextBuilder
 

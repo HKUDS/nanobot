@@ -192,9 +192,9 @@ export const CodeBlock = memo(function CodeBlock({
   // Plain text still contains the entire preview, with normal selection and find.
   const withinHighlightBudget = useMemo(() => {
     if (!useViewportHighlight) return true;
-    if (code.length > 256_000) return false;
+    if (code.length > 100_000) return false;
     const lines = code.split("\n");
-    return lines.length <= 5_000 && !lines.some(line => line.length > 2_000);
+    return lines.length <= 2_000 && !lines.some(line => line.length > 2_000);
   }, [code, useViewportHighlight]);
   const deferHighlight = highlight && !renderAnsi && useViewportHighlight
     && withinHighlightBudget && code.length > 8_000;

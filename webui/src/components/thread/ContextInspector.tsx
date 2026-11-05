@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -7,8 +7,9 @@ import { formatTurnLatency } from "@/lib/format-time";
 import type { ContextGraph, ContextSnapshot } from "@/lib/types";
 import type { ComposerContextUsage, ComposerRoundUsage } from "./ComposerUsagePopover";
 
-import { ContextGraphScene } from "./ContextGraphScene";
 import { ContextReplayButton } from "./ContextReplayButton";
+
+const ContextGraphScene = lazy(() => import("./ContextGraphScene").then(module => ({ default: module.ContextGraphScene })));
 
 const EMPTY_GRAPH: ContextGraph = { nodes: [], edges: [] };
 const surface = "context-inspector-surface select-none rounded-[20px] bg-card";
@@ -52,7 +53,9 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   openFileCallback.current = onOpenFile;
   const openFile = useCallback((path: string) => { setExpanded(false); openFileCallback.current?.(path); }, []);
   const content = (large: boolean) => <motion.div layoutId={layoutId} transition={{ duration: reducedMotion ? 0 : 0.25, ease: [0.2, 0, 0, 1] }} className={cn("flex flex-col gap-3", sidebar && !large && "h-full min-h-0")}>
-    <ContextGraphScene graph={snapshot?.graph ?? EMPTY_GRAPH} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? toggleExpanded : undefined} onOpenFile={onOpenFile ? openFile : undefined} />
+    <Suspense fallback={<div aria-busy="true" className={cn(surface, "min-h-[300px]", sidebar && !large && "min-h-0 flex-1")} />}>
+      <ContextGraphScene graph={snapshot?.graph ?? EMPTY_GRAPH} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? toggleExpanded : undefined} onOpenFile={onOpenFile ? openFile : undefined} />
+    </Suspense>
     <div className="flex shrink-0 items-center gap-3">
     <div onPointerEnter={() => setMeterHover(true)} onPointerLeave={() => setMeterHover(false)} className={cn(surface, "relative flex h-14 min-w-0 flex-1 items-center gap-4 px-4 transition-transform duration-150 ease-out motion-reduce:transition-none", meterHover && "scale-[1.015]")}>
       <div className="flex h-11 flex-1 items-center">

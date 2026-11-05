@@ -1,4 +1,4 @@
-import { nodeRadius } from "@/lib/context-graph";
+import { nodeRadius } from "@/lib/context-graph-layout";
 import type { ContextGraph, ContextGraphNode } from "@/lib/types";
 
 type PresentedNode = ContextGraphNode & { presence: number; emphasis: number; focus: number; radius: number; loaded: number; labelRemaining: number };

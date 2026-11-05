@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createGraphSimulation, updateGraphSimulation, startGraphSettlement } from "@/lib/context-graph";
+import { createGraphSimulation, updateGraphSimulation, advanceGraphSimulation, startGraphSettlement } from "@/lib/context-graph-layout";
 import { createGraphPresentation } from "@/components/thread/graph-presentation";
 import type { ContextGraph } from "@/lib/types";
 
@@ -76,6 +76,27 @@ describe("context graph continuity", () => {
     expect(sliced.nodes().map(({ x, y }) => ({ x, y }))).toEqual(reference.nodes().map(({ x, y }) => ({ x, y })));
     expect(sliced.nodes().every((node) => node.vx === 0 && node.vy === 0)).toBe(true);
     expect(sliced.alpha()).toBe(0);
+  });
+
+  it("reaches the same layout at slow and fast paint rates without stretching physical time", () => {
+    const previous = new Map([["a.md", { x: 50, y: 80 }], ["b.md", { x: 150, y: 130 }]]);
+    const simulate = (frameMs: number) => {
+      const sim = createGraphSimulation(next, previous, 600, 300).stop();
+      let elapsed = 0;
+      while (sim.alpha() > sim.alphaMin()) {
+        advanceGraphSimulation(sim, frameMs, Infinity);
+        elapsed += frameMs;
+      }
+      return { elapsed, positions: sim.nodes().map(({ x, y }) => ({ x, y })) };
+    };
+    const fast = simulate(1000 / 60), slow = simulate(50);
+    expect(slow.positions).toEqual(fast.positions);
+    expect(Math.abs(slow.elapsed - fast.elapsed)).toBeLessThan(51);
+    // A constrained frame still makes progress, rather than queuing an unbounded catch-up.
+    const bounded = createGraphSimulation(next, previous, 600, 300).stop();
+    const reference = createGraphSimulation(next, previous, 600, 300).stop().tick();
+    advanceGraphSimulation(bounded, 10_000, 0);
+    expect(bounded.nodes().map(({ x, y }) => ({ x, y }))).toEqual(reference.nodes().map(({ x, y }) => ({ x, y })));
   });
 
   it("reverses an in-flight exit from its current opacity when a graph returns", () => {

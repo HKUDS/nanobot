@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Iterator
-from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import unquote, urlsplit
 
@@ -23,18 +24,6 @@ class ReferenceParser(Protocol):
 
 class MarkdownReferences:
     def references(self, content: str) -> Iterator[str]:
-        if len(content) <= 128_000:
-            yield from self._cached_references(content)
-        else:
-            yield from self._references(content)
-
-    @staticmethod
-    @lru_cache(maxsize=16)
-    def _cached_references(content: str) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(MarkdownReferences._references(content)))
-
-    @staticmethod
-    def _references(content: str) -> Iterator[str]:
         for block in MarkdownIt("commonmark").parse(content):
             for token in block.children or ():
                 if token.type == "link_open" and (href := token.attrGet("href")):
@@ -42,20 +31,48 @@ class MarkdownReferences:
                         yield href
 
 
-@lru_cache(maxsize=16)
-def _encoded_source_tokens(content: str, encoding: Encoding) -> int:
-    return len(encoding.encode_ordinary(content))
+# Bound retained source text, rather than evicting a normal prompt's working set
+# after sixteen files. Results contain unresolved links so directory/symlink
+# changes still take effect on every observation.
+_ANALYSIS_SOURCE_BYTES = 4 * 1024 * 1024
+_ANALYSIS_ENTRIES = 256
+_analysis_cache: OrderedDict[
+    tuple[str, ReferenceParser | None, Encoding | None],
+    tuple[int, tuple[str, ...], int],
+] = OrderedDict()
+_analysis_bytes = 0
+_analysis_lock = Lock()
 
 
-def _source_tokens(content: str) -> int:
+def _analyze_source(content: str, parser: ReferenceParser | None) -> tuple[int, tuple[str, ...]]:
+    global _analysis_bytes
     encoding = get_token_encoding()
+    key = (content, parser, encoding)
+    with _analysis_lock:
+        if (cached := _analysis_cache.get(key)) is not None:
+            _analysis_cache.move_to_end(key)
+            return cached[0], cached[1]
+    source_bytes = len(content.encode("utf-8"))
+    links = tuple(dict.fromkeys(parser.references(content))) if parser else ()
+    tokens = source_bytes
     if encoding is not None:
         try:
-            return (_encoded_source_tokens(content, encoding) if len(content) <= 128_000
-                    else len(encoding.encode_ordinary(content)))
+            tokens = len(encoding.encode_ordinary(content))
         except Exception:
-            pass
-    return len(content.encode("utf-8"))
+            # Do not cache a transient encoding failure as a successful estimate.
+            return tokens, links
+    if source_bytes <= _ANALYSIS_SOURCE_BYTES:
+        with _analysis_lock:
+            # Concurrent observers may have analyzed the same content meanwhile.
+            if key not in _analysis_cache:
+                while _analysis_cache and (
+                    _analysis_bytes + source_bytes > _ANALYSIS_SOURCE_BYTES
+                    or len(_analysis_cache) >= _ANALYSIS_ENTRIES
+                ):
+                    _analysis_bytes -= _analysis_cache.popitem(last=False)[1][2]
+                _analysis_cache[key] = (tokens, links, source_bytes)
+                _analysis_bytes += source_bytes
+    return tokens, links
 
 
 REFERENCE_PARSERS: dict[str, ReferenceParser] = {
@@ -67,9 +84,10 @@ def source_receipt(path: Path, content: str, *, loaded: bool = True) -> SourceRe
     path = path.resolve()
     links: list[str] = []
     parser = REFERENCE_PARSERS.get(path.suffix.lower()) if loaded else None
+    tokens, references = _analyze_source(content, parser) if loaded else (0, ())
     if parser:
         seen: set[str] = set()
-        for href in parser.references(content):
+        for href in references:
             if href in seen:
                 continue
             seen.add(href)
@@ -88,7 +106,7 @@ def source_receipt(path: Path, content: str, *, loaded: bool = True) -> SourceRe
                 links.append(target)
             if len(links) >= 128:
                 break
-    return {"path": str(path), "name": path.parent.name if path.name == "SKILL.md" else path.name, "tokens": _source_tokens(content) if loaded else 0,
+    return {"path": str(path), "name": path.parent.name if path.name == "SKILL.md" else path.name, "tokens": tokens,
             "links": links, "loaded": loaded}
 
 
