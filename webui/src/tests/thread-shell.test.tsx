@@ -1029,6 +1029,69 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument());
   });
 
+  it("closes the graph on session switch and reopens with the new session context", async () => {
+    const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const bottom = this.classList.contains("thread-preview-layout") ? 900
+        : this.classList.contains("thread-composer-surface") && this.isConnected ? 880 : 0;
+      return DOMRect.fromRect({ x: 0, y: 0, width: 1000, height: bottom });
+    });
+    const client = makeClient();
+    const envelope = { chat_id: "live-usage", turn_id: "live-turn" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Alive-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, projection: "events", active_turn_id: "live-turn", has_pending_tool_calls: true,
+            events: [{ ...envelope, event: "user_message", text: "Waiting for answer", starts_turn: true, turn_seq: 0 }] })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    const footer = document.createElement("div");
+    document.body.append(footer);
+    const view = render(wrap(client, <ThreadShell
+      composerPortalTarget={footer}
+      session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />));
+    await screen.findByText("Waiting for answer");
+    act(() => client._emitChat("live-usage", { ...envelope, event: "model_request", request_id: "first", run_id: "run",
+      phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
+      usage: { prompt_tokens: 100, completion_tokens: 10, context_tokens: 100, request_count: 1 },
+      round_usages: [{ prompt_tokens: 100, completion_tokens: 10 }],
+      context_graph: { nodes: [{ path: "/first.md", name: "first.md", state: "loaded", tokens: 40 }], edges: [] },
+    }));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    const input = screen.getByRole("textbox");
+    expect(footer).toContainElement(input);
+    const host = document.querySelector(".thread-preview-layout")!;
+    Object.defineProperty(host, "clientWidth", { value: 1000 });
+    fireEvent(window, new Event("resize"));
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("button", { name: "first.md" })).toBeInTheDocument();
+    expect((host as HTMLElement).style.getPropertyValue("--sidebar-bottom-inset")).toBe("20px");
+    await act(async () => view.rerender(wrap(client, <ThreadShell
+      composerPortalTarget={footer}
+      session={session("other-usage")} title="Other usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />)));
+    act(() => client._emitChat("other-usage", {
+      event: "model_request", chat_id: "other-usage", turn_id: "other-turn", request_id: "other", run_id: "other-run",
+      phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
+      usage: { prompt_tokens: 200, context_tokens: 200 },
+      context_graph: { nodes: [{ path: "/other.md", name: "other.md", state: "loaded", tokens: 60 }], edges: [] },
+    }));
+    const newInput = screen.getByRole("textbox");
+    expect(newInput).not.toBe(input);
+    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+    expect(host).not.toHaveAttribute("data-preview-open");
+    expect(footer).toContainElement(newInput);
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+    expect(await screen.findByRole("button", { name: "other.md" })).toBeInTheDocument();
+    expect((host as HTMLElement).style.getPropertyValue("--sidebar-bottom-inset")).toBe("20px");
+    expect(screen.getByTestId("context-sidebar")).toBeInTheDocument();
+    expect(host.querySelector(".thread-conversation")).toContainElement(newInput);
+    view.unmount();
+    footer.remove();
+    geometry.mockRestore();
+  });
+
   it("updates composer usage from active model snapshots without changing the body", async () => {
     const client = makeClient();
     const envelope = { chat_id: "live-usage", turn_id: "live-turn" };
