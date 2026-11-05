@@ -21,9 +21,13 @@ const large: ContextSnapshot[] = [{ id: "large", contextWindowTokens: 100000, us
 } }];
 function Fixture() {
   const [showLarge, setShowLarge] = useState(false);
+  const [pythonLoaded, setPythonLoaded] = useState(false);
   const frames = new URLSearchParams(location.search).has("single") ? snapshots.map((snapshot) => ({ ...snapshot, graph: snapshots[0].graph })) : snapshots;
+  const inspectedFrames = pythonLoaded ? [...frames, { ...frames[1], id: "python", graph: {
+    nodes: [...frames[1].graph.nodes, { path: "/worker.py", name: "worker.py", state: "loaded" as const, tokens: 200 }], edges: frames[1].graph.edges,
+  } }] : frames;
   const [opened, setOpened] = useState("");
-  return <main className="mx-auto max-w-2xl p-4"><ContextInspector context={null} rounds={[]} snapshots={showLarge ? large : frames} onOpenFile={setOpened} /><output>{opened}</output>{new URLSearchParams(location.search).has("pair") && <section aria-label="Second graph"><ContextInspector context={null} rounds={[]} snapshots={frames} /></section>}<button onClick={() => setShowLarge(true)}>Load 500 nodes</button></main>;
+  return <main className="mx-auto max-w-2xl p-4"><ContextInspector context={null} rounds={[]} snapshots={showLarge ? large : inspectedFrames} onOpenFile={setOpened} /><output>{opened}</output>{new URLSearchParams(location.search).has("pair") && <section aria-label="Second graph"><ContextInspector context={null} rounds={[]} snapshots={frames} /></section>}<button onClick={() => setShowLarge(true)}>Load 500 nodes</button><button onClick={() => setPythonLoaded(true)}>Read Python file</button></main>;
 }
 await initializeI18n();
 createRoot(document.getElementById("root")!).render(<TooltipProvider><Fixture /></TooltipProvider>);

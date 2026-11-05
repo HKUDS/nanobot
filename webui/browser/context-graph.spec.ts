@@ -79,8 +79,41 @@ test.describe("touch graph", () => {
 
 
 declare global {
-  interface Window { graphDrawTrace: { arcs: number; frames: number; maxTask: number; start: number } }
+  interface Window {
+    graphDrawTrace: { arcs: number; frames: number; maxTask: number; start: number };
+    pythonLabelPaints: number[];
+  }
 }
+
+test.describe("normal-motion file loading", () => {
+  test.use({ reducedMotion: "no-preference" });
+  test("introduces a loaded Python filename after the graph has been idle, then fades it out", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.pythonLabelPaints = [];
+      const fillText = CanvasRenderingContext2D.prototype.fillText;
+      CanvasRenderingContext2D.prototype.fillText = function (...args) {
+        if (args[0] === "worker.py") window.pythonLabelPaints.push(this.globalAlpha);
+        return fillText.apply(this, args);
+      };
+    });
+    await page.goto("/browser/context-graph.html?single");
+    await expect(page.getByRole("button", { name: "a.md", exact: true })).toBeAttached();
+    // Let the existing labels finish, then leave the stopped animation clock idle.
+    await page.waitForTimeout(6500);
+    await page.getByRole("button", { name: "Read Python file" }).click();
+    await expect(page.getByRole("button", { name: "worker.py", exact: true })).toBeAttached();
+    await expect.poll(() => page.evaluate(() => window.pythonLabelPaints.some((alpha) => alpha > 0.9))).toBe(true);
+    await expect.poll(() => page.evaluate(() => {
+      const alpha = window.pythonLabelPaints.at(-1) ?? 1;
+      return alpha > 0 && alpha < 0.3;
+    })).toBe(true);
+    await page.waitForTimeout(700);
+    const paints = await page.evaluate(() => window.pythonLabelPaints.length);
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => window.pythonLabelPaints.length)).toBe(paints);
+  });
+});
+
 test("500 reduced-motion nodes settle over multiple frames and are all painted", async ({ page }) => {
   await page.addInitScript(() => {
     window.graphDrawTrace = { arcs: 0, frames: 0, maxTask: 0, start: Infinity };

@@ -95,6 +95,8 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
     }
     state.geometry = false;
     if (change.moving || (running && !reducedMotion)) schedule();
+    // The next animation starts a new clock; idle time must not consume its labels.
+    else state.previous = 0;
   };
   useEffect(() => {
     if (previousEpoch.current === epoch) return;
@@ -116,7 +118,7 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
     const intersection = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver(([entry]) => {
       clock.current.visible = entry.isIntersecting;
       if (entry.isIntersecting) { clock.current.previous = 0; schedule(); }
-      else { cancelAnimationFrame(clock.current.frame); clock.current.frame = 0; }
+      else { cancelAnimationFrame(clock.current.frame); clock.current.frame = 0; clock.current.previous = 0; }
     });
     intersection?.observe(element);
     return () => { observer.disconnect(); intersection?.disconnect(); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("resize", schedule); cancelAnimationFrame(clock.current.frame); clock.current.frame = 0; simulation.current?.stop(); };
