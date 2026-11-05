@@ -29,8 +29,12 @@ export function createGraphPresentation() {
       }
       for (const node of graph.nodes) {
         const previous = nodes.get(node.path);
-        if (previous) Object.assign(previous, node);
-        else nodes.set(node.path, { ...node, presence: 0, emphasis: 1, focus: 0, radius: nodeRadius(node), loaded: Number(node.state === "loaded"), labelRemaining: 1600 });
+        if (previous) {
+          if (node.state !== "loaded") previous.labelRemaining = 0;
+          else if (previous.state !== "loaded") previous.labelRemaining = 1600;
+          Object.assign(previous, node);
+        }
+        else nodes.set(node.path, { ...node, presence: 0, emphasis: 1, focus: 0, radius: nodeRadius(node), loaded: Number(node.state === "loaded"), labelRemaining: node.state === "loaded" ? 1600 : 0 });
       }
       for (const edge of graph.edges) if (!edges.has(edgeKey(edge))) edges.set(edgeKey(edge), { ...edge, presence: 0, emphasis: 1 });
       frame = { nodes: [...nodes.values()], edges: [...edges.values()] };

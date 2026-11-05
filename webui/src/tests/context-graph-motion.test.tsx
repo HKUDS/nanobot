@@ -15,11 +15,17 @@ describe("context graph continuity", () => {
     expect(presentation.frame.nodes[0].labelRemaining).toBe(600);
     presentation.update(next, "a.md");
     presentation.advance(300, false);
-    expect(presentation.frame.nodes.map((node) => node.labelRemaining)).toEqual([300, 1300]);
-    presentation.update(next, null);
+    expect(presentation.frame.nodes.map((node) => node.labelRemaining)).toEqual([300, 0]);
+    const loaded: ContextGraph = { ...next, nodes: next.nodes.map((node) => ({ ...node, state: "loaded" })) };
+    presentation.update(loaded, null);
     presentation.advance(300, false);
-    expect(presentation.frame.nodes.map((node) => node.labelRemaining)).toEqual([0, 1000]);
-    expect(presentation.advance(1000, true).moving).toBe(false);
+    expect(presentation.frame.nodes.map((node) => node.labelRemaining)).toEqual([0, 1300]);
+    presentation.update(loaded, "b.md");
+    presentation.advance(300, false);
+    expect(presentation.frame.nodes[1].labelRemaining).toBe(1000);
+    // Replaying an earlier, unloaded state ends the automatic label reveal.
+    presentation.update(next, null);
+    expect(presentation.advance(0, true).moving).toBe(false);
     expect(presentation.frame.nodes.map((node) => node.labelRemaining)).toEqual([0, 0]);
   });
 
