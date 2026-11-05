@@ -142,6 +142,8 @@ jobs:
             ${{ runner.temp }}/packaged-update/packaged-update-report.json
             ${{ runner.temp }}/packaged-update/packaged-update-timings.json
             ${{ runner.temp }}/packaged-update/*/result.json
+            ${{ runner.temp }}/packaged-update/*/phase-failure.json
             ${{ runner.temp }}/packaged-update/lane-*/run/*/result.json
+            ${{ runner.temp }}/packaged-update/lane-*/run/*/phase-failure.json
           if-no-files-found: error
           retention-days: 3

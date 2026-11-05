@@ -236,6 +236,28 @@ def test_worker_count_must_be_positive_before_creating_output(tmp_path):
     assert not output.exists()
 
 
+@pytest.mark.parametrize("update_phase", ["handoff_failed", "private-value-must-not-be-exported"])
+def test_phase_failure_identifies_failed_assertion_without_exporting_private_values(tmp_path, update_phase):
+    job = tmp_path / "private-job"
+    job.mkdir()
+    secret = "sensitive-token-must-stay-local"
+    probe.write(tmp_path / "launch.json", {"directory": str(job), "command": [secret]})
+    probe.write(job / "status.json", {"phase": update_phase, "mutation_started": False, "message": secret})
+    probe.write(job / "supervision.json", {"state": "needs_attention", "confirmation_id": secret})
+    try:
+        probe.replace_once(b"missing seam", b"needle", secret.encode())
+    except ValueError as error:
+        probe.phase_failure(tmp_path, "verify", error)
+    document = (tmp_path / "phase-failure.json").read_text()
+    record = json.loads(document)
+    assert record["phase"] == "verify" and record["error_type"] == "ValueError"
+    assert record["probe_lines"] and all(isinstance(line, int) for line in record["probe_lines"])
+    assert record["update_phase"] == ("handoff_failed" if update_phase == "handoff_failed" else "incomplete")
+    assert record["mutation_started"] is False and record["recovery_needs_attention"] is True
+    assert secret not in document and str(tmp_path) not in document
+    assert "private-value-must-not-be-exported" not in document
+
+
 def test_lanes_balance_all_nine_scenarios_without_splitting_fifteen_journeys():
     scenarios = list(probe.SCENARIOS)
     assert probe.scenario_groups(scenarios, 1) == [scenarios]

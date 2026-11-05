@@ -27,7 +27,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -57,6 +57,28 @@ def read(path: Path):
 
 def write(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def phase_failure(root: Path, phase: str, error: Exception) -> None:
+    """Export a failed probe location, not exception values or private journals."""
+    lines = []
+    traceback = error.__traceback__
+    while traceback is not None:
+        if traceback.tb_frame.f_code.co_filename == __file__:
+            lines.append(traceback.tb_lineno)
+        traceback = traceback.tb_next
+    record = {"phase": phase, "error_type": type(error).__name__, "probe_lines": lines}
+    # Read with stdlib only: the target package can be deliberately unimportable.
+    # Messages, commands, paths, identifiers and arbitrary phase values stay local.
+    with suppress(OSError, ValueError, KeyError, TypeError):
+        directory = Path(read(root / "launch.json")["directory"])
+        status = read(directory / "status.json")
+        record["update_phase"] = (status["phase"] if status["phase"] in {
+            "succeeded", "restored", "failed", "restart_failed", "handoff_failed",
+        } else "incomplete")
+        record["mutation_started"] = status["mutation_started"] is True
+        record["recovery_needs_attention"] = read(directory / "supervision.json").get("state") == "needs_attention"
+    write(root / "phase-failure.json", record)
 
 
 class Timings:
@@ -916,10 +938,14 @@ def main() -> None:
     if args.phase:
         if sys.prefix == sys.base_prefix:
             parser.error("Product phases must run in the disposable installation")
-        if args.phase == "prepare":
-            prepare(args.output)
-        else:
-            write(args.output / "result.json", verify(args.output))
+        try:
+            if args.phase == "prepare":
+                prepare(args.output)
+            else:
+                write(args.output / "result.json", verify(args.output))
+        except Exception as error:
+            phase_failure(args.output, args.phase, error)
+            raise
         return
     if not args.wheel or not args.commit:
         parser.error("--wheel and --commit are required")
