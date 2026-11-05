@@ -452,6 +452,7 @@ class AgentLoop:
         )
         self._idle_compact_check_interval_s = idle_compact_check_interval_seconds
         self._next_idle_compact_check_at = time.monotonic()
+        self._idle_compact_check_running = False
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self.commands = CommandRouter()
@@ -1413,12 +1414,13 @@ class AgentLoop:
         return result
 
     async def _check_expired_sessions_if_due(self) -> None:
-        if self.bus.admission.paused:
+        if self.bus.admission.paused or self._idle_compact_check_running:
             return
         now = time.monotonic()
         if now < self._next_idle_compact_check_at:
             return
         self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
+        self._idle_compact_check_running = True
         try:
             with self.bus.admission.activity():
                 await self.auto_compact.check_expired(
@@ -1428,6 +1430,8 @@ class AgentLoop:
                 )
         except SessionOperationQueueFullError:
             logger.debug("Skipping idle archival while session storage is busy")
+        finally:
+            self._idle_compact_check_running = False
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -1442,7 +1446,9 @@ class AgentLoop:
                     async with asyncio.timeout(1.0):
                         msg = await self.bus.consume_inbound()
                 except asyncio.TimeoutError:
-                    await self._check_expired_sessions_if_due()
+                    # Storage may wait behind a turn that /stop needs to cancel.
+                    if not self.bus.admission.paused:
+                        self.schedule_background(self._check_expired_sessions_if_due())
                     continue
                 except asyncio.CancelledError:
                     # Preserve real task cancellation so shutdown can complete cleanly.
@@ -1812,7 +1818,8 @@ class AgentLoop:
                 if self._pending_queues.get(key) is pending:
                     self._pending_queues.pop(key)
                     await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
-            if self._background_tasks:
+            # A scan can schedule archival while shutdown waits for it.
+            while self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
         except BaseException as exc:
             errors.append(exc)
