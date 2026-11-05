@@ -251,6 +251,8 @@ Open **Skills → Discover** to browse or search skills from skills.sh and Skill
 
 Marketplace skills are third-party instructions and may include executable scripts. Review the source and instructions before installing one, and enable only skills you trust with the same files, tools, and credentials available to your agent.
 
+Discover marks a skill as installed only when its recorded marketplace source matches. A skill with the same name from another source is a name conflict, not another installed copy. Older or manually copied skills without a source record remain usable and show “Installed source unknown.” Review the existing skill in **Installed** before removing it if you want a different source; installation never replaces it automatically. New installs keep a small `.nanobot-origin.json` receipt beside `SKILL.md`. Keep that receipt with the skill when moving or backing up the workspace. Older nanobot versions ignore it; no skill-directory rename or history migration is required.
+
 ## Automations
 
 Automations are agent turns that run later in a linked topic. Create them from the topic or channel where they are supposed to run so nanobot keeps the correct target context. When an automation runs, it normally delivers the result back to that topic.
