@@ -8,6 +8,21 @@ const next: ContextGraph = { nodes: [...first.nodes, { path: "b.md", name: "b.md
   edges: [{ source: "a.md", target: "b.md" }] };
 
 describe("context graph continuity", () => {
+  it("briefly introduces new labels without restarting existing labels on graph or focus updates", () => {
+    const presentation = createGraphPresentation();
+    presentation.update(first, null);
+    presentation.advance(1000, false);
+    expect(presentation.frame.nodes[0].labelRemaining).toBe(600);
+    presentation.update(next, "a.md");
+    presentation.advance(300, false);
+    expect(presentation.frame.nodes.map((node) => node.labelRemaining)).toEqual([300, 1300]);
+    presentation.update(next, null);
+    presentation.advance(300, false);
+    expect(presentation.frame.nodes.map((node) => node.labelRemaining)).toEqual([0, 1000]);
+    expect(presentation.advance(1000, true).moving).toBe(false);
+    expect(presentation.frame.nodes.map((node) => node.labelRemaining)).toEqual([0, 0]);
+  });
+
   it("retains existing particles and grows a linked node near its neighbour", () => {
     const sim = createGraphSimulation(first, new Map(), 600, 300).stop();
     const original = sim.nodes()[0];

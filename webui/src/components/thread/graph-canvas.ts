@@ -77,7 +77,8 @@ export function paintGraph(context: CanvasRenderingContext2D, frame: GraphPresen
       context.beginPath(); context.roundRect(x - 22, y - 22, 44, 44, 4); context.stroke();
       context.lineWidth = 1;
     }
-    const labelOpacity = node.path === highlighted ? 1 : Math.max(0, Math.min(1, (view.k - 1) / 3.75));
+    // Introduce new files for one second, then fade to the usual zoom visibility.
+    const labelOpacity = node.path === highlighted ? 1 : Math.max(0, Math.min(1, (view.k - 1) / 3.75), Math.min(1, node.labelRemaining / 600));
     if (labelOpacity > 0) {
       context.globalAlpha = alpha * labelOpacity;
       context.fillStyle = palette.foreground;

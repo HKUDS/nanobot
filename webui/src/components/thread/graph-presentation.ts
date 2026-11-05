@@ -1,7 +1,7 @@
 import { nodeRadius } from "@/lib/context-graph";
 import type { ContextGraph, ContextGraphNode } from "@/lib/types";
 
-export type PresentedNode = ContextGraphNode & { presence: number; emphasis: number; focus: number; radius: number; loaded: number };
+export type PresentedNode = ContextGraphNode & { presence: number; emphasis: number; focus: number; radius: number; loaded: number; labelRemaining: number };
 export type PresentedEdge = ContextGraph["edges"][number] & { presence: number; emphasis: number };
 export type GraphPresentation = { nodes: PresentedNode[]; edges: PresentedEdge[] };
 export const edgeKey = (edge: ContextGraph["edges"][number]) => JSON.stringify([edge.source, edge.target]);
@@ -30,7 +30,7 @@ export function createGraphPresentation() {
       for (const node of graph.nodes) {
         const previous = nodes.get(node.path);
         if (previous) Object.assign(previous, node);
-        else nodes.set(node.path, { ...node, presence: 0, emphasis: 1, focus: 0, radius: nodeRadius(node), loaded: Number(node.state === "loaded") });
+        else nodes.set(node.path, { ...node, presence: 0, emphasis: 1, focus: 0, radius: nodeRadius(node), loaded: Number(node.state === "loaded"), labelRemaining: 1600 });
       }
       for (const edge of graph.edges) if (!edges.has(edgeKey(edge))) edges.set(edgeKey(edge), { ...edge, presence: 0, emphasis: 1 });
       frame = { nodes: [...nodes.values()], edges: [...edges.values()] };
@@ -49,6 +49,9 @@ export function createGraphPresentation() {
         return next;
       };
       for (const [path, node] of nodes) {
+        // Keep the clock alive after the layout settles so new labels can fade out.
+        node.labelRemaining = Math.max(0, node.labelRemaining - Math.max(0, elapsed));
+        if (node.labelRemaining > 0) moving = true;
         node.presence = approach(node.presence, wanted.has(path) ? 1 : 0);
         node.emphasis = approach(node.emphasis, highlighted && !related.has(path) ? 0.2 : 1);
         node.focus = approach(node.focus, path === highlighted ? 1 : 0);
