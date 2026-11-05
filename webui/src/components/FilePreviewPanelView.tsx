@@ -62,7 +62,7 @@ export function FilePreviewPanelView({ path, state, imageOpen, onImageOpenChange
                     <div className="aspect-[8/5] w-full max-w-sm rounded-compact bg-muted/40" />
                   </div> : <>
                     {previewKind === "markdown" && !actionsHost ? <div className="flex justify-end px-4 py-2">
-                      <div className="inline-flex h-8 items-center rounded-control bg-muted/40 px-3 text-xs">
+                      <div className="touch-target inline-flex h-8 items-center rounded-control bg-muted/40 px-3 text-xs">
                         <span className="invisible">{modeLabel}</span>
                       </div>
                     </div> : null}

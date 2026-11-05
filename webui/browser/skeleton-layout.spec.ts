@@ -216,7 +216,7 @@ for (const width of [390, 1440]) {
         await noOverflow(page);
         await page.goto(fixture("markdown"));
         await expect(page.getByRole("heading", { name: "Project overview" })).toBeVisible();
-        await page.getByTestId("file-preview-panel").locator(".segmented-control button").nth(1).click();
+        await page.getByTestId("file-preview-panel").getByRole("button", { name: locale === "en" ? "Source" : "原文", exact: true }).click();
         await expect(page.getByTestId("viewport-code-rows")).toBeVisible();
         const markdownSource = await box(page.locator("pre"));
         await page.getByTestId("reload-preview").click();

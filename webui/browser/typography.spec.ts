@@ -66,7 +66,16 @@ for (const narrow of [false, true]) {
       for (const selector of ["table", "th", "td"]) {
         expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBeCloseTo(bodySize * 0.875);
       }
-      expect(await tables.first().evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+      // Wide tables scroll within their wrapper instead of squeezing words into single letters.
+      const textTable = tables.first();
+      await expect(textTable).toHaveCSS("overflow-x", "auto");
+      await textTable.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+      expect(await textTable.evaluate(node => {
+        const bounds = node.getBoundingClientRect();
+        const lastCell = node.querySelector("tbody td:last-child")!.getBoundingClientRect();
+        return lastCell.right <= bounds.right + 1 && lastCell.right > bounds.left;
+      })).toBe(true);
+      await textTable.evaluate(node => { node.scrollLeft = 0; });
       await expect.poll(() => formulaTable.locator(".katex-html > .base").evaluateAll((nodes) => nodes.every((node) => {
         const formula = node.getBoundingClientRect();
         const cell = node.closest("th, td")!;
