@@ -831,9 +831,6 @@ export default function MarkdownTextRenderer({
       components={components}
       className={cn(
         "markdown-content prose max-w-none dark:prose-invert",
-        "prose-headings:mt-4 prose-headings:mb-2 prose-headings:tracking-tight",
-        "prose-p:my-2",
-        "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
         "prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:font-normal",
         "prose-blockquote:not-italic prose-blockquote:text-foreground/80",
         "prose-a:text-content-link prose-a:underline-offset-2 hover:prose-a:text-content-link-hover",

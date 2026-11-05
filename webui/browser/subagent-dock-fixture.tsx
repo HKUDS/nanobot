@@ -14,6 +14,7 @@ const createdAt = Date.now() / 1000;
 let streamLength = 0;
 let inputNumber = 0;
 const saveTasks = new URLSearchParams(location.search).has("saved");
+const historyParagraphs = new URLSearchParams(location.search).has("long-history") ? 20 : 12;
 const taskStorageKey = "fixture.subagent-dock.tasks";
 const taskLabels = new URLSearchParams(location.search).has("long-labels")
   ? ["核对多轮任务完成后的归档位置、长标题换行与独立详情入口", "Review_the_responsive_subtask_panel_and_keyboard_focus_without_interrupting_running_work", "整理交互建议"]
@@ -28,7 +29,7 @@ const tasks: SubagentTaskSnapshot[] = taskLabels.map((label, index) => ({
 const history: ThreadProjectionEvent[] = [
   { event: "user_message", chat_id: chatId, projection_id: "preview-prompt", turn_id: turnId, text: "请让三个子任务分别检查实现、测试和交互。主对话继续讨论，不要等它们全部结束。", starts_turn: true },
   { event: "message", chat_id: chatId, projection_id: "preview-answer", turn_id: turnId,
-    text: "已经安排。你可以继续在这里交流，子任务会独立推进。\n\n**随时查看，不必回翻聊天**\n\n输入区上方的子任务入口会留在原位。点开可以查看每一路任务的状态、真实工具活动和最终结果。\n\n" + "主对话仍然可以正常输出和滚动。任务列表与消息区分别滚动，展开详情也不会取消正在执行的任务。\n\n".repeat(12) },
+    text: "已经安排。你可以继续在这里交流，子任务会独立推进。\n\n**随时查看，不必回翻聊天**\n\n输入区上方的子任务入口会留在原位。点开可以查看每一路任务的状态、真实工具活动和最终结果。\n\n" + "主对话仍然可以正常输出和滚动。任务列表与消息区分别滚动，展开详情也不会取消正在执行的任务。\n\n".repeat(historyParagraphs) },
 ];
 
 function updateTask(index: number, patch: Partial<SubagentTaskSnapshot>) {

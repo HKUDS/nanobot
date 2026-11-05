@@ -1119,6 +1119,9 @@ export function ThreadComposer({
   const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey, persistDraft) : undefined);
   const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
+  const [placeholderHintRequested, setPlaceholderHintRequested] = useState(false);
+  const [placeholderHintOpen, setPlaceholderHintOpen] = useState(false);
+  const [placeholderHintBottomGap, setPlaceholderHintBottomGap] = useState(0);
   const blurFrame = useRef<number | null>(null);
   const [boundSessionMentions, setBoundSessionMentions] = useState<SessionMention[]>(
     initialDraft?.sessionMentions ?? [],
@@ -1164,7 +1167,20 @@ export function ThreadComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const tabFocusRequested = useRef(false);
   const [compactControls, setCompactControls] = useState(false);
+
+  useEffect(() => {
+    // Automatic session focus should not open the hint; keyboard navigation should.
+    const onKeyDown = (event: KeyboardEvent) => { tabFocusRequested.current = event.key === "Tab"; };
+    const onPointerDown = () => { tabFocusRequested.current = false; };
+    document.addEventListener("keydown", onKeyDown, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const form = formRef.current;
@@ -1852,6 +1868,26 @@ export function ThreadComposer({
     const input = textareaRef.current;
     if (input) autosizeTextarea(input);
   }, [readingTextSize, customReadingTextSize]);
+
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    if (!input || document.activeElement !== input || !placeholderHintRequested || input.value || !input.placeholder) {
+      setPlaceholderHintOpen(false);
+      return;
+    }
+    const form = formRef.current!;
+    const measure = () => {
+      setPlaceholderHintOpen(input.scrollWidth > input.clientWidth);
+      setPlaceholderHintBottomGap(form.getBoundingClientRect().bottom - input.getBoundingClientRect().bottom);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(input);
+    observer?.observe(form);
+    let active = true;
+    void document.fonts?.ready.then(() => { if (active) measure(); });
+    return () => { active = false; observer?.disconnect(); };
+  }, [placeholderHintRequested, mentionInput.value, resolvedPlaceholder, sessionDragPreview, readingTextSize, customReadingTextSize]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
@@ -2739,38 +2775,65 @@ export function ThreadComposer({
                 : null}
             />
           ) : null}
-          <textarea
-            ref={textareaRef}
-            value={mentionInput.value}
-            onFocus={() => {
-              if (compactWhenIdle) setComposerFocused(true);
-            }}
-            onChange={mentionInput.onChange}
-            onCompositionStart={mentionInput.onCompositionStart}
-            onCompositionEnd={mentionInput.onCompositionEnd}
-            onKeyDown={onKeyDown}
-            onKeyUp={() => setCursorPosition(rawSelection().start)}
-            onSelect={() => setCursorPosition(rawSelection().start)}
-            onClick={() => setCursorPosition(rawSelection().start)}
-            onCopy={mentionInput.onCopy}
-            onCut={mentionInput.onCut}
-            onScroll={(e) => {
-              if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = e.currentTarget.scrollTop;
-            }}
-            onPaste={onPaste}
-            rows={1}
-            enterKeyHint={hasCoarsePointer ? "enter" : undefined}
-            placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
-            disabled={interactionDisabled}
-            aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
-            className={cn(
-              inputTextClasses,
-              "relative z-10 block caret-foreground placeholder:text-muted-foreground",
-              "focus:outline-none focus-visible:outline-none",
-              "disabled:cursor-not-allowed",
-              hasInlineDecorations && "text-transparent selection:bg-primary/20",
-            )}
-          />
+          <TooltipProvider>
+            <Tooltip open={placeholderHintOpen}>
+              <TooltipTrigger asChild>
+                <textarea
+                  ref={textareaRef}
+                  value={mentionInput.value}
+                  onFocus={(event) => {
+                    if (tabFocusRequested.current && !event.currentTarget.value) setPlaceholderHintRequested(true);
+                    tabFocusRequested.current = false;
+                    if (compactWhenIdle) setComposerFocused(true);
+                  }}
+                  onBlur={() => {
+                    if (placeholderHintRequested) setPlaceholderHintRequested(false);
+                  }}
+                  onPointerLeave={(event) => {
+                    if (event.pointerType === "mouse" && placeholderHintRequested) setPlaceholderHintRequested(false);
+                  }}
+                  onChange={mentionInput.onChange}
+                  onCompositionStart={mentionInput.onCompositionStart}
+                  onCompositionEnd={mentionInput.onCompositionEnd}
+                  onKeyDown={onKeyDown}
+                  onKeyUp={() => setCursorPosition(rawSelection().start)}
+                  onSelect={() => setCursorPosition(rawSelection().start)}
+                  onClick={(event) => {
+                    setCursorPosition(rawSelection().start);
+                    if (!event.currentTarget.value) setPlaceholderHintRequested(true);
+                  }}
+                  onCopy={mentionInput.onCopy}
+                  onCut={mentionInput.onCut}
+                  onScroll={(e) => {
+                    if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = e.currentTarget.scrollTop;
+                  }}
+                  onPaste={onPaste}
+                  rows={1}
+                  enterKeyHint={hasCoarsePointer ? "enter" : undefined}
+                  placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
+                  disabled={interactionDisabled}
+                  aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
+                  aria-description={sessionDragPreview ? undefined : resolvedPlaceholder}
+                  className={cn(
+                    inputTextClasses,
+                    "relative z-10 block caret-foreground placeholder:text-muted-foreground",
+                    "focus:outline-none focus-visible:outline-none",
+                    "disabled:cursor-not-allowed",
+                    hasInlineDecorations && "text-transparent selection:bg-primary/20",
+                  )}
+                />
+              </TooltipTrigger>
+              {placeholderHintOpen ? (
+                <TooltipContent side="top" align="start" onEscapeKeyDown={() => {
+                  setPlaceholderHintOpen(false);
+                  setPlaceholderHintRequested(false);
+                }} style={{ "--placeholder-hint-bottom-gap": `${placeholderHintBottomGap}px` } as CSSProperties}
+                  className="pointer-events-none max-w-[min(24rem,calc(100vw-2rem))] whitespace-normal break-words text-sm data-[side=bottom]:mt-[var(--placeholder-hint-bottom-gap)]">
+                  {resolvedPlaceholder}
+                </TooltipContent>
+              ) : null}
+            </Tooltip>
+          </TooltipProvider>
         </div>
         {inlineError ? (
           <div

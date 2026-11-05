@@ -147,3 +147,56 @@ test("idle voice and ready send remain distinct from the composer in both themes
   }
   await test.info().attach("action-contrast", { body: JSON.stringify(measurements, null, 2), contentType: "application/json" });
 });
+
+
+test("a long mobile placeholder remains available without shifting the composer", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, viewport: { width: 314, height: 844 }, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => localStorage.setItem("nanobot.locale", "fr"));
+    await page.goto("/browser/fixture.html?case=composer-action&composerVariant=thread");
+    await page.evaluate(() => document.fonts.ready);
+    const input = page.locator(".thread-composer-input textarea");
+    const action = page.locator(".composer-primary-action");
+    await expect(input).toHaveAttribute("placeholder", /compétences/);
+    const placeholder = (await input.getAttribute("placeholder"))!;
+    await expect(input).toHaveAttribute("aria-description", placeholder);
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+    const before = (await action.boundingBox())!;
+    const initialHeight = await input.evaluate(node => node.clientHeight);
+
+    await input.tap();
+    const hint = page.getByRole("tooltip");
+    await expect(hint).toHaveText(placeholder);
+    const hintSurface = page.locator('[data-radix-popper-content-wrapper] [data-side]').first();
+    const composer = page.locator(".thread-composer-form");
+    await expect.poll(async () => {
+      const [hintBox, composerBox] = await Promise.all([hintSurface.boundingBox(), composer.boundingBox()]);
+      return !!hintBox && !!composerBox && (hintBox.y + hintBox.height <= composerBox.y || hintBox.y >= composerBox.y + composerBox.height);
+    }).toBe(true);
+    expect(await action.boundingBox()).toEqual(before);
+
+    await input.fill("Bonjour");
+    await expect(hint).toHaveCount(0);
+    expect(await action.boundingBox()).toEqual(before);
+    await input.fill("Première ligne\nDeuxième ligne\nTroisième ligne");
+    await expect.poll(() => input.evaluate(node => node.clientHeight)).toBeGreaterThan(initialHeight);
+    await input.fill("");
+    await expect(hint).toHaveText(placeholder);
+    await expect.poll(() => input.evaluate(node => node.clientHeight)).toBe(initialHeight);
+    expect(await action.boundingBox()).toEqual(before);
+    await input.press("Escape");
+    await expect(hint).toHaveCount(0);
+
+    await page.locator(".thread-composer-footer button").first().focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(input).toBeFocused();
+    await expect(hint).toHaveText(placeholder);
+    const box = (await input.boundingBox())!;
+    await page.mouse.move(box.x + 5, box.y + 5);
+    await page.mouse.move(1, 800);
+    await expect(hint).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
