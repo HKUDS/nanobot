@@ -875,6 +875,12 @@
   /* A split needs 420px for the conversation plus 360px for the preview.
      Narrow workbench panes use the same contained overlay as a phone. */
   @container thread-preview-layout (min-width: 780px) {
+    /* A replacement owns the slot while the outgoing surface fades over it. */
+    .thread-preview-layout:has(> .file-preview-pane:not([data-closing])) > .file-preview-pane[data-closing] {
+      position: absolute;
+      width: var(--file-preview-width);
+      z-index: 30;
+    }
     .file-preview-pane {
       position: relative;
       z-index: auto;

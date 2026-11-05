@@ -1,18 +1,34 @@
-import { createContext, forwardRef, useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode } from "react";
+import { createContext, forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode } from "react";
+import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 interface SidebarPanelProps extends HTMLAttributes<HTMLElement> {
   header?: ReactNode;
   width: number;
   isClosing?: boolean;
+  open?: boolean;
   floating?: boolean;
   contentClassName?: string;
 }
 
 export const SidebarPanelActionsContext = createContext<HTMLElement | null>(null);
 
-/** Shared nonmodal side slot. Contents keep their final width while the slot opens. */
+/** Retain the same surface through exit, including an interrupted close. */
 export const SidebarPanel = forwardRef<HTMLElement, SidebarPanelProps>(function SidebarPanel({
+  open = true, isClosing, ...props
+}, ref) {
+  const [present, setPresent] = useState(open);
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    if (open) { setPresent(true); return; }
+    const timer = window.setTimeout(() => setPresent(false), reducedMotion ? 0 : 300);
+    return () => window.clearTimeout(timer);
+  }, [open, reducedMotion]);
+  return open || present ? <SidebarPanelContent {...props} ref={ref} isClosing={isClosing || !open} /> : null;
+});
+
+/** Shared nonmodal side slot. Contents keep their final width while the slot opens. */
+const SidebarPanelContent = forwardRef<HTMLElement, SidebarPanelProps>(function SidebarPanelContent({
   width, isClosing = false, floating = false, header, contentClassName, className, style, children, ...props
 }, forwardedRef) {
   const panel = useRef<HTMLElement | null>(null);
@@ -29,7 +45,7 @@ export const SidebarPanel = forwardRef<HTMLElement, SidebarPanelProps>(function 
     let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => setEntered(true)); });
     return () => cancelAnimationFrame(frame);
   }, []);
-  return <aside {...props} ref={setPanel}
+  return <aside {...props} ref={setPanel} data-closing={isClosing || undefined}
     style={{
       "--file-preview-width": `${width}px`,
       "--file-preview-slot-width": isClosing ? "0px" : !entered ? "var(--sidebar-enter-width, 0px)" : `${width}px`,

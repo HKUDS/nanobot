@@ -219,7 +219,7 @@ export function ComposerUsagePopover({
         <DialogTitle className="sr-only">{t("thread.composer.context.panelTitle")}</DialogTitle>
         {inspector}
       </DialogContent>
-    </Dialog> : open && createPortal(<SidebarPanel width={420} floating={!sidebarHost} ref={sidebarRef} id={panelId}
+    </Dialog> : createPortal(<SidebarPanel open={open} width={420} floating={!sidebarHost} ref={sidebarRef} id={panelId}
       aria-label={t("thread.composer.context.panelTitle")} data-testid="context-sidebar" onKeyDown={onPanelKeyDown}>
       {inspector}
     </SidebarPanel>, sidebarHost ?? document.body)}

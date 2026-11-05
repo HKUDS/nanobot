@@ -64,7 +64,13 @@ describe("Context sidebar", () => {
     expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
     expect(within(footer).getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "true");
     await user.click(within(footer).getByTestId("composer-context-usage"));
-    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary")).toBe(sidebar);
+    expect(sidebar.style.getPropertyValue("--file-preview-slot-width")).toBe("0px");
+    // Reopening during exit retains the graph instead of remounting it.
+    await user.click(within(footer).getByTestId("composer-context-usage"));
+    expect(screen.getByRole("complementary")).toBe(sidebar);
+    await user.click(within(footer).getByTestId("composer-context-usage"));
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
     view.unmount(); toolbar.remove(); footer.remove();
   });
 
