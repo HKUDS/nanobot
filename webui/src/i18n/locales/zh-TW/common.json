@@ -1923,7 +1923,7 @@
         "panelTitle": "上下文用量",
         "contextTitle": "上下文",
         "cacheHitRate": "快取命中率",
-        "tokenUsage": "{{used}} / {{limit}} tokens",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "生成耗時"
       },
       "queued": {

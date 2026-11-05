@@ -2129,7 +2129,7 @@
         "panelTitle": "Context usage",
         "contextTitle": "Context",
         "cacheHitRate": "Cache hit rate",
-        "tokenUsage": "{{used}} / {{limit}} tokens",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Generation time"
       },
       "queued": {

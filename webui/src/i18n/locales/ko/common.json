@@ -1923,7 +1923,7 @@
         "panelTitle": "컨텍스트 사용량",
         "contextTitle": "컨텍스트",
         "cacheHitRate": "캐시 적중률",
-        "tokenUsage": "{{used}} / {{limit}} 토큰",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "생성 시간"
       },
       "queued": {

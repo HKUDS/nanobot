@@ -1923,7 +1923,7 @@
         "panelTitle": "Utilisation du contexte",
         "contextTitle": "Contexte",
         "cacheHitRate": "Taux de réussite du cache",
-        "tokenUsage": "{{used}} / {{limit}} tokens",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Temps de génération"
       },
       "queued": {

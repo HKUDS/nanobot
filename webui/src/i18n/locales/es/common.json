@@ -1924,7 +1924,7 @@
         "panelTitle": "Uso del contexto",
         "contextTitle": "Contexto",
         "cacheHitRate": "Tasa de aciertos de caché",
-        "tokenUsage": "{{used}} / {{limit}} tokens",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Tiempo de generación"
       },
       "queued": {

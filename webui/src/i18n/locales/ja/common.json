@@ -1923,7 +1923,7 @@
         "panelTitle": "コンテキスト使用量",
         "contextTitle": "コンテキスト",
         "cacheHitRate": "キャッシュヒット率",
-        "tokenUsage": "{{used}} / {{limit}} トークン",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "生成時間"
       },
       "queued": {

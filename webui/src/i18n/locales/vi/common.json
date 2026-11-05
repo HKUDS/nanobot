@@ -1923,7 +1923,7 @@
         "panelTitle": "Mức sử dụng ngữ cảnh",
         "contextTitle": "Ngữ cảnh",
         "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",
-        "tokenUsage": "{{used}} / {{limit}} token",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Thời gian tạo"
       },
       "queued": {

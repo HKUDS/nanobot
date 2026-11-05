@@ -1923,7 +1923,7 @@
         "panelTitle": "Penggunaan konteks",
         "contextTitle": "Konteks",
         "cacheHitRate": "Rasio cache hit",
-        "tokenUsage": "{{used}} / {{limit}} token",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Waktu pembuatan"
       },
       "queued": {
