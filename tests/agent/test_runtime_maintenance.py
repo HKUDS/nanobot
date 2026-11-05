@@ -103,22 +103,25 @@ async def test_direct_turn_including_final_notification_stays_busy(agent, cancel
     agent.runtime_event_publisher.run_status_changed = notify
     task = asyncio.create_task(agent.process_direct("work"))
     try:
+        # Guard each transition, not the total duration of startup and storage.
         async with asyncio.timeout(3):
             await entered.wait()
-            with pytest.raises(RuntimeBusyError):
-                with agent.maintenance():
-                    pytest.fail("active direct turn was missed")
-            assert not agent.bus.admission.paused
-            assert not task.done()
-            if cancel:
-                task.cancel()
-            else:
-                release.set()
+        with pytest.raises(RuntimeBusyError):
+            with agent.maintenance():
+                pytest.fail("active direct turn was missed")
+        assert not agent.bus.admission.paused
+        assert not task.done()
+        if cancel:
+            task.cancel()
+        else:
+            release.set()
+        async with asyncio.timeout(3):
             await notifying.wait()
-            with pytest.raises(RuntimeBusyError):
-                with agent.maintenance():
-                    pytest.fail("final notification was missed")
-            notified.set()
+        with pytest.raises(RuntimeBusyError):
+            with agent.maintenance():
+                pytest.fail("final notification was missed")
+        notified.set()
+        async with asyncio.timeout(3):
             if cancel:
                 with pytest.raises(asyncio.CancelledError):
                     await task
