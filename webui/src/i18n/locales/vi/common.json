@@ -1922,7 +1922,8 @@
         "detailsLabel": "Mở mức sử dụng ngữ cảnh",
         "panelTitle": "Mức sử dụng ngữ cảnh",
         "contextTitle": "Ngữ cảnh",
-        "cacheHitRate": "Tỷ lệ hit KV cache",
+        "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",
+        "tokenUsage": "{{used}} / {{limit}} token",
         "duration": "Thời gian tạo"
       },
       "queued": {

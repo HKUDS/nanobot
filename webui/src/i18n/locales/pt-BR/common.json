@@ -1936,7 +1936,8 @@
         "detailsLabel": "Abrir uso do contexto",
         "panelTitle": "Uso do contexto",
         "contextTitle": "Contexto",
-        "cacheHitRate": "Taxa de acertos do cache KV",
+        "cacheHitRate": "Taxa de acertos de cache",
+        "tokenUsage": "{{used}} / {{limit}} tokens",
         "duration": "Tempo de geração"
       },
       "queued": {

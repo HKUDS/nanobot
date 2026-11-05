@@ -55,3 +55,16 @@ it("stops playback at compaction and shows the new baseline", async () => {
   expect(screen.getByRole("button", { name: "system.md" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
 });
+
+
+it("shows token usage from the displayed snapshot, including estimates without cache data", () => {
+  const { rerender } = render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
+  const meter = screen.getByRole("progressbar").parentElement!.parentElement!;
+  fireEvent.pointerEnter(meter);
+  expect(screen.getByText("2,000 / 10,000 tokens")).toBeVisible();
+  expect(screen.getByText("40%")).toBeVisible();
+  rerender(<ContextInspector context={null} rounds={[]} snapshots={[{
+    id: "compacted", estimatedTokens: 1500, contextWindowTokens: 10000, graph: { nodes: [], edges: [] },
+  }]} />);
+  expect(screen.getByText("≈1,500 / 10,000 tokens")).toBeVisible();
+});

@@ -1922,7 +1922,8 @@
         "detailsLabel": "컨텍스트 사용량 열기",
         "panelTitle": "컨텍스트 사용량",
         "contextTitle": "컨텍스트",
-        "cacheHitRate": "KV 캐시 적중률",
+        "cacheHitRate": "캐시 적중률",
+        "tokenUsage": "{{used}} / {{limit}} 토큰",
         "duration": "생성 시간"
       },
       "queued": {

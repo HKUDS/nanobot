@@ -2128,7 +2128,8 @@
         "detailsLabel": "Open context usage",
         "panelTitle": "Context usage",
         "contextTitle": "Context",
-        "cacheHitRate": "KV cache hit rate",
+        "cacheHitRate": "Cache hit rate",
+        "tokenUsage": "{{used}} / {{limit}} tokens",
         "duration": "Generation time"
       },
       "queued": {

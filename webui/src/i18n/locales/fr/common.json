@@ -1922,7 +1922,8 @@
         "detailsLabel": "Ouvrir l’utilisation du contexte",
         "panelTitle": "Utilisation du contexte",
         "contextTitle": "Contexte",
-        "cacheHitRate": "Taux de succès du cache KV",
+        "cacheHitRate": "Taux de réussite du cache",
+        "tokenUsage": "{{used}} / {{limit}} tokens",
         "duration": "Temps de génération"
       },
       "queued": {

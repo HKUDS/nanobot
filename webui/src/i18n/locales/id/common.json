@@ -1922,7 +1922,8 @@
         "detailsLabel": "Buka penggunaan konteks",
         "panelTitle": "Penggunaan konteks",
         "contextTitle": "Konteks",
-        "cacheHitRate": "Rasio hit KV cache",
+        "cacheHitRate": "Rasio cache hit",
+        "tokenUsage": "{{used}} / {{limit}} token",
         "duration": "Waktu pembuatan"
       },
       "queued": {

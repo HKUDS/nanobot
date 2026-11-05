@@ -1922,7 +1922,8 @@
         "detailsLabel": "コンテキスト使用量を開く",
         "panelTitle": "コンテキスト使用量",
         "contextTitle": "コンテキスト",
-        "cacheHitRate": "KV キャッシュヒット率",
+        "cacheHitRate": "キャッシュヒット率",
+        "tokenUsage": "{{used}} / {{limit}} トークン",
         "duration": "生成時間"
       },
       "queued": {
