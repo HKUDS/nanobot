@@ -503,7 +503,7 @@ export function MessageBubble({
                 "text-left text-reading whitespace-pre-wrap [overflow-wrap:anywhere]",
                 temporary
                   ? "border border-dashed border-muted-foreground/40 bg-transparent"
-                  : "bg-secondary/70",
+                  : "user-message-surface bg-secondary/70",
               )}
             >
               {messageText}
