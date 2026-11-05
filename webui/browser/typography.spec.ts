@@ -38,11 +38,12 @@ for (const narrow of [false, true]) {
     await expect(tables).toHaveCount(2);
     await expect(formulaTable.locator(".katex")).toHaveCount(7);
     await page.evaluate(() => document.fonts.ready);
+    expect(await page.evaluate(() => Array.from(document.fonts).some((font) => font.family === "Open Sans" && font.status === "loaded"))).toBe(true);
     const observations = [];
     for (const [size, label, bodySize] of [
-      ["small", "阅读字号：小", narrow ? 15 : 16],
-      ["standard", "阅读字号：标准", narrow ? 16 : 18],
-      ["large", "阅读字号：大", narrow ? 18 : 20],
+      ["small", "阅读字号：小", 15],
+      ["standard", "阅读字号：标准", 16],
+      ["large", "阅读字号：大", 18],
     ] as const) {
       await group.getByRole("radio", { name: label, exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("data-reading-text-size", size);
@@ -50,13 +51,14 @@ for (const narrow of [false, true]) {
       await expect(paragraph).toHaveCSS("font-size", `${bodySize}px`);
       const body = await metrics(paragraph);
       expect(body.size).toBe(bodySize);
-      expect(body.line).toBeCloseTo(bodySize * 1.8);
+      expect(body.line).toBeCloseTo(bodySize * 1.6);
       expect(body.weight).toBe("400");
+      expect(body.family).toContain("Open Sans");
       expect((await metrics(page.locator("[data-user-text-bubble] p"))).size).toBe(bodySize);
       for (const selector of ["blockquote", "ol > li", ".task-list-item"]) {
         expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBe(bodySize);
       }
-      for (const [selector, ratio] of [["h1", 1.5], ["h2", 1.25], ["h3", 1.125], ["h4", 1]] as const) {
+      for (const [selector, ratio] of [["h1", 2], ["h2", 1.5], ["h3", 1.25], ["h4", 1.125]] as const) {
         const heading = await metrics(page.locator(`.markdown-content ${selector}`));
         expect(heading.size).toBeCloseTo(bodySize * ratio);
         expect(heading.weight).toBe("600");
@@ -128,7 +130,7 @@ test("keyboard, tooltip, persistence and unchanged preferences", async ({ page }
   const large = page.getByRole("radio", { name: "Large reading text", exact: true });
   await expect(large).toBeFocused();
   await expect(large).toBeChecked();
-  await expect(page.locator(".markdown-content p").first()).toHaveCSS("line-height", `${20 * 1.625}px`);
+  await expect(page.locator(".markdown-content p").first()).toHaveCSS("line-height", `${18 * 1.6}px`);
   await page.reload();
   await expect(page.getByRole("radio", { name: "Large reading text", exact: true })).toBeChecked();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nanobot-webui.settings-preferences")!))).toMatchObject({

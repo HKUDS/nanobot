@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Open Sans";
+  src: url("./assets/fonts/open-sans-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Open Sans";
+  src: url("./assets/fonts/open-sans-variable-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 300 800;
+  font-display: swap;
+}
+
 .thread-composer-stack {
   --composer-content-width: 49.5rem;
 }
@@ -134,32 +150,22 @@
   }
 
   :root, .reading-typography {
-    --reading-size-wide: 18px;
-    --reading-size-narrow: 16px;
-    --text-reading-size: var(--reading-size-wide);
+    --text-reading-size: 16px;
+    --reading-line-height: 1.6;
     --text-code-size: calc(var(--text-reading-size) * 0.875);
     --text-code-dense-size: calc(var(--text-reading-size) * 0.75);
   }
 
   :root[data-reading-text-size="small"], .reading-typography[data-reading-text-size="small"] {
-    --reading-size-wide: 16px;
-    --reading-size-narrow: 15px;
+    --text-reading-size: 15px;
   }
 
   :root[data-reading-text-size="large"], .reading-typography[data-reading-text-size="large"] {
-    --reading-size-wide: 20px;
-    --reading-size-narrow: 18px;
+    --text-reading-size: 18px;
   }
 
   :root[data-reading-text-size="custom"], .reading-typography[data-reading-text-size="custom"] {
-    --reading-size-wide: var(--custom-reading-size, 18px);
-    --reading-size-narrow: var(--custom-reading-size, 18px);
-  }
-
-  @media (max-width: 639px) {
-    :root, .reading-typography {
-      --text-reading-size: var(--reading-size-narrow);
-    }
+    --text-reading-size: var(--custom-reading-size, 18px);
   }
 
   .dark {
@@ -237,6 +243,13 @@
     @apply bg-background text-foreground font-sans antialiased;
     overflow: hidden;
     text-autospace: normal;
+  }
+
+  .text-reading,
+  .text-reading-small,
+  .text-composer,
+  .markdown-content {
+    font-family: "Open Sans", sans-serif;
   }
 
   /* Keep source text and editable values visually literal. */
@@ -480,25 +493,28 @@
     @apply mb-0;
   }
 
-  /* Override Tailwind Typography's built-in colors with our design tokens
-     so assistant messages use the same --foreground as user messages. */
   .markdown-content {
-    --tw-prose-body: hsl(var(--foreground));
-    --tw-prose-headings: hsl(var(--foreground));
-    --tw-prose-bold: hsl(var(--foreground));
-    --tw-prose-lead: hsl(var(--foreground));
+    --tw-prose-body: hsl(var(--foreground) / 0.9);
+    --tw-prose-headings: hsl(var(--foreground) / 0.9);
+    --tw-prose-bold: hsl(var(--foreground) / 0.9);
+    --tw-prose-lead: hsl(var(--foreground) / 0.9);
     transition: var(--theme-ink-transition, color 0s);
     @apply text-reading;
   }
 
   .markdown-content :is(h1, h2, h3, h4, h5, h6) {
+    margin-block: 1.25em 0.5em;
     font-weight: 600;
-    line-height: 1.4;
+    line-height: 1.3;
   }
-  .markdown-content h1 { font-size: 1.5em; }
-  .markdown-content h2 { font-size: 1.25em; }
-  .markdown-content h3 { font-size: 1.125em; }
-  .markdown-content :is(h4, h5, h6) { font-size: 1em; }
+  .markdown-content h1 { font-size: 2em; }
+  .markdown-content h2 { font-size: 1.5em; }
+  .markdown-content h3 { font-size: 1.25em; }
+  .markdown-content h4 { font-size: 1.125em; }
+  .markdown-content :is(h5, h6) { font-size: 1em; }
+  .markdown-content :is(p, ul, ol) { margin-block: 0.8em; }
+  .markdown-content li { margin-block: 0.25em; }
+  .markdown-content :is(li > ul, li > ol) { margin-block: 0; }
   .markdown-content strong { font-weight: 600; }
   .markdown-content :is(th, td) {
     font-size: inherit;
@@ -525,17 +541,6 @@
 
   .markdown-content .task-list-item {
     @apply list-none pl-0;
-  }
-
-  /* Set the default before locale overrides: html also matches :lang(). */
-  :root {
-    --cjk-line-height: 1.625;
-  }
-
-  :lang(zh),
-  :lang(ja),
-  :lang(ko) {
-    --cjk-line-height: 1.8;
   }
 
   .markdown-content :is(h1, h2, h3, h4, h5, h6),
@@ -1006,11 +1011,11 @@
 }
 
 [data-user-text-bubble] > .message-block-menu-trigger {
-  top: calc((1rem + var(--text-reading-size) * var(--cjk-line-height) - var(--message-block-control-size)) / 2);
+  top: calc((1rem + var(--text-reading-size) * var(--reading-line-height) - var(--message-block-control-size)) / 2);
 }
 
 [data-user-text-bubble] > .message-block-hover-time {
-  top: calc((1rem + var(--text-reading-size) * var(--cjk-line-height) + var(--message-block-control-size)) / 2);
+  top: calc((1rem + var(--text-reading-size) * var(--reading-line-height) + var(--message-block-control-size)) / 2);
 }
 
 [data-context-block-active] .message-block-menu-trigger,
