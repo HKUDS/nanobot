@@ -543,6 +543,25 @@ export function ThreadShell({
   const visiblePreview = filePreviewClosing ? closingPreview.state : previewState;
   const activePreview = visiblePreview.tabs.find((tab) => tab.id === visiblePreview.activeId);
   const previewOpen = Boolean(activePreview);
+  const sidebarOpen = previewOpen || contextSidebarOpen;
+  const [localComposerHost, setLocalComposerHost] = useState<HTMLDivElement | null>(null);
+  const [composerMount] = useState(() => document.createElement("div"));
+  const inlineComposer = composerPortalTarget === undefined || (sidebarOpen && composerActive);
+  const composerDestination = inlineComposer ? localComposerHost : composerPortalTarget;
+  useLayoutEffect(() => {
+    if (!composerDestination) { composerMount.remove(); return; }
+    if (composerMount.parentElement === composerDestination) return;
+    // Move the host, not the React subtree: drafts, graph replay and exit presence survive.
+    const focused = document.activeElement instanceof HTMLElement && composerMount.contains(document.activeElement)
+      ? document.activeElement : null;
+    const selection = document.getSelection();
+    const range = focused && selection?.rangeCount && composerMount.contains(selection.getRangeAt(0).commonAncestorContainer)
+      ? selection.getRangeAt(0).cloneRange() : null;
+    composerDestination.appendChild(composerMount);
+    focused?.focus({ preventScroll: true });
+    if (range && selection) { selection.removeAllRanges(); selection.addRange(range); }
+  }, [composerDestination, composerMount]);
+  useLayoutEffect(() => () => composerMount.remove(), [composerMount]);
   const [filePreviewMaxWidth, setFilePreviewMaxWidth] = useState(FILE_PREVIEW_MAX_WIDTH);
   const filePreviewWidth = clampFilePreviewWidth(previewState.width, filePreviewMaxWidth);
   const draftKey = session?.key ?? (temporaryChatEnabled ? "new:temporary" : "new:chat");
@@ -1482,7 +1501,7 @@ export function ThreadShell({
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
-    <section ref={setSidebarHost} style={{ "--sidebar-enter-width": `${sidebarEnterWidth}px`, "--sidebar-enter-mobile-width": sidebarEnterWidth ? "100%" : "0px" } as CSSProperties} data-preview-open={previewOpen || contextSidebarOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
+    <section ref={setSidebarHost} style={{ "--sidebar-enter-width": `${sidebarEnterWidth}px`, "--sidebar-enter-mobile-width": sidebarEnterWidth ? "100%" : "0px" } as CSSProperties} data-preview-open={sidebarOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
       <div ref={setConversationElement} className={cn(
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
         headerPortalTarget === undefined && !hideHeader && "thread-workspace",
@@ -1518,7 +1537,7 @@ export function ThreadShell({
             retryStatus={retryStatus}
             emptyState={emptyState}
             initialLoading={initialHistoryLoading}
-            composer={composerPortalTarget === undefined || (previewOpen && composerActive) ? composer : null}
+            composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
@@ -1545,7 +1564,7 @@ export function ThreadShell({
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
         : null}
-      {composerPortalTarget && !previewOpen ? createPortal(
+      {createPortal(
         <div
           hidden={!composerActive}
           aria-hidden={!composerActive}
@@ -1554,8 +1573,8 @@ export function ThreadShell({
         >
           {composer}
         </div>,
-        composerPortalTarget,
-      ) : null}
+        composerMount,
+      )}
       {activePreview && previewSessionKey ? (
         <FileActionsProvider key={previewSessionKey} value={fileActions}>
         <PreviewPane

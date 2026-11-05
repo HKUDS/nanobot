@@ -1038,7 +1038,10 @@ describe("ThreadShell", () => {
             events: [{ ...envelope, event: "user_message", text: "Waiting for answer", starts_turn: true, turn_seq: 0 }] })
         : { ok: false, status: 404, json: async () => ({}) },
     )));
-    render(wrap(client, <ThreadShell
+    const footer = document.createElement("div");
+    document.body.append(footer);
+    const view = render(wrap(client, <ThreadShell
+      composerPortalTarget={footer}
       session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
       settingsSnapshot={modelSettings("test-model", "deepseek")}
     />));
@@ -1058,11 +1061,29 @@ describe("ThreadShell", () => {
       context_graph: { nodes: [{ path: "/second.md", name: "second.md", state: "loaded", tokens: 60 }], edges: [] },
     }));
     expect(trigger).toHaveAccessibleName("Context 20%. Open context usage");
+    const input = screen.getByRole("textbox");
+    expect(footer).toContainElement(input);
+    fireEvent.change(input, { target: { value: "Preserve this draft" } });
+    const host = document.querySelector(".thread-preview-layout")!;
+    Object.defineProperty(host, "clientWidth", { value: 1000 });
+    fireEvent(window, new Event("resize"));
     fireEvent.click(trigger);
+    expect(host.querySelector(".thread-conversation")).toContainElement(input);
+    expect(footer).not.toContainElement(input);
+    expect(input).toHaveValue("Preserve this draft");
     expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
     expect(await screen.findByRole("button", { name: "second.md" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play context history" })).toBeEnabled();
     expect(screen.getByText("Waiting for answer")).toBeInTheDocument();
+    const sidebar = screen.getByTestId("context-sidebar");
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
+    expect(sidebar).toHaveAttribute("data-closing");
+    expect(footer).toContainElement(input);
+    expect(input).toHaveValue("Preserve this draft");
+    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+    view.unmount();
+    footer.remove();
   });
 
   it.each([false, true])("restores context after compaction only with newer usage (%s)", async (newReply) => {
