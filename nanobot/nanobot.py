@@ -287,10 +287,11 @@ class Nanobot:
                 await emitter.text_completed(resuming=False, force=False)
                 result = result_from_response(response, capture)
                 await emitter.emit(StreamEvent(
-                    type=STREAM_EVENT_RUN_COMPLETED,
+                    type=STREAM_EVENT_RUN_FAILED if result.stop_reason == "error" else STREAM_EVENT_RUN_COMPLETED,
                     content=result.content,
                     result=result,
                     usage=result.usage,
+                    error=result.error,
                     metadata=dict(result.metadata),
                 ))
                 return result

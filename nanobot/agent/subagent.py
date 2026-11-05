@@ -836,6 +836,7 @@ class SubagentManager:
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=hook,
+                streaming_output=True,
                 max_iterations_message="Task stopped at its iteration limit before producing a final response.",
                 finalize_on_max_iterations=False,
                 error_message=None,

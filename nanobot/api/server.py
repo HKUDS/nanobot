@@ -56,15 +56,21 @@ _PREPARE_AGENT_KEY = web.AppKey[Callable[[], Awaitable[None]] | None]("prepare_a
 _REQUEST_ID_KEY = web.RequestKey[str]("request_id")
 
 
-class _UsageCaptureHook(AgentHook):
-    """Capture the aggregate usage owned by one API run."""
+class _RunCaptureHook(AgentHook):
+    """Capture the outcome and aggregate usage owned by one API run."""
 
     def __init__(self) -> None:
         super().__init__()
         self.usage: LLMUsage | None = None
+        self.stop_reason: str | None = None
+        self.error: str | None = None
+        self.final_content: str | None = None
 
     async def after_run(self, context: AgentRunHookContext) -> None:
         self.usage = context.usage
+        self.stop_reason = context.stop_reason
+        self.error = context.error
+        self.final_content = context.final_content
 
 
 async def _prepare_agent(app: web.Application) -> None:
@@ -73,11 +79,12 @@ async def _prepare_agent(app: web.Application) -> None:
         await prepare()
 
 
+def _error_payload(status: int, message: str, err_type: str) -> dict[str, dict[str, str | int]]:
+    return {"error": {"message": message, "type": err_type, "code": status}}
+
+
 def _error_json(status: int, message: str, err_type: str = "invalid_request_error") -> web.Response:
-    return web.json_response(
-        {"error": {"message": message, "type": err_type, "code": status}},
-        status=status,
-    )
+    return web.json_response(_error_payload(status, message, err_type), status=status)
 
 
 def _chat_completion_response(
@@ -147,6 +154,10 @@ def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None 
         ],
     }
     return f"data: {_json.dumps(payload)}\n\n".encode()
+
+
+def _sse_model_error(message: str) -> bytes:
+    return f"data: {_json.dumps(_error_payload(502, message, 'server_error'))}\n\n".encode()
 
 
 _SSE_DONE = b"data: [DONE]\n\n"
@@ -300,6 +311,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         "API request session_key={} media={} text={} stream={}",
         session_key, len(media_paths), text[:80], stream,
     )
+    run_capture = _RunCaptureHook()
     if stream:
         resp = web.StreamResponse()
         resp.content_type = "text/event-stream"
@@ -338,8 +350,11 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                             chat_id=chat_id,
                             on_stream=_on_stream,
                             on_stream_end=_on_stream_end,
+                            hooks=[run_capture],
                         )
-                    if not emitted_content:
+                    if run_capture.stop_reason == "error":
+                        stream_failed = True
+                    elif not emitted_content:
                         response_text = _response_text(response)
                         if response_text.strip():
                             await queue.put(response_text)
@@ -362,12 +377,13 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-        if not stream_failed:
+        if run_capture.stop_reason == "error":
+            await resp.write(_sse_model_error(run_capture.error or "Model provider request failed."))
+        elif not stream_failed:
             await resp.write(_sse_chunk("", model_name, chunk_id, finish_reason="stop"))
             await resp.write(_SSE_DONE)
         return resp
 
-    usage_capture = _UsageCaptureHook()
     try:
         async with session_lock:
             try:
@@ -379,7 +395,12 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
                         session_key=session_key,
                         channel="api",
                         chat_id=chat_id,
-                        hooks=[usage_capture],
+                        hooks=[run_capture],
+                    )
+                if run_capture.stop_reason == "error":
+                    return _error_json(
+                        502, run_capture.final_content or run_capture.error or "Model provider request failed.",
+                        err_type="server_error",
                     )
                 response_text = _response_text(response)
                 if not response_text or not response_text.strip():
@@ -396,7 +417,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response | web.St
         return _error_json(500, "Internal server error", err_type="server_error")
 
     return web.json_response(
-        _chat_completion_response(response_text, model_name, usage_capture.usage)
+        _chat_completion_response(response_text, model_name, run_capture.usage)
     )
 
 

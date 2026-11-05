@@ -505,7 +505,7 @@ SDK runs with different session keys may overlap, including runs with per-run `m
 | `type` | `StreamEventType` | Event type, such as `text.delta` or `run.completed`. |
 | `delta` | `str` | Incremental text or reasoning chunk. |
 | `content` | `str` | Completed text segment or final content. |
-| `result` | `RunResult \| None` | Present on `run.completed`. |
+| `result` | `RunResult \| None` | Present on `run.completed` and on `run.failed` for structured failures. |
 | `name` | `str \| None` | Tool name for tool events. |
 | `tool_call_id` | `str \| None` | Provider tool call id when available. |
 | `arguments` | `dict \| None` | Tool arguments when available. |

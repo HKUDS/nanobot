@@ -53,6 +53,33 @@ class TestMessageToolSuppressLogic:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_model_error_is_delivered_after_message_to_same_target(self, tmp_path: Path) -> None:
+        loop = _make_loop(tmp_path)
+        tool_call = ToolCallRequest(
+            id="call1", name="message",
+            arguments={"content": "Starting", "channel": "telegram", "chat_id": "chat123"},
+        )
+        diagnostic = "Error: DeepSeek generation was interrupted (aborted)."
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+            LLMResponse(content="", tool_calls=[tool_call]),
+            LLMResponse(content=diagnostic, finish_reason="error", error_kind="generation_interrupted"),
+        ])
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        sent: list[OutboundMessage] = []
+        mt = loop.tools.get("message")
+        assert isinstance(mt, MessageTool)
+        mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
+
+        msg = InboundMessage(channel="telegram", sender_id="user1", chat_id="chat123", content="Start")
+        result = await loop._process_message(msg)
+
+        assert [message.content for message in sent] == ["Starting"]
+        assert result is not None
+        assert result.channel == "telegram" and result.chat_id == "chat123"
+        assert result.content == diagnostic
+
+    @pytest.mark.asyncio
     async def test_not_suppress_when_sent_to_different_target(self, tmp_path: Path) -> None:
         loop = _make_loop(tmp_path)
         tool_call = ToolCallRequest(

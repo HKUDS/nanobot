@@ -1352,6 +1352,7 @@ class AgentLoop:
                 transcript_input=transcript_input,
                 transcript_builder=transcript_builder,
                 hook=hook,
+                streaming_output=streaming,
                 concurrent_tools=True,
                 # Temporary turns use the governor's bounded in-memory results;
                 # never create durable spill files, even before discard/cancellation.
@@ -2353,6 +2354,7 @@ class AgentLoop:
         if (
             ctx.kind is TurnKind.USER
             and (ctx.delivery.route.channel, ctx.delivery.route.chat_id) in message_sends
+            and result.stop_reason != "error"
             and (not result.had_injections or result.stop_reason == "empty_final_response")
         ):
             ctx.suppress_response = True

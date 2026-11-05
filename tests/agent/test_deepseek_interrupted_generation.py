@@ -55,8 +55,8 @@ class _Peer:
             "type": "function",
             "function": {"name": "read_file", "arguments": '{"path":"example.txt"}'},
         }
-        # Include an unfinished call with the interrupted answer: it must never execute.
-        tool_calls = [tool] if first_tool or self.first_tool and reason != "stop" else []
+        # Include an unfinished call when tools are available: it must never execute.
+        tool_calls = [tool] if first_tool or self.first_tool and reason != "stop" and body.get("tools") else []
         usage = {"prompt_tokens": 4, "completion_tokens": 3, "total_tokens": 7}
         if not body.get("stream"):
             return httpx.Response(200, json={
@@ -205,6 +205,38 @@ async def test_runner_without_streaming_does_not_present_partial_as_error_or_ans
     assert result.messages[-1]["content"] == _PERSISTED_MODEL_ERROR_PLACEHOLDER
 
 
+@pytest.mark.parametrize("reason", ["insufficient_system_resource", "aborted"])
+async def test_runner_reports_interruption_during_budget_finalization(make_provider, reason):
+    peer = _Peer(reason, first_tool=True)
+    provider = make_provider(peer)
+    tools = MagicMock()
+    tools.get_definitions.return_value = [{
+        "type": "function", "function": {"name": "read_file", "parameters": {
+            "type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"],
+        }},
+    }]
+    tools.execute = AsyncMock(return_value="read complete")
+    end = AsyncMock()
+
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=[{"role": "user", "content": "question"}], tools=tools,
+        model="deepseek-flash", max_iterations=1, max_tool_result_chars=1000,
+        hook=AgentProgressHook(output_events(on_stream_end=end), streaming=True),
+    ))
+
+    assert len(peer.requests) == 2
+    assert not peer.requests[-1][1].get("tools")
+    tools.execute.assert_awaited_once_with("read_file", {"path": "example.txt"})
+    assert result.stop_reason == "error"
+    assert result.error == result.final_content
+    assert result.error and reason in result.error and _PARTIAL not in result.error
+    assert result.messages[-1]["content"] == _PERSISTED_MODEL_ERROR_PLACEHOLDER
+    assert result.usage is not None
+    assert (result.usage.input_tokens, result.usage.output_tokens) == (8, 6)
+    assert [(usage.input_tokens, usage.output_tokens) for usage in result.round_usages] == [(4, 3), (4, 3)]
+    assert end.await_args_list[-1].kwargs == {"resuming": False}
+
+
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.parametrize("spec", ["deepseek", "openai"])
 async def test_normal_stop_succeeds_for_deepseek_and_other_provider(make_provider, streaming, spec):
@@ -284,7 +316,10 @@ async def test_default_deepseek_responses_path_remains_unchanged(make_provider, 
     assert result.provider_state is not None
 
 
-async def test_chat_fallback_interruption_preserves_prior_responses_state_and_tool_result(make_provider):
+@pytest.mark.parametrize("max_iterations", [1, 2])
+async def test_chat_fallback_interruption_preserves_prior_responses_state_and_tool_result(
+    make_provider, max_iterations,
+):
     requests = []
     chat = _Peer("aborted")
     tool_item = {
@@ -324,15 +359,19 @@ async def test_chat_fallback_interruption_preserves_prior_responses_state_and_to
     show = AsyncMock()
     result = await AgentRunner().run(make_run_spec(
         provider, initial_messages=[{"role": "user", "content": "question"}], tools=tools,
-        model="deepseek-flash", max_iterations=2, max_tool_result_chars=1000,
+        model="deepseek-flash", max_iterations=max_iterations, max_tool_result_chars=1000,
         hook=AgentProgressHook(output_events(on_stream=show), streaming=True),
     ))
 
     assert [path for path, _ in requests] == ["/responses", "/responses", "/chat/completions"]
     assert result.stop_reason == "error"
-    assert result.messages[-1]["_interrupted"] is True
     assert result.provider_state is not None
-    show.assert_awaited_once_with(_PARTIAL)
+    if max_iterations == 1:
+        assert result.messages[-1]["content"] == _PERSISTED_MODEL_ERROR_PLACEHOLDER
+        show.assert_not_awaited()
+    else:
+        assert result.messages[-1]["_interrupted"] is True
+        show.assert_awaited_once_with(_PARTIAL)
     tools.execute.assert_awaited_once_with("read_file", {"path": "example.txt"})
 
     followup = {"role": "user", "content": "explain that"}
@@ -351,7 +390,9 @@ async def test_chat_fallback_interruption_preserves_prior_responses_state_and_to
     }]
     assert replay[-2:] == [{
         "type": "message", "role": "assistant", "status": "completed",
-        "content": [{"type": "output_text", "text": _PARTIAL}],
+        "content": [{"type": "output_text", "text": (
+            _PERSISTED_MODEL_ERROR_PLACEHOLDER if max_iterations == 1 else _PARTIAL
+        )}],
     }, {
         "role": "user", "content": [{"type": "input_text", "text": "explain that"}],
     }]

@@ -108,6 +108,8 @@ class AgentRunSpec:
     transcript_input: TranscriptInput | None = None
     transcript_builder: TranscriptBuilder | None = None
     hook: AgentHook | None = None
+    # Observers can request deltas without delivering them to the caller.
+    streaming_output: bool | None = None
     error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
@@ -417,6 +419,16 @@ class AgentRunner:
             events=spec.events,
         )
 
+        def error_content(diagnostic: str) -> str:
+            streaming_output = (
+                spec.streaming_output if spec.streaming_output is not None else hook.wants_streaming()
+            )
+            if length_recovery_parts and not streaming_output:
+                prefix = "".join(length_recovery_parts).rstrip()
+                if prefix:
+                    return f"{prefix}\n\n{diagnostic.lstrip()}"
+            return diagnostic
+
         async def end_length_segment(*, interrupted: bool) -> None:
             nonlocal pending_length_segment
             if pending_length_segment is None:
@@ -465,7 +477,7 @@ class AgentRunner:
                 request_state.compaction.request_messages, messages,
             )
             request_state.recent_round_usages.append(None)
-            response, raw_usage = await self._request_model(
+            response, raw_usage, response_streamed = await self._request_model(
                 spec,
                 request_messages,
                 hook,
@@ -656,9 +668,15 @@ class AgentRunner:
                 context.tool_calls = list(response.tool_calls)
                 original_content = response.content
                 clean = hook.finalize_content(context, response.content)
+                response_streamed = False
 
             if response.finish_reason == "length":
                 if len(length_recovery_parts) < _MAX_LENGTH_RECOVERIES:
+                    if hook.wants_streaming() and not response_streamed and not is_blank_text(clean):
+                        await hook.on_stream(
+                            context, _restore_outer_whitespace(clean or "", original_content),
+                        )
+                        context.streamed_content = True
                     length_recovery_parts.append(
                         _restore_outer_whitespace(clean or "", original_content)
                     )
@@ -690,7 +708,7 @@ class AgentRunner:
             if (
                 length_recovery_parts
                 and hook.wants_streaming()
-                and not context.streamed_content
+                and not response_streamed
                 and response.finish_reason != "error"
                 and not is_blank_text(clean)
             ):
@@ -785,12 +803,9 @@ class AgentRunner:
                 continue
 
             if response.finish_reason == "error":
-                if LLMProvider.is_arrearage_response(response):
-                    final_content = _ARREARAGE_ERROR_MESSAGE
-                else:
-                    final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
+                error = self._model_error_content(response, clean, spec.error_message)
+                final_content = error_content(error)
                 stop_reason = "error"
-                error = final_content
                 self._append_model_error_placeholder(messages)
                 context.final_content = final_content
                 context.error = error
@@ -838,9 +853,9 @@ class AgentRunner:
             # Once a goal allowed tool work beyond the ordinary budget, its
             # closure deserves an answer, not a claim that work is unfinished.
             goal_overrun = iteration + 1 > spec.max_iterations
-            terminal_content = None
+            terminal_response = None
             if spec.finalize_on_max_iterations:
-                terminal_content, usage = await self._try_finalize_after_max_iterations(
+                terminal_response, usage = await self._try_finalize_after_max_iterations(
                     spec,
                     hook,
                     messages,
@@ -849,26 +864,47 @@ class AgentRunner:
                     request_state=request_state,
                     round_usages=round_usages,
                 )
-            if terminal_content is not None and goal_overrun:
-                stop_reason = "completed"
-                pending_stream_content = terminal_content
-            if terminal_content is None:
-                if goal_overrun and spec.finalize_on_max_iterations:
-                    terminal_content = EMPTY_FINAL_RESPONSE_MESSAGE
-                    stop_reason = "empty_final_response"
-                    error = terminal_content
-                    pending_stream_content = terminal_content
-                else:
-                    terminal_content = self._max_iterations_fallback(spec)
-            if length_recovery_parts:
-                terminal_tail = f"\n\n{terminal_content.lstrip()}"
-                final_content = (
-                    "".join(length_recovery_parts).rstrip() + terminal_tail
-                ).strip()
-                pending_stream_content = terminal_tail
+            if terminal_response is not None and terminal_response.finish_reason == "error":
+                conversation_state.observe_response(
+                    terminal_response, messages, adopt_candidate_state=False,
+                )
+                context = AgentHookContext(
+                    iteration=iteration + 1,
+                    messages=messages,
+                    response=terminal_response,
+                    usage=round_usages[-1],
+                    session_key=spec.session_key,
+                )
+                clean = hook.finalize_content(context, terminal_response.content)
+                error = self._model_error_content(terminal_response, clean, spec.error_message)
+                final_content = error_content(error)
+                stop_reason = "error"
+                failure_error_kind = LLMProvider.public_error_kind(terminal_response)
+                self._append_model_error_placeholder(messages)
+                if hook.wants_streaming():
+                    await hook.on_stream_end(context, resuming=False)
             else:
-                final_content = terminal_content
-            self._append_final_message(messages, terminal_content)
+                terminal_content = terminal_response.content if terminal_response is not None else None
+                if terminal_content is not None and goal_overrun:
+                    stop_reason = "completed"
+                    pending_stream_content = terminal_content
+                if terminal_content is None:
+                    if goal_overrun and spec.finalize_on_max_iterations:
+                        terminal_content = EMPTY_FINAL_RESPONSE_MESSAGE
+                        stop_reason = "empty_final_response"
+                        error = terminal_content
+                        pending_stream_content = terminal_content
+                    else:
+                        terminal_content = self._max_iterations_fallback(spec)
+                if length_recovery_parts:
+                    terminal_tail = f"\n\n{terminal_content.lstrip()}"
+                    final_content = (
+                        "".join(length_recovery_parts).rstrip() + terminal_tail
+                    ).strip()
+                    pending_stream_content = terminal_tail
+                else:
+                    final_content = terminal_content
+                self._append_final_message(messages, terminal_content)
 
         return AgentRunResult(
             final_content=final_content,
@@ -980,7 +1016,7 @@ class AgentRunner:
         request_state: ModelRequestState,
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
-    ) -> tuple[LLMResponse, LLMUsage]:
+    ) -> tuple[LLMResponse, LLMUsage, bool]:
         _raise_if_cancelling()
         messages, kwargs = await self._prepare_model_request(
             spec,
@@ -1000,6 +1036,7 @@ class AgentRunner:
         generation_started_at: float | None = None
         generation_elapsed_s = 0.0
         stream_buf = ""
+        response_streamed = False
 
         def _end_stream_segment() -> None:
             nonlocal stream_buf
@@ -1069,10 +1106,11 @@ class AgentRunner:
             thinking_buf = ""
 
             async def _stream(delta: str) -> None:
-                nonlocal stream_buf
+                nonlocal stream_buf, response_streamed
                 stream_buf += delta
                 _generation_delta(delta)
                 if delta:
+                    response_streamed = True
                     context.streamed_content = True
                     await _close_native_reasoning()
                 await hook.on_stream(context, delta)
@@ -1092,9 +1130,11 @@ class AgentRunner:
                     await hook.emit_reasoning(incremental)
 
             async def _stream_recover() -> None:
+                nonlocal response_streamed
                 _pause_generation()
                 await _close_native_reasoning()
                 _end_stream_segment()
+                response_streamed = False
                 await hook.on_stream_end(context, resuming=True)
 
             kwargs.update(
@@ -1157,13 +1197,13 @@ class AgentRunner:
             retry_messages = self._malformed_tool_call_retry_messages(
                 messages, response.content,
             )
-            retry_response, retry_usage = await self._request_model(
+            retry_response, retry_usage, retry_streamed = await self._request_model(
                 spec, retry_messages, hook, context,
                 request_state=request_state,
                 malformed_retry=True,
                 transcript=None,
             )
-            return retry_response, round_usage + retry_usage
+            return retry_response, round_usage + retry_usage, retry_streamed
         if (
             all_dropped
             and original_finish_reason in ("tool_calls", "function_call")
@@ -1185,8 +1225,8 @@ class AgentRunner:
                 request_state,
                 fallback_response,
             )
-            return fallback_response, round_usage + fallback_usage
-        return response, round_usage
+            return fallback_response, round_usage + fallback_usage, False
+        return response, round_usage, response_streamed
 
     @staticmethod
     def _drop_malformed_tool_calls(
@@ -1285,7 +1325,7 @@ class AgentRunner:
         iteration: int,
         request_state: ModelRequestState,
         round_usages: list[LLMUsage],
-    ) -> tuple[str | None, LLMUsage | None]:
+    ) -> tuple[LLMResponse | None, LLMUsage | None]:
         compaction = request_state.compaction
         request_messages = await self.prepare_prompt(compaction.request_messages, messages)
         retry_messages = (
@@ -1313,7 +1353,9 @@ class AgentRunner:
         raw_usage = await self._record_request_usage(spec, request_state, response)
         round_usages.append(raw_usage)
         usage = self._merge_usage(usage, raw_usage)
-        if response.finish_reason == "error" or response.has_tool_calls:
+        if response.finish_reason == "error":
+            return response, usage
+        if response.has_tool_calls:
             logger.warning(
                 "Budget-exhausted finalization returned finish_reason='{}' "
                 "with {} tool call(s) for {}; using fallback",
@@ -1333,7 +1375,8 @@ class AgentRunner:
         clean = hook.finalize_content(context, response.content)
         if is_blank_text(clean):
             return None, usage
-        return clean, usage
+        response.content = clean
+        return response, usage
 
     async def _request_no_tools(
         self,
@@ -1504,6 +1547,14 @@ class AgentRunner:
             messages[-1] = build_assistant_message(content)
             return
         messages.append(build_assistant_message(content))
+
+    @staticmethod
+    def _model_error_content(
+        response: LLMResponse, clean: str | None, fallback: str | None,
+    ) -> str:
+        if LLMProvider.is_arrearage_response(response):
+            return _ARREARAGE_ERROR_MESSAGE
+        return clean or fallback or _DEFAULT_ERROR_MESSAGE
 
     @staticmethod
     def _append_model_error_placeholder(messages: list[dict[str, Any]]) -> None:
