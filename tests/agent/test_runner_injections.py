@@ -14,6 +14,8 @@ from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+# Shutdown drains accepted writes and closes SQLite WAL connections on CI workers.
+_LOOP_SHUTDOWN_TIMEOUT = 30
 
 
 def _make_injection_callback(queue: asyncio.Queue):
@@ -1100,7 +1102,7 @@ async def test_followup_routed_to_pending_queue(tmp_path):
     queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
 
     loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    await asyncio.wait_for(run_task, timeout=_LOOP_SHUTDOWN_TIMEOUT)
 
     assert loop._active_tasks == {}
     assert queued_msg.content == "follow-up"
@@ -1134,7 +1136,7 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
     assert queued_msg.metadata["_recovery_followup_id"]
 
     loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    await asyncio.wait_for(run_task, timeout=_LOOP_SHUTDOWN_TIMEOUT)
 
 
 @pytest.mark.asyncio
@@ -1204,7 +1206,7 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
     queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
 
     loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    await asyncio.wait_for(run_task, timeout=_LOOP_SHUTDOWN_TIMEOUT)
 
     assert queued_msg is msg
     assert loop._active_tasks == {}
@@ -1498,7 +1500,7 @@ async def test_session_inbox_is_installed_before_worker_start(tmp_path, monkeypa
     release_first.set()
     await asyncio.wait_for(all_processed.wait(), timeout=5)
     loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    await asyncio.wait_for(run_task, timeout=_LOOP_SHUTDOWN_TIMEOUT)
 
     assert processed == ["initial", *followups]
 
