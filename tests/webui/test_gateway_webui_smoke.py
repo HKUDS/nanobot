@@ -568,7 +568,7 @@ async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during
     config["providers"]["custom"]["apiBase"] = f"http://127.0.0.1:{model_port}/v1"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     launcher = """
-import asyncio, faulthandler, sys, urllib.request
+import asyncio, faulthandler, httpx, sys
 from pathlib import Path
 from nanobot.session.state import SessionState
 original = SessionState.checkpoint_view
@@ -580,10 +580,9 @@ async def checkpoint(self, session, payload):
     results = payload.get('completed_tool_results', [])
     if barrier_url and not held and results and results[-1].get('tool_call_id') == 'call-16':
         held = True
-        def signal():
-            with urllib.request.urlopen(barrier_url) as response:
-                response.read()
-        await asyncio.to_thread(signal)
+        async with httpx.AsyncClient(trust_env=False, timeout=20) as client:
+            response = await client.get(barrier_url)
+            response.raise_for_status()
         await asyncio.Event().wait()
 SessionState.checkpoint_view = checkpoint
 home, config = sys.argv[1:3]
@@ -709,8 +708,7 @@ with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
                 else:
                     process.terminate()
                 try:
-                    # A cancelled checkpoint can still have its HTTP thread waiting
-                    # for this loop's barrier response. Keep serving until it exits.
+                    # Keep the test model/barrier server live while its client exits.
                     await asyncio.to_thread(process.wait, timeout=30)
                 except subprocess.TimeoutExpired:
                     process.kill()
