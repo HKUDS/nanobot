@@ -2090,8 +2090,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Type your message…",
-      "placeholderHero": "Describe what you’d like to do",
+      "placeholderThread": "Type / for commands, @ for chats or apps, $ for skills",
+      "placeholderHero": "Type / for commands, @ for chats or apps, $ for skills",
       "placeholderOpening": "Opening a new topic…",
       "inputAria": "Message input",
       "goalStateStrip": "Goal: {{label}}",

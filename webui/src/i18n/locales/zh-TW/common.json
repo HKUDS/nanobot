@@ -1884,8 +1884,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "輸入訊息…",
-      "placeholderHero": "描述你想做的事",
+      "placeholderThread": "輸入 / 查看命令，@ 引用對話或應用程式，$ 選擇技能",
+      "placeholderHero": "輸入 / 查看命令，@ 引用對話或應用程式，$ 選擇技能",
       "placeholderOpening": "正在開啟新話題…",
       "inputAria": "訊息輸入框",
       "goalStateStrip": "目標：{{label}}",

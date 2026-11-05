@@ -2458,7 +2458,7 @@ describe("ThreadShell", () => {
       expect(screen.getByRole("textbox")).toBeInTheDocument(),
     );
     const input = screen.getByRole("textbox");
-    expect(input).toHaveAttribute("placeholder", "Describe what you’d like to do");
+    expect(input).toHaveAttribute("placeholder", "Type / for commands, @ for chats or apps, $ for skills");
     expect(input.className).toContain("min-h-[78px]");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });

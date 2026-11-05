@@ -1898,8 +1898,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Digite sua mensagem…",
-      "placeholderHero": "Descreva o que você quer fazer",
+      "placeholderThread": "Digite / para ver comandos, @ para mencionar conversas ou aplicativos e $ para escolher habilidades",
+      "placeholderHero": "Digite / para ver comandos, @ para mencionar conversas ou aplicativos e $ para escolher habilidades",
       "placeholderOpening": "Abrindo um novo tópico…",
       "inputAria": "Campo de mensagem",
       "goalStateStrip": "Objetivo: {{label}}",

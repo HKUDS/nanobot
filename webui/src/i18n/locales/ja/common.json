@@ -1884,8 +1884,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "メッセージを入力…",
-      "placeholderHero": "やりたいことを入力",
+      "placeholderThread": "/ でコマンド、@ で会話やアプリ、$ でスキルを選択",
+      "placeholderHero": "/ でコマンド、@ で会話やアプリ、$ でスキルを選択",
       "placeholderOpening": "新しいトピックを開いています…",
       "inputAria": "メッセージ入力欄",
       "goalStateStrip": "目標: {{label}}",
