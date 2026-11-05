@@ -1,5 +1,4 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -199,13 +198,6 @@ export function ComposerUsagePopover({
     </Tooltip>
   </TooltipProvider>;
 
-  const header = <>
-    <span className="min-w-0 flex-1 truncate text-sm font-medium">{t("thread.composer.context.panelTitle")}</span>
-    <button type="button" aria-label={t("common.close")} onClick={close}
-      className="touch-target grid size-10 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <X className="size-4" />
-    </button>
-  </>;
   const inspector = <ContextInspector sidebar context={context} rounds={rounds} snapshots={snapshots}
     onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
   const onPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -228,7 +220,7 @@ export function ComposerUsagePopover({
         {inspector}
       </DialogContent>
     </Dialog> : open && createPortal(<SidebarPanel width={420} floating={!sidebarHost} ref={sidebarRef} id={panelId}
-      header={header} aria-label={t("thread.composer.context.panelTitle")} data-testid="context-sidebar" onKeyDown={onPanelKeyDown}>
+      aria-label={t("thread.composer.context.panelTitle")} data-testid="context-sidebar" onKeyDown={onPanelKeyDown}>
       {inspector}
     </SidebarPanel>, sidebarHost ?? document.body)}
   </>;

@@ -42,7 +42,7 @@ describe("Context sidebar", () => {
     const view = render(<ComposerUsagePopover sidebarHost={host} context={null} rounds={[]} snapshots={[first]} />);
     await user.click(screen.getByTestId("composer-context-usage"));
     const sidebar = within(host).getByRole("complementary");
-    act(() => within(sidebar).getByRole("button", { name: "Close" }).focus());
+    act(() => within(sidebar).getByRole("button", { name: "Expand context panel" }).focus());
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.getByTestId("composer-context-usage")).toHaveFocus());
     expect(screen.getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "false");
