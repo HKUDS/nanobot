@@ -676,6 +676,13 @@ describe("ThreadComposer", () => {
   });
 
   it("opens the current graph and replays its request snapshots from the beginning", async () => {
+    // Happy DOM has no canvas renderer; supply the operations used by graph paint
+    // so replay can receive the same painted-frame acknowledgement as a browser.
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      setTransform: vi.fn(), clearRect: vi.fn(), setLineDash: vi.fn(), beginPath: vi.fn(),
+      moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), arc: vi.fn(), fill: vi.fn(),
+      roundRect: vi.fn(), fillText: vi.fn(), measureText: (text: string) => ({ width: text.length * 6 }),
+    } as unknown as CanvasRenderingContext2D);
     render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 200, contextWindowTokens: 1000 }}
       contextSnapshots={[
         { id: "first", contextWindowTokens: 1000, usage: { prompt_tokens: 100 }, graph: { nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 40 }], edges: [] } },
@@ -695,8 +702,8 @@ describe("ThreadComposer", () => {
 
   it("shows the latest round cache metrics when inspecting legacy history", () => {
     render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 14700, contextWindowTokens: 200000 }}
-      recentRoundUsage={[{ id: "first", timestamp: 1, inputTokens: 18000, outputTokens: 280, cachedTokens: 12000 },
-        { id: "second", timestamp: 2, inputTokens: 29400, outputTokens: 416, cachedTokens: 26180 }]} />);
+      recentRoundUsage={[{ inputTokens: 18000, cachedTokens: 12000 },
+        { inputTokens: 29400, cachedTokens: 26180 }]} />);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
     const meter = screen.getByRole("progressbar", { name: "Context" });
     fireEvent.pointerEnter(meter.parentElement!.parentElement!);
@@ -707,7 +714,7 @@ describe("ThreadComposer", () => {
 
   it("keeps context usage visible when the provider omits cache metrics", () => {
     render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 14700, contextWindowTokens: 200000 }}
-      recentRoundUsage={[{ id: "round", timestamp: 1, inputTokens: 29400, outputTokens: 416 }]} />);
+      recentRoundUsage={[{ inputTokens: 29400 }]} />);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
     const meter = screen.getByRole("progressbar", { name: "Context" });
     expect(meter).toHaveAttribute("aria-valuenow", "7");
@@ -1301,10 +1308,7 @@ describe("ThreadComposer", () => {
         onSend={onSend}
         contextUsage={{ contextTokens: 10000, contextWindowTokens: 200000 }}
         recentRoundUsage={[{
-          id: "turn-1",
-          timestamp: Date.UTC(2026, 8, 13, 7, 20),
           inputTokens: 10000,
-          outputTokens: 280,
           cachedTokens: 8000,
         }]}
       />,

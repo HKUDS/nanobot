@@ -2064,8 +2064,6 @@
       "sessionInfo": "Session details"
     },
     "sessionInfo": {
-      "title": "Session",
-      "untitled": "Untitled topic",
       "automations": "Automations",
       "count": "{{count}}",
       "loading": "Loading automations...",
@@ -2130,11 +2128,7 @@
         "detailsLabel": "Open context usage",
         "panelTitle": "Context usage",
         "contextTitle": "Context",
-        "recentRounds": "Recent rounds",
-        "inputTrend": "Input tokens",
-        "input": "Input tokens",
         "cacheHitRate": "KV cache hit rate",
-        "output": "Output tokens",
         "duration": "Generation time"
       },
       "queued": {
@@ -2542,8 +2536,7 @@
     "fileEditDiffTruncated": "Diff truncated. Open the file for the full change.",
     "usage": {
       "context": "Context now: {{tokens}}{{capacity}}",
-      "requests": "{{count}} calls this turn",
-      "estimated": "Includes estimated usage"
+      "requests": "{{count}} calls this turn"
     }
   },
   "recovery": {

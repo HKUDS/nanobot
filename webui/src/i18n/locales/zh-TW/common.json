@@ -1858,8 +1858,6 @@
       "sessionInfo": "對話詳細資料"
     },
     "sessionInfo": {
-      "title": "對話",
-      "untitled": "未命名話題",
       "automations": "自動任務",
       "count": "{{count}}",
       "loading": "正在載入自動任務…",
@@ -1924,11 +1922,7 @@
         "detailsLabel": "開啟上下文用量",
         "panelTitle": "上下文用量",
         "contextTitle": "上下文",
-        "recentRounds": "最近輪次",
-        "inputTrend": "輸入 Token",
-        "input": "輸入 Token",
         "cacheHitRate": "KV Cache 命中率",
-        "output": "輸出 Token",
         "duration": "生成耗時"
       },
       "queued": {
@@ -2155,8 +2149,7 @@
     "fileEditDiffTruncated": "僅顯示部分差異，請開啟檔案查看完整內容。",
     "usage": {
       "context": "目前上下文：{{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} 次模型請求",
-      "estimated": "包含估算用量"
+      "requests": "{{count}} 次模型請求"
     },
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",

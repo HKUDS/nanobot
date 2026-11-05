@@ -1872,8 +1872,6 @@
       "sessionInfo": "Detalhes da sessão"
     },
     "sessionInfo": {
-      "title": "Sessão",
-      "untitled": "Tópico sem título",
       "automations": "Automações",
       "count": "{{count}}",
       "loading": "Carregando automações...",
@@ -1938,11 +1936,7 @@
         "detailsLabel": "Abrir uso do contexto",
         "panelTitle": "Uso do contexto",
         "contextTitle": "Contexto",
-        "recentRounds": "Rodadas recentes",
-        "inputTrend": "Tokens de entrada",
-        "input": "Tokens de entrada",
         "cacheHitRate": "Taxa de acertos do cache KV",
-        "output": "Tokens de saída",
         "duration": "Tempo de geração"
       },
       "queued": {
@@ -2350,8 +2344,7 @@
     "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa.",
     "usage": {
       "context": "Contexto atual: {{tokens}}{{capacity}}",
-      "requests": "{{count}} chamadas nesta rodada",
-      "estimated": "Inclui uso estimado"
+      "requests": "{{count}} chamadas nesta rodada"
     }
   },
   "recovery": {

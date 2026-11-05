@@ -31,9 +31,9 @@ const presets: ModelPresetOption[] = [
   { name: "推理", provider: "anthropic", model: "claude-sonnet-4", reasoningEffort: "high", contextWindowTokens: 200_000 },
 ];
 const rounds: ComposerRoundUsage[] = [
-  { id: "gallery-round-1", timestamp: createdAt, inputTokens: 8_200, cachedTokens: 6_000, outputTokens: 620, generationMs: 3_100 },
-  { id: "gallery-round-2", timestamp: createdAt + 60_000, inputTokens: 12_000, cachedTokens: 8_200, outputTokens: 980, generationMs: 5_400 },
-  { id: "gallery-round-3", timestamp: createdAt + 120_000, inputTokens: 18_500, cachedTokens: 12_000, outputTokens: 1_240, generationMs: 7_200 },
+  { inputTokens: 8_200, cachedTokens: 6_000, generationMs: 3_100 },
+  { inputTokens: 12_000, cachedTokens: 8_200, generationMs: 5_400 },
+  { inputTokens: 18_500, cachedTokens: 12_000, generationMs: 7_200 },
 ];
 const commands: SlashCommand[] = [
   { command: "/status", title: "previews.composer.statusCommand", description: "previews.composer.statusDescription", icon: "activity", lifecycle: "side_channel", acceptsArgs: false },

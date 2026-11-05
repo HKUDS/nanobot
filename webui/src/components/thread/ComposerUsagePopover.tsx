@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -15,35 +15,9 @@ export interface ComposerContextUsage {
 }
 
 export interface ComposerRoundUsage {
-  id: string;
-  timestamp: number;
   inputTokens: number;
-  outputTokens?: number;
   cachedTokens?: number;
-  estimatedTokens?: number;
   generationMs?: number;
-}
-
-interface NormalizedRoundUsage extends ComposerRoundUsage {
-  cachedTokens?: number;
-  outputTokens: number;
-}
-
-function normalizeRounds(
-  rounds: readonly ComposerRoundUsage[],
-): NormalizedRoundUsage[] {
-  return rounds
-    .filter((round) => Number.isFinite(round.inputTokens) && round.inputTokens > 0)
-    .map((round) => ({
-      ...round,
-      inputTokens: Math.max(0, round.inputTokens),
-      outputTokens: Number.isFinite(round.outputTokens)
-        ? Math.max(0, round.outputTokens ?? 0)
-        : 0,
-      ...(Number.isFinite(round.cachedTokens)
-        ? { cachedTokens: Math.min(round.inputTokens, Math.max(0, round.cachedTokens ?? 0)) }
-        : {}),
-    }));
 }
 
 export function ComposerUsagePopover({
@@ -76,7 +50,6 @@ export function ComposerUsagePopover({
   const setOpen = (next: boolean) => { if (next) interactedOutside.current = false; setLocalOpen(next); onOpenChange?.(next); };
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
-  const sidebarRef = useRef<HTMLElement>(null);
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
     const measure = () => setNarrow((sidebarHost?.clientWidth ?? window.innerWidth) < 780);
@@ -87,13 +60,13 @@ export function ComposerUsagePopover({
     return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
   }, [sidebarHost]);
   const close = () => { setOpen(false); requestAnimationFrame(() => triggerRef.current?.focus()); };
-  const normalizedRounds = useMemo(() => normalizeRounds(rounds), [rounds]);
+  const hasRounds = rounds.some((round) => Number.isFinite(round.inputTokens) && round.inputTokens > 0);
   const hasContext = !!context
     && Number.isFinite(context.contextTokens)
     && context.contextTokens >= 0
     && Number.isFinite(context.contextWindowTokens)
     && (context.contextWindowTokens ?? 0) > 0;
-  if (!open && !hasContext && normalizedRounds.length === 0 && !snapshots.length) {
+  if (!open && !hasContext && !hasRounds && !snapshots.length) {
     return null;
   }
 
@@ -219,7 +192,7 @@ export function ComposerUsagePopover({
         <DialogTitle className="sr-only">{t("thread.composer.context.panelTitle")}</DialogTitle>
         {inspector}
       </DialogContent>
-    </Dialog> : createPortal(<SidebarPanel open={open} width={420} floating={!sidebarHost} ref={sidebarRef} id={panelId}
+    </Dialog> : createPortal(<SidebarPanel open={open} width={420} floating={!sidebarHost} id={panelId}
       aria-label={t("thread.composer.context.panelTitle")} data-testid="context-sidebar" onKeyDown={onPanelKeyDown}>
       {inspector}
     </SidebarPanel>, sidebarHost ?? document.body)}

@@ -1858,8 +1858,6 @@
       "sessionInfo": "Chi tiết phiên"
     },
     "sessionInfo": {
-      "title": "Phiên",
-      "untitled": "Chủ đề chưa đặt tên",
       "automations": "Tự động hóa",
       "count": "{{count}}",
       "loading": "Đang tải tự động hóa...",
@@ -1924,11 +1922,7 @@
         "detailsLabel": "Mở mức sử dụng ngữ cảnh",
         "panelTitle": "Mức sử dụng ngữ cảnh",
         "contextTitle": "Ngữ cảnh",
-        "recentRounds": "Các lượt gần đây",
-        "inputTrend": "Token đầu vào",
-        "input": "Token đầu vào",
         "cacheHitRate": "Tỷ lệ hit KV cache",
-        "output": "Token đầu ra",
         "duration": "Thời gian tạo"
       },
       "queued": {
@@ -2156,8 +2150,7 @@
     "fileEditDiffTruncated": "Chỉ hiển thị một phần thay đổi. Mở tệp để xem nội dung đầy đủ.",
     "usage": {
       "context": "Ngữ cảnh gần nhất: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} yêu cầu mô hình",
-      "estimated": "Bao gồm mức sử dụng ước tính"
+      "requests": "{{count}} yêu cầu mô hình"
     },
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",

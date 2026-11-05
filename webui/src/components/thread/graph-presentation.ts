@@ -1,10 +1,10 @@
 import { nodeRadius } from "@/lib/context-graph";
 import type { ContextGraph, ContextGraphNode } from "@/lib/types";
 
-export type PresentedNode = ContextGraphNode & { presence: number; emphasis: number; focus: number; radius: number; loaded: number; labelRemaining: number };
-export type PresentedEdge = ContextGraph["edges"][number] & { presence: number; emphasis: number };
+type PresentedNode = ContextGraphNode & { presence: number; emphasis: number; focus: number; radius: number; loaded: number; labelRemaining: number };
+type PresentedEdge = ContextGraph["edges"][number] & { presence: number; emphasis: number };
 export type GraphPresentation = { nodes: PresentedNode[]; edges: PresentedEdge[] };
-export const edgeKey = (edge: ContextGraph["edges"][number]) => JSON.stringify([edge.source, edge.target]);
+const edgeKey = (edge: ContextGraph["edges"][number]) => JSON.stringify([edge.source, edge.target]);
 
 /** Mutable animation state; request graphs remain immutable. The caller owns its clock. */
 export function createGraphPresentation() {
@@ -44,7 +44,7 @@ export function createGraphPresentation() {
       return frame;
     },
     advance(elapsed: number, reducedMotion: boolean) {
-      if (!moving) return { moving: false, removed: false, changed: false };
+      if (!moving) return { moving: false, removed: false };
       const amount = reducedMotion ? 1 : 1 - Math.pow(0.9, Math.min(64, Math.max(0, elapsed)) / (1000 / 60));
       moving = false;
       let removed = false;
@@ -71,7 +71,7 @@ export function createGraphPresentation() {
         if (!wantedEdges.has(key) && edge.presence === 0) { edges.delete(key); removed = true; }
       }
       if (removed) frame = { nodes: [...nodes.values()], edges: [...edges.values()] };
-      return { moving, removed, changed: true };
+      return { moving, removed };
     },
   };
 }

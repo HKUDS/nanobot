@@ -1858,8 +1858,6 @@
       "sessionInfo": "Detail sesi"
     },
     "sessionInfo": {
-      "title": "Sesi",
-      "untitled": "Topik tanpa judul",
       "automations": "Otomasi",
       "count": "{{count}}",
       "loading": "Memuat otomasi...",
@@ -1924,11 +1922,7 @@
         "detailsLabel": "Buka penggunaan konteks",
         "panelTitle": "Penggunaan konteks",
         "contextTitle": "Konteks",
-        "recentRounds": "Putaran terbaru",
-        "inputTrend": "Token masukan",
-        "input": "Token masukan",
         "cacheHitRate": "Rasio hit KV cache",
-        "output": "Token keluaran",
         "duration": "Waktu pembuatan"
       },
       "queued": {
@@ -2156,8 +2150,7 @@
     "fileEditDiffTruncated": "Perbedaan dipotong. Buka file untuk melihat perubahan lengkap.",
     "usage": {
       "context": "Konteks terbaru: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} permintaan model",
-      "estimated": "Termasuk penggunaan perkiraan"
+      "requests": "{{count}} permintaan model"
     },
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",

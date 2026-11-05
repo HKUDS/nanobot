@@ -1858,8 +1858,6 @@
       "sessionInfo": "セッション詳細"
     },
     "sessionInfo": {
-      "title": "セッション",
-      "untitled": "無題のトピック",
       "automations": "自動タスク",
       "count": "{{count}}",
       "loading": "自動タスクを読み込み中...",
@@ -1924,11 +1922,7 @@
         "detailsLabel": "コンテキスト使用量を開く",
         "panelTitle": "コンテキスト使用量",
         "contextTitle": "コンテキスト",
-        "recentRounds": "最近のラウンド",
-        "inputTrend": "入力トークン",
-        "input": "入力トークン",
         "cacheHitRate": "KV キャッシュヒット率",
-        "output": "出力トークン",
         "duration": "生成時間"
       },
       "queued": {
@@ -2156,8 +2150,7 @@
     "fileEditDiffTruncated": "差分は切り詰められました。完全な変更はファイルを開いて確認してください。",
     "usage": {
       "context": "最新のコンテキスト: {{tokens}}{{capacity}} トークン",
-      "requests": "モデルリクエスト {{count}} 回",
-      "estimated": "推定使用量を含みます"
+      "requests": "モデルリクエスト {{count}} 回"
     },
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",

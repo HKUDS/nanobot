@@ -130,22 +130,12 @@ function recentComposerRoundUsage(messages: ComposerUsageSnapshot[]): ComposerRo
       ) {
         continue;
       }
-      const outputTokens = round.completion_tokens;
       const cachedTokens = round.cached_tokens;
-      const estimatedTokens = round.estimated_tokens;
       const generationMs = round.generation_ms;
       recent.push({
-        id: `${turnKey}:${roundIndex}`,
-        timestamp: message.completedAt ?? message.createdAt,
         inputTokens,
-        ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)
-          ? { outputTokens }
-          : {}),
         ...(typeof cachedTokens === "number" && Number.isFinite(cachedTokens)
           ? { cachedTokens }
-          : {}),
-        ...(typeof estimatedTokens === "number" && Number.isFinite(estimatedTokens)
-          ? { estimatedTokens }
           : {}),
         ...(typeof generationMs === "number" && Number.isFinite(generationMs)
           ? { generationMs }

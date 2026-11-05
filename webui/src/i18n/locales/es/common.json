@@ -1859,8 +1859,6 @@
       "sessionInfo": "Detalles de la sesión"
     },
     "sessionInfo": {
-      "title": "Sesión",
-      "untitled": "Tema sin título",
       "automations": "Automatizaciones",
       "count": "{{count}}",
       "loading": "Cargando automatizaciones...",
@@ -1925,11 +1923,7 @@
         "detailsLabel": "Abrir uso del contexto",
         "panelTitle": "Uso del contexto",
         "contextTitle": "Contexto",
-        "recentRounds": "Rondas recientes",
-        "inputTrend": "Tokens de entrada",
-        "input": "Tokens de entrada",
         "cacheHitRate": "Tasa de aciertos de KV Cache",
-        "output": "Tokens de salida",
         "duration": "Tiempo de generación"
       },
       "queued": {
@@ -2157,8 +2151,7 @@
     "fileEditDiffTruncated": "Diferencias truncadas. Abre el archivo para ver el cambio completo.",
     "usage": {
       "context": "Contexto más reciente: {{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} solicitudes al modelo",
-      "estimated": "Incluye uso estimado"
+      "requests": "{{count}} solicitudes al modelo"
     },
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",

@@ -1858,8 +1858,6 @@
       "sessionInfo": "Détails de la session"
     },
     "sessionInfo": {
-      "title": "Session",
-      "untitled": "Sujet sans titre",
       "automations": "Automatisations",
       "count": "{{count}}",
       "loading": "Chargement des automatisations...",
@@ -1924,11 +1922,7 @@
         "detailsLabel": "Ouvrir l’utilisation du contexte",
         "panelTitle": "Utilisation du contexte",
         "contextTitle": "Contexte",
-        "recentRounds": "Tours récents",
-        "inputTrend": "Jetons d’entrée",
-        "input": "Jetons d’entrée",
         "cacheHitRate": "Taux de succès du cache KV",
-        "output": "Jetons de sortie",
         "duration": "Temps de génération"
       },
       "queued": {
@@ -2156,8 +2150,7 @@
     "fileEditDiffTruncated": "Différences tronquées. Ouvrez le fichier pour voir la modification complète.",
     "usage": {
       "context": "Dernier contexte : {{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} requêtes au modèle",
-      "estimated": "Inclut une estimation de l’utilisation"
+      "requests": "{{count}} requêtes au modèle"
     },
     "activityThinkingFor": "Réflexion pendant {{duration}}",
     "activityThought": "Réflexion terminée",

@@ -3,7 +3,7 @@ import type { GraphPresentation } from "./graph-presentation";
 
 type RGB = readonly [number, number, number];
 export interface GraphPalette { background: RGB; foreground: string; muted: RGB; font: string; labels: Map<string, string> }
-export interface GraphCamera { x: number; y: number; k: number }
+interface GraphCamera { x: number; y: number; k: number }
 const orange: RGB = [249, 115, 22];
 const blend = (a: RGB, b: RGB, amount: number): RGB => [a[0] + (b[0] - a[0]) * amount, a[1] + (b[1] - a[1]) * amount, a[2] + (b[2] - a[2]) * amount];
 const rgb = (value: RGB) => `rgb(${value.map(Math.round).join(" ")})`;

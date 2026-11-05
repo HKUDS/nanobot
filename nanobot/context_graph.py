@@ -83,16 +83,3 @@ class ContextSnapshot(TypedDict):
     graph: ContextGraph
     estimated_tokens: int
     context_window_tokens: int
-
-
-def parse_context_snapshot(value: object) -> ContextSnapshot | None:
-    if not isinstance(value, dict):
-        return None
-    value = cast(dict[str, object], value)
-    graph = parse_context_graph(value.get("graph"))
-    tokens, window = value.get("estimated_tokens"), value.get("context_window_tokens")
-    if graph is None or not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
-        return None
-    if not isinstance(window, int) or isinstance(window, bool) or window <= 0:
-        return None
-    return {"graph": graph, "estimated_tokens": tokens, "context_window_tokens": window}
