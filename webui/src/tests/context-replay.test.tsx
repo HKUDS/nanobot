@@ -10,13 +10,16 @@ vi.mock("@/components/thread/ContextGraphScene", () => ({
 }));
 afterEach(() => vi.useRealTimers());
 
-function start(count: number) {
+async function start(count: number) {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
   const snapshots: ContextSnapshot[] = Array.from({ length: count }, (_, index) => ({
     id: String(index), contextWindowTokens: 10000,
     usage: { prompt_tokens: (index + 1) * 100 }, graph: { nodes: [], edges: [] },
   }));
-  render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
+  await act(async () => {
+    render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} />);
+    await vi.dynamicImportSettled();
+  });
   const play = screen.getByRole("button", { name: "Play context history" });
   fireEvent.click(play);
   return play;
@@ -24,8 +27,8 @@ function start(count: number) {
 const paint = () => fireEvent.click(screen.getByRole("button", { name: "Paint snapshot" }));
 const progress = () => screen.getByRole("progressbar").getAttribute("aria-valuenow");
 
-it("replays short histories at five steps per second and can restart", () => {
-  const play = start(2);
+it("replays short histories at five steps per second and can restart", async () => {
+  const play = await start(2);
   expect(play).toBeDisabled();
   expect(progress()).toBe("1");
   paint();
@@ -38,8 +41,8 @@ it("replays short histories at five steps per second and can restart", () => {
   expect(progress()).toBe("1");
 });
 
-it("speeds up longer histories without dropping unpainted snapshots", () => {
-  start(400);
+it("speeds up longer histories without dropping unpainted snapshots", async () => {
+  await start(400);
   // A delayed first paint does not skip intermediate request states.
   act(() => vi.advanceTimersByTime(350));
   expect(progress()).toBe("1");
