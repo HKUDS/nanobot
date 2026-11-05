@@ -394,6 +394,7 @@ export interface MarketplaceSkillSummary {
   downloads?: number;
   url: string;
   installed: boolean;
+  installation_status?: "available" | "installed" | "conflict" | "unknown";
   install_supported: boolean;
   metric: "installs_24h" | "installs_total";
   version?: string;
