@@ -58,7 +58,7 @@ const SidebarPanelContent = forwardRef<HTMLElement, SidebarPanelProps>(function 
     <div className={cn("file-preview-content absolute inset-y-2 right-2 flex min-h-0 w-[calc(100cqw-1rem)] flex-col pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
       floating && "w-[calc(min(420px,100vw)-1rem)]",
       !entered || isClosing ? "translate-x-2 opacity-0" : "translate-x-0 opacity-100", contentClassName)}>
-      {header && <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border/40 px-2">
+      {header && <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-border/40 p-2">
         {header}
         <div ref={setActionsHost} className="shrink-0" />
       </div>}
