@@ -527,11 +527,14 @@ async def test_chat_sdk_chunks_are_not_retained_during_stream(chat_sdk, monkeypa
         _chat_event({"content": "first"}),
         _bad_chat_event("usage") if bad else _chat_event({"content": "second"}),
         _chat_event({"content": "third"}), _chat_event({"content": "fourth"}),
-        _chat_event({}, finish="stop"),
+        _chat_event({}, finish="stop", usage={
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+        }),
     ])
     provider, _ = chat_sdk([stream])
     references = []
     released = []
+    deltas = []
     original_add = OpenAICompatProvider._ChatStreamAccumulator.add
 
     def track_add(accumulator, chunk):
@@ -541,6 +544,7 @@ async def test_chat_sdk_chunks_are_not_retained_during_stream(chat_sdk, monkeypa
     monkeypatch.setattr(OpenAICompatProvider._ChatStreamAccumulator, "add", track_add)
 
     async def on_content(value):
+        deltas.append(value)
         if value == "fourth":
             released.extend(ref() is None for ref in references[:2])
 
@@ -548,7 +552,11 @@ async def test_chat_sdk_chunks_are_not_retained_during_stream(chat_sdk, monkeypa
         [{"role": "user", "content": "work"}], on_content_delta=on_content,
     )
     assert released == [True, True]
+    assert deltas == (["first", "third", "fourth"] if bad else ["first", "second", "third", "fourth"])
     assert result.finish_reason == ("error" if bad else "stop")
+    if not bad:
+        assert result.content == "".join(deltas)
+        assert result.usage is not None and result.usage.total_tokens == 15
     assert stream.closed
 
 

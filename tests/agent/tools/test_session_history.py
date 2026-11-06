@@ -450,7 +450,7 @@ async def test_cancelled_history_scan_exits_and_releases_wal_snapshot(tmp_path, 
             return await lookup()
 
         monkeypatch.setattr(tool._handles, "alist_all_by_key", reset_before_lookup)
-    method = {"read": "read", "search": "search", "search-refill": "_complete_search"}[tool_name]
+    method = {"read": "read", "search": "_start_search", "search-refill": "_complete_search"}[tool_name]
     original = getattr(tool._access, method)
 
     def tracked(*args, **kwargs):

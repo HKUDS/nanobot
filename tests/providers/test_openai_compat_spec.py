@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import weakref
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -260,43 +259,6 @@ async def test_openai_compat_chat_stream_forwards_reasoning_deltas_deepseek_styl
     assert result.reasoning_content == "step1step2"
     assert result.content == "answer"
     mock_chat.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_openai_compat_stream_releases_consumed_sdk_chunks() -> None:
-    released = False
-    deltas: list[str] = []
-
-    async def stream():
-        nonlocal released
-        first = _chat_chunk({"content": "first"})
-        reference = weakref.ref(first)
-        yield first
-        del first
-        yield _chat_chunk({"content": "second"})
-        released = reference() is None
-        yield _chat_chunk({}, finish="stop", usage={
-            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
-        })
-
-    async def on_content(delta: str) -> None:
-        deltas.append(delta)
-
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
-        mock_openai.return_value.chat.completions.create = AsyncMock(return_value=_FakeChatStream(stream()))
-        provider = OpenAICompatProvider(
-            api_key="sk-test", default_model="test-model",
-            model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
-        )
-        result = await provider.chat_stream(
-            messages=[{"role": "user", "content": "hi"}], on_content_delta=on_content,
-        )
-
-    assert released
-    assert deltas == ["first", "second"]
-    assert result.content == "firstsecond"
-    assert result.finish_reason == "stop"
-    assert result.usage is not None and result.usage.total_tokens == 15
 
 
 @pytest.mark.asyncio
