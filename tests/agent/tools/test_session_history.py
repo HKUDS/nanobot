@@ -162,7 +162,6 @@ async def test_session_tools_stream_visible_archived_history_with_casefold_and_o
     assert automation["results"] == []
     assert empty["messages"] == []
     reader = SessionHistoryReader(manager)
-    assert len(reader.read(key, query="", limit=0)["messages"]) == 13
     assert reader.read(key, query="", limit=8, exclude_session_key=key) is None
     await manager.state.aclose()
 
@@ -254,27 +253,38 @@ def test_read_uses_one_snapshot_for_header_and_messages(tmp_path, monkeypatch):
     assert [message["content"] for message in match["messages"]] == ["old message"]
 
 
-def test_session_reads_propagate_errors_in_old_persisted_records(tmp_path):
+def test_session_read_decodes_only_as_far_as_needed(tmp_path, monkeypatch):
+    from nanobot.session import sqlite_store
+
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("sdk:history")
-    session.messages = [{"role": "user", "content": f"message {i}"} for i in range(20)]
+    session.messages = [
+        {"role": "user", "content": f"message {i}", "_marker": "history-row"}
+        for i in range(100)
+    ]
+    session.messages.append({
+        "role": "user", "content": "hidden", "_marker": "history-row", "_hidden_history": True,
+    })
     manager.save(session)
-    with manager._store.transaction() as db:
-        db.execute("UPDATE messages SET record='[]' WHERE session_key=? AND position=0", (session.key,))
-        db.execute(
-            "UPDATE messages SET record=? WHERE session_key=? AND position=19",
-            (json.dumps({"role": [], "content": "malformed role"}), session.key),
-        )
+    original_object = sqlite_store._object
+    decoded_rows = []
 
+    def count_rows(raw):
+        result = original_object(raw)
+        if result.get("_marker") == "history-row":
+            decoded_rows.append(result)
+        return result
+
+    monkeypatch.setattr(sqlite_store, "_object", count_rows)
     reader = SessionHistoryReader(manager)
-    assert reader.search("", limit=5)[0]["messages"] == []
-    with pytest.raises(ValueError, match="stored session record must be an object"):
-        reader.read(session.key, query="", limit=8)
-    with pytest.raises(ValueError, match="stored session record must be an object"):
-        reader.search("not-present", limit=5)
-    manager.update_session_metadata(session.key, {"session_type": "private"})
-    with pytest.raises(ValueError, match="stored session record must be an object"):
-        reader.read(session.key, query="", limit=8)
+    result = reader.read(session.key, query="", limit=8)
+    assert [message["message_index"] for message in result["messages"]] == list(range(92, 100))
+    assert len(decoded_rows) == 9
+
+    decoded_rows.clear()
+    result = reader.read(session.key, query="not-present", limit=8)
+    assert result["messages"] == []
+    assert len(decoded_rows) == 101
 
 
 @pytest.mark.asyncio

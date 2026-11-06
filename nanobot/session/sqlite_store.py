@@ -439,18 +439,14 @@ class SqliteSessionStore:
     ) -> _T | None:
         """Project the header and canonical messages without materializing history."""
         with self.transaction(write=False) as db:
-            if db.execute("SELECT 1 FROM sessions WHERE key=?", (key,)).fetchone() is None:
-                return None
-            # A full load validates every record before decoding the header or
-            # projecting messages. Preserve those errors without keeping the rows.
-            count = 0
-            for row in db.execute(
-                "SELECT record FROM messages WHERE session_key=? ORDER BY position", (key,),
-            ):
-                _object(row[0])
-                count += 1
             session = self.load(key, history=False)
-            assert session is not None
+            if session is None:
+                return None
+            # Indices refer to the ordered message list, not SQLite positions.
+            # Count first so sparse positions retain the same observable indices.
+            count = db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_key=?", (key,),
+            ).fetchone()[0]
             header: SessionMetadataPayload = {
                 "key": key, "created_at": session.created_at.isoformat(),
                 "updated_at": session.updated_at.isoformat(), "metadata": session.metadata,
