@@ -12,11 +12,12 @@ from datetime import datetime
 from typing import Any, TypeVar, cast
 
 from nanobot.bus.events import InboundMessage
-from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
+from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.keys import is_dream_session
 from nanobot.session.manager import (
     Session,
     SessionIdentity,
+    SessionInfo,
     SessionPolicy,
     fork_session,
 )
@@ -714,6 +715,13 @@ class SessionState:
         if baseline is not None:
             metadata = {**baseline.metadata, _CHECKPOINT_KEY: committed.metadata[_CHECKPOINT_KEY]}
             draft._baseline = replace(baseline, metadata=metadata, provider_state=committed.provider_state)  # pyright: ignore[reportPrivateUsage]
+
+    async def migrate_history(
+        self, name: str, collect: Callable[[list[SessionInfo]], list[HistoryImport]],
+    ) -> None:
+        await self._execute(
+            None, lambda: self._store.migrate_history(name, collect), operation_name="migrate_history",
+        )
 
     async def project_history(
         self, key: str, project: Callable[[HistoryReader], _T],
