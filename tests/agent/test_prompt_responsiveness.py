@@ -11,7 +11,7 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage
 from nanobot.runtime_context import public_history_message
 from nanobot.security.workspace_access import current_workspace_scope
-from nanobot.session.manager import Session
+from nanobot.session.manager import Session, SessionPolicy
 
 
 class ControlledProvider(LLMProvider):
@@ -126,7 +126,10 @@ async def test_preparation_allows_status_heartbeat_and_cancellation(
     tasks = [task, pulse]
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
-        status = await asyncio.wait_for(loop.process_direct("/status", session_key="cli:status"), 5)
+        # Measure preparation responsiveness, not command-history disk writes.
+        status = await asyncio.wait_for(loop.process_direct(
+            "/status", session_key="cli:status", _session_policy=SessionPolicy(persist=False),
+        ), 5)
         assert status is not None and "test-model" in status.content
         heartbeat_requested.set()
         await asyncio.wait_for(heartbeat_progress.wait(), 5)
