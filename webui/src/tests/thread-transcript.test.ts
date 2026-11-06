@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ThreadTranscript } from "@/lib/thread-transcript";
-import type { ThreadProjectionEvent, WebuiThreadPersistedPayload } from "@/lib/types";
+import type { ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
 
 const NOW = 1_800_000_000_000;
 let nextId = 0;
