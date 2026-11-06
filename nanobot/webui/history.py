@@ -42,6 +42,7 @@ _CONTENT_FIELDS = frozenset({
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
     "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason", "render_as",
     "request_usage", "request_id", "run_id", "sequence", "context_graph", "context_snapshot",
+    "_webui_projection_receipts",
 })
 
 
@@ -96,12 +97,29 @@ def record_from_fact(fact: HistoryFact, key: str, *, expand_graphs: bool = True)
     return record
 
 
-def turn_records(
-    history: HistoryReader, ordinal: int, *, max_records: int | None = None, max_bytes: int | None = None,
+def _records_from_entries(
+    history: HistoryReader, ordinal: int, entries: Sequence[tuple[int, HistoryFact]],
 ) -> list[dict[str, Any]]:
     return [{**record_from_fact(fact, history.key, expand_graphs=False),
              "_webui_replay_identity": f"turn:{ordinal}:record:{position}"}
-            for position, fact in history.read_entries(ordinal, max_records=max_records, max_bytes=max_bytes)]
+            for position, fact in entries]
+
+
+def turn_records(history: HistoryReader, ordinal: int) -> list[dict[str, Any]]:
+    return _records_from_entries(history, ordinal, history.read_entries(ordinal))
+
+
+def turn_record_page(
+    history: HistoryReader, ordinal: int, *, start: int, end: int, reverse: bool,
+    max_records: int, max_bytes: int, allow_oversized: bool = False,
+) -> tuple[list[dict[str, Any]], int, int, int]:
+    page = history.read_entry_page(ordinal, start=start, end=end, reverse=reverse,
+                                   max_records=max_records, max_bytes=max_bytes,
+                                   allow_oversized=allow_oversized)
+    if not page.entries:
+        return [], start, start, 0
+    return (_records_from_entries(history, ordinal, page.entries), page.entries[0][0],
+            page.entries[-1][0] + 1, page.source_bytes)
 
 
 def _read_legacy_file(path: Path) -> list[dict[str, Any]]:

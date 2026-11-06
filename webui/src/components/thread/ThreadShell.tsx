@@ -658,7 +658,7 @@ export function ThreadShell({
     dismissStreamError,
   } = useNanobotStream(
     chatId, undefined, false, handleTurnEnd, undefined, undefined,
-    { key: historyKey, cache: messageCacheRef.current },
+    { key: historyKey, cache: messageCacheRef.current, temporary },
   );
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const initialHistoryLoading = loading;

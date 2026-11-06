@@ -174,6 +174,71 @@ describe("NanobotClient", () => {
     client.close();
   });
 
+  it.each(["recovery_state", "attached"] as const)("starts a different new recovery from unscoped %s", (event) => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "recovery:old-recovery", status: "running", started_at: 100 });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "recovery:old-recovery" });
+    const state = { status: "resuming", recovery_id: "new-recovery", attempts: 1 };
+    socket.fakeMessage(event === "recovery_state"
+      ? { event, chat_id: "chat", ...state }
+      : { event, chat_id: "chat", recovery_state: state });
+    expect(client.getRunState("chat")).toMatchObject({ active: true, unsettled: true, latestTurnId: "recovery:new-recovery" });
+    client.close();
+  });
+
+  it.each(["recovery_state", "attached"] as const)("prefers an explicit turn_id over recovery_id on %s", (event) => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "turn-explicit", status: "running", started_at: 100 });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "turn-explicit" });
+    const state = { status: "resuming", recovery_id: "new-recovery", attempts: 1 };
+    socket.fakeMessage(event === "recovery_state"
+      ? { event, chat_id: "chat", turn_id: "turn-explicit", ...state }
+      : { event, chat_id: "chat", turn_id: "turn-explicit", recovery_state: state });
+    expect(client.getRunState("chat")).toMatchObject({ active: false, unsettled: false, latestTurnId: "turn-explicit" });
+    client.close();
+  });
+
+  it("delivers a recovered state after the recovery turn ends", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const received = vi.fn();
+    client.onTranscript("chat", received);
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1" });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "recovery:r1" });
+    const recovered = { event: "recovery_state", chat_id: "chat", status: "recovered", recovery_id: "r1", reason: "continued" };
+    socket.fakeMessage(recovered);
+    expect(received).toHaveBeenCalledWith(recovered);
+    expect(client.getRunState("chat").active).toBe(false);
+    client.close();
+  });
+
+  it("allows a new continuation of an interrupted recovery after loop guard", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1", attempts: 1 });
+    socket.fakeMessage({ event: "attached", chat_id: "chat", recovery_state: {
+      status: "awaiting_user", recovery_id: "r1", reason: "loop_guard", attempts: 1,
+    } });
+    expect(client.getRunState("chat").active).toBe(false);
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1", attempts: 2 });
+    expect(client.getRunState("chat").active).toBe(true);
+    client.close();
+  });
+
   it("reconciles simultaneous client submissions to the gateway-owned turn", () => {
     const client = new NanobotClient({
       url: "ws://test",
