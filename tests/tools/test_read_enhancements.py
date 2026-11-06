@@ -1,6 +1,9 @@
 import base64
+import codecs
+import hashlib
 import os
 import sys
+import tracemalloc
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +15,20 @@ from nanobot.utils.document import (
     DocumentLineSource,
     LocatedDocumentLine,
 )
+
+
+class _ReadStreamWrapper:
+    def __init__(self, stream):
+        self.stream = stream
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return self.stream.__exit__(*args)
 
 
 def _document_source(text: str) -> DocumentLineSource:
@@ -50,6 +67,60 @@ class TestReadDedup:
             second = await tool.execute(path=str(f))
         assert "unchanged" in second.lower()
         assert "line 0" not in second
+
+    @pytest.mark.asyncio
+    async def test_visible_unchanged_receipt_skips_text_parsing(self, tool, tmp_path, monkeypatch):
+        f = tmp_path / "data.txt"
+        f.write_text("one\ntwo\n", encoding="utf-8")
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f), limit=1)
+
+        def fail_parse(*_args):
+            raise AssertionError("unchanged content must not be parsed again")
+
+        monkeypatch.setattr(tool, "_read_text", fail_parse)
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            second = await tool.execute(path=str(f), limit=1)
+        assert second == f"[File unchanged since last read: {f}]"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("case", ["fresh", "force", "not_visible", "different_range"])
+    async def test_read_without_a_usable_receipt_makes_one_pass(
+        self, tool, tmp_path, monkeypatch, case,
+    ):
+        f = tmp_path / "data.txt"
+        raw = b"first\n" + b"x" * 80 + b"\nlast\n"
+        f.write_bytes(raw)
+        if case != "fresh":
+            with file_state.file_read_context("read-1", lambda: {}):
+                first = await tool.execute(path=str(f), limit=1)
+        else:
+            first = ""
+        real_fdopen = os.fdopen
+        counts = {"bytes": 0, "seeks": 0}
+
+        class CountingStream(_ReadStreamWrapper):
+            def read(self, size):
+                chunk = self.stream.read(size)
+                counts["bytes"] += len(chunk)
+                return chunk
+
+            def seek(self, *args):
+                counts["seeks"] += 1
+                return self.stream.seek(*args)
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: CountingStream(real_fdopen(*args, **kwargs)),
+        )
+        visible = {} if case == "not_visible" else {"read-1": first}
+        offset = 2 if case == "different_range" else 1
+        with file_state.file_read_context("read-2", lambda: visible):
+            result = await tool.execute(path=str(f), offset=offset, limit=1, force=case == "force")
+
+        assert result.startswith(f"{offset}| ")
+        assert counts == {"bytes": len(raw), "seeks": 0}
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
 
     @pytest.mark.asyncio
     async def test_read_after_external_modification_returns_full(self, tool, tmp_path):
@@ -588,3 +659,425 @@ class TestReadFileDescription:
         tool = ReadFileTool()
         desc = tool.description.lower()
         assert "document" in desc or "docx" in desc or "xlsx" in desc or "pptx" in desc
+
+
+class TestBoundedTextReads:
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("chunk_size", [16, 17])
+    @pytest.mark.parametrize(
+        ("encoding", "bom"),
+        [
+            ("utf-8", b""),
+            ("utf-8", codecs.BOM_UTF8),
+            ("utf-16-le", codecs.BOM_UTF16_LE),
+            ("utf-16-be", codecs.BOM_UTF16_BE),
+            ("utf-32-le", codecs.BOM_UTF32_LE),
+            ("utf-32-be", codecs.BOM_UTF32_BE),
+        ],
+    )
+    async def test_chunked_text_matches_splitlines_and_normalization(
+        self, tmp_path, monkeypatch, encoding, bom, chunk_size,
+    ):
+        content = (
+            "a" * 15 + "\r\n" + "prefix\r\r\nnext\rsolo\n"
+            + "\v\f\x1c\x1d\x1e\x85\u2028\u2029界😀end"
+        )
+        f = tmp_path / "mixed.txt"
+        f.write_bytes(bom + content.encode(encoding))
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", chunk_size)
+        lines = content.replace("\r\n", "\n").splitlines()
+
+        for offset, limit in [(1, 3), (4, 4), (len(lines), 1)]:
+            end = min(offset - 1 + limit, len(lines))
+            expected = "\n".join(
+                f"{number}| {line}"
+                for number, line in enumerate(lines[offset - 1:end], offset)
+            )
+            if end < len(lines):
+                expected += (
+                    f"\n\n(Showing lines {offset}-{end} of {len(lines)}. "
+                    f"Use offset={end + 1} to continue.)"
+                )
+            else:
+                expected += f"\n\n(End of file — {len(lines)} lines total)"
+            assert await tool.execute(path=str(f), offset=offset, limit=limit, force=True) == expected
+        result = await tool.execute(path=str(f), offset=len(lines) + 1, force=True)
+        assert result == f"Error: offset {len(lines) + 1} is beyond end of file ({len(lines)} lines)"
+
+    @pytest.mark.asyncio
+    async def test_late_utf8_error_uses_latin1_for_the_entire_known_text_file(
+        self, tmp_path, monkeypatch,
+    ):
+        raw = b"caf\xc3\xa9\n" + b"x" * 50 + b"\x85last\xff"
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+        text_file = tmp_path / "legacy.txt"
+        text_file.write_bytes(raw)
+
+        result = await tool.execute(path=str(text_file), limit=1)
+
+        assert result == "1| cafÃ©\n\n(Showing lines 1-1 of 3. Use offset=2 to continue.)"
+        assert tool._file_states.get(text_file).content_hash == hashlib.sha256(raw).hexdigest()
+
+        binary = tmp_path / "data.bin"
+        binary.write_bytes(raw)
+        result = await tool.execute(path=str(binary), limit=1)
+        assert result.is_error
+        assert str(result).startswith(f"Error: Cannot read binary file {binary} (MIME:")
+        assert tool._file_states.get(binary) is None
+
+    @pytest.mark.asyncio
+    async def test_latin1_fallback_preserves_prior_ascii_and_split_line_boundary(self, tmp_path, monkeypatch):
+        f = tmp_path / "legacy.txt"
+        raw = b"first\n" + b"a" * 9 + b"\r" + b"\xc3\xa9\xff\nlast\n"
+        f.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+
+        result = await tool.execute(path=str(f), limit=4)
+
+        assert result == "1| first\n2| aaaaaaaaa\n3| Ã©ÿ\n4| last\n\n(End of file — 4 lines total)"
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("raw", "encoding"),
+        [
+            (codecs.BOM_UTF8 + b"a" * 40 + b"\xc3", "utf-8-sig"),
+            (codecs.BOM_UTF8 + b"a" * 40 + b"\xfflater", "utf-8-sig"),
+            (codecs.BOM_UTF16_LE + b"a\x00" * 20 + b"\x00", "utf-16"),
+            (codecs.BOM_UTF32_BE + b"\x00\x00\x00a" * 10 + b"\x00\x11\x00\x00", "utf-32"),
+        ],
+    )
+    async def test_malformed_bom_keeps_original_decode_error(
+        self, tmp_path, monkeypatch, raw, encoding,
+    ):
+        f = tmp_path / "broken.txt"
+        f.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 17)
+        with pytest.raises(UnicodeDecodeError) as exc:
+            raw.decode(encoding)
+
+        result = await tool.execute(path=str(f), limit=1)
+
+        assert result.is_error
+        assert result == f"Error reading file: {exc.value}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("filename", "raw", "mime"),
+        [
+            ("image.dat", b"\x89PNG\r\n\x1a\ncontents", "image/png"),
+            ("image.png", b"plain text with image extension", "image/png"),
+        ],
+    )
+    async def test_magic_and_extension_image_reads_are_unchanged(self, tmp_path, filename, raw, mime):
+        f = tmp_path / filename
+        f.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+
+        result = await tool.execute(path=str(f), limit=1)
+
+        assert result[0]["image_url"]["url"] == f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+        assert result[1] == {"type": "text", "text": f"(Image file: {f})"}
+
+    @pytest.mark.asyncio
+    async def test_image_growth_during_read_respects_size_limit(self, tmp_path, monkeypatch):
+        f = tmp_path / "growing.png"
+        f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 16)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+        monkeypatch.setattr(tool, "_MAX_FILE_SIZE_BYTES", 64)
+        real_fdopen = os.fdopen
+
+        class GrowingStream(_ReadStreamWrapper):
+            def __init__(self, stream):
+                super().__init__(stream)
+                self.grown = False
+
+            def read(self, size):
+                chunk = self.stream.read(size)
+                if not self.grown:
+                    self.grown = True
+                    with f.open("ab") as out:
+                        out.write(b"y" * 64)
+                return chunk
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: GrowingStream(real_fdopen(*args, **kwargs)),
+        )
+        result = await tool.execute(path=str(f))
+
+        assert result.is_error
+        assert "File too large to read" in result
+
+    @pytest.mark.asyncio
+    async def test_small_image_does_not_allocate_the_file_size_limit(self, tmp_path):
+        if tracemalloc.is_tracing():
+            pytest.skip("requires isolated tracemalloc accounting")
+        f = tmp_path / "small.png"
+        f.write_bytes(b"\x89PNG\r\n\x1a\ncontents")
+        tool = ReadFileTool(workspace=tmp_path)
+        await tool.execute(path=str(f))
+
+        tracemalloc.start()
+        try:
+            result = await tool.execute(path=str(f))
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+        assert result[0]["type"] == "image_url"
+        assert peak < 2 * 1024 * 1024
+
+    @pytest.mark.asyncio
+    async def test_hash_and_dedup_cover_changes_outside_selected_range(self, tmp_path, monkeypatch):
+        f = tmp_path / "data.txt"
+        raw = b"first\n" + b"x" * 100 + b"\nend-A\n"
+        f.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f), limit=1)
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            assert "File unchanged" in await tool.execute(path=str(f), limit=1)
+
+        mtime = f.stat().st_mtime_ns
+        changed = raw.replace(b"end-A", b"end-B")
+        f.write_bytes(changed)
+        os.utime(f, ns=(mtime, mtime))
+        with file_state.file_read_context("read-3", lambda: {"read-1": first}):
+            reread = await tool.execute(path=str(f), limit=1)
+        assert reread == first
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(changed).hexdigest()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("new_type", ["utf16", "image"])
+    async def test_changed_file_is_redetected_and_hashed_after_precheck(
+        self, tmp_path, monkeypatch, new_type,
+    ):
+        f = tmp_path / "data.txt"
+        f.write_bytes(b"original\n")
+        tool = ReadFileTool(workspace=tmp_path)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f))
+        f.write_bytes(b"intermediate bytes\n")
+        final = (
+            "new text\n".encode("utf-16") if new_type == "utf16"
+            else b"\x89PNG\r\n\x1a\nimage data"
+        )
+        real_fdopen = os.fdopen
+
+        class ChangeAfterPrecheck(_ReadStreamWrapper):
+            def __init__(self, stream):
+                super().__init__(stream)
+                self.changed = False
+
+            def read(self, size):
+                chunk = self.stream.read(size)
+                if not chunk and not self.changed:
+                    self.changed = True
+                    f.write_bytes(final)
+                return chunk
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: ChangeAfterPrecheck(real_fdopen(*args, **kwargs)),
+        )
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            second = await tool.execute(path=str(f))
+
+        if new_type == "image":
+            assert second[0]["image_url"]["url"] == (
+                f"data:image/png;base64,{base64.b64encode(final).decode()}"
+            )
+            assert tool._file_states.get(f).content_hash == hashlib.sha256(b"original\n").hexdigest()
+        else:
+            assert second == "1| new text\n\n(End of file — 1 lines total)"
+            assert tool._file_states.get(f).content_hash == hashlib.sha256(final).hexdigest()
+            with file_state.file_read_context("read-3", lambda: {"read-2": second}):
+                repeat = await tool.execute(path=str(f))
+            assert repeat == f"[File unchanged since last read: {f}]"
+
+    @pytest.mark.asyncio
+    async def test_shrunk_image_after_receipt_check_does_not_allocate_old_file_size(self, tmp_path, monkeypatch):
+        if tracemalloc.is_tracing():
+            pytest.skip("requires isolated tracemalloc accounting")
+        f = tmp_path / "data.txt"
+        f.write_bytes(b"x" * (8 * 1024 * 1024))
+        tool = ReadFileTool(workspace=tmp_path)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f), limit=1)
+        with f.open("r+b") as out:
+            out.seek(-1, os.SEEK_END)
+            out.write(b"y")
+        image = b"\x89PNG\r\n\x1a\nsmall"
+        real_fdopen = os.fdopen
+
+        class ChangeAfterPrecheck(_ReadStreamWrapper):
+            def __init__(self, stream):
+                super().__init__(stream)
+                self.changed = False
+
+            def read(self, size):
+                chunk = self.stream.read(size)
+                if not chunk and not self.changed:
+                    self.changed = True
+                    f.write_bytes(image)
+                return chunk
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: ChangeAfterPrecheck(real_fdopen(*args, **kwargs)),
+        )
+        tracemalloc.start()
+        try:
+            with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+                result = await tool.execute(path=str(f), limit=1)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+        assert result[0]["image_url"]["url"] == f"data:image/png;base64,{base64.b64encode(image).decode()}"
+        assert peak < 3 * 1024 * 1024
+
+    @pytest.mark.asyncio
+    async def test_growth_during_hash_precheck_respects_size_limit(self, tmp_path, monkeypatch):
+        f = tmp_path / "data.txt"
+        raw = b"first\n" + b"x" * 20
+        f.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+        monkeypatch.setattr(tool, "_MAX_FILE_SIZE_BYTES", 64)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f))
+        real_fdopen = os.fdopen
+
+        class GrowingStream(_ReadStreamWrapper):
+            def __init__(self, stream):
+                super().__init__(stream)
+                self.grown = False
+
+            def read(self, size):
+                chunk = self.stream.read(size)
+                if not self.grown:
+                    self.grown = True
+                    with f.open("ab") as out:
+                        out.write(b"y" * 64)
+                return chunk
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: GrowingStream(real_fdopen(*args, **kwargs)),
+        )
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            result = await tool.execute(path=str(f))
+
+        assert result.is_error
+        assert "File too large to read" in result
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
+
+    @pytest.mark.asyncio
+    async def test_file_at_size_limit_is_readable(self, tmp_path, monkeypatch):
+        f = tmp_path / "exact.txt"
+        raw = b"x" * 99 + b"\n"
+        f.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_MAX_FILE_SIZE_BYTES", len(raw))
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+
+        result = await tool.execute(path=str(f), limit=1)
+
+        assert result == "1| " + "x" * 99 + "\n\n(End of file — 1 lines total)"
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
+
+    @pytest.mark.asyncio
+    async def test_opened_nonregular_file_is_not_read(self, tmp_path, monkeypatch):
+        f = tmp_path / "replaced.txt"
+        f.write_text("regular", encoding="utf-8")
+        target = f.resolve()
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        real_open = os.open
+
+        def open_replacement(path, flags, *args, **kwargs):
+            if os.fspath(path) == os.fspath(target):
+                return read_fd
+            return real_open(path, flags, *args, **kwargs)
+
+        tool = ReadFileTool()
+        try:
+            with monkeypatch.context() as scoped:
+                scoped.setattr("nanobot.agent.tools.filesystem.os.open", open_replacement)
+                result = await tool.execute(path=str(f))
+        finally:
+            try:
+                os.close(read_fd)
+            except OSError:
+                pass
+
+        assert result.is_error
+        assert result == f"Error: Not a file: {f}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("exceeds_limit", [False, True])
+    async def test_growth_after_open_is_read_once_and_respects_size_limit(
+        self, tmp_path, monkeypatch, exceeds_limit,
+    ):
+        f = tmp_path / "growing.txt"
+        original = b"first\n" + b"x" * 40 + b"\nlast\n"
+        addition = b"extra\n" * (12 if exceeds_limit else 1)
+        f.write_bytes(original)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+        monkeypatch.setattr(tool, "_MAX_FILE_SIZE_BYTES", 100)
+        read_text = tool._read_text
+
+        def append_before_reading_rest(stream, first, *args):
+            with f.open("ab") as out:
+                out.write(addition)
+            return read_text(stream, first, *args)
+
+        monkeypatch.setattr(tool, "_read_text", append_before_reading_rest)
+        result = await tool.execute(path=str(f), limit=1)
+
+        if exceeds_limit:
+            assert result.is_error
+            assert "File too large to read" in result
+            assert tool._file_states.get(f) is None
+        else:
+            assert result == "1| first\n\n(Showing lines 1-1 of 4. Use offset=2 to continue.)"
+            assert tool._file_states.get(f).content_hash == hashlib.sha256(original + addition).hexdigest()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("offset", [1, 2])
+    async def test_large_unbroken_line_has_bounded_python_allocations(self, tmp_path, offset):
+        if tracemalloc.is_tracing():
+            pytest.skip("requires isolated tracemalloc accounting")
+        f = tmp_path / "large.txt"
+        with f.open("wb") as out:
+            out.write(b"first\n")
+            for _ in range(128):
+                out.write(b"x" * 65536)
+            out.write(b"\nlast\n")
+        tool = ReadFileTool(workspace=tmp_path)
+        warmup = tmp_path / "warmup.txt"
+        warmup.write_text("warmup", encoding="utf-8")
+        await tool.execute(path=str(warmup))
+
+        tracemalloc.start()
+        try:
+            result = await tool.execute(path=str(f), offset=offset, limit=1)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+        assert "of 3. Use offset=" in result
+        if offset == 2:
+            assert "Line 2 truncated" in result
+        assert peak < 3 * 1024 * 1024

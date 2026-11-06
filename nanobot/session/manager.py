@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -363,6 +365,10 @@ class SessionMetadataPayload(TypedDict):
     metadata: dict[str, Any]
 
 
+class SessionHistoryPayload(SessionMetadataPayload):
+    generation: str
+
+
 class SessionInfo(TypedDict):
     key: str
     created_at: str
@@ -609,6 +615,37 @@ class SessionManager:
                 self._store.save(session)
             self._store.append_history(key, facts, expected_generation=session.generation)
         self._store.run_write(append)
+
+    def read_consistently(
+        self, operation: Callable[[], _T], *, cancelled: threading.Event | None = None,
+    ) -> _T:
+        """Run nested repository reads against one committed snapshot."""
+        return self._store.run_read(operation, cancelled=cancelled)
+
+    def read_batch(self, operation: Callable[[], _T]) -> _T:
+        """Reuse a connection without extending nested read snapshots."""
+        return self._store.run_read_batch(operation)
+
+    def read_history_header(self, key: str) -> SessionHistoryPayload | None:
+        """Read the metadata and generation needed by persisted history tools."""
+        return self._store.read_history_header(key)
+
+    def project_session_messages(
+        self,
+        key: str,
+        project: Callable[[SessionHistoryPayload, Iterator[tuple[int, dict[str, Any]]]], _T],
+    ) -> _T | None:
+        """Project a session header and reverse message stream within one snapshot.
+
+        The stream is valid only during the callback.
+        """
+        return self._store.project_session_messages(key, project)
+
+    def project_session_handle_names(
+        self, project: Callable[[Iterator[tuple[str, object]]], _T],
+    ) -> _T:
+        """Project stored handle names within the caller's read snapshot."""
+        return self._store.project_session_handle_names(project)
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:
         """Read a session without populating the cache."""

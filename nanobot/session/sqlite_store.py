@@ -4,7 +4,8 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterator
+from concurrent.futures import CancelledError
 from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from nanobot.session.history_graph import history_record_size
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     Session,
+    SessionHistoryPayload,
     SessionInfo,
     SessionMetadataPayload,
     SessionPayload,
@@ -149,10 +151,41 @@ class SqliteSessionStore:
         with self.transaction():
             return operation()
 
-    def run_read(self, operation: Callable[[], _T]) -> _T:
+    def run_read(
+        self, operation: Callable[[], _T], *, cancelled: threading.Event | None = None,
+    ) -> _T:
         """Run one repository command against a consistent read snapshot."""
-        with self.transaction(write=False):
+        with self.transaction(write=False) as db:
+            if cancelled is None:
+                return operation()
+            if cancelled.is_set():
+                raise CancelledError()
+            # Interrupt long SQLite work as well as the Python-level row scans.
+            db.set_progress_handler(cancelled.is_set, 1000)
+            try:
+                return operation()
+            except sqlite3.OperationalError:
+                if cancelled.is_set():
+                    raise CancelledError() from None
+                raise
+            finally:
+                db.set_progress_handler(None, 0)
+
+    def run_read_batch(self, operation: Callable[[], _T]) -> _T:
+        """Reuse one connection across independent short read transactions."""
+        if getattr(self._local, "connection", None) is not None or getattr(self._local, "read_batch", None) is not None:
             return operation()
+        connection: sqlite3.Connection | None = getattr(self._local, "worker_connection", None)
+        owned = connection is None
+        if connection is None:
+            connection = self._open_connection()
+        self._local.read_batch = connection
+        try:
+            return operation()
+        finally:
+            self._local.read_batch = None
+            if owned:
+                connection.close()
 
     def _open_connection(self, *, worker: bool = False) -> sqlite3.Connection:
         if self.path.is_symlink():
@@ -185,7 +218,9 @@ class SqliteSessionStore:
             return
         if self.path.is_symlink():
             raise RuntimeError("session database must not be a symlink")
-        connection: sqlite3.Connection | None = getattr(self._local, "worker_connection", None)
+        connection: sqlite3.Connection | None = getattr(self._local, "read_batch", None)
+        if connection is None:
+            connection = getattr(self._local, "worker_connection", None)
         owned = connection is None
         if connection is None:
             connection = self._open_connection()
@@ -431,6 +466,53 @@ class SqliteSessionStore:
                 return None
             return {"key": key, "created_at": row[0], "updated_at": row[1],
                     "metadata": self._metadata(db, key, row[2])}
+
+    def read_history_header(self, key: str) -> SessionHistoryPayload | None:
+        """Read search identity and metadata without runtime checkpoints or inputs."""
+        with self.transaction(write=False) as db:
+            row = db.execute(
+                "SELECT created_at, updated_at, metadata, generation FROM sessions WHERE key=?", (key,),
+            ).fetchone()
+            if row is None:
+                return None
+            return {"key": key, "created_at": datetime.fromisoformat(row[0]).isoformat(),
+                    "updated_at": datetime.fromisoformat(row[1]).isoformat(),
+                    "metadata": _object(row[2]), "generation": row[3]}
+
+    def project_session_messages(
+        self,
+        key: str,
+        project: Callable[[SessionHistoryPayload, Iterator[tuple[int, dict[str, Any]]]], _T],
+    ) -> _T | None:
+        """Project the header and canonical messages without materializing history."""
+        with self.transaction(write=False) as db:
+            header = self.read_history_header(key)
+            if header is None:
+                return None
+            # Indices refer to the ordered message list, not SQLite positions.
+            # Count first so sparse positions retain the same observable indices.
+            count = db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_key=?", (key,),
+            ).fetchone()[0]
+            rows = db.execute(
+                "SELECT record FROM messages WHERE session_key=? ORDER BY position DESC", (key,),
+            )
+            messages = ((count - 1 - index, _object(row[0])) for index, row in enumerate(rows))
+            try:
+                return project(header, messages)
+            finally:
+                rows.close()
+
+    def project_session_handle_names(
+        self, project: Callable[[Iterator[tuple[str, object]]], _T],
+    ) -> _T:
+        """Stream stored names for handle ambiguity checks in the caller's snapshot."""
+        with self.transaction(write=False) as db:
+            rows = db.execute("SELECT key, json_extract(metadata, '$.session_handle') FROM sessions")
+            try:
+                return project((str(row[0]), cast(object, row[1])) for row in rows)
+            finally:
+                rows.close()
 
     def read(self, key: str) -> SessionPayload | None:
         session = self.load(key)
