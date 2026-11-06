@@ -108,17 +108,24 @@ function BspWorkbenchHarness() {
 }
 
 describe("PaneWorkbench", () => {
-  it("keeps a single conversation's header inside that pane instead of above its previews", () => {
+  it("keeps a single conversation's header and composer inside its preview layout", () => {
+    const composer = <textarea aria-label="Composer Alpha" />;
     render(<PaneWorkbench panes={[{ key: "alpha", title: "Alpha" }]} activePaneKey="alpha"
       layout="columns" chrome showLayoutControl={false} onActivatePane={vi.fn()} onAddPane={vi.fn()}
       onLayoutChange={vi.fn()} onPaneOrderChange={vi.fn()}
       renderPane={(_pane, context) => {
         expect(context.headerPortalTarget).toBeUndefined();
         expect(context.multiplePanes).toBe(false);
-        return <div data-testid="local-toolbar">{context.headerActions}</div>;
+        return <div data-testid="local-toolbar">
+          {context.headerActions}
+          {context.composerPortalTarget === undefined ? composer : context.composerPortalTarget
+            ? createPortal(composer, context.composerPortalTarget) : null}
+        </div>;
       }} />);
     expect(screen.getByTestId("workbench-header-host")).toBeEmptyDOMElement();
-    expect(within(screen.getByTestId("local-toolbar")).getByRole("button", { name: "Add pane" })).toBeVisible();
+    const conversation = screen.getByTestId("local-toolbar");
+    expect(within(conversation).getByRole("button", { name: "Add pane" })).toBeVisible();
+    expect(within(conversation).getByRole("textbox", { name: "Composer Alpha" })).toBeVisible();
   });
 
   const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
@@ -168,7 +175,7 @@ describe("PaneWorkbench", () => {
       .toEqual(["Alpha", "Beta"]);
     expect(screen.getByRole("button", { name: "Focus Alpha" })).toHaveAttribute("data-multiple-panes", "true");
     expect(screen.getByRole("button", { name: "Focus Beta" })).toHaveAttribute("data-multiple-panes", "true");
-    expect(screen.getByLabelText("Composer Beta")).toBeVisible();
+    expect(within(screen.getByTestId("workbench-composer-host")).getByLabelText("Composer Beta")).toBeVisible();
     expect(screen.getByLabelText("Composer Alpha")).not.toBeVisible();
 
     fireEvent.pointerDown(
@@ -400,7 +407,12 @@ describe("PaneWorkbench", () => {
       renderPane: (pane: { key: string; title: string }, context: {
         headerActions: ReactNode;
         multiplePanes: boolean;
-      }) => <>{context.headerActions}<span data-multiple-panes={context.multiplePanes}>{pane.title}</span></>,
+        composerPortalTarget: HTMLElement | null | undefined;
+      }) => <>{context.headerActions}<span data-multiple-panes={context.multiplePanes}>{pane.title}</span>
+        {context.composerPortalTarget ? createPortal(
+          <textarea aria-label={`Composer ${pane.title}`} />, context.composerPortalTarget,
+        ) : null}
+      </>,
     };
 
     const { rerender } = render(<PaneWorkbench {...props} activePaneKey="gamma" />);
@@ -408,6 +420,7 @@ describe("PaneWorkbench", () => {
     expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
     expect(screen.getByTestId("workbench-pane-gamma")).toBeInTheDocument();
     expect(screen.getByText("gamma", { selector: "span" })).toHaveAttribute("data-multiple-panes", "false");
+    expect(within(screen.getByTestId("workbench-composer-host")).getByRole("textbox", { name: "Composer gamma" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Layout" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
     expect(screen.queryByRole("separator")).not.toBeInTheDocument();
@@ -415,6 +428,7 @@ describe("PaneWorkbench", () => {
     rerender(<PaneWorkbench {...props} activePaneKey="delta" />);
     expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
     expect(screen.getByTestId("workbench-pane-delta")).toBeInTheDocument();
+    expect(within(screen.getByTestId("workbench-composer-host")).getByRole("textbox", { name: "Composer delta" })).toBeVisible();
     expect(screen.queryByTestId("workbench-pane-gamma")).not.toBeInTheDocument();
   });
 

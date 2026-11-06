@@ -1,12 +1,8 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-light";
-import markup from "react-syntax-highlighter/dist/esm/languages/prism/markup";
-import oneLight from "react-syntax-highlighter/dist/esm/styles/prism/one-light";
+import { codeHighlight } from "@/lib/code-highlighter";
 
 import { ViewportCodeRows } from "@/components/ViewportCodeRows";
-
-SyntaxHighlighter.registerLanguage("markup", markup);
 
 let notify: (entries: IntersectionObserverEntry[]) => void;
 const disconnect = vi.fn();
@@ -25,8 +21,7 @@ function sourceText() {
   return [...document.querySelectorAll("[data-highlighted]")].map(node => node.textContent).join("");
 }
 function preview(code: string) {
-  return <div data-file-preview-scroll><SyntaxHighlighter language="markup" style={oneLight}
-    renderer={props => <ViewportCodeRows {...props} />}>{code}</SyntaxHighlighter></div>;
+  return <div data-file-preview-scroll><ViewportCodeRows lines={codeHighlight(code, "markup").read()} /></div>;
 }
 
 describe("viewport code highlighting", () => {
