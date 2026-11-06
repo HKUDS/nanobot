@@ -1479,12 +1479,14 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
     session.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Finish the goal."}
     loop.sessions.save(session)
     calls = 0
+    model_progress: asyncio.Queue[int] = asyncio.Queue()
 
     async def respond(*args, **kwargs):
         nonlocal calls
         if args and "You write short, neutral chat titles" in str(args[0]):
             return LLMResponse(content="Goal checkpoint")
         calls += 1
+        model_progress.put_nowait(calls)
         if calls == 3:
             await loop._dispatch_inbound(InboundMessage(
                 channel="websocket", sender_id="user", chat_id="committed-checkpoint",
@@ -1505,12 +1507,15 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
     loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
     loop.runner.run = AsyncMock(wraps=loop.runner.run)
     committed, release = threading.Event(), threading.Event()
+    checkpoint_ready = asyncio.Event()
+    event_loop = asyncio.get_running_loop()
     publish = loop.sessions.state._publish
 
     def hold_after_commit(saved, *args, **kwargs):
         checkpoint = saved.metadata.get(RUNTIME_CHECKPOINT_KEY, {})
         if checkpoint.get("phase") == "tools_completed" and calls == 3 and not committed.is_set():
             committed.set()
+            event_loop.call_soon_threadsafe(checkpoint_ready.set)
             if not release.wait(5):
                 raise TimeoutError("test did not release the committed save")
         return publish(saved, *args, **kwargs)
@@ -1536,7 +1541,12 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
     bus_task = asyncio.create_task(loop.run())
     try:
         await loop.bus.publish_inbound(msg)
-        assert await asyncio.wait_for(asyncio.to_thread(committed.wait), 5)
+        # Establish each preparation step before measuring Stop responsiveness.
+        # An async observer also cancels without leaving an executor thread waiting.
+        for expected_call in (1, 2, 3):
+            assert await asyncio.wait_for(model_progress.get(), 5) == expected_call
+        await asyncio.wait_for(checkpoint_ready.wait(), 5)
+        assert committed.is_set()
         worker, = loop._active_tasks[msg.session_key]
         assert gate.locked()
         assert loop._pending_queues[msg.session_key].qsize() == 1
