@@ -943,7 +943,7 @@ export function ThreadShell({
       void refreshModelSettings();
     }
     return () => { settingsRefreshGenerationRef.current += 1; };
-  }, [refreshModelSettings, settingsLoading, settingsSnapshot]);
+  }, [client, refreshModelSettings, settingsLoading, settingsSnapshot]);
 
   useEffect(() => {
     return client.onRuntimeModelUpdate(() => {

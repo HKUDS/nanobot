@@ -1451,6 +1451,25 @@ describe("ThreadShell", () => {
     recorder.mockRestore();
   });
 
+  it("rejects a model-settings refresh after its client is replaced", async () => {
+    const client = makeClient();
+    const settings = chatModelSettings("deepseek-v4-pro", "deepseek");
+    let release!: (response: Response) => void;
+    const pending = new Promise<Response>(resolve => { release = resolve; });
+    const refresh = vi.fn(() => pending);
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings?scope=chat"
+      ? refresh() : Promise.resolve(httpJson({}))));
+    const view = (owner: typeof client) => wrap(owner,
+      <ThreadShell session={null} title="New topic" onToggleSidebar={() => {}} settingsSnapshot={settings} />);
+    const { rerender } = render(view(client));
+    act(() => client._emitRuntimeModelUpdate("gpt-5.5"));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    rerender(view(makeClient()));
+    await act(async () => { release(httpJson(chatModelSettings("gpt-5.5", "openai"))); await pending; });
+    expect(screen.getByTestId("composer-model-logo-deepseek")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-model-logo-openai")).not.toBeInTheDocument();
+  });
+
   it("updates the composer model logo when settings snapshot changes", async () => {
     const client = makeClient();
     const { rerender } = render(
