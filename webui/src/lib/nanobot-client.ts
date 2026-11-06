@@ -200,7 +200,7 @@ function runObservation(event: InboundEvent): RunObservation | null {
     case "stream_end":
       return { ...base, kind: "activity" };
     case "retry_status":
-      return { ...base, kind: event.state === "recovered" || event.state === "cleared" ? "progress" : "activity" };
+      return { ...base, lifecycleSignal: true, kind: event.state === "recovered" || event.state === "cleared" ? "progress" : "activity" };
     case "recovery_state":
       // Supersession resolves the old recovery, not the new user turn that caused it.
       return event.status === "recovered" && event.reason === "superseded"
@@ -435,6 +435,16 @@ export class NanobotClient {
     this.applyRunEffects(this.runs.transition({ kind: "fence", chatId, completedTurnIds }));
   }
 
+  /** Settle explicit fragment completions without claiming coverage of live content. */
+  settleFragmentRunLifecycle(chatId: string, completedTurnIds: readonly string[]): void {
+    this.applyRunEffects(this.runs.transition({ kind: "settle-fragment-lifecycle", chatId, completedTurnIds }));
+  }
+
+  /** Whether a mounted transcript owns delivery for this chat. */
+  hasTranscript(chatId: string): boolean {
+    return this.transcriptHandlers.has(chatId);
+  }
+
   /** Last ``goal_state`` payload for *chatId*, if any frame has arrived this connection. */
   getGoalState(chatId: string): GoalStateWsPayload | undefined {
     return this.goalStateByChatId.get(chatId);
@@ -469,7 +479,8 @@ export class NanobotClient {
             && frame.turn_id === effect.turnId
           ));
           break;
-        case "prune-inbound": {
+        case "prune-inbound":
+        case "prune-lifecycle-inbound": {
           const pending = this.pendingInboundByChat.get(effect.chatId);
           if (!pending) break;
           const turnIds = new Set(effect.turnIds);
@@ -477,6 +488,8 @@ export class NanobotClient {
             !("turn_id" in event)
             || typeof event.turn_id !== "string"
             || !turnIds.has(event.turn_id)
+            || (effect.kind === "prune-lifecycle-inbound"
+              && event.event !== "goal_status" && event.event !== "recovery_state" && event.event !== "retry_status")
           ));
           if (remaining.length > 0) this.pendingInboundByChat.set(effect.chatId, remaining);
           else this.pendingInboundByChat.delete(effect.chatId);

@@ -95,6 +95,7 @@ function makeClient() {
     getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
     canReconcileCanonicalCompletion,
     reconcileCanonicalCompletion,
+    settleFragmentRunLifecycle: vi.fn(lifecycle.settleFragmentRunLifecycle.bind(lifecycle)),
     fenceCanonicalCompletedTurns: lifecycle.fenceCanonicalCompletedTurns.bind(lifecycle),
     getGoalState: lifecycle.getGoalState.bind(lifecycle),
     onTranscript: lifecycle.onTranscript.bind(lifecycle),

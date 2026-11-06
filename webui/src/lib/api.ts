@@ -421,6 +421,18 @@ export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPay
   if (value.projection !== "events" || !Array.isArray(value.events)) {
     throw new Error("Invalid WebUI thread events");
   }
+  if (isRecord(value.page) && value.page.history_generation != null
+    && (typeof value.page.history_generation !== "string" || !value.page.history_generation)) {
+    throw new Error("Invalid WebUI thread history generation");
+  }
+  if (isRecord(value.page) && value.page.record_range !== undefined) {
+    const range = value.page.record_range;
+    if (!isRecord(range) || !Number.isSafeInteger(range.turn) || Number(range.turn) < 0
+      || !Number.isSafeInteger(range.start) || Number(range.start) < 0
+      || !Number.isSafeInteger(range.end) || Number(range.end) <= Number(range.start)) {
+      throw new Error("Invalid WebUI thread record range");
+    }
+  }
   const graphs = new Map<string, ContextGraph>();
   if (value.context_graphs !== undefined) {
     if (!isRecord(value.context_graphs)) throw new Error("Invalid context graph dictionary");

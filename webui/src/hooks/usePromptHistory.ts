@@ -3,6 +3,7 @@ import { useClient } from "@/providers/ClientProvider";
 import { fetchPromptIndex, fetchWebuiThread } from "@/lib/api";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { joinThreadFragments } from "@/lib/thread-page-fragments";
 import { isModelCommandText } from "@/lib/format";
 import { isSystemCommandTurnId } from "@/lib/nanobot-client";
 import type { PromptIndex, UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
@@ -45,6 +46,8 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   const [index, setIndex] = useState<{ key: string; prompts: PromptAnchor[] } | null>(null);
   const indexSnapshot = useRef<PromptIndex>();
   const [pages, setPages] = useState<HistoryPage[]>([]);
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
   const [target, setTarget] = useState<PromptHistoryNavigation["target"]>(null);
   const [operation, setOperation] = useState<PromptHistoryNavigation["operation"]>(null);
   const [loading, setLoading] = useState(false);
@@ -54,6 +57,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   const request = useRef<AbortController | null>(null);
   const sequence = useRef(0);
   const retry = useRef<() => void>(() => setRefresh((value) => value + 1));
+  const emptyScan = useRef<{ direction: "before" | "after"; reversed: boolean }>({ direction: "after", reversed: false });
   const scope = useRef({ key, client });
   const currentScope = scope.current.key === key && scope.current.client === client;
 
@@ -140,9 +144,10 @@ export function usePromptHistory(key: string | null, version: number, messages: 
     setPages((current) => current.map((page) => ({ ...page, messages: update(page.messages) })));
   }, []);
 
-  const read = useCallback(async (cursor: string, direction: "before" | "after", id?: string) => {
+  const read = useCallback(async (cursor: string, direction: "before" | "after", id?: string, automatic = false) => {
     // Boundary inputs can arrive before loading renders; only a new jump supersedes a read.
     if (!key || (!id && request.current)) return;
+    if (!automatic) emptyScan.current = { direction, reversed: false };
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -156,6 +161,11 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       });
       if (controller.signal.aborted) return;
       if (!body) throw new Error("History is no longer available");
+      const generation = body.page?.history_generation;
+      const previousGeneration = pagesRef.current[0]?.body.page?.history_generation;
+      if (!id && generation && previousGeneration && generation !== previousGeneration) {
+        throw new Error("History changed; select the message again");
+      }
       const page = { body, messages: projectWebuiThreadMessages(projectThreadEvents(body.events)) };
       if (id && !page.messages.some((message) => message.id === id)) {
         setRefresh((value) => value + 1);
@@ -179,18 +189,42 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   const last = pages[pages.length - 1]?.body.page;
   const window = useMemo(() => {
     if (!currentScope || !pages.length) return null;
-    let count = 0;
+    const messages: UIMessage[] = [];
     let boundary: number | null = null;
-    for (const page of pages) {
-      const eventIndex = page.body.fork_boundary_event_index;
-      if (eventIndex !== undefined) boundary = count + projectWebuiThreadMessages(projectThreadEvents(page.body.events.slice(0, eventIndex))).length;
-      count += page.messages.length;
+    for (let index = 0; index < pages.length; index++) {
+      const page = pages[index];
+      let body = page.body;
+      let rows = page.messages;
+      const range = body.page?.record_range;
+      if (range) {
+        let joined = joinThreadFragments([], body);
+        while (pages[index + 1]?.body.page?.record_range?.turn === range.turn) {
+          joined = joinThreadFragments(joined.pages, pages[++index].body);
+        }
+        body = joined.body;
+        rows = projectWebuiThreadMessages(projectThreadEvents(body.events));
+      }
+      const eventIndex = body.fork_boundary_event_index;
+      if (eventIndex !== undefined) boundary = messages.length + projectWebuiThreadMessages(projectThreadEvents(body.events.slice(0, eventIndex))).length;
+      messages.push(...rows);
     }
-    return { messages: pages.flatMap((page) => page.messages),
+    return { messages,
       userMessageOffset: first?.user_message_offset ?? 0,
       hasMoreBefore: first?.has_more_before === true, hasMoreAfter: last?.has_more_after === true,
       forkBoundaryMessageCount: boundary };
   }, [currentScope, pages, first, last]);
+
+  useEffect(() => {
+    if (!window || window.messages.length || loading || error) return;
+    let direction = emptyScan.current.direction;
+    let cursor = direction === "after" ? last?.after_cursor : first?.before_cursor;
+    if (!cursor && !emptyScan.current.reversed) {
+      direction = direction === "after" ? "before" : "after";
+      emptyScan.current = { direction, reversed: true };
+      cursor = direction === "after" ? last?.after_cursor : first?.before_cursor;
+    }
+    if (cursor) void read(cursor, direction, undefined, true);
+  }, [error, first?.before_cursor, last?.after_cursor, loading, read, window]);
 
   return { prompts, window, target: currentScope ? target : null, loading: currentScope && loading,
     operation: currentScope && (loading || error) ? operation : null,

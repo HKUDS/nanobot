@@ -159,6 +159,31 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it.each([true, false])("keeps temporary and new persistent streams separate when the history key is absent (temporary=%s)", (temporary) => {
+    const fake = fakeClient();
+    const cache = new ThreadMessageCache(() => temporary);
+    const options = { key: null, cache, temporary };
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], options), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
+    });
+    first.unmount();
+    const snapshot = cache.get("checkpoint")!;
+    expect(snapshot.live).toHaveLength(temporary ? 0 : 1);
+    expect(snapshot.projection.messages[0].content).toBe("First ");
+    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], options), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: "First ", resuming: true, merge_next: true });
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 3, text: "last" });
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 4, text: "First last" });
+    });
+    expect(restored.result.current.messages[0].content).toBe("First last");
+    restored.unmount();
+    if (temporary) expect(cache.get("checkpoint")!.live).toEqual([]);
+  });
+
   it("resumes a merge_next cached snapshot including reasoning queued before detach", () => {
     const fake = fakeClient();
     const cache = new ThreadMessageCache(() => false);

@@ -112,8 +112,8 @@ class WebUIOutboundDelivery:
         self._temporary_chats = temporary_chats
         self._session_projection = session_projection
         self._context_graph = ContextGraphObserver(transcripts.sessions)
-        self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
-        self._reasoning_text_buffers: dict[tuple[str, str], list[str]] = {}
+        self._stream_text_buffers: dict[tuple[str, str, str, str], list[str]] = {}
+        self._reasoning_text_buffers: dict[tuple[str, str, str, str], list[str]] = {}
 
     async def _project_notification(self, msg: OutboundMessage) -> NotificationProjection | None:
         event = msg.event
@@ -150,6 +150,7 @@ class WebUIOutboundDelivery:
         """Forget unclosed streams when a turn ends or its chat is discarded."""
         if not complete or self._temporary_chats.should_persist_transcript(chat_id):
             self._context_graph.discard(chat_id)
+        self._transcripts.discard(chat_id, complete=complete)
         for buffers in (self._stream_text_buffers, self._reasoning_text_buffers):
             for key in tuple(buffers):
                 if key[0] == chat_id:
@@ -486,12 +487,23 @@ class WebUIOutboundDelivery:
         payload: StreamWirePayload = {"event": "reasoning_delta", "chat_id": chat_id, "text": delta}
         if stream_id is not None:
             payload["stream_id"] = stream_id
-        self._reasoning_text_buffers.setdefault((chat_id, str(stream_id or "")), []).append(delta)
+        key = self._transcripts.stream_buffer_key(chat_id, stream_id, metadata)
+        buffered = self._reasoning_text_buffers.setdefault(key, [])
+        buffered.append(delta)
         body: dict[str, Any] = dict(payload)
-        await self._persist_turn_stream_event(
-            chat_id, body, completed_text=None, metadata=metadata or {}, phase="reasoning",
-        )
-        await self._fanout(recipients, body, label=" reasoning ")
+        try:
+            await self._persist_turn_stream_event(
+                chat_id, body, completed_text=None, metadata=metadata or {}, phase="reasoning",
+            )
+            if (recipients and self._reasoning_text_buffers.get(key) is buffered
+                    and self._temporary_chats.should_persist_transcript(chat_id)):
+                self._transcripts.remember_buffered_delta(chat_id, body, metadata)
+            await self._fanout(recipients, body, label=" reasoning ")
+        except BaseException:
+            if self._reasoning_text_buffers.get(key) is buffered:
+                self._reasoning_text_buffers.pop(key, None)
+                self._transcripts.discard_stream_receipts(key, "reasoning")
+            raise
 
     async def send_reasoning_end(
         self, chat_id: str, metadata: dict[str, Any] | None = None,
@@ -501,12 +513,18 @@ class WebUIOutboundDelivery:
         payload: StreamWirePayload = {"event": "reasoning_end", "chat_id": chat_id}
         if stream_id is not None:
             payload["stream_id"] = stream_id
-        text = "".join(self._reasoning_text_buffers.pop((chat_id, str(stream_id or "")), []))
+        key = self._transcripts.stream_buffer_key(chat_id, stream_id, metadata)
+        text = "".join(self._reasoning_text_buffers.pop(key, []))
         body: dict[str, Any] = dict(payload)
-        await self._persist_turn_stream_event(
-            chat_id, body, completed_text=text or None, metadata=metadata or {}, phase="reasoning",
-        )
-        await self._fanout(recipients, body, label=" reasoning_end ")
+        try:
+            await self._persist_turn_stream_event(
+                chat_id, body, completed_text=text or None, metadata=metadata or {}, phase="reasoning",
+            )
+            await self._fanout(recipients, body, label=" reasoning_end ")
+        except BaseException:
+            if key not in self._reasoning_text_buffers:
+                self._transcripts.discard_stream_receipts(key, "reasoning")
+            raise
 
     async def send_file_edit_events(
         self, chat_id: str, edits: list[dict[str, Any]], metadata: dict[str, Any] | None = None,
@@ -529,37 +547,48 @@ class WebUIOutboundDelivery:
         merge_next: bool = False,
     ) -> None:
         recipients = self._transport.webui_recipients(ChatAudience(chat_id))
-        stream_key = (chat_id, str(stream_id or ""))
+        stream_key = self._transcripts.stream_buffer_key(chat_id, stream_id, metadata)
         completed_text: str | None = None
-        payload: StreamWirePayload
-        if stream_end:
-            payload = {"event": "stream_end", "chat_id": chat_id}
-            buffered = (
-                self._stream_text_buffers.setdefault(stream_key, [])
-                if merge_next else self._stream_text_buffers.pop(stream_key, [])
-            )
-            if delta:
-                buffered.append(delta)
-            full_text = "".join(buffered)
-            rewritten = self._media.rewrite_local_markdown_images(full_text)
-            completed_text = rewritten
-            if delta or rewritten != full_text:
-                payload["text"] = rewritten
-        else:
-            payload = {"event": "delta", "chat_id": chat_id, "text": delta}
-            self._stream_text_buffers.setdefault(stream_key, []).append(delta)
-        if stream_id is not None:
-            payload["stream_id"] = stream_id
-        if stream_end and resuming:
-            payload["resuming"] = True
-        if stream_end and merge_next:
-            payload["merge_next"] = True
-        body: dict[str, Any] = dict(payload)
-        await self._persist_turn_stream_event(
-            chat_id, body, completed_text=completed_text, metadata=metadata or {},
-            phase="answer", include_source=True,
+        buffered = (
+            self._stream_text_buffers.setdefault(stream_key, [])
+            if not stream_end or merge_next else self._stream_text_buffers.pop(stream_key, [])
         )
-        await self._fanout(recipients, body, label=" stream ")
+        try:
+            payload: StreamWirePayload
+            if stream_end:
+                payload = {"event": "stream_end", "chat_id": chat_id}
+                if delta:
+                    buffered.append(delta)
+                full_text = "".join(buffered)
+                rewritten = self._media.rewrite_local_markdown_images(full_text)
+                completed_text = rewritten
+                if delta or rewritten != full_text:
+                    payload["text"] = rewritten
+            else:
+                payload = {"event": "delta", "chat_id": chat_id, "text": delta}
+                buffered.append(delta)
+            if stream_id is not None:
+                payload["stream_id"] = stream_id
+            if stream_end and resuming:
+                payload["resuming"] = True
+            if stream_end and merge_next:
+                payload["merge_next"] = True
+            body: dict[str, Any] = dict(payload)
+            await self._persist_turn_stream_event(
+                chat_id, body, completed_text=completed_text, metadata=metadata or {},
+                phase="answer", include_source=True,
+            )
+            if (not stream_end and recipients and self._stream_text_buffers.get(stream_key) is buffered
+                    and self._temporary_chats.should_persist_transcript(chat_id)):
+                self._transcripts.remember_buffered_delta(chat_id, body, metadata)
+            await self._fanout(recipients, body, label=" stream ")
+        except BaseException:
+            current = self._stream_text_buffers.get(stream_key)
+            if current is buffered:
+                self._stream_text_buffers.pop(stream_key, None)
+            if current is None or current is buffered:
+                self._transcripts.discard_stream_receipts(stream_key, "answer")
+            raise
 
     async def _send_payload(
         self,
@@ -583,14 +612,16 @@ class WebUIOutboundDelivery:
                 (metadata or {}).get("webui") is True
                 and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
             )
-            persisted = await self._persist_turn_transcript_event(
-                chat_id, body, metadata=metadata, phase="complete",
-                transcript_overrides={WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True} if prior_failure else None,
-            )
-            if persisted:
-                # A durable incomplete marker allows HTTP recovery after restart.
-                clear_websocket_turn_if_current(chat_id, turn_owner)
-            self.discard(chat_id, complete=True)
+            try:
+                persisted = await self._persist_turn_transcript_event(
+                    chat_id, body, metadata=metadata, phase="complete",
+                    transcript_overrides={WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True} if prior_failure else None,
+                )
+                if persisted:
+                    # A durable incomplete marker allows HTTP recovery after restart.
+                    clear_websocket_turn_if_current(chat_id, turn_owner)
+            finally:
+                self.discard(chat_id, complete=True)
         await self._fanout(recipients, body, label=f" {body['event']} ")
 
     async def _send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:

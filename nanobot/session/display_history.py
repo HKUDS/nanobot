@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -86,6 +86,12 @@ class HistoryTurn:
     user_count: int
 
 
+@dataclass(frozen=True)
+class HistoryEntryPage:
+    entries: list[tuple[int, HistoryFact]]
+    source_bytes: int
+
+
 class HistoryReader:
     """A single-session view valid only inside its owner's read transaction."""
 
@@ -122,50 +128,60 @@ class HistoryReader:
         ):
             yield HistoryTurn(*row)
 
-    def read_entries(
-        self, ordinal: int, *, max_records: int | None = None, max_bytes: int | None = None,
-    ) -> list[tuple[int, HistoryFact]]:
-        clause = "session_key=? AND turn_ordinal=?"
-        params = (self.key, ordinal)
-        selected: list[int] | None = None
-        if max_records is not None and max_bytes is not None:
-            # Inspect sizes/positions, not unbounded JSON bodies, before decoding
-            # a pathological single turn. Preserve the first input and useful tail.
-            priorities: list[tuple[int, int]] = []
-            for kinds, order in (((HistoryKind.INPUT,), "ASC"),
-                                 ((HistoryKind.COMPLETION,), "DESC"),
-                                 ((HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT, HistoryKind.ANSWER_FRAGMENT), "DESC")):
-                row = self._db.execute(
-                    f"SELECT position, coalesce(json_extract(record, '$.uncompressed_bytes'), length(CAST(record AS BLOB))) FROM history_entries WHERE {clause} "
-                    f"AND kind IN ({','.join('?' for _ in kinds)}) ORDER BY position {order} LIMIT 1",
-                    (*params, *kinds),
-                ).fetchone()
-                if row is not None:
-                    priorities.append((row[0], row[1]))
-            candidates = self._db.execute(
-                f"SELECT position, coalesce(json_extract(record, '$.uncompressed_bytes'), length(CAST(record AS BLOB))) FROM history_entries WHERE {clause} ORDER BY position DESC LIMIT ?",
-                (*params, max_records),
-            )
-            positions: set[int] = set()
-            used = 0
-            for position, size in (*priorities, *candidates):
-                if position not in positions and len(positions) < max_records and used + size <= max_bytes:
-                    positions.add(position)
-                    used += size
-            selected = sorted(positions)
-            if not selected:
-                return []
-            clause += f" AND position IN ({','.join('?' for _ in selected)})"
+    def read_entries(self, ordinal: int) -> list[tuple[int, HistoryFact]]:
         return [(row[0], HistoryFact.decode(row[1])) for row in self._db.execute(
-            f"SELECT position, record FROM history_entries WHERE {clause} ORDER BY position",
-            (*params, *(selected or [])),
+            """SELECT position, record FROM history_entries
+               WHERE session_key=? AND turn_ordinal=? ORDER BY position""",
+            (self.key, ordinal),
         )]
 
-    def user_count_before(self, ordinal: int) -> int:
-        return int(self._db.execute(
+    def read_entry_page(
+        self, ordinal: int, *, start: int, end: int, reverse: bool,
+        max_records: int, max_bytes: int, allow_oversized: bool = False,
+    ) -> HistoryEntryPage:
+        """Read a contiguous range, budgeting encoded and expanded source bytes."""
+        order = "DESC" if reverse else "ASC"
+        sizes = self._db.execute(
+            f"""SELECT position, max(length(CAST(record AS BLOB)),
+                                    coalesce(json_extract(record, '$.uncompressed_bytes'), 0))
+                FROM history_entries WHERE session_key=? AND turn_ordinal=?
+                AND position>=? AND position<? ORDER BY position {order} LIMIT ?""",
+            (self.key, ordinal, start, end, max_records),
+        )
+        positions: list[int] = []
+        used = 0
+        for position, size in sizes:
+            # A single persisted fact can exceed a configured page budget. It
+            # must still be returned to make progress; storage caps each fact.
+            if used + size > max_bytes and (positions or not allow_oversized):
+                break
+            positions.append(position)
+            used += size
+            if used >= max_bytes:
+                break
+        if not positions:
+            return HistoryEntryPage([], 0)
+        first, last = min(positions), max(positions) + 1
+        entries = [(row[0], HistoryFact.decode(row[1])) for row in self._db.execute(
+            """SELECT position, record FROM history_entries WHERE session_key=? AND turn_ordinal=?
+               AND position>=? AND position<? ORDER BY position""",
+            (self.key, ordinal, first, last),
+        )]
+        return HistoryEntryPage(entries, used)
+
+    def user_count_before(self, ordinal: int, position: int = 0) -> int:
+        earlier = int(self._db.execute(
             "SELECT coalesce(sum(user_count), 0) FROM history_turns WHERE session_key=? AND ordinal<?",
             (self.key, ordinal),
         ).fetchone()[0])
+        if not position:
+            return earlier
+        within_turn = self._db.execute(
+            """SELECT count(*) FROM history_entries WHERE session_key=? AND turn_ordinal=?
+               AND position<? AND kind=?""",
+            (self.key, ordinal, position, HistoryKind.INPUT),
+        ).fetchone()[0]
+        return earlier + int(within_turn)
 
     def has_input(self, input_id: str) -> bool:
         return self._db.execute(
@@ -174,15 +190,44 @@ class HistoryReader:
             (self.key, input_id),
         ).fetchone() is not None
 
-    def navigation(self) -> Iterator[tuple[int, int, HistoryFact]]:
+    def unique_user_position(self, ordinal: int) -> int | None:
+        positions = self._db.execute(
+            """SELECT position FROM history_entries WHERE session_key=? AND turn_ordinal=?
+               AND kind=? ORDER BY position LIMIT 2""",
+            (self.key, ordinal, HistoryKind.INPUT),
+        ).fetchall()
+        return int(positions[0][0]) if len(positions) == 1 else None
+
+    def incomplete_completion_marker(self, ordinal: int, position: int) -> tuple[bool, int]:
+        """Inspect just the terminal marker; no complete fact is returned or decoded."""
+        row = self._db.execute(
+            """SELECT kind, CASE WHEN kind=? THEN json_type(record, '$.content.transcript_incomplete') END,
+                      CASE WHEN kind=? THEN max(length(CAST(record AS BLOB)),
+                          coalesce(json_extract(record, '$.uncompressed_bytes'), 0)) ELSE 0 END
+               FROM history_entries WHERE session_key=? AND turn_ordinal=? AND position=?""",
+            (HistoryKind.COMPLETION, HistoryKind.COMPLETION, self.key, ordinal, position),
+        ).fetchone()
+        return (bool(row and row[0] == HistoryKind.COMPLETION and row[1] == "true"), int(row[2]) if row else 0)
+
+    def has_navigation_answer(self, ordinal: int) -> bool:
+        return self._db.execute(
+            """SELECT 1 FROM history_entries WHERE session_key=? AND turn_ordinal=?
+               AND kind IN (?, ?, ?) LIMIT 1""",
+            (self.key, ordinal, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT, HistoryKind.ANSWER_FRAGMENT),
+        ).fetchone() is not None
+
+    def navigation(self, *, on_read: Callable[[int], None] | None = None) -> Iterator[tuple[int, int, HistoryFact]]:
         """Read input/answer records only, never file diffs or tool result bodies."""
         kinds = (HistoryKind.INPUT, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT,
                  HistoryKind.ANSWER_FRAGMENT, HistoryKind.COMPLETION)
         for row in self._db.execute(
-            """SELECT turn_ordinal, position, record FROM history_entries
-               WHERE session_key=? AND kind IN (?, ?, ?, ?, ?) ORDER BY turn_ordinal, position""",
+            """SELECT turn_ordinal, position, record,
+                      max(length(CAST(record AS BLOB)), coalesce(json_extract(record, '$.uncompressed_bytes'), 0))
+               FROM history_entries WHERE session_key=? AND kind IN (?, ?, ?, ?, ?) ORDER BY turn_ordinal, position""",
             (self.key, *kinds),
         ):
+            if on_read is not None:
+                on_read(int(row[3]))
             yield int(row[0]), int(row[1]), HistoryFact.decode(row[2])
 
     def all_facts(self) -> list[HistoryFact]:
