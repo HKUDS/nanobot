@@ -1640,66 +1640,77 @@ class OpenAICompatProvider(LLMProvider):
                 Any,
                 await client.chat.completions.create(**kwargs),
             )
-            accumulator = self._ChatStreamAccumulator(type(self))
-            completed = False
-            stream_iter: AsyncIterator[Any] = chat_stream.__aiter__()
-            while True:
-                try:
-                    chunk: Any = await asyncio.wait_for(
-                        stream_iter.__anext__(),
-                        timeout=idle_timeout_s,
-                    )
-                except StopAsyncIteration:
-                    break
-                if chunk.choices:
-                    completed |= bool(chunk.choices[0].finish_reason)
-                    delta_obj = chunk.choices[0].delta
-                    raw_delta_content = getattr(delta_obj, "content", None)
-                    if on_content_delta:
-                        # Mistral streams content as a list of {"type":"thinking",
-                        # ...} + {"type":"text",...} blocks. Extract just the
-                        # text portion before invoking the callback so callers
-                        # never see non-string content.
-                        text = self._extract_text_content(raw_delta_content)
-                        if text:
-                            await on_content_delta(text)
-                    if on_thinking_delta:
-                        reasoning = getattr(delta_obj, "reasoning_content", None) or getattr(
-                            delta_obj, "reasoning", None,
+            async with chat_stream as stream:
+                accumulator = self._ChatStreamAccumulator(type(self))
+                parse_error: Exception | None = None
+                completed = False
+                stream_iter: AsyncIterator[Any] = stream.__aiter__()
+                while True:
+                    try:
+                        chunk: Any = await asyncio.wait_for(
+                            stream_iter.__anext__(),
+                            timeout=idle_timeout_s,
                         )
-                        r_text = self._extract_text_content(reasoning)
-                        if not r_text:
-                            # Mistral keeps the thinking trace inside the
-                            # content array rather than a separate field.
-                            r_text = self._extract_thinking_content(raw_delta_content)
-                        if r_text:
-                            await on_thinking_delta(r_text)
-                    if on_tool_call_delta:
-                        for idx, tool_delta in enumerate(
-                            getattr(delta_obj, "tool_calls", None) or []
-                        ):
-                            fn = _get(tool_delta, "function")
-                            tool_index = _get(tool_delta, "index")
-                            await on_tool_call_delta({
-                                "index": tool_index if tool_index is not None else idx,
-                                "call_id": str(_get(tool_delta, "id") or ""),
-                                "name": str(_get(fn, "name") or "") if fn is not None else "",
-                                "arguments_delta": (
-                                    str(_get(fn, "arguments") or "") if fn is not None else ""
-                                ),
-                            })
-                        function_call = getattr(delta_obj, "function_call", None)
-                        if function_call:
-                            await on_tool_call_delta({
-                                "index": 0,
-                                "call_id": "",
-                                "name": str(_get(function_call, "name") or ""),
-                                "arguments_delta": str(_get(function_call, "arguments") or ""),
-                            })
-                accumulator.add(chunk)
-            if not completed:
-                raise ConnectionError("Model stream ended before a finish reason was received")
-            return accumulator.finish()
+                    except StopAsyncIteration:
+                        break
+                    if chunk.choices:
+                        completed |= bool(chunk.choices[0].finish_reason)
+                        delta_obj = chunk.choices[0].delta
+                        raw_delta_content = getattr(delta_obj, "content", None)
+                        if on_content_delta:
+                            # Mistral streams content as a list of {"type":"thinking",
+                            # ...} + {"type":"text",...} blocks. Extract just the
+                            # text portion before invoking the callback so callers
+                            # never see non-string content.
+                            text = self._extract_text_content(raw_delta_content)
+                            if text:
+                                await on_content_delta(text)
+                        if on_thinking_delta:
+                            reasoning = getattr(delta_obj, "reasoning_content", None) or getattr(
+                                delta_obj, "reasoning", None,
+                            )
+                            r_text = self._extract_text_content(reasoning)
+                            if not r_text:
+                                # Mistral keeps the thinking trace inside the
+                                # content array rather than a separate field.
+                                r_text = self._extract_thinking_content(raw_delta_content)
+                            if r_text:
+                                await on_thinking_delta(r_text)
+                        if on_tool_call_delta:
+                            for idx, tool_delta in enumerate(
+                                getattr(delta_obj, "tool_calls", None) or []
+                            ):
+                                fn = _get(tool_delta, "function")
+                                tool_index = _get(tool_delta, "index")
+                                await on_tool_call_delta({
+                                    "index": tool_index if tool_index is not None else idx,
+                                    "call_id": str(_get(tool_delta, "id") or ""),
+                                    "name": str(_get(fn, "name") or "") if fn is not None else "",
+                                    "arguments_delta": (
+                                        str(_get(fn, "arguments") or "") if fn is not None else ""
+                                    ),
+                                })
+                            function_call = getattr(delta_obj, "function_call", None)
+                            if function_call:
+                                await on_tool_call_delta({
+                                    "index": 0,
+                                    "call_id": "",
+                                    "name": str(_get(function_call, "name") or ""),
+                                    "arguments_delta": str(_get(function_call, "arguments") or ""),
+                                })
+                    if parse_error is None:
+                        try:
+                            accumulator.add(chunk)
+                        except Exception as e:
+                            # The old parser ran after streaming: keep its first error,
+                            # but let later callbacks and stream failures take priority.
+                            # A traceback would retain the failed SDK chunk until EOF.
+                            parse_error = e.with_traceback(None)
+                if not completed:
+                    raise ConnectionError("Model stream ended before a finish reason was received")
+                if parse_error is not None:
+                    raise parse_error
+                return accumulator.finish()
         except asyncio.TimeoutError:
             return LLMResponse(
                 content=(

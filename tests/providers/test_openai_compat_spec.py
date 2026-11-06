@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import weakref
+from contextlib import aclosing
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -129,7 +130,7 @@ def _fake_chat_stream(text: str = "ok"):
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return _stream()
+    return aclosing(_stream())
 
 
 def _fake_chat_stream_reasoning_chunks():
@@ -143,7 +144,7 @@ def _fake_chat_stream_reasoning_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return _stream()
+    return aclosing(_stream())
 
 
 def _fake_chat_stream_tool_call_chunks():
@@ -164,7 +165,7 @@ def _fake_chat_stream_tool_call_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return _stream()
+    return aclosing(_stream())
 
 
 def _fake_chat_stream_legacy_function_call_chunks():
@@ -179,7 +180,7 @@ def _fake_chat_stream_legacy_function_call_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return _stream()
+    return aclosing(_stream())
 
 
 @pytest.mark.asyncio
@@ -241,7 +242,7 @@ async def test_openai_compat_stream_releases_consumed_sdk_chunks() -> None:
         deltas.append(delta)
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
-        mock_openai.return_value.chat.completions.create = AsyncMock(return_value=stream())
+        mock_openai.return_value.chat.completions.create = AsyncMock(return_value=aclosing(stream()))
         provider = OpenAICompatProvider(
             api_key="sk-test", default_model="test-model",
             model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
@@ -428,6 +429,12 @@ class _FakeResponsesError(Exception):
 
 
 class _StalledStream:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        pass
+
     def __aiter__(self):
         return self
 
