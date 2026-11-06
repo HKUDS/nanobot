@@ -960,10 +960,18 @@ class TestBoundedTextReads:
         f.write_text("regular", encoding="utf-8")
         read_fd, write_fd = os.pipe()
         os.close(write_fd)
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.os.open", lambda *_args: read_fd)
+        real_open = os.open
+
+        def open_replacement(path, flags, *args, **kwargs):
+            if os.fspath(path) == os.fspath(f):
+                return read_fd
+            return real_open(path, flags, *args, **kwargs)
+
         tool = ReadFileTool()
         try:
-            result = await tool.execute(path=str(f))
+            with monkeypatch.context() as scoped:
+                scoped.setattr("nanobot.agent.tools.filesystem.os.open", open_replacement)
+                result = await tool.execute(path=str(f))
         finally:
             try:
                 os.close(read_fd)
