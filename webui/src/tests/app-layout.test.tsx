@@ -773,6 +773,12 @@ describe("App layout", () => {
     const user = userEvent.setup();
     const base = baseSettingsPayload();
     mockFetchRoutes({
+      "/api/settings?scope=chat": {
+        ...chatSettingsPayload(),
+        agent: { ...chatSettingsPayload().agent, model: "", resolved_provider: "", model_preset: "" },
+        model_presets: [],
+        model_call_order: [],
+      },
       "/api/settings": {
         ...base,
         agent: {
@@ -788,6 +794,7 @@ describe("App layout", () => {
     });
 
     render(<App />);
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     await user.click(await screen.findByRole("button", { name: "Choose model" }));
@@ -2336,6 +2343,9 @@ describe("App layout", () => {
       runtime_surface: "native",
     });
 
+    mockFetchRoutes({
+      "/api/settings?scope=chat": { ...chatSettingsPayload(), surface: "native", runtime_surface: "native" },
+    });
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
