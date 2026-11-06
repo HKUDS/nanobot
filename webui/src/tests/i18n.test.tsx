@@ -478,12 +478,32 @@ describe("webui i18n", () => {
     }
   });
 
-  it("defaults to English until the user chooses another language", () => {
+  it("follows the browser until the user chooses another language", () => {
     localStorage.removeItem(LOCALE_STORAGE_KEY);
-    expect(resolveInitialLocale()).toBe("en");
+    vi.stubGlobal("navigator", { languages: ["zh-CN"], language: "zh-CN" });
+    try {
+      expect(resolveInitialLocale()).toBe("zh-CN");
+      localStorage.setItem(LOCALE_STORAGE_KEY, "fr");
+      expect(resolveInitialLocale()).toBe("fr");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
-    localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
-    expect(resolveInitialLocale()).toBe("zh-CN");
+  it("falls back to English for an unsupported browser language", () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    vi.stubGlobal("navigator", { languages: ["de-DE"], language: "de-DE" });
+    try {
+      expect(resolveInitialLocale()).toBe("en");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("persists an explicit selection even when it matches the current language", async () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    await setAppLanguage("en");
+    expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("en");
   });
 
   it("lists each language by its native name", async () => {
