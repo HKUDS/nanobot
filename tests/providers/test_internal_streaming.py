@@ -873,5 +873,6 @@ def test_langfuse_async_openai_chat_stream(mode):
     result = subprocess.run(
         [sys.executable, "-B", "-c", script, mode, __file__], env=env,
         capture_output=True, text=True, timeout=30, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
