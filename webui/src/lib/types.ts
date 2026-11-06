@@ -720,6 +720,16 @@ export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPendi
 export type RuntimeConfigValue = string | number | boolean | string[] | null;
 
 
+// Full settings from protocol-1 hosts that ignore scope are also valid chat settings.
+export type ChatSettingsPayload = Pick<SettingsPayload, "surface" | "runtime_surface" | "model_call_order"> & {
+  agent: Pick<SettingsPayload["agent"], "model" | "provider" | "resolved_provider" | "model_preset">;
+  model_presets: Array<Pick<SettingsPayload["model_presets"][number],
+    "name" | "label" | "active" | "is_default" | "model" | "provider" | "resolved_provider"
+    | "context_window_tokens" | "reasoning_effort">>;
+  providers: Array<Pick<SettingsPayload["providers"][number], "name" | "label" | "configured">>;
+  transcription?: Pick<NonNullable<SettingsPayload["transcription"]>, "provider">;
+};
+
 export interface SettingsPayload {
   runtime_config?: Record<string, RuntimeConfigValue>;
   surface?: RuntimeSurface;

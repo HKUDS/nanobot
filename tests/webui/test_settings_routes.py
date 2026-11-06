@@ -323,22 +323,33 @@ async def test_usage_query_runs_off_the_event_loop(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_full_settings_query_runs_off_the_event_loop(monkeypatch) -> None:
+@pytest.mark.parametrize(("query", "compact"), [("", False), ("?scope=chat", True), ("?scope=Chat", False), ("?scope=unknown", False)])
+async def test_settings_scope_keeps_config_auth_surface_and_offloop_reads(
+    tmp_path, monkeypatch, query, compact,
+) -> None:
     calling_thread = threading.get_ident()
     worker_threads: list[int] = []
-    router = _router()
+    config_path = tmp_path / "gateway-config.json"
 
-    def settings_response():
+    def payload(is_compact, **kwargs):
         worker_threads.append(threading.get_ident())
-        return http_json_response({"ok": True})
+        assert kwargs["config_path"] == config_path
+        assert kwargs["surface"] == "browser"
+        return {"compact": is_compact}
 
-    monkeypatch.setattr(router, "_handle_settings", settings_response)
-    request = SimpleNamespace(path="/api/settings", headers=Headers())
+    monkeypatch.setattr("nanobot.webui.settings_routes.settings_payload", lambda **kw: payload(False, **kw))
+    monkeypatch.setattr("nanobot.webui.settings_routes.chat_settings_payload", lambda **kw: payload(True, **kw))
+    request = SimpleNamespace(path=f"/api/settings{query}", headers=Headers())
+    rejected = await _router(authorized=False, config_path=config_path).dispatch(None, request, "/api/settings")
+    assert rejected is not None and rejected.status_code == 401
+    assert worker_threads == []
 
-    response = await router.dispatch(None, request, request.path)
+    response = await _router(config_path=config_path).dispatch(None, request, "/api/settings")
 
-    assert response is not None
-    assert response.status_code == 200
+    assert response is not None and response.status_code == 200
+    result = json.loads(response.body)
+    assert result["compact"] is compact
+    assert result["surface"] == result["runtime_surface"] == "browser"
     assert worker_threads and worker_threads[0] != calling_thread
 
 

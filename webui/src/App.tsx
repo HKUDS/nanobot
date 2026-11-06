@@ -84,6 +84,7 @@ import type {
   ChatSummary,
   RuntimeSurface,
   SessionAutomationJob,
+  ChatSettingsPayload,
   SettingsPayload,
   WorkspaceScopePayload,
   WorkspacesPayload,
@@ -91,7 +92,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Disclosure } from "@/components/ui/disclosure";
-import { fetchSettings, fetchWorkspaces } from "@/lib/api";
+import { fetchChatSettings, fetchSettings, fetchWorkspaces } from "@/lib/api";
 import {
   createRuntimeHost,
   isNativeRuntime,
@@ -136,6 +137,9 @@ const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
 type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
+type ShellSettingsSnapshot =
+  | { scope: "chat"; payload: ChatSettingsPayload }
+  | { scope: "full"; payload: SettingsPayload };
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -934,9 +938,19 @@ function Shell({
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
   const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
-  const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
+  const [shellSettingsSnapshot, setShellSettingsSnapshot] = useState<ShellSettingsSnapshot | null>(null);
+  const settingsSnapshot = shellSettingsSnapshot?.payload ?? null;
   const [settingsLoading, setSettingsLoading] = useState(true);
   const settingsRefreshGenerationRef = useRef(0);
+  const fullSettingsRequestedRef = useRef(false);
+  useEffect(() => {
+    if (view !== "chat" && view !== "remote") fullSettingsRequestedRef.current = true;
+  }, [view]);
+  const onSettingsChange = useCallback((payload: SettingsPayload) => {
+    settingsRefreshGenerationRef.current += 1;
+    setShellSettingsSnapshot({ scope: "full", payload });
+    setSettingsLoading(false);
+  }, []);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
     chatId: string;
@@ -1075,15 +1089,15 @@ function Shell({
     let cancelled = false;
     const requestGeneration = settingsRefreshGenerationRef.current;
     setSettingsLoading(true);
-    fetchSettings(getToken())
+    fetchChatSettings(getToken())
       .then((payload) => {
         if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
-          setSettingsSnapshot(payload);
+          setShellSettingsSnapshot({ scope: "chat", payload });
         }
       })
       .catch(() => {
         if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
-          setSettingsSnapshot(null);
+          setShellSettingsSnapshot(null);
         }
       })
       .finally(() => {
@@ -1909,17 +1923,20 @@ function Shell({
   useEffect(() => {
     let cancelled = false;
     let retryTimer: number | undefined;
-    const refreshSettings = (generation: number, attempt = 0): void => {
-      void fetchSettings(getToken())
-        .then((payload) => {
-          if (!cancelled && generation === settingsRefreshGenerationRef.current) {
-            setSettingsSnapshot(payload);
-          }
-        })
-        .catch(() => {
-          if (cancelled || generation !== settingsRefreshGenerationRef.current || attempt >= 3) return;
-          retryTimer = window.setTimeout(() => refreshSettings(generation, attempt + 1), 250);
-        });
+    const refreshSettings = async (generation: number, attempt = 0): Promise<void> => {
+      if (cancelled || generation !== settingsRefreshGenerationRef.current) return;
+      try {
+        const snapshot: ShellSettingsSnapshot = fullSettingsRequestedRef.current
+          ? { scope: "full", payload: await fetchSettings(getToken()) }
+          : { scope: "chat", payload: await fetchChatSettings(getToken()) };
+        if (!cancelled && generation === settingsRefreshGenerationRef.current) {
+          setShellSettingsSnapshot(snapshot);
+          setSettingsLoading(false);
+        }
+      } catch {
+        if (cancelled || generation !== settingsRefreshGenerationRef.current || attempt >= 3) return;
+        retryTimer = window.setTimeout(() => { void refreshSettings(generation, attempt + 1); }, 250);
+      }
     };
     const unsubscribe = client.onStatus((status) => {
       // Another tab can consume the reload marker before this tab reconnects.
@@ -1949,7 +1966,7 @@ function Shell({
       setIsRestarting(false);
       setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
       window.setTimeout(() => setRestartToast(null), 3_500);
-      refreshSettings(refreshGeneration);
+      void refreshSettings(refreshGeneration);
     });
     return () => {
       cancelled = true;
@@ -2681,13 +2698,13 @@ function Shell({
                     registerExitGuard={registerSettingsExitGuard}
                     themePreference={themePreference}
                     initialSection={settingsInitialSection}
-                    initialSettings={settingsSnapshot}
+                    initialSettings={shellSettingsSnapshot?.scope === "full" ? shellSettingsSnapshot.payload : null}
                     showSidebar={view === "settings"}
                     mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                     onChangeTheme={setTheme}
                     onBackToChat={onBackToChat}
                     onModelNameChange={onModelNameChange}
-                    onSettingsChange={setSettingsSnapshot}
+                    onSettingsChange={onSettingsChange}
                     skills={skills}
                     skillsLoading={skillsLoading}
                     skillsError={skillsError}

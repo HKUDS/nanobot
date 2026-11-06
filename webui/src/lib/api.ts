@@ -34,6 +34,7 @@ import type {
   SessionDeleteResult,
   SessionHandle,
   SessionAutomationsPayload,
+  ChatSettingsPayload,
   SettingsPayload,
   SidebarStatePayload,
   SkillDetail,
@@ -816,6 +817,18 @@ export async function deleteSession(
       key,
       ...(options?.deleteAutomations ? { delete_automations: true } : {}),
     },
+  );
+}
+
+export async function fetchChatSettings(
+  token: string,
+  base: string = "",
+): Promise<ChatSettingsPayload> {
+  return request<ChatSettingsPayload>(
+    `${base}/api/settings?scope=chat`,
+    token,
+    undefined,
+    API_READ_TIMEOUT_MS,
   );
 }
 

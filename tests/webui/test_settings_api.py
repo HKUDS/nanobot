@@ -23,6 +23,7 @@ from nanobot.webui.settings_api import (
     _docs_version,
     _model_catalog_kind,
     _oauth_provider_status,
+    chat_settings_payload,
     complete_oauth_provider,
     create_model_configuration,
     create_provider_settings,
@@ -61,6 +62,63 @@ def isolate_settings_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def oauth_flows() -> WebUIOAuthFlowRegistry:
     return WebUIOAuthFlowRegistry()
+
+
+@pytest.mark.parametrize(("surface", "transcription_provider"), [("browser", None), ("native", "xiaomi_mimo")])
+def test_chat_settings_match_full_fields_without_editor_or_usage_work(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, surface, transcription_provider,
+) -> None:
+    config_path = tmp_path / "gateway-config.json"
+    config = Config.model_validate({
+        "providers": {
+            DYNAMIC_PROVIDER_NAME: {"apiBase": DYNAMIC_PROVIDER_API_BASE},
+            "openai": {"apiKey": "test-key"},
+            "opencodeZen": {"apiKey": "legacy-key"},
+        },
+        "agents": {"defaults": {"modelPreset": "fast", "fallbackModels": ["codex"]}},
+        "modelPresets": {
+            "fast": {"model": f"{DYNAMIC_PROVIDER_NAME}/gpt-4", "provider": "auto"},
+            "codex": {"model": "gpt-5.5", "provider": "openai_codex", "reasoningEffort": "high"},
+        },
+        "channels": {"transcriptionProvider": "openai"},
+        "transcription": {"provider": transcription_provider},
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.webui.settings_api._oauth_provider_status", lambda spec: {
+        "configured": spec.name == "openai_codex", "account": None,
+        "expires_at": None, "login_supported": True,
+    })
+    full = settings_payload(config_path=config_path, surface=surface)
+
+    def editor_work(*_args, **_kwargs):
+        pytest.fail("chat settings must not aggregate usage or build editor capabilities")
+
+    monkeypatch.setattr("nanobot.webui.settings_system.llm_usage_payload", editor_work)
+    monkeypatch.setattr("nanobot.webui.settings_capabilities.capability_settings_payload", editor_work)
+    compact = chat_settings_payload(config_path=config_path, surface=surface)
+
+    assert compact["surface"] == compact["runtime_surface"] == full["surface"] == surface
+    assert compact["agent"] == {key: full["agent"][key] for key in (
+        "model", "provider", "resolved_provider", "model_preset",
+    )}
+    assert compact["model_presets"] == [
+        {key: row[key] for key in (
+            "name", "label", "active", "is_default", "model", "provider",
+            "resolved_provider", "context_window_tokens", "reasoning_effort",
+        )} for row in full["model_presets"]
+    ]
+    assert compact["model_call_order"] == full["model_call_order"] == ["fast", "codex"]
+    assert compact["providers"] == [
+        {key: row[key] for key in ("name", "label", "configured")} for row in full["providers"]
+    ]
+    providers = {row["name"]: row for row in compact["providers"]}
+    for name in (DYNAMIC_PROVIDER_NAME, "openai", "opencode_zen", "openai_codex"):
+        assert providers[name]["configured"] is True
+    assert providers["anthropic"]["configured"] is False
+    assert compact["agent"]["resolved_provider"] == DYNAMIC_PROVIDER_NAME
+    assert compact["transcription"] == {"provider": full["transcription"]["provider"]}
+    assert compact["transcription"]["provider"] == (transcription_provider or "openai")
+    assert not ({"usage", "runtime", "image_generation", "web_search"} & compact.keys())
 
 
 def test_settings_payload_propagates_preset_resolution_failure(

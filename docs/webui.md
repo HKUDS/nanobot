@@ -274,6 +274,8 @@ Local triggers do not have a WebUI "Run now" action because each run needs a mes
 
 ## Settings
 
+Chat startup loads the model and voice settings needed by the composer without loading usage history. Opening a settings page loads the full settings editor and usage history.
+
 Runtime settings may require a gateway restart; the WebUI marks those controls.
 
 **Appearance** preferences apply immediately in the current browser without changing gateway configuration. These controls remain available while gateway settings are loading or unavailable. Choose **System**, **Light**, or **Dark** for the theme; **System** follows operating-system changes while the app is open. Existing explicit light/dark preferences are preserved.

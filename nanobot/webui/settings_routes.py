@@ -35,6 +35,7 @@ from nanobot.webui.nanobot_features_api import (
     nanobot_features_payload,
 )
 from nanobot.webui.settings_api import (
+    chat_settings_payload,
     complete_oauth_provider,
     create_model_configuration,
     create_provider_settings,
@@ -315,7 +316,7 @@ class WebUISettingsRouter:
         if not self._authorized(request):
             return self._unauthorized()
         if route == ("root", "settings"):
-            return await asyncio.to_thread(self._handle_settings)
+            return await asyncio.to_thread(self._handle_settings, self._query(request))
         if route == ("root", "usage"):
             return await asyncio.to_thread(self._handle_settings_usage)
 
@@ -495,11 +496,15 @@ class WebUISettingsRouter:
                 )
         return self._json_response(payload)
 
-    def _handle_settings(self) -> Response:
+    def _handle_settings(self, query: QueryParams) -> Response:
+        payload_builder = (
+            chat_settings_payload if contracts.query_first(query, "scope") == "chat"
+            else settings_payload
+        )
         return self._json_response(
             self._with_restart_state(
                 self.settings.read(
-                    settings_payload,
+                    payload_builder,
                     surface=self._runtime_surface,
                     runtime_capability_overrides=self._runtime_capabilities,
                 )

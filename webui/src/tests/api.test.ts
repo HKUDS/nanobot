@@ -27,6 +27,7 @@ import {
   fetchProviderModels,
   fetchPromptIndex,
   fetchSessionAutomations,
+  fetchChatSettings,
   fetchSettingsUsage,
   fetchSidebarState,
   fetchSkillDetail,
@@ -677,6 +678,26 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("fetches chat-scoped settings with the authenticated read transport and host base", async () => {
+    const payload = {
+      surface: "browser", runtime_surface: "browser",
+      agent: { model: "gpt-4o", provider: "openai", resolved_provider: "openai", model_preset: null },
+      model_presets: [], model_call_order: [], providers: [], transcription: { provider: "groq" },
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => payload } as Response);
+
+    await expect(fetchChatSettings("tok", "https://host.example")).resolves.toBe(payload);
+    expect(fetch).toHaveBeenCalledWith(
+      "https://host.example/api/settings?scope=chat",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
   it("fetches token usage through the lightweight settings endpoint", async () => {
     await fetchSettingsUsage("tok");
 
@@ -817,11 +838,11 @@ describe("webui API helpers", () => {
     });
   });
 
-  it("times out when an API request never responds", async () => {
+  it.each([["sessions", listSessions], ["chat settings", fetchChatSettings]] as const)("times out when a %s read never responds", async (_label, read) => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
 
-    const pending = expect(listSessions("tok")).rejects.toThrow(
+    const pending = expect(read("tok")).rejects.toThrow(
       "Request timed out after 20000ms",
     );
     await vi.advanceTimersByTimeAsync(20_000);

@@ -43,7 +43,7 @@ import {
   fetchFileReferenceMetadata,
   fetchInstalledCliApps,
   fetchMcpPresets,
-  fetchSettings,
+  fetchChatSettings,
   fetchWorkspaces,
   fetchWorkspaceDirectories,
   listSlashCommands,
@@ -65,7 +65,7 @@ import type {
   FilePreviewPayload,
   FileReferenceMetadata,
   RoundUsage,
-  SettingsPayload,
+  ChatSettingsPayload,
   SlashCommand,
   SkillSummary,
   UIMessage,
@@ -251,7 +251,7 @@ interface ThreadShellProps {
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
-  settingsSnapshot?: SettingsPayload | null;
+  settingsSnapshot?: ChatSettingsPayload | null;
   settingsLoading?: boolean;
   onOpenModelSettings?: () => void;
   skills?: SkillSummary[];
@@ -527,7 +527,8 @@ export function ThreadShell({
     isPayload: isMcpPresetsPayload,
     selectItems: installedMcpPresetsFromPayload,
   });
-  const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
+  const [settings, setSettings] = useState<ChatSettingsPayload | null>(settingsSnapshot);
+  const settingsRefreshGenerationRef = useRef(0);
   const [modelFallback, setModelFallback] = useState<{
     chatId: string;
     model: string;
@@ -926,19 +927,22 @@ export function ThreadShell({
   );
 
   const refreshModelSettings = useCallback(async () => {
+    const generation = ++settingsRefreshGenerationRef.current;
     try {
-      setSettings(await fetchSettings(getToken()));
+      const payload = await fetchChatSettings(getToken());
+      if (generation === settingsRefreshGenerationRef.current) setSettings(payload);
     } catch {
-      if (!settingsSnapshot) setSettings(null);
+      if (generation === settingsRefreshGenerationRef.current && !settingsSnapshot) setSettings(null);
     }
   }, [getToken, settingsSnapshot]);
 
   useEffect(() => {
     if (settingsSnapshot) {
       setSettings(settingsSnapshot);
-      return;
+    } else if (!settingsLoading) {
+      void refreshModelSettings();
     }
-    if (!settingsLoading) void refreshModelSettings();
+    return () => { settingsRefreshGenerationRef.current += 1; };
   }, [refreshModelSettings, settingsLoading, settingsSnapshot]);
 
   useEffect(() => {
@@ -1407,7 +1411,7 @@ export function ThreadShell({
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={temporary ? null : chatId}
-          transcriptionProvider={settingsSnapshot?.transcription?.provider}
+          transcriptionProvider={settings?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}
           focusRequest={composerFocusSignal}
@@ -1459,7 +1463,7 @@ export function ThreadShell({
           workspaceProjectLocked={projectLocked}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
-          transcriptionProvider={settingsSnapshot?.transcription?.provider}
+          transcriptionProvider={settings?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}
           onQuotedContextChange={setQuotedContext}

@@ -9,6 +9,7 @@ import { useSessions } from "@/hooks/useSessions";
 import type { RunState } from "@/lib/nanobot-client";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import type {
+  ChatSettingsPayload,
   ChatSummary,
   ConnectionStatus,
   SessionAutomationJob,
@@ -70,6 +71,8 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const route = routes[String(input)]
+        // Existing protocol-1 host fixtures return the full superset for either scope.
+        ?? (String(input) === "/api/settings?scope=chat" ? routes["/api/settings"] : undefined)
         ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
         ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(String(input)) ? { tasks: [] } : undefined);
       const body =
@@ -86,6 +89,21 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
 function currentMonthTimestamp(day: number, hour = 10, minute = 0): number {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), day, hour, minute).getTime();
+}
+
+function chatSettingsPayload(): ChatSettingsPayload {
+  return {
+    surface: "browser",
+    runtime_surface: "browser",
+    agent: { model: "openai/gpt-4o", provider: "openai", resolved_provider: "openai", model_preset: "default" },
+    model_presets: [{
+      name: "default", active: true, is_default: true, model: "openai/gpt-4o", provider: "openai",
+      context_window_tokens: 65536, reasoning_effort: null,
+    }],
+    model_call_order: [],
+    providers: [{ name: "openai", label: "OpenAI", configured: true }],
+    transcription: { provider: "groq" },
+  };
 }
 
 function baseSettingsPayload() {
@@ -659,6 +677,69 @@ describe("App layout", () => {
       (el) => el.className,
     );
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
+  });
+
+  it.each(["compact", "protocol-1 full superset"])("boots chat with %s settings and loads full settings only on editor navigation", async (shape) => {
+    const chat = chatSettingsPayload();
+    const full = { ...baseSettingsPayload(), providers: chat.providers };
+    let releaseFull!: (payload: typeof full) => void;
+    const pendingFull = new Promise<typeof full>((resolve) => { releaseFull = resolve; });
+    mockFetchRoutes({
+      "/api/settings?scope=chat": shape === "compact" ? chat : full,
+      "/api/settings": () => pendingFull,
+    });
+    render(<App />);
+
+    expect(await screen.findByTestId("composer-model-logo-openai")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings?scope=chat")).toHaveLength(1);
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings")).toHaveLength(0);
+    act(() => {
+      window.history.replaceState(null, "", "/#/settings?section=runtime");
+      window.dispatchEvent(new Event("hashchange"));
+    });
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings")).toHaveLength(1));
+    expect(screen.queryByText("/tmp/config.json")).not.toBeInTheDocument();
+    await act(async () => { releaseFull(full); });
+    expect(await screen.findByText("/tmp/config.json")).toBeInTheDocument();
+  });
+
+  it.each(["bootstrap", "restart"])("does not let a late chat %s overwrite the editor snapshot", async (request) => {
+    const chat = chatSettingsPayload();
+    const full = { ...baseSettingsPayload(), providers: chat.providers };
+    let releaseChat!: (payload: ChatSettingsPayload) => void;
+    const pendingChat = new Promise<ChatSettingsPayload>((resolve) => { releaseChat = resolve; });
+    let chatReads = 0;
+    mockFetchRoutes({
+      "/api/settings?scope=chat": () => ++chatReads === 1 && request === "restart" ? chat : pendingChat,
+      "/api/settings": full,
+    });
+    render(<App />);
+    await waitFor(() => expect(chatReads).toBe(1));
+    if (request === "restart") {
+      await screen.findByTestId("composer-model-logo-openai");
+      localStorage.setItem("nanobot-webui.restartStartedAt", String(Date.now() - 2_000));
+      act(() => {
+        for (const handler of statusHandlers) handler("reconnecting");
+        for (const handler of statusHandlers) handler("open");
+      });
+      await waitFor(() => expect(chatReads).toBe(2));
+      expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings")).toHaveLength(0);
+    }
+    act(() => {
+      window.history.replaceState(null, "", "/#/settings?section=runtime");
+      window.dispatchEvent(new Event("hashchange"));
+    });
+    await screen.findByText("/tmp/config.json");
+    const stale: ChatSettingsPayload = {
+      ...chat,
+      agent: { ...chat.agent, model: "deepseek-v4-pro", provider: "deepseek", resolved_provider: "deepseek" },
+      model_presets: chat.model_presets.map((preset) => ({ ...preset, model: "deepseek-v4-pro", provider: "deepseek" })),
+      providers: [{ name: "deepseek", label: "DeepSeek", configured: true }],
+    };
+    await act(async () => { releaseChat(stale); await pendingChat; });
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    expect(await screen.findByTestId("composer-model-logo-openai")).toBeInTheDocument();
+    expect(screen.queryByTestId("composer-model-logo-deepseek")).not.toBeInTheDocument();
   });
 
   it("uses one main landmark and a page heading in desktop settings", async () => {
@@ -1340,6 +1421,7 @@ describe("App layout", () => {
       expect(screen.getAllByText("Saved. Restart to apply changes.").length).toBeGreaterThan(0);
     }, { timeout: 10_000 });
 
+    const chatReads = vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings?scope=chat").length;
     restartCompleted = true;
     act(() => {
       for (const handler of statusHandlers) handler("reconnecting");
@@ -1347,6 +1429,7 @@ describe("App layout", () => {
     });
 
     await waitFor(() => expect(refreshedSettingsRequests).toBeGreaterThan(1));
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings?scope=chat")).toHaveLength(chatReads);
     await act(async () => {
       releaseRefreshedSettings();
       await refreshedSettingsReady;

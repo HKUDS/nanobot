@@ -14,8 +14,10 @@ import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { ThreadTranscript } from "@/lib/thread-transcript";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
+import * as voiceRecorder from "@/hooks/useVoiceRecorder";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type {
+  ChatSettingsPayload,
   CliAppsPayload,
   ConnectionStatus,
   SettingsPayload,
@@ -364,6 +366,20 @@ function stubThreadResizeObserver() {
   return {
     observers,
     restore: () => vi.stubGlobal("ResizeObserver", original),
+  };
+}
+
+function chatModelSettings(model: string, provider: string): ChatSettingsPayload {
+  return {
+    surface: "browser", runtime_surface: "browser",
+    agent: { model, provider, resolved_provider: provider, model_preset: "default" },
+    model_presets: [{
+      name: "default", active: true, is_default: true, model, provider,
+      context_window_tokens: 65536, reasoning_effort: null,
+    }],
+    model_call_order: [],
+    providers: [{ name: provider, label: provider, configured: true }],
+    transcription: { provider: "groq" },
   };
 }
 
@@ -1385,14 +1401,14 @@ describe("ThreadShell", () => {
 
   it.each([true, false])("waits for parent settings and retries only on failure (success: %s)", async (success) => {
     const client = makeClient();
-    const settings = modelSettings("deepseek-v4-pro", "deepseek");
+    const settings = chatModelSettings("deepseek-v4-pro", "deepseek");
     const settingsRequest = vi.fn(() => Promise.resolve(httpJson(settings)));
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => (
-      String(input).endsWith("/api/settings")
+      String(input) === "/api/settings?scope=chat"
         ? settingsRequest()
         : Promise.resolve(httpJson({}))
     )));
-    const view = (loading: boolean, snapshot: SettingsPayload | null) => wrap(
+    const view = (loading: boolean, snapshot: ChatSettingsPayload | null) => wrap(
       client,
       <ThreadShell session={null} title="New topic" onToggleSidebar={() => {}}
         settingsLoading={loading} settingsSnapshot={snapshot} />,
@@ -1404,6 +1420,35 @@ describe("ThreadShell", () => {
     rerender(view(false, success ? settings : null));
     expect(await screen.findByTestId("composer-model-logo-deepseek")).toBeInTheDocument();
     expect(settingsRequest).toHaveBeenCalledTimes(success ? 0 : 1);
+  });
+
+  it("uses accepted compact refreshes for model and transcription, without overwriting a newer snapshot", async () => {
+    const recorder = vi.spyOn(voiceRecorder, "useVoiceRecorder");
+    const client = makeClient();
+    const initial = chatModelSettings("deepseek-v4-pro", "deepseek");
+    const updated = { ...chatModelSettings("gpt-5.5", "openai_codex"), transcription: { provider: "xiaomi_mimo" } };
+    let releaseSettings!: (response: Response) => void;
+    const pendingSettings = new Promise<Response>((resolve) => { releaseSettings = resolve; });
+    const settingsRequest = vi.fn().mockReturnValueOnce(pendingSettings).mockResolvedValue(httpJson(initial));
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings?scope=chat"
+      ? settingsRequest() : Promise.resolve(httpJson({}))));
+    const view = (snapshot: ChatSettingsPayload) => wrap(client,
+      <ThreadShell session={null} title="New topic" onToggleSidebar={() => {}} settingsSnapshot={snapshot} />);
+    const { rerender } = render(view(initial));
+    act(() => client._emitRuntimeModelUpdate("gpt-5.5"));
+    await waitFor(() => expect(settingsRequest).toHaveBeenCalledTimes(1));
+    rerender(view(updated));
+    await screen.findByTestId("composer-model-logo-openai_codex");
+    await act(async () => { releaseSettings(httpJson(initial)); await pendingSettings; });
+    expect(screen.getByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
+    expect(recorder.mock.calls.at(-1)?.[0].wantsWav).toBe(true);
+
+    act(() => client._emitRuntimeModelUpdate("deepseek-v4-pro"));
+    await screen.findByTestId("composer-model-logo-deepseek");
+    expect(recorder.mock.calls.at(-1)?.[0].wantsWav).toBe(false);
+    expect(settingsRequest).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === "/api/settings")).toBe(false);
+    recorder.mockRestore();
   });
 
   it("updates the composer model logo when settings snapshot changes", async () => {
@@ -1756,8 +1801,7 @@ describe("ThreadShell", () => {
 
   it.each([false, true])("keeps model setup actionable without a repeated tooltip (existing history: %s)", async (hasHistory) => {
     const client = makeClient();
-    const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
-    settings.agent.has_api_key = false;
+    const settings = chatModelSettings("anthropic/claude-opus-4-5", "anthropic");
     settings.providers = [{ name: "anthropic", label: "Anthropic", configured: false }];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("websocket%3Asetup-tooltip/webui-thread")) {
