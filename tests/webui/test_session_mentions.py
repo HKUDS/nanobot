@@ -116,7 +116,9 @@ def test_session_mention_context_treats_titles_as_data() -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_mentions_do_not_isolate_workspaces(tmp_path) -> None:
+async def test_session_mentions_do_not_isolate_workspaces(tmp_path, monkeypatch) -> None:
+    webui_dir = tmp_path / "webui"
+    monkeypatch.setattr("nanobot.webui.history.get_webui_dir", lambda: webui_dir)
     manager = SessionManager(tmp_path)
     project_b = tmp_path / "b"
     project_b.mkdir()

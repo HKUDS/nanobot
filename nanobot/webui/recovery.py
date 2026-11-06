@@ -83,6 +83,9 @@ class RecoveryCoordinator:
 
     async def scan(self) -> None:
         """Recover every interrupted WebUI session once at gateway startup."""
+        from nanobot.webui.history import initialize_history
+
+        await initialize_history(self.sessions)
         for key in await self._recovery_candidates():
             metadata_payload = await self.sessions.state.read_metadata(key)
             raw_metadata = metadata_payload.get("metadata") if metadata_payload else None
