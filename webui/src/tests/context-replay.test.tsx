@@ -89,3 +89,43 @@ it("keeps replay usage frame-local and restores the latest measurement when play
   expect(screen.getByText("1k / 10k")).toBeVisible();
   expect(screen.getByText("50%")).toBeVisible();
 });
+
+it("waits for each deferred graph and its paint, including error/retry, without skipping a round", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  const pending = new Map<string, { resolve: (graph: ContextGraph) => void; reject: (error: Error) => void }>();
+  const loadGraph = vi.fn((ref: string) => new Promise<ContextGraph>((resolve, reject) => pending.set(ref, { resolve, reject })));
+  const snapshots: ContextSnapshot[] = [
+    { id: "first", graphDetailRef: "first-ref", contextWindowTokens: 10000, usage: { prompt_tokens: 1000 } },
+    { id: "last", graphDetailRef: "last-ref", contextWindowTokens: 10000, usage: { prompt_tokens: 2000 } },
+  ];
+  await act(async () => {
+    render(<ContextInspector context={null} rounds={[]} snapshots={snapshots} loadGraph={loadGraph} />);
+    await vi.dynamicImportSettled();
+  });
+  expect(loadGraph.mock.calls.map(([ref]) => ref)).toEqual(["last-ref"]);
+  await act(async () => pending.get("last-ref")!.resolve({ nodes: [], edges: [] }));
+  const scene = screen.getByRole("button", { name: "Paint snapshot" });
+  const play = screen.getByRole("button", { name: "Play context history" });
+  fireEvent.click(play);
+  expect(loadGraph.mock.calls.map(([ref]) => ref)).toEqual(["last-ref", "first-ref"]);
+  expect(screen.getByRole("button", { name: "Paint snapshot" })).toBe(scene);
+  paint(); // The retained scene may paint, but it is not the requested first frame.
+  act(() => vi.advanceTimersByTime(1000));
+  expect(progress()).toBe("10");
+  await act(async () => pending.get("first-ref")!.reject(new Error("Offline")));
+  expect(screen.getByRole("alert")).toHaveTextContent("Could not load the context graph.");
+  expect(screen.getByRole("button", { name: "Paint snapshot" })).toBe(scene);
+  expect(play).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await act(async () => pending.get("first-ref")!.resolve({ nodes: [], edges: [] }));
+  act(() => vi.advanceTimersByTime(1000));
+  expect(progress()).toBe("10"); // Resolving alone is not permission to advance.
+  paint();
+  act(() => vi.advanceTimersByTime(1));
+  expect(progress()).toBe("20");
+  expect(play).toBeDisabled();
+  paint();
+  act(() => vi.advanceTimersByTime(1));
+  expect(play).toBeEnabled();
+  expect(loadGraph).toHaveBeenCalledTimes(3); // The already loaded latest frame is local to this open panel.
+});

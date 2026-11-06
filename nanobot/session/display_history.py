@@ -161,6 +161,14 @@ class HistoryReader:
             (*params, *(selected or [])),
         )]
 
+    def read_entry(self, ordinal: int, position: int) -> HistoryFact | None:
+        """Read one immutable fact by its existing session/turn/position primary key."""
+        row = self._db.execute(
+            "SELECT record FROM history_entries WHERE session_key=? AND turn_ordinal=? AND position=?",
+            (self.key, ordinal, position),
+        ).fetchone()
+        return HistoryFact.decode(row[0]) if row is not None else None
+
     def user_count_before(self, ordinal: int) -> int:
         return int(self._db.execute(
             "SELECT coalesce(sum(user_count), 0) FROM history_turns WHERE session_key=? AND ordinal<?",

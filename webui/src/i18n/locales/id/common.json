@@ -1926,6 +1926,8 @@
         "tooltip": "Konteks {{percent}}%",
         "detailsLabel": "Buka penggunaan konteks",
         "panelTitle": "Penggunaan konteks",
+        "loadError": "Tidak dapat memuat graf konteks.",
+        "unavailable": "Host ini tidak dapat memuat graf konteks tersimpan.",
         "contextTitle": "Konteks",
         "cacheHitRate": "Rasio cache hit",
         "tokenUsage": "{{used}} / {{limit}}",

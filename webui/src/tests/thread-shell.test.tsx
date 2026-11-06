@@ -1132,6 +1132,57 @@ describe("ThreadShell", () => {
     geometry.mockRestore();
   });
 
+  it("opens historical context with one selected detail request and preserves file preview", async () => {
+    const client = makeClient();
+    const envelope = { chat_id: "deferred-usage", turn_id: "turn" };
+    const graph = { nodes: [{ path: "/latest.md", name: "latest.md", state: "loaded", tokens: 179 }], edges: [] };
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.includes("/webui-thread/context-graph?")) return Promise.resolve(httpJson({ graph }));
+      if (path.includes("/file-preview?")) return Promise.resolve(httpJson({
+        path: "/latest.md", display_path: "latest.md", project_path: "/", kind: "text", language: "markdown",
+        size: 15, content: "Preview content", truncated: false,
+      }));
+      if (path.includes("websocket%3Adeferred-usage/webui-thread?")) return Promise.resolve(httpJson({
+        schemaVersion: 3, projection: "events", events: [
+          { ...envelope, event: "user_message", text: "Read the files", starts_turn: true, turn_seq: 1 },
+          ...[1, 2].map((number) => ({ ...envelope, event: "model_request", request_id: `request-${number}`, run_id: "run",
+            phase: "completed", sequence: number * 2, turn_seq: number + 1, context_window_tokens: 1000,
+            usage: { context_tokens: number * 80, request_count: number }, request_usage: { context_tokens: number * 80 },
+            context_graph_detail_ref: number === 1 ? "older-ref" : "latest-ref" })),
+          { ...envelope, event: "message", text: "Saved answer", turn_seq: 4 },
+          { ...envelope, event: "turn_end", turn_seq: 5 },
+        ],
+      }));
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const thread = <ThreadShell session={session("deferred-usage")} title="Deferred usage"
+      onToggleSidebar={() => {}} settingsSnapshot={modelSettings("test-model", "deepseek")} />;
+    const view = render(wrap(client, thread, undefined, "tok", ["webui.context-graph.detail.v1"]));
+    await screen.findByText("Saved answer");
+    const detailCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/context-graph?"));
+    expect(detailCalls()).toHaveLength(0);
+    const trigger = await screen.findByTestId("composer-context-usage");
+    expect(trigger).toHaveAccessibleName("Context 16%. Open context usage");
+    fireEvent.click(trigger);
+    const node = await screen.findByRole("button", { name: "latest.md" });
+    expect(detailCalls()).toHaveLength(1);
+    expect(String(detailCalls()[0][0])).toContain("ref=latest-ref");
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "16");
+    fireEvent.click(node);
+    expect(await screen.findByText("About 179 tokens")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    expect(await screen.findByText("Preview content")).toBeVisible();
+    expect(detailCalls()).toHaveLength(1);
+    // Bootstrap after a host downgrade can remove support while cached refs remain.
+    view.rerender(wrap(client, thread, undefined, "tok", []));
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+    expect(await screen.findByText("This host cannot load saved context graphs.")).toBeVisible();
+    expect(detailCalls()).toHaveLength(1);
+    view.unmount();
+  });
+
   it("updates composer usage from active model snapshots without changing the body", async () => {
     const client = makeClient();
     const envelope = { chat_id: "live-usage", turn_id: "live-turn" };

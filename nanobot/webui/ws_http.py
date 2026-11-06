@@ -134,6 +134,7 @@ from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import (
     TranscriptReplayStats,
     build_session_thread_response,
+    build_webui_context_graph_detail_response,
     build_webui_thread_response,
     build_webui_trace_detail_response,
     webui_transcript_revision,
@@ -856,6 +857,10 @@ class GatewayHTTPHandler:
         if m:
             return await self._project_session_history(request, m.group(1), self._handle_prompt_index_get)
 
+        m = re.match(r"^/api/sessions/([^/]+)/webui-thread/context-graph$", got)
+        if m:
+            return await self._project_session_history(request, m.group(1), self._handle_webui_context_graph_get)
+
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread/trace-detail$", got)
         if m:
             return await self._project_session_history(request, m.group(1), self._handle_webui_trace_detail_get)
@@ -1276,6 +1281,7 @@ class GatewayHTTPHandler:
         revision_variant = {
             "include_model_requests": include_model_requests,
             "context_graph_encoding": _query_first(query, "context_graph_encoding"),
+            "context_graph_detail": _query_first(query, "context_graph_detail"),
             "active_turn_id": active_turn_id,
             "active_turn_started_at": active_turn_started_at,
             "active_turn_transcript_persistence_failed": (
@@ -1298,6 +1304,7 @@ class GatewayHTTPHandler:
         replay_stats = diagnostics.transcript if diagnostics is not None else TranscriptReplayStats()
         data = build_webui_thread_response(
             decoded_key, history=history, include_model_requests=include_model_requests,
+            defer_context_graphs=_query_first(query, "context_graph_detail") == "deferred-v1",
             augment_user_media=lambda paths, local: self.media.augment_transcript_user_media(paths, local, session_key=decoded_key),
             augment_assistant_media=self.media.augment_transcript_media,
             augment_assistant_text=lambda text: self.media.rewrite_local_markdown_images(
@@ -1330,6 +1337,19 @@ class GatewayHTTPHandler:
             data["revision"] = final_revision
         return _PreparedThreadResponse(
             data=data, headers=response_headers,
+        )
+
+    def _handle_webui_context_graph_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:
+        # Admission and session identity are checked by _project_session_history.
+        detail_ref = _query_first(_parse_query(request.path), "ref")
+        if not detail_ref:
+            return _http_error(400, "missing context graph detail ref")
+        data = build_webui_context_graph_detail_response(detail_ref, history=history)
+        if data is None:
+            return _http_error(404, "context graph detail not found")
+        return _http_json_response(
+            data, accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
+            extra_headers=_NO_STORE_HEADERS,
         )
 
     def _handle_webui_trace_detail_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:

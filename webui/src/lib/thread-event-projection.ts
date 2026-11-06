@@ -1,4 +1,5 @@
 import { toMediaAttachment } from "@/lib/media";
+import { contextGraphSource } from "@/lib/context-graph";
 import {
   mergeToolProgressEvents,
   mergeToolProgressTraceLines,
@@ -869,6 +870,7 @@ export function projectThreadEvent(
       || (previousRequest?.runId === event.run_id && event.sequence <= previousRequest.sequence)
       || (previousRequest?.turnSeq !== undefined && event.turn_seq !== undefined
         && event.turn_seq <= previousRequest.turnSeq)) return state;
+    const graphSource = contextGraphSource(event.context_graph, event.context_graph_detail_ref);
     const modelRequest: UIModelRequestSnapshot = {
       ...previousRequest,
       createdAt: previousRequest?.createdAt ?? projectionCreatedAt(event, options),
@@ -885,9 +887,9 @@ export function projectThreadEvent(
       ...(event.usage !== undefined ? { usage: event.usage } : {}),
       ...(event.round_usages !== undefined ? { roundUsages: event.round_usages.slice(-8) } : {}),
       ...(event.context_window_tokens !== undefined ? { contextWindowTokens: event.context_window_tokens } : {}),
-      ...(event.context_graph ? { contextSnapshots: [
+      ...(graphSource ? { contextSnapshots: [
         ...(previousRequest?.contextSnapshots ?? []).filter((s) => s.id !== event.request_id),
-        { id: event.request_id, turnSeq: event.turn_seq, graph: event.context_graph, usage: event.request_usage === undefined
+        { id: event.request_id, turnSeq: event.turn_seq, ...graphSource, usage: event.request_usage === undefined
           ? (event.phase === "completed" ? event.round_usages?.at(-1) : undefined) : event.request_usage ?? undefined, contextWindowTokens: event.context_window_tokens },
       ] } : {}),
     };
@@ -1047,7 +1049,8 @@ export function projectThreadEvent(
         turnSeq: event.turn_seq,
         reason: event.reason,
         ...(event.context_snapshot ? { contextSnapshot: {
-          id, graph: event.context_snapshot.graph,
+          id, ...(event.context_snapshot.graph ? { graph: event.context_snapshot.graph }
+            : { graphDetailRef: event.context_snapshot.graph_detail_ref }),
           estimatedTokens: event.context_snapshot.estimated_tokens,
           contextWindowTokens: event.context_snapshot.context_window_tokens,
         } } : {}),

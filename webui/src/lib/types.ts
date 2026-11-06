@@ -196,20 +196,23 @@ export interface ContextGraph {
   edges: { source: string; target: string }[];
 }
 
-export interface ContextInspection {
-  graph: ContextGraph;
+export type ContextInspection = {
   estimated_tokens: number;
   context_window_tokens: number;
-}
+} & ({ graph: ContextGraph; graph_detail_ref?: never } | { graph?: never; graph_detail_ref: string });
 
-export interface ContextSnapshot {
+/** Inline live/older-host data or a durable, session-scoped historical reference. */
+export type ContextGraphSource =
+  | { graph: ContextGraph; graphDetailRef?: never }
+  | { graph?: never; graphDetailRef: string };
+
+export type ContextSnapshot = ContextGraphSource & {
   turnSeq?: number;
   estimatedTokens?: number;
   id: string;
-  graph: ContextGraph;
   usage?: TurnUsage;
   contextWindowTokens?: number;
-}
+};
 
 export interface UIModelRequestSnapshot {
   contextSnapshots?: ContextSnapshot[];
@@ -1646,6 +1649,7 @@ export type InboundEvent =
       event: "model_request";
       request_usage?: TurnUsage | null;
       context_graph?: ContextGraph;
+      context_graph_detail_ref?: string;
       chat_id: string;
       request_id: string;
       run_id: string;

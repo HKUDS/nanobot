@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ContextInspector } from "@/components/thread/ContextInspector";
-import type { ContextSnapshot } from "@/lib/types";
+import type { ContextGraph, ContextSnapshot } from "@/lib/types";
 
-const snapshots: ContextSnapshot[] = [
+const snapshots = [
   { id: "first", contextWindowTokens: 10000, usage: { prompt_tokens: 1000 }, graph: {
     nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 100 }], edges: [],
   } },
@@ -12,7 +12,7 @@ const snapshots: ContextSnapshot[] = [
     nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 100 }, { path: "/b.md", name: "b.md", state: "discovered", tokens: 0 }],
     edges: [{ source: "/a.md", target: "/b.md" }],
   } },
-];
+] satisfies ContextSnapshot[];
 
 describe("Context inspector", () => {
   it("exposes every graph node as a named keyboard control", async () => {
@@ -94,4 +94,36 @@ it("keeps the latest measured usage while the live graph advances and updates on
   rerender(<ContextInspector context={null} rounds={[]} snapshots={[pending]} />);
   expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
   expect(screen.getByText("— / 20k")).toBeVisible();
+});
+
+it("loads only while active and isolates late details across source, close and client changes", async () => {
+  const pending: { ref: string; signal: AbortSignal; resolve: (graph: ContextGraph) => void }[] = [];
+  const loader = (ref: string, signal: AbortSignal) => new Promise<ContextGraph>((resolve) => pending.push({ ref, signal, resolve }));
+  const firstClient = vi.fn(loader);
+  const nextClient = vi.fn(loader);
+  const source = (ref: string): ContextSnapshot[] => [{ id: "request", graphDetailRef: ref, estimatedTokens: 100, contextWindowTokens: 1000 }];
+  const content = (active: boolean, ref: string, loadGraph = firstClient) =>
+    <ContextInspector context={null} rounds={[]} snapshots={source(ref)} active={active} loadGraph={loadGraph} />;
+  const view = render(content(false, "first"));
+  expect(pending).toHaveLength(0);
+  view.rerender(content(true, "first"));
+  expect(screen.getByRole("status")).toHaveTextContent("Loading");
+  expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+  view.rerender(content(true, "second"));
+  expect(pending[0].signal.aborted).toBe(true);
+  await act(async () => pending[0].resolve(snapshots[0].graph));
+  expect(screen.queryByRole("button", { name: "a.md" })).not.toBeInTheDocument();
+  view.rerender(content(false, "second"));
+  expect(pending[1].signal.aborted).toBe(true);
+  await act(async () => pending[1].resolve(snapshots[0].graph));
+  view.rerender(content(true, "second"));
+  view.rerender(content(true, "second", nextClient));
+  expect(pending[2].signal.aborted).toBe(true);
+  await act(async () => pending[2].resolve(snapshots[0].graph));
+  expect(screen.queryByRole("button", { name: "a.md" })).not.toBeInTheDocument();
+  await act(async () => pending[3].resolve({ nodes: [{ path: "/new.md", name: "new.md", tokens: 30, state: "loaded" }], edges: [] }));
+  expect(await screen.findByRole("button", { name: "new.md" })).toBeInTheDocument();
+  expect(pending.map(({ ref }) => ref)).toEqual(["first", "second", "second", "second"]);
+  view.unmount();
+  expect(pending[3].signal.aborted).toBe(true);
 });

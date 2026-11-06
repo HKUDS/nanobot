@@ -40,6 +40,7 @@ import {
   ApiError,
   fetchFilePreviewAvailability,
   fetchFilePreview,
+  fetchWebuiContextGraph,
   fetchFileReferenceMetadata,
   fetchInstalledCliApps,
   fetchMcpPresets,
@@ -752,6 +753,11 @@ export function ThreadShell({
   const contextGraphSnapshots = useMemo(
     () => messagesReady ? composerContextSnapshots(messages, modelRequests) : [], [messages, modelRequests, messagesReady],
   );
+  // Loader identity scopes inspector requests/cache even when two clients share a session key.
+  const contextGraphDetailsSupported = webuiCapabilities.includes("webui.context-graph.detail.v1");
+  const loadContextGraph = useMemo(() => historyKey && contextGraphDetailsSupported
+    ? (ref: string, signal: AbortSignal) => fetchWebuiContextGraph(token, historyKey, ref, signal)
+    : undefined, [client, historyKey, token, contextGraphDetailsSupported]);
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
   const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"
@@ -1592,6 +1598,8 @@ export function ThreadShell({
         context={composerContextUsage}
         rounds={composerRoundUsage}
         snapshots={contextGraphSnapshots}
+        active={composerActive && messagesReady}
+        loadGraph={loadContextGraph}
         sidebarHost={contextSidebarHost}
         open={contextSidebarOpen}
         onOpenChange={handleContextSidebarOpenChange}

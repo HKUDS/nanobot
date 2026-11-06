@@ -1,4 +1,4 @@
-import type { ContextGraph, ContextGraphNode, ContextInspection, ContextSnapshot, UIMessage, UIModelRequestSnapshot } from "@/lib/types";
+import type { ContextGraph, ContextGraphNode, ContextGraphSource, ContextInspection, ContextSnapshot, UIMessage, UIModelRequestSnapshot } from "@/lib/types";
 
 export function isContextGraph(value: unknown): value is ContextGraph {
   if (!value || typeof value !== "object") return false;
@@ -20,9 +20,18 @@ export function isContextGraph(value: unknown): value is ContextGraph {
   });
 }
 
+export function isContextGraphDetailRef(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 4096 && /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+export function contextGraphSource(graph: ContextGraph | undefined, detailRef: string | undefined): ContextGraphSource | undefined {
+  return graph ? { graph } : detailRef ? { graphDetailRef: detailRef } : undefined;
+}
+
 export function isContextInspection(value: unknown, validateGraph: typeof isContextGraph = isContextGraph): value is ContextInspection {
   return typeof value === "object" && value !== null
-    && "graph" in value && validateGraph(value.graph)
+    && (("graph" in value && validateGraph(value.graph) && !("graph_detail_ref" in value))
+      || (!("graph" in value) && "graph_detail_ref" in value && isContextGraphDetailRef(value.graph_detail_ref)))
     && "estimated_tokens" in value && typeof value.estimated_tokens === "number"
     && Number.isFinite(value.estimated_tokens) && value.estimated_tokens >= 0
     && "context_window_tokens" in value && typeof value.context_window_tokens === "number"

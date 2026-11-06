@@ -34,6 +34,7 @@ import {
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
+  fetchWebuiContextGraph,
   fetchSubagentThread,
   fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
@@ -112,13 +113,26 @@ describe("webui API helpers", () => {
     await fetchWebuiThread("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1&context_graph_detail=deferred-v1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
         cache: "no-store",
       }),
     );
+  });
+
+  it("loads one authenticated graph detail with cancellation", async () => {
+    const graph = { nodes: [], edges: [] };
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ graph }) } as Response);
+    const controller = new AbortController();
+    await expect(fetchWebuiContextGraph("tok", "websocket:chat-1", "durable-ref", controller.signal)).resolves.toEqual(graph);
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/sessions/websocket%3Achat-1/webui-thread/context-graph?ref=durable-ref",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" }, cache: "no-store", signal: expect.any(AbortSignal) }),
+    );
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ graph: { nodes: [] } }) } as Response);
+    await expect(fetchWebuiContextGraph("tok", "websocket:chat-1", "durable-ref", controller.signal)).rejects.toThrow("Invalid context graph detail response");
   });
 
   it("passes pagination params when fetching a WebUI thread page", async () => {
@@ -128,7 +142,7 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D&include_model_requests=1&context_graph_encoding=references-v1",
+      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D&include_model_requests=1&context_graph_encoding=references-v1&context_graph_detail=deferred-v1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
@@ -174,7 +188,7 @@ describe("webui API helpers", () => {
     })).resolves.toBe(cached);
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1&context_graph_detail=deferred-v1",
       expect.objectContaining({
         headers: {
           Authorization: "Bearer tok",

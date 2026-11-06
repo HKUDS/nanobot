@@ -1,4 +1,4 @@
-import { isContextGraph, isContextInspection } from "@/lib/context-graph";
+import { isContextGraph, isContextGraphDetailRef, isContextInspection } from "@/lib/context-graph";
 import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
   ApiServicePayload,
@@ -393,6 +393,8 @@ function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet
       return value as unknown as ThreadProjectionEvent;
     case "model_request": {
       if (value.context_graph !== undefined && !validatedGraphs.has(value.context_graph) && !isContextGraph(value.context_graph)) break;
+      if (value.context_graph_detail_ref !== undefined
+        && (value.context_graph !== undefined || !isContextGraphDetailRef(value.context_graph_detail_ref))) break;
       const isUsage = (usage: unknown) => isRecord(usage)
         && Object.values(usage).every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0);
       if (typeof value.request_id !== "string" || !value.request_id
@@ -502,6 +504,7 @@ export async function fetchWebuiThread(
   if (options?.after) params.set("after", options.after);
   params.set("include_model_requests", "1");
   params.set("context_graph_encoding", "references-v1");
+  params.set("context_graph_detail", "deferred-v1");
   const query = params.toString();
   const suffix = query ? `?${query}` : "";
   const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;
@@ -545,6 +548,18 @@ export async function fetchPromptIndex(token: string, key: string, signal: Abort
   });
   return { prompts: [...(cached?.prompts.slice(0, replaceFrom) ?? []), ...prompts],
     revision: typeof body.revision === "string" ? body.revision : undefined };
+}
+
+export async function fetchWebuiContextGraph(
+  token: string, key: string, ref: string, signal: AbortSignal, base: string = "",
+): Promise<ContextGraph> {
+  const query = new URLSearchParams({ ref });
+  const body = await request<unknown>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread/context-graph?${query}`,
+    token, { signal, cache: "no-store" }, API_READ_TIMEOUT_MS,
+  );
+  if (!isRecord(body) || !isContextGraph(body.graph)) throw new Error("Invalid context graph detail response");
+  return body.graph;
 }
 
 export async function fetchWebuiThreadTraceDetail(

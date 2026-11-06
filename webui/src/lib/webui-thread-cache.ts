@@ -40,7 +40,7 @@ function reloadPayload(body: WebuiThreadPersistedPayload): unknown {
       const { context_graph, ...rest } = event;
       return { ...rest, context_graph_ref: reference(context_graph) };
     }
-    if (event.event === "context_compaction" && event.context_snapshot) {
+    if (event.event === "context_compaction" && event.context_snapshot?.graph) {
       const { graph, ...snapshot } = event.context_snapshot;
       return { ...event, context_snapshot: { ...snapshot, graph_ref: reference(graph) } };
     }

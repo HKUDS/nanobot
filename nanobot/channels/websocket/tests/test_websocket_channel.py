@@ -5076,6 +5076,8 @@ async def test_bootstrap_exposes_native_surface(bus: MagicMock, start_listener) 
         body = response.json()
         assert body["runtime_surface"] == "native"
         assert body["runtime_capabilities"]["can_restart_engine"] is True
+        assert body["terminal"]["webui"]["min_protocol"] == body["terminal"]["webui"]["max_protocol"] == 1
+        assert "webui.context-graph.detail.v1" in body["terminal"]["webui"]["capabilities"]
         assert body["token"].startswith("nbwt_")
         assert body["api_token"].startswith("nbwt_")
         assert body["api_token"] != body["token"]
@@ -7100,3 +7102,108 @@ async def test_context_graph_dictionary_pages_are_self_contained_and_opt_in(hist
         assert compact["page"]["before_cursor"] == old["page"]["before_cursor"]
         before = compact["page"]["before_cursor"]
     assert seen == ["2", "1", "0"]
+
+
+@pytest.mark.asyncio
+async def test_deferred_context_graph_routes_preserve_pages_and_read_only_the_selected_fact(history, monkeypatch):
+    from urllib.parse import quote
+
+    from websockets.http11 import Request
+
+    from nanobot.session.display_history import HistoryReader
+
+    key = "websocket:deferred-graphs"
+    graph = {"nodes": [{"path": f"/file-{i}.md", "name": f"file-{i}.md", "tokens": i, "state": "loaded"}
+                       for i in range(200)], "edges": []}
+    for number in range(2):
+        history.append(key, {"event": "user", "text": f"question {number}"})
+        history.append(key, {"event": "model_request", "request_id": str(number), "run_id": str(number),
+                             "sequence": 1, "phase": "started", "context_graph": graph, "request_usage": None})
+        history.append(key, {"event": "model_request", "request_id": str(number), "run_id": str(number),
+                             "sequence": 2, "phase": "completed", "context_graph": graph,
+                             "request_usage": {"context_tokens": number + 10}, "usage": {"request_count": 1},
+                             "round_usages": [{"prompt_tokens": 20}], "context_window_tokens": 1000})
+        history.append(key, {"event": "context_compaction", "compaction_id": str(number), "phase": "succeeded",
+                             "context_snapshot": {"graph": graph, "estimated_tokens": 5, "context_window_tokens": 1000}})
+        history.append(key, {"event": "message", "text": f"answer {number}"})
+        history.append(key, {"event": "turn_end", "usage": {"context_tokens": number + 10}})
+    channel = _ch(MagicMock(), session_manager=history.sessions)
+    channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
+    http = channel.gateway.http
+    encoded = quote(key, safe="")
+
+    async def get(path, token="tok", etag=None):
+        headers = [("Authorization", f"Bearer {token}")]
+        if etag:
+            headers.append(("If-None-Match", etag))
+        response = await http._dispatch_session_routes(Request(path, Headers(headers)), path.split("?", 1)[0])
+        assert response is not None
+        return response
+
+    before = None
+    detail_refs = []
+    read_entry = HistoryReader.read_entry
+    selected = []
+
+    def one_entry(reader, ordinal, position):
+        selected.append((reader.key, ordinal, position))
+        return read_entry(reader, ordinal, position)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("deferred history must not expand graphs or read an entire turn for detail")
+
+    for ordinal in (1, 0):
+        path = f"/api/sessions/{encoded}/webui-thread?include_model_requests=1&limit=1"
+        if before:
+            path += "&before=" + quote(before, safe="")
+        full_response = await get(path)
+        full = json.loads(full_response.body)
+        unknown = await get(path + "&context_graph_detail=future")
+        assert json.loads(unknown.body)["events"] == full["events"]
+        deferred_path = path + "&context_graph_detail=deferred-v1&context_graph_encoding=references-v1"
+        with monkeypatch.context() as patch:
+            patch.setattr("nanobot.session.history_graph.GraphDecoder.graph", unexpected)
+            response = await get(deferred_path, etag=full_response.headers["ETag"])
+        assert response.status_code == 200
+        assert response.headers["ETag"] != full_response.headers["ETag"]
+        assert len(response.body) < len(full_response.body) / 3
+        deferred = json.loads(response.body)
+        assert deferred["page"] == full["page"]
+        assert deferred["completed_turn_ids"] == full["completed_turn_ids"]
+        assert (await get(deferred_path, etag=response.headers["ETag"])).status_code == 304
+        with monkeypatch.context() as patch:
+            patch.setattr(HistoryReader, "read_entries", unexpected)
+            patch.setattr(HistoryReader, "read_entry", one_entry)
+            for event in deferred["events"]:
+                target = event.get("context_snapshot", event)
+                field = "graph_detail_ref" if "context_snapshot" in event else "context_graph_detail_ref"
+                if field not in target:
+                    continue
+                ref = target.pop(field)
+                detail_refs.append(ref)
+                count = len(selected)
+                detail = await get(f"/api/sessions/{encoded}/webui-thread/context-graph?ref={ref}")
+                assert detail.status_code == 200
+                assert len(selected) == count + 1
+                assert selected[-1] == (key, ordinal, 3 if field == "graph_detail_ref" else event["sequence"])
+                target["graph" if field == "graph_detail_ref" else "context_graph"] = json.loads(detail.body)["graph"]
+        assert deferred["events"] == full["events"]
+        before = deferred["page"]["before_cursor"]
+    assert len(set(detail_refs)) == 6  # Identical graph bodies still address their own immutable fact.
+
+    path = f"/api/sessions/{encoded}/webui-thread/context-graph?ref={detail_refs[0]}"
+    with monkeypatch.context() as patch:
+        patch.setattr(HistoryReader, "read_entry", unexpected)
+        assert (await get(path, token="expired")).status_code == 401
+        assert (await get(path.replace(encoded, quote("websocket:another-chat", safe="")))).status_code == 404
+        assert (await get(path.split("?", 1)[0] + "?ref=malformed")).status_code == 404
+    await history.sessions.state.reset(key)
+    history.append(key, {"event": "user", "text": "replacement"})
+    history.append(key, {"event": "model_request", "request_id": "new", "run_id": "new", "sequence": 1,
+                         "phase": "started", "context_graph": graph})
+    # Reusing turn/position after reset must not revive a previous generation's reference.
+    stale = f"/api/sessions/{encoded}/webui-thread/context-graph?ref={detail_refs[3]}"
+    assert (await get(stale)).status_code == 404
+    fresh = await get(f"/api/sessions/{encoded}/webui-thread?include_model_requests=1&context_graph_detail=deferred-v1")
+    ref = json.loads(fresh.body)["events"][1]["context_graph_detail_ref"]
+    assert (await get(f"/api/sessions/{encoded}/webui-thread/context-graph?ref={ref}")).status_code == 200

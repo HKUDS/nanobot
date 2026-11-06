@@ -2132,6 +2132,8 @@
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",
         "panelTitle": "Context usage",
+        "loadError": "Could not load the context graph.",
+        "unavailable": "This host cannot load saved context graphs.",
         "contextTitle": "Context",
         "cacheHitRate": "Cache hit rate",
         "tokenUsage": "{{used}} / {{limit}}",

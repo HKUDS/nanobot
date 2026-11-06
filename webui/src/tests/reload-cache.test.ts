@@ -68,6 +68,18 @@ describe("tab reload cache", () => {
     expect(frames[0].context_graph?.edges[0]).toBe(frames[49].context_graph?.edges[0]);
   });
 
+  it("restores deferred references and compaction estimates without materializing graphs", () => {
+    activateReloadCache("ws://localhost:8765/");
+    const body = parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [
+      { event: "context_compaction", chat_id: "chat", compaction_id: "compact", phase: "succeeded",
+        context_snapshot: { graph_detail_ref: "baseline", estimated_tokens: 100, context_window_tokens: 1000 } },
+      { event: "model_request", chat_id: "chat", request_id: "request", run_id: "run", sequence: 2, phase: "completed",
+        context_graph_detail_ref: "request-graph", request_usage: { context_tokens: 200 }, round_usages: [{ prompt_tokens: 200 }] },
+    ] });
+    new WebuiThreadCache().set("websocket:chat", body);
+    expect(new WebuiThreadCache().get("websocket:chat")).toEqual(body);
+  });
+
   it("does not restore another gateway's data or data after logout", () => {
     activateReloadCache("ws://localhost:8765/");
     new WebuiThreadCache().set("websocket:a", thread);

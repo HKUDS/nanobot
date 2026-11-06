@@ -33,6 +33,27 @@ describe("model request snapshots", () => {
       graph: snapshot.graph, tokens: snapshot.usage?.prompt_tokens,
     }))).toEqual([{ graph: first, tokens: 100 }, { graph: second, tokens: 101 }]);
   });
+  it("normalizes deferred request and compaction sources without losing usage or estimates", () => {
+    const transcript = new ThreadTranscript();
+    const events = parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [
+      request(1, { context_graph_detail_ref: "before-compaction", phase: "completed", request_usage: usage(1) }),
+      { ...envelope, event: "context_compaction", compaction_id: "boundary", phase: "succeeded", turn_seq: 2,
+        context_snapshot: { graph_detail_ref: "compaction-graph", estimated_tokens: 50, context_window_tokens: 1000 } },
+      request(3, { context_graph_detail_ref: "pending-graph", request_usage: null, context_window_tokens: 1000 }),
+    ] }).events;
+    for (const event of events) project(transcript, event, true);
+    expect(composerContextSnapshots(transcript.messages, transcript.modelRequests)).toEqual([
+      { id: "compaction-boundary", graphDetailRef: "compaction-graph", estimatedTokens: 50, contextWindowTokens: 1000 },
+      { id: "request-3", turnSeq: 3, graphDetailRef: "pending-graph", contextWindowTokens: 1000 },
+    ]);
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)).toMatchObject({ estimatedContextTokens: 50 });
+    project(transcript, request(4, { request_id: "request-3", context_graph_detail_ref: "completed-graph", phase: "completed",
+      request_usage: usage(2), usage: usage(2), round_usages: rounds(2), context_window_tokens: 1000 }), true);
+    expect(composerContextSnapshots(transcript.messages, transcript.modelRequests).at(-1)).toMatchObject({
+      id: "request-3", graphDetailRef: "completed-graph", usage: usage(2), contextWindowTokens: 1000,
+    });
+    expect(composerUsageSnapshots(transcript.messages, transcript.modelRequests).at(-1)).toMatchObject({ usage: usage(2), roundUsages: rounds(2) });
+  });
   it("validates request identity, phase, sequence, and usage at the history boundary", () => {
     for (const invalid of [{ phase: "unknown" }, { sequence: -1 }, { run_id: null }, { usage: { context_tokens: "123" } }]) {
       expect(() => parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [{ ...request(1), ...invalid }] })).toThrow();
