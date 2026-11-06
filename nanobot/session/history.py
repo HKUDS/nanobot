@@ -4,13 +4,13 @@ import asyncio
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import CancelledError
+from dataclasses import dataclass, field
 from typing import Any, TypedDict, TypeVar, cast
 
 from nanobot.runtime_context import public_history_message
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionHistoryPayload, SessionManager, metadata_title
 from nanobot.session.session_handles import SESSION_HANDLE_METADATA_KEY, normalize_session_handle
-from nanobot.utils.cancellation import shield_and_drain
 
 _T = TypeVar("_T")
 
@@ -36,18 +36,46 @@ def _check_cancelled(cancelled: threading.Event | None) -> None:
 
 
 async def _run_cancellable(operation: Callable[[threading.Event], _T]) -> _T:
-    """Keep the worker owned until cancellation has closed its read transaction."""
+    """Cancel queued work immediately; drain a started transaction before returning."""
     cancelled = threading.Event()
-    worker = asyncio.create_task(asyncio.to_thread(operation, cancelled))
+    start_lock = threading.Lock()
+    started = False
+
+    def run() -> _T:
+        nonlocal started
+        # Cancellation and entry into the operation have one atomic ownership
+        # handoff. A dequeued worker may not touch the database after cancellation.
+        with start_lock:
+            if cancelled.is_set():
+                raise CancelledError()
+            started = True
+        return operation(cancelled)
+
+    worker = asyncio.create_task(asyncio.to_thread(run))
     try:
         return await asyncio.shield(worker)
-    except asyncio.CancelledError:
-        cancelled.set()
+    except asyncio.CancelledError as cancellation:
+        with start_lock:
+            cancelled.set()
+            drain = started
+        if not drain:
+            worker.cancel()
+            raise
+        while not worker.done():
+            try:
+                await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                # Repeated caller cancellation must not orphan an active reader.
+                continue
+            except BaseException:
+                break
         try:
-            await shield_and_drain(worker)
-        except BaseException:
-            # The caller's cancellation wins after the worker has settled.
+            worker.result()
+        except (CancelledError, asyncio.CancelledError):
             pass
+        except BaseException as exc:
+            # Preserve unexpected worker failures while cancellation still wins.
+            raise cancellation from exc
         raise
 
 
@@ -119,17 +147,48 @@ def _matching_messages(
     return matches
 
 
+@dataclass
+class _SearchCursor:
+    """Detached header ranking and progress; never owns a database snapshot."""
+
+    query: str
+    exclude_session_key: str | None
+    initialized: bool = False
+    ranked: list[tuple[int, int, SessionMatch]] = field(default_factory=list)
+    remaining: list[tuple[int, str]] = field(default_factory=list)
+    ranked_offset: int = 0
+    remaining_offset: int = 0
+    ordering: dict[str, tuple[int, int]] = field(default_factory=dict)
+
+    @property
+    def exhausted(self) -> bool:
+        return (
+            self.initialized
+            and self.ranked_offset == len(self.ranked)
+            and self.remaining_offset == len(self.remaining)
+        )
+
+    def order(self, matches: list[SessionMatch]) -> list[SessionMatch]:
+        # Retain only the bounded candidates currently under consideration.
+        self.ordering = {match["session_key"]: self.ordering[match["session_key"]] for match in matches}
+        return sorted(matches, key=lambda match: self.ordering[match["session_key"]])
+
+
 class SessionHistoryReader:
     """Search full persisted history, including messages before summary checkpoints."""
 
     def __init__(self, sessions: SessionManager) -> None:
         self._sessions = sessions
 
+    def search_cursor(self, query: str, *, exclude_session_key: str | None = None) -> _SearchCursor:
+        return _SearchCursor(query, exclude_session_key)
+
     async def asearch(
         self, query: str, limit: int, *, exclude_session_key: str | None = None,
+        _cursor: _SearchCursor | None = None,
     ) -> list[SessionMatch]:
         return await _run_cancellable(lambda cancelled: self.search(
-            query, limit, exclude_session_key=exclude_session_key, cancelled=cancelled,
+            query, limit, exclude_session_key=exclude_session_key, cancelled=cancelled, _cursor=_cursor,
         ))
 
     def search(
@@ -139,18 +198,15 @@ class SessionHistoryReader:
         *,
         exclude_session_key: str | None = None,
         cancelled: threading.Event | None = None,
+        _cursor: _SearchCursor | None = None,
     ) -> list[SessionMatch]:
-        return self._sessions.read_batch(lambda: self._search(
-            query, limit, exclude_session_key=exclude_session_key, cancelled=cancelled,
-        ))
+        cursor = _cursor or self.search_cursor(query, exclude_session_key=exclude_session_key)
+        return self._sessions.read_batch(lambda: self._search(cursor, limit, cancelled))
 
     def _search(
-        self, query: str, limit: int, *, exclude_session_key: str | None,
-        cancelled: threading.Event | None,
+        self, cursor: _SearchCursor, limit: int, cancelled: threading.Event | None,
     ) -> list[SessionMatch]:
-        needle = query.casefold()
-        ranked: list[tuple[int, int, SessionMatch]] = []
-        remaining: list[tuple[int, str]] = []
+        needle = cursor.query.casefold()
 
         def headers() -> None:
             # Keep ranking, title and visibility together, but don't hold this
@@ -158,7 +214,7 @@ class SessionHistoryReader:
             for position, row in enumerate(self._sessions.list_sessions()):
                 _check_cancelled(cancelled)
                 key = row.get("key")
-                if not isinstance(key, str) or key == exclude_session_key:
+                if not isinstance(key, str) or key == cursor.exclude_session_key:
                     continue
                 payload = self._sessions.read_history_header(key)
                 if payload is None:
@@ -168,10 +224,10 @@ class SessionHistoryReader:
                 title = _text(row.get("title"))
                 rank = _title_rank(title, needle)
                 if rank is None:
-                    remaining.append((position, key))
+                    cursor.remaining.append((position, key))
                     continue
                 updated = row.get("updated_at")
-                ranked.append((rank, position, {
+                cursor.ranked.append((rank, position, {
                     "session_key": key,
                     "generation": payload["generation"],
                     "title": title,
@@ -179,25 +235,61 @@ class SessionHistoryReader:
                     "messages": [],
                 }))
 
-        self._sessions.read_consistently(headers, cancelled=cancelled)
-        for position, key in remaining:
+        if not cursor.initialized:
+            self._sessions.read_consistently(headers, cancelled=cancelled)
+            cursor.ranked.sort(key=lambda item: (item[0], item[1]))
+            cursor.initialized = True
+
+        matches: list[SessionMatch] = []
+        while len(matches) < limit and cursor.ranked_offset < len(cursor.ranked):
             _check_cancelled(cancelled)
-            if len(ranked) >= limit:
-                break
+            rank, position, match = cursor.ranked[cursor.ranked_offset]
+            cursor.ranked_offset += 1
+            cursor.ordering[match["session_key"]] = (rank, position)
+            matches.append(match)
+        while len(matches) < limit and cursor.remaining_offset < len(cursor.remaining):
+            _check_cancelled(cancelled)
+            position, key = cursor.remaining[cursor.remaining_offset]
+            cursor.remaining_offset += 1
             # Re-read title, visibility, generation and messages together. A
             # header captured before a reset or privacy change cannot be reused.
-            match = self.read(key, query=query, limit=2, cancelled=cancelled, _for_search=True)
+            match = self.read(key, query=cursor.query, limit=2, cancelled=cancelled, _for_search=True)
             if match is None:
                 continue
             rank = _title_rank(match["title"], needle)
             if rank is not None:
                 match["messages"] = []
-                ranked.append((rank, position, match))
             elif match["messages"]:
                 match["title"] = match["title"] or _text(match["messages"][0]["content"])
-                ranked.append((3, position, match))
-        ranked.sort(key=lambda item: (item[0], item[1]))
-        return [item[2] for item in ranked[:limit]]
+                rank = 3
+            else:
+                continue
+            cursor.ordering[key] = (rank, position)
+            matches.append(match)
+        return sorted(matches, key=lambda match: cursor.ordering[match["session_key"]])
+
+    async def acomplete_search(
+        self, cursor: _SearchCursor, matches: list[SessionMatch], handles: Mapping[str, str], limit: int,
+    ) -> list[tuple[SessionMatch, str | None]]:
+        return await _run_cancellable(lambda cancelled: self._sessions.read_batch(
+            lambda: self._complete_search(cursor, matches, handles, limit, cancelled),
+        ))
+
+    def _complete_search(
+        self, cursor: _SearchCursor, matches: list[SessionMatch], handles: Mapping[str, str],
+        limit: int, cancelled: threading.Event,
+    ) -> list[tuple[SessionMatch, str | None]]:
+        while True:
+            _check_cancelled(cancelled)
+            # Only the final validation needs the workspace-wide ambiguity scan.
+            # It also rechecks every retained generation in the same snapshot.
+            minimum = 0 if cursor.exhausted else limit
+            valid = self._validate(matches, handles, cancelled, conflict_minimum=minimum)
+            if len(valid) >= limit or cursor.exhausted:
+                return valid
+            retained = [match for match, _ in valid]
+            more = self._search(cursor, limit - len(retained), cancelled)
+            matches = cursor.order(retained + more)
 
     async def aread(
         self, session_key: str, *, query: str, limit: int,
@@ -249,6 +341,7 @@ class SessionHistoryReader:
 
     def _validate(
         self, matches: list[SessionMatch], handles: Mapping[str, str], cancelled: threading.Event,
+        *, conflict_minimum: int = 0,
     ) -> list[tuple[SessionMatch, str | None]]:
         def validate() -> list[tuple[SessionMatch, str | None]]:
             valid: list[tuple[SessionMatch, str | None]] = []
@@ -269,6 +362,8 @@ class SessionHistoryReader:
                     handle = None
                 valid.append((match, handle))
 
+            if len(valid) < conflict_minimum:
+                return valid
             names = {handle for _, handle in valid if handle is not None}
             if not names:
                 return valid

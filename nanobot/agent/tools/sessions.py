@@ -103,12 +103,14 @@ class SearchSessionsTool(_SessionTool):
         query = query.strip()
         if not query:
             return ToolResult.error("Error: search query must not be empty")
+        excluded = current_request_session_key()
+        cursor = self._access.search_cursor(query, exclude_session_key=excluded)
         matches = await self._access.asearch(
-            query, _SEARCH_LIMIT, exclude_session_key=current_request_session_key(),
+            query, _SEARCH_LIMIT, exclude_session_key=excluded, _cursor=cursor,
         )
         handles = await self._handles.alist_all_by_key() if matches else {}
-        validated = await self._access.avalidate(
-            matches, {key: handle.name for key, handle in handles.items()},
+        validated = await self._access.acomplete_search(
+            cursor, matches, {key: handle.name for key, handle in handles.items()}, _SEARCH_LIMIT,
         ) if matches else []
         needle = query.casefold()
         result = {

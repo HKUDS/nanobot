@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from contextlib import AbstractContextManager
 from datetime import datetime
 from types import SimpleNamespace
@@ -429,7 +431,183 @@ async def test_search_retains_valid_matches_when_a_candidate_is_reset(manager, m
 
     monkeypatch.setattr(tool._handles, "alist_all_by_key", reset_once)
     result = _decode(await tool.execute(query="needle"))
-    assert [row["session_key"] for row in result["results"]] == [f"sdk:{i}" for i in (4, 3, 2, 1)]
+    assert [row["session_key"] for row in result["results"]] == [f"sdk:{i}" for i in (4, 3, 2, 1, 0)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_matches_title,sixth_matches_title", [
+    (True, True), (True, False), (False, False),
+])
+@pytest.mark.parametrize("reset_count", [5, 11])
+async def test_search_fills_from_remaining_candidates_after_resets(
+    manager, monkeypatch, first_matches_title, sixth_matches_title, reset_count,
+):
+    for i in range(reset_count + 1):
+        _save_session(
+            manager, f"sdk:{i}",
+            title="Straße plan" if (first_matches_title if i else sixth_matches_title) else "notes",
+            messages=[
+                {"role": "tool", "content": "Straße hidden"},
+                {"role": "user", "content": f"Straße stable {i}"},
+            ],
+            updated_at=datetime(2025, 1, i + 1),
+        )
+    tool = SearchSessionsTool(manager)
+    lookup = tool._handles.alist_all_by_key
+    list_sessions = manager.list_sessions
+    calls = scans = 0
+
+    def count_header_scans():
+        nonlocal scans
+        scans += 1
+        return list_sessions()
+
+    async def reset_before_lookup():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            for i in range(reset_count, 0, -1):
+                await manager.state.reset(f"sdk:{i}")
+                await manager.state.update_metadata(f"sdk:{i}", {"title": "other"})
+        return await lookup()
+
+    monkeypatch.setattr(manager, "list_sessions", count_header_scans)
+    monkeypatch.setattr(tool._handles, "alist_all_by_key", reset_before_lookup)
+    first = _decode(await tool.execute(query="STRASSE"))
+    second = _decode(await tool.execute(query="STRASSE"))
+    for result in (first, second):
+        assert [row["session_key"] for row in result["results"]] == ["sdk:0"]
+        row = result["results"][0]
+        assert row["handle"] is not None
+        if not sixth_matches_title:
+            assert [(item["message_index"], item["content"]) for item in row["excerpts"]] == [
+                (1, "Straße stable 0"),
+            ]
+    assert calls == scans == 2  # One handle lookup and one header scan per execution.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("matches_title", [True, False])
+async def test_search_stops_reading_bodies_after_five_matches(manager, monkeypatch, matches_title):
+    for i in range(9):
+        _save_session(
+            manager, f"sdk:{i}", title="needle title" if matches_title else "notes",
+            messages=[{"role": "user", "content": "needle body"}],
+            updated_at=datetime(2025, 1, i + 1),
+        )
+    tool = SearchSessionsTool(manager)
+    original = tool._access.read
+    scanned = []
+
+    def track_read(key, **kwargs):
+        scanned.append(key)
+        return original(key, **kwargs)
+
+    monkeypatch.setattr(tool._access, "read", track_read)
+    result = _decode(await tool.execute(query="needle"))
+    assert [row["session_key"] for row in result["results"]] == [f"sdk:{i}" for i in range(8, 3, -1)]
+    assert scanned == ([] if matches_title else [f"sdk:{i}" for i in range(8, 3, -1)])
+
+
+@pytest.mark.asyncio
+async def test_refill_revalidates_retained_and_new_candidates(manager, monkeypatch):
+    for i in range(12):
+        _save_session(manager, f"sdk:{i}", title="needle", messages=[],
+                      updated_at=datetime(2025, 1, i + 1))
+    tool = SearchSessionsTool(manager)
+    lookup = tool._handles.alist_all_by_key
+    validate = tool._access._validate
+    project_names = manager.project_session_handle_names
+    validated, release = threading.Event(), threading.Event()
+    validation_calls = ambiguity_scans = 0
+
+    async def reset_before_lookup():
+        await manager.state.reset("sdk:11")
+        await manager.state.update_metadata("sdk:11", {"title": "other"})
+        return await lookup()
+
+    def pause_after_first_validation(*args, **kwargs):
+        nonlocal validation_calls
+        result = validate(*args, **kwargs)
+        validation_calls += 1
+        if validation_calls == 1:
+            validated.set()
+            assert release.wait(5)
+        return result
+
+    def count_ambiguity_scans(project):
+        nonlocal ambiguity_scans
+        ambiguity_scans += 1
+        return project_names(project)
+
+    monkeypatch.setattr(tool._handles, "alist_all_by_key", reset_before_lookup)
+    monkeypatch.setattr(tool._access, "_validate", pause_after_first_validation)
+    monkeypatch.setattr(manager, "project_session_handle_names", count_ambiguity_scans)
+    task = asyncio.create_task(tool.execute(query="needle"))
+    try:
+        assert await asyncio.to_thread(validated.wait, 5)
+        # One retained match and the next cached candidate both become stale.
+        for key in ("sdk:10", "sdk:6"):
+            await manager.state.reset(key)
+            await manager.state.update_metadata(key, {"title": "other"})
+        release.set()
+        result = _decode(await task)
+        assert [row["session_key"] for row in result["results"]] == [
+            "sdk:9", "sdk:8", "sdk:7", "sdk:5", "sdk:4",
+        ]
+        assert validation_calls == 3
+        assert ambiguity_scans == 1
+    finally:
+        release.set()
+        if not task.done():
+            await task
+
+
+@pytest.mark.asyncio
+async def test_refill_reranks_a_candidate_whose_title_changed(manager, monkeypatch):
+    for i in range(5):
+        _save_session(manager, f"sdk:{i}", title="needle plan", messages=[],
+                      updated_at=datetime(2025, 1, i + 1))
+    _save_session(manager, "sdk:newest", title="notes", messages=[], updated_at=datetime(2026, 1, 1))
+    tool = SearchSessionsTool(manager)
+    lookup = tool._handles.alist_all_by_key
+
+    async def change_before_lookup():
+        await manager.state.reset("sdk:4")
+        await manager.state.update_metadata("sdk:4", {"title": "other"})
+        await manager.state.update_metadata("sdk:newest", {"title": "needle"})
+        return await lookup()
+
+    monkeypatch.setattr(tool._handles, "alist_all_by_key", change_before_lookup)
+    result = _decode(await tool.execute(query="needle"))
+    assert [row["session_key"] for row in result["results"]] == [
+        "sdk:newest", "sdk:3", "sdk:2", "sdk:1", "sdk:0",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_refilled_match_does_not_expose_sdk_duplicate_handle(manager, monkeypatch):
+    for i in range(6):
+        _save_session(manager, f"sdk:{i}", title="needle", messages=[],
+                      updated_at=datetime(2025, 1, i + 1))
+    _save_session(manager, "sdk:older", title="notes", messages=[], updated_at=datetime(2020, 1, 1))
+    tool = SearchSessionsTool(manager)
+    lookup = tool._handles.alist_all_by_key
+    original = await lookup()
+    client = SessionClient(SimpleNamespace(sessions=manager))
+
+    async def reset_and_import_duplicate():
+        for i in range(5, 0, -1):
+            await manager.state.reset(f"sdk:{i}")
+            await manager.state.update_metadata(f"sdk:{i}", {"title": "other"})
+        handles = await lookup()
+        await client.ingest("sdk:older", [], metadata={"session_handle": original["sdk:0"].name})
+        return handles
+
+    monkeypatch.setattr(tool._handles, "alist_all_by_key", reset_and_import_duplicate)
+    result = _decode(await tool.execute(query="needle"))
+    assert [row["session_key"] for row in result["results"]] == ["sdk:0"]
+    assert result["results"][0]["handle"] is None
 
 
 @pytest.mark.asyncio

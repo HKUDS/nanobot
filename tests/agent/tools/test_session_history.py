@@ -7,6 +7,8 @@ import sqlite3
 import threading
 import time
 import tracemalloc
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import datetime
 
 import pytest
@@ -332,6 +334,78 @@ async def test_session_tool_memory_is_bounded_for_long_persisted_history(tmp_pat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool_name", ["read", "search"])
+async def test_queued_history_tool_cancels_without_starting_a_transaction(tmp_path, monkeypatch, tool_name):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("sdk:history")
+    session.messages = [{"role": "user", "content": "needle"}]
+    manager.save(session)
+    entered, release, queued, transaction = (threading.Event() for _ in range(4))
+
+    class SignallingExecutor(ThreadPoolExecutor):
+        def __init__(self):
+            super().__init__(max_workers=1)
+            self.submissions = 0
+
+        def submit(self, fn, /, *args, **kwargs):
+            future = super().submit(fn, *args, **kwargs)
+            self.submissions += 1
+            if self.submissions == 2:
+                queued.set()
+            return future
+
+    def block_executor():
+        entered.set()
+        assert release.wait(5)
+
+    for method in ("read_batch", "read_consistently"):
+        original = getattr(manager, method)
+
+        def tracked(*args, _original=original, **kwargs):
+            transaction.set()
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(manager, method, tracked)
+
+    loop = asyncio.get_running_loop()
+    previous_executor = loop._default_executor
+    executor = SignallingExecutor()
+    loop.set_default_executor(executor)
+    blocker = loop.run_in_executor(None, block_executor)
+    tool = ReadSessionTool(manager) if tool_name == "read" else SearchSessionsTool(manager)
+    kwargs = {"session_key": session.key, "query": "needle"} if tool_name == "read" else {"query": "needle"}
+
+    async def wait_for_event(event):
+        while not event.is_set():
+            await asyncio.sleep(0.001)
+
+    task = None
+    try:
+        await asyncio.wait_for(wait_for_event(entered), timeout=5)
+        task = asyncio.create_task(tool.execute(**kwargs))
+        await asyncio.wait_for(wait_for_event(queued), timeout=5)
+        task.cancel()
+        completed, _ = await asyncio.wait({task}, timeout=0.5)
+        assert task in completed, "a queued history worker blocked cancellation"
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not transaction.is_set()
+    finally:
+        release.set()
+        await blocker
+        # A fence ensures any previously queued worker has actually been dequeued.
+        await loop.run_in_executor(None, lambda: None)
+        if task is not None:
+            with suppress(asyncio.CancelledError):
+                await task
+        loop._default_executor = previous_executor
+        executor.shutdown(wait=True)
+        if manager._state is not None:
+            await manager.state.aclose()
+    assert not transaction.is_set(), "cancelled queued work entered the database after return"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["read", "search", "search-refill"])
 async def test_cancelled_history_scan_exits_and_releases_wal_snapshot(tmp_path, monkeypatch, tool_name):
     from nanobot.session import sqlite_store
 
@@ -343,6 +417,11 @@ async def test_cancelled_history_scan_exits_and_releases_wal_snapshot(tmp_path, 
         for i in range(3000)
     ]
     manager.save(session)
+    if tool_name == "search-refill":
+        for i in range(5):
+            candidate = manager.get_or_create(f"sdk:candidate-{i}")
+            candidate.metadata.update({"title": "not-present", "title_user_edited": True})
+            manager.save(candidate)
     db = sqlite3.connect(manager._store.path, isolation_level=None, timeout=0.2)
     db.execute("PRAGMA wal_autocheckpoint=0")
     db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -360,7 +439,18 @@ async def test_cancelled_history_scan_exits_and_releases_wal_snapshot(tmp_path, 
 
     monkeypatch.setattr(sqlite_store, "_object", slow_rows)
     tool = ReadSessionTool(manager) if tool_name == "read" else SearchSessionsTool(manager)
-    method = "read" if tool_name == "read" else "search"
+    if tool_name == "search-refill":
+        lookup = tool._handles.alist_all_by_key
+
+        async def reset_before_lookup():
+            for i in range(5):
+                candidate_key = f"sdk:candidate-{i}"
+                await manager.state.reset(candidate_key)
+                await manager.state.update_metadata(candidate_key, {"title": "other"})
+            return await lookup()
+
+        monkeypatch.setattr(tool._handles, "alist_all_by_key", reset_before_lookup)
+    method = {"read": "read", "search": "search", "search-refill": "_complete_search"}[tool_name]
     original = getattr(tool._access, method)
 
     def tracked(*args, **kwargs):
@@ -378,6 +468,11 @@ async def test_cancelled_history_scan_exits_and_releases_wal_snapshot(tmp_path, 
         _, frames, checkpointed = db.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
         assert frames > checkpointed  # The paused reader really holds the older snapshot.
         task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done(), "cancellation returned while the reader still held a snapshot"
+        task.cancel()  # A second stop must not detach the already-started reader.
+        await asyncio.sleep(0)
+        assert not task.done()
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -388,6 +483,46 @@ async def test_cancelled_history_scan_exits_and_releases_wal_snapshot(tmp_path, 
         release.set()
         await asyncio.to_thread(done.wait, 5)
         db.close()
+        if manager._state is not None:
+            await manager.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_running_reader_preserves_unexpected_worker_failure(tmp_path, monkeypatch):
+    from nanobot.session import sqlite_store
+
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("sdk:history")
+    session.messages = [{"role": "user", "content": "needle", "_marker": "failing-row"}]
+    manager.save(session)
+    entered, release = threading.Event(), threading.Event()
+    original = sqlite_store._object
+
+    def fail_row(raw):
+        record = original(raw)
+        if record.get("_marker") == "failing-row":
+            entered.set()
+            assert release.wait(5)
+            raise ValueError("failed to decode history")
+        return record
+
+    monkeypatch.setattr(sqlite_store, "_object", fail_row)
+    task = asyncio.create_task(ReadSessionTool(manager).execute(session_key=session.key))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError) as cancelled:
+            await task
+        assert isinstance(cancelled.value.__cause__, ValueError)
+        assert str(cancelled.value.__cause__) == "failed to decode history"
+    finally:
+        release.set()
+        if not task.done():
+            with suppress(asyncio.CancelledError):
+                await task
         if manager._state is not None:
             await manager.state.aclose()
 
