@@ -2093,6 +2093,7 @@
     },
     "composer": {
       "placeholder": "输入 / 查看命令，@ 引用会话或应用，$ 选择技能",
+      "placeholderCompact": "输入消息…",
       "placeholderOpening": "正在打开新话题…",
       "inputAria": "消息输入框",
       "goalStateStrip": "目标：{{label}}",

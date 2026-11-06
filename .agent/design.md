@@ -20,6 +20,10 @@ Python rules live in [scripts/check_import_boundaries.py](../scripts/check_impor
 
 The checks cover selected direct imports and client initialization dependencies. They do not establish a complete runtime dependency graph; execution, state ownership, and security contracts still require behavioral verification.
 
+## Keep a change locally understandable
+
+Group code by the behavior it owns, not a target file length. A useful extraction owns its state, subscriptions, and cleanup behind a narrow typed interface; moving helpers while exposing the original component's entire state does not create a boundary. Keep collaborating logic together when separating it would require more context to understand the same change. Preserve cross-owner tests and point task navigation at the new owner when one moves.
+
 ## Prefer duplication over premature abstraction
 
 Channels and providers are allowed to repeat similar logic (send retries, media handling, message splitting). Do not introduce complex base classes or shared helpers just to eliminate duplication across channel files. Each channel file should remain self-contained and readable on its own. The same applies to provider implementations.

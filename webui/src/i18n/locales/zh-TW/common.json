@@ -1887,6 +1887,7 @@
     },
     "composer": {
       "placeholder": "輸入 / 查看命令，@ 引用對話或應用程式，$ 選擇技能",
+      "placeholderCompact": "輸入訊息…",
       "placeholderOpening": "正在開啟新話題…",
       "inputAria": "訊息輸入框",
       "goalStateStrip": "目標：{{label}}",

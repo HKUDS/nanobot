@@ -72,14 +72,16 @@ function ComposerPreview() {
   return <div className="space-y-4">
     <StatePicker label={t("previews.composer.state")} value={mode} options={["thread", "hero", "streaming", "disabled"]} onChange={setMode} />
     <Button variant="outline" size="sm" onClick={() => setQuoted("组件接收状态，并把操作交给调用方。")}>{t("previews.composer.addQuote")}</Button>
-    <ThreadComposer disabled={mode === "disabled"} isStreaming={mode === "streaming"} variant={mode === "hero" ? "hero" : "thread"}
-      inputAriaLabel={t("previews.composer.input")} placeholder={t("previews.composer.placeholder")}
-      modelLabel={selected.name} modelDetail={selected.model} modelProvider={selected.provider} modelPreset={preset}
-      modelPresets={presets} onModelPresetChange={setPreset} slashCommands={commands.map((command) => ({ ...command, title: t(command.title), description: t(command.description) }))}
-      contextUsage={{ contextTokens: 18_500, contextWindowTokens: 200_000 }} recentRoundUsage={rounds}
-      workspaceScope={projectScope} workspaceControlsHidden quotedContext={quoted} onQuotedContextChange={setQuoted}
-      onStop={() => { setMode("thread"); setSent({ kind: "stopped" }); }}
-      onSend={(content, attachments) => { setSent({ kind: "sent", content, attachments: attachments?.length ?? 0 }); return true; }} />
+    <ComposerUsagePopover context={{ contextTokens: 18_500, contextWindowTokens: 200_000 }} rounds={rounds}>
+      {(renderContextUsage) => <ThreadComposer disabled={mode === "disabled"} isStreaming={mode === "streaming"} variant={mode === "hero" ? "hero" : "thread"}
+        inputAriaLabel={t("previews.composer.input")} placeholder={t("previews.composer.placeholder")}
+        modelLabel={selected.name} modelDetail={selected.model} modelProvider={selected.provider} modelPreset={preset}
+        modelPresets={presets} onModelPresetChange={setPreset} slashCommands={commands.map((command) => ({ ...command, title: t(command.title), description: t(command.description) }))}
+        renderContextUsage={renderContextUsage}
+        workspaceScope={projectScope} workspaceControlsHidden quotedContext={quoted} onQuotedContextChange={setQuoted}
+        onStop={() => { setMode("thread"); setSent({ kind: "stopped" }); }}
+        onSend={(content, attachments) => { setSent({ kind: "sent", content, attachments: attachments?.length ?? 0 }); return true; }} />}
+    </ComposerUsagePopover>
     <p role="status" className="text-sm text-muted-foreground">{sent?.kind === "stopped" ? t("previews.composer.stopped")
       : sent ? t("previews.composer.sent", { content: sent.content, attachments: sent.attachments ? t("previews.composer.attachments", { amount: sent.attachments }) : "" })
         : t("previews.composer.hint")}</p>

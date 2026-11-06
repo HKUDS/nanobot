@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -20,6 +20,8 @@ export interface ComposerRoundUsage {
   generationMs?: number;
 }
 
+export type ComposerUsageControl = (layout: { showLabel: boolean; compactLabel: boolean }) => ReactNode;
+
 export function ComposerUsagePopover({
   context,
   rounds,
@@ -28,7 +30,8 @@ export function ComposerUsagePopover({
   showLabel = false,
   compactLabel = false,
   sidebarHost,
-  triggerHost,
+  sessionKey,
+  children,
   open: controlledOpen,
   onOpenChange,
 }: {
@@ -39,7 +42,8 @@ export function ComposerUsagePopover({
   showLabel?: boolean;
   compactLabel?: boolean;
   sidebarHost?: HTMLElement | null;
-  triggerHost?: HTMLElement | null;
+  sessionKey?: string | null;
+  children?: (renderControl: ComposerUsageControl | undefined) => ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -66,9 +70,7 @@ export function ComposerUsagePopover({
     && context.contextTokens >= 0
     && Number.isFinite(context.contextWindowTokens)
     && (context.contextWindowTokens ?? 0) > 0;
-  if (!open && !hasContext && !hasRounds && !snapshots.length) {
-    return null;
-  }
+  const available = open || hasContext || hasRounds || snapshots.length > 0;
 
   const contextPercentage = hasContext
     ? Math.min(
@@ -96,8 +98,9 @@ export function ComposerUsagePopover({
     : `${contextDescription}. ${detailsLabel}`;
   const ringCircumference = 2 * Math.PI * 6;
   const ringLength = ringCircumference * meterPercentage / 100;
-  const showTextLabel = showLabel && (!compactLabel || contextPercentage !== null);
-  const trigger = (
+  const renderControl: ComposerUsageControl = ({ showLabel, compactLabel }) => {
+    const showTextLabel = showLabel && (!compactLabel || contextPercentage !== null);
+    const trigger = (
       <button
         type="button"
         ref={triggerRef}
@@ -162,24 +165,25 @@ export function ComposerUsagePopover({
           </span>
         ) : null}
       </button>
-  );
+    );
 
-  const triggerWithTooltip = <TooltipProvider>
-    <Tooltip>
-      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-      <TooltipContent side="top" className="text-xs">{contextDescription}</TooltipContent>
-    </Tooltip>
-  </TooltipProvider>;
+    return <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">{contextDescription}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>;
+  };
 
-  const inspector = <ContextInspector sidebar expandable={!narrow} context={context} rounds={rounds} snapshots={snapshots}
+  const inspector = <ContextInspector key={sessionKey} sidebar expandable={!narrow} context={context} rounds={rounds} snapshots={snapshots}
     onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
   const onPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); close(); }
   };
 
   return <>
-    {triggerHost === undefined ? triggerWithTooltip : triggerHost && createPortal(triggerWithTooltip, triggerHost)}
-    {narrow ? <Dialog open={open} onOpenChange={setOpen} modal={!sidebarHost}>
+    {children ? children(available ? renderControl : undefined) : available && renderControl({ showLabel, compactLabel })}
+    {available && (narrow ? <Dialog open={open} onOpenChange={setOpen} modal={!sidebarHost}>
       <DialogContent portalContainer={sidebarHost} placement="bottom" id={panelId} aria-describedby={undefined}
         data-testid="context-sidebar"
         overlayClassName={cn("context-drawer-backdrop", sidebarHost && "absolute bg-black/25 backdrop-blur-[8px] sm:bg-transparent sm:backdrop-blur-none")}
@@ -195,6 +199,6 @@ export function ComposerUsagePopover({
     </Dialog> : createPortal(<SidebarPanel open={open} width={420} floating={!sidebarHost} id={panelId}
       aria-label={t("thread.composer.context.panelTitle")} data-testid="context-sidebar" onKeyDown={onPanelKeyDown}>
       {inspector}
-    </SidebarPanel>, sidebarHost ?? document.body)}
+    </SidebarPanel>, sidebarHost ?? document.body))}
   </>;
 }

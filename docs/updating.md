@@ -2,16 +2,16 @@
 
 Use the update method that owns your installation. If your version does not include the WebUI updater, first upgrade through the original installer or package manager. This does not convert an existing installation into an installer-managed one.
 
-## Upgrade older JSONL installations through 0.4.0
+## Upgrade older JSONL installations
 
-Version 0.4.1 uses SQLite conversation history and the shared `network.proxy` configuration. It no longer imports old JSONL model history or WebUI transcripts, or converts per-feature proxy settings. If you use 0.3.5 or older, or still have unimported JSONL history, do not skip directly to 0.4.1.
+The 0.4.x releases retain automatic import of legacy model JSONL history, WebUI JSONL / segments and per-feature proxy settings. You can upgrade an older installation directly to 0.4.1 through its original installation method; an intermediate 0.4.0 installation is not required. These importers are scheduled for removal in 0.5.0.
 
 1. Stop all writers and back up the complete instance, including the configuration directory and workspace.
-2. Select version **0.4.0** explicitly through the original installation method, preserving existing extras, constraints and installation ownership.
-3. Start 0.4.0 with the same instance selectors. Let it import the old history, then open existing conversations and verify both messages and displayed history. Check proxy settings and save the migrated shared-proxy configuration before continuing.
-4. Stop the instance and back up the migrated data. Upgrade to 0.4.1 through the same installation method, then verify the running version, old conversations, a new message and another restart.
+2. Upgrade through the original installation method, preserving existing extras, constraints and installation ownership.
+3. Start the updated instance with the same configuration and workspace selectors. Open existing conversations and verify both messages and displayed history. Check proxy settings and save the migrated shared-proxy configuration.
+4. Verify the running version, a new message and another restart before considering the upgrade complete.
 
-Keep the original backup and retained JSONL import backups. Do not delete or overwrite old data to resolve a missing-history problem. Instances already using SQLite history and the shared proxy configuration can upgrade directly from 0.4.0.
+Keep the original backup and retained JSONL import backups. Do not delete or overwrite old data to resolve a missing-history problem. Complete and verify the migration on a 0.4.x release before upgrading to 0.5.0.
 
 ## Update from the WebUI
 

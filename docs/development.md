@@ -2,7 +2,7 @@
 
 This page collects contributor-facing notes for extending nanobot. User-facing setup and runtime options live in [`configuration.md`](./configuration.md).
 
-For browser interface changes, start with [WebUI development](../webui/README.md). For Python setup and contribution checks, see [CONTRIBUTING.md](../CONTRIBUTING.md). The sections below cover provider extensions.
+For source and test entry points by task, start with the [development navigation](../.agent/navigation.md). For browser interface changes, use the [WebUI change map](../webui/README.md#change-a-behavior). For Python setup and contribution checks, see [CONTRIBUTING.md](../CONTRIBUTING.md). The sections below cover provider extensions.
 
 ## Adding an LLM Provider
 

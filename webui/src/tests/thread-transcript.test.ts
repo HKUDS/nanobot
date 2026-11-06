@@ -41,6 +41,25 @@ function receive(thread: ThreadTranscript, ...events: ThreadProjectionEvent[]): 
 }
 
 describe("ThreadTranscript admission", () => {
+  it("keeps the history boundary unknown through live delivery and a failed first read", () => {
+    const thread = new ThreadTranscript();
+    const read = thread.begin("initial");
+    receive(thread, { ...at("turn-now", 5), event: "delta", stream_id: "answer-now", text: "Live tail" });
+    expect(thread.paging).toMatchObject({ loading: true, hasMoreBefore: null });
+
+    thread.finishRead(read, "History unavailable");
+    expect(thread.paging).toMatchObject({ loading: false, error: "History unavailable", hasMoreBefore: null });
+    const restored = new ThreadTranscript([], thread.save());
+    expect(restored.paging.hasMoreBefore).toBeNull();
+    const retry = restored.begin("latest");
+    expect(restored.accept(history([
+      input("turn-now", "Earlier question"),
+      { ...at("turn-now", 6), event: "stream_end", stream_id: "answer-now", text: "Live tail", resuming: true, merge_next: true },
+    ]), retry)).toBe(true);
+    expect(restored.messages.map((row) => row.content)).toEqual(["Earlier question", "Live tail"]);
+    expect(restored.paging).toMatchObject({ loading: false, error: null, hasMoreBefore: false });
+  });
+
   it.each(["succeeded", "failed", "cancelled"] as const)("reconciles one idle compaction across live phases and history (%s)", (phase) => {
     const thread = new ThreadTranscript();
     const base = [

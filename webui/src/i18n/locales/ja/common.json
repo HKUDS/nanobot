@@ -1887,6 +1887,7 @@
     },
     "composer": {
       "placeholder": "/ でコマンド、@ で会話やアプリ、$ でスキルを選択",
+      "placeholderCompact": "メッセージを入力…",
       "placeholderOpening": "新しいトピックを開いています…",
       "inputAria": "メッセージ入力欄",
       "goalStateStrip": "目標: {{label}}",
