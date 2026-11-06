@@ -71,8 +71,7 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const route = routes[String(input)]
-        // Existing protocol-1 host fixtures return the full superset for either scope.
-        ?? (String(input) === "/api/settings?scope=chat" ? routes["/api/settings"] : undefined)
+        ?? (String(input) === "/api/settings?scope=chat" ? chatSettingsPayload() : undefined)
         ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
         ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(String(input)) ? { tasks: [] } : undefined);
       const body =
@@ -679,14 +678,14 @@ describe("App layout", () => {
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
   });
 
-  it.each(["compact", "protocol-1 full superset"])("boots chat with %s settings and loads full settings only on editor navigation", async (shape) => {
+  it("boots chat with compact settings and loads full settings only on editor navigation", async () => {
     const chat = chatSettingsPayload();
     const base = baseSettingsPayload();
     const full = { ...base, providers: chat.providers, model_presets: base.model_presets.map(preset => ({ ...preset, resolved_provider: "openai" })) };
     let releaseFull!: (payload: typeof full) => void;
     const pendingFull = new Promise<typeof full>((resolve) => { releaseFull = resolve; });
     mockFetchRoutes({
-      "/api/settings?scope=chat": shape === "compact" ? chat : full,
+      "/api/settings?scope=chat": chat,
       "/api/settings": () => pendingFull,
     });
     render(<App />);

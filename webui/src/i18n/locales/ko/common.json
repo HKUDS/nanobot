@@ -1927,7 +1927,6 @@
         "detailsLabel": "컨텍스트 사용량 열기",
         "panelTitle": "컨텍스트 사용량",
         "loadError": "컨텍스트 그래프를 불러올 수 없습니다.",
-        "unavailable": "이 호스트는 저장된 컨텍스트 그래프를 불러올 수 없습니다.",
         "contextTitle": "컨텍스트",
         "cacheHitRate": "캐시 적중률",
         "tokenUsage": "{{used}} / {{limit}}",

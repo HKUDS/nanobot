@@ -156,17 +156,31 @@ def test_default_workspace_files_are_discoverable_without_claiming_loaded(tmp_pa
 
 
 def test_graph_survives_webui_history_boundary(tmp_path: Path):
-    from nanobot.webui.history import fact_from_record, record_from_fact
-    from nanobot.webui.transcript import _client_projection_event
+    from nanobot.session.manager import SessionManager
+    from nanobot.webui.history import fact_from_record
+    from nanobot.webui.transcript import (
+        build_webui_context_graph_detail_response,
+        build_webui_thread_response,
+    )
 
     content = "Read me"
     graph = graph_from_sources([source_receipt(tmp_path / "guide.md", content)])
     event = {"event": "model_request", "request_id": "request", "run_id": "run",
              "sequence": 1, "phase": "completed", "context_graph": graph}
-    restored = record_from_fact(fact_from_record(event), "websocket:context-test")
-    projected = _client_projection_event(restored, augment_user_media=None,
-                                         augment_assistant_media=None, augment_assistant_text=None)
-    assert projected["context_graph"] == graph
+    sessions = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "sessions")
+    key = "websocket:context-test"
+    sessions.get_or_create(key)
+    sessions.append_history(key, [fact_from_record(record) for record in [
+        {"event": "user", "text": "Read the guide"}, event, {"event": "turn_end"},
+    ]])
+    payload = sessions.project_history(key, lambda history: build_webui_thread_response(
+        key, history=history, include_model_requests=True,
+    ))
+    request = next(event for event in payload["events"] if event["event"] == "model_request")
+    detail = sessions.project_history(key, lambda history: build_webui_context_graph_detail_response(
+        request["context_graph_detail_ref"], history=history,
+    ))
+    assert detail["graph"] == graph
 
 
 def test_explicit_skill_sources_in_current_message(tmp_path: Path):

@@ -1159,13 +1159,15 @@ describe("ThreadShell", () => {
     vi.stubGlobal("fetch", fetchMock);
     const thread = <ThreadShell session={session("deferred-usage")} title="Deferred usage"
       onToggleSidebar={() => {}} settingsSnapshot={modelSettings("test-model", "deepseek")} />;
-    const view = render(wrap(client, thread, undefined, "tok", ["webui.context-graph.detail.v1"]));
+    const view = render(wrap(client, thread));
     await screen.findByText("Saved answer");
     const detailCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/context-graph?"));
     expect(detailCalls()).toHaveLength(0);
     const trigger = await screen.findByTestId("composer-context-usage");
     expect(trigger).toHaveAccessibleName("Context 16%. Open context usage");
     fireEvent.click(trigger);
+    await waitFor(() => expect(detailCalls()).toHaveLength(1));
+    await act(async () => { await vi.dynamicImportSettled(); });
     const node = await screen.findByRole("button", { name: "latest.md" });
     expect(detailCalls()).toHaveLength(1);
     expect(String(detailCalls()[0][0])).toContain("ref=latest-ref");
@@ -1174,12 +1176,6 @@ describe("ThreadShell", () => {
     expect(await screen.findByText("About 179 tokens")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
     expect(await screen.findByText("Preview content")).toBeVisible();
-    expect(detailCalls()).toHaveLength(1);
-    // Bootstrap after a host downgrade can remove support while cached refs remain.
-    view.rerender(wrap(client, thread, undefined, "tok", []));
-    fireEvent.click(screen.getByTestId("composer-context-usage"));
-    expect(await screen.findByText("This host cannot load saved context graphs.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
     expect(detailCalls()).toHaveLength(1);
     view.unmount();
   });

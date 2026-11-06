@@ -754,10 +754,9 @@ export function ThreadShell({
     () => messagesReady ? composerContextSnapshots(messages, modelRequests) : [], [messages, modelRequests, messagesReady],
   );
   // Loader identity scopes inspector requests/cache even when two clients share a session key.
-  const contextGraphDetailsSupported = webuiCapabilities.includes("webui.context-graph.detail.v1");
-  const loadContextGraph = useMemo(() => historyKey && contextGraphDetailsSupported
+  const loadContextGraph = useMemo(() => historyKey
     ? (ref: string, signal: AbortSignal) => fetchWebuiContextGraph(token, historyKey, ref, signal)
-    : undefined, [client, historyKey, token, contextGraphDetailsSupported]);
+    : undefined, [client, historyKey, token]);
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
   const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"

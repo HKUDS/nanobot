@@ -78,7 +78,7 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
       </Suspense>}
       {(!displayedGraph || !graph) && <div className={cn(surface, "flex min-h-[300px] flex-col items-center justify-center px-4 text-center text-sm text-muted-foreground", sidebar && !large && "min-h-0 flex-1", displayedGraph && "absolute inset-0 z-20 justify-start bg-transparent pt-4")}>
         <div className={cn("flex flex-col items-center gap-3", displayedGraph && "rounded-lg bg-card/95 px-3 py-2")}>
-          {active && (!loadGraph ? <p role="status">{t("thread.composer.context.unavailable")}</p> : detail.error ? <>
+          {active && (detail.error ? <>
             <p role="alert">{t("thread.composer.context.loadError")}</p>
             <button type="button" onClick={detail.retry} className="rounded-md px-3 py-2 text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">{t("common.retry")}</button>
           </> : <p role="status" aria-busy="true">{t("chat.loading")}</p>)}
@@ -107,7 +107,7 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
         </dl>
       </div>}
     </div>
-    <ContextReplayButton disabled={!active || replay !== null || snapshots.length < 2 || (!loadGraph && snapshots.some(item => item.graphDetailRef))}
+    <ContextReplayButton disabled={!active || replay !== null || snapshots.length < 2}
       onPlay={() => {
         setMeterHover(false);
         // Scale by request count: our replay unit is a snapshot, not a graph edge.

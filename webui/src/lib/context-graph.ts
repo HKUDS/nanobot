@@ -28,9 +28,9 @@ export function contextGraphSource(graph: ContextGraph | undefined, detailRef: s
   return graph ? { graph } : detailRef ? { graphDetailRef: detailRef } : undefined;
 }
 
-export function isContextInspection(value: unknown, validateGraph: typeof isContextGraph = isContextGraph): value is ContextInspection {
+export function isContextInspection(value: unknown): value is ContextInspection {
   return typeof value === "object" && value !== null
-    && (("graph" in value && validateGraph(value.graph) && !("graph_detail_ref" in value))
+    && (("graph" in value && isContextGraph(value.graph) && !("graph_detail_ref" in value))
       || (!("graph" in value) && "graph_detail_ref" in value && isContextGraphDetailRef(value.graph_detail_ref)))
     && "estimated_tokens" in value && typeof value.estimated_tokens === "number"
     && Number.isFinite(value.estimated_tokens) && value.estimated_tokens >= 0

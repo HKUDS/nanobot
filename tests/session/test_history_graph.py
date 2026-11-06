@@ -9,7 +9,10 @@ from nanobot.session.display_history import HistoryFact, HistoryKind
 from nanobot.session.history_graph import decode_graph, encode_graph, graph_decoding
 from nanobot.session.manager import SessionManager
 from nanobot.webui.history import fact_from_record, record_from_fact
-from nanobot.webui.transcript import build_webui_thread_response
+from nanobot.webui.transcript import (
+    build_webui_context_graph_detail_response,
+    build_webui_thread_response,
+)
 
 
 def graph(count=5):
@@ -93,8 +96,11 @@ async def test_storage_compresses_off_loop_and_replay_retains_each_request(tmp_p
     requests = [event for event in payload["events"] if event["event"] == "model_request"]
     assert [event["request_id"] for event in requests] == ["0", "1", "2"]
     assert [event["request_usage"]["context_tokens"] for event in requests] == [10, 11, 12]
-    assert requests[0]["context_graph"] is requests[1]["context_graph"]
-    assert requests[0]["context_graph"] == graph()
+    for event in requests:
+        detail = await sessions.state.project_history(session.key, lambda history: build_webui_context_graph_detail_response(
+            event["context_graph_detail_ref"], history=history,
+        ))
+        assert detail["graph"] == graph()
     await sessions.state.aclose()
 
 

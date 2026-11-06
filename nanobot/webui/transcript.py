@@ -32,7 +32,6 @@ from nanobot.session.display_history import (
 from nanobot.session.history_graph import (
     decode_graph,
     decode_snapshot,
-    graph_decoding,
     graph_size_adjustment,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
@@ -1586,19 +1585,16 @@ def _client_projection_event(
             "compaction_id": compaction_id,
             "phase": phase,
         }
-        if context_graph_scope is not None:
-            raw_snapshot = record.get("context_snapshot")
-            if isinstance(raw_snapshot, dict):
-                snapshot_data = cast(dict[str, Any], raw_snapshot)
-                tokens, window = snapshot_data.get("estimated_tokens"), snapshot_data.get("context_window_tokens")
-                if (type(tokens) is int and tokens >= 0 and type(window) is int and window > 0
-                        and isinstance(snapshot_data.get("graph"), (dict, str))):
-                    projected["context_snapshot"] = {
-                        "estimated_tokens": tokens, "context_window_tokens": window,
-                        "graph_detail_ref": _context_graph_detail_ref(record, context_graph_scope, "context_snapshot.graph"),
-                    }
-        elif (snapshot := decode_snapshot(record.get("context_snapshot"))) is not None:
-            projected["context_snapshot"] = snapshot
+        raw_snapshot = record.get("context_snapshot")
+        if context_graph_scope is not None and isinstance(raw_snapshot, dict):
+            snapshot_data = cast(dict[str, Any], raw_snapshot)
+            tokens, window = snapshot_data.get("estimated_tokens"), snapshot_data.get("context_window_tokens")
+            if (type(tokens) is int and tokens >= 0 and type(window) is int and window > 0
+                    and isinstance(snapshot_data.get("graph"), (dict, str))):
+                projected["context_snapshot"] = {
+                    "estimated_tokens": tokens, "context_window_tokens": window,
+                    "graph_detail_ref": _context_graph_detail_ref(record, context_graph_scope, "context_snapshot.graph"),
+                }
         reason = record.get("reason")
         if isinstance(reason, str) and reason in {"idle", "context_pressure", "manual", "provider_native"}:
             projected["reason"] = reason
@@ -1619,11 +1615,8 @@ def _client_projection_event(
             projected.update(request_id=request_id, run_id=run_id, sequence=sequence, phase=phase)
             if "request_usage" in record:
                 projected["request_usage"] = _sanitize_turn_usage(record["request_usage"]) or None
-            if context_graph_scope is not None:
-                if isinstance(record.get("context_graph"), (dict, str)):
-                    projected["context_graph_detail_ref"] = _context_graph_detail_ref(record, context_graph_scope, "context_graph")
-            elif (graph := decode_graph(record.get("context_graph"))) is not None:
-                projected["context_graph"] = graph
+            if context_graph_scope is not None and isinstance(record.get("context_graph"), (dict, str)):
+                projected["context_graph_detail_ref"] = _context_graph_detail_ref(record, context_graph_scope, "context_graph")
         latency_ms = record.get("latency_ms")
         if isinstance(latency_ms, int | float) and latency_ms >= 0:
             projected["latency_ms"] = int(latency_ms)
@@ -1733,7 +1726,7 @@ def _client_projection_events(
     augment_user_media: Callable[[list[str], list[str]], list[dict[str, Any]]] | None,
     augment_assistant_media: Callable[[list[str]], list[dict[str, Any]]] | None,
     augment_assistant_text: Callable[[str], str] | None,
-    context_graph_scope: tuple[str, str] | None = None,
+    context_graph_scope: tuple[str, str] | None,
 ) -> tuple[list[dict[str, Any]], int | None]:
     events: list[dict[str, Any]] = []
     fork_boundary_event_index: int | None = None
@@ -1855,7 +1848,6 @@ def build_session_thread_response(
             "active_turn_id": turn_id if active else None}
 
 
-@graph_decoding()
 def build_webui_thread_response(
     session_key: str,
     *,
@@ -1875,9 +1867,9 @@ def build_webui_thread_response(
     after: str | None = None,
     stats: TranscriptReplayStats | None = None,
     include_model_requests: bool = False,
-    defer_context_graphs: bool = False,
 ) -> dict[str, Any] | None:
-    """Return canonical events, hiding additive request events from old clients."""
+    """Return canonical events with on-demand context graph references."""
+    revision = history.revision
     replay_stats = stats or TranscriptReplayStats()
     lines, page = _select_transcript_page(
         history=history,
@@ -1954,7 +1946,6 @@ def build_webui_thread_response(
         "active_turn_id": active_turn_id,
     }
     replay_started = time.perf_counter()
-    revision = history.revision if defer_context_graphs else None
     events, fork_boundary_event_index = _client_projection_events(
         lines,
         augment_user_media=augment_user_media,
@@ -1963,8 +1954,8 @@ def build_webui_thread_response(
         context_graph_scope=(session_key, revision[0]) if revision is not None else None,
     )
     if not include_model_requests:
-        # Select pages and stable identities before capability filtering, so an
-        # older client's cursors still navigate the same durable transcript.
+        # WebUI includes per-request details; the TUI consumes turn summaries.
+        # Filter after paging so both navigate the same durable transcript.
         if fork_boundary_event_index is not None:
             fork_boundary_event_index = sum(
                 event["event"] != "model_request" for event in events[:fork_boundary_event_index]

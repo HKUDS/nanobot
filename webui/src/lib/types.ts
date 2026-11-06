@@ -201,7 +201,7 @@ export type ContextInspection = {
   context_window_tokens: number;
 } & ({ graph: ContextGraph; graph_detail_ref?: never } | { graph?: never; graph_detail_ref: string });
 
-/** Inline live/older-host data or a durable, session-scoped historical reference. */
+/** An inline live graph or a durable, session-scoped historical reference. */
 export type ContextGraphSource =
   | { graph: ContextGraph; graphDetailRef?: never }
   | { graph?: never; graphDetailRef: string };
@@ -723,7 +723,6 @@ export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPendi
 export type RuntimeConfigValue = string | number | boolean | string[] | null;
 
 
-// Full settings from protocol-1 hosts that ignore scope are also valid chat settings.
 export type ChatSettingsPayload = Pick<SettingsPayload, "surface" | "runtime_surface" | "model_call_order"> & {
   agent: Pick<SettingsPayload["agent"], "model" | "provider" | "resolved_provider" | "model_preset">;
   model_presets: Array<Pick<SettingsPayload["model_presets"][number],

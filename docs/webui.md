@@ -113,8 +113,6 @@ The context indicator beside the model badge shows context-window usage. **Recen
 
 Open the file graph to see files used since the latest compaction and local Markdown references discovered in those files. Click a node to see its estimated token count or open the file, and drag across the usage bar or use replay to review earlier rounds. A loaded node means the file was read or supplied during this phase; it does not guarantee that the whole file, or its original text, remains in the model's current request. Compaction starts a new replay phase; its graph appears with the next request. Previously saved snapshots remain readable, but missing historical snapshots are not reconstructed from current files.
 
-Replay loads saved graphs as needed. If loading fails, choose **Retry** to continue.
-
 During compaction, the model switches to a summary plus subsequent messages; the original messages remain in chat history. Use `/compact` to compact the current topic manually. See [Memory](./memory.md) for compaction and Dream consolidation.
 
 ### File and diagram previews

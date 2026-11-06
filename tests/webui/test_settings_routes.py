@@ -323,7 +323,7 @@ async def test_usage_query_runs_off_the_event_loop(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("query", "compact"), [("", False), ("?scope=chat", True), ("?scope=Chat", False), ("?scope=unknown", False)])
+@pytest.mark.parametrize(("query", "compact"), [("", False), ("?scope=chat", True)])
 async def test_settings_scope_keeps_config_auth_surface_and_offloop_reads(
     tmp_path, monkeypatch, query, compact,
 ) -> None:
