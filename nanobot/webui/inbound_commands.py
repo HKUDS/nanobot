@@ -16,7 +16,8 @@ from websockets.asyncio.server import ServerConnection
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
-from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
+from nanobot.command.application import builtin_command_starts_agent_turn
+from nanobot.command.builtin import USER_SHELL_COMMAND
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
@@ -60,7 +61,6 @@ from nanobot.webui.session_access import (
     session_mentions_runtime_context,
 )
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
-from nanobot.webui.sidebar_state import write_webui_sidebar_state
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
 
@@ -164,7 +164,7 @@ class WebUICommandRouter:
         self._message_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
-        return self._http_router.workspace_project_selection_available(connection)
+        return connection in self._webui_connections
 
     async def send_webui_protocol_error(
         self,
@@ -286,6 +286,37 @@ class WebUICommandRouter:
             )
             return None
 
+    async def dispatch_legacy_message(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        chat_id: str,
+        content: str,
+    ) -> None:
+        """Authorize legacy text frames through the same workspace boundary."""
+        scope = await self.workspace_scope_or_error(
+            connection,
+            lambda: self._workspaces.scope_for_message(
+                {}, chat_id=chat_id, chat_running=False,
+                can_change_project=self.workspace_project_selection_available(connection),
+            ),
+            chat_id=chat_id,
+        )
+        if scope is None:
+            return
+        await self._transport.webui_dispatch_message(
+            sender_id=client_id, chat_id=chat_id, content=content,
+            media=None,
+            metadata={
+                "remote": getattr(connection, "remote_address", None),
+                WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
+            },
+            is_dm=False,
+            session_key=None,
+            require_existing_session=False,
+            session_generation=None,
+        )
+
     async def dispatch(
         self,
         connection: ServerConnection,
@@ -405,10 +436,7 @@ class WebUICommandRouter:
                 )
                 return
             try:
-                saved_state = await asyncio.to_thread(
-                    write_webui_sidebar_state,
-                    cast(dict[str, Any], state),
-                )
+                saved_state = await self._http_router.sidebar_state.write(cast(dict[str, Any], state))
             except (OSError, ValueError):
                 await self._transport.webui_send_event(
                     connection,

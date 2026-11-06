@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
@@ -24,12 +25,17 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
+from nanobot.context_graph import ContextGraph
+from nanobot.context_sources import PromptSourcesEvent
+from nanobot.events import ModelRequestEvent
 from nanobot.pairing.events import PairingChanged
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     mark_websocket_turn_transcript_persistence_failed,
     websocket_turn_transcript_persistence_failed,
 )
+from nanobot.webui.context_observer import ContextGraphObserver
 from nanobot.webui.media_gateway import WebUIMediaGateway
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
@@ -42,6 +48,7 @@ from nanobot.webui.outbound_wire import (
     GoalStateWirePayload,
     GoalStatusWirePayload,
     MessageWirePayload,
+    NotificationProjection,
     RuntimeModelWirePayload,
     SessionUpdatedWirePayload,
     StreamWirePayload,
@@ -68,6 +75,13 @@ class ChatAudience:
 
 
 WebUIAudience: TypeAlias = ChatAudience | Literal["all_connections", "authenticated_webui"]
+_ACTIVITY_BATCH_BYTES = 128 * 1024
+
+
+async def _encode_payload(payload: Mapping[str, object]) -> str:
+    if "context_graph" in payload or "context_snapshot" in payload:
+        return await asyncio.to_thread(json.dumps, payload, ensure_ascii=False)
+    return json.dumps(payload, ensure_ascii=False)
 
 
 class WebUIOutboundTransport(Protocol):
@@ -97,8 +111,31 @@ class WebUIOutboundDelivery:
         self._transcripts = transcripts
         self._temporary_chats = temporary_chats
         self._session_projection = session_projection
+        self._context_graph = ContextGraphObserver(transcripts.sessions)
         self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
         self._reasoning_text_buffers: dict[tuple[str, str], list[str]] = {}
+
+    async def _project_notification(self, msg: OutboundMessage) -> NotificationProjection | None:
+        event = msg.event
+        if not isinstance(event, ModelRequestEvent | ContextCompactionEvent):
+            return project_notification(msg.chat_id, event, msg.metadata)
+        persistent = self._temporary_chats.should_persist_transcript(msg.chat_id)
+        if isinstance(event, ModelRequestEvent):
+            graph: ContextGraph = {"nodes": [], "edges": []}
+            try:
+                graph = await self._context_graph.snapshot(msg.chat_id, msg.metadata, persistent=persistent)
+            except Exception:
+                logger.exception("Unable to restore context graph")
+            return project_notification(msg.chat_id, event, msg.metadata, context_graph=graph)
+        if event.phase == "succeeded":
+            try:
+                await self._context_graph.reset(msg.chat_id, msg.metadata, persistent=persistent)
+            except Exception:
+                logger.exception("Unable to reset context graph")
+        return project_notification(msg.chat_id, event, msg.metadata)
+
+    async def initialize(self) -> None:
+        await self._transcripts.initialize()
 
     def bind_pairing(self, bus: MessageBus, *, channel: str) -> Callable[[], None]:
         async def queue_changed(event: PairingChanged) -> None:
@@ -106,8 +143,10 @@ class WebUIOutboundDelivery:
 
         return bus.subscribe(queue_changed, PairingChanged)
 
-    def discard(self, chat_id: str) -> None:
+    def discard(self, chat_id: str, *, complete: bool = False) -> None:
         """Forget unclosed streams when a turn ends or its chat is discarded."""
+        if not complete or self._temporary_chats.should_persist_transcript(chat_id):
+            self._context_graph.discard(chat_id)
         for buffers in (self._stream_text_buffers, self._reasoning_text_buffers):
             for key in tuple(buffers):
                 if key[0] == chat_id:
@@ -131,12 +170,92 @@ class WebUIOutboundDelivery:
         *,
         label: str,
     ) -> None:
-        raw = json.dumps(payload, ensure_ascii=False)
+        if not recipients:
+            return
+        raw = await _encode_payload(payload)
         for connection in recipients:
             await self._transport.webui_send_raw(connection, raw, label=label)
 
+    def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
+        def activity(msg: OutboundMessage) -> bool:
+            event = msg.event
+            return (
+                not msg.media and not msg.metadata.get(WEBUI_RESTART_CONTROL_METADATA_KEY)
+                and (
+                    isinstance(event, ModelRequestEvent | RetryStatusEvent)
+                    or isinstance(event, ProgressEvent) and not (
+                        event.reasoning or event.reasoning_delta or event.reasoning_end or event.file_edit_events
+                    )
+                )
+            )
+
+        generation = following.metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        turn_id = following.metadata.get(WEBUI_TURN_METADATA_KEY)
+        return (
+            activity(previous) and activity(following)
+            and previous.chat_id == following.chat_id
+            and isinstance(generation, str) and bool(generation)
+            and isinstance(turn_id, str) and bool(turn_id)
+            and all(previous.metadata.get(key) == following.metadata.get(key) for key in (
+                HISTORY_GENERATION_METADATA_KEY, WEBUI_TURN_METADATA_KEY, WEBSOCKET_TURN_OWNER_METADATA_KEY,
+            ))
+            and self._temporary_chats.should_persist_transcript(following.chat_id)
+        )
+
+    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
+        first = messages[0]
+        frames: list[tuple[tuple[ServerConnection, ...], str, str]] = []
+        records: list[dict[str, Any]] = []
+        byte_count = 0
+
+        async def flush() -> None:
+            if records:
+                await self._transcripts.append_many(first.chat_id, records, metadata=first.metadata)
+            for recipients, raw, label in frames:
+                for connection in recipients:
+                    await self._transport.webui_send_raw(connection, raw, label=label)
+            frames.clear()
+            records.clear()
+
+        for msg in messages:
+            progress = msg.event if isinstance(msg.event, ProgressEvent) else None
+            if progress is not None:
+                body = await self._message_payload(msg, progress)
+                persistent, label = True, " "
+            else:
+                notification = await self._project_notification(msg)
+                assert notification is not None
+                body = dict(notification.payload)
+                persistent = notification.persistence == "turn_activity"
+                label = f" {body['event']} "
+            if persistent:
+                self._transcripts.prepare_event(
+                    msg.chat_id, body, metadata=msg.metadata, phase="activity", include_source=progress is not None,
+                )
+            try:
+                raw = await _encode_payload(body)
+                size = len(raw.encode("utf-8"))
+            except (TypeError, ValueError, RecursionError) as exc:
+                logger.warning("WebUI activity encoding failed for {}: {}", msg.chat_id, exc)
+                continue
+            if frames and byte_count + size > _ACTIVITY_BATCH_BYTES:
+                await flush()
+                byte_count = 0
+            recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
+            frames.append((recipients, raw, label))
+            if persistent:
+                records.append({**body, "text": msg.content} if progress is not None else body)
+            byte_count += size
+        await flush()
+
     async def send(self, msg: OutboundMessage) -> None:
         event = msg.event
+        if isinstance(event, PromptSourcesEvent):
+            await self._context_graph.observe_prompt(
+                msg.chat_id, event.sources, msg.metadata,
+                persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),
+            )
+            return
         if isinstance(event, PairingChanged):
             await self._fanout(
                 self._transport.webui_recipients("authenticated_webui"),
@@ -153,7 +272,7 @@ class WebUIOutboundDelivery:
         recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
         if not recipients:
             quiet_events = (
-                ProgressEvent, RetryStatusEvent, UserInputEvent, TurnEndEvent, SessionUpdatedEvent,
+                ModelRequestEvent, ProgressEvent, RetryStatusEvent, UserInputEvent, TurnEndEvent, SessionUpdatedEvent,
                 GoalStatusEvent, GoalStateSyncEvent, SubagentTaskChanged, ContextCompactionEvent,
             )
             log = logger.debug if isinstance(event, quiet_events) else logger.warning
@@ -173,7 +292,7 @@ class WebUIOutboundDelivery:
                     body["provenance"] = event.provenance
                 await self._fanout(recipients, body, label=" user_message ")
             return
-        notification = project_notification(msg.chat_id, event, msg.metadata)
+        notification = await self._project_notification(msg)
         if notification is not None:
             if recipients or notification.deliver_offline:
                 await self._send_payload(
@@ -298,8 +417,7 @@ class WebUIOutboundDelivery:
             chat_id, persisted=persisted, metadata=metadata, phase=phase,
         )
 
-    async def _send_message(self, msg: OutboundMessage, progress: ProgressEvent | None) -> None:
-        recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
+    async def _message_payload(self, msg: OutboundMessage, progress: ProgressEvent | None) -> dict[str, Any]:
         text = msg.content
         user_shell = msg.metadata.get(INBOUND_META_USER_SHELL) is True
         payload: MessageWirePayload = {
@@ -327,16 +445,24 @@ class WebUIOutboundDelivery:
             payload["latency_ms"] = int(latency)
         if progress and progress.tool_events:
             payload["tool_events"] = project_tool_events(progress.tool_events)
+            await self._context_graph.observe_tools(
+                msg.chat_id, payload["tool_events"], msg.metadata,
+                persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),
+            )
         agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
         if agent_ui is not None:
             payload["agent_ui"] = agent_ui
         if progress:
             payload["kind"] = "tool_hint" if progress.tool_hint else "progress"
-        body: dict[str, Any] = dict(payload)
+        return dict(payload)
+
+    async def _send_message(self, msg: OutboundMessage, progress: ProgressEvent | None) -> None:
+        recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
+        body = await self._message_payload(msg, progress)
         await self._persist_turn_transcript_event(
             msg.chat_id, body, metadata=msg.metadata,
             phase="activity" if progress else "answer", include_source=True,
-            transcript_overrides={"text": text},
+            transcript_overrides={"text": msg.content},
         )
         await self._fanout(recipients, body, label=" ")
 
@@ -450,7 +576,7 @@ class WebUIOutboundDelivery:
             if persisted:
                 # A durable incomplete marker allows HTTP recovery after restart.
                 clear_websocket_turn_if_current(chat_id, turn_owner)
-            self.discard(chat_id)
+            self.discard(chat_id, complete=True)
         await self._fanout(recipients, body, label=f" {body['event']} ")
 
     async def _send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:

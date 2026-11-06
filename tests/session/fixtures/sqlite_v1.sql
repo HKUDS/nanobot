@@ -20,4 +20,5 @@ CREATE TABLE pending_inputs (
     PRIMARY KEY (session_key, kind, position)
 );
 CREATE INDEX sessions_updated ON sessions(updated_at DESC);
+INSERT INTO storage_meta (key, value) VALUES ('jsonl_import', 'complete');
 PRAGMA user_version = 1;

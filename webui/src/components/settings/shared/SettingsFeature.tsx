@@ -22,7 +22,7 @@ export function SettingsAdvancedOptions({ children }: { children: ReactNode }) {
 }
 
 export function SettingsFeature({
-  title, enabled, onChange, disabled, initialOpen = false, error, children, onBeforeClose,
+  title, enabled, onChange, disabled, initialOpen = false, error, children, onClose,
 }: {
   title: string;
   enabled: boolean;
@@ -31,7 +31,7 @@ export function SettingsFeature({
   initialOpen?: boolean;
   error?: string;
   children?: ReactNode;
-  onBeforeClose?: () => Promise<boolean>;
+  onClose?: () => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(initialOpen && enabled);
@@ -45,9 +45,8 @@ export function SettingsFeature({
   return (
     <section ref={section} aria-label={title}>
       <Dialog open={Boolean(children) && open} onOpenChange={(next) => {
-        if (!next && onBeforeClose) {
-          void onBeforeClose().then((saved) => { if (saved) setOpen(false); });
-        } else setOpen(next);
+        setOpen(next);
+        if (!next) onClose?.();
       }}>
       <SettingsGroup>
         <SettingsRow title={children ? (

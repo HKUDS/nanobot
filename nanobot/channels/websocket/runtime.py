@@ -7,6 +7,7 @@ import json
 import socket
 import ssl
 import uuid
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -636,6 +637,7 @@ class WebSocketChannel(BaseChannel):
             )
 
     async def start(self) -> None:
+        await self._outbound.initialize()
         self.gateway.http.remote_instances.resume()
         from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -852,12 +854,8 @@ class WebSocketChannel(BaseChannel):
                 # WebSocket already authenticates at handshake time (token),
                 # so pairing is not applicable. Treat as non-DM to avoid
                 # sending pairing codes to an already-authenticated client.
-                await self._handle_message(
-                    sender_id=client_id,
-                    chat_id=default_chat_id,
-                    content=content,
-                    metadata={"remote": getattr(connection, "remote_address", None)},
-                    is_dm=False,
+                await self._commands.dispatch_legacy_message(
+                    connection, client_id, default_chat_id, content,
                 )
         except Exception as e:
             self.logger.debug("connection ended: {}", e)
@@ -1107,6 +1105,12 @@ class WebSocketChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         await self._outbound.send(msg)
+
+    def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
+        return self._outbound.can_batch_send(previous, following)
+
+    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
+        await self._outbound.send_batch(messages)
 
     def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
         return msg

@@ -7,6 +7,12 @@ import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
 
+// These DOM tests exercise disclosure/source contracts; the real shadow renderer runs in browser tests.
+vi.mock("@/components/thread/activity/DiffSyntaxHighlight", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/thread/activity/DiffSyntaxHighlight")>();
+  return { ...actual, DiffSyntaxHighlight: actual.PlainDiffLines };
+});
+
 const BLENDER_CLI_APP: CliAppInfo = {
   name: "blender",
   display_name: "Blender",
@@ -185,7 +191,7 @@ describe("AgentActivityCluster", () => {
       .toHaveAttribute("aria-label", `${path} 編集`);
   });
 
-  it("loads deferred trace details only after completed activity is expanded", async () => {
+  it.each(["exec(…)", ""])("loads deferred trace details only after completed activity is expanded (summary=%s)", async (summary) => {
     const onLoadTraceDetails = vi.fn();
     render(
       <AgentActivityCluster
@@ -193,8 +199,8 @@ describe("AgentActivityCluster", () => {
           id: "t-deferred",
           role: "tool",
           kind: "trace",
-          content: "exec(…)",
-          traces: ["exec(…)"],
+          content: summary,
+          traces: summary ? [summary] : [],
           traceDetail: {
             ref: "9.tr-deadbeefdeadbeef",
             bytes: 40_000,

@@ -7,9 +7,8 @@ import pytest
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.command.application import build_help_text, builtin_command_palette
 from nanobot.command.builtin import (
-    build_help_text,
-    builtin_command_palette,
     cmd_dream,
     cmd_dream_log,
     cmd_dream_prompt,

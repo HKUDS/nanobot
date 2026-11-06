@@ -1615,6 +1615,10 @@
       "marketplaceNpxRequired": "Se requiere Node.js con npx",
       "marketplaceInstalling": "Instalando",
       "marketplaceInstalled": "Instalada",
+      "marketplaceNameConflict": "El nombre ya está en uso",
+      "marketplaceOriginUnknown": "Origen instalado desconocido",
+      "marketplaceConflictHelp": "Revisa las habilidades con el mismo nombre en Instaladas antes de eliminarlas para usar otro origen.",
+      "marketplaceInstallConflict": "Conflicto de instalación. Espera a que termine la instalación en curso y revisa las habilidades del mismo nombre en Instaladas.",
       "marketplaceInstall": "Instalar",
       "marketplaceNoTrend": "Sin tendencia todavía",
       "marketplaceTrendLabel": "Tendencia de instalaciones de 8 semanas",
@@ -1859,8 +1863,6 @@
       "sessionInfo": "Detalles de la sesión"
     },
     "sessionInfo": {
-      "title": "Sesión",
-      "untitled": "Tema sin título",
       "automations": "Automatizaciones",
       "count": "{{count}}",
       "loading": "Cargando automatizaciones...",
@@ -1885,8 +1887,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Escribe tu mensaje…",
-      "placeholderHero": "Describe lo que quieres hacer",
+      "placeholder": "Escribe / para ver comandos, @ para mencionar conversaciones o aplicaciones y $ para elegir habilidades",
+      "placeholderCompact": "Escribe un mensaje…",
       "placeholderOpening": "Abriendo un nuevo tema…",
       "inputAria": "Entrada de mensaje",
       "goalStateStrip": "Objetivo: {{label}}",
@@ -1913,15 +1915,21 @@
       "reauthFallback": "Un modelo alternativo respondió esta vez.",
       "reauthSettings": "Abrir ajustes del modelo",
       "context": {
+          "loaded": "Cargado",
+          "unloaded": "Sin cargar",
+          "expand": "Ampliar contexto",
+          "collapse": "Reducir contexto",
+          "noFiles": "Aún no hay contexto registrado",
+          "estimatedNodeTokens": "Unos {{value}} tokens",
+          "openFile": "Abrir archivo",
+          "history": "Historial de contexto",
+          "playHistory": "Reproducir historial del contexto",
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso del contexto",
         "panelTitle": "Uso del contexto",
         "contextTitle": "Contexto",
-        "recentRounds": "Rondas recientes",
-        "inputTrend": "Tokens de entrada",
-        "input": "Tokens de entrada",
-        "cacheHitRate": "Tasa de aciertos de KV Cache",
-        "output": "Tokens de salida",
+        "cacheHitRate": "Tasa de aciertos de caché",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Tiempo de generación"
       },
       "queued": {
@@ -2149,8 +2157,7 @@
     "fileEditDiffTruncated": "Diferencias truncadas. Abre el archivo para ver el cambio completo.",
     "usage": {
       "context": "Contexto más reciente: {{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} solicitudes al modelo",
-      "estimated": "Incluye uso estimado"
+      "requests": "{{count}} solicitudes al modelo"
     },
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",

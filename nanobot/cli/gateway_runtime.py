@@ -55,8 +55,9 @@ from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.token_encoding import warmup_token_encoding
 from nanobot.webui.build import BuildMode
+from nanobot.webui.context_source_hook import create_context_source_hook
 from nanobot.webui.dev import WebUIDevError, WebUIDevServer
-from nanobot.webui.sidebar_state import read_webui_sidebar_state
+from nanobot.webui.sidebar_state import ensure_webui_session_archives
 
 if TYPE_CHECKING:
     from nanobot.update_profiles import ProfileReceipt
@@ -593,6 +594,8 @@ def _run_claimed_gateway(
         unified_session=config.agents.defaults.unified_session,
     )
 
+    from nanobot.goal.assembly import install_goal
+
     agent = AgentLoop.from_config(
         config, bus,
         provider=provider_snapshot.provider,
@@ -606,10 +609,12 @@ def _run_claimed_gateway(
         provider_signature=provider_snapshot.signature,
         local_trigger_store=trigger_store,
         hooks=[_MCPReadinessHook(mcp_provider)],
-        hook_factories=[create_file_edit_activity_hook],
+        hook_factories=[create_file_edit_activity_hook, create_context_source_hook],
         tool_registry=tools,
         recovery_admission=recovery,
+        builtin_assembly=install_goal,
     )
+
     def _schedule_webui_background(awaitable: Awaitable[None]) -> None:
         agent.schedule_background(cast(Coroutine[Any, Any, None], awaitable))
 
@@ -829,7 +834,7 @@ def _run_claimed_gateway(
     )
 
     async def _pick_heartbeat_target() -> tuple[str, str]:
-        sidebar_state = await asyncio.to_thread(read_webui_sidebar_state)
+        archived_keys = await ensure_webui_session_archives(session_manager.state)
         unified_metadata = None
         if config.agents.defaults.unified_session:
             record = await session_manager.state.read_metadata(UNIFIED_SESSION_KEY)
@@ -838,7 +843,7 @@ def _run_claimed_gateway(
         return _pick_heartbeat_target_from_sessions(
             enabled_channels=channels.enabled_channels,
             sessions=await session_manager.state.list_sessions(),
-            archived_keys=sidebar_state.get("archived_keys", []),
+            archived_keys=archived_keys,
             unified_session_metadata=unified_metadata,
         )
 
@@ -992,7 +997,6 @@ def _run_claimed_gateway(
         tasks: list[asyncio.Task[Any]] = []
         shutdown_task: asyncio.Task[Any] | None = None
         runtime_tasks: asyncio.Future[list[Any]] | None = None
-        startup_complete = False
         shutdown_event = asyncio.Event()
         cli_terminal._ensure_interactive_tty_mode()
         restore_shutdown_handlers = _install_gateway_shutdown_handlers(
@@ -1096,7 +1100,6 @@ def _run_claimed_gateway(
                     name="nanobot-webui-dev-server",
                 ))
             runtime_tasks = asyncio.gather(*tasks)
-            startup_complete = True
             shutdown_task = asyncio.create_task(
                 shutdown_event.wait(),
                 name="nanobot-gateway-shutdown",
@@ -1118,10 +1121,7 @@ def _run_claimed_gateway(
 
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
-            if not startup_complete:
-                # Do not report a successful gateway command when startup
-                # failed before any runtime task or listener was created.
-                raise typer.Exit(1)
+            raise typer.Exit(1)
         finally:
             try:
                 if shutdown_task and not shutdown_task.done():

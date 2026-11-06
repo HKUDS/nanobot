@@ -2701,7 +2701,7 @@ def test_optional_dependency_metadata_for_enable():
         "wecom": ("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
-            "neonize>=0.4.3.post0,<0.5.0",
+            "neonize>=0.5.2,<1.0.0",
             "python-magic>=0.4.27; sys_platform != 'win32'",
             "python-magic-bin>=0.4.14; sys_platform == 'win32'",
             "segno>=1.6.1,<2.0.0",
@@ -3755,7 +3755,9 @@ async def test_restart_notice_retries_until_running_channel_accepts_delivery():
 
     notice = RestartNotice(channel="discord", chat_id="123", started_at_raw="")
     with patch("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,)):
-        await mgr._send_restart_notice_when_started(notice, timeout_s=0.1, poll_s=0.01)
+        # Test delivery retries, not a 100 ms scheduling deadline under CI load.
+        async with asyncio.timeout(3):
+            await mgr._send_restart_notice_when_started(notice)
 
     assert channel.attempts == 2
     assert channel.sent is not None

@@ -1820,6 +1820,10 @@
       "marketplaceNpxRequired": "Node.js with npx is required",
       "marketplaceInstalling": "Installing",
       "marketplaceInstalled": "Installed",
+      "marketplaceNameConflict": "Name already in use",
+      "marketplaceOriginUnknown": "Installed source unknown",
+      "marketplaceConflictHelp": "Review same-name skills in Installed before removing them to use another source.",
+      "marketplaceInstallConflict": "Installation conflict. Wait for any installation to finish, then review same-name skills in Installed.",
       "marketplaceInstall": "Install",
       "marketplaceNoTrend": "No trend yet",
       "marketplaceTrendLabel": "8-week install trend",
@@ -2064,8 +2068,6 @@
       "sessionInfo": "Session details"
     },
     "sessionInfo": {
-      "title": "Session",
-      "untitled": "Untitled topic",
       "automations": "Automations",
       "count": "{{count}}",
       "loading": "Loading automations...",
@@ -2090,8 +2092,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Type your message…",
-      "placeholderHero": "Describe what you’d like to do",
+      "placeholder": "Type / for commands, @ for chats or apps, $ for skills",
+      "placeholderCompact": "Type a message…",
       "placeholderOpening": "Opening a new topic…",
       "inputAria": "Message input",
       "goalStateStrip": "Goal: {{label}}",
@@ -2118,15 +2120,21 @@
       "reauthFallback": "A fallback model handled this response.",
       "reauthSettings": "Open model settings",
       "context": {
+          "loaded": "Loaded",
+          "unloaded": "Not loaded",
+          "expand": "Expand context panel",
+          "collapse": "Collapse context panel",
+          "noFiles": "No context recorded yet",
+          "estimatedNodeTokens": "About {{value}} tokens",
+          "openFile": "Open file",
+          "history": "Context history",
+          "playHistory": "Play context history",
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",
         "panelTitle": "Context usage",
         "contextTitle": "Context",
-        "recentRounds": "Recent rounds",
-        "inputTrend": "Input tokens",
-        "input": "Input tokens",
-        "cacheHitRate": "KV cache hit rate",
-        "output": "Output tokens",
+        "cacheHitRate": "Cache hit rate",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Generation time"
       },
       "queued": {
@@ -2534,8 +2542,7 @@
     "fileEditDiffTruncated": "Diff truncated. Open the file for the full change.",
     "usage": {
       "context": "Context now: {{tokens}}{{capacity}}",
-      "requests": "{{count}} calls this turn",
-      "estimated": "Includes estimated usage"
+      "requests": "{{count}} calls this turn"
     }
   },
   "recovery": {

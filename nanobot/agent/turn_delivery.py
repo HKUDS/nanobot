@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from nanobot.bus.delivery import DeliveryRequest
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -33,6 +34,7 @@ from nanobot.session.keys import (
     is_internal_session,
     last_channel_from_metadata,
 )
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import strip_think
 
 if TYPE_CHECKING:
@@ -205,7 +207,7 @@ class TurnDelivery:
     route: TurnRoute
     route_admission: TurnRouteAdmission | None = None
     enable_stream: bool = False
-    continuation_pending: bool = field(init=False, default=False)
+    run_id: str = field(init=False)
     delivery_message: InboundMessage = field(init=False)
     lifecycle_message: InboundMessage = field(init=False)
     _stream_base_id: str | None = field(init=False, default=None)
@@ -213,6 +215,7 @@ class TurnDelivery:
     _stream_open: bool = field(init=False, default=False)
     events: EventSink = field(init=False)
     _routed_events: EventSink = field(init=False)
+    completed: bool = field(init=False, default=False)
     _stop_reason: str | None = field(init=False, default=None)
     _failure_error_kind: str | None = field(init=False, default=None)
     _retry_status: RetryStatusEvent | None = field(init=False, default=None)
@@ -223,6 +226,7 @@ class TurnDelivery:
     _stream_source_unknown: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
+        self.run_id = uuid4().hex
         self._routed_events = _bind_events(self.bus, self.route, self.session_key)
         self.events = EventSink(self._publish_event, self._routed_events.accepts)
         self.delivery_message = dataclasses.replace(
@@ -299,15 +303,16 @@ class TurnDelivery:
                 self.delivery_message,
                 self.session_key,
                 runtime,
+                run_id=self.run_id,
             )
             return
-        self.runtime_event_publisher.record_turn_runtime(self.session_key, runtime)
+        self.runtime_event_publisher.record_turn_runtime(self.session_key, runtime, run_id=self.run_id)
 
     def record_latency(self, latency_ms: int | None) -> None:
-        self.runtime_event_publisher.record_turn_latency(self.session_key, latency_ms)
+        self.runtime_event_publisher.record_turn_latency(self.session_key, latency_ms, run_id=self.run_id)
 
     def record_usage(self, round_usages: list[LLMUsage]) -> None:
-        self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages)
+        self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages, run_id=self.run_id)
 
     def record_stop_reason(
         self,
@@ -390,11 +395,9 @@ class TurnDelivery:
             )
         if publish_completion:
             outcome, failure_kind = _turn_outcome(stop_reason)
-            await self.runtime_event_publisher.turn_completed(
+            await self._publish_completion(
                 channel=completed_channel,
                 chat_id=completed_chat_id,
-                session_key=self.session_key,
-                metadata=self.lifecycle_message.metadata,
                 outcome=outcome,
                 failure_kind=failure_kind,
                 failure_error_kind=(self._failure_error_kind or (
@@ -404,6 +407,9 @@ class TurnDelivery:
                     self._retry_status.attempt if failure_kind == "model" and self._retry_status else None
                 ),
             )
+
+    async def cancelled(self) -> None:
+        await self._publish_completion(outcome="cancelled")
 
     async def fail(self, *, publish_completion: bool) -> None:
         await self.bus.publish_outbound(
@@ -415,14 +421,31 @@ class TurnDelivery:
             )
         )
         if publish_completion:
+            await self._publish_completion(outcome="failed", failure_kind="internal")
+
+    async def _publish_completion(
+        self, *, outcome: str, channel: str | None = None, chat_id: str | None = None,
+        failure_kind: str | None = None, failure_error_kind: str | None = None,
+        failure_attempts: int | None = None,
+    ) -> None:
+        if self.completed:
+            return
+
+        async def publish() -> None:
             await self.runtime_event_publisher.turn_completed(
-                channel=self.lifecycle_message.channel,
-                chat_id=self.lifecycle_message.chat_id,
+                channel=channel if channel is not None else self.lifecycle_message.channel,
+                chat_id=chat_id if chat_id is not None else self.lifecycle_message.chat_id,
                 session_key=self.session_key,
                 metadata=self.lifecycle_message.metadata,
-                outcome="failed",
-                failure_kind="internal",
+                outcome=outcome,
+                failure_kind=failure_kind,
+                failure_error_kind=failure_error_kind,
+                failure_attempts=failure_attempts,
+                run_id=self.run_id,
             )
+            self.completed = True
+
+        await shield_and_drain(publish())
 
     async def idle(self) -> None:
         await self.runtime_event_publisher.run_status_changed(
@@ -430,7 +453,7 @@ class TurnDelivery:
             self.session_key,
             "idle",
         )
-        self.runtime_event_publisher.clear_turn(self.session_key)
+        self.runtime_event_publisher.clear_turn(self.session_key, run_id=self.run_id)
 
     def _stream_id(self) -> str:
         assert self._stream_base_id is not None

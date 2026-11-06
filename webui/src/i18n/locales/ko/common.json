@@ -1614,6 +1614,10 @@
       "marketplaceNpxRequired": "npx가 포함된 Node.js가 필요합니다",
       "marketplaceInstalling": "설치 중",
       "marketplaceInstalled": "설치됨",
+      "marketplaceNameConflict": "같은 이름의 스킬이 있음",
+      "marketplaceOriginUnknown": "설치 출처를 알 수 없음",
+      "marketplaceConflictHelp": "출처를 바꾸려면 먼저 설치됨에서 같은 이름의 스킬을 확인한 후 삭제하세요.",
+      "marketplaceInstallConflict": "설치가 충돌합니다. 진행 중인 설치가 끝나면 설치됨에서 같은 이름의 스킬을 확인하세요.",
       "marketplaceInstall": "설치",
       "marketplaceNoTrend": "추세 없음",
       "marketplaceTrendLabel": "8주 설치 추이",
@@ -1858,8 +1862,6 @@
       "sessionInfo": "세션 세부 정보"
     },
     "sessionInfo": {
-      "title": "세션",
-      "untitled": "제목 없는 주제",
       "automations": "자동화",
       "count": "{{count}}",
       "loading": "자동화를 불러오는 중...",
@@ -1884,8 +1886,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "메시지를 입력하세요…",
-      "placeholderHero": "하고 싶은 일을 알려 주세요",
+      "placeholder": "/로 명령어 보기, @로 대화나 앱 선택, $로 스킬 선택",
+      "placeholderCompact": "메시지 입력…",
       "placeholderOpening": "새 주제를 여는 중…",
       "inputAria": "메시지 입력",
       "goalStateStrip": "목표: {{label}}",
@@ -1912,15 +1914,21 @@
       "reauthFallback": "이번 응답은 대체 모델이 처리했습니다.",
       "reauthSettings": "모델 설정 열기",
       "context": {
+          "loaded": "불러옴",
+          "unloaded": "불러오지 않음",
+          "expand": "컨텍스트 확대",
+          "collapse": "컨텍스트 축소",
+          "noFiles": "아직 기록된 컨텍스트가 없습니다",
+          "estimatedNodeTokens": "약 {{value}} 토큰",
+          "openFile": "파일 열기",
+          "history": "컨텍스트 기록",
+          "playHistory": "컨텍스트 기록 재생",
         "tooltip": "컨텍스트 {{percent}}%",
         "detailsLabel": "컨텍스트 사용량 열기",
         "panelTitle": "컨텍스트 사용량",
         "contextTitle": "컨텍스트",
-        "recentRounds": "최근 라운드",
-        "inputTrend": "입력 토큰",
-        "input": "입력 토큰",
-        "cacheHitRate": "KV 캐시 적중률",
-        "output": "출력 토큰",
+        "cacheHitRate": "캐시 적중률",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "생성 시간"
       },
       "queued": {
@@ -2148,8 +2156,7 @@
     "fileEditDiffTruncated": "변경 사항의 일부만 표시됩니다. 전체 내용은 파일을 열어 확인하세요.",
     "usage": {
       "context": "최근 컨텍스트: {{tokens}}{{capacity}} 토큰",
-      "requests": "모델 요청 {{count}}회",
-      "estimated": "예상 사용량 포함"
+      "requests": "모델 요청 {{count}}회"
     },
     "activityThinkingFor": "{{duration}} 동안 생각 중",
     "activityThought": "생각함",

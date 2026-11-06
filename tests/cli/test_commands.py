@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import urlparse
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from nanobot.agent.memory import MemoryStore
@@ -90,6 +91,11 @@ class _StopGatewayError(RuntimeError):
     pass
 
 
+def _patch_fake_agent_loop(monkeypatch, target, fake):
+    monkeypatch.setattr(target, fake)
+    monkeypatch.setattr("nanobot.goal.assembly.install_goal", MagicMock())
+
+
 class _GatewayAgentContractStub:
     """Minimal stable AgentLoop surface required by gateway assembly tests."""
 
@@ -138,6 +144,7 @@ class _EmptyGatewaySessionManager:
     def state(self):
         return SimpleNamespace(
             list_sessions=AsyncMock(return_value=[]),
+            migrate_history=AsyncMock(),
             record_delivery=AsyncMock(),
             aclose=AsyncMock(),
         )
@@ -934,7 +941,7 @@ def test_provider_login_openai_codex_uses_explicit_config_proxy(tmp_path, monkey
     proxy = "http://127.0.0.1:23458"
     config_path = tmp_path / "config.json"
     config_path.write_text(
-        json.dumps({"network": {"proxy": proxy}, "providers": {"openaiCodex": {"useProxy": True}}}),
+        json.dumps({"providers": {"openaiCodex": {"proxy": proxy}}}),
         encoding="utf-8",
     )
     active_path: dict[str, Path] = {}
@@ -1688,6 +1695,46 @@ def test_agent_uses_explicit_config_path(mock_agent_runtime, tmp_path: Path):
     assert mock_agent_runtime["load_config"].call_args.args == (config_path.resolve(),)
 
 
+def test_one_shot_agent_assembles_goal_without_background_queue(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+    from nanobot.session.manager import SessionManager
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.agents.defaults.max_tool_iterations = 1
+    config.bind_source_path(tmp_path / "instance" / "config.json")
+    provider = _fake_provider()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="goal", name="create_goal", arguments={"objective": "Do the synthetic task."},
+        )]),
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="complete", name="update_goal", arguments={"action": "complete", "recap": "Verified."},
+        )]),
+        LLMResponse(content="Verified."),
+    ])
+    monkeypatch.setattr("nanobot.cli.agent._load_runtime_config", lambda *_args: config)
+    monkeypatch.setattr("nanobot.cli.agent.sync_workspace_templates", lambda *_args: None)
+    monkeypatch.setattr("nanobot.cli.agent.is_default_workspace", lambda *_args: False)
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda *_args: provider)
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "instance" / "config.json")
+
+    result = runner.invoke(app, ["agent", "--classic", "-m", "/goal Do the synthetic task."])
+    assert result.exit_code == 0, result.output
+    assert provider.chat_stream_with_retry.await_count == 3
+    calls = provider.chat_stream_with_retry.await_args_list
+    assert all(call.kwargs["tools"] for call in calls[:2])
+    assert not calls[2].kwargs.get("tools")
+    assert "Verified." in result.output
+    sessions = SessionManager(config.workspace_path, sessions_root=tmp_path / "instance" / "sessions")
+    goal = sessions.get_or_create("cli:direct").metadata["goal_state"]
+    assert goal["status"] == "completed" and goal["objective"] == "Do the synthetic task."
+
+
 def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -1719,7 +1766,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         async def aclose(self) -> None:
             return None
 
-    monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.terminal._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -1761,7 +1808,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.terminal._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
@@ -1811,7 +1858,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.terminal._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
@@ -1867,7 +1914,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
             return None
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.agent.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr(
         "nanobot.cli.terminal._print_agent_response", lambda *_args, **_kwargs: None
     )
@@ -2247,9 +2294,9 @@ def test_heartbeat_empty_response_is_not_evaluated(
         session_manager=_FakeSessionManager,
         cron_service=_FakeCron,
     )
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.read_webui_sidebar_state", lambda: {})
+    monkeypatch.setattr("nanobot.cli.gateway_runtime.ensure_webui_session_archives", AsyncMock(return_value=[]))
     monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _unexpected_evaluator)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
@@ -3155,7 +3202,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
-    monkeypatch.setattr("nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
     monkeypatch.setattr("aiohttp.web.run_app", _fake_run_app)
 
@@ -3340,7 +3387,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
         raise AssertionError("unbound cron job must not be evaluated for delivery")
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr(
         "nanobot.cli.gateway_runtime.evaluate_response",
@@ -3456,7 +3503,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
         raise AssertionError("bound cron must not use legacy response evaluator")
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
     monkeypatch.setattr("nanobot.cli.gateway_runtime.evaluate_response", _unexpected_evaluator)
 
@@ -3698,18 +3745,20 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
         seen["local_trigger_queue_kwargs"] = kwargs
         raise _StopGatewayError("stop")
 
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr(
         "nanobot.triggers.local_runner.run_local_trigger_queue",
         _fake_run_local_trigger_queue,
     )
 
-    cli_commands._run_gateway(
-        config,
-        health_server_enabled=False,
-        unconfigured_provider_error=setup_error,
-    )
+    with pytest.raises(typer.Exit) as exc_info:
+        cli_commands._run_gateway(
+            config,
+            health_server_enabled=False,
+            unconfigured_provider_error=setup_error,
+        )
+    assert exc_info.value.exit_code == 1
 
     agent = seen["agent"]
     agent_kwargs = seen["agent_from_config_kwargs"]
@@ -4014,14 +4063,14 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert captured["host"] == host
     assert captured["port"] == 18791
     assert f"Health endpoint: {display_url}" in result.stdout
@@ -4117,9 +4166,11 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         assert timed_out_writer.output == b""
 
 
-def test_gateway_agent_task_owns_initial_mcp_provider_close(
+@pytest.mark.parametrize("failure_phase", ["startup", "runtime"])
+def test_gateway_failure_exits_nonzero_after_cleanup(
     monkeypatch,
     tmp_path: Path,
+    failure_phase: str,
 ) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
@@ -4199,7 +4250,8 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
             self.on_job = None
 
         async def start(self) -> None:
-            return None
+            if failure_phase == "startup":
+                raise _StopGatewayError("gateway startup failed")
 
         def stop(self) -> None:
             seen["cron_stopped"] = True
@@ -4218,7 +4270,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
             return False
 
         async def serve_forever(self) -> None:
-            raise _StopGatewayError("stop")
+            raise _StopGatewayError("gateway runtime failed")
 
     async def _fake_start_server(_handler, _host: str, _port: int):
         return _FakeServer()
@@ -4229,7 +4281,7 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
         message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.cli.gateway_runtime.MCPProvider", _FakeMCPProvider)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
@@ -4237,18 +4289,23 @@ def test_gateway_agent_task_owns_initial_mcp_provider_close(
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
-    assert result.exit_code == 0
+    assert result.exit_code == 1
+    assert "Gateway crashed unexpectedly" in result.stdout
+    assert f"_StopGatewayError: gateway {failure_phase} failed" in result.stdout
     assert seen["agent_stopped"] is True
     assert seen["inflight_turns_preserved"] is True
     assert seen["agent_closed"] is True
-    assert seen["agent_task_cleaned_up"] is True
     assert seen["channels_stopped"] is True
     assert seen["cron_stopped"] is True
     mcp_provider = seen["mcp_provider"]
     assert isinstance(mcp_provider, _FakeMCPProvider)
-    assert mcp_provider.connect_task is seen["agent_task"]
-    assert mcp_provider.close_tasks[0] is mcp_provider.connect_task
-    assert len(mcp_provider.close_tasks) == 2
+    if failure_phase == "runtime":
+        assert seen["agent_task_cleaned_up"] is True
+        assert mcp_provider.connect_task is seen["agent_task"]
+        assert mcp_provider.close_tasks[0] is mcp_provider.connect_task
+        assert len(mcp_provider.close_tasks) == 2
+    else:
+        assert len(mcp_provider.close_tasks) == 1
     hooks = seen["hooks"]
     assert isinstance(hooks, list)
     assert len(hooks) == 1
@@ -4393,7 +4450,7 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
         message_bus=MessageBus,
         session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
     )
-    monkeypatch.setattr("nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
+    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.gateway_runtime.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
     monkeypatch.setattr("asyncio.start_server", _fake_start_server)

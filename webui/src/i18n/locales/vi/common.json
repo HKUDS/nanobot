@@ -1614,6 +1614,10 @@
       "marketplaceNpxRequired": "Cần Node.js có npx",
       "marketplaceInstalling": "Đang cài đặt",
       "marketplaceInstalled": "Đã cài đặt",
+      "marketplaceNameConflict": "Tên đã được sử dụng",
+      "marketplaceOriginUnknown": "Không rõ nguồn đã cài",
+      "marketplaceConflictHelp": "Kiểm tra kỹ năng cùng tên trong Đã cài trước khi xóa để dùng nguồn khác.",
+      "marketplaceInstallConflict": "Xung đột cài đặt. Chờ quá trình cài đặt hoàn tất rồi kiểm tra kỹ năng cùng tên trong Đã cài.",
       "marketplaceInstall": "Cài đặt",
       "marketplaceNoTrend": "Chưa có xu hướng",
       "marketplaceTrendLabel": "Xu hướng lượt cài đặt trong 8 tuần",
@@ -1858,8 +1862,6 @@
       "sessionInfo": "Chi tiết phiên"
     },
     "sessionInfo": {
-      "title": "Phiên",
-      "untitled": "Chủ đề chưa đặt tên",
       "automations": "Tự động hóa",
       "count": "{{count}}",
       "loading": "Đang tải tự động hóa...",
@@ -1884,8 +1886,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Nhập tin nhắn…",
-      "placeholderHero": "Mô tả điều bạn muốn làm",
+      "placeholder": "Nhập / để xem lệnh, @ để chọn cuộc trò chuyện hoặc ứng dụng, $ để chọn kỹ năng",
+      "placeholderCompact": "Nhập tin nhắn…",
       "placeholderOpening": "Đang mở chủ đề mới…",
       "inputAria": "Ô nhập tin nhắn",
       "goalStateStrip": "Mục tiêu: {{label}}",
@@ -1912,15 +1914,21 @@
       "reauthFallback": "Mô hình dự phòng đã xử lý phản hồi này.",
       "reauthSettings": "Mở cài đặt mô hình",
       "context": {
+          "loaded": "Đã tải",
+          "unloaded": "Chưa tải",
+          "expand": "Mở rộng ngữ cảnh",
+          "collapse": "Thu gọn ngữ cảnh",
+          "noFiles": "Chưa có ngữ cảnh được ghi nhận",
+          "estimatedNodeTokens": "Khoảng {{value}} token",
+          "openFile": "Mở tệp",
+          "history": "Lịch sử ngữ cảnh",
+          "playHistory": "Phát lịch sử ngữ cảnh",
         "tooltip": "Ngữ cảnh {{percent}}%",
         "detailsLabel": "Mở mức sử dụng ngữ cảnh",
         "panelTitle": "Mức sử dụng ngữ cảnh",
         "contextTitle": "Ngữ cảnh",
-        "recentRounds": "Các lượt gần đây",
-        "inputTrend": "Token đầu vào",
-        "input": "Token đầu vào",
-        "cacheHitRate": "Tỷ lệ hit KV cache",
-        "output": "Token đầu ra",
+        "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Thời gian tạo"
       },
       "queued": {
@@ -2148,8 +2156,7 @@
     "fileEditDiffTruncated": "Chỉ hiển thị một phần thay đổi. Mở tệp để xem nội dung đầy đủ.",
     "usage": {
       "context": "Ngữ cảnh gần nhất: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} yêu cầu mô hình",
-      "estimated": "Bao gồm mức sử dụng ước tính"
+      "requests": "{{count}} yêu cầu mô hình"
     },
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",

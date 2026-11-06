@@ -349,13 +349,12 @@ test("does not retire a completed list or detail while it is being read", async 
 for (const width of [1440, 390]) {
   test(`keeps the reading position when results are archived and the live entry retires at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto("/browser/fixture.html?case=subagent-dock");
+    await page.goto("/browser/fixture.html?case=subagent-dock&long-history");
     const body = page.getByTestId("thread-message-region");
     const paragraphs = body.getByText("主对话仍然可以正常输出和滚动。任务列表与消息区分别滚动，展开详情也不会取消正在执行的任务。", { exact: true });
-    await expect(paragraphs).toHaveCount(12);
+    await expect(paragraphs).toHaveCount(20);
     await settledMotion(body);
-    const anchor = paragraphs.nth(6);
-    await anchor.scrollIntoViewIfNeeded();
+    const anchor = paragraphs.nth(13);
     await body.hover();
     await page.mouse.wheel(0, -160);
     await expect.poll(() => body.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeGreaterThan(100);

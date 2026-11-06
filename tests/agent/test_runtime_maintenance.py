@@ -103,22 +103,25 @@ async def test_direct_turn_including_final_notification_stays_busy(agent, cancel
     agent.runtime_event_publisher.run_status_changed = notify
     task = asyncio.create_task(agent.process_direct("work"))
     try:
+        # Guard each transition, not the total duration of startup and storage.
         async with asyncio.timeout(3):
             await entered.wait()
-            with pytest.raises(RuntimeBusyError):
-                with agent.maintenance():
-                    pytest.fail("active direct turn was missed")
-            assert not agent.bus.admission.paused
-            assert not task.done()
-            if cancel:
-                task.cancel()
-            else:
-                release.set()
+        with pytest.raises(RuntimeBusyError):
+            with agent.maintenance():
+                pytest.fail("active direct turn was missed")
+        assert not agent.bus.admission.paused
+        assert not task.done()
+        if cancel:
+            task.cancel()
+        else:
+            release.set()
+        async with asyncio.timeout(3):
             await notifying.wait()
-            with pytest.raises(RuntimeBusyError):
-                with agent.maintenance():
-                    pytest.fail("final notification was missed")
-            notified.set()
+        with pytest.raises(RuntimeBusyError):
+            with agent.maintenance():
+                pytest.fail("final notification was missed")
+        notified.set()
+        async with asyncio.timeout(3):
             if cancel:
                 with pytest.raises(asyncio.CancelledError):
                     await task
@@ -292,6 +295,99 @@ async def test_async_idle_scan_keeps_storage_work_owned(agent, monkeypatch):
         await task
     with agent.maintenance():
         assert agent.bus.admission.paused
+
+
+async def test_idle_storage_scan_does_not_delay_stop(agent, monkeypatch):
+    model_started, scan_started, release_scan = (asyncio.Event() for _ in range(3))
+    original_list = agent.sessions.state.list_sessions
+
+    async def chat(**kwargs):
+        model_started.set()
+        await asyncio.Future()
+
+    async def list_sessions():
+        scan_started.set()
+        await release_scan.wait()
+        return await original_list()
+
+    agent.provider.chat_stream_with_retry = chat
+    monkeypatch.setattr(agent.sessions.state, "list_sessions", list_sessions)
+    consumer = asyncio.create_task(agent.run())
+    try:
+        await agent.bus.publish_inbound(message())
+        async with asyncio.timeout(5):
+            await model_started.wait()
+            await scan_started.wait()
+        await agent.bus.publish_inbound(message("/stop"))
+        async with asyncio.timeout(3):
+            while True:
+                reply = await agent.bus.consume_outbound()
+                if reply.content == "Stopped 1 task(s).":
+                    break
+        assert not consumer.done()
+        assert not release_scan.is_set()
+        with pytest.raises(RuntimeBusyError):
+            with agent.maintenance():
+                pytest.fail("pending idle scan was mistaken for an idle runtime")
+    finally:
+        release_scan.set()
+        agent.stop()
+        await asyncio.wait_for(consumer, timeout=5)
+
+
+async def test_idle_tick_during_maintenance_does_not_start_scan(agent, monkeypatch):
+    async def idle_once():
+        agent.stop()
+        raise asyncio.TimeoutError
+
+    check = AsyncMock()
+    monkeypatch.setattr(agent.auto_compact, "check_expired", check)
+    monkeypatch.setattr(agent.bus, "consume_inbound", idle_once)
+    with agent.maintenance():
+        await agent.run()
+        check.assert_not_awaited()
+        assert not agent._background_tasks
+
+
+@pytest.mark.parametrize("scan_fails", [False, True])
+async def test_idle_scan_is_single_flight_and_drains_spawned_work(agent, monkeypatch, scan_fails):
+    entered, release, child_started, release_child = (asyncio.Event() for _ in range(4))
+
+    async def child():
+        child_started.set()
+        await release_child.wait()
+
+    async def scan(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        agent.schedule_background(child())
+        if scan_fails:
+            raise OSError("idle scan failed after scheduling archival")
+
+    check = AsyncMock(side_effect=scan)
+    monkeypatch.setattr(agent.auto_compact, "check_expired", check)
+    agent.schedule_background(agent._check_expired_sessions_if_due())
+    closing = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        agent._next_idle_compact_check_at = 0
+        await asyncio.wait_for(agent._check_expired_sessions_if_due(), timeout=3)
+        check.assert_awaited_once()
+        closing = asyncio.create_task(agent.aclose())
+        await asyncio.sleep(0)
+        assert not closing.done()
+        release.set()
+        await asyncio.wait_for(child_started.wait(), timeout=3)
+        # Shutdown cannot finish until this explicitly held child is released.
+        done, _ = await asyncio.wait((closing,), timeout=0.05)
+        assert not done
+        assert not agent._idle_compact_check_running
+    finally:
+        release.set()
+        release_child.set()
+        if closing is not None:
+            await asyncio.wait_for(closing, timeout=3)
+    assert not agent._background_tasks
 
 
 async def test_cancelled_exec_startup_stays_busy_until_cleanup_finishes(agent, tmp_path, monkeypatch):

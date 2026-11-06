@@ -41,26 +41,29 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 const DialogPositionedContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    contained?: boolean;
     positionerStyle?: React.CSSProperties;
     placement?: "center" | "bottom";
     overlayClassName?: string;
   }
->(({ positionerStyle, placement, overlayClassName, ...props }, ref) => (
-  <DialogOverlay forceMount className={overlayClassName}>
-  <div className={cn("fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain", placement !== "bottom" && "p-4")} style={{
+>(({ contained, positionerStyle, placement, overlayClassName, ...props }, ref) => {
+  const Overlay = contained ? "div" : DialogOverlay;
+  return <Overlay data-dialog-backdrop {...(contained ? {} : { forceMount: true })} className={cn(contained && "absolute inset-0 z-50", overlayClassName)}>
+  <div className={cn("fixed inset-0 z-50 flex items-start justify-center overscroll-contain", placement === "bottom" ? "overflow-clip" : "overflow-y-auto p-4", contained && "absolute")} style={{
     top: "var(--app-viewport-top, 0px)",
     height: "var(--app-viewport-height, 100%)",
     bottom: "auto",
-    ...positionerStyle,
+    ...(contained ? { top: 0, height: "100%" } : positionerStyle),
   }}>
     <DialogPrimitive.Content ref={ref} {...props} />
   </div>
-  </DialogOverlay>
-));
+  </Overlay>;
+});
 DialogPositionedContent.displayName = "DialogPositionedContent";
 
 interface DialogContentProps
   extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> {
+  portalContainer?: HTMLElement | null;
   showCloseButton?: boolean;
   overlayClassName?: string;
   layoutAnchor?: HTMLElement | null;
@@ -71,10 +74,73 @@ interface DialogContentProps
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, showCloseButton = true, overlayClassName, placement = "center", layoutAnchor: explicitLayoutAnchor, centerInLayoutAnchor = false, onOpenAutoFocus, ...props }, ref) => {
+>(({ className, children, portalContainer, showCloseButton = true, overlayClassName, placement = "center", layoutAnchor: explicitLayoutAnchor, centerInLayoutAnchor = false, onOpenAutoFocus, ...props }, ref) => {
   const { t } = useTranslation();
   const [container, setContainer] = React.useState<HTMLDivElement | null>(null);
   const contentNode = React.useRef<HTMLDivElement | null>(null);
+  const gesture = React.useRef<{ id: number; start: number; y: number; time: number; speed: number; moved: boolean } | null>(null);
+  const suppressClick = React.useRef(false);
+  const settleAnimation = React.useRef<Animation | null>(null);
+  const backdropFrame = React.useRef<number | null>(null);
+  const dragBackdrop = React.useRef<{ node: HTMLElement; color: string; blur: number } | null>(null);
+  const paintBackdrop = (distance: number, height: number) => {
+    const backdrop = dragBackdrop.current;
+    if (!backdrop) return;
+    const remaining = 1 - Math.min(1, Math.max(0, distance) / Math.max(1, height));
+    backdrop.node.style.backgroundColor = `color-mix(in srgb, ${backdrop.color} ${remaining * 100}%, transparent)`;
+    backdrop.node.style.backdropFilter = `blur(${backdrop.blur * remaining}px)`;
+  };
+  const cancelBackdropFrame = () => {
+    if (backdropFrame.current !== null) cancelAnimationFrame(backdropFrame.current);
+    backdropFrame.current = null;
+  };
+  React.useEffect(() => () => {
+    settleAnimation.current?.cancel();
+    if (backdropFrame.current !== null) cancelAnimationFrame(backdropFrame.current);
+  }, []);
+  const finishDrag = (button: HTMLButtonElement, pointerId: number, cancelled: boolean) => {
+    const drag = gesture.current;
+    const node = contentNode.current;
+    if (!drag || drag.id !== pointerId || !node) return;
+    gesture.current = null;
+    suppressClick.current = drag.moved;
+    if (!drag.moved) {
+      if (dragBackdrop.current) {
+        const style = dragBackdrop.current.node.style;
+        for (const property of ["background-color", "backdrop-filter", "transition"]) style.removeProperty(property);
+        dragBackdrop.current = null;
+      }
+      return;
+    }
+    const distance = Math.max(0, drag.y - drag.start);
+    const dismiss = !cancelled && (distance > Math.min(120, node.offsetHeight * 0.22)
+      || (distance > 24 && drag.speed > 0.65 && performance.now() - drag.time < 100));
+    const destination = dismiss ? node.offsetHeight : 0;
+    const animation = node.animate([{ translate: `0 ${distance}px` }, { translate: `0 ${destination}px` }], {
+      duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : dismiss ? 180 : 260,
+      easing: "cubic-bezier(0.2, 0, 0, 1)", fill: "forwards",
+    });
+    settleAnimation.current = animation;
+    const follow = () => {
+      paintBackdrop(parseFloat(getComputedStyle(node).getPropertyValue("translate").split(" ")[1]) || 0, node.offsetHeight);
+      backdropFrame.current = requestAnimationFrame(follow);
+    };
+    backdropFrame.current = requestAnimationFrame(follow);
+    animation.onfinish = () => {
+      cancelBackdropFrame();
+      node.style.translate = `0 ${destination}px`;
+      paintBackdrop(destination, node.offsetHeight);
+      if (!dismiss && dragBackdrop.current) {
+        const style = dragBackdrop.current.node.style;
+        for (const property of ["background-color", "backdrop-filter", "transition"]) style.removeProperty(property);
+        dragBackdrop.current = null;
+      }
+      animation.cancel();
+      settleAnimation.current = null;
+      if (dismiss) { suppressClick.current = false; button.click(); }
+    };
+  };
+
   const inheritedLayoutAnchor = React.useContext(DialogLayoutContext);
   const layoutAnchor = explicitLayoutAnchor ?? inheritedLayoutAnchor;
   const [layout, setLayout] = React.useState<React.CSSProperties>();
@@ -114,13 +180,22 @@ const DialogContent = React.forwardRef<
   }, [layoutAnchor, placement, centerInLayoutAnchor]);
   const contentRef = React.useCallback((node: HTMLDivElement | null) => {
     contentNode.current = node;
+    if (!node) {
+      settleAnimation.current?.cancel();
+      settleAnimation.current = null;
+      if (backdropFrame.current !== null) cancelAnimationFrame(backdropFrame.current);
+      backdropFrame.current = null;
+      dragBackdrop.current = null;
+      gesture.current = null;
+    }
     setContainer(node);
     if (typeof ref === "function") ref(node);
     else if (ref) ref.current = node;
   }, [ref]);
   return (
-    <DialogPortal>
+    <DialogPortal container={portalContainer}>
         <DialogPositionedContent
+          contained={!!portalContainer}
           positionerStyle={layout}
           placement={placement}
           overlayClassName={overlayClassName}
@@ -136,9 +211,10 @@ const DialogContent = React.forwardRef<
             modalSurfaceClassName,
             "relative grid w-full max-w-lg gap-4 p-6 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:animate-none",
             placement === "bottom"
-              ? "mt-auto max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-modal pb-[max(1rem,env(safe-area-inset-bottom))] data-[state=open]:slide-in-from-bottom-4 data-[state=closed]:slide-out-to-bottom-4"
+              ? "mt-auto max-h-[85dvh] overflow-y-auto overscroll-contain rounded-t-modal pb-[max(1rem,env(safe-area-inset-bottom))] data-[state=open]:slide-in-from-bottom-full data-[state=closed]:slide-out-to-bottom-full ease-[cubic-bezier(0.2,0,0,1)] duration-300"
               : "my-auto origin-center rounded-modal data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
             className,
+            placement === "bottom" && "pt-9 transition-none",
           )}
           {...props}
         >
@@ -146,8 +222,45 @@ const DialogContent = React.forwardRef<
             {children}
           </FloatingPortalContext.Provider>
           {showCloseButton ? (
-            <DialogPrimitive.Close className={cn("absolute right-2.5 top-2.5 grid place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none", placement === "bottom" ? "h-11 w-11" : "h-7 w-7")}>
-              <X className="h-4 w-4" />
+            <DialogPrimitive.Close
+              onPointerDown={(event) => {
+                if (placement !== "bottom" || !event.isPrimary || event.button !== 0) return;
+                const node = contentNode.current;
+                const offset = node ? parseFloat(getComputedStyle(node).getPropertyValue("translate").split(" ")[1]) || 0 : 0;
+                cancelBackdropFrame();
+                settleAnimation.current?.cancel();
+                if (node) node.style.translate = `0 ${offset}px`;
+                const backdrop = node?.closest<HTMLElement>("[data-dialog-backdrop]");
+                if (backdrop && !dragBackdrop.current) {
+                  const style = getComputedStyle(backdrop);
+                  dragBackdrop.current = { node: backdrop, color: style.backgroundColor,
+                    blur: parseFloat(style.getPropertyValue("backdrop-filter").match(/blur\(([^)]+)/)?.[1] ?? "0") || 0 };
+                  backdrop.style.transition = "none";
+                  backdrop.style.animation = "none";
+                }
+                suppressClick.current = false;
+                gesture.current = { id: event.pointerId, start: event.clientY - offset, y: event.clientY, time: performance.now(), speed: 0, moved: offset > 5 };
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                const drag = gesture.current;
+                if (!drag || drag.id !== event.pointerId) return;
+                const now = performance.now();
+                drag.speed = (event.clientY - drag.y) / Math.max(1, now - drag.time);
+                drag.y = event.clientY; drag.time = now;
+                drag.moved ||= Math.abs(drag.y - drag.start) > 5;
+                if (contentNode.current) {
+                  const distance = Math.max(0, drag.y - drag.start);
+                  contentNode.current.style.translate = `0 ${distance}px`;
+                  paintBackdrop(distance, contentNode.current.offsetHeight);
+                }
+              }}
+              onPointerUp={(event) => finishDrag(event.currentTarget, event.pointerId, false)}
+              onPointerCancel={(event) => finishDrag(event.currentTarget, event.pointerId, true)}
+              onLostPointerCapture={(event) => finishDrag(event.currentTarget, event.pointerId, true)}
+              onClick={(event) => { if (suppressClick.current) { event.preventDefault(); suppressClick.current = false; } }}
+              className={cn("absolute grid place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none", placement === "bottom" ? "left-1/2 top-0 h-8 w-16 -translate-x-1/2 touch-none cursor-grab active:cursor-grabbing" : "right-2.5 top-2.5 h-7 w-7")}>
+              {placement === "bottom" ? <span aria-hidden="true" className="h-1 w-9 rounded-full bg-current opacity-40" /> : <X className="h-4 w-4" />}
               <span className="sr-only">{t("common.close")}</span>
             </DialogPrimitive.Close>
           ) : null}

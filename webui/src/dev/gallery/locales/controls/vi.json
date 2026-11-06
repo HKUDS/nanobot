@@ -504,5 +504,12 @@
     "view": "Xem lời mời",
     "dismissed": "Đã chọn không nhắc lại trong bản xem trước",
     "starred": "Đã chọn liên kết GitHub trong bản xem trước"
+  },
+  "sidebarPanel": {
+    "title": "Bảng bên",
+    "toggle": "Ẩn hoặc hiện bảng",
+    "content": "Chi tiết nằm trong ngăn hiện tại.",
+    "description": "Bảng bên không khóa giao diện với hiệu ứng mở dùng chung.",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

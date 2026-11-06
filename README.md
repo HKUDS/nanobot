@@ -301,7 +301,7 @@ Use a regular topic for a bounded objective with a clear completion condition, f
 /goal Review this project's tests and list the smallest missing test case.
 ```
 
-The goal lets nanobot continue work across model turns while the gateway runs; a scheduled automation instead starts a turn at specified times. Use `/stop` to interrupt the current work, and ask nanobot to cancel the goal if you want to abandon it. Keep the gateway running for unattended work using the background or service options below.
+An active goal keeps nanobot working beyond the ordinary iteration limit until it records completion, cancellation, or a blocked state. This can use more model tokens; `/stop` interrupts the current work, while asking nanobot to cancel the goal abandons the objective. Execution errors can also stop the work. A scheduled automation instead starts work at specified times. Keep the gateway running for unattended work using the background or service options below.
 
 After a gateway restart, reopen the original topic and review saved results before explicitly continuing any interrupted work. Recovery does not blindly replay uncertain tool actions. See the [long-running agent guide](./docs/guides/long-running-ai-agent.md) for starting conditions and related automation options.
 
@@ -524,7 +524,7 @@ Use nanobot for a real task, report what broke, and then pick a focused improvem
 <table>
   <tr>
     <td align="center"><a href="https://github.com/re-bin"><img src="https://avatars.githubusercontent.com/u/52506698?v=4&s=80" width="80" height="80" alt="Xubin Ren"><br><strong>Xubin Ren</strong></a><br><a href="https://x.com/xubinrencs"><img src="https://img.shields.io/badge/@xubinrencs-000000?style=flat&logo=x&logoColor=white" alt="Xubin Ren on X"></a></td>
-    <td align="center"><a href="https://github.com/chengyongru"><img src="https://avatars.githubusercontent.com/u/61816729?v=4&s=80" width="80" height="80" alt="Yongru Chen"><br><strong>Yongru Chen</strong></a><br><a href="https://x.com/chengyongru"><img src="https://img.shields.io/badge/@chengyongru-000000?style=flat&logo=x&logoColor=white" alt="Yongru Chen on X"></a></td>
+    <td align="center"><a href="https://github.com/chengyongru"><img src="https://avatars.githubusercontent.com/u/61816729?v=4&s=80" width="80" height="80" alt="Yongru Cheng"><br><strong>Yongru Cheng</strong></a><br><a href="https://x.com/chengyongru"><img src="https://img.shields.io/badge/@chengyongru-000000?style=flat&logo=x&logoColor=white" alt="Yongru Cheng on X"></a></td>
   </tr>
 </table>
 

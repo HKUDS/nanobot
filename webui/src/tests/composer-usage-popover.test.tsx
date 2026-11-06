@@ -1,181 +1,113 @@
-import { createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createPortal } from "react-dom";
 import { describe, expect, it } from "vitest";
-
 import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
+import type { ContextSnapshot } from "@/lib/types";
 
-function pointer(
-  target: HTMLElement,
-  type: "pointerDown" | "pointerMove" | "pointerUp" | "pointerCancel" | "lostPointerCapture",
-  { y, x = 160, time = 1000, id = 1 }: { y: number; x?: number; time?: number; id?: number },
-) {
-  const event = createEvent[type](target, {
-    pointerId: id, pointerType: "touch", isPrimary: true, button: 0, clientX: x, clientY: y,
-  });
-  Object.defineProperty(event, "timeStamp", { value: time });
-  fireEvent(target, event);
-}
+const first: ContextSnapshot = { id: "1", contextWindowTokens: 10000, usage: { prompt_tokens: 1000 },
+  graph: { nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 100 }], edges: [] } };
 
-async function openSheet() {
-  const user = userEvent.setup();
-  render(
-    <ComposerUsagePopover
-      bottomSheet
-      showLabel
-      context={{ contextTokens: 10000, contextWindowTokens: 200000 }}
-      rounds={[
-        { id: "round", timestamp: 0, inputTokens: 10000, cachedTokens: 8000 },
-        { id: "round-2", timestamp: 60000, inputTokens: 14000, outputTokens: 280 },
-      ]}
-    />,
-  );
-  const trigger = screen.getByTestId("composer-context-usage");
-  await user.click(trigger);
-  const sheet = screen.getByRole("dialog", { name: "Context usage" });
-  const handle = within(sheet).getByRole("button", { name: "Close" });
-  return { user, trigger, sheet, handle };
-}
-
-describe("Mobile context usage sheet", () => {
-  it("keeps tiny rounds tappable without exaggerating their visual token usage", async () => {
+describe("Context sidebar", () => {
+  it("stays open while writing a message and updates the graph as new snapshots arrive", async () => {
     const user = userEvent.setup();
-    render(<ComposerUsagePopover bottomSheet context={null} rounds={[
-      { id: "small", timestamp: 0, inputTokens: 1000 },
-      { id: "large", timestamp: 60000, inputTokens: 500000 },
-    ]} />);
+    const content = (snapshots: ContextSnapshot[]) => <><textarea aria-label="Message" />
+      <ComposerUsagePopover context={null} rounds={[]} snapshots={snapshots} /></>;
+    const view = render(content([first]));
     await user.click(screen.getByTestId("composer-context-usage"));
-    const [small, large] = screen.getAllByTestId("round-usage-bar");
-    for (const bar of [small, large]) {
-      expect(bar.parentElement).toHaveClass("relative", "h-full", "flex-1");
-      expect(bar).toHaveClass("before:absolute", "before:inset-0");
-    }
-    expect(small).toHaveStyle({ height: "0.216px" });
-    expect(large).toHaveStyle({ height: "108px" });
-    await user.pointer([{ keys: "[TouchA>]", target: small }, { keys: "[/TouchA]", target: small }]);
-    expect(within(screen.getByRole("dialog", { name: "Context usage" })).getByRole("dialog"))
-      .toHaveTextContent("1,000");
+    const sidebar = screen.getByRole("complementary", { name: "Context usage" });
+    await user.type(screen.getByRole("textbox"), "Continue reading");
+    expect(sidebar).toBeVisible();
+    expect(screen.getByRole("textbox")).toHaveValue("Continue reading");
+    view.rerender(content([first, { ...first, id: "2", usage: { prompt_tokens: 2000 }, graph: {
+      nodes: [...first.graph.nodes, { path: "/b.md", name: "b.md", state: "loaded", tokens: 200 }], edges: [],
+    } }]));
+    expect(await within(sidebar).findByRole("button", { name: "b.md" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    await user.click(within(sidebar).getByRole("button", { name: "Expand context panel" }));
+    const expanded = await screen.findByRole("dialog", { name: "Context usage" });
+    expect(within(expanded).getByRole("button", { name: "b.md" })).toBeInTheDocument();
+    expect(within(expanded).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
+    await user.click(within(expanded).getByRole("button", { name: "Collapse context panel" }));
+    expect(within(sidebar).getByRole("button", { name: "Expand context panel" })).toBeVisible();
+    await user.click(screen.getByTestId("composer-context-usage"));
+    await waitFor(() => expect(screen.getByTestId("composer-context-usage")).toHaveFocus());
   });
 
-  it("replaces the X with a keyboard-accessible drag handle", async () => {
-    const { user, handle, sheet, trigger } = await openSheet();
-    expect(within(sheet).getAllByRole("button", { name: "Close" })).toEqual([handle]);
-    expect(handle.querySelector("svg")).toBeNull();
-    expect(handle).toHaveClass("touch-none", "h-11");
-    handle.focus();
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(trigger).toHaveFocus();
-  });
-
-  it("keeps tapped round details open, switches rounds, and toggles the same bar closed", async () => {
-    const { user, sheet } = await openSheet();
-    const [first, second] = within(sheet).getAllByTestId("round-usage-bar");
-    const tap = (target: HTMLElement) => user.pointer([
-      { keys: "[TouchA>]", target },
-      { keys: "[/TouchA]", target },
-    ]);
-
-    expect(first.tagName).toBe("BUTTON");
-    await tap(first);
-    const details = within(sheet).getByRole("dialog");
-    expect(details).toHaveTextContent("10,000");
-    expect(details).toHaveTextContent("80%");
-    expect(first).toHaveAttribute("aria-expanded", "true");
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    fireEvent.pointerLeave(first, { pointerType: "touch" });
-    expect(details).toBeVisible();
-
-    await tap(second);
-    await waitFor(() => expect(within(sheet).getAllByRole("dialog")).toHaveLength(1));
-    expect(within(sheet).getByRole("dialog")).toHaveTextContent("14,000");
-    expect(within(sheet).getByRole("dialog")).toHaveTextContent("280");
-    expect(first).toHaveAttribute("aria-expanded", "false");
-    expect(second).toHaveAttribute("aria-expanded", "true");
-
-    await tap(second);
-    await waitFor(() => expect(within(sheet).queryByRole("dialog")).not.toBeInTheDocument());
-    expect(sheet).toBeVisible();
-    await tap(first);
-    await tap(within(sheet).getByRole("heading", { name: "Context usage" }));
-    await waitFor(() => expect(within(sheet).queryByRole("dialog")).not.toBeInTheDocument());
-    expect(sheet).toBeVisible();
-  });
-
-  it("dismisses nested round details with Escape before the sheet, and supports dragging with details open", async () => {
-    const { user, sheet, handle, trigger } = await openSheet();
-    const first = within(sheet).getAllByTestId("round-usage-bar")[0];
-    first.focus();
-    await user.keyboard("{Enter}");
-    expect(within(sheet).getByRole("dialog")).toBeVisible();
+  it("mounts in the conversation's side slot and closes with Escape from its controls", async () => {
+    const user = userEvent.setup();
+    const host = document.createElement("section");
+    Object.defineProperty(host, "clientWidth", { value: 900 });
+    document.body.append(host);
+    const view = render(<ComposerUsagePopover sidebarHost={host} context={null} rounds={[]} snapshots={[first]} />);
+    await user.click(screen.getByTestId("composer-context-usage"));
+    const sidebar = within(host).getByRole("complementary");
+    act(() => within(sidebar).getByRole("button", { name: "Expand context panel" }).focus());
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(within(sheet).queryByRole("dialog")).not.toBeInTheDocument());
-    expect(sheet).toBeVisible();
-    expect(first).toHaveFocus();
-
-    await user.click(first);
-    pointer(handle, "pointerDown", { y: 400 });
-    pointer(handle, "pointerMove", { y: 520, time: 1400 });
-    pointer(handle, "pointerUp", { y: 520, time: 1500 });
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(document.body).not.toHaveStyle({ pointerEvents: "none" });
-    expect(trigger).toHaveFocus();
+    await waitFor(() => expect(screen.getByTestId("composer-context-usage")).toHaveFocus());
+    expect(screen.getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "false");
+    view.unmount(); host.remove();
+  });
+  it("keeps the open sidebar and playback when its trigger moves between responsive slots", async () => {
+    const user = userEvent.setup();
+    const toolbar = document.createElement("span");
+    const footer = document.createElement("span");
+    document.body.append(toolbar, footer);
+    const content = (host: HTMLElement) => <ComposerUsagePopover context={null} rounds={[]}
+      snapshots={[first, { ...first, id: "2", usage: { prompt_tokens: 2000 } }]}>
+      {(renderControl) => createPortal(renderControl?.({ showLabel: false, compactLabel: false }), host)}
+    </ComposerUsagePopover>;
+    const view = render(content(toolbar));
+    await user.click(within(toolbar).getByTestId("composer-context-usage"));
+    const sidebar = screen.getByRole("complementary");
+    await user.click(within(sidebar).getByRole("button", { name: "Play context history" }));
+    view.rerender(content(footer));
+    expect(screen.getByRole("complementary")).toBe(sidebar);
+    expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+    expect(within(footer).getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "true");
+    await user.click(within(footer).getByTestId("composer-context-usage"));
+    expect(screen.getByRole("complementary")).toBe(sidebar);
+    expect(sidebar.style.getPropertyValue("--file-preview-slot-width")).toBe("0px");
+    // Reopening during exit retains the graph instead of remounting it.
+    await user.click(within(footer).getByTestId("composer-context-usage"));
+    expect(screen.getByRole("complementary")).toBe(sidebar);
+    await user.click(within(footer).getByTestId("composer-context-usage"));
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    view.unmount(); toolbar.remove(); footer.remove();
   });
 
-  it.each([
-    [100, 500],
-    [32, 40],
-  ])("dismisses after dragging %dpx in %dms and opens at the original position", async (distance, duration) => {
-    const { user, handle, sheet, trigger } = await openSheet();
-    pointer(handle, "pointerDown", { y: 400 });
-    pointer(handle, "pointerMove", { y: 400 + distance, time: 1000 + duration });
-    // happy-dom doesn't expose individual transforms through getComputedStyle.
-    expect(sheet.style.translate).toBe(`0 ${distance}px`);
-    expect(sheet).toHaveStyle({ transition: "none" });
-    pointer(handle, "pointerUp", { y: 400 + distance, time: 1000 + duration });
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(document.body).not.toHaveStyle({ pointerEvents: "none" });
-    expect(trigger).toHaveFocus();
-
-    await user.click(trigger);
-    expect(screen.getByRole("dialog").style.translate).toBe("0 0px");
+  it("resets session playback without replacing the open sidebar", async () => {
+    const user = userEvent.setup();
+    const content = (sessionKey: string, snapshots: ContextSnapshot[]) => (
+      <ComposerUsagePopover sessionKey={sessionKey} context={null} rounds={[]} snapshots={snapshots} />
+    );
+    const view = render(content("first-session", [first, { ...first, id: "2", usage: { prompt_tokens: 2000 } }]));
+    await user.click(screen.getByTestId("composer-context-usage"));
+    const sidebar = screen.getByRole("complementary");
+    await within(sidebar).findByRole("button", { name: "a.md" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Play context history" }));
+    expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+    view.rerender(content("second-session", [{ ...first, id: "other", usage: { prompt_tokens: 3000 },
+      graph: { nodes: [{ path: "/other.md", name: "other.md", state: "loaded", tokens: 300 }], edges: [] } }]));
+    expect(screen.getByRole("complementary")).toBe(sidebar);
+    expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "30");
+    expect(await within(sidebar).findByRole("button", { name: "other.md" })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "a.md" })).not.toBeInTheDocument();
   });
 
-  it.each([
-    { end: "pointerUp" as const, y: 432, x: 160 },
-    { end: "pointerUp" as const, y: 370, x: 160 },
-    { end: "pointerUp" as const, y: 460, x: 260 },
-    { end: "pointerCancel" as const, y: 500, x: 160 },
-    { end: "lostPointerCapture" as const, y: 500, x: 160 },
-  ])("snaps back without a click-through on $end at ($x, $y)", async ({ end, y, x }) => {
-    const { user, handle, sheet } = await openSheet();
-    pointer(handle, "pointerDown", { y: 400 });
-    pointer(handle, "pointerMove", { y, x, time: 1400 });
-    pointer(handle, end, { y, x, time: 1500 });
-    expect(sheet.style.translate).toBe("0 0px");
-    expect(sheet.style.transition).toBe("");
-    fireEvent.click(handle, { detail: 1 });
-    expect(screen.getByRole("dialog")).toBeVisible();
-    await user.click(handle);
+  it("opens a pane-contained drawer with a visible close control on narrow panes", async () => {
+    const user = userEvent.setup();
+    const host = document.createElement("section");
+    Object.defineProperty(host, "clientWidth", { value: 600 });
+    document.body.append(host);
+    const view = render(<ComposerUsagePopover sidebarHost={host} context={null} rounds={[]} snapshots={[first]} />);
+    await user.click(screen.getByTestId("composer-context-usage"));
+    const drawer = within(host).getByRole("dialog", { name: "Context usage" });
+    await user.click(within(drawer).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(document.body).not.toHaveStyle({ pointerEvents: "none" });
+    expect(screen.getByTestId("composer-context-usage")).toHaveFocus();
+    view.unmount(); host.remove();
   });
 
-  it("does not capture content scrolling or let another pointer finish the drag", async () => {
-    const { user, handle, sheet } = await openSheet();
-    const content = within(sheet).getByRole("group", { name: "Input tokens" });
-    pointer(content, "pointerDown", { y: 480 });
-    pointer(content, "pointerMove", { y: 580 });
-    pointer(content, "pointerUp", { y: 580, time: 1500 });
-    expect(sheet.style.translate).toBe("0 0px");
-
-    pointer(handle, "pointerDown", { y: 400 });
-    pointer(handle, "pointerMove", { y: 412 });
-    pointer(handle, "pointerDown", { y: 412, id: 2 });
-    pointer(handle, "pointerUp", { y: 600, id: 2 });
-    expect(sheet.style.translate).toBe("0 12px");
-    pointer(handle, "pointerUp", { y: 412, time: 1500 });
-    expect(sheet.style.translate).toBe("0 0px");
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-  });
 });

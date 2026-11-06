@@ -13,6 +13,7 @@ import { IdleCompactionControl } from "@/components/settings/system/IdleCompacti
 import { Input } from "@/components/ui/input";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigField, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { updateRuntimeConfigSettings } from "@/lib/api";
+import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type { RuntimeConfigValue, SettingsPayload } from "@/lib/types";
 import type { ApplySettingsPayload } from "@/components/settings/contracts";
@@ -111,6 +112,9 @@ export function useRuntimeConfigSettings(
     setErrors((prev) => ({ ...prev, [group]: "" }));
     try {
       const payload = await updateRuntimeConfigSettings(client, values);
+      if (Object.keys(values).some(path => path.startsWith("tools.cli_apps.") || path === "network.proxy")) {
+        invalidateToolsCatalog(client);
+      }
       applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       discard(group);
       setSaved((prev) => ({ ...prev, [group]: true }));
@@ -151,6 +155,7 @@ export function useRuntimeConfigSettings(
     setSaving("proxy");
     try {
       const payload = await updateRuntimeConfigSettings(client, { "network.proxy": next.trim() || null });
+      invalidateToolsCatalog(client);
       applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       discard("proxy");
       setSaved((prev) => ({ ...prev, proxy: true }));

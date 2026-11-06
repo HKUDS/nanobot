@@ -8,6 +8,9 @@ type Role = "user" | "assistant" | "tool" | "system";
 type MessageKind = "message" | "trace" | "compaction";
 
 export interface UIContextCompaction extends ContextCompaction {
+  contextSnapshot?: ContextSnapshot;
+  /** Lifecycle event sequence, independent of the row's display position. */
+  turnSeq?: number;
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
   announce?: boolean;
 }
@@ -180,6 +183,50 @@ export interface UIMessage {
   deliveryErrorKind?: MessageDeliveryErrorKind;
 }
 
+/** Turn-owned telemetry, not a transcript row or body-history source. */
+export interface ContextGraphNode {
+  path: string;
+  name: string;
+  state: "loaded" | "discovered";
+  tokens: number;
+}
+
+export interface ContextGraph {
+  nodes: ContextGraphNode[];
+  edges: { source: string; target: string }[];
+}
+
+export interface ContextInspection {
+  graph: ContextGraph;
+  estimated_tokens: number;
+  context_window_tokens: number;
+}
+
+export interface ContextSnapshot {
+  turnSeq?: number;
+  estimatedTokens?: number;
+  id: string;
+  graph: ContextGraph;
+  usage?: TurnUsage;
+  contextWindowTokens?: number;
+}
+
+export interface UIModelRequestSnapshot {
+  contextSnapshots?: ContextSnapshot[];
+  runId: string;
+  sequence: number;
+  turnSeq?: number;
+  retiredRunIds: string[];
+  createdAt: number;
+  completedAt?: number;
+  /** Last turn sequence reporting fresh context usage. */
+  usageTurnSeq?: number;
+  ended?: boolean;
+  usage?: TurnUsage;
+  roundUsages?: RoundUsage[];
+  contextWindowTokens?: number;
+}
+
 export interface UICliAppAttachment {
   name: string;
   display_name?: string;
@@ -347,6 +394,7 @@ export interface MarketplaceSkillSummary {
   downloads?: number;
   url: string;
   installed: boolean;
+  installation_status?: "available" | "installed" | "conflict" | "unknown";
   install_supported: boolean;
   metric: "installs_24h" | "installs_total";
   version?: string;
@@ -1528,7 +1576,8 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
-  | (NotificationEvent & InboundTurnMetadata)
+  | (Exclude<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata)
+  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection })
   | ({
       event: "file_edit";
       chat_id: string;
@@ -1583,6 +1632,19 @@ export type InboundEvent =
       fallback?: boolean;
       reauth_provider?: string;
     }
+  | ({
+      event: "model_request";
+      request_usage?: TurnUsage | null;
+      context_graph?: ContextGraph;
+      chat_id: string;
+      request_id: string;
+      run_id: string;
+      sequence: number;
+      phase: "started" | "completed" | "failed" | "cancelled";
+      usage?: TurnUsage;
+      round_usages?: RoundUsage[];
+      context_window_tokens?: number;
+    } & InboundTurnMetadata)
   | ({
       event: "turn_end";
       chat_id: string;
@@ -1650,6 +1712,7 @@ export type InboundEvent =
     };
 
 type ThreadProjectionEventName =
+  | "model_request"
   | "user_message"
   | "message"
   | "file_edit"

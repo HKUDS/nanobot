@@ -507,11 +507,8 @@ class SubagentManager:
         )
 
     def _subagent_tools_config(self) -> ToolsConfig:
-        return ToolsConfig(
-            exec=self.tools_config.exec,
-            web=self.tools_config.web,
-            file=self.tools_config.file,
-            restrict_to_workspace=self.restrict_to_workspace,
+        return self.tools_config.model_copy(
+            update={"restrict_to_workspace": self.restrict_to_workspace},
         )
 
     def _build_tools(

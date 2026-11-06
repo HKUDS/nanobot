@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import subprocess
 import sys
@@ -30,6 +31,8 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
+from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
+from nanobot.session.location import SessionLocation
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
@@ -60,6 +63,27 @@ def gateway_for(manager, sessions, workspace):
     )
     token = gateway.tokens.issue_api_token(60)
     return gateway, SimpleNamespace(remote_address=("127.0.0.1", 12345)), Headers({"Authorization": f"Bearer {token}"})
+
+
+async def wait_for_model_requests(manager, task_id, requests, count):
+    task = manager._running_tasks[task_id]
+    for _ in range(count):
+        request = asyncio.create_task(requests.get())
+        try:
+            done, _ = await asyncio.wait(
+                (request, task), timeout=5, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if task in done:
+                result = task.result()
+                status = manager.check(task_id, "websocket:parent")
+                pytest.fail(
+                    "subagent ended before its activity was ready: "
+                    f"state={status.state}, error={status.error!r}, result={result!r}"
+                )
+            assert request in done, "subagent made no progress to its next model request"
+        finally:
+            request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -119,18 +143,18 @@ async def test_child_thread_reads_real_session_through_parent_without_new_persis
     workspace.mkdir()
     (workspace / "config.txt").write_text("configured value", encoding="utf-8")
     manager, sessions, runtime = manager_with_storage(workspace, root)
-    entered, release = asyncio.Event(), asyncio.Event()
+    model_requests, release = asyncio.Queue(), asyncio.Event()
     final_text = ("## Findings\n\n" + "Verified configuration.\n" * 1000).rstrip()
     calls = 0
 
     async def respond(**_kwargs):
         nonlocal calls
         calls += 1
+        model_requests.put_nowait(None)
         if calls == 1:
             return LLMResponse(content="Inspecting configuration", tool_calls=[
                 ToolCallRequest("read-config", "read_file", {"path": "config.txt"}),
             ])
-        entered.set()
         await release.wait()
         return LLMResponse(content=final_text)
 
@@ -138,8 +162,9 @@ async def test_child_thread_reads_real_session_through_parent_without_new_persis
     gateway, connection, headers = gateway_for(manager, sessions, workspace)
     try:
         await manager.spawn("Inspect configuration", session_key="websocket:parent", runtime=runtime)
-        await asyncio.wait_for(entered.wait(), 5)
         task_id, = manager.statuses_for_session("websocket:parent")
+        # Bound each round, rather than the combined startup/tool/persistence work.
+        await wait_for_model_requests(manager, task_id, model_requests, 2)
         child_key = SubagentSessions.key(task_id)
         path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
         files_before = set(root.rglob("*"))
@@ -244,29 +269,11 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
     try:
         await manager.spawn("Edit and inspect files", session_key="websocket:parent", runtime=runtime)
         task_id, = manager.statuses_for_session("websocket:parent")
-        task = manager._running_tasks[task_id]
-        for _ in range(4):
-            request = asyncio.create_task(model_requests.get())
-            try:
-                done, _ = await asyncio.wait(
-                    (request, task), timeout=5, return_when=asyncio.FIRST_COMPLETED,
-                )
-                if task in done:
-                    result = task.result()
-                    status = manager.check(task_id, "websocket:parent")
-                    pytest.fail(
-                        "subagent ended before its activity was ready: "
-                        f"state={status.state}, error={status.error!r}, result={result!r}"
-                    )
-                assert request in done, "subagent made no progress to its next model request"
-            finally:
-                request.cancel()
-                await asyncio.gather(request, return_exceptions=True)
+        await wait_for_model_requests(manager, task_id, model_requests, 4)
         path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
 
         async def assert_activity(gateway, connection, headers):
-            child_key = SubagentSessions.key(task_id)
-            before = sessions.project_history(child_key, lambda history: history.all_facts())
+            before = {file.name: file.read_bytes() for file in root.glob("*.jsonl")}
             response = await gateway.http.dispatch(connection, Request(path, headers))
             assert response.status_code == 200
             thread = json.loads(response.body)
@@ -279,7 +286,7 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
             assert "+after" in completed["diff"]["text"]
             assert "-before" in completed["diff"]["text"]
             assert (workspace / "example.txt").read_text(encoding="utf-8") == "after\n"
-            assert sessions.project_history(child_key, lambda history: history.all_facts()) == before
+            assert {file.name: file.read_bytes() for file in root.glob("*.jsonl")} == before
             return thread
 
         assert (await assert_activity(gateway, connection, headers))["active_turn_id"]
@@ -387,7 +394,8 @@ async def test_task_changes_use_parent_chat_events_and_saved_child_observations(
                     "Investigate configuration", origin_channel="websocket", origin_chat_id=chat,
                     session_key=f"websocket:{chat}", origin_turn_id="finished-parent-turn", runtime=runtime,
                 )
-                await asyncio.wait_for(entered.get(), 2)
+                # The checkpoint uses real storage; this checks routing, not disk latency.
+                await asyncio.wait_for(entered.get(), 30)
             first, sibling = manager.statuses_for_session("websocket:parent")
             foreign, = manager.statuses_for_session("websocket:other")
             parent = await sessions.state.read("websocket:parent")
@@ -841,6 +849,63 @@ async def test_temporary_parent_never_persists_task_content(tmp_path, monkeypatc
         await reopened.close()
     finally:
         await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_child_sessions_migrate_from_legacy_jsonl_and_reopen(tmp_path):
+    workspace, root = tmp_path / "agent", tmp_path / "sessions"
+    parent_key, task_id = "websocket:parent", "legacy-inspection"
+    child_key = SubagentSessions.key(task_id)
+    task_metadata = {
+        "task_id": task_id, "owner": parent_key, "revision": 3,
+        "label": "inspect", "task_description": "inspect", "state": "done", "phase": "done",
+        "created_at": 1767225600.0, "completed_at": 1767225601.2, "elapsed_seconds": 1.2,
+        "origin_turn_id": "turn-1", "iteration": 1, "result": "Verified", "stop_reason": "stop",
+    }
+    fixtures = {
+        parent_key: [
+            {"_type": "metadata", "key": parent_key, "metadata": {"webui": True},
+             "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00",
+             "last_archived": 0},
+            {"role": "user", "content": "Inspect config"},
+        ],
+        child_key: [
+            {"_type": "metadata", "key": child_key,
+             "metadata": {SESSION_TYPE_KEY: SUBAGENT.name, PARENT_SESSION_KEY: parent_key,
+                          TASK_METADATA_KEY: task_metadata},
+             "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:01.200000",
+             "last_archived": 0},
+            {"role": "user", "content": "inspect"},
+            {"role": "assistant", "content": "Verified"},
+        ],
+    }
+    legacy = workspace / "sessions"
+    legacy.mkdir(parents=True)
+    for key, records in fixtures.items():
+        (legacy / f"{SessionLocation.storage_key(key)}.jsonl").write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8",
+        )
+    source_hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in legacy.glob("*.jsonl")}
+
+    for _ in range(2):
+        manager, sessions, _ = manager_with_storage(workspace, root)
+        try:
+            assert {row["key"] for row in sessions.list_sessions()} == set(fixtures)
+            assert sessions.child_session_keys(parent_key) == [child_key]
+            status = manager.check(task_id, parent_key)
+            assert status.state == "done" and status.result == "Verified"
+            assert status.origin_turn_id == "turn-1"
+            assert manager.get_running_count() == 0
+            for key, records in fixtures.items():
+                restored = sessions.read_session_file(key)
+                assert restored["metadata"] == records[0]["metadata"]
+                assert restored["messages"] == records[1:]
+            assert list(legacy.glob("*.jsonl")) == []
+            backups = sessions.sessions_dir / WORKSPACE_BACKUP_DIR
+            assert {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in backups.glob("*.jsonl")} == source_hashes
+        finally:
+            await manager.close()
 
 
 @pytest.mark.asyncio

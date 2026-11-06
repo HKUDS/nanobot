@@ -818,9 +818,9 @@ class TestResponsesConversationState:
     ):
         assert resolve_compact_threshold(context_window, max_output) == expected
 
-    def test_compaction_compatibility_recognizes_old_sdk_signature_error(self):
+    def test_local_sdk_errors_do_not_disable_server_compaction(self):
         error = TypeError("create() got an unexpected keyword argument 'context_management'")
-        assert is_compaction_compatibility_error(error) is True
+        assert is_compaction_compatibility_error(error) is False
         assert is_compaction_compatibility_error(TypeError("unrelated argument")) is False
 
     def test_state_observability_logs_counts_without_opaque_content(self):
@@ -953,6 +953,37 @@ class TestResponsesConversationState:
             "content": [{"type": "input_text", "text": "continue"}],
         }
         assert "lossy public transcript" not in str(items)
+
+    @pytest.mark.parametrize("last_system, expected", [
+        ("latest instructions", "latest instructions"),
+        ([{"type": "text", "text": "not a string"}], ""),
+    ])
+    def test_replay_uses_the_latest_system_message(self, last_system, expected):
+        state = build_responses_state(
+            provider="openai:test", model="test-model",
+            input_items=[{"role": "user", "content": "accepted"}], output_items=[],
+        ).with_pending_messages([{"role": "user", "content": "new"}])
+        messages = [
+            {"role": "system", "content": "old instructions"},
+            {"role": "user", "content": "historical"},
+            {"role": "system", "content": last_system},
+        ]
+
+        instructions, items, replayed = prepare_responses_input(
+            messages, state=state, provider="openai:test", model="test-model",
+        )
+        assert replayed is True
+        assert instructions == expected
+        assert items == [
+            {"role": "user", "content": "accepted"},
+            {"role": "user", "content": [{"type": "input_text", "text": "new"}]},
+        ]
+
+        fallback_instructions, fallback_items, replayed = prepare_responses_input(
+            messages, state=state, provider="openai:other", model="test-model",
+        )
+        assert replayed is False
+        assert (fallback_instructions, fallback_items) == convert_messages(messages)
 
     def test_replayed_and_delta_reasoning_items_keep_array_content(self):
         # Regression for PR #5214: token consolidation clears

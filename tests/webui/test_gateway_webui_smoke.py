@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import signal
 import socket
 import subprocess
@@ -14,6 +15,7 @@ from urllib.parse import quote
 import httpx
 import pytest
 import websockets
+from aiohttp import web
 
 from nanobot.agent.subagent_sessions import SubagentSessions
 from nanobot.agent.subagent_status import SubagentStatus
@@ -473,3 +475,218 @@ def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
         asyncio.run(assert_attach_state())
     finally:
         _stop_gateway(second)
+
+
+@pytest.mark.parametrize("stop_during_checkpoint", [False, True])
+async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during_checkpoint: bool) -> None:
+    """Exercise the actual gateway and WebSocket with a synthetic local model."""
+    checkpoint_waiting = asyncio.Event()
+    closing_request = asyncio.Event()
+    release_close = asyncio.Event()
+    requests: list[dict] = []
+
+    async def barrier(_request: web.Request) -> web.Response:
+        checkpoint_waiting.set()
+        return web.Response(text="ready")
+
+    async def model(request: web.Request) -> web.StreamResponse:
+        payload = await request.json()
+        is_title = any(
+            "You write short, neutral chat titles" in str(message.get("content"))
+            for message in payload.get("messages", [])
+        )
+        if is_title:
+            text, reason, tool = "Synthetic goal", "stop", None
+        else:
+            requests.append(payload)
+            number = len(requests)
+            text, reason, tool = None, "tool_calls", None
+            if number == 1:
+                tool = ("create_goal", {"objective": "Verify the synthetic task."})
+            elif number <= 16:
+                tool = ("list_dir", {"path": "."})
+            elif stop_during_checkpoint:
+                assert number == 17
+                assert "Handle this independent input" in str(payload["messages"])
+                text, reason = "Handled independent input.", "content_filter"
+            elif number == 17:
+                closing_request.set()
+                await release_close.wait()
+                tool = ("update_goal", {"action": "complete", "recap": "Verified."})
+            else:
+                assert number == 18 and not payload.get("tools")
+                text, reason = "Verified.", "stop"
+        message: dict = {"role": "assistant", "content": text}
+        if tool is not None:
+            message["tool_calls"] = [{
+                "id": f"call-{len(requests)}", "type": "function",
+                "function": {"name": tool[0], "arguments": json.dumps(tool[1])},
+            }]
+        usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        if not payload.get("stream"):
+            return web.json_response({
+                "id": "synthetic", "object": "chat.completion", "created": 1,
+                "model": "smoke-model", "choices": [{"index": 0, "message": message, "finish_reason": reason}],
+                "usage": usage,
+            })
+        delta: dict = {"role": "assistant"}
+        if text is not None:
+            delta["content"] = text
+        if tool is not None:
+            delta["tool_calls"] = [{"index": 0, **message["tool_calls"][0]}]
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(request)
+        for choice in (
+            {"index": 0, "delta": delta, "finish_reason": None},
+            {"index": 0, "delta": {}, "finish_reason": reason},
+        ):
+            chunk = {"id": "synthetic", "object": "chat.completion.chunk", "created": 1,
+                     "model": "smoke-model", "choices": [choice], "usage": usage}
+            await response.write(f"data: {json.dumps(chunk)}\n\n".encode())
+        await response.write(b"data: [DONE]\n\n")
+        return response
+
+    app = web.Application()
+    app.router.add_get("/barrier", barrier)
+    app.router.add_post("/v1/chat/completions", model)
+    server = web.AppRunner(app)
+    await server.setup()
+    site = web.TCPSite(server, "127.0.0.1", 0)
+    await site.start()
+    assert site._server is not None and site._server.sockets  # noqa: SLF001
+    model_port = site._server.sockets[0].getsockname()[1]  # noqa: SLF001
+    ws_port, gateway_port = _free_port(), _free_port()
+    home, workspace = tmp_path / "home", tmp_path / "workspace"
+    home.mkdir()
+    workspace.mkdir()
+    config_path, log_path = tmp_path / "config.json", tmp_path / "gateway.log"
+    _write_smoke_config(config_path, workspace=workspace, ws_port=ws_port, gateway_port=gateway_port)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["providers"]["custom"]["apiBase"] = f"http://127.0.0.1:{model_port}/v1"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    launcher = """
+import asyncio, sys, urllib.request
+from nanobot.session.state import SessionState
+original = SessionState.checkpoint_view
+barrier_url = sys.argv[3]
+held = False
+async def checkpoint(self, session, payload):
+    global held
+    await original(self, session, payload)
+    results = payload.get('completed_tool_results', [])
+    if barrier_url and not held and results and results[-1].get('tool_call_id') == 'call-16':
+        held = True
+        def signal():
+            with urllib.request.urlopen(barrier_url) as response:
+                response.read()
+        await asyncio.to_thread(signal)
+        await asyncio.Event().wait()
+SessionState.checkpoint_view = checkpoint
+home, config = sys.argv[1:3]
+sys.argv = ['nanobot', '--home', home, 'gateway', '--config', config]
+from nanobot.cli.entry import main
+main()
+"""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("NANOBOT_")}
+    env.update({"HOME": str(home), "USERPROFILE": str(home), "APPDATA": str(home),
+                "LOCALAPPDATA": str(home), "TMP": str(tmp_path), "TEMP": str(tmp_path),
+                "NO_PROXY": "localhost,127.0.0.1", "no_proxy": "localhost,127.0.0.1"})
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    process = None
+    try:
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(
+                [sys.executable, "-c", launcher, str(home), str(config_path),
+                 f"http://127.0.0.1:{model_port}/barrier" if stop_during_checkpoint else ""],
+                cwd=Path(__file__).resolve().parents[2], env=env, stdout=log,
+                stderr=subprocess.STDOUT, creationflags=creationflags,
+            )
+        bootstrap = await asyncio.to_thread(
+            _wait_for_bootstrap, f"http://127.0.0.1:{ws_port}", process, log_path,
+        )
+        async with websockets.connect(bootstrap["ws_url"] + "?token=" + bootstrap["token"] + "&client_id=goal-e2e") as ws:
+            await _recv_until(ws, "ready")
+            await ws.send(json.dumps({"type": "new_chat"}))
+            chat_id = (await _recv_until(ws, "attached"))["chat_id"]
+            await _recv_until(ws, "session_updated")
+            await ws.send(json.dumps({"type": "message", "chat_id": chat_id,
+                                      "content": "/goal Verify the synthetic task",
+                                      "webui": True, "turn_id": "goal-e2e"}))
+            events: list[dict] = []
+
+            async def receive_until(predicate):
+                async with asyncio.timeout(20):
+                    while True:
+                        event = json.loads(await ws.recv())
+                        events.append(event)
+                        if predicate(event):
+                            return event
+
+            if stop_during_checkpoint:
+                await asyncio.wait_for(checkpoint_waiting.wait(), 20)
+                await ws.send(json.dumps({"type": "message", "chat_id": chat_id,
+                                          "content": "/stop", "webui": True}))
+                end = await receive_until(lambda event: event.get("event") == "turn_end")
+                assert end.get("outcome") == "cancelled"
+                assert end["goal_state"]["status"] == "active"
+                await receive_until(lambda event: event.get("event") == "goal_status" and event.get("status") == "idle")
+                assert len(requests) == 16
+                running = [event for event in events if event.get("event") == "goal_status" and event.get("status") == "running"]
+                # Submitting Stop hydrates the current status before cancellation.
+                assert {event.get("turn_id") for event in running} == {"goal-e2e"}
+                assert running[0]["started_at"] > 0
+                assert len({event["started_at"] for event in running}) == 1
+                assert sum(event.get("event") == "turn_end" for event in events) == 1
+                await ws.send(json.dumps({"type": "message", "chat_id": chat_id,
+                                          "content": "Handle this independent input", "webui": True,
+                                          "turn_id": "follow-up"}))
+                followup = await receive_until(lambda event: event.get("event") == "turn_end")
+                assert followup.get("turn_id") == "follow-up"
+                assert len(requests) == 17
+            else:
+                await asyncio.wait_for(closing_request.wait(), 20)
+                waiting = await receive_until(lambda event: (
+                    event.get("event") == "model_request"
+                    and event.get("phase") == "started"
+                    and event.get("usage", {}).get("request_count") == 16
+                ))
+                assert waiting["usage"]["context_tokens"] == 10
+                assert len(waiting["round_usages"]) == 8
+                assert not any(event.get("event") == "turn_end" for event in events)
+                history_url = f"http://127.0.0.1:{ws_port}/api/sessions/{quote('websocket:' + chat_id, safe='')}/webui-thread"
+                headers = {"Authorization": f"Bearer {bootstrap['api_token']}"}
+                async with httpx.AsyncClient(trust_env=False) as client:
+                    modern = await client.get(history_url, params={"include_model_requests": "1"}, headers=headers)
+                    modern.raise_for_status()
+                    persisted = [event for event in modern.json()["events"] if event["event"] == "model_request"]
+                    assert persisted[-1]["request_id"] == waiting["request_id"]
+                    assert persisted[-1]["usage"] == waiting["usage"]
+                    legacy = await client.get(history_url, headers={**headers, "If-None-Match": modern.headers["etag"]})
+                    assert legacy.status_code == 200
+                    assert not any(event["event"] == "model_request" for event in legacy.json()["events"])
+                release_close.set()
+                end = await receive_until(lambda event: event.get("event") == "turn_end")
+                assert end.get("turn_id") == "goal-e2e"
+                assert not end["goal_state"]["active"]
+                assert len(requests) == 18
+                await receive_until(lambda event: event.get("event") == "goal_status" and event.get("status") == "idle")
+                assert sum(event.get("event") == "goal_status" and event.get("status") == "running" for event in events) == 1
+                assert sum(event.get("event") == "turn_end" for event in events) == 1
+                assert any(event.get("event") == "goal_state" and event.get("goal_state", {}).get("active") for event in events)
+                reconnect_bootstrap = await asyncio.to_thread(_get_bootstrap, f"http://127.0.0.1:{ws_port}/webui/bootstrap")
+                async with websockets.connect(reconnect_bootstrap["ws_url"] + "?token=" + reconnect_bootstrap["token"] + "&client_id=goal-reconnect") as reconnected:
+                    await _recv_until(reconnected, "ready")
+                    await reconnected.send(json.dumps({"type": "attach", "chat_id": chat_id}))
+                    await _recv_until(reconnected, "attached")
+                    state = await _recv_until(reconnected, "goal_state")
+                    assert state["goal_state"] == {"active": False}
+    finally:
+        release_close.set()
+        if process is not None and process.poll() is None:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                               capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                process.terminate()
+            process.wait(timeout=30)
+        await server.cleanup()

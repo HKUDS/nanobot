@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { composerUsageSnapshots, type ComposerUsageSnapshot } from "@/lib/model-request";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
@@ -19,9 +20,11 @@ import { latestSubagentInputKey } from "@/lib/subagent-tasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import type {
-  ComposerContextUsage,
-  ComposerRoundUsage,
+import {
+  ComposerUsagePopover,
+  type ComposerContextUsage,
+  type ComposerRoundUsage,
+  type ComposerUsageControl,
 } from "@/components/thread/ComposerUsagePopover";
 import {
   modelPresetOptionsFromSettings,
@@ -75,20 +78,20 @@ import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
+import { composerContextSnapshots } from "@/lib/context-graph";
 import { useClient } from "@/providers/ClientProvider";
 
-function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage | null {
+function latestComposerContextUsage(messages: ComposerUsageSnapshot[]): ComposerContextUsage | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.kind === "compaction" && message.compaction?.phase === "succeeded") {
-      return null;
+    if (message.compacted) {
+      return message.estimatedContextTokens !== undefined
+        ? { contextTokens: message.estimatedContextTokens, contextWindowTokens: message.contextWindowTokens, estimated: true }
+        : null;
     }
     const contextTokens = message.usage?.context_tokens;
     if (
-      message.role !== "assistant"
-      || message.kind === "trace"
-      || message.isStreaming
-      || typeof contextTokens !== "number"
+      typeof contextTokens !== "number"
       || !Number.isFinite(contextTokens)
       || contextTokens < 0
     ) {
@@ -104,23 +107,20 @@ function latestComposerContextUsage(messages: UIMessage[]): ComposerContextUsage
   return null;
 }
 
-function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
+function recentComposerRoundUsage(messages: ComposerUsageSnapshot[]): ComposerRoundUsage[] {
   const recent: ComposerRoundUsage[] = [];
   const seenTurns = new Set<string>();
   for (let index = messages.length - 1; index >= 0 && recent.length < 8; index -= 1) {
     const message = messages[index];
+    if (message.compacted) break;
     const turnKey = message.turnId || message.id;
-    if (
-      message.role !== "assistant"
-      || message.kind === "trace"
-      || message.isStreaming
-      || seenTurns.has(turnKey)
-    ) {
+    if (seenTurns.has(turnKey)) {
       continue;
     }
 
-    seenTurns.add(turnKey);
     const rounds: RoundUsage[] = message.roundUsages ?? [];
+    if (!rounds.length) continue;
+    seenTurns.add(turnKey);
     for (let roundIndex = rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
       const round = rounds[roundIndex];
       const inputTokens = round.prompt_tokens;
@@ -132,22 +132,12 @@ function recentComposerRoundUsage(messages: UIMessage[]): ComposerRoundUsage[] {
       ) {
         continue;
       }
-      const outputTokens = round.completion_tokens;
       const cachedTokens = round.cached_tokens;
-      const estimatedTokens = round.estimated_tokens;
       const generationMs = round.generation_ms;
       recent.push({
-        id: `${turnKey}:${roundIndex}`,
-        timestamp: message.completedAt ?? message.createdAt,
         inputTokens,
-        ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)
-          ? { outputTokens }
-          : {}),
         ...(typeof cachedTokens === "number" && Number.isFinite(cachedTokens)
           ? { cachedTokens }
-          : {}),
-        ...(typeof estimatedTokens === "number" && Number.isFinite(estimatedTokens)
-          ? { estimatedTokens }
           : {}),
         ...(typeof generationMs === "number" && Number.isFinite(generationMs)
           ? { generationMs }
@@ -252,6 +242,7 @@ interface ThreadShellProps {
   composerPortalTarget?: HTMLElement | null;
   navigationFrame?: HTMLElement | null;
   composerActive?: boolean;
+  multiplePanes?: boolean;
   composerInputAriaLabel?: string;
   emptyComposerVariant?: "hero" | "thread";
   workspaceScope?: WorkspaceScopePayload | null;
@@ -473,6 +464,7 @@ export function ThreadShell({
   composerPortalTarget,
   navigationFrame,
   composerActive = true,
+  multiplePanes = false,
   composerInputAriaLabel,
   emptyComposerVariant = "hero",
   workspaceScope = null,
@@ -546,11 +538,39 @@ export function ThreadShell({
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
+  const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (multiplePanes) setContextSidebarOpen(false);
+  }, [multiplePanes, previewSessionKey]);
+  const [sidebarEnterWidth, setSidebarEnterWidth] = useState(0);
+  const [contextSidebarHost, setContextSidebarHost] = useState<HTMLElement | null>(null);
+  const setSidebarHost = useCallback((node: HTMLElement | null) => { shellRef.current = node; setContextSidebarHost(node); }, []);
   const [closingPreview, setClosingPreview] = useState<{ key: string; state: FilePreviewState } | null>(null);
   const filePreviewClosing = closingPreview?.key === previewSessionKey;
   const visiblePreview = filePreviewClosing ? closingPreview.state : previewState;
-  const activePreview = visiblePreview.tabs.find((tab) => tab.id === visiblePreview.activeId);
+  const activePreview = contextSidebarOpen ? undefined : visiblePreview.tabs.find((tab) => tab.id === visiblePreview.activeId);
   const previewOpen = Boolean(activePreview);
+  const sidebarOpen = previewOpen || contextSidebarOpen;
+  const [localComposerHost, setLocalComposerHost] = useState<HTMLDivElement | null>(null);
+  const [composerMount] = useState(() => document.createElement("div"));
+  const inlineComposer = composerPortalTarget === undefined || (sidebarOpen && composerActive);
+  const composerDestination = inlineComposer ? localComposerHost : composerPortalTarget;
+  useLayoutEffect(() => {
+    // The inline host ref arrives on the next render. Keep the focused input
+    // attached until that destination is ready.
+    if (!composerDestination) { if (!inlineComposer) composerMount.remove(); return; }
+    if (composerMount.parentElement === composerDestination) return;
+    // Move the host, not the React subtree, to preserve the input and its draft.
+    const focused = document.activeElement instanceof HTMLElement && composerMount.contains(document.activeElement)
+      ? document.activeElement : null;
+    const selection = document.getSelection();
+    const range = focused && selection?.rangeCount && composerMount.contains(selection.getRangeAt(0).commonAncestorContainer)
+      ? selection.getRangeAt(0).cloneRange() : null;
+    composerDestination.appendChild(composerMount);
+    focused?.focus({ preventScroll: true });
+    if (range && selection) { selection.removeAllRanges(); selection.addRange(range); }
+  }, [composerDestination, composerMount, inlineComposer]);
+  useLayoutEffect(() => () => composerMount.remove(), [composerMount]);
   const [filePreviewMaxWidth, setFilePreviewMaxWidth] = useState(FILE_PREVIEW_MAX_WIDTH);
   const filePreviewWidth = clampFilePreviewWidth(previewState.width, filePreviewMaxWidth);
   const draftKey = session?.key ?? (temporaryChatEnabled ? "new:temporary" : "new:chat");
@@ -565,7 +585,23 @@ export function ThreadShell({
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
   const [conversationElement, setConversationElement] = useState<HTMLDivElement | null>(null);
-  const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const [composerSurface, setComposerSurface] = useState<HTMLDivElement | null>(null);
+  const alignSidebar = useCallback(() => {
+    if (!sidebarOpen || !inlineComposer || !contextSidebarHost || !composerSurface) return;
+    // Metadata can wrap below the input card. The viewport also reports grid
+    // movement, which changes the surface's position without resizing it.
+    const inset = contextSidebarHost.getBoundingClientRect().bottom - composerSurface.getBoundingClientRect().bottom;
+    contextSidebarHost.style.setProperty("--sidebar-bottom-inset", `${Math.max(0, inset)}px`);
+  }, [contextSidebarHost, composerSurface, sidebarOpen, inlineComposer]);
+  useLayoutEffect(() => {
+    if (!sidebarOpen || !inlineComposer || !contextSidebarHost || !composerSurface) return;
+    alignSidebar();
+    const observer = new ResizeObserver(alignSidebar);
+    observer.observe(contextSidebarHost);
+    observer.observe(composerMount);
+    observer.observe(composerSurface);
+    return () => observer.disconnect();
+  }, [alignSidebar, contextSidebarHost, sidebarOpen, inlineComposer, composerDestination, composerMount, composerSurface]);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const filePreviewResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -589,6 +625,8 @@ export function ThreadShell({
   }, [chatId, onTurnEnd]);
   const {
     messages,
+    modelRequests,
+    messagesKey,
     messagesReady,
     isStreaming,
     runStartedAt,
@@ -699,13 +737,19 @@ export function ThreadShell({
   useEffect(() => {
     if (hasAppMentions) requestMentionCatalogs();
   }, [hasAppMentions, requestMentionCatalogs]);
+  const usageSnapshots = useMemo(
+    () => messagesReady ? composerUsageSnapshots(messages, modelRequests) : [], [messages, modelRequests, messagesReady],
+  );
   const composerContextUsage = useMemo(
-    () => latestComposerContextUsage(displayMessages),
-    [displayMessages],
+    () => latestComposerContextUsage(usageSnapshots),
+    [usageSnapshots],
   );
   const composerRoundUsage = useMemo(
-    () => recentComposerRoundUsage(displayMessages),
-    [displayMessages],
+    () => recentComposerRoundUsage(usageSnapshots),
+    [usageSnapshots],
+  );
+  const contextGraphSnapshots = useMemo(
+    () => messagesReady ? composerContextSnapshots(messages, modelRequests) : [], [messages, modelRequests, messagesReady],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
@@ -1135,9 +1179,19 @@ export function ThreadShell({
   }, []);
 
   const handleOpenFilePreview = useCallback((path: string) => {
+    setSidebarEnterWidth(shellRef.current?.querySelector(".file-preview-pane")?.getBoundingClientRect().width ?? 0);
+    setContextSidebarOpen(false);
     cancelPreviewClose();
     openFile(path);
   }, [cancelPreviewClose, openFile]);
+
+  const handleContextSidebarOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      setSidebarEnterWidth(previewOpen ? filePreviewWidth : 0);
+      cancelPreviewClose(); closePreview();
+    }
+    setContextSidebarOpen(open);
+  }, [previewOpen, filePreviewWidth, cancelPreviewClose, closePreview]);
 
   const handleClosePreviewTab = useCallback((id: string) => {
     if (previewState.tabs.length === 1) handleCloseFilePreview();
@@ -1271,7 +1325,7 @@ export function ThreadShell({
     [chatId, onForkChat],
   );
 
-  const composer = (
+  const composer = (renderContextUsage: ComposerUsageControl | undefined) => (
     <div className={composerVariant === "hero" ? "thread-composer-stack is-hero" : "thread-composer-stack"}>
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
@@ -1316,11 +1370,6 @@ export function ThreadShell({
           activeTurnId={turnActive && chatId ? client.getRunTurnId(chatId) ?? historyActiveTurnId : null}
           completedTurnIds={messagesReady && !recoveryNeedsDecision
             && chatId && !client.hasUnsettledRun(chatId) ? queueCompletedTurnIds : undefined}
-          placeholder={
-            composerVariant === "hero"
-              ? t("thread.composer.placeholderHero")
-              : t("thread.composer.placeholderThread")
-          }
           modelLabel={modelBadgeLabel}
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
@@ -1331,9 +1380,9 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
-          contextUsage={composerContextUsage}
-          recentRoundUsage={composerRoundUsage}
+          renderContextUsage={renderContextUsage}
           variant={composerVariant}
+          surfaceRef={setComposerSurface}
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
           cliApps={cliApps}
@@ -1374,11 +1423,7 @@ export function ThreadShell({
           disabled={booting}
           inputAriaLabel={composerInputAriaLabel}
           isStreaming={turnActive}
-          placeholder={
-            booting
-              ? t("thread.composer.placeholderOpening")
-              : t("thread.composer.placeholderHero")
-          }
+          placeholder={booting ? t("thread.composer.placeholderOpening") : undefined}
           modelLabel={modelBadgeLabel}
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
@@ -1389,8 +1434,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
-          contextUsage={composerContextUsage}
-          recentRoundUsage={composerRoundUsage}
+          renderContextUsage={renderContextUsage}
           variant="hero"
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
@@ -1398,7 +1442,7 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
-          surfaceRef={composerSurfaceRef}
+          surfaceRef={setComposerSurface}
           onInspectAttachment={inspectAttachment}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
@@ -1432,10 +1476,11 @@ export function ThreadShell({
     </div>
   );
   const sessionInfoAction = historyKey ? (
-    <SessionInfoPopover client={client} sessionKey={historyKey} token={token} title={title} />
+    <SessionInfoPopover client={client} sessionKey={historyKey} token={token} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
     <PromptNavigator
+      shortcutEnabled={composerActive}
       messages={displayMessages}
       prompts={promptNavigation.prompts}
       onJumpToPrompt={(promptId) => viewportRef.current?.jumpToUserPrompt(promptId)}
@@ -1472,7 +1517,7 @@ export function ThreadShell({
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
-    <section ref={shellRef} data-preview-open={previewOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
+    <section ref={setSidebarHost} style={{ "--sidebar-enter-width": `${sidebarEnterWidth}px`, "--sidebar-enter-mobile-width": sidebarEnterWidth ? "100%" : "0px" } as CSSProperties} data-preview-open={sidebarOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
       <div ref={setConversationElement} className={cn(
         "thread-conversation relative flex min-w-0 flex-1 flex-col overflow-hidden",
         headerPortalTarget === undefined && !hideHeader && "thread-workspace",
@@ -1499,6 +1544,7 @@ export function ThreadShell({
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
+            messagesKey={messagesKey}
             navigation={promptNavigation}
             navigationFrame={navigationFrame}
             temporary={temporary}
@@ -1507,7 +1553,10 @@ export function ThreadShell({
             retryStatus={retryStatus}
             emptyState={emptyState}
             initialLoading={initialHistoryLoading}
-            composer={composerPortalTarget === undefined ? composer : null}
+            initialError={historyError}
+            onRetryInitial={refreshHistory}
+            composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
+            onComposerLayoutChange={alignSidebar}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
@@ -1534,16 +1583,28 @@ export function ThreadShell({
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
         : null}
-      {composerPortalTarget ? createPortal(
-        <div
-          hidden={!composerActive}
-          aria-hidden={!composerActive}
-          data-testid={composerActive ? "active-pane-composer" : undefined}
-        >
-          {composer}
-        </div>,
-        composerPortalTarget,
-      ) : null}
+      <ComposerUsagePopover
+        sessionKey={previewSessionKey}
+        context={composerContextUsage}
+        rounds={composerRoundUsage}
+        snapshots={contextGraphSnapshots}
+        sidebarHost={contextSidebarHost}
+        open={contextSidebarOpen}
+        onOpenChange={handleContextSidebarOpenChange}
+        onOpenFile={handleOpenFilePreview}
+      >
+        {(renderContextUsage) => createPortal(
+          <div
+            hidden={!composerActive}
+            aria-hidden={!composerActive}
+            data-testid={composerActive ? "active-pane-composer" : undefined}
+            data-active-composer={composerActive || undefined}
+          >
+            {composer(renderContextUsage)}
+          </div>,
+          composerMount,
+        )}
+      </ComposerUsagePopover>
       {activePreview && previewSessionKey ? (
         <FileActionsProvider key={previewSessionKey} value={fileActions}>
         <PreviewPane
