@@ -681,7 +681,8 @@ describe("App layout", () => {
 
   it.each(["compact", "protocol-1 full superset"])("boots chat with %s settings and loads full settings only on editor navigation", async (shape) => {
     const chat = chatSettingsPayload();
-    const full = { ...baseSettingsPayload(), providers: chat.providers };
+    const base = baseSettingsPayload();
+    const full = { ...base, providers: chat.providers, model_presets: base.model_presets.map(preset => ({ ...preset, resolved_provider: "openai" })) };
     let releaseFull!: (payload: typeof full) => void;
     const pendingFull = new Promise<typeof full>((resolve) => { releaseFull = resolve; });
     mockFetchRoutes({
@@ -689,6 +690,7 @@ describe("App layout", () => {
       "/api/settings": () => pendingFull,
     });
     render(<App />);
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
 
     expect(await screen.findByTestId("composer-model-logo-openai")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings?scope=chat")).toHaveLength(1);
@@ -697,6 +699,7 @@ describe("App layout", () => {
       window.history.replaceState(null, "", "/#/settings?section=runtime");
       window.dispatchEvent(new Event("hashchange"));
     });
+    await act(async () => { await import("@/components/settings/SettingsView"); });
     await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings")).toHaveLength(1));
     expect(screen.queryByText("/tmp/config.json")).not.toBeInTheDocument();
     await act(async () => { releaseFull(full); });
@@ -705,7 +708,8 @@ describe("App layout", () => {
 
   it.each(["bootstrap", "restart"])("does not let a late chat %s overwrite the editor snapshot", async (request) => {
     const chat = chatSettingsPayload();
-    const full = { ...baseSettingsPayload(), providers: chat.providers };
+    const base = baseSettingsPayload();
+    const full = { ...base, providers: chat.providers, model_presets: base.model_presets.map(preset => ({ ...preset, resolved_provider: "openai" })) };
     let releaseChat!: (payload: ChatSettingsPayload) => void;
     const pendingChat = new Promise<ChatSettingsPayload>((resolve) => { releaseChat = resolve; });
     let chatReads = 0;
@@ -714,6 +718,7 @@ describe("App layout", () => {
       "/api/settings": full,
     });
     render(<App />);
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
     await waitFor(() => expect(chatReads).toBe(1));
     if (request === "restart") {
       await screen.findByTestId("composer-model-logo-openai");
@@ -729,6 +734,7 @@ describe("App layout", () => {
       window.history.replaceState(null, "", "/#/settings?section=runtime");
       window.dispatchEvent(new Event("hashchange"));
     });
+    await act(async () => { await import("@/components/settings/SettingsView"); });
     await screen.findByText("/tmp/config.json");
     const stale: ChatSettingsPayload = {
       ...chat,
