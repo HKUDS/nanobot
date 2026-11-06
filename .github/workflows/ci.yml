@@ -366,12 +366,7 @@ jobs:
 
       - name: Install browser for layout regressions
         working-directory: webui
-        run: |
-          if [ -f /etc/apt/apt-mirrors.txt ]; then
-            sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
-            cat /etc/apt/apt-mirrors.txt
-          fi
-          bun x playwright install --with-deps chromium
+        run: bun x playwright install --with-deps chromium
 
       - name: Test browser layout and history motion
         working-directory: webui
