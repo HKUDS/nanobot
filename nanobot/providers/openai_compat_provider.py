@@ -1423,7 +1423,7 @@ class OpenAICompatProvider(LLMProvider):
 
     @classmethod
     def _parse_chunks(cls, chunks: Iterable[Any]) -> LLMResponse:
-        accumulator = _ChatStreamAccumulator(cls)
+        accumulator = cls._ChatStreamAccumulator(cls)
         for chunk in chunks:
             accumulator.add(chunk)
         return accumulator.finish()
@@ -1640,7 +1640,7 @@ class OpenAICompatProvider(LLMProvider):
                 Any,
                 await client.chat.completions.create(**kwargs),
             )
-            accumulator = _ChatStreamAccumulator(type(self))
+            accumulator = self._ChatStreamAccumulator(type(self))
             completed = False
             stream_iter: AsyncIterator[Any] = chat_stream.__aiter__()
             while True:
@@ -1716,116 +1716,116 @@ class OpenAICompatProvider(LLMProvider):
         return self.default_model
 
 
-class _ChatStreamAccumulator:
-    """Build one response without retaining the SDK's completed chunks."""
+    class _ChatStreamAccumulator:
+        """Build one response without retaining the SDK's completed chunks."""
 
-    def __init__(self, parser: type[OpenAICompatProvider]) -> None:
-        self._parser = parser
-        self._content_parts: list[str] = []
-        self._reasoning_parts: list[str] = []
-        self._tool_calls: dict[int, dict[str, Any]] = {}
-        self._finish_reason = "stop"
-        self._usage: LLMUsage | None = None
+        def __init__(self, parser: type[OpenAICompatProvider]) -> None:
+            self._parser = parser
+            self._content_parts: list[str] = []
+            self._reasoning_parts: list[str] = []
+            self._tool_calls: dict[int, dict[str, Any]] = {}
+            self._finish_reason = "stop"
+            self._usage: LLMUsage | None = None
 
-    def _tool_call(self, index: int) -> dict[str, Any]:
-        return self._tool_calls.setdefault(index, {
-            "id": "", "name": "", "arguments": "",
-            "extra_content": None, "prov": None, "fn_prov": None,
-        })
+        def _tool_call(self, index: int) -> dict[str, Any]:
+            return self._tool_calls.setdefault(index, {
+                "id": "", "name": "", "arguments": "",
+                "extra_content": None, "prov": None, "fn_prov": None,
+            })
 
-    def _accum_tc(self, tc: Any, idx_hint: int) -> None:
-        tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
-        buf = self._tool_call(tc_index)
-        tc_id = _get(tc, "id")
-        if tc_id:
-            buf["id"] = str(tc_id)
-        fn = _get(tc, "function")
-        if fn is not None:
-            fn_name = _get(fn, "name")
+        def _accum_tc(self, tc: Any, idx_hint: int) -> None:
+            tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
+            buf = self._tool_call(tc_index)
+            tc_id = _get(tc, "id")
+            if tc_id:
+                buf["id"] = str(tc_id)
+            fn = _get(tc, "function")
+            if fn is not None:
+                fn_name = _get(fn, "name")
+                if fn_name:
+                    buf["name"] = str(fn_name)
+                fn_args = _get(fn, "arguments")
+                if fn_args:
+                    buf["arguments"] += str(fn_args)
+            ec, prov, fn_prov = _extract_tc_extras(tc)
+            if ec:
+                buf["extra_content"] = ec
+            if prov:
+                buf["prov"] = prov
+            if fn_prov:
+                buf["fn_prov"] = fn_prov
+
+        def _accum_legacy_function_call(self, function_call: Any) -> None:
+            if not function_call:
+                return
+            buf = self._tool_call(0)
+            fn_name = _get(function_call, "name")
             if fn_name:
                 buf["name"] = str(fn_name)
-            fn_args = _get(fn, "arguments")
+            fn_args = _get(function_call, "arguments")
             if fn_args:
                 buf["arguments"] += str(fn_args)
-        ec, prov, fn_prov = _extract_tc_extras(tc)
-        if ec:
-            buf["extra_content"] = ec
-        if prov:
-            buf["prov"] = prov
-        if fn_prov:
-            buf["fn_prov"] = fn_prov
 
-    def _accum_legacy_function_call(self, function_call: Any) -> None:
-        if not function_call:
-            return
-        buf = self._tool_call(0)
-        fn_name = _get(function_call, "name")
-        if fn_name:
-            buf["name"] = str(fn_name)
-        fn_args = _get(function_call, "arguments")
-        if fn_args:
-            buf["arguments"] += str(fn_args)
+        def add(self, chunk: Any) -> None:
+            if isinstance(chunk, str):
+                self._content_parts.append(chunk)
+                return
 
-    def add(self, chunk: Any) -> None:
-        if isinstance(chunk, str):
-            self._content_parts.append(chunk)
-            return
-
-        cls = self._parser
-        chunk_map = cls._maybe_mapping(chunk)
-        if chunk_map is None:
-            raise TypeError(f"Unsupported chat chunk type: {type(chunk).__name__}")
-        choices = cast(list[object], chunk_map.get("choices") or [])
-        if not choices:
-            self._usage = cls._extract_usage(chunk_map) or self._usage
-            text = cls._extract_text_content(
-                chunk_map.get("content") or chunk_map.get("output_text")
-            )
+            cls = self._parser
+            chunk_map = cls._maybe_mapping(chunk)
+            if chunk_map is None:
+                raise TypeError(f"Unsupported chat chunk type: {type(chunk).__name__}")
+            choices = cast(list[object], chunk_map.get("choices") or [])
+            if not choices:
+                self._usage = cls._extract_usage(chunk_map) or self._usage
+                text = cls._extract_text_content(
+                    chunk_map.get("content") or chunk_map.get("output_text")
+                )
+                if text:
+                    self._content_parts.append(text)
+                return
+            choice = cls._maybe_mapping(choices[0]) or {}
+            if choice.get("finish_reason"):
+                self._finish_reason = str(choice["finish_reason"])
+            delta = cls._maybe_mapping(choice.get("delta")) or {}
+            raw_delta_content = delta.get("content")
+            text = cls._extract_text_content(raw_delta_content)
             if text:
                 self._content_parts.append(text)
-            return
-        choice = cls._maybe_mapping(choices[0]) or {}
-        if choice.get("finish_reason"):
-            self._finish_reason = str(choice["finish_reason"])
-        delta = cls._maybe_mapping(choice.get("delta")) or {}
-        raw_delta_content = delta.get("content")
-        text = cls._extract_text_content(raw_delta_content)
-        if text:
-            self._content_parts.append(text)
-        text = cls._extract_text_content(delta.get("reasoning_content"))
-        if not text:
-            text = cls._extract_text_content(delta.get("reasoning"))
-        if not text:
-            text = cls._extract_thinking_content(raw_delta_content)
-        if text:
-            self._reasoning_parts.append(text)
-        for idx, tc in enumerate(cast(Iterable[object], delta.get("tool_calls") or [])):
-            self._accum_tc(tc, idx)
-        self._accum_legacy_function_call(delta.get("function_call"))
-        self._usage = cls._extract_usage(chunk_map) or self._usage
+            text = cls._extract_text_content(delta.get("reasoning_content"))
+            if not text:
+                text = cls._extract_text_content(delta.get("reasoning"))
+            if not text:
+                text = cls._extract_thinking_content(raw_delta_content)
+            if text:
+                self._reasoning_parts.append(text)
+            for idx, tc in enumerate(cast(Iterable[object], delta.get("tool_calls") or [])):
+                self._accum_tc(tc, idx)
+            self._accum_legacy_function_call(delta.get("function_call"))
+            self._usage = cls._extract_usage(chunk_map) or self._usage
 
-    def finish(self) -> LLMResponse:
-        # Some providers reuse the same ID for parallel calls.
-        seen_ids: set[str] = set()
-        for buf in self._tool_calls.values():
-            if not buf["id"] or buf["id"] in seen_ids:
-                buf["id"] = _short_tool_id()
-            seen_ids.add(buf["id"])
-        tool_calls = [
-            ToolCallRequest(
-                id=buf["id"] or _short_tool_id(),
-                name=buf["name"],
-                arguments=parse_tool_arguments(buf["arguments"]),
-                extra_content=buf.get("extra_content"),
-                provider_specific_fields=buf.get("prov"),
-                function_provider_specific_fields=buf.get("fn_prov"),
+        def finish(self) -> LLMResponse:
+            # Some providers reuse the same ID for parallel calls.
+            seen_ids: set[str] = set()
+            for buf in self._tool_calls.values():
+                if not buf["id"] or buf["id"] in seen_ids:
+                    buf["id"] = _short_tool_id()
+                seen_ids.add(buf["id"])
+            tool_calls = [
+                ToolCallRequest(
+                    id=buf["id"] or _short_tool_id(),
+                    name=buf["name"],
+                    arguments=parse_tool_arguments(buf["arguments"]),
+                    extra_content=buf.get("extra_content"),
+                    provider_specific_fields=buf.get("prov"),
+                    function_provider_specific_fields=buf.get("fn_prov"),
+                )
+                for buf in self._tool_calls.values()
+            ]
+            return LLMResponse(
+                content="".join(self._content_parts) or None,
+                tool_calls=tool_calls,
+                finish_reason=self._finish_reason,
+                usage=self._usage,
+                reasoning_content="".join(self._reasoning_parts) or None,
             )
-            for buf in self._tool_calls.values()
-        ]
-        return LLMResponse(
-            content="".join(self._content_parts) or None,
-            tool_calls=tool_calls,
-            finish_reason=self._finish_reason,
-            usage=self._usage,
-            reasoning_content="".join(self._reasoning_parts) or None,
-        )
