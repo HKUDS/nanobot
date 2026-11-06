@@ -23,6 +23,7 @@ class _AsyncStream:
     def __init__(self, chunks: list[Any]) -> None:
         self._chunks = chunks
         self._idx = 0
+        self.close = AsyncMock()
 
     def __aiter__(self) -> _AsyncStream:
         return self
@@ -82,15 +83,17 @@ async def test_openai_compat_stream_ignores_invalid_idle_timeout_env(monkeypatch
         "model": "test-model",
         "choices": [{"index": 0, "delta": {"content": "ok"}, "finish_reason": "stop"}],
     })
+    stream = _AsyncStream([chunk])
     provider._client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(
-            create=AsyncMock(return_value=_AsyncStream([chunk])),
+            create=AsyncMock(return_value=stream),
         )),
     )
 
     result = await provider.chat_stream(messages=[{"role": "user", "content": "hi"}])
 
     assert result.content == "ok"
+    stream.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
