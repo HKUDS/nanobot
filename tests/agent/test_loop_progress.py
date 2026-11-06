@@ -664,6 +664,126 @@ class TestToolEventProgress:
         assert [message.content for message in final] == ["partial\n\nsummary"]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("emit_delta", [False, True])
+    async def test_failed_budget_finalization_closes_stream_and_reports_model_error(
+        self,
+        tmp_path: Path,
+        emit_delta: bool,
+    ) -> None:
+        bus = MessageBus()
+        provider = MagicMock(aclose=AsyncMock())
+        provider.get_default_model.return_value = "test-model"
+
+        async def chat_stream_with_retry(*, on_content_delta=None, **kwargs):
+            if on_content_delta is None:
+                return LLMResponse(content="connection lost", finish_reason="error", error_kind="connection")
+            if emit_delta:
+                await on_content_delta("partial")
+            return LLMResponse(content="partial", finish_reason="length")
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        _attach_webui_runtime_events(loop, bus)
+        loop.max_iterations = 1
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        try:
+            await run_session(loop, InboundMessage(
+                channel="websocket", sender_id="u1", chat_id="chat1", content="give a long answer",
+                metadata={"_wants_stream": True},
+            ))
+            outbound = [bus.outbound.get_nowait() for _ in range(bus.outbound_size)]
+            deltas = [m.event for m in outbound if isinstance(m.event, StreamDeltaEvent)]
+            endings = [m.event for m in outbound if isinstance(m.event, StreamEndEvent)]
+            turn_end = [m.event for m in outbound if isinstance(m.event, TurnEndEvent)]
+
+            assert [event.content for event in deltas] == ["partial"]
+            assert [(event.resuming, event.merge_next) for event in endings] == [
+                (True, True), (False, False),
+            ]
+            assert {event.stream_id for event in [*deltas, *endings]} == {deltas[0].stream_id}
+            assert [(event.outcome, event.failure_kind, event.failure_error_kind) for event in turn_end] == [
+                ("failed", "model", "connection"),
+            ]
+        finally:
+            await loop.aclose()
+
+    @pytest.mark.asyncio
+    async def test_length_after_malformed_retries_streams_its_own_content(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        loop = _make_loop(tmp_path)
+        _attach_webui_runtime_events(loop, loop.bus)
+        loop.max_iterations = 1
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        calls = 0
+
+        async def chat_stream_with_retry(*, on_content_delta=None, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls <= 2:
+                assert on_content_delta is not None
+                text = f"attempt {calls}. "
+                await on_content_delta(text)
+                return LLMResponse(content=text, finish_reason="tool_calls", tool_calls=[
+                    ToolCallRequest(id=f"bad-{calls}", name="", arguments={}),
+                ])
+            assert on_content_delta is None
+            if calls == 3:
+                return LLMResponse(content="recovered", finish_reason="length")
+            return LLMResponse(content="connection lost", finish_reason="error", error_kind="connection")
+
+        loop.provider.chat_stream_with_retry = chat_stream_with_retry
+        try:
+            await run_session(loop, InboundMessage(
+                channel="websocket", sender_id="u1", chat_id="chat1", content="question",
+                metadata={"_wants_stream": True},
+            ))
+            outbound = [loop.bus.outbound.get_nowait() for _ in range(loop.bus.outbound_size)]
+            deltas = [m.event.content for m in outbound if isinstance(m.event, StreamDeltaEvent)]
+            turn_end = [m.event for m in outbound if isinstance(m.event, TurnEndEvent)]
+            assert "".join(deltas) == "attempt 1. attempt 2. recovered"
+            assert calls == 4
+            assert [(event.outcome, event.failure_kind) for event in turn_end] == [("failed", "model")]
+        finally:
+            await loop.aclose()
+
+    @pytest.mark.asyncio
+    async def test_stream_observer_does_not_hide_unstreamed_length_prefix(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from nanobot.agent.hook import AgentHook
+
+        loop = _make_loop(tmp_path)
+        loop.max_iterations = 1
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        observed = []
+
+        class Observer(AgentHook):
+            def wants_streaming(self) -> bool:
+                return True
+
+            async def on_stream(self, context, delta):
+                observed.append(delta)
+
+        async def chat_stream_with_retry(*, on_content_delta=None, **kwargs):
+            if on_content_delta is None:
+                return LLMResponse(content="connection lost", finish_reason="error", error_kind="connection")
+            await on_content_delta("partial")
+            return LLMResponse(content="partial", finish_reason="length")
+
+        loop.provider.chat_stream_with_retry = chat_stream_with_retry
+        try:
+            result = await loop.process_direct("question", hooks=[Observer()])
+            assert result is not None
+            assert result.content == "partial\n\nconnection lost"
+            assert observed == ["partial"]
+        finally:
+            await loop.aclose()
+
+    @pytest.mark.asyncio
     async def test_cancelled_length_recovery_closes_merged_stream(
         self,
         tmp_path: Path,

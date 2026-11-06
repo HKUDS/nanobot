@@ -125,6 +125,50 @@ async def test_reasoning_only_failure_does_not_claim_a_preserved_reply():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("max_iterations", [1, 2])
+async def test_model_error_preserves_length_segment_without_duplicate_streaming(streaming, max_iterations):
+    provider = MagicMock(spec=LLMProvider)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    show = AsyncMock()
+    end = AsyncMock()
+    calls = 0
+
+    async def respond(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            if on_content_delta := kwargs.get("on_content_delta"):
+                await on_content_delta("Already shown.")
+            return LLMResponse(content="Already shown.", finish_reason="length")
+        if max_iterations == 1:
+            assert kwargs["tools"] is None
+        return LLMResponse(content="connection lost", finish_reason="error", error_kind="connection")
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=[{"role": "user", "content": "question"}],
+        tools=tools, model="test", max_iterations=max_iterations, max_tool_result_chars=1000,
+        hook=AgentProgressHook(output_events(on_stream=show, on_stream_end=end), streaming=streaming),
+    ))
+
+    assert calls == 2
+    assert result.stop_reason == "error"
+    assert result.error == "connection lost"
+    assert result.final_content == ("connection lost" if streaming else "Already shown.\n\nconnection lost")
+    assert result.failure_error_kind == "connection"
+    assert result.messages[1]["content"] == "Already shown."
+    assert result.messages[-1]["content"] == _PERSISTED_MODEL_ERROR_PLACEHOLDER
+    if streaming:
+        show.assert_awaited_once_with("Already shown.")
+        assert end.await_args_list[-1].kwargs == {"resuming": False}
+    else:
+        show.assert_not_awaited()
+        end.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_nonstreaming_provider_error_is_not_observed_as_assistant_body():
     provider = UnconfiguredProvider("test")
     tools = MagicMock()

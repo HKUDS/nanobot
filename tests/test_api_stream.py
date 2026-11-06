@@ -358,3 +358,104 @@ async def test_streaming_backend_failure_does_not_emit_success_terminator(aiohtt
     body = await resp.text()
     assert '"finish_reason": "stop"' not in body
     assert "[DONE]" not in body
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("after_length", [False, True])
+async def test_model_error_is_reported_through_api(aiohttp_client, tmp_path, stream, after_length):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    diagnostic = "Error: DeepSeek generation was interrupted (aborted)."
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    calls = 0
+
+    async def respond(*, on_content_delta=None, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if after_length and calls == 1:
+            if on_content_delta is not None:
+                await on_content_delta("partial answer")
+            return LLMResponse(content="partial answer", finish_reason="length")
+        return LLMResponse(
+            content=diagnostic, finish_reason="error", error_kind="generation_interrupted",
+            error_should_retry=False,
+        )
+
+    provider.chat_stream_with_retry = respond
+    agent = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    agent.max_iterations = 1
+    agent.tools.get_definitions = MagicMock(return_value=[])
+    client = await aiohttp_client(create_app(agent, model_name="test-model", api_key=API_KEY))
+    try:
+        resp = await client.post(
+            "/v1/chat/completions", headers=AUTH_HEADERS,
+            json={"messages": [{"role": "user", "content": "question"}], "stream": stream},
+        )
+        if stream:
+            assert resp.status == 200
+            frames = [line[6:] for line in (await resp.text()).splitlines() if line.startswith("data: ")]
+            assert "[DONE]" not in frames
+            chunks = [json.loads(frame) for frame in frames]
+            if after_length:
+                assert chunks[0]["choices"][0]["delta"]["content"] == "partial answer"
+            assert chunks[-1]["error"]["message"] == diagnostic
+        else:
+            assert resp.status == 502
+            expected = f"partial answer\n\n{diagnostic}" if after_length else diagnostic
+            assert (await resp.json())["error"]["message"] == expected
+            if after_length:
+                session = await agent.sessions.state.get("api:default")
+                assert any(message.get("content") == "partial answer" for message in session.messages)
+        assert calls == (2 if after_length else 1)
+    finally:
+        await agent.aclose()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("emit_partial", [False, True])
+async def test_openai_client_receives_interrupted_stream_error(aiohttp_client, tmp_path, emit_partial):
+    import httpx
+    from openai import APIError, AsyncOpenAI
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    diagnostic = "Error: DeepSeek generation was interrupted (aborted)."
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+
+    async def respond(*, on_content_delta=None, **_kwargs):
+        assert on_content_delta is not None
+        if emit_partial:
+            await on_content_delta("partial answer")
+        return LLMResponse(
+            content=diagnostic, finish_reason="error", error_kind="generation_interrupted",
+            error_should_retry=False,
+        )
+
+    provider.chat_stream_with_retry = respond
+    agent = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    agent.tools.get_definitions = MagicMock(return_value=[])
+    client = await aiohttp_client(create_app(agent, model_name="test-model", api_key=API_KEY))
+    try:
+        async with AsyncOpenAI(
+            api_key=API_KEY, base_url=str(client.make_url("/v1")), max_retries=0,
+            http_client=httpx.AsyncClient(trust_env=False),
+        ) as sdk:
+            stream = await sdk.chat.completions.create(
+                model="test-model", messages=[{"role": "user", "content": "question"}], stream=True,
+            )
+            chunks = []
+            with pytest.raises(APIError, match="DeepSeek generation was interrupted"):
+                async for chunk in stream:
+                    chunks.append(chunk.choices[0].delta.content)
+            assert chunks == (["partial answer"] if emit_partial else [])
+    finally:
+        await agent.aclose()

@@ -1533,6 +1533,45 @@ async def test_stream_generator_break_cancels_underlying_run(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_streamed_reports_model_error_after_partial_output(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import LLMResponse
+
+    diagnostic = "Error: DeepSeek generation was interrupted (aborted)."
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+
+    async def respond(*, on_content_delta=None, **_kwargs):
+        assert on_content_delta is not None
+        await on_content_delta("partial answer")
+        return LLMResponse(
+            content=diagnostic, finish_reason="error", error_kind="generation_interrupted",
+            error_should_retry=False,
+        )
+
+    provider.chat_stream_with_retry = respond
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    bot = Nanobot(loop)
+    try:
+        run = await bot.run_streamed("question")
+        events = [event async for event in run.stream_events()]
+        result = await run.wait()
+
+        assert [event.delta for event in events if event.type == STREAM_EVENT_TEXT_DELTA] == [
+            "partial answer"
+        ]
+        assert events[-1].type == STREAM_EVENT_RUN_FAILED
+        assert events[-1].error == diagnostic
+        assert events[-1].result is result
+        assert result.stop_reason == "error"
+        assert result.error == diagnostic
+    finally:
+        await bot.aclose()
+
+
+@pytest.mark.asyncio
 async def test_run_streamed_restores_hooks_and_reports_failure(tmp_path):
     from nanobot.agent.hook import AgentHook
 
