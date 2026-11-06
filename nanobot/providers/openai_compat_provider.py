@@ -12,7 +12,7 @@ import string
 import time
 import uuid
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any, cast
@@ -117,7 +117,7 @@ class _ChatStreamCloseError(Exception):
 
 
 @asynccontextmanager
-async def _managed_chat_stream(chat_stream: Any) -> AsyncIterator[Any]:
+async def _managed_chat_stream(chat_stream: Any) -> AsyncGenerator[Any, None]:
     try:
         yield chat_stream
     except BaseException as primary_error:
