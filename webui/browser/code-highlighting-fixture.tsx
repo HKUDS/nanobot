@@ -25,6 +25,7 @@ export function CodeHighlightingFixture() {
     <section aria-label="Markdown"><MarkdownText streaming={streaming}>{streaming ? markdown.slice(0, markdown.indexOf("中文")) : markdown}</MarkdownText></section>
     <section aria-label="TypeScript"><CodeBlock language="tsx" code={changed ? source.replace("result", "updated") : source} showLineNumbers /></section>
     <section aria-label="INI"><CodeBlock language="ini" code={"; comment\n[server]\nhost=localhost\n"} /></section>
+    <section aria-label="HJSON"><CodeBlock language="hjson" code={"# comment\n{ host: localhost }\n"} /></section>
     <section aria-label="Unknown"><CodeBlock language="unknown-file-format" code={'<script>alert("not executable")</script>'} /></section>
     <section aria-label="ANSI"><CodeBlock language="ansi" code={'\x1b[32mPASS\x1b[0m <img src=x onerror="bad()">'} /></section>
     <section aria-label="File preview"><div data-file-preview-scroll className="code-content h-80 overflow-auto border">

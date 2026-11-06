@@ -31,12 +31,15 @@ for (const dark of [false, true]) {
       await expect(ini.getByTestId("highlighted-code")).toContainText("host=localhost");
       await expect(ini.locator('[data-code-token][style*="--code-comment"]')).toHaveText("; comment");
       expect(await sourceText(ini)).toBe("; comment\n[server]\nhost=localhost\n");
+      const hjson = page.getByRole("region", { name: "HJSON", exact: true });
+      await expect(hjson.getByTestId("highlighted-code")).toContainText("host: localhost");
+      expect(await sourceText(hjson)).toBe("# comment\n{ host: localhost }\n");
       await expect(page.getByRole("region", { name: "Unknown", exact: true }).getByTestId("highlighted-code")).toHaveText('<script>alert("not executable")</script>');
       await expect(page.getByRole("region", { name: "ANSI", exact: true }).getByTestId("ansi-code")).toHaveText('PASS <img src=x onerror="bad()">');
       expect(await page.locator("main script, main img").count()).toBe(0);
       for (const size of ["small", "standard", "large"]) {
         await page.evaluate(size => { document.documentElement.dataset.readingTextSize = size; }, size);
-        const expectedBody = narrow ? size === "small" ? 15 : size === "large" ? 18 : 16 : size === "small" ? 16 : size === "large" ? 20 : 18;
+        const expectedBody = size === "small" ? 15 : size === "large" ? 18 : 16;
         await expect(code.getByTestId("highlighted-code")).toHaveCSS("font-size", `${expectedBody * 0.875}px`);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       }
@@ -103,22 +106,22 @@ test("a real grammar request failure keeps complete source, controls and the app
   await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
   const failed: string[] = [];
   const warning = page.waitForEvent("console", message => message.type() === "warning" && message.text().startsWith("Code highlighting failed."));
-  await page.route(/\/ini-[^/]*\.js(?:\?|$)/, async route => {
+  await page.route(/\/hjson-[^/]*\.js(?:\?|$)/, async route => {
     failed.push(route.request().url());
     await route.abort("failed");
   });
   await page.goto("/browser/fixture.html?case=code-highlighting");
   await warning;
   expect(failed).toHaveLength(1);
-  const ini = page.getByRole("region", { name: "INI", exact: true });
-  const source = "; comment\n[server]\nhost=localhost\n";
-  await expect(ini.getByTestId("plain-code-fallback")).toHaveText(source);
-  expect(await ini.getByTestId("plain-code-fallback").textContent()).toBe(source);
-  await ini.getByRole("button", { name: "Copy code", exact: true }).click();
+  const hjson = page.getByRole("region", { name: "HJSON", exact: true });
+  const source = "# comment\n{ host: localhost }\n";
+  await expect(hjson.getByTestId("plain-code-fallback")).toHaveText(source);
+  expect(await hjson.getByTestId("plain-code-fallback").textContent()).toBe(source);
+  await hjson.getByRole("button", { name: "Copy code", exact: true }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
     .toBe(process.platform === "win32" ? source.replace(/\n/g, "\r\n") : source);
   await page.getByRole("button", { name: "Change source", exact: true }).click();
   await expect(page.getByRole("region", { name: "TypeScript", exact: true }).getByTestId("highlighted-code")).toContainText("export const updated");
   await page.getByRole("button", { name: "Toggle theme", exact: true }).click();
-  expect(await ini.getByTestId("plain-code-fallback").textContent()).toBe(source);
+  expect(await hjson.getByTestId("plain-code-fallback").textContent()).toBe(source);
 });

@@ -34,7 +34,7 @@ describe("shared code highlighting", () => {
     expect(value[3].tokens.some(token => token.color === "var(--code-string)" && token.content === "'yes'")).toBe(true);
   });
 
-  it("retains INI syntax through the grammar backend instead of dropping configuration-file colors", async () => {
+  it("retains INI configuration-file colors", async () => {
     const source = "; comment\n[server]\nhost=localhost\n";
     const value = await lines(source, "ini");
     expect(value.flatMap(line => line.tokens).map(token => token.content).join("")).toBe(source);

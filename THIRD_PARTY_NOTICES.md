@@ -245,12 +245,12 @@ SOFTWARE.
 ## Pierre Diffs and Highlights — code highlighting and read-only diffs (Apache-2.0 and MIT dependencies)
 
 - **Source**: https://github.com/pierrecomputer/pierre
-- **Components**: `@pierre/diffs` 1.6.1, `@pierre/highlights` 0.2.0, `@pierre/theme` 2.0.0, and `@pierre/theming` 1.0.2; Shiki 4.5.0 and the dependencies identified below.
+- **Components**: `@pierre/diffs` 1.6.4, `@pierre/highlights` 0.4.0, `@pierre/theme` 2.0.0, and `@pierre/theming` 1.0.2; Shiki 4.6.0 and the dependencies identified below.
 - **Bundled**: `nanobot/web/dist/assets/*.{js,wasm}`
 
 The following license texts and upstream notices are retained from the distributed packages.
 
-### `@pierre/diffs 1.6.1`, `@pierre/highlights 0.2.0`, `@pierre/theme 2.0.0`, `@pierre/theming 1.0.2`
+### `@pierre/diffs 1.6.4`, `@pierre/highlights 0.4.0`, `@pierre/theme 2.0.0`, `@pierre/theming 1.0.2`
 
 ```text
 Apache License
@@ -444,7 +444,7 @@ CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
 ```
 
-### `@shikijs/core 4.5.0`, `@shikijs/engine-javascript 4.5.0`, `@shikijs/engine-oniguruma 4.5.0`, `@shikijs/langs 4.5.0`, `@shikijs/primitive 4.5.0`, `@shikijs/themes 4.5.0`, `@shikijs/types 4.5.0`, `shiki 4.5.0`
+### `@shikijs/core 4.6.0`, `@shikijs/engine-javascript 4.6.0`, `@shikijs/engine-oniguruma 4.6.0`, `@shikijs/langs 4.6.0`, `@shikijs/primitive 4.6.0`, `@shikijs/themes 4.6.0`, `@shikijs/types 4.6.0`, `shiki 4.6.0`
 
 ```text
 MIT License
@@ -497,7 +497,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### `hast-util-to-html 9.0.5`
+### `hast-util-to-html 9.0.5` and `9.0.6`
 
 ```text
 (The MIT License)
@@ -656,7 +656,7 @@ SOFTWARE.
 
 ### Upstream NOTICE: `@pierre/highlights`
 
-```text
+````text
 # Bundled theme licenses
 
 Community themes are pruned copies of pinned Zed theme files or conversions of
@@ -664,6 +664,25 @@ the pinned Shiki TextMate files listed below. Theme names and appearances are
 normalized to Shiki's catalog.
 
 ## Sources
+
+Terminal palettes use the same pinned sources as the themes below. Exceptions:
+
+- Horizon's original repository is unavailable. Its palette comes from the
+  [Zed Horizon 0.0.1 archive](https://api.zed.dev/extensions/horizon/0.0.1/download).
+- Andromeeda's two null black entries and both Horizon themes' four null black
+  and white entries use their inherited
+  [Zed defaults at `ce48461`](https://github.com/zed-industries/zed/blob/ce48461eaadd16c65c31f835511ab96bd3b6e746/crates/theme/src/default_colors.rs).
+- LaserWave leaves ten terminal colors undefined; Slack Dark leaves all 16
+  undefined. These entries use the dark palette in
+  [VS Code at `3623f17`](https://github.com/microsoft/vscode/blob/3623f170559712f7ee16f59dfbd87c885b6a2b31/src/vs/workbench/contrib/terminal/common/terminalColorRegistry.ts).
+- Pierre's palettes come from
+  [its Zed theme](https://github.com/pierrecomputer/pierre/blob/861ce3c61e1cfeaf283d83e95a3767479e75bfee/packages/theme/zed/themes/pierre.json).
+  The vibrant variants preserve the Display P3 values in
+  [Pierre Dark Vibrant](https://github.com/pierrecomputer/pierre/blob/861ce3c61e1cfeaf283d83e95a3767479e75bfee/packages/theme/themes/pierre-dark-vibrant.json)
+  and
+  [Pierre Light Vibrant](https://github.com/pierrecomputer/pierre/blob/861ce3c61e1cfeaf283d83e95a3767479e75bfee/packages/theme/themes/pierre-light-vibrant.json).
+
+Dracula's `ffffffff` bright white value is normalized to `#ffffffff`.
 
 The Zed version is the extension version published in the
 [Zed registry](https://github.com/zed-industries/extensions) at
@@ -795,7 +814,7 @@ themes retain Copyright 2017 Mattia Astorino. `github-dark-default` also derives
 from the MIT-licensed GitHub/Primer theme credited above. Highlights extracts
 individual themes and prunes unused Zed style properties. The full Apache-2.0
 text is included in the package's [`LICENSE.md`](./LICENSE.md).
-```
+````
 
 ### Upstream NOTICE: `@pierre/theme`
 

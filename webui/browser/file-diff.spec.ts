@@ -40,11 +40,11 @@ for (const dark of [false, true]) {
       await expect(rows.nth(3)).toHaveText('  return <span className="badge">ready</span>;');
       await expect(tsx.locator("[data-line][data-line-type=change-addition] [data-diff-span]")).not.toHaveCount(0);
       await expectKeywordColor(rows);
-      for (const [size, wide, small] of [["small", 16, 15], ["standard", 18, 16], ["large", 20, 18]] as const) {
+      for (const [size, body] of [["small", 15], ["standard", 16], ["large", 18]] as const) {
         await page.evaluate(value => { document.documentElement.dataset.readingTextSize = value; }, size);
-        await expect(rows.first()).toHaveCSS("font-size", `${(narrow ? small : wide) * 0.75}px`);
+        await expect(rows.first()).toHaveCSS("font-size", `${body * 0.75}px`);
         await expect.poll(async () => rows.first().evaluate(node => parseFloat(getComputedStyle(node).lineHeight)))
-          .toBeCloseTo((narrow ? small : wide) * 0.75 * 1.6);
+          .toBeCloseTo(body * 0.75 * 1.6);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       }
       const callbacks = page.getByRole("region", { name: "callbacks.tsx", exact: true });
