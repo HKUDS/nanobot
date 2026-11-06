@@ -66,5 +66,9 @@ for (const width of [360, 1024]) {
     await page.getByLabel("File edits").evaluate((element) => { (element as HTMLElement).style.maxWidth = "none"; });
     await expect(longPath).not.toContainText("…");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.setViewportSize({ width, height: 800 });
+    await page.getByLabel("File edits").evaluate((element) => { (element as HTMLElement).style.maxWidth = "640px"; });
+    await expect(longPath).toContainText("…");
+    await expect(references.nth(1)).not.toContainText("…");
   });
 }
