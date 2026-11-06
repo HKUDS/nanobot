@@ -319,6 +319,44 @@ async def test_disabled_idle_scan_does_not_block_maintenance_on_storage(agent, m
         await scan
 
 
+@pytest.mark.parametrize("ttl,next_check", [(0, 0), (15, float("inf"))], ids=["disabled", "not-due"])
+async def test_idle_tick_without_due_work_keeps_maintenance_available(agent, monkeypatch, ttl, next_check):
+    agent.auto_compact._ttl = ttl
+    agent._next_idle_compact_check_at = next_check
+    inspected, input_ready = asyncio.Event(), asyncio.Event()
+    outcomes = []
+
+    def inspect_maintenance():
+        try:
+            with agent.maintenance():
+                outcomes.append("idle")
+        except RuntimeBusyError:
+            outcomes.append("busy")
+        finally:
+            inspected.set()
+
+    first_tick = True
+
+    async def consume():
+        nonlocal first_tick
+        if first_tick:
+            first_tick = False
+            asyncio.get_running_loop().call_soon(inspect_maintenance)
+            raise asyncio.TimeoutError
+        await input_ready.wait()
+
+    monkeypatch.setattr(agent.bus, "consume_inbound", consume)
+    consumer = asyncio.create_task(agent.run())
+    try:
+        async with asyncio.timeout(3):
+            await inspected.wait()
+        assert outcomes == ["idle"]
+    finally:
+        agent.stop()
+        consumer.cancel()
+        await asyncio.gather(consumer, return_exceptions=True)
+
+
 async def test_idle_storage_scan_does_not_delay_stop(agent, monkeypatch):
     agent.auto_compact._ttl = 15
     model_started, scan_started, release_scan = (asyncio.Event() for _ in range(3))
@@ -359,6 +397,7 @@ async def test_idle_storage_scan_does_not_delay_stop(agent, monkeypatch):
 
 
 async def test_idle_tick_during_maintenance_does_not_start_scan(agent, monkeypatch):
+    agent.auto_compact._ttl = 15
     async def idle_once():
         agent.stop()
         raise asyncio.TimeoutError
@@ -374,6 +413,7 @@ async def test_idle_tick_during_maintenance_does_not_start_scan(agent, monkeypat
 
 @pytest.mark.parametrize("scan_fails", [False, True])
 async def test_idle_scan_is_single_flight_and_drains_spawned_work(agent, monkeypatch, scan_fails):
+    agent.auto_compact._ttl = 15
     entered, release, child_started, release_child = (asyncio.Event() for _ in range(4))
 
     async def child():
