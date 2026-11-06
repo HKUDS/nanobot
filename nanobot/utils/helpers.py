@@ -337,7 +337,7 @@ def detect_image_mime(data: bytes) -> str | None:
 
 
 def build_image_content_blocks(
-    raw: bytes | bytearray, mime: str, path: str, label: str
+    raw: bytes, mime: str, path: str, label: str
 ) -> list[dict[str, Any]]:
     """Build native image blocks plus a short text label."""
     b64 = base64.b64encode(raw).decode()

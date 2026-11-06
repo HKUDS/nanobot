@@ -367,6 +367,7 @@ class ReadFileTool(_FsTool):
     _MAX_CHARS = 128_000
     _MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
     _READ_CHUNK_SIZE = 64 * 1024
+    _IMAGE_READ_CHUNK_SIZE = 1024 * 1024
     _DEFAULT_LIMIT = 2000
     _MAX_PDF_PAGES = 20
 
@@ -443,24 +444,22 @@ class ReadFileTool(_FsTool):
 
                     mime = detect_image_mime(first) or mimetypes.guess_type(path)[0]
                     if mime and mime.startswith("image/"):
-                        image = bytearray(max(len(first), opened.st_size))
-                        image[:len(first)] = first
+                        chunks = [first]
                         bytes_read = len(first)
-                        with memoryview(image) as view:
-                            while bytes_read < len(image):
-                                count = stream.readinto(view[bytes_read:])
-                                if not count:
-                                    break
-                                bytes_read += count
-                        del image[bytes_read:]
+                        # Bound each read without preallocating from a size that
+                        # may have become stale during the receipt check.
+                        remaining = os.fstat(stream.fileno()).st_size - bytes_read
+                        chunk_size = min(self._IMAGE_READ_CHUNK_SIZE, max(self._READ_CHUNK_SIZE, remaining))
                         while chunk := stream.read(min(
-                            self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
+                            chunk_size, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
                         )):
                             bytes_read += len(chunk)
                             if bytes_read > self._MAX_FILE_SIZE_BYTES:
                                 return self._file_too_large(bytes_read)
-                            image.extend(chunk)
-                        return build_image_content_blocks(image, mime, str(fp), f"(Image file: {path})")
+                            chunks.append(chunk)
+                        raw = b"".join(chunks)
+                        del chunks
+                        return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
                     previous_hash = (
                         self._file_states.visible_read_hash(fp, offset=offset, limit=limit)

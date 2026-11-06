@@ -905,6 +905,48 @@ class TestBoundedTextReads:
             assert repeat == f"[File unchanged since last read: {f}]"
 
     @pytest.mark.asyncio
+    async def test_shrunk_image_after_receipt_check_does_not_allocate_old_file_size(self, tmp_path, monkeypatch):
+        if tracemalloc.is_tracing():
+            pytest.skip("requires isolated tracemalloc accounting")
+        f = tmp_path / "data.txt"
+        f.write_bytes(b"x" * (8 * 1024 * 1024))
+        tool = ReadFileTool(workspace=tmp_path)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f), limit=1)
+        with f.open("r+b") as out:
+            out.seek(-1, os.SEEK_END)
+            out.write(b"y")
+        image = b"\x89PNG\r\n\x1a\nsmall"
+        real_fdopen = os.fdopen
+
+        class ChangeAfterPrecheck(_ReadStreamWrapper):
+            def __init__(self, stream):
+                super().__init__(stream)
+                self.changed = False
+
+            def read(self, size):
+                chunk = self.stream.read(size)
+                if not chunk and not self.changed:
+                    self.changed = True
+                    f.write_bytes(image)
+                return chunk
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: ChangeAfterPrecheck(real_fdopen(*args, **kwargs)),
+        )
+        tracemalloc.start()
+        try:
+            with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+                result = await tool.execute(path=str(f), limit=1)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+
+        assert result[0]["image_url"]["url"] == f"data:image/png;base64,{base64.b64encode(image).decode()}"
+        assert peak < 3 * 1024 * 1024
+
+    @pytest.mark.asyncio
     async def test_growth_during_hash_precheck_respects_size_limit(self, tmp_path, monkeypatch):
         f = tmp_path / "data.txt"
         raw = b"first\n" + b"x" * 20
