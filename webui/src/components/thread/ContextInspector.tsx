@@ -14,6 +14,13 @@ const ContextGraphScene = lazy(() => import("./ContextGraphScene").then(module =
 const EMPTY_GRAPH: ContextGraph = { nodes: [], edges: [] };
 const surface = "context-inspector-surface select-none rounded-[20px] bg-card";
 
+function latestUsageSnapshot(snapshots: readonly ContextSnapshot[]) {
+  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+    const snapshot = snapshots[index];
+    if (snapshot.estimatedTokens !== undefined || snapshot.usage !== undefined) return snapshot;
+  }
+}
+
 export function ContextInspector({ context, rounds, snapshots, onOpenFile, sidebar = false, expandable = true }: {
   context: ComposerContextUsage | null; rounds: readonly ComposerRoundUsage[];
   snapshots: readonly ContextSnapshot[]; onOpenFile?: (path: string) => void; sidebar?: boolean; expandable?: boolean;
@@ -37,17 +44,19 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
     return () => window.clearTimeout(timer);
   }, [replay, readyGraph]);
   const snapshot = replay ? replay.frames[replay.index] : snapshots.at(-1);
+  // The live graph advances before usage arrives; replay stays frame-local.
+  const usageSnapshot = replay ? snapshot : latestUsageSnapshot(snapshots);
   const latestRound = rounds.at(-1);
-  const tokens = snapshot ? snapshot.estimatedTokens ?? snapshot.usage?.context_tokens ?? snapshot.usage?.prompt_tokens : context?.contextTokens;
-  const estimated = snapshot?.estimatedTokens !== undefined || (!snapshot?.usage && context?.estimated);
-  const windowTokens = snapshot?.contextWindowTokens ?? context?.contextWindowTokens;
+  const tokens = usageSnapshot ? usageSnapshot.estimatedTokens ?? usageSnapshot.usage?.context_tokens ?? usageSnapshot.usage?.prompt_tokens : context?.contextTokens;
+  const estimated = usageSnapshot ? usageSnapshot.estimatedTokens !== undefined : context?.estimated;
+  const windowTokens = usageSnapshot ? usageSnapshot.contextWindowTokens : context?.contextWindowTokens ?? snapshot?.contextWindowTokens;
   const tokenNumbers = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 });
   const hasTokenUsage = tokens !== undefined || !!windowTokens;
   const used = tokens !== undefined && windowTokens ? Math.min(100, tokens / windowTokens * 100) : null;
-  const cached = snapshot ? snapshot.usage?.cached_tokens : latestRound?.cachedTokens;
-  const input = snapshot ? snapshot.usage?.prompt_tokens : latestRound?.inputTokens;
+  const cached = usageSnapshot ? usageSnapshot.usage?.cached_tokens : latestRound?.cachedTokens;
+  const input = usageSnapshot ? usageSnapshot.usage?.prompt_tokens : latestRound?.inputTokens;
   const cachedWidth = cached !== undefined && windowTokens ? Math.min(used ?? 0, cached / windowTokens * 100) : 0;
-  const duration = snapshot ? snapshot.usage?.generation_ms : latestRound?.generationMs;
+  const duration = usageSnapshot ? usageSnapshot.usage?.generation_ms : latestRound?.generationMs;
   const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
   const openFileCallback = useRef(onOpenFile);
   openFileCallback.current = onOpenFile;
