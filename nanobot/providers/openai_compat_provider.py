@@ -15,7 +15,7 @@ from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -114,6 +114,22 @@ _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
 
 class _ChatStreamCloseError(Exception):
     """A stream finished without a primary error, but its cleanup failed."""
+
+
+class _ChatStreamCallbackError(Exception):
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+_Delta = TypeVar("_Delta")
+
+
+async def _emit_chat_delta(callback: Callable[[_Delta], Awaitable[None]], delta: _Delta) -> None:
+    try:
+        await callback(delta)
+    except Exception as error:
+        raise _ChatStreamCallbackError(error) from error
 
 
 @asynccontextmanager
@@ -1690,7 +1706,7 @@ class OpenAICompatProvider(LLMProvider):
                             # never see non-string content.
                             text = self._extract_text_content(raw_delta_content)
                             if text:
-                                await on_content_delta(text)
+                                await _emit_chat_delta(on_content_delta, text)
                         if on_thinking_delta:
                             reasoning = getattr(delta_obj, "reasoning_content", None) or getattr(
                                 delta_obj, "reasoning", None,
@@ -1701,14 +1717,14 @@ class OpenAICompatProvider(LLMProvider):
                                 # content array rather than a separate field.
                                 r_text = self._extract_thinking_content(raw_delta_content)
                             if r_text:
-                                await on_thinking_delta(r_text)
+                                await _emit_chat_delta(on_thinking_delta, r_text)
                         if on_tool_call_delta:
                             for idx, tool_delta in enumerate(
                                 getattr(delta_obj, "tool_calls", None) or []
                             ):
                                 fn = _get(tool_delta, "function")
                                 tool_index = _get(tool_delta, "index")
-                                await on_tool_call_delta({
+                                await _emit_chat_delta(on_tool_call_delta, {
                                     "index": tool_index if tool_index is not None else idx,
                                     "call_id": str(_get(tool_delta, "id") or ""),
                                     "name": str(_get(fn, "name") or "") if fn is not None else "",
@@ -1718,7 +1734,7 @@ class OpenAICompatProvider(LLMProvider):
                                 })
                             function_call = getattr(delta_obj, "function_call", None)
                             if function_call:
-                                await on_tool_call_delta({
+                                await _emit_chat_delta(on_tool_call_delta, {
                                     "index": 0,
                                     "call_id": "",
                                     "name": str(_get(function_call, "name") or ""),
@@ -1737,6 +1753,11 @@ class OpenAICompatProvider(LLMProvider):
                 if parse_error is not None:
                     raise parse_error
                 return accumulator.finish()
+        except _ChatStreamCallbackError as e:
+            response = self._handle_error(e.error, spec=self._spec, api_base=self.api_base)
+            response.error_kind = "callback"
+            response.error_should_retry = False
+            return response
         except _ChatStreamCloseError as e:
             return LLMResponse(
                 content=f"Error closing LLM stream: {e}",
@@ -1763,9 +1784,8 @@ class OpenAICompatProvider(LLMProvider):
         original_messages: list[dict[str, Any]],
         response: LLMResponse,
     ) -> LLMResponse:
-        # A cleanup failure says nothing about image support and may occur
-        # after a complete model response. Do not retry it with altered input.
-        if response.error_kind == "cleanup":
+        # Neither a callback nor a cleanup failure indicates image incompatibility.
+        if response.error_kind in {"callback", "cleanup"}:
             return response
         return await super()._retry_without_images(call, kw, original_messages, response)
 

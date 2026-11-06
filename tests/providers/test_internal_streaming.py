@@ -774,6 +774,32 @@ async def test_chat_callback_error_wins_over_close_error(chat_sdk, cleanup_warni
     assert any("connection reset" in message for message in cleanup_warnings)
 
 
+@pytest.mark.parametrize("close_fails", [False, True])
+@pytest.mark.parametrize("error_type", [RuntimeError, ConnectionError])
+async def test_chat_callback_error_does_not_retry_without_images(chat_sdk, close_fails, error_type):
+    stream = _ControlledChatStream(
+        [_chat_event({"reasoning_content": "thinking"})],
+        close_error=httpx.CloseError("connection reset") if close_fails else None,
+    )
+    retry = _ControlledChatStream([_chat_event({"content": "unexpected"}, finish="stop")])
+    provider, requests = chat_sdk([stream, retry])
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": "work"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+    ]}]
+    original = json.loads(json.dumps(messages))
+
+    async def on_thinking(_value):
+        raise error_type("callback failed")
+
+    result = await provider.chat_stream_with_retry(messages, on_thinking_delta=on_thinking)
+
+    assert result.finish_reason == "error" and "callback failed" in result.content
+    assert len(requests) == 1
+    assert messages == original
+    assert stream.closed
+
+
 @pytest.mark.parametrize("mode", ["success", "quota", "cancel"])
 def test_langfuse_async_openai_chat_stream(mode):
     if importlib.util.find_spec("langfuse") is None:
