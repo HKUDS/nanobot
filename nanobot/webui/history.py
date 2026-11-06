@@ -159,20 +159,27 @@ def collect_legacy_history(
         keys_by_stem.setdefault(SessionManager.safe_key(session["key"]), set()).add(session["key"])
     foreign_owners: dict[str, list[Path]] = {}
     if namespace is not None and groups:
-        for database in namespace.parent.glob("*/sessions.sqlite3"):
-            if database.parent == namespace:
+        for other_namespace in namespace.parent.iterdir():
+            if other_namespace == namespace or not other_namespace.is_dir():
                 continue
-            if database.is_symlink() or database.parent.is_symlink():
-                raise ValueError(f"invalid session namespace for history migration: {database}")
-            with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
-                owned = {str(row[0]) for row in db.execute("SELECT key FROM sessions")}
-                prefix = f"{HISTORY_IMPORT_MARKER}:"
-                owned.update(str(row[0])[len(prefix):] for row in db.execute(
-                    "SELECT key FROM storage_meta WHERE key LIKE ? AND value='complete'",
-                    (prefix + "%",),
-                ))
-                for key in owned:
-                    foreign_owners.setdefault(key, []).append(database)
+            database = other_namespace / "sessions.sqlite3"
+            if database.is_symlink() or other_namespace.is_symlink():
+                raise ValueError(f"invalid session namespace for history migration: {other_namespace}")
+            if database.exists():
+                # SQLite and deletion receipts take precedence over retained JSONL backups.
+                with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+                    owned = {str(row[0]) for row in db.execute("SELECT key FROM sessions")}
+                    prefix = f"{HISTORY_IMPORT_MARKER}:"
+                    owned.update(str(row[0])[len(prefix):] for row in db.execute(
+                        "SELECT key FROM storage_meta WHERE key LIKE ? AND value='complete'",
+                        (prefix + "%",),
+                    ))
+            else:
+                from nanobot.session.jsonl_migration import read_jsonl
+
+                owned = {read_jsonl(path)[0].key for path in other_namespace.glob("*.jsonl")}
+            for key in owned:
+                foreign_owners.setdefault(key, []).append(other_namespace)
     imports: list[HistoryImport] = []
     for stem, paths in groups.items():
         records = [record for path in paths for record in _read_legacy_file(path)]
