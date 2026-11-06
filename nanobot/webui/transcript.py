@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import hashlib
@@ -60,9 +59,6 @@ _MAX_TRANSCRIPT_PAGE_BYTES = 20 * 1024 * 1024
 _MAX_INLINE_TRACE_DETAIL_BYTES = 32 * 1024
 _WEBUI_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _WEBUI_REPLAY_IDENTITY_KEY = "_webui_replay_identity"
-_WEBUI_PROJECTION_RECEIPTS_KEY = "_webui_projection_receipts"
-_MAX_STREAM_RECEIPT_RANGES = 256
-_MAX_STREAM_RECEIPT_STREAMS = 64
 _WEBUI_TRACE_DETAIL_REF_RE = re.compile(
     r"^(?P<turn>\d{1,12})\.(?P<message>history-[0-9a-f]{20})$"
 )
@@ -319,8 +315,6 @@ def _projection_receipts(records: Sequence[Mapping[str, Any]]) -> list[_Projecti
 
 def _compact_completed_stream_deltas(
     turn: list[dict[str, Any]],
-    *,
-    include_projection_receipts: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
     if not turn or turn[-1].get("event") != "turn_end":
         return turn, 0
@@ -341,18 +335,10 @@ def _compact_completed_stream_deltas(
         if not chunks:
             continue
         completed = dict(record)
-        text = completed.get("text")
-        chunk_text = "".join(str(chunk.get("text") or "") for _, chunk in chunks)
-        if not isinstance(text, str) or not text:
-            completed["text"] = chunk_text
-        elif include_projection_receipts and text != chunk_text:
-            # A legacy snapshot may be signed or unrelated. Matching stream IDs do
-            # not prove that it contains the preceding fragments.
-            continue
-        if include_projection_receipts and not completed.get(_WEBUI_PROJECTION_RECEIPTS_KEY):
-            receipts = _projection_receipts([*(chunk for _, chunk in chunks), record])
-            if receipts:
-                completed[_WEBUI_PROJECTION_RECEIPTS_KEY] = receipts
+        # The sealed snapshot is authoritative even when media rewriting changes
+        # its text. Only old ends without text need their preceding fragments.
+        if not isinstance(completed.get("text"), str):
+            completed["text"] = "".join(str(chunk.get("text") or "") for _, chunk in chunks)
         replacements[index] = completed
         dropped_indexes.update(chunk_index for chunk_index, _ in chunks)
 
@@ -511,7 +497,7 @@ def _select_transcript_page(
         if partial:
             stats.truncated_oversized_turn = True
         else:
-            turn, dropped = _compact_completed_stream_deltas(turn, include_projection_receipts=True)
+            turn, dropped = _compact_completed_stream_deltas(turn)
             stats.compacted_delta_records += dropped
         selected.append(_TranscriptTurnRef(ref.ordinal, turn, first_position, end_position, ref.record_count))
         record_count += raw_count
@@ -617,13 +603,6 @@ def webui_message_source(metadata: dict[str, Any] | None) -> dict[str, str] | No
     return source
 
 
-@dataclass(slots=True)
-class _StreamReceiptState:
-    streams: dict[tuple[str, str], list[list[int]]]
-    range_count: int = 0
-    disabled: bool = False
-
-
 class WebUITranscriptRecorder:
     """Capture channel facts through the session owner before transport fan-out."""
 
@@ -631,77 +610,6 @@ class WebUITranscriptRecorder:
         self.sessions = sessions
         self._log = log
         self._turn_sequences: dict[tuple[str, str], int] = {}
-        self._stream_receipts: dict[tuple[str, str, str], _StreamReceiptState] = {}
-
-    @staticmethod
-    def stream_buffer_key(
-        chat_id: str, stream_id: str | None, metadata: Mapping[str, Any] | None,
-    ) -> tuple[str, str, str, str]:
-        turn_id = (metadata or {}).get(WEBUI_TURN_METADATA_KEY)
-        generation = (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY)
-        return (chat_id, turn_id if isinstance(turn_id, str) else "",
-                generation if isinstance(generation, str) else "", str(stream_id or ""))
-
-    def remember_buffered_delta(self, chat_id: str, event: Mapping[str, Any], metadata: Mapping[str, Any] | None) -> None:
-        """Record an annotated delta already added to its exact snapshot buffer."""
-        stream_id = event.get("stream_id")
-        key = self.stream_buffer_key(chat_id, stream_id if isinstance(stream_id, str) else None, metadata)
-        sequence, phase = event.get("turn_seq"), event.get("turn_phase")
-        if (self.sessions is None or not key[1] or not key[2] or event.get("turn_id") != key[1]
-                or phase not in {"answer", "reasoning"} or not isinstance(sequence, int) or isinstance(sequence, bool)):
-            return
-        state = self._stream_receipts.setdefault(key[:3], _StreamReceiptState({}))
-        if state.disabled:
-            return
-        stream = (phase, key[3])
-        ranges = state.streams.get(stream)
-        if ranges is None:
-            if len(state.streams) >= _MAX_STREAM_RECEIPT_STREAMS:
-                state.streams.clear()
-                state.range_count = 0
-                state.disabled = True
-                return
-            ranges = state.streams[stream] = []
-        index = bisect_left(ranges, [sequence, sequence])
-        if index and ranges[index - 1][1] >= sequence:
-            return
-        if index < len(ranges) and ranges[index][0] == sequence:
-            return
-        previous = index > 0 and ranges[index - 1][1] + 1 == sequence
-        following = index < len(ranges) and ranges[index][0] - 1 == sequence
-        if previous and following:
-            ranges[index - 1][1] = ranges[index][1]
-            ranges.pop(index)
-            state.range_count -= 1
-        elif previous:
-            ranges[index - 1][1] = sequence
-        elif following:
-            ranges[index][0] = sequence
-        elif state.range_count < _MAX_STREAM_RECEIPT_RANGES:
-            ranges.insert(index, [sequence, sequence])
-            state.range_count += 1
-        else:
-            state.streams.clear()
-            state.range_count = 0
-            state.disabled = True
-
-    def discard_stream_receipts(
-        self, key: tuple[str, str, str, str], phase: str,
-    ) -> None:
-        state = self._stream_receipts.get(key[:3])
-        if state is not None and not state.disabled:
-            state.range_count -= len(state.streams.pop((phase, key[3]), []))
-            if not state.streams:
-                self._stream_receipts.pop(key[:3], None)
-
-    def discard(self, chat_id: str, *, complete: bool = False) -> None:
-        for key in tuple(self._stream_receipts):
-            if key[0] == chat_id:
-                self._stream_receipts.pop(key, None)
-        if not complete:
-            for key in tuple(self._turn_sequences):
-                if key[0] == chat_id:
-                    self._turn_sequences.pop(key, None)
 
     async def initialize(self) -> None:
         sessions = self.sessions
@@ -740,23 +648,6 @@ class WebUITranscriptRecorder:
         record = dict(event)
         if completed_text is not None:
             record["text"] = completed_text
-        stream_id = event.get("stream_id")
-        key = self.stream_buffer_key(chat_id, stream_id if isinstance(stream_id, str) else None, metadata)
-        state = self._stream_receipts.get(key[:3])
-        ranges = state.streams.get((phase or "", key[3])) if state is not None and not state.disabled else None
-        if ranges and event.get("turn_id") == key[1]:
-            record[_WEBUI_PROJECTION_RECEIPTS_KEY] = [{"turn_id": key[1], "ranges": [r.copy() for r in ranges]}]
-        if event.get("merge_next") is not True:
-            self.discard_stream_receipts(key, phase or "")
-        if _WEBUI_PROJECTION_RECEIPTS_KEY in record:
-            # Check exactly the fact that append will encode, including timestamp.
-            record = _record_for_append(record)
-            try:
-                # Leave room for the existing fact limit even when the snapshot
-                # itself nearly fills it; serialization stays off the event loop.
-                await asyncio.to_thread(lambda: fact_from_record(record).encode())
-            except (ValueError, TypeError):
-                record.pop(_WEBUI_PROJECTION_RECEIPTS_KEY, None)
         return await self.append(chat_id, record, metadata=metadata)
 
     async def append_user_message(
@@ -1517,7 +1408,7 @@ def build_webui_trace_detail_response(
     turn = _transcript_turn_at_ordinal(ordinal, history=history)
     if turn is None:
         return None
-    turn, _ = _compact_completed_stream_deltas(turn, include_projection_receipts=True)
+    turn, _ = _compact_completed_stream_deltas(turn)
     lines = _records_with_replay_identity(turn, turn_ordinal=ordinal)
     for group in _client_projection_deferred_trace_groups(lines).values():
         first = lines[group.start]
@@ -1572,9 +1463,6 @@ def _client_projection_common_fields(record: dict[str, Any]) -> dict[str, Any]:
     created_at_ms = _valid_created_at_ms(record.get("created_at_ms"))
     if created_at_ms is not None:
         fields["created_at_ms"] = created_at_ms
-    receipts = record.get(_WEBUI_PROJECTION_RECEIPTS_KEY)
-    if receipts:
-        fields["projection_receipts"] = receipts
     return fields
 
 

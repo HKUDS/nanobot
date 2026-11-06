@@ -42,7 +42,6 @@ _CONTENT_FIELDS = frozenset({
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
     "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason", "render_as",
     "request_usage", "request_id", "run_id", "sequence", "context_graph", "context_snapshot",
-    "_webui_projection_receipts",
 })
 
 

@@ -30,9 +30,9 @@ def test_oversized_turn_pages_are_contiguous_and_replay_raw_events(history, monk
         {"event": "user", "text": "previous", "turn_id": "previous"},
         {"event": "turn_end", "turn_id": "previous"},
         {"event": "user", "text": "first", "turn_id": "execution", "turn_seq": 1},
-        {"event": "delta", "text": "a", "turn_id": "execution", "turn_seq": 2},
-        {"event": "delta", "text": "b", "turn_id": "execution", "turn_seq": 3},
-        {"event": "stream_end", "text": "ab", "turn_id": "execution", "turn_seq": 4},
+        {"event": "delta", "text": "![plot](diagram", "turn_id": "execution", "turn_seq": 2},
+        {"event": "delta", "text": ".png)", "turn_id": "execution", "turn_seq": 3},
+        {"event": "stream_end", "text": "![plot](/api/media/signed)", "turn_id": "execution", "turn_seq": 4},
         {"event": "message", "kind": "progress", "text": "trace one with full detail", "turn_id": "execution", "turn_seq": 5},
         {"event": "user", "text": "second", "turn_id": "execution", "turn_seq": 6},
         {"event": "message", "kind": "progress", "text": "trace two with full detail", "turn_id": "execution", "turn_seq": 7},
@@ -44,15 +44,26 @@ def test_oversized_turn_pages_are_contiguous_and_replay_raw_events(history, monk
     for row in rows:
         history.append(key, row)
 
+    decoded = []
+    original_decode = HistoryFact.decode
+
+    def track_decode(record):
+        decoded.append(record)
+        return original_decode(record)
+
+    monkeypatch.setattr(HistoryFact, "decode", track_decode)
+
     def no_canonical_load():
         pytest.fail("a sliced turn must not trigger canonical recovery")
 
     def read(**kwargs):
+        decoded.clear()
         stats = transcript.TranscriptReplayStats()
         page = history.build(key, limit=100, stats=stats,
                              session_messages_loader=no_canonical_load, **kwargs)
         assert page is not None
-        assert stats.parsed_records <= transcript._MAX_TRANSCRIPT_PAGE_RECORDS
+        assert stats.parsed_records == len(decoded) <= transcript._MAX_TRANSCRIPT_PAGE_RECORDS
+        assert stats.source_bytes == sum(max(len(record.encode("utf-8")), history_record_size(record)) for record in decoded)
         assert stats.source_bytes <= transcript._MAX_TRANSCRIPT_PAGE_BYTES
         return page
 
@@ -73,6 +84,7 @@ def test_oversized_turn_pages_are_contiguous_and_replay_raw_events(history, monk
     target = [event for event in events if event.get("turn_id") == "execution"]
     assert [event["turn_seq"] for event in target] == list(range(1, 10))
     assert [event["event"] for event in target[1:4]] == ["delta", "delta", "stream_end"]
+    assert [event["text"] for event in target[1:4]] == ["![plot](diagram", ".png)", "![plot](/api/media/signed)"]
     progress = [event for event in target if event.get("kind") == "progress"]
     assert [event["text"] for event in progress] == ["trace one with full detail", "trace two with full detail"]
     assert all("trace_detail" not in event for event in progress)

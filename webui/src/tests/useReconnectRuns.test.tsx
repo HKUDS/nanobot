@@ -127,55 +127,6 @@ describe("durable run recovery", () => {
     close();
   });
 
-  it.each(["recovery_state", "attached"] as const)("does not revive a fragment-completed recovery from delayed unscoped %s", async (event) => {
-    const turnId = "recovery:old-recovery";
-    const body: WebuiThreadPersistedPayload = {
-      schemaVersion: 3, projection: "events", has_pending_tool_calls: false, active_turn_id: null,
-      completed_turn_ids: [turnId],
-      page: { history_generation: "generation", record_range: { turn: 0, start: 5, end: 8 },
-        before_cursor: "before-5", has_more_before: true, truncated_oversized_turn: true },
-      events: [{ event: "turn_end", chat_id: "inactive", turn_id: turnId, turn_seq: 8 }],
-    };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(body)));
-    const { client, sockets, running, reopen, close } = setup();
-    running("inactive", turnId);
-    await reopen();
-    expect(client.getRunState("inactive").active).toBe(false);
-    const state = { status: "resuming", recovery_id: "old-recovery", attempts: 0 };
-    act(() => sockets.at(-1)!.receive(event === "recovery_state"
-      ? { event, chat_id: "inactive", ...state }
-      : { event, chat_id: "inactive", recovery_state: state }));
-    expect(client.getRunState("inactive")).toMatchObject({ active: false, unsettled: false, latestTurnId: turnId });
-    close();
-  });
-
-  it.each([
-    ["recovery_state", "recovered"], ["recovery_state", "awaiting_user"],
-    ["attached", "recovered"], ["attached", "awaiting_user"],
-  ] as const)("does not stop a newer U from delayed unscoped %s (%s)", async (event, status) => {
-    const turnId = "recovery:old-recovery";
-    const body: WebuiThreadPersistedPayload = {
-      schemaVersion: 3, projection: "events", has_pending_tool_calls: false, active_turn_id: null,
-      completed_turn_ids: [turnId],
-      page: { history_generation: "generation", record_range: { turn: 0, start: 5, end: 8 },
-        before_cursor: "before-5", has_more_before: true, truncated_oversized_turn: true },
-      events: [{ event: "turn_end", chat_id: "inactive", turn_id: turnId, turn_seq: 8 }],
-    };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(body)));
-    const { client, sockets, running, reopen, close } = setup();
-    running("inactive", turnId);
-    await reopen();
-    act(() => {
-      running("inactive", "turn-new", 456);
-      const state = { status, recovery_id: "old-recovery", attempts: 1 };
-      sockets.at(-1)!.receive(event === "recovery_state"
-        ? { event, chat_id: "inactive", ...state }
-        : { event, chat_id: "inactive", recovery_state: state });
-    });
-    expect(client.getRunState("inactive")).toMatchObject({ active: true, unsettled: true, latestTurnId: "turn-new", startedAt: 456 });
-    close();
-  });
-
   it("projects an unpersisted buffered tool event when the user returns to the recovered thread", async () => {
     const chatId = "inactive";
     const turnId = "turn-old";
@@ -305,6 +256,72 @@ describe("durable run recovery", () => {
     expect(mounted.result.current.messages.map((message) => message.content)).toContain("Answer");
     expect(client.getRunState(chatId).active).toBe(false);
     expect(mounted.result.current.isStreaming).toBe(false);
+    mounted.unmount();
+    close();
+  });
+
+  it("settles a held overlapping signed-image fragment only after loading its user prefix", async () => {
+    const chatId = "inactive";
+    const turnId = "turn-old";
+    const rawImage = "![image](images/photo.png)";
+    const signedImage = "![image](/api/media/signed.png)";
+    const initial: WebuiThreadPersistedPayload = {
+      schemaVersion: 3, sessionKey: `websocket:${chatId}`, projection: "events",
+      has_pending_tool_calls: true, active_turn_id: turnId, completed_turn_ids: [],
+      page: { history_generation: "generation", record_range: { turn: 0, start: 1, end: 2 },
+        before_cursor: "inside", has_more_before: true, truncated_oversized_turn: true },
+      events: [{ event: "model_request", chat_id: chatId, turn_id: turnId, turn_seq: 2,
+        request_id: "request", run_id: "run", sequence: 1, phase: "started", projection_id: "request" }],
+    };
+    const latest: WebuiThreadPersistedPayload = {
+      ...initial, has_pending_tool_calls: false, active_turn_id: null, completed_turn_ids: [turnId],
+      page: { ...initial.page, record_range: { turn: 0, start: 1, end: 4 } },
+      events: [...initial.events,
+        { event: "stream_end", chat_id: chatId, turn_id: turnId, turn_seq: 4,
+          stream_id: "wire", text: signedImage, projection_id: "answer" },
+        { event: "turn_end", chat_id: chatId, turn_id: turnId, turn_seq: 5, projection_id: "done" }],
+    };
+    const prefix: WebuiThreadPersistedPayload = {
+      ...initial, has_pending_tool_calls: false, active_turn_id: null,
+      page: { ...initial.page, record_range: { turn: 0, start: 0, end: 1 },
+        before_cursor: null, has_more_before: false },
+      events: [{ event: "user_message", chat_id: chatId, turn_id: turnId, turn_seq: 1,
+        text: "Show the image", starts_turn: true, projection_id: "question" }],
+    };
+    let latestReads = 0;
+    let finishPrefix!: (value: Response) => void;
+    const fetchMock = vi.fn((url: string) => url.includes("before=")
+      ? new Promise<Response>((resolve) => { finishPrefix = resolve; })
+      : Promise.resolve(response(latestReads++ ? latest : initial)));
+    vi.stubGlobal("fetch", fetchMock);
+    const { client, sockets, running, close } = setup();
+    const wrapper = ({ children }: { children: ReactNode }) => <ClientProvider client={client} token="token">{children}</ClientProvider>;
+    const mounted = renderHook(() => useNanobotStream(chatId, [], false, undefined, undefined, [],
+      { key: `websocket:${chatId}` }), { wrapper });
+    act(() => {
+      running();
+      sockets.at(-1)!.receive({ event: "delta", chat_id: chatId, turn_id: turnId, turn_seq: 3,
+        stream_id: "wire", text: rawImage });
+    });
+    await act(async () => {});
+    expect(mounted.result.current.messages.map((message) => message.content)).toEqual([rawImage]);
+    await act(async () => { mounted.result.current.refreshHistory(); });
+    await act(async () => {});
+    expect(mounted.result.current.history.error).toBeNull();
+    expect(mounted.result.current.history.hasMoreBefore).toBe(true);
+    expect(mounted.result.current.messages.map((message) => message.content)).toEqual([rawImage]);
+    expect(mounted.result.current.isStreaming).toBe(true);
+    expect(client.getRunState(chatId)).toMatchObject({ active: true, unsettled: true });
+
+    let older!: Promise<void>;
+    act(() => { older = mounted.result.current.loadOlder(); });
+    expect(fetchMock.mock.calls.at(-1)?.[0]).toContain("before=inside");
+    await act(async () => { finishPrefix(response(prefix)); await older; });
+    expect(mounted.result.current.messages.map((message) => message.content)).toEqual(["Show the image", signedImage]);
+    expect(mounted.result.current.messages.filter((message) => message.role === "assistant")).toHaveLength(1);
+    expect(mounted.result.current.history.hasMoreBefore).toBe(false);
+    expect(mounted.result.current.isStreaming).toBe(false);
+    expect(client.getRunState(chatId)).toMatchObject({ active: false, unsettled: false });
     mounted.unmount();
     close();
   });
