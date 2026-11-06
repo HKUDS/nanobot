@@ -958,12 +958,13 @@ class TestBoundedTextReads:
     async def test_opened_nonregular_file_is_not_read(self, tmp_path, monkeypatch):
         f = tmp_path / "replaced.txt"
         f.write_text("regular", encoding="utf-8")
+        target = f.resolve()
         read_fd, write_fd = os.pipe()
         os.close(write_fd)
         real_open = os.open
 
         def open_replacement(path, flags, *args, **kwargs):
-            if os.fspath(path) == os.fspath(f):
+            if os.fspath(path) == os.fspath(target):
                 return read_fd
             return real_open(path, flags, *args, **kwargs)
 
