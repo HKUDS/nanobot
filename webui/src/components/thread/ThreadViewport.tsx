@@ -50,6 +50,8 @@ interface ThreadViewportProps {
   navigationFrame?: HTMLElement | null;
   emptyState?: ReactNode;
   initialLoading?: boolean;
+  initialError?: string | null;
+  onRetryInitial?: () => void;
   scrollToBottomSignal?: number;
   activeTurnId?: string | null;
   activeTurnStartedHere?: boolean;
@@ -62,7 +64,7 @@ interface ThreadViewportProps {
   mcpPresets?: McpPresetInfo[];
   slashCommands?: SlashCommand[];
   forkBoundaryMessageCount?: number | null;
-  hasMoreBefore?: boolean;
+  hasMoreBefore?: boolean | null;
   loadingOlder?: boolean;
   olderError?: string | null;
   userMessageOffset?: number;
@@ -264,6 +266,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   navigationFrame,
   emptyState,
   initialLoading = false,
+  initialError = null,
+  onRetryInitial,
   scrollToBottomSignal = 0,
   activeTurnId: liveTurnId = null,
   activeTurnStartedHere = false,
@@ -429,7 +433,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     [messages, visibleMessageCount],
   );
   const hiddenMessageCount = messages.length - visibleMessages.length;
-  const historyExhausted = !hasMoreBefore && hiddenMessageCount === 0;
+  const historyUnknown = hasMoreBefore === null;
+  const historyExhausted = hasMoreBefore === false && hiddenMessageCount === 0;
   const hiddenUserMessageCount =
     userMessageOffset
     + (hiddenMessageCount > 0
@@ -950,6 +955,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       direction: ThreadScrollDirection | null,
     ) => {
       if (!direction) return;
+      if (direction === "backward" && atHistoryBoundary() && hasMoreBefore === null && hiddenMessageCount === 0) {
+        captureHistoryScrollAnchor();
+        yieldCameraToUser();
+        return;
+      }
       if (direction === "forward" && historyWindow?.hasMoreAfter
         && el.scrollHeight - el.scrollTop - el.clientHeight < HISTORY_PREFETCH_MIN_PX
         && !navigation?.loading) {
@@ -983,7 +993,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         return;
       }
       historyInputRef.current = "other";
-      if (atHistoryBoundary()) {
+      if (atHistoryBoundary() && hasMoreBefore !== null) {
         const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
           : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? el.clientHeight : 1;
         if (event.deltaY < 0) {
@@ -1043,7 +1053,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       const verticalTravel = Math.abs(touch.clientY - gesture.startY);
       if (!gesture.pulling && horizontalTravel > verticalTravel) gesture.horizontal = true;
       if (gesture.horizontal) return;
-      if (gesture.pulling || (atHistoryBoundary() && delta < 0 && hiddenMessageCount === 0)) {
+      if (gesture.pulling || (atHistoryBoundary() && hasMoreBefore !== null && delta < 0 && hiddenMessageCount === 0)) {
         if (!gesture.pulling) {
           prepareHistoryPull();
           historySpringRef.current?.startTouch();
@@ -1144,7 +1154,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   ]);
 
   const navigationStatus = navigation?.operation !== "older" && Boolean(navigation?.loading || navigation?.error);
-  const showHistoryStatus = !historySlotCompleted && !navigationStatus && messages.length > 0 && conversationReady
+  const showInitialHistoryStatus = !navigationStatus && historyUnknown && hasMessages && conversationReady
+    && atHistoryTop && Boolean(initialLoading || initialError);
+  const showHistoryStatus = !historyUnknown && !historySlotCompleted && !navigationStatus && messages.length > 0 && conversationReady
     && (atHistoryTop && (!historyExhausted || showHistoryExhausted) || historyPhase !== "hidden" || loadingOlder);
   const historyStatus = showHistoryStatus ? (
     <ThreadHistoryStatus
@@ -1286,6 +1298,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           ) : null}
         </div>
         {!retainedHistorySlotKey ? historyStatus : null}
+        {showInitialHistoryStatus ? <ThreadHistoryStatus loading={initialLoading}
+          error={initialError} onRetry={() => onRetryInitial?.()} /> : null}
         {navigationStatus && navigation ? <ThreadHistoryStatus loading={navigation.loading}
           error={navigation.error} onRetry={navigation.retry} /> : null}
         {!hasMessages ? <div ref={bottomRef} aria-hidden className="h-px" /> : null}

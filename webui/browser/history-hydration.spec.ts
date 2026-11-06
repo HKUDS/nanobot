@@ -222,6 +222,58 @@ test("pre-request compaction stays in place through retries and precedes the ans
   backend.healthy();
 });
 
+for (const inputMethod of ["wheel", "touch"] as const) {
+  test(`keeps unresolved history retryable after live-first delivery (${inputMethod})`, async ({ page }) => {
+    const { backend, body } = await openFixture(page, inputMethod === "touch" ? 390 : 1440);
+    const initial = await backend.read();
+    await backend.send(delta(5, LIVE));
+    await expect(body.getByText(LIVE, { exact: true })).toBeVisible();
+
+    if (inputMethod === "touch") {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+      const bounds = (await body.boundingBox())!;
+      const x = bounds.x + bounds.width / 2;
+      const y = bounds.y + 80;
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (const travel of [40, 80, 120, 200]) {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + travel }] });
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await cdp.detach();
+    } else {
+      await body.hover();
+      await page.mouse.wheel(0, -120);
+    }
+    await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
+    await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeVisible();
+    expect(backend.reads).toHaveLength(1);
+
+    await initial.route.fulfill({ status: 503, body: "Synthetic history unavailable" });
+    const retry = page.getByRole("button", { name: "Loading failed. Retry" });
+    await expect(retry).toBeVisible();
+    await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
+    await expect(body.getByText(LIVE, { exact: true })).toBeVisible();
+    await retry.click();
+    const retried = await backend.read(A, null, 1);
+    await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeVisible();
+    await backend.release(retried, liveFirstHistory());
+    await expect(body.getByText("Historical prefix question", { exact: true })).toBeAttached();
+    await expect(body.getByText(LIVE, { exact: true })).toHaveCount(1);
+    await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
+
+    const older = await requestOlder(page, backend, body, "nan311-before-2");
+    await backend.release(older, history(closedTurn("first-turn", "First question", "First answer.")));
+    await expect(body.getByText("First question", { exact: true })).toBeAttached();
+    await body.hover();
+    await page.mouse.wheel(0, -10_000);
+    await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBeLessThanOrEqual(1);
+    await page.mouse.wheel(0, -120);
+    await expect(page.getByText("No earlier messages", { exact: true })).toBeVisible();
+    backend.healthy();
+  });
+}
+
 for (const width of [1440, 390]) {
   test(`synthetic live-first latest admits its prefix without refresh, then prepends two cursor pages (${width}px)`, async ({ page }) => {
     const { backend, body } = await openFixture(page, width);

@@ -1553,6 +1553,8 @@ export function ThreadShell({
             retryStatus={retryStatus}
             emptyState={emptyState}
             initialLoading={initialHistoryLoading}
+            initialError={historyError}
+            onRetryInitial={refreshHistory}
             composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
             onComposerLayoutChange={alignSidebar}
             activeTurnId={viewportTurnId}
