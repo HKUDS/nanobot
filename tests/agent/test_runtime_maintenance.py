@@ -275,6 +275,7 @@ async def test_queued_event_dispatch_cannot_be_overtaken_by_maintenance(agent):
 
 
 async def test_async_idle_scan_keeps_storage_work_owned(agent, monkeypatch):
+    agent.auto_compact._ttl = 15
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def scan(*args, **kwargs):
@@ -297,7 +298,29 @@ async def test_async_idle_scan_keeps_storage_work_owned(agent, monkeypatch):
         assert agent.bus.admission.paused
 
 
+async def test_disabled_idle_scan_does_not_block_maintenance_on_storage(agent, monkeypatch):
+    agent.auto_compact._ttl = 0
+    reading, release = asyncio.Event(), asyncio.Event()
+
+    async def list_sessions():
+        reading.set()
+        await release.wait()
+        return []
+
+    monkeypatch.setattr(agent.sessions.state, "list_sessions", list_sessions)
+    scan = asyncio.create_task(agent._check_expired_sessions_if_due())
+    try:
+        await asyncio.sleep(0)
+        with agent.maintenance():
+            assert not reading.is_set()
+            assert scan.done()
+    finally:
+        release.set()
+        await scan
+
+
 async def test_idle_storage_scan_does_not_delay_stop(agent, monkeypatch):
+    agent.auto_compact._ttl = 15
     model_started, scan_started, release_scan = (asyncio.Event() for _ in range(3))
     original_list = agent.sessions.state.list_sessions
 

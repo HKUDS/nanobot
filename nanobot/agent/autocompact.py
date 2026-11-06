@@ -65,6 +65,8 @@ class AutoCompact:
         active_session_keys: Collection[str] = (),
     ) -> None:
         """Schedule idle archival without blocking the event loop."""
+        if self._ttl <= 0:
+            return
         now = datetime.now()
         active_keys = set(active_session_keys)
         for info in await self.sessions.state.list_sessions():
