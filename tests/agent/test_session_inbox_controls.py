@@ -124,6 +124,7 @@ async def test_rejected_input_does_not_stop_other_sessions(loop, monkeypatch, re
 
     loop.provider.chat_stream_with_retry = chat
     if rejection == "idle":
+        loop.auto_compact._ttl = 15
         original_check = loop.auto_compact.check_expired
 
         async def observed_check(*args, **kwargs):

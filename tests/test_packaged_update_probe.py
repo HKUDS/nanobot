@@ -82,13 +82,15 @@ def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tm
         assert_canonical_preserved(before, canonical_records(store.path))
 
 
-def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):
+def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n",
+          handoff=b"async def _prepare(directory):\n    try:\n        pass\n    except Exception:\n        raise\n"):
     path = tmp_path / f"nanobot_ai-{version}-py3-none-manylinux_2_17_x86_64.whl"
     with ZipFile(path, "w") as archive:
         archive.writestr(f"nanobot_ai-{version}.dist-info/METADATA", f"Name: nanobot-ai\nVersion: {version}\n")
         archive.writestr("nanobot/__init__.py", "# unchanged application\n")
         archive.writestr("nanobot/release_feed.py", "transport=transport or PinnedDNSAsyncTransport(),\n")
         archive.writestr("nanobot/update_worker.py", worker)
+        archive.writestr("nanobot/update_handoff.py", handoff)
         archive.writestr("nanobot/update_fallback.py", fallback)
         binary = ZipInfo("nanobot/tui/bin/nanobot-tui")
         binary.external_attr = 0o100755 << 16
@@ -261,6 +263,58 @@ def test_worker_count_must_be_positive_before_creating_output(tmp_path):
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 2 and "--workers" in result.stderr
     assert not output.exists()
+
+
+def test_fixture_preflight_observer_records_location_and_preserves_refusal(tmp_path):
+    secret = "sensitive-preflight-detail"
+    handoff = f'''from pathlib import Path
+async def _prepare(directory):
+    try:
+        raise ValueError({secret!r})
+    except Exception:
+        raise
+'''.encode()
+    source = wheel(tmp_path, "0.4.1", handoff=handoff)
+    baseline = fixture_wheel(source, tmp_path / "baseline", "0.4.0", feed=tmp_path / "feed.json")
+    namespace = {}
+    with ZipFile(baseline) as archive:
+        exec(compile(archive.read("nanobot/update_handoff.py"), "update_handoff.py", "exec"), namespace)
+    with pytest.raises(ValueError, match=secret):
+        asyncio.run(namespace["_prepare"](tmp_path))
+    document = (tmp_path / "acceptance-preflight.json").read_text()
+    assert json.loads(document) == {"error_type": "ValueError", "frames": [["update_handoff.py", 4]],
+                                    "stop_states": []}
+    assert secret not in document
+
+
+@pytest.mark.parametrize("update_phase", ["handoff_failed", "private-value-must-not-be-exported"])
+def test_phase_failure_identifies_failed_assertion_without_exporting_private_values(tmp_path, update_phase):
+    job = tmp_path / "private-job"
+    job.mkdir()
+    secret = "sensitive-token-must-stay-local"
+    probe.write(tmp_path / "launch.json", {"directory": str(job), "command": [secret]})
+    probe.write(job / "status.json", {"phase": update_phase, "mutation_started": False, "message": secret})
+    probe.write(job / "supervision.json", {"state": "needs_attention", "confirmation_id": secret})
+    probe.write(job / "acceptance-preflight.json", {"error_type": "ReleaseFeedError", "message": secret,
+                                                  "frames": [["release_feed.py", 300, secret], [secret, 2]],
+                                                  "stop_states": ["busy", secret, "busy"]})
+    probe.write(job / "acceptance-busy.json", {"active": True, "channel_delivery": False,
+                                              "pending_queues": secret, "message": secret})
+    try:
+        probe.replace_once(b"missing seam", b"needle", secret.encode())
+    except ValueError as error:
+        probe.phase_failure(tmp_path, "verify", error)
+    document = (tmp_path / "phase-failure.json").read_text()
+    record = json.loads(document)
+    assert record["phase"] == "verify" and record["error_type"] == "ValueError"
+    assert record["probe_lines"] and all(isinstance(line, int) for line in record["probe_lines"])
+    assert record["update_phase"] == ("handoff_failed" if update_phase == "handoff_failed" else "incomplete")
+    assert record["mutation_started"] is False and record["recovery_needs_attention"] is True
+    assert record["preflight_error"] == "ReleaseFeedError" and record["preflight_frames"] == [["release_feed.py", 300]]
+    assert record["stop_states"] == ["busy"]
+    assert record["busy_flags"] == {"active": True, "channel_delivery": False}
+    assert secret not in document and str(tmp_path) not in document
+    assert "private-value-must-not-be-exported" not in document
 
 
 def test_lanes_balance_all_nine_scenarios_without_splitting_fifteen_journeys():

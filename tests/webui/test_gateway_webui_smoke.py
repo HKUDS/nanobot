@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -481,12 +482,14 @@ def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
 async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during_checkpoint: bool) -> None:
     """Exercise the actual gateway and WebSocket with a synthetic local model."""
     checkpoint_waiting = asyncio.Event()
+    release_checkpoint = asyncio.Event()
     closing_request = asyncio.Event()
     release_close = asyncio.Event()
     requests: list[dict] = []
 
     async def barrier(_request: web.Request) -> web.Response:
         checkpoint_waiting.set()
+        await release_checkpoint.wait()
         return web.Response(text="ready")
 
     async def model(request: web.Request) -> web.StreamResponse:
@@ -565,7 +568,8 @@ async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during
     config["providers"]["custom"]["apiBase"] = f"http://127.0.0.1:{model_port}/v1"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     launcher = """
-import asyncio, sys, urllib.request
+import asyncio, faulthandler, httpx, sys
+from pathlib import Path
 from nanobot.session.state import SessionState
 original = SessionState.checkpoint_view
 barrier_url = sys.argv[3]
@@ -576,16 +580,20 @@ async def checkpoint(self, session, payload):
     results = payload.get('completed_tool_results', [])
     if barrier_url and not held and results and results[-1].get('tool_call_id') == 'call-16':
         held = True
-        def signal():
-            with urllib.request.urlopen(barrier_url) as response:
-                response.read()
-        await asyncio.to_thread(signal)
+        async with httpx.AsyncClient(trust_env=False, timeout=20) as client:
+            response = await client.get(barrier_url)
+            response.raise_for_status()
         await asyncio.Event().wait()
 SessionState.checkpoint_view = checkpoint
 home, config = sys.argv[1:3]
 sys.argv = ['nanobot', '--home', home, 'gateway', '--config', config]
 from nanobot.cli.entry import main
-main()
+with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
+    faulthandler.dump_traceback_later(10, repeat=True, file=stacks)
+    try:
+        main()
+    finally:
+        faulthandler.cancel_dump_traceback_later()
 """
     env = {key: value for key, value in os.environ.items() if not key.startswith("NANOBOT_")}
     env.update({"HOME": str(home), "USERPROFILE": str(home), "APPDATA": str(home),
@@ -621,6 +629,15 @@ main()
                         events.append(event)
                         if predicate(event):
                             return event
+
+            # Bound each model round, not all 16 durable rounds with one deadline.
+            # Drain the real client while the gateway advances to the stop barrier.
+            for request_count in range(1, 17):
+                await receive_until(lambda event: (
+                    event.get("event") == "model_request"
+                    and event.get("phase") == "completed"
+                    and event.get("usage", {}).get("request_count") == request_count
+                ))
 
             if stop_during_checkpoint:
                 await asyncio.wait_for(checkpoint_waiting.wait(), 20)
@@ -682,11 +699,25 @@ main()
                     assert state["goal_state"] == {"active": False}
     finally:
         release_close.set()
-        if process is not None and process.poll() is None:
-            if sys.platform == "win32":
-                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                               capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
-            else:
-                process.terminate()
-            process.wait(timeout=30)
-        await server.cleanup()
+        release_checkpoint.set()
+        try:
+            if process is not None and process.poll() is None:
+                if sys.platform == "win32":
+                    subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                   capture_output=True, check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                else:
+                    process.terminate()
+                try:
+                    # Keep the test model/barrier server live while its client exits.
+                    await asyncio.to_thread(process.wait, timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    await asyncio.to_thread(process.wait, timeout=10)
+                    stacks = tmp_path / "gateway-stacks.log"
+                    if stacks.exists():
+                        frames = re.findall(r'File "[^"\n]*[/\\]([^/\\"\n]+)", line (\d+) in (\w+)',
+                                            stacks.read_text(encoding="utf-8"))
+                        print("Gateway shutdown stack locations:", frames[-80:])
+                    raise
+        finally:
+            await server.cleanup()
