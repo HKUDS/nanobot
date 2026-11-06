@@ -540,7 +540,7 @@ export function ThreadShell({
     useFilePreviewState(previewSessionKey, filePreviewStore);
   const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
   useLayoutEffect(() => {
-    if (multiplePanes) setContextSidebarOpen(false);
+    if (multiplePanes || !previewSessionKey) setContextSidebarOpen(false);
   }, [multiplePanes, previewSessionKey]);
   const [sidebarEnterWidth, setSidebarEnterWidth] = useState(0);
   const [contextSidebarHost, setContextSidebarHost] = useState<HTMLElement | null>(null);
