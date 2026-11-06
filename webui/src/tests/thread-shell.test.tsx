@@ -1032,6 +1032,41 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument());
   });
 
+  it("closes the context sidebar when starting a new conversation", async () => {
+    const client = makeClient();
+    const envelope = { chat_id: "live-usage", turn_id: "live-turn" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Alive-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, projection: "events", active_turn_id: "live-turn", has_pending_tool_calls: true,
+            events: [{ ...envelope, event: "user_message", text: "Waiting for answer", starts_turn: true, turn_seq: 0 }] })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    const footer = document.createElement("div");
+    document.body.append(footer);
+    const view = render(wrap(client, <ThreadShell composerPortalTarget={footer}
+      session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")} />));
+    await screen.findByText("Waiting for answer");
+    act(() => client._emitChat("live-usage", { ...envelope, event: "model_request", request_id: "first", run_id: "run",
+      phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
+      usage: { prompt_tokens: 100, context_tokens: 100 },
+      context_graph: { nodes: [{ path: "/first.md", name: "first.md", state: "loaded", tokens: 40 }], edges: [] },
+    }));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    const host = document.querySelector(".thread-preview-layout")!;
+    Object.defineProperty(host, "clientWidth", { value: 1000 });
+    fireEvent(window, new Event("resize"));
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("button", { name: "first.md" })).toBeInTheDocument();
+    expect(screen.getByTestId("context-sidebar")).toBeInTheDocument();
+    await act(async () => view.rerender(wrap(client, <ThreadShell composerPortalTarget={footer}
+      session={null} title="New conversation" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")} />)));
+    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+    expect(footer).toContainElement(screen.getByRole("textbox"));
+    footer.remove();
+  });
+
   it.each([false, true])("switches context in the same side slot unless multiple panes are visible (%s)", async (multiplePanes) => {
     const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       const bottom = this.classList.contains("thread-preview-layout") ? 900
