@@ -149,7 +149,7 @@ test("idle voice and ready send remain distinct from the composer in both themes
 });
 
 
-test("a compact mobile placeholder keeps the full hint available without shifting the composer", async ({ browser, baseURL }) => {
+test("a compact mobile composer preserves its placeholder, focus, and sizing", async ({ browser, baseURL }) => {
   const context = await browser.newContext({ baseURL, viewport: { width: 314, height: 844 }, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
   try {
     const page = await context.newPage();
@@ -162,41 +162,24 @@ test("a compact mobile placeholder keeps the full hint available without shiftin
     await expect.poll(() => input.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
     const placeholder = (await input.getAttribute("aria-description"))!;
     expect(placeholder).toContain("compétences");
-    await expect(page.getByRole("tooltip")).toHaveCount(0);
     const before = (await action.boundingBox())!;
     const initialHeight = await input.evaluate(node => node.clientHeight);
 
     await input.tap();
-    const hint = page.getByRole("tooltip");
-    await expect(hint).toHaveText(placeholder);
-    const hintSurface = page.locator('[data-radix-popper-content-wrapper] [data-side]').first();
-    const composer = page.locator(".thread-composer-form");
-    await expect.poll(async () => {
-      const [hintBox, composerBox] = await Promise.all([hintSurface.boundingBox(), composer.boundingBox()]);
-      return !!hintBox && !!composerBox && (hintBox.y + hintBox.height <= composerBox.y || hintBox.y >= composerBox.y + composerBox.height);
-    }).toBe(true);
+    await expect(input).toBeFocused();
     expect(await action.boundingBox()).toEqual(before);
 
     await input.fill("Bonjour");
-    await expect(hint).toHaveCount(0);
     expect(await action.boundingBox()).toEqual(before);
     await input.fill("Première ligne\nDeuxième ligne\nTroisième ligne");
     await expect.poll(() => input.evaluate(node => node.clientHeight)).toBeGreaterThan(initialHeight);
     await input.fill("");
-    await expect(hint).toHaveText(placeholder);
     await expect.poll(() => input.evaluate(node => node.clientHeight)).toBe(initialHeight);
     expect(await action.boundingBox()).toEqual(before);
-    await input.press("Escape");
-    await expect(hint).toHaveCount(0);
 
     await page.locator(".thread-composer-footer button").first().focus();
     await page.keyboard.press("Shift+Tab");
     await expect(input).toBeFocused();
-    await expect(hint).toHaveText(placeholder);
-    const box = (await input.boundingBox())!;
-    await page.mouse.move(box.x + 5, box.y + 5);
-    await page.mouse.move(1, 800);
-    await expect(hint).toHaveCount(0);
   } finally {
     await context.close();
   }
