@@ -46,6 +46,7 @@ interface ThreadViewportProps {
   runStartedAt?: number | null;
   retryStatus?: RetryStatus | null;
   composer?: ReactNode;
+  onComposerLayoutChange?: () => void;
   navigationFrame?: HTMLElement | null;
   emptyState?: ReactNode;
   initialLoading?: boolean;
@@ -259,6 +260,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   runStartedAt = null,
   retryStatus = null,
   composer,
+  onComposerLayoutChange,
   navigationFrame,
   emptyState,
   initialLoading = false,
@@ -302,6 +304,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const messageContentRef = useRef<HTMLDivElement>(null);
   const emptyStateRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
+  const composerLayoutChangeRef = useRef(onComposerLayoutChange);
+  composerLayoutChangeRef.current = onComposerLayoutChange;
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastConversationKeyRef = useRef<string | null>(conversationKey);
   const conversationHandoffPendingRef = useRef(false);
@@ -399,6 +403,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         };
       },
       onGeometry: (geometry: ThreadMotionGeometry) => {
+        composerLayoutChangeRef.current?.();
         if (Math.abs(composerDockHeightRef.current - geometry.composerHeight) >= 1) {
           composerDockHeightRef.current = geometry.composerHeight;
           setComposerDockHeight(geometry.composerHeight);
@@ -878,7 +883,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   useLayoutEffect(() => {
     const el = scrollRef.current;
     const content = contentRef.current;
-    const messageRegion = messageRegionRef.current;
+    // The flexible first grid row moves the composer during hero/thread transitions.
+    const contentRegion = messageRegionRef.current ?? emptyStateRef.current;
     const messageContent = messageContentRef.current;
     const composerDock = composerDockRef.current;
     if (!el) return;
@@ -896,7 +902,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       : new ResizeObserver(reconcileObservedGeometry);
     observer?.observe(el);
     if (content) observer?.observe(content);
-    if (messageRegion) observer?.observe(messageRegion);
+    if (contentRegion) observer?.observe(contentRegion);
     if (messageContent) observer?.observe(messageContent);
     if (composerDock) observer?.observe(composerDock);
     window.addEventListener("resize", invalidateGeometry);

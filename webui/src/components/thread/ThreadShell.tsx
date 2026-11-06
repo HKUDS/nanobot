@@ -586,23 +586,22 @@ export function ThreadShell({
   const shellRef = useRef<HTMLElement | null>(null);
   const [conversationElement, setConversationElement] = useState<HTMLDivElement | null>(null);
   const [composerSurface, setComposerSurface] = useState<HTMLDivElement | null>(null);
+  const alignSidebar = useCallback(() => {
+    if (!sidebarOpen || !inlineComposer || !contextSidebarHost || !composerSurface) return;
+    // Metadata can wrap below the input card. The viewport also reports grid
+    // movement, which changes the surface's position without resizing it.
+    const inset = contextSidebarHost.getBoundingClientRect().bottom - composerSurface.getBoundingClientRect().bottom;
+    contextSidebarHost.style.setProperty("--sidebar-bottom-inset", `${Math.max(0, inset)}px`);
+  }, [contextSidebarHost, composerSurface, sidebarOpen, inlineComposer]);
   useLayoutEffect(() => {
-    const shell = contextSidebarHost;
-    const surface = composerSurface;
-    if (!sidebarOpen || !inlineComposer || !shell || !surface) return;
-    // Metadata can wrap below the input card. Align sidebars to the visible
-    // surface, rather than assuming a fixed composer/footer padding.
-    const alignSidebar = () => {
-      const inset = shell.getBoundingClientRect().bottom - surface.getBoundingClientRect().bottom;
-      shell.style.setProperty("--sidebar-bottom-inset", `${Math.max(0, inset)}px`);
-    };
+    if (!sidebarOpen || !inlineComposer || !contextSidebarHost || !composerSurface) return;
     alignSidebar();
     const observer = new ResizeObserver(alignSidebar);
-    observer.observe(shell);
+    observer.observe(contextSidebarHost);
     observer.observe(composerMount);
-    observer.observe(surface);
+    observer.observe(composerSurface);
     return () => observer.disconnect();
-  }, [contextSidebarHost, sidebarOpen, inlineComposer, composerDestination, composerMount, composerSurface]);
+  }, [alignSidebar, contextSidebarHost, sidebarOpen, inlineComposer, composerDestination, composerMount, composerSurface]);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const filePreviewResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -1555,6 +1554,7 @@ export function ThreadShell({
             emptyState={emptyState}
             initialLoading={initialHistoryLoading}
             composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
+            onComposerLayoutChange={alignSidebar}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
