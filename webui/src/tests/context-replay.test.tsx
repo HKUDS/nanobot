@@ -60,3 +60,32 @@ it("speeds up longer histories without dropping unpainted snapshots", async () =
   act(() => vi.advanceTimersByTime(47));
   expect(progress()).toBe("5");
 });
+
+it("keeps replay usage frame-local and restores the latest measurement when playback ends", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  const snapshots: ContextSnapshot[] = [
+    { id: "measured", contextWindowTokens: 10000, usage: { prompt_tokens: 1000, cached_tokens: 500 }, graph: { nodes: [], edges: [] } },
+    { id: "pending", contextWindowTokens: 20000, graph: { nodes: [], edges: [] } },
+  ];
+  await act(async () => {
+    render(<ContextInspector context={{ contextTokens: 1000, contextWindowTokens: 10000 }}
+      rounds={[{ inputTokens: 1000, cachedTokens: 500 }]} snapshots={snapshots} />);
+    await vi.dynamicImportSettled();
+  });
+  expect(progress()).toBe("10");
+  const play = screen.getByRole("button", { name: "Play context history" });
+  fireEvent.click(play);
+  expect(progress()).toBe("10");
+  paint();
+  act(() => vi.advanceTimersByTime(200));
+  expect(progress()).toBeNull();
+  fireEvent.pointerEnter(screen.getByRole("progressbar").parentElement!.parentElement!);
+  expect(screen.getByText("— / 20k")).toBeVisible();
+  expect(screen.queryByText("50%")).not.toBeInTheDocument();
+  paint();
+  act(() => vi.advanceTimersByTime(200));
+  expect(play).toBeEnabled();
+  expect(progress()).toBe("10");
+  expect(screen.getByText("1k / 10k")).toBeVisible();
+  expect(screen.getByText("50%")).toBeVisible();
+});
