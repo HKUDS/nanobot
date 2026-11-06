@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from contextlib import AbstractContextManager
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ from nanobot.agent.tools.session_messages import SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.bus.queue import MessageBus
 from nanobot.runtime_context import RuntimeContextBlock, append_runtime_context
+from nanobot.sdk.clients import SessionClient
 from nanobot.session.manager import SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
 
@@ -152,22 +154,60 @@ async def test_search_sessions_ranks_titles_before_message_matches(manager):
 
 
 @pytest.mark.asyncio
-async def test_search_keeps_match_if_session_is_deleted_before_handle_lookup(manager, monkeypatch):
+@pytest.mark.parametrize("change,match_title", [
+    ("reset", False), ("recreate", True), ("delete", True), ("private", False),
+])
+async def test_search_drops_stale_or_private_matches_before_handle_lookup(manager, monkeypatch, change, match_title):
     key = "slack:history"
-    _save_session(manager, key, title="Database notes", messages=[])
+    _save_session(manager, key, title="needle title" if match_title else "notes", messages=[
+        {"role": "user", "content": "needle old content"},
+    ])
+    old_generation = manager.read_session_version(key)[0]
     tool = SearchSessionsTool(manager)
     lookup = tool._handles.alist_all_by_key
 
-    async def delete_before_lookup():
-        assert await manager.state.delete(key)
+    async def change_before_lookup():
+        if change == "reset":
+            await manager.state.reset(key)
+            await manager.state.import_messages(
+                key, [{"role": "user", "content": "new content"}], metadata={"title": "new title"},
+            )
+        elif change in {"recreate", "delete"}:
+            assert await manager.state.delete(key)
+            if change == "recreate":
+                await manager.state.import_messages(key, [{"role": "user", "content": "new content"}])
+        else:
+            await manager.state.update_metadata(key, {"session_type": "private"})
+        if change in {"reset", "recreate"}:
+            assert manager.read_session_version(key)[0] != old_generation
+        monkeypatch.setattr(tool._handles, "alist_all_by_key", lookup)
         return await lookup()
 
-    monkeypatch.setattr(tool._handles, "alist_all_by_key", delete_before_lookup)
+    monkeypatch.setattr(tool._handles, "alist_all_by_key", change_before_lookup)
     with _webui_request():
-        result = _decode(await tool.execute(query="Database"))
+        result = _decode(await tool.execute(query="needle"))
 
-    assert [row["session_key"] for row in result["results"]] == [key]
-    assert result["results"][0]["handle"] is None
+    assert result["results"] == []
+
+
+@pytest.mark.asyncio
+async def test_read_by_handle_does_not_read_a_reassigned_handle(manager, monkeypatch):
+    key = "slack:history"
+    _save_session(manager, key, title="Notes", messages=[{"role": "user", "content": "old content"}])
+    tool = ReadSessionTool(manager)
+    original = await tool._handles.ahandle_for_session(key)
+    resolve = tool._handles.aresolve
+
+    async def replace_after_resolve(name):
+        handle = await resolve(name)
+        await manager.state.delete(key)
+        await manager.state.import_messages(key, [{"role": "user", "content": "new content"}],
+                                            metadata={"session_handle": "luna"})
+        return handle
+
+    monkeypatch.setattr(tool._handles, "aresolve", replace_after_resolve)
+    result = await tool.execute(session_key=f"@{original.name}")
+    assert result.is_error and "session not found" in str(result)
 
 
 @pytest.mark.asyncio
@@ -371,3 +411,64 @@ async def test_session_tools_work_without_request_context(manager):
 
     assert [row["session_key"] for row in result["results"]] == ["custom:history"]
     assert read["session_key"] == "custom:history"
+
+
+@pytest.mark.asyncio
+async def test_search_retains_valid_matches_when_a_candidate_is_reset(manager, monkeypatch):
+    for i in range(6):
+        _save_session(manager, f"sdk:{i}", title=f"needle {i}", messages=[],
+                      updated_at=datetime(2025, 1, i + 1))
+    tool = SearchSessionsTool(manager)
+    lookup = tool._handles.alist_all_by_key
+
+    async def reset_once():
+        monkeypatch.setattr(tool._handles, "alist_all_by_key", lookup)
+        await manager.state.reset("sdk:5")
+        await manager.state.update_metadata("sdk:5", {"title": "other"})
+        return await lookup()
+
+    monkeypatch.setattr(tool._handles, "alist_all_by_key", reset_once)
+    result = _decode(await tool.execute(query="needle"))
+    assert [row["session_key"] for row in result["results"]] == [f"sdk:{i}" for i in (4, 3, 2, 1)]
+
+
+@pytest.mark.asyncio
+async def test_handle_is_not_exposed_if_another_session_acquires_the_same_name(manager, monkeypatch):
+    _save_session(manager, "sdk:older", title="older", messages=[])
+    _save_session(manager, "sdk:target", title="target", messages=[{"role": "user", "content": "needle"}])
+    search = SearchSessionsTool(manager)
+    initial = await search._handles.alist_all_by_key()
+    target_name = initial["sdk:target"].name
+    client = SessionClient(SimpleNamespace(sessions=manager))
+    snapshot = await client.export("sdk:target")
+    assert snapshot is not None and snapshot.metadata["session_handle"] == target_name
+    lookup = search._handles.alist_all_by_key
+
+    async def restore_after_lookup():
+        handles = await lookup()
+        # SDK restore carries the exported handle into an existing empty session.
+        await client.restore(snapshot, session_key="sdk:older")
+        return handles
+
+    monkeypatch.setattr(search._handles, "alist_all_by_key", restore_after_lookup)
+    result = _decode(await search.execute(query="needle"))
+    assert result["results"][0]["session_key"] == "sdk:target"
+    assert result["results"][0]["handle"] is None
+    reassigned = await search._handles.aresolve(target_name)
+    assert reassigned is not None and reassigned.session_key == "sdk:older"
+
+    read = ReadSessionTool(manager)
+    current = await read._handles.ahandle_for_session("sdk:target")
+    assert current is not None
+    resolve = read._handles.aresolve
+
+    async def ingest_after_resolve(name):
+        handle = await resolve(name)
+        await client.ingest("sdk:older", [], metadata={"session_handle": current.name})
+        return handle
+
+    monkeypatch.setattr(read._handles, "aresolve", ingest_after_resolve)
+    result = await read.execute(session_key=f"@{current.name}")
+    assert result.is_error and "session not found" in str(result)
+    reassigned = await resolve(current.name)
+    assert reassigned is not None and reassigned.session_key == "sdk:older"

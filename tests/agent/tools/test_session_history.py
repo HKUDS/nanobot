@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import gc
 import json
+import sqlite3
+import threading
+import time
 import tracemalloc
 from datetime import datetime
 
@@ -203,7 +207,7 @@ def test_session_search_ranking_and_visibility_remain_snapshot_based(tmp_path):
     assert reader.search("unmatched", limit=5) == []
 
 
-def test_search_uses_one_snapshot_for_visibility_and_messages(tmp_path, monkeypatch):
+def test_search_keeps_visibility_title_and_messages_consistent(tmp_path, monkeypatch):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("sdk:history")
     session.metadata["title"] = "Notes"
@@ -225,9 +229,11 @@ def test_search_uses_one_snapshot_for_visibility_and_messages(tmp_path, monkeypa
     monkeypatch.setattr(manager, "list_sessions", list_then_commit)
     reader = SessionHistoryReader(manager)
     matches = reader.search("needle", limit=5)
-    assert [(match["title"], match["updated_at"], match["messages"][0]["content"]) for match in matches] == [
-        ("Notes", "2024-01-01T00:00:00", "old needle"),
-    ]
+    # A search may omit the now-private session rather than pinning one global
+    # snapshot; if it returns a match, it must not combine the two versions.
+    assert [(match["title"], match["updated_at"], match["messages"][0]["content"]) for match in matches] in (
+        [], [("Notes", "2024-01-01T00:00:00", "old needle")],
+    )
     assert reader.read(session.key, query="", limit=8) is None
 
 
@@ -322,3 +328,209 @@ async def test_session_tool_memory_is_bounded_for_long_persisted_history(tmp_pat
             assert result["results"] == []
     if manager._state is not None:
         await manager.state.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["read", "search"])
+async def test_cancelled_history_scan_exits_and_releases_wal_snapshot(tmp_path, monkeypatch, tool_name):
+    from nanobot.session import sqlite_store
+
+    manager = SessionManager(tmp_path)
+    key = "sdk:long-history"
+    session = manager.get_or_create(key)
+    session.messages = [
+        {"role": "user", "content": f"ordinary {i}", "_marker": "long-history"}
+        for i in range(3000)
+    ]
+    manager.save(session)
+    db = sqlite3.connect(manager._store.path, isolation_level=None, timeout=0.2)
+    db.execute("PRAGMA wal_autocheckpoint=0")
+    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    entered, release, done = threading.Event(), threading.Event(), threading.Event()
+    original_object = sqlite_store._object
+
+    def slow_rows(raw):
+        result = original_object(raw)
+        if result.get("_marker") == "long-history":
+            if not entered.is_set():
+                entered.set()
+                assert release.wait(5)
+            time.sleep(0.0005)
+        return result
+
+    monkeypatch.setattr(sqlite_store, "_object", slow_rows)
+    tool = ReadSessionTool(manager) if tool_name == "read" else SearchSessionsTool(manager)
+    method = "read" if tool_name == "read" else "search"
+    original = getattr(tool._access, method)
+
+    def tracked(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(tool._access, method, tracked)
+    kwargs = {"session_key": key, "query": "not-present"} if tool_name == "read" else {"query": "not-present"}
+    task = asyncio.create_task(tool.execute(**kwargs))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        db.execute("UPDATE sessions SET title='while scanning' WHERE key=?", (key,))
+        _, frames, checkpointed = db.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        assert frames > checkpointed  # The paused reader really holds the older snapshot.
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await asyncio.to_thread(done.wait, 0.5), "cancelled worker continued scanning"
+        db.execute("UPDATE sessions SET title='after cancellation' WHERE key=?", (key,))
+        assert db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone() == (0, 0, 0)
+    finally:
+        release.set()
+        await asyncio.to_thread(done.wait, 5)
+        db.close()
+        if manager._state is not None:
+            await manager.state.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["reset", "recreate"])
+async def test_search_during_replacement_never_mixes_header_and_body(tmp_path, monkeypatch, change):
+    manager = SessionManager(tmp_path)
+    writer = SessionManager(tmp_path)
+    key = "sdk:history"
+    session = manager.get_or_create(key)
+    session.metadata["title"] = "old title"
+    session.messages = [{"role": "user", "content": "needle old content"}]
+    manager.save(session)
+    captured, release = threading.Event(), threading.Event()
+    original_list = manager.list_sessions
+
+    def pause_after_list():
+        rows = original_list()
+        captured.set()
+        assert release.wait(5)
+        return rows
+
+    monkeypatch.setattr(manager, "list_sessions", pause_after_list)
+    task = asyncio.create_task(SearchSessionsTool(manager).execute(query="needle"))
+    try:
+        assert await asyncio.to_thread(captured.wait, 5)
+        if change == "reset":
+            await writer.state.reset(key)
+        else:
+            assert await writer.state.delete(key)
+        await writer.state.import_messages(
+            key, [{"role": "user", "content": "needle new content"}], metadata={"title": "new title"},
+        )
+        release.set()
+        results = json.loads(await task)["results"]
+        if results:
+            assert len(results) == 1
+            assert results[0]["title"] == "new title"
+            assert results[0]["excerpts"][0]["content"] == "needle new content"
+            assert results[0]["handle"] is not None
+    finally:
+        release.set()
+        await writer.state.aclose()
+        if manager._state is not None:
+            await manager.state.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("by_handle", [False, True])
+async def test_read_during_reset_does_not_return_old_history(tmp_path, monkeypatch, by_handle):
+    manager = SessionManager(tmp_path)
+    writer = SessionManager(tmp_path)
+    key = "sdk:history"
+    session = manager.get_or_create(key)
+    session.messages = [{"role": "user", "content": "old content"}]
+    manager.save(session)
+    tool = ReadSessionTool(manager)
+    handle = await tool._handles.ahandle_for_session(key)
+    captured, release = threading.Event(), threading.Event()
+    public_history = manager.types.public_history
+
+    def pause_after_header(metadata):
+        if not captured.is_set():
+            captured.set()
+            assert release.wait(5)
+        return public_history(metadata)
+
+    monkeypatch.setattr(manager.types, "public_history", pause_after_header)
+    reference = f"@{handle.name}" if by_handle else key
+    task = asyncio.create_task(tool.execute(session_key=reference))
+    try:
+        assert await asyncio.to_thread(captured.wait, 5)
+        await writer.state.reset(key)
+        await writer.state.import_messages(key, [{"role": "user", "content": "new content"}])
+        release.set()
+        result = await task
+        assert result.is_error and "session not found" in str(result)
+    finally:
+        release.set()
+        await writer.state.aclose()
+        await manager.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_search_does_not_hold_a_global_snapshot_between_histories(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    for i in range(2):
+        session = manager.get_or_create(f"sdk:{i}")
+        session.messages = [{"role": "user", "content": "ordinary"}]
+        session.updated_at = datetime(2025, 1, i + 1)
+        manager.save(session)
+    db = sqlite3.connect(manager._store.path, isolation_level=None, timeout=0.2)
+    db.execute("PRAGMA wal_autocheckpoint=0")
+    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    entered, release = threading.Event(), threading.Event()
+    tool = SearchSessionsTool(manager)
+    original_read = tool._access.read
+
+    def pause_before_second(key, **kwargs):
+        if key == "sdk:0":
+            entered.set()
+            assert release.wait(5)
+        return original_read(key, **kwargs)
+
+    monkeypatch.setattr(tool._access, "read", pause_before_second)
+    task = asyncio.create_task(tool.execute(query="not-present"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        db.execute("UPDATE sessions SET title='changed' WHERE key='sdk:1'")
+        assert db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone() == (0, 0, 0)
+        release.set()
+        assert json.loads(await task)["results"] == []
+    finally:
+        release.set()
+        db.close()
+        if manager._state is not None:
+            await manager.state.aclose()
+
+
+def test_search_preserves_recency_order_when_a_title_changes_during_scan(tmp_path, monkeypatch):
+    manager = SessionManager(tmp_path)
+    newer = manager.get_or_create("sdk:newer")
+    newer.metadata["title"] = "notes"
+    newer.messages = [{"role": "user", "content": "needle in body"}]
+    newer.updated_at = datetime(2025, 1, 1)
+    manager.save(newer)
+    older = manager.get_or_create("sdk:older")
+    older.metadata["title"] = "needle old"
+    older.updated_at = datetime(2020, 1, 1)
+    manager.save(older)
+    writer = SessionManager(tmp_path)
+    changed = writer.get_or_create(newer.key)
+    changed.metadata["title"] = "needle new"
+    reader = SessionHistoryReader(manager)
+    original_read = reader.read
+
+    def change_before_read(key, **kwargs):
+        if key == newer.key:
+            writer.save(changed)
+        return original_read(key, **kwargs)
+
+    monkeypatch.setattr(reader, "read", change_before_read)
+    assert [match["session_key"] for match in reader.search("needle", limit=5)] == [
+        newer.key, older.key,
+    ]
