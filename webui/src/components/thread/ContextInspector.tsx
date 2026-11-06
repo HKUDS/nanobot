@@ -76,11 +76,13 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
       {displayedGraph && <Suspense fallback={<div role="status" aria-busy="true" className={cn(surface, "flex min-h-[300px] items-center justify-center text-sm text-muted-foreground", sidebar && !large && "min-h-0 flex-1")}>{t("chat.loading")}</div>}>
         <ContextGraphScene graph={displayedGraph} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? toggleExpanded : undefined} onOpenFile={onOpenFile ? openFile : undefined} />
       </Suspense>}
-      {(!displayedGraph || !graph) && <div className={cn(surface, "flex min-h-[300px] flex-col items-center justify-center gap-3 px-4 text-center text-sm text-muted-foreground", sidebar && !large && "min-h-0 flex-1", displayedGraph && "absolute inset-0 z-20 bg-card/85")}>
-        {active && (!loadGraph ? <p role="status">{t("thread.composer.context.unavailable")}</p> : detail.error ? <>
-          <p role="alert">{t("thread.composer.context.loadError")}</p>
-          <button type="button" onClick={detail.retry} className="rounded-md px-3 py-2 text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">{t("common.retry")}</button>
-        </> : <p role="status" aria-busy="true">{t("chat.loading")}</p>)}
+      {(!displayedGraph || !graph) && <div className={cn(surface, "flex min-h-[300px] flex-col items-center justify-center px-4 text-center text-sm text-muted-foreground", sidebar && !large && "min-h-0 flex-1", displayedGraph && "absolute inset-0 z-20 justify-start bg-transparent pt-4")}>
+        <div className={cn("flex flex-col items-center gap-3", displayedGraph && "rounded-lg bg-card/95 px-3 py-2")}>
+          {active && (!loadGraph ? <p role="status">{t("thread.composer.context.unavailable")}</p> : detail.error ? <>
+            <p role="alert">{t("thread.composer.context.loadError")}</p>
+            <button type="button" onClick={detail.retry} className="rounded-md px-3 py-2 text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">{t("common.retry")}</button>
+          </> : <p role="status" aria-busy="true">{t("chat.loading")}</p>)}
+        </div>
       </div>}
     </div>
     <div className="flex shrink-0 items-center gap-3">
