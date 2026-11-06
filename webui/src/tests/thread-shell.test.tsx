@@ -1179,6 +1179,7 @@ describe("ThreadShell", () => {
     view.rerender(wrap(client, thread, undefined, "tok", []));
     fireEvent.click(screen.getByTestId("composer-context-usage"));
     expect(await screen.findByText("This host cannot load saved context graphs.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
     expect(detailCalls()).toHaveLength(1);
     view.unmount();
   });

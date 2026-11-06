@@ -7111,6 +7111,7 @@ async def test_deferred_context_graph_routes_preserve_pages_and_read_only_the_se
     from websockets.http11 import Request
 
     from nanobot.session.display_history import HistoryReader
+    from nanobot.webui.history import fact_from_record
 
     key = "websocket:deferred-graphs"
     graph = {"nodes": [{"path": f"/file-{i}.md", "name": f"file-{i}.md", "tokens": i, "state": "loaded"}
@@ -7127,6 +7128,12 @@ async def test_deferred_context_graph_routes_preserve_pages_and_read_only_the_se
                              "context_snapshot": {"graph": graph, "estimated_tokens": 5, "context_window_tokens": 1000}})
         history.append(key, {"event": "message", "text": f"answer {number}"})
         history.append(key, {"event": "turn_end", "usage": {"context_tokens": number + 10}})
+    for number in range(2):
+        history.append("websocket:another-chat", {"event": "user", "text": f"other question {number}"})
+        history.append("websocket:another-chat", {"event": "model_request", "request_id": str(number),
+                                                  "run_id": str(number), "sequence": 1, "phase": "started",
+                                                  "context_graph": graph})
+        history.append("websocket:another-chat", {"event": "turn_end"})
     channel = _ch(MagicMock(), session_manager=history.sessions)
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
     http = channel.gateway.http
@@ -7198,9 +7205,11 @@ async def test_deferred_context_graph_routes_preserve_pages_and_read_only_the_se
         assert (await get(path.replace(encoded, quote("websocket:another-chat", safe="")))).status_code == 404
         assert (await get(path.split("?", 1)[0] + "?ref=malformed")).status_code == 404
     await history.sessions.state.reset(key)
-    history.append(key, {"event": "user", "text": "replacement"})
-    history.append(key, {"event": "model_request", "request_id": "new", "run_id": "new", "sequence": 1,
-                         "phase": "started", "context_graph": graph})
+    await history.sessions.state.append_history(key, [
+        fact_from_record({"event": "user", "text": "replacement"}),
+        fact_from_record({"event": "model_request", "request_id": "new", "run_id": "new", "sequence": 1,
+                          "phase": "started", "context_graph": graph}),
+    ], expected_generation=None)
     # Reusing turn/position after reset must not revive a previous generation's reference.
     stale = f"/api/sessions/{encoded}/webui-thread/context-graph?ref={detail_refs[3]}"
     assert (await get(stale)).status_code == 404

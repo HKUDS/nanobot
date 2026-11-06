@@ -105,7 +105,7 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
         </dl>
       </div>}
     </div>
-    <ContextReplayButton disabled={!active || replay !== null || snapshots.length < 2}
+    <ContextReplayButton disabled={!active || replay !== null || snapshots.length < 2 || (!loadGraph && snapshots.some(item => item.graphDetailRef))}
       onPlay={() => {
         setMeterHover(false);
         // Scale by request count: our replay unit is a snapshot, not a graph edge.
