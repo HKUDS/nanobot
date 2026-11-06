@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any, TypedDict, cast
 
 from nanobot.runtime_context import public_history_message
 from nanobot.session.history_visibility import is_hidden_history_message
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import SessionManager, SessionMetadataPayload
 
 
 class SessionMessage(TypedDict):
@@ -43,16 +43,11 @@ def _message_text(message: Mapping[str, Any]) -> str:
     return "\n".join(parts).strip()
 
 
-def _matching_messages(raw_messages: object, *, needle: str, limit: int) -> list[SessionMessage]:
-    if not isinstance(raw_messages, list):
-        return []
-    messages = cast(list[object], raw_messages)
+def _matching_messages(
+    messages: Iterator[tuple[int, dict[str, Any]]], *, needle: str, limit: int,
+) -> list[SessionMessage]:
     matches: list[SessionMessage] = []
-    for index in range(len(messages) - 1, -1, -1):
-        raw_message = messages[index]
-        if not isinstance(raw_message, dict):
-            continue
-        message = cast(dict[str, Any], raw_message)
+    for index, message in messages:
         role = message.get("role")
         if role not in {"user", "assistant"} or message.get("_command") or is_hidden_history_message(message):
             continue
@@ -85,6 +80,17 @@ class SessionHistoryReader:
         limit: int,
         *,
         exclude_session_key: str | None = None,
+    ) -> list[SessionMatch]:
+        return self._sessions.read_consistently(
+            lambda: self._search(query, limit, exclude_session_key=exclude_session_key),
+        )
+
+    def _search(
+        self,
+        query: str,
+        limit: int,
+        *,
+        exclude_session_key: str | None,
     ) -> list[SessionMatch]:
         needle = query.casefold()
         ranked: list[tuple[int, SessionMatch]] = []
@@ -139,17 +145,19 @@ class SessionHistoryReader:
     ) -> SessionMatch | None:
         if session_key == exclude_session_key:
             return None
-        payload = self._sessions.read_session_file(session_key)
-        if payload is None:
-            return None
-        raw_metadata = cast(object, payload.get("metadata"))
-        metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
-        if not self._sessions.types.public_history(metadata):
-            return None
-        updated = payload.get("updated_at")
-        return {
-            "session_key": session_key,
-            "title": _text(metadata.get("title")),
-            "updated_at": updated if isinstance(updated, str) else None,
-            "messages": _matching_messages(payload.get("messages"), needle=query.casefold(), limit=limit),
-        }
+
+        def project(
+            payload: SessionMetadataPayload, messages: Iterator[tuple[int, dict[str, Any]]],
+        ) -> SessionMatch | None:
+            metadata = payload["metadata"]
+            if not self._sessions.types.public_history(metadata):
+                return None
+            updated = payload.get("updated_at")
+            return {
+                "session_key": session_key,
+                "title": _text(metadata.get("title")),
+                "updated_at": updated if isinstance(updated, str) else None,
+                "messages": _matching_messages(messages, needle=query.casefold(), limit=limit),
+            }
+
+        return self._sessions.project_session_messages(session_key, project)

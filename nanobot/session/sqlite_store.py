@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager, suppress
 from datetime import datetime
 from pathlib import Path
@@ -431,6 +431,38 @@ class SqliteSessionStore:
                 return None
             return {"key": key, "created_at": row[0], "updated_at": row[1],
                     "metadata": self._metadata(db, key, row[2])}
+
+    def project_session_messages(
+        self,
+        key: str,
+        project: Callable[[SessionMetadataPayload, Iterator[tuple[int, dict[str, Any]]]], _T],
+    ) -> _T | None:
+        """Project the header and canonical messages without materializing history."""
+        with self.transaction(write=False) as db:
+            if db.execute("SELECT 1 FROM sessions WHERE key=?", (key,)).fetchone() is None:
+                return None
+            # A full load validates every record before decoding the header or
+            # projecting messages. Preserve those errors without keeping the rows.
+            count = 0
+            for row in db.execute(
+                "SELECT record FROM messages WHERE session_key=? ORDER BY position", (key,),
+            ):
+                _object(row[0])
+                count += 1
+            session = self.load(key, history=False)
+            assert session is not None
+            header: SessionMetadataPayload = {
+                "key": key, "created_at": session.created_at.isoformat(),
+                "updated_at": session.updated_at.isoformat(), "metadata": session.metadata,
+            }
+            rows = db.execute(
+                "SELECT record FROM messages WHERE session_key=? ORDER BY position DESC", (key,),
+            )
+            messages = ((count - 1 - index, _object(row[0])) for index, row in enumerate(rows))
+            try:
+                return project(header, messages)
+            finally:
+                rows.close()
 
     def read(self, key: str) -> SessionPayload | None:
         session = self.load(key)

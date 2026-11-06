@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -609,6 +610,21 @@ class SessionManager:
                 self._store.save(session)
             self._store.append_history(key, facts, expected_generation=session.generation)
         self._store.run_write(append)
+
+    def read_consistently(self, operation: Callable[[], _T]) -> _T:
+        """Run nested repository reads against one committed snapshot."""
+        return self._store.run_read(operation)
+
+    def project_session_messages(
+        self,
+        key: str,
+        project: Callable[[SessionMetadataPayload, Iterator[tuple[int, dict[str, Any]]]], _T],
+    ) -> _T | None:
+        """Project a session header and reverse message stream within one snapshot.
+
+        The stream is valid only during the callback.
+        """
+        return self._store.project_session_messages(key, project)
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:
         """Read a session without populating the cache."""
