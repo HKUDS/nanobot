@@ -133,7 +133,8 @@ function appendProjectedSessionInput(
 function createTranscript(messages: UIMessage[], saved: ThreadTranscriptSnapshot | undefined, historyKey: string | null) {
   const owner = new ThreadTranscript(messages, saved);
   // The first paint must not enter the welcome layout while history is pending.
-  owner.paging = { ...owner.paging, loading: !!historyKey && owner.paging.version === 0 };
+  owner.paging = { ...owner.paging, loading: !!historyKey && owner.paging.version === 0,
+    hasMoreBefore: historyKey ? owner.paging.hasMoreBefore : false };
   return owner;
 }
 

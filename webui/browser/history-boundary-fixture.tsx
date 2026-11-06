@@ -27,7 +27,8 @@ export function HistoryBoundaryFixture({ local = false, navigate = false, tasks 
     <SubagentTasksProvider client={client} token={token} sessionKey={key} enabled={tasks} liveEvents={false}>
     <ThreadViewport messages={messages} isStreaming={false} conversationKey={key}
       messagesKey={local ? key : history.messagesKey}
-      conversationReady={local || history.messagesReady && !history.loading} hasMoreBefore={history.hasMoreBefore}
+      conversationReady={local || history.messagesReady} hasMoreBefore={history.hasMoreBefore}
+      initialLoading={history.loading} initialError={history.error} onRetryInitial={history.refresh}
       loadingOlder={history.loadingOlder} olderError={history.olderError} onLoadOlder={history.loadOlder}
       navigation={navigate ? navigation : undefined} userMessageOffset={history.userMessageOffset}
       composer={<div className="border-t px-4 py-6" style={{ height: 96 }}>History boundary fixture</div>} />

@@ -36,7 +36,8 @@ export interface ThreadPaging {
   error: string | null;
   olderError: string | null;
   beforeCursor: string | null;
-  hasMoreBefore: boolean;
+  /** Null until a history read establishes the oldest loaded boundary. */
+  hasMoreBefore: boolean | null;
   userMessageOffset: number;
   forkBoundaryMessageCount: number | null;
   truncated: boolean;
@@ -95,7 +96,7 @@ function copyText(value: TextSource): TextSource {
 }
 function emptyPaging(): ThreadPaging {
   return { loading: false, loadingOlder: false, error: null, olderError: null,
-    beforeCursor: null, hasMoreBefore: false, userMessageOffset: 0,
+    beforeCursor: null, hasMoreBefore: null, userMessageOffset: 0,
     forkBoundaryMessageCount: null, truncated: false, version: 0, lineage: 0,
     hasPendingToolCalls: false, completedTurnIds: [], completionIdsProvided: false, activeTurnId: null };
 }
