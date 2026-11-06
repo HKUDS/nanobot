@@ -9,6 +9,7 @@ import pytest
 from agent.session_helpers import mock_session_manager, run_session
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.file_state import FileStateStore
+from nanobot.agent.tools.filesystem import ReadFileTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command.application import register_builtin_commands
@@ -199,7 +200,10 @@ class TestCmdNewUnifiedSession:
         previous_file_state = file_state_store.for_session("unified:default")
         tracked_file = tmp_path / "tracked.txt"
         tracked_file.write_text("tracked", encoding="utf-8")
-        previous_file_state.record_read(tracked_file)
+        await ReadFileTool(workspace=tmp_path, file_states=previous_file_state).execute(
+            path=str(tracked_file),
+        )
+        assert previous_file_state.get(tracked_file) is not None
         loop = SimpleNamespace(
             sessions=sessions,
             consolidator=SimpleNamespace(archive_session=AsyncMock(return_value=True)),
@@ -230,7 +234,7 @@ class TestCmdNewUnifiedSession:
         assert reloaded.messages == []
         reset_file_state = file_state_store.for_session("unified:default")
         assert reset_file_state is not previous_file_state
-        assert reset_file_state.is_unchanged(tracked_file) is False
+        assert reset_file_state.get(tracked_file) is None
         archived = loop.consolidator.archive_session.call_args.args[0]
         assert archived.key == "unified:default"
         assert archived.messages == expected_snapshot

@@ -248,7 +248,6 @@ class _TextRange:
         self.total = 0
         self.numbered: list[str] = []
         self.line_truncated = False
-        self.overflow_line: int | None = None
         self._output_chars = 0
         self._fragments: list[str] = []
         self._fragment_chars = 0
@@ -307,7 +306,6 @@ class _TextRange:
                 self.numbered.append((prefix + "".join(self._fragments) + fragment)[:self.max_chars])
                 self.line_truncated = True
             self._fragments.clear()
-            self.overflow_line = line_no
             self._stopped = True
             return
 
@@ -434,13 +432,33 @@ class ReadFileTool(_FsTool):
                 if opened.st_size > self._MAX_FILE_SIZE_BYTES:
                     return self._file_too_large(opened.st_size)
 
+                guessed_mime = mimetypes.guess_type(path)[0]
+                previous_hash = (
+                    self._file_states.visible_read_hash(fp, offset=offset, limit=limit)
+                    if not force and not (guessed_mime and guessed_mime.startswith("image/"))
+                    else None
+                )
+                if previous_hash is not None:
+                    digest = hashlib.sha256()
+                    bytes_read = 0
+                    while chunk := stream.read(min(
+                        self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
+                    )):
+                        bytes_read += len(chunk)
+                        if bytes_read > self._MAX_FILE_SIZE_BYTES:
+                            return self._file_too_large(bytes_read)
+                        digest.update(chunk)
+                    if digest.hexdigest() == previous_hash:
+                        return f"[File unchanged since last read: {path}]"
+                    stream.seek(0)
+
                 first = stream.read(min(max(16, self._READ_CHUNK_SIZE), self._MAX_FILE_SIZE_BYTES + 1))
                 if not first:
                     return f"(Empty file: {path})"
                 if len(first) > self._MAX_FILE_SIZE_BYTES:
                     return self._file_too_large(len(first))
 
-                mime = detect_image_mime(first) or mimetypes.guess_type(path)[0]
+                mime = detect_image_mime(first) or guessed_mime
                 if mime and mime.startswith("image/"):
                     image = bytearray(first)
                     while True:
@@ -456,7 +474,7 @@ class ReadFileTool(_FsTool):
                     del image
                     return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
-                return self._read_text(stream, first, fp, path, mime, offset, limit, force)
+                return self._read_text(stream, first, fp, path, mime, offset, limit)
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
@@ -471,7 +489,7 @@ class ReadFileTool(_FsTool):
 
     def _read_text(
         self, stream: BinaryIO, first: bytes, fp: Path, path: str, mime: str | None,
-        offset: int, limit: int | None, force: bool,
+        offset: int, limit: int | None,
     ) -> str:
         from nanobot.utils.document import _is_text_extension
 
@@ -491,11 +509,6 @@ class ReadFileTool(_FsTool):
 
         selected_offset = max(1, offset)
         selected_limit = limit or self._DEFAULT_LIMIT
-        if selected_limit < 0:
-            # Direct callers can bypass the schema's minimum. Preserve the
-            # old negative slice semantics without retaining the whole file.
-            end = selected_offset - 1 + selected_limit
-            selected_limit = self._MAX_FILE_SIZE_BYTES + 1 if end < 0 else 0
         text = _TextRange(selected_offset, selected_limit, self._MAX_CHARS)
         # A late UTF-8 error changes the interpretation of the entire file. Run
         # both candidates on the same bytes, rather than reopening a mutable file.
@@ -538,11 +551,6 @@ class ReadFileTool(_FsTool):
                 decode_error = _decode_error_message(e, base + decoded_bytes - buffered)
 
         content_hash = digest.hexdigest()
-        if not force and self._file_states.is_unchanged(
-            fp, offset=offset, limit=limit, content_hash=content_hash,
-        ):
-            return f"[File unchanged since last read: {path}]"
-
         if decode_error is not None:
             if bom_length:
                 return ToolResult.error(f"Error reading file: {decode_error}")
@@ -564,15 +572,6 @@ class ReadFileTool(_FsTool):
         numbered = text.numbered
         line_truncated = text.line_truncated
         end = offset - 1 + len(numbered)
-        if limit is not None and limit < 0:
-            original_end = offset - 1 + limit
-            last_line = max(0, total + original_end) if original_end < 0 else original_end
-            numbered = numbered[:max(0, last_line - offset + 1)]
-            if text.overflow_line is not None and text.overflow_line <= last_line:
-                end = offset - 1 + len(numbered)
-            else:
-                end = original_end
-                line_truncated = False
         result = "\n".join(numbered)
         if line_truncated:
             result += (

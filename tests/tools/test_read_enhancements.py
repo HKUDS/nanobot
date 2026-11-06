@@ -17,6 +17,20 @@ from nanobot.utils.document import (
 )
 
 
+class _ReadStreamWrapper:
+    def __init__(self, stream):
+        self.stream = stream
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return self.stream.__exit__(*args)
+
+
 def _document_source(text: str) -> DocumentLineSource:
     lines = (
         LocatedDocumentLine(line, line_no, "")
@@ -53,6 +67,60 @@ class TestReadDedup:
             second = await tool.execute(path=str(f))
         assert "unchanged" in second.lower()
         assert "line 0" not in second
+
+    @pytest.mark.asyncio
+    async def test_visible_unchanged_receipt_skips_text_parsing(self, tool, tmp_path, monkeypatch):
+        f = tmp_path / "data.txt"
+        f.write_text("one\ntwo\n", encoding="utf-8")
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f), limit=1)
+
+        def fail_parse(*_args):
+            raise AssertionError("unchanged content must not be parsed again")
+
+        monkeypatch.setattr(tool, "_read_text", fail_parse)
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            second = await tool.execute(path=str(f), limit=1)
+        assert second == f"[File unchanged since last read: {f}]"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("case", ["fresh", "force", "not_visible", "different_range"])
+    async def test_read_without_a_usable_receipt_makes_one_pass(
+        self, tool, tmp_path, monkeypatch, case,
+    ):
+        f = tmp_path / "data.txt"
+        raw = b"first\n" + b"x" * 80 + b"\nlast\n"
+        f.write_bytes(raw)
+        if case != "fresh":
+            with file_state.file_read_context("read-1", lambda: {}):
+                first = await tool.execute(path=str(f), limit=1)
+        else:
+            first = ""
+        real_fdopen = os.fdopen
+        counts = {"bytes": 0, "seeks": 0}
+
+        class CountingStream(_ReadStreamWrapper):
+            def read(self, size):
+                chunk = self.stream.read(size)
+                counts["bytes"] += len(chunk)
+                return chunk
+
+            def seek(self, *args):
+                counts["seeks"] += 1
+                return self.stream.seek(*args)
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: CountingStream(real_fdopen(*args, **kwargs)),
+        )
+        visible = {} if case == "not_visible" else {"read-1": first}
+        offset = 2 if case == "different_range" else 1
+        with file_state.file_read_context("read-2", lambda: visible):
+            result = await tool.execute(path=str(f), offset=offset, limit=1, force=case == "force")
+
+        assert result.startswith(f"{offset}| ")
+        assert counts == {"bytes": len(raw), "seeks": 0}
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
 
     @pytest.mark.asyncio
     async def test_read_after_external_modification_returns_full(self, tool, tmp_path):
@@ -743,6 +811,90 @@ class TestBoundedTextReads:
             reread = await tool.execute(path=str(f), limit=1)
         assert reread == first
         assert tool._file_states.get(f).content_hash == hashlib.sha256(changed).hexdigest()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("new_type", ["utf16", "image"])
+    async def test_changed_file_is_redetected_and_hashed_after_precheck(
+        self, tmp_path, monkeypatch, new_type,
+    ):
+        f = tmp_path / "data.txt"
+        f.write_bytes(b"original\n")
+        tool = ReadFileTool(workspace=tmp_path)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f))
+        f.write_bytes(b"intermediate bytes\n")
+        final = (
+            "new text\n".encode("utf-16") if new_type == "utf16"
+            else b"\x89PNG\r\n\x1a\nimage data"
+        )
+        real_fdopen = os.fdopen
+
+        class ChangeAfterPrecheck(_ReadStreamWrapper):
+            def __init__(self, stream):
+                super().__init__(stream)
+                self.changed = False
+
+            def read(self, size):
+                chunk = self.stream.read(size)
+                if not chunk and not self.changed:
+                    self.changed = True
+                    f.write_bytes(final)
+                return chunk
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: ChangeAfterPrecheck(real_fdopen(*args, **kwargs)),
+        )
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            second = await tool.execute(path=str(f))
+
+        if new_type == "image":
+            assert second[0]["image_url"]["url"] == (
+                f"data:image/png;base64,{base64.b64encode(final).decode()}"
+            )
+            assert tool._file_states.get(f).content_hash == hashlib.sha256(b"original\n").hexdigest()
+        else:
+            assert second == "1| new text\n\n(End of file — 1 lines total)"
+            assert tool._file_states.get(f).content_hash == hashlib.sha256(final).hexdigest()
+            with file_state.file_read_context("read-3", lambda: {"read-2": second}):
+                repeat = await tool.execute(path=str(f))
+            assert repeat == f"[File unchanged since last read: {f}]"
+
+    @pytest.mark.asyncio
+    async def test_growth_during_hash_precheck_respects_size_limit(self, tmp_path, monkeypatch):
+        f = tmp_path / "data.txt"
+        raw = b"first\n" + b"x" * 20
+        f.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+        monkeypatch.setattr(tool, "_MAX_FILE_SIZE_BYTES", 64)
+        with file_state.file_read_context("read-1", lambda: {}):
+            first = await tool.execute(path=str(f))
+        real_fdopen = os.fdopen
+
+        class GrowingStream(_ReadStreamWrapper):
+            def __init__(self, stream):
+                super().__init__(stream)
+                self.grown = False
+
+            def read(self, size):
+                chunk = self.stream.read(size)
+                if not self.grown:
+                    self.grown = True
+                    with f.open("ab") as out:
+                        out.write(b"y" * 64)
+                return chunk
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: GrowingStream(real_fdopen(*args, **kwargs)),
+        )
+        with file_state.file_read_context("read-2", lambda: {"read-1": first}):
+            result = await tool.execute(path=str(f))
+
+        assert result.is_error
+        assert "File too large to read" in result
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
 
     @pytest.mark.asyncio
     async def test_file_at_size_limit_is_readable(self, tmp_path, monkeypatch):
