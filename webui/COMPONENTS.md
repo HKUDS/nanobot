@@ -39,6 +39,7 @@ Channel fixture fields, defaults, and requirements come from the Python channel 
 | `src/components/settings/shared/` | Reusable settings-specific compositions | Settings rows/groups, feature editors, provider controls |
 | `src/components/settings/` | Settings feature screens and their controllers | Models, capabilities, channels, automations |
 | `src/components/remote/` | Host selection and connection interfaces | Host switcher, pairing and remote connections |
+| `src/components/pairing/` | Chat-channel pairing requests, approval lifecycle, and code input | `ChannelPairing`, `PairingCodePopup` |
 | `src/components/workbench/` | Pane layout and its interaction model | `PaneWorkbench` |
 | `src/components/icons/` | Product-specific icon vocabulary | `product-icons.tsx` |
 | `nanobot/channels/<channel>/webui/` | Channel-owned screens, components, and translations | Feishu assistants, Linear setup, Weixin connection |
