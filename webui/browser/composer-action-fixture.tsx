@@ -7,6 +7,7 @@ export function ComposerActionFixture({ parameters }: { parameters: URLSearchPar
   return <main className="mx-auto w-full max-w-5xl px-4 pt-24">
     <ThreadComposer
       variant={parameters.get("composerVariant") === "thread" ? "thread" : "hero"}
+      placeholder={parameters.has("opening") ? "Opening a new topic…" : undefined}
       modelLabel="Preview"
       goalState={parameters.has("goal") ? { active: true, objective: "Keep the work in focus." } : undefined}
       isStreaming={running}

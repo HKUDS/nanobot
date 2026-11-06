@@ -1888,6 +1888,7 @@
     },
     "composer": {
       "placeholder": "Escribe / para ver comandos, @ para mencionar conversaciones o aplicaciones y $ para elegir habilidades",
+      "placeholderCompact": "Escribe un mensaje…",
       "placeholderOpening": "Abriendo un nuevo tema…",
       "inputAria": "Entrada de mensaje",
       "goalStateStrip": "Objetivo: {{label}}",

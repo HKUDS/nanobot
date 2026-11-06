@@ -1887,6 +1887,7 @@
     },
     "composer": {
       "placeholder": "Nhập / để xem lệnh, @ để chọn cuộc trò chuyện hoặc ứng dụng, $ để chọn kỹ năng",
+      "placeholderCompact": "Nhập tin nhắn…",
       "placeholderOpening": "Đang mở chủ đề mới…",
       "inputAria": "Ô nhập tin nhắn",
       "goalStateStrip": "Mục tiêu: {{label}}",
