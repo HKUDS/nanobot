@@ -1,11 +1,18 @@
 import asyncio
+import importlib.util
 import json
+import os
+import subprocess
+import sys
+import textwrap
 import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
+import openai
 import pytest
 from agent.runner_helpers import failed_test_consolidator
+from loguru import logger
 from openai import AsyncOpenAI
 
 from nanobot.agent.hook import AgentHook
@@ -284,13 +291,21 @@ def _bad_chat_event(kind):
 
 
 class _ControlledChatStream(_EventStream):
-    def __init__(self, events, *, disconnect=False, pause_at=None):
+    def __init__(self, events, *, disconnect=False, pause_at=None, close_error=None):
         super().__init__(events)
         self.disconnect = disconnect
         self.pause_at = pause_at
+        self.close_error = close_error
         self.reached_pause = asyncio.Event()
         self.release = asyncio.Event()
         self.sent = 0
+        self.close_calls = 0
+
+    async def aclose(self):
+        self.close_calls += 1
+        self.closed = True
+        if self.close_error is not None:
+            raise self.close_error
 
     async def __aiter__(self):
         for index, event in enumerate(self.events):
@@ -639,3 +654,224 @@ async def test_chat_sdk_mistral_thinking_and_legacy_function_call(chat_sdk):
     assert result.tool_calls[0].name == "old_tool" and result.tool_calls[0].arguments == {"n": 1}
     assert result.usage is not None and result.usage.total_tokens == 6
     assert stream.closed
+
+
+@pytest.fixture
+def cleanup_warnings():
+    messages = []
+    sink = logger.add(messages.append, format="{message}", level="WARNING")
+    try:
+        yield messages
+    finally:
+        logger.remove(sink)
+
+
+def _require_minimum_sdk_for_iterator_close_failure():
+    # SDK 2.24 closes inside its iterator and masks these errors before the
+    # provider's cleanup runs. That pre-existing SDK behavior is outside this fix.
+    if openai.__version__ != "2.8.0":
+        pytest.skip("this regression targets the 2.8.0 SDK's caller-owned close")
+
+
+@pytest.mark.parametrize("blocked", ["read", "callback"])
+async def test_chat_cancel_wins_over_close_error_without_retry(chat_sdk, cleanup_warnings, blocked):
+    if blocked == "read":
+        _require_minimum_sdk_for_iterator_close_failure()
+    stream = _ControlledChatStream([
+        _chat_event({"content": "waiting"}), _chat_event({}, finish="stop"),
+    ], pause_at=0 if blocked == "read" else None, close_error=httpx.CloseError("connection reset"))
+    retry = _ControlledChatStream([_chat_event({"content": "unexpected"}, finish="stop")])
+    provider, requests = chat_sdk([stream, retry])
+    callback_started = asyncio.Event()
+
+    async def on_content(value):
+        if value == "waiting":
+            callback_started.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(provider.chat_stream_with_retry(
+        [{"role": "user", "content": "work"}], on_content_delta=on_content,
+    ))
+    try:
+        started = stream.reached_pause if blocked == "read" else callback_started
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    assert len(requests) == 1 and stream.closed and stream.close_calls == 1
+    assert any("connection reset" in message for message in cleanup_warnings)
+
+
+@pytest.mark.parametrize("parse_first", [False, True])
+async def test_chat_provider_error_wins_over_close_error_without_retry(
+    chat_sdk, cleanup_warnings, parse_first,
+):
+    _require_minimum_sdk_for_iterator_close_failure()
+    prefix = [_bad_chat_event("usage")] if parse_first else []
+    stream = _ControlledChatStream(prefix + [{"error": {
+        "message": "quota exhausted", "type": "insufficient_quota", "code": "insufficient_quota",
+    }}], close_error=httpx.CloseError("connection reset"))
+    retry = _ControlledChatStream([_chat_event({"content": "unexpected"}, finish="stop")])
+    provider, requests = chat_sdk([stream, retry])
+
+    result = await provider.chat_stream_with_retry([{"role": "user", "content": "work"}])
+
+    assert result.finish_reason == "error"
+    assert result.error_type == result.error_code == "insufficient_quota"
+    assert "quota exhausted" in result.content
+    assert len(requests) == 1 and stream.closed and stream.close_calls == 1
+    assert any("connection reset" in message for message in cleanup_warnings)
+
+
+async def test_chat_disconnect_wins_over_close_error_and_still_retries(chat_sdk, cleanup_warnings):
+    _require_minimum_sdk_for_iterator_close_failure()
+    first = _ControlledChatStream([
+        _bad_chat_event("usage"), _chat_event({"reasoning_content": "thinking"}),
+    ], disconnect=True, close_error=httpx.CloseError("connection reset"))
+    second = _ControlledChatStream([_chat_event({"content": "recovered"}, finish="stop")])
+    provider, requests = chat_sdk([first, second])
+
+    result = await provider.chat_stream_with_retry([{"role": "user", "content": "work"}])
+
+    assert result.finish_reason == "stop" and result.content == "recovered"
+    assert len(requests) == 2 and first.closed and second.closed
+    assert any("after ConnectionError: connection reset" in message for message in cleanup_warnings)
+
+
+async def test_chat_timeout_wins_over_close_error(chat_sdk, cleanup_warnings, monkeypatch):
+    _require_minimum_sdk_for_iterator_close_failure()
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0.05")
+    stream = _ControlledChatStream([
+        _bad_chat_event("usage"), _chat_event({}, finish="stop"),
+    ], pause_at=1, close_error=httpx.CloseError("connection reset"))
+    provider, requests = chat_sdk([stream])
+
+    result = await provider.chat_stream([{"role": "user", "content": "work"}])
+
+    assert result.error_kind == "timeout" and len(requests) == 1 and stream.closed
+    assert any("connection reset" in message for message in cleanup_warnings)
+
+
+async def test_chat_callback_error_wins_over_close_error(chat_sdk, cleanup_warnings):
+    stream = _ControlledChatStream([
+        _bad_chat_event("usage"), _chat_event({"content": "fail"}),
+    ], close_error=httpx.CloseError("connection reset"))
+    provider, requests = chat_sdk([stream])
+
+    async def on_content(value):
+        raise RuntimeError("callback failed")
+
+    result = await provider.chat_stream(
+        [{"role": "user", "content": "work"}], on_content_delta=on_content,
+    )
+    assert result.finish_reason == "error" and "callback failed" in result.content
+    assert len(requests) == 1 and stream.closed and stream.close_calls == 1
+    assert any("connection reset" in message for message in cleanup_warnings)
+
+
+@pytest.mark.parametrize("mode", ["success", "quota", "cancel"])
+def test_langfuse_async_openai_chat_stream(mode):
+    if importlib.util.find_spec("langfuse") is None:
+        pytest.skip("optional Langfuse dependency is not installed")
+    if mode == "quota":
+        _require_minimum_sdk_for_iterator_close_failure()
+
+    # Langfuse instruments OpenAI globally; isolate those hooks in a child.
+    script = textwrap.dedent("""
+        import asyncio
+        import runpy
+        import sys
+        from pathlib import Path
+
+        import httpx
+        import langfuse.openai as langfuse_openai
+        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+        from nanobot.providers.registry import ModelAPICapabilities
+
+        test_file = Path(sys.argv[2]).resolve()
+        sys.path.insert(0, str(test_file.parent.parent))
+        helpers = runpy.run_path(str(test_file))
+        event, stream_type = helpers["_chat_event"], helpers["_ControlledChatStream"]
+        mode = sys.argv[1]
+        starts, ends = [], []
+
+        class Generation:
+            def update(self, **kwargs):
+                return self
+            def end(self):
+                ends.append(True)
+        class Tracer:
+            def start_observation(self, **kwargs):
+                starts.append(True)
+                return Generation()
+        langfuse_openai.get_client = lambda **kwargs: Tracer()
+
+        events = ([{"error": {"message": "quota exhausted", "type": "insufficient_quota",
+                              "code": "insufficient_quota"}}] if mode == "quota" else
+                  [event({"content": "complete"}, finish="stop")])
+        stream = stream_type(events, close_error=(
+            httpx.CloseError("connection reset") if mode != "success" else None))
+        requests = []
+        def handler(request):
+            requests.append(request)
+            reply = stream if len(requests) == 1 else stream_type([
+                event({"content": "unexpected retry"}, finish="stop")])
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=reply)
+
+        async def main():
+            client = langfuse_openai.AsyncOpenAI(
+                api_key="synthetic", base_url="https://synthetic.invalid/v1", max_retries=0,
+                http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False))
+            provider = OpenAICompatProvider(
+                api_key="synthetic", default_model="synthetic",
+                model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"))
+            provider._client = client
+            provider._CHAT_RETRY_DELAYS = (0,)
+            try:
+                if mode == "cancel":
+                    started = asyncio.Event()
+                    async def on_content(value):
+                        started.set()
+                        await asyncio.Event().wait()
+                    task = asyncio.create_task(provider.chat_stream_with_retry(
+                        [{"role": "user", "content": "work"}], on_content_delta=on_content))
+                    await asyncio.wait_for(started.wait(), timeout=5)
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    else:
+                        raise AssertionError("caller cancellation was lost")
+                else:
+                    result = await provider.chat_stream_with_retry(
+                        [{"role": "user", "content": "work"}])
+                    if mode == "success":
+                        assert result.finish_reason == "stop" and result.content == "complete"
+                    else:
+                        assert result.finish_reason == "error"
+                        assert result.error_type == result.error_code == "insufficient_quota"
+                assert len(requests) == 1 and stream.closed and stream.close_calls == 1
+                assert len(starts) == len(ends) == 1
+            finally:
+                await client.close()
+        asyncio.run(main())
+    """)
+    env = {
+        key: os.environ[key]
+        for key in (
+            "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "HOME", "USERPROFILE", "APPDATA",
+            "LOCALAPPDATA", "PYTHONPATH", "PYTHONDONTWRITEBYTECODE", "LD_LIBRARY_PATH",
+        )
+        if key in os.environ
+    }
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", script, mode, __file__], env=env,
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

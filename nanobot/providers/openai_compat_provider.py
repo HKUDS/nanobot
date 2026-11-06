@@ -13,6 +13,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse
@@ -109,6 +110,31 @@ _MIMO_THINKING_MODELS: frozenset[str] = frozenset({
     "mimo-v2-omni",
 })
 _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
+
+
+class _ChatStreamCloseError(Exception):
+    """A stream finished without a primary error, but its cleanup failed."""
+
+
+@asynccontextmanager
+async def _managed_chat_stream(chat_stream: Any) -> AsyncIterator[Any]:
+    try:
+        yield chat_stream
+    except BaseException as primary_error:
+        try:
+            await chat_stream.close()
+        except Exception as close_error:
+            logger.warning(
+                "OpenAI chat stream cleanup failed after {}: {}",
+                type(primary_error).__name__, close_error,
+            )
+        raise
+    else:
+        try:
+            await chat_stream.close()
+        except Exception as close_error:
+            raise _ChatStreamCloseError(str(close_error)) from close_error
+
 
 # Maps ProviderSpec.thinking_style → extra_body builder.
 # Each builder takes a bool (thinking_enabled) and returns the dict to
@@ -1640,7 +1666,7 @@ class OpenAICompatProvider(LLMProvider):
                 Any,
                 await client.chat.completions.create(**kwargs),
             )
-            async with chat_stream as stream:
+            async with _managed_chat_stream(chat_stream) as stream:
                 accumulator = self._ChatStreamAccumulator(type(self))
                 parse_error: Exception | None = None
                 completed = False
@@ -1711,6 +1737,13 @@ class OpenAICompatProvider(LLMProvider):
                 if parse_error is not None:
                     raise parse_error
                 return accumulator.finish()
+        except _ChatStreamCloseError as e:
+            return LLMResponse(
+                content=f"Error closing LLM stream: {e}",
+                finish_reason="error",
+                error_kind="cleanup",
+                error_should_retry=False,
+            )
         except asyncio.TimeoutError:
             return LLMResponse(
                 content=(
@@ -1722,6 +1755,19 @@ class OpenAICompatProvider(LLMProvider):
             )
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
+
+    async def _retry_without_images(
+        self,
+        call: Callable[..., Awaitable[LLMResponse]],
+        kw: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        response: LLMResponse,
+    ) -> LLMResponse:
+        # A cleanup failure says nothing about image support and may occur
+        # after a complete model response. Do not retry it with altered input.
+        if response.error_kind == "cleanup":
+            return response
+        return await super()._retry_without_images(call, kw, original_messages, response)
 
     def get_default_model(self) -> str:
         return self.default_model

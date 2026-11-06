@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import weakref
-from contextlib import aclosing
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
@@ -123,6 +123,20 @@ def _chat_chunk(delta, finish=None, usage=None) -> ChatCompletionChunk:
     })
 
 
+class _FakeChatStream:
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.close_error = None
+
+    def __aiter__(self):
+        return self.iterator.__aiter__()
+
+    async def close(self):
+        await self.iterator.aclose()
+        if self.close_error is not None:
+            raise self.close_error
+
+
 def _fake_chat_stream(text: str = "ok"):
     async def _stream():
         yield _chat_chunk({"content": text})
@@ -130,7 +144,7 @@ def _fake_chat_stream(text: str = "ok"):
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return aclosing(_stream())
+    return _FakeChatStream(_stream())
 
 
 def _fake_chat_stream_reasoning_chunks():
@@ -144,7 +158,7 @@ def _fake_chat_stream_reasoning_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return aclosing(_stream())
+    return _FakeChatStream(_stream())
 
 
 def _fake_chat_stream_tool_call_chunks():
@@ -165,7 +179,7 @@ def _fake_chat_stream_tool_call_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return aclosing(_stream())
+    return _FakeChatStream(_stream())
 
 
 def _fake_chat_stream_legacy_function_call_chunks():
@@ -180,7 +194,34 @@ def _fake_chat_stream_legacy_function_call_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return aclosing(_stream())
+    return _FakeChatStream(_stream())
+
+
+@pytest.mark.parametrize("close_error", [
+    httpx.CloseError("connection reset"), TimeoutError("cleanup deadline"),
+], ids=["close-error", "close-timeout"])
+@pytest.mark.parametrize("with_image", [False, True], ids=["text", "image"])
+async def test_stream_close_only_error_is_visible_without_retry(close_error, with_image):
+    stream = _fake_chat_stream("complete")
+    stream.close_error = close_error
+    content = [{"type": "text", "text": "work"}]
+    if with_image:
+        content.append({"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}})
+    messages = [{"role": "user", "content": content}]
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
+        create = AsyncMock(return_value=stream)
+        mock_openai.return_value.chat.completions.create = create
+        provider = OpenAICompatProvider(
+            api_key="synthetic", default_model="synthetic",
+            model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
+        )
+        provider._CHAT_RETRY_DELAYS = (0,)
+        result = await provider.chat_stream_with_retry(messages)
+
+    assert result.finish_reason == "error" and str(close_error) in result.content
+    assert result.error_kind == "cleanup" and result.error_should_retry is False
+    assert create.await_count == 1
+    assert messages[0]["content"] == content
 
 
 @pytest.mark.asyncio
@@ -242,7 +283,7 @@ async def test_openai_compat_stream_releases_consumed_sdk_chunks() -> None:
         deltas.append(delta)
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
-        mock_openai.return_value.chat.completions.create = AsyncMock(return_value=aclosing(stream()))
+        mock_openai.return_value.chat.completions.create = AsyncMock(return_value=_FakeChatStream(stream()))
         provider = OpenAICompatProvider(
             api_key="sk-test", default_model="test-model",
             model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
@@ -429,10 +470,7 @@ class _FakeResponsesError(Exception):
 
 
 class _StalledStream:
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
+    async def close(self):
         pass
 
     def __aiter__(self):
