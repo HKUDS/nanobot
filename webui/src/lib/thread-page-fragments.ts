@@ -58,7 +58,9 @@ export function joinThreadFragments(
   });
   const group = selected!;
   const body = { ...current, events: group.events, completed_turn_ids: group.completed_turn_ids,
-    page: { ...current.page!, record_range: group.page!.record_range,
+    page: { ...current.page!, before_cursor: group.page!.before_cursor, has_more_before: group.page!.has_more_before,
+      user_message_offset: group.page!.user_message_offset, after_cursor: group.page!.after_cursor,
+      has_more_after: group.page!.has_more_after, record_range: group.page!.record_range,
       truncated_oversized_turn: group.page!.truncated_oversized_turn } };
   if (group.fork_boundary_event_index === undefined) delete body.fork_boundary_event_index;
   else body.fork_boundary_event_index = group.fork_boundary_event_index;

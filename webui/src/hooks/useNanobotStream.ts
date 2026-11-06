@@ -569,9 +569,13 @@ export function useNanobotStream(
         if (accepted && owner.hasPendingFragmentGap) {
           deferredCanonicalRef.current = { owner, generation, canonical };
         } else if (body?.page?.record_range) {
-          if (accepted && owner.lastAcceptanceCovered && Array.isArray(body.completed_turn_ids)) {
-            if (deferredCanonicalRef.current?.owner === owner) deferredCanonicalRef.current = undefined;
-            settleFragment(canonical);
+          if (accepted && Array.isArray(body.completed_turn_ids)) {
+            if (owner.lastAcceptanceCovered) {
+              if (deferredCanonicalRef.current?.owner === owner) deferredCanonicalRef.current = undefined;
+              settleFragment(canonical);
+            } else {
+              deferredCanonicalRef.current = { owner, generation, canonical };
+            }
           }
         } else if (ownRead && !owner.hasPendingFragmentGap) {
           if (deferredCanonicalRef.current?.owner === owner) deferredCanonicalRef.current = undefined;
@@ -615,12 +619,17 @@ export function useNanobotStream(
       const accepted = owner.accept(body, read);
       setMessages(owner.messages);
       const deferred = deferredCanonicalRef.current;
-      if (accepted && wasBridging && !owner.hasPendingFragmentGap && owner.lastAcceptanceCovered) {
-        deferredCanonicalRef.current = undefined;
-        if (deferred?.owner === owner && chatId && client.getRunGeneration(chatId) === deferred.generation) {
-          messageCache?.set(chatId, owner.save());
-          settleFragment(deferred.canonical);
-        } else {
+      if (accepted && !owner.hasPendingFragmentGap && owner.lastAcceptanceCovered) {
+        if (deferred?.owner === owner
+          && deferred.canonical.completedTurnIds.every((turn) => owner.projection.closedTurnIds.has(turn))) {
+          deferredCanonicalRef.current = undefined;
+          if (chatId && client.getRunGeneration(chatId) === deferred.generation) {
+            messageCache?.set(chatId, owner.save());
+            settleFragment(deferred.canonical);
+          } else {
+            setRefreshSeq((value) => value + 1);
+          }
+        } else if (wasBridging) {
           setRefreshSeq((value) => value + 1);
         }
       }
@@ -632,7 +641,7 @@ export function useNanobotStream(
     } finally {
       if (olderReadRef.current === operation) olderReadRef.current = null;
     }
-  }, [chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, reconcileCanonical, setMessages, settleFragment]);
+  }, [chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, setMessages, settleFragment]);
 
   useEffect(() => {
     const bridging = transcriptRef.current.hasPendingFragmentGap;

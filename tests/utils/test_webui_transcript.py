@@ -271,7 +271,6 @@ def test_thread_response_preserves_optional_stream_ids(history, delta_event, end
         "wire-first", "wire-first", "wire-second", "wire-second", None, None,
     ]
     assert all("stream_id" not in event for event in stream_events[-2:])
-    assert all("projection_receipts" not in event for event in stream_events)
     assert history.read(key) == original_rows
 
 
@@ -280,7 +279,7 @@ def test_thread_response_preserves_optional_stream_ids(history, delta_event, end
     [("delta", "stream_end", "answer"), ("reasoning_delta", "reasoning_end", "reasoning")],
 )
 @pytest.mark.parametrize("completed_text", [None, "canonical text"])
-def test_thread_response_receipts_for_folded_legacy_deltas(
+def test_complete_turn_folds_legacy_deltas_into_authoritative_stream_snapshots(
     history, delta_event, end_event, phase, completed_text,
 ) -> None:
     key = "websocket:folded-receipts"
@@ -305,20 +304,13 @@ def test_thread_response_receipts_for_folded_legacy_deltas(
     payload = history.build(key, stats=stats)
 
     assert payload is not None
-    assert stats.compacted_delta_records == (4 if completed_text is None else 1)
+    assert stats.compacted_delta_records == 4
     ends = [event for event in payload["events"] if event["event"] == end_event]
     assert [(event["stream_id"], event["turn_seq"], event["text"]) for event in ends] == [
         ("primary", 9, primary_text), ("secondary", 10, "other"),
     ]
-    if completed_text is None:
-        assert ends[0]["projection_receipts"] == [
-            {"turn_id": "turn-folded", "ranges": [[3, 4], [8, 9]]},
-        ]
-    else:
-        assert "projection_receipts" not in ends[0]
-        assert [event["turn_seq"] for event in payload["events"] if event["event"] == delta_event] == [3, 4, 8]
-    assert ends[1]["projection_receipts"] == [
-        {"turn_id": "turn-folded", "ranges": [[6, 6], [10, 10]]},
+    assert [event["event"] for event in payload["events"]] == [
+        "user_message", "message", end_event, end_event, "turn_end",
     ]
     assert history.read(key) == original_rows
     # Migration compaction retains its existing record format, without HTTP metadata.
