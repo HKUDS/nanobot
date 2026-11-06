@@ -1368,18 +1368,19 @@ class AgentLoop:
             )
         return result
 
-    def _idle_compact_check_due(self) -> bool:
+    def _idle_compact_check_due(self, now: float) -> bool:
         return (
             self.auto_compact.enabled
             and not self.bus.admission.paused
             and not self._idle_compact_check_running
-            and time.monotonic() >= self._next_idle_compact_check_at
+            and now >= self._next_idle_compact_check_at
         )
 
     async def _check_expired_sessions_if_due(self) -> None:
-        if not self._idle_compact_check_due():
+        now = time.monotonic()
+        if not self._idle_compact_check_due(now):
             return
-        self._next_idle_compact_check_at = time.monotonic() + self._idle_compact_check_interval_s
+        self._next_idle_compact_check_at = now + self._idle_compact_check_interval_s
         self._idle_compact_check_running = True
         try:
             with self.bus.admission.activity():
@@ -1407,7 +1408,7 @@ class AgentLoop:
                         msg = await self.bus.consume_inbound()
                 except asyncio.TimeoutError:
                     # Storage may wait behind a turn that /stop needs to cancel.
-                    if self._idle_compact_check_due():
+                    if self._idle_compact_check_due(time.monotonic()):
                         self.schedule_background(self._check_expired_sessions_if_due())
                     continue
                 except asyncio.CancelledError:
