@@ -1422,128 +1422,11 @@ class OpenAICompatProvider(LLMProvider):
         )
 
     @classmethod
-    def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
-        content_parts: list[str] = []
-        reasoning_parts: list[str] = []
-        tc_bufs: dict[int, dict[str, Any]] = {}
-        finish_reason = "stop"
-        usage: LLMUsage | None = None
-
-        def _accum_tc(tc: Any, idx_hint: int) -> None:
-            tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
-            buf = tc_bufs.setdefault(tc_index, {
-                "id": "", "name": "", "arguments": "",
-                "extra_content": None, "prov": None, "fn_prov": None,
-            })
-            tc_id = _get(tc, "id")
-            if tc_id:
-                buf["id"] = str(tc_id)
-            fn = _get(tc, "function")
-            if fn is not None:
-                fn_name = _get(fn, "name")
-                if fn_name:
-                    buf["name"] = str(fn_name)
-                fn_args = _get(fn, "arguments")
-                if fn_args:
-                    buf["arguments"] += str(fn_args)
-            ec, prov, fn_prov = _extract_tc_extras(tc)
-            if ec:
-                buf["extra_content"] = ec
-            if prov:
-                buf["prov"] = prov
-            if fn_prov:
-                buf["fn_prov"] = fn_prov
-
-        def _accum_legacy_function_call(function_call: Any) -> None:
-            if not function_call:
-                return
-            buf = tc_bufs.setdefault(0, {
-                "id": "", "name": "", "arguments": "",
-                "extra_content": None, "prov": None, "fn_prov": None,
-            })
-            fn_name = _get(function_call, "name")
-            if fn_name:
-                buf["name"] = str(fn_name)
-            fn_args = _get(function_call, "arguments")
-            if fn_args:
-                buf["arguments"] += str(fn_args)
-
+    def _parse_chunks(cls, chunks: Iterable[Any]) -> LLMResponse:
+        accumulator = _ChatStreamAccumulator(cls)
         for chunk in chunks:
-            if isinstance(chunk, str):
-                content_parts.append(chunk)
-                continue
-
-            chunk_map = cls._maybe_mapping(chunk)
-            if chunk_map is None:
-                raise TypeError(f"Unsupported chat chunk type: {type(chunk).__name__}")
-            choices = cast(
-                list[object],
-                chunk_map.get("choices") or [],
-            )
-            if not choices:
-                usage = cls._extract_usage(chunk_map) or usage
-                text = cls._extract_text_content(
-                    chunk_map.get("content") or chunk_map.get("output_text")
-                )
-                if text:
-                    content_parts.append(text)
-                continue
-            choice = cls._maybe_mapping(choices[0]) or {}
-            if choice.get("finish_reason"):
-                finish_reason = str(choice["finish_reason"])
-            delta = cls._maybe_mapping(choice.get("delta")) or {}
-            raw_delta_content = delta.get("content")
-            text = cls._extract_text_content(raw_delta_content)
-            if text:
-                content_parts.append(text)
-            text = cls._extract_text_content(delta.get("reasoning_content"))
-            if not text:
-                text = cls._extract_text_content(delta.get("reasoning"))
-            if not text:
-                # Mistral streams thinking inside the content array as
-                # {"type":"thinking", thinking:[{"type":"text", ...}]}.
-                text = cls._extract_thinking_content(raw_delta_content)
-            if text:
-                reasoning_parts.append(text)
-            for idx, tc in enumerate(
-                cast(
-                    Iterable[object],
-                    delta.get("tool_calls") or [],
-                )
-            ):
-                _accum_tc(tc, idx)
-            _accum_legacy_function_call(delta.get("function_call"))
-            usage = cls._extract_usage(chunk_map) or usage
-
-        # Some providers (e.g. Zhipu/GLM) reuse the same tool_call id for
-        # parallel tool calls in streaming mode. Deduplicate before building
-        # the response so downstream tool messages don't collide.
-        _seen_tc_ids: set[str] = set()
-        for b in tc_bufs.values():
-            if not b["id"] or b["id"] in _seen_tc_ids:
-                b["id"] = _short_tool_id()
-            _seen_tc_ids.add(b["id"])
-
-        content = "".join(content_parts) or None
-        tool_calls = [
-            ToolCallRequest(
-                id=b["id"] or _short_tool_id(),
-                name=b["name"],
-                arguments=parse_tool_arguments(b["arguments"]),
-                extra_content=b.get("extra_content"),
-                provider_specific_fields=b.get("prov"),
-                function_provider_specific_fields=b.get("fn_prov"),
-            )
-            for b in tc_bufs.values()
-        ]
-
-        return LLMResponse(
-            content=content,
-            tool_calls=tool_calls,
-            finish_reason=finish_reason,
-            usage=usage,
-            reasoning_content="".join(reasoning_parts) or None,
-        )
+            accumulator.add(chunk)
+        return accumulator.finish()
 
     @classmethod
     def _extract_error_metadata(cls, e: Exception) -> dict[str, Any]:
@@ -1757,7 +1640,7 @@ class OpenAICompatProvider(LLMProvider):
                 Any,
                 await client.chat.completions.create(**kwargs),
             )
-            chunks: list[Any] = []
+            accumulator = _ChatStreamAccumulator(type(self))
             completed = False
             stream_iter: AsyncIterator[Any] = chat_stream.__aiter__()
             while True:
@@ -1768,7 +1651,6 @@ class OpenAICompatProvider(LLMProvider):
                     )
                 except StopAsyncIteration:
                     break
-                chunks.append(chunk)
                 if chunk.choices:
                     completed |= bool(chunk.choices[0].finish_reason)
                     delta_obj = chunk.choices[0].delta
@@ -1814,9 +1696,10 @@ class OpenAICompatProvider(LLMProvider):
                                 "name": str(_get(function_call, "name") or ""),
                                 "arguments_delta": str(_get(function_call, "arguments") or ""),
                             })
+                accumulator.add(chunk)
             if not completed:
                 raise ConnectionError("Model stream ended before a finish reason was received")
-            return self._parse_chunks(chunks)
+            return accumulator.finish()
         except asyncio.TimeoutError:
             return LLMResponse(
                 content=(
@@ -1831,3 +1714,118 @@ class OpenAICompatProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self.default_model
+
+
+class _ChatStreamAccumulator:
+    """Build one response without retaining the SDK's completed chunks."""
+
+    def __init__(self, parser: type[OpenAICompatProvider]) -> None:
+        self._parser = parser
+        self._content_parts: list[str] = []
+        self._reasoning_parts: list[str] = []
+        self._tool_calls: dict[int, dict[str, Any]] = {}
+        self._finish_reason = "stop"
+        self._usage: LLMUsage | None = None
+
+    def _tool_call(self, index: int) -> dict[str, Any]:
+        return self._tool_calls.setdefault(index, {
+            "id": "", "name": "", "arguments": "",
+            "extra_content": None, "prov": None, "fn_prov": None,
+        })
+
+    def _accum_tc(self, tc: Any, idx_hint: int) -> None:
+        tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
+        buf = self._tool_call(tc_index)
+        tc_id = _get(tc, "id")
+        if tc_id:
+            buf["id"] = str(tc_id)
+        fn = _get(tc, "function")
+        if fn is not None:
+            fn_name = _get(fn, "name")
+            if fn_name:
+                buf["name"] = str(fn_name)
+            fn_args = _get(fn, "arguments")
+            if fn_args:
+                buf["arguments"] += str(fn_args)
+        ec, prov, fn_prov = _extract_tc_extras(tc)
+        if ec:
+            buf["extra_content"] = ec
+        if prov:
+            buf["prov"] = prov
+        if fn_prov:
+            buf["fn_prov"] = fn_prov
+
+    def _accum_legacy_function_call(self, function_call: Any) -> None:
+        if not function_call:
+            return
+        buf = self._tool_call(0)
+        fn_name = _get(function_call, "name")
+        if fn_name:
+            buf["name"] = str(fn_name)
+        fn_args = _get(function_call, "arguments")
+        if fn_args:
+            buf["arguments"] += str(fn_args)
+
+    def add(self, chunk: Any) -> None:
+        if isinstance(chunk, str):
+            self._content_parts.append(chunk)
+            return
+
+        cls = self._parser
+        chunk_map = cls._maybe_mapping(chunk)
+        if chunk_map is None:
+            raise TypeError(f"Unsupported chat chunk type: {type(chunk).__name__}")
+        choices = cast(list[object], chunk_map.get("choices") or [])
+        if not choices:
+            self._usage = cls._extract_usage(chunk_map) or self._usage
+            text = cls._extract_text_content(
+                chunk_map.get("content") or chunk_map.get("output_text")
+            )
+            if text:
+                self._content_parts.append(text)
+            return
+        choice = cls._maybe_mapping(choices[0]) or {}
+        if choice.get("finish_reason"):
+            self._finish_reason = str(choice["finish_reason"])
+        delta = cls._maybe_mapping(choice.get("delta")) or {}
+        raw_delta_content = delta.get("content")
+        text = cls._extract_text_content(raw_delta_content)
+        if text:
+            self._content_parts.append(text)
+        text = cls._extract_text_content(delta.get("reasoning_content"))
+        if not text:
+            text = cls._extract_text_content(delta.get("reasoning"))
+        if not text:
+            text = cls._extract_thinking_content(raw_delta_content)
+        if text:
+            self._reasoning_parts.append(text)
+        for idx, tc in enumerate(cast(Iterable[object], delta.get("tool_calls") or [])):
+            self._accum_tc(tc, idx)
+        self._accum_legacy_function_call(delta.get("function_call"))
+        self._usage = cls._extract_usage(chunk_map) or self._usage
+
+    def finish(self) -> LLMResponse:
+        # Some providers reuse the same ID for parallel calls.
+        seen_ids: set[str] = set()
+        for buf in self._tool_calls.values():
+            if not buf["id"] or buf["id"] in seen_ids:
+                buf["id"] = _short_tool_id()
+            seen_ids.add(buf["id"])
+        tool_calls = [
+            ToolCallRequest(
+                id=buf["id"] or _short_tool_id(),
+                name=buf["name"],
+                arguments=parse_tool_arguments(buf["arguments"]),
+                extra_content=buf.get("extra_content"),
+                provider_specific_fields=buf.get("prov"),
+                function_provider_specific_fields=buf.get("fn_prov"),
+            )
+            for buf in self._tool_calls.values()
+        ]
+        return LLMResponse(
+            content="".join(self._content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=self._finish_reason,
+            usage=self._usage,
+            reasoning_content="".join(self._reasoning_parts) or None,
+        )
