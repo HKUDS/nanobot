@@ -729,6 +729,19 @@ class TestBoundedTextReads:
         assert tool._file_states.get(binary) is None
 
     @pytest.mark.asyncio
+    async def test_latin1_fallback_preserves_prior_ascii_and_split_line_boundary(self, tmp_path, monkeypatch):
+        f = tmp_path / "legacy.txt"
+        raw = b"first\n" + b"a" * 9 + b"\r" + b"\xc3\xa9\xff\nlast\n"
+        f.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+
+        result = await tool.execute(path=str(f), limit=4)
+
+        assert result == "1| first\n2| aaaaaaaaa\n3| Ã©ÿ\n4| last\n\n(End of file — 4 lines total)"
+        assert tool._file_states.get(f).content_hash == hashlib.sha256(raw).hexdigest()
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("raw", "encoding"),
         [
@@ -770,6 +783,37 @@ class TestBoundedTextReads:
 
         assert result[0]["image_url"]["url"] == f"data:{mime};base64,{base64.b64encode(raw).decode()}"
         assert result[1] == {"type": "text", "text": f"(Image file: {f})"}
+
+    @pytest.mark.asyncio
+    async def test_image_growth_during_read_respects_size_limit(self, tmp_path, monkeypatch):
+        f = tmp_path / "growing.png"
+        f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 16)
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+        monkeypatch.setattr(tool, "_MAX_FILE_SIZE_BYTES", 64)
+        real_fdopen = os.fdopen
+
+        class GrowingStream(_ReadStreamWrapper):
+            def __init__(self, stream):
+                super().__init__(stream)
+                self.grown = False
+
+            def read(self, size):
+                chunk = self.stream.read(size)
+                if not self.grown:
+                    self.grown = True
+                    with f.open("ab") as out:
+                        out.write(b"y" * 64)
+                return chunk
+
+        monkeypatch.setattr(
+            "nanobot.agent.tools.filesystem.os.fdopen",
+            lambda *args, **kwargs: GrowingStream(real_fdopen(*args, **kwargs)),
+        )
+        result = await tool.execute(path=str(f))
+
+        assert result.is_error
+        assert "File too large to read" in result
 
     @pytest.mark.asyncio
     async def test_small_image_does_not_allocate_the_file_size_limit(self, tmp_path):

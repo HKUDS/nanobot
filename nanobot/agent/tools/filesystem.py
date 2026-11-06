@@ -6,6 +6,7 @@ import hashlib
 import mimetypes
 import os
 import stat
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -432,15 +433,43 @@ class ReadFileTool(_FsTool):
                 if opened.st_size > self._MAX_FILE_SIZE_BYTES:
                     return self._file_too_large(opened.st_size)
 
-                guessed_mime = mimetypes.guess_type(path)[0]
-                previous_hash = (
-                    self._file_states.visible_read_hash(fp, offset=offset, limit=limit)
-                    if not force and not (guessed_mime and guessed_mime.startswith("image/"))
-                    else None
-                )
-                if previous_hash is not None:
-                    digest = hashlib.sha256()
-                    bytes_read = 0
+                check_previous = not force
+                while True:
+                    first = stream.read(min(max(16, self._READ_CHUNK_SIZE), self._MAX_FILE_SIZE_BYTES + 1))
+                    if not first:
+                        return f"(Empty file: {path})"
+                    if len(first) > self._MAX_FILE_SIZE_BYTES:
+                        return self._file_too_large(len(first))
+
+                    mime = detect_image_mime(first) or mimetypes.guess_type(path)[0]
+                    if mime and mime.startswith("image/"):
+                        image = bytearray(max(len(first), opened.st_size))
+                        image[:len(first)] = first
+                        bytes_read = len(first)
+                        with memoryview(image) as view:
+                            while bytes_read < len(image):
+                                count = stream.readinto(view[bytes_read:])
+                                if not count:
+                                    break
+                                bytes_read += count
+                        del image[bytes_read:]
+                        while chunk := stream.read(min(
+                            self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
+                        )):
+                            bytes_read += len(chunk)
+                            if bytes_read > self._MAX_FILE_SIZE_BYTES:
+                                return self._file_too_large(bytes_read)
+                            image.extend(chunk)
+                        return build_image_content_blocks(image, mime, str(fp), f"(Image file: {path})")
+
+                    previous_hash = (
+                        self._file_states.visible_read_hash(fp, offset=offset, limit=limit)
+                        if check_previous else None
+                    )
+                    if previous_hash is None:
+                        return self._read_text(stream, first, fp, path, mime, offset, limit)
+                    digest = hashlib.sha256(first)
+                    bytes_read = len(first)
                     while chunk := stream.read(min(
                         self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
                     )):
@@ -450,31 +479,10 @@ class ReadFileTool(_FsTool):
                         digest.update(chunk)
                     if digest.hexdigest() == previous_hash:
                         return f"[File unchanged since last read: {path}]"
+                    # Re-detect the file after rewinding: it may have changed
+                    # type while the previous receipt was being checked.
                     stream.seek(0)
-
-                first = stream.read(min(max(16, self._READ_CHUNK_SIZE), self._MAX_FILE_SIZE_BYTES + 1))
-                if not first:
-                    return f"(Empty file: {path})"
-                if len(first) > self._MAX_FILE_SIZE_BYTES:
-                    return self._file_too_large(len(first))
-
-                mime = detect_image_mime(first) or guessed_mime
-                if mime and mime.startswith("image/"):
-                    image = bytearray(first)
-                    while True:
-                        chunk = stream.read(min(
-                            self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - len(image),
-                        ))
-                        if not chunk:
-                            break
-                        image.extend(chunk)
-                        if len(image) > self._MAX_FILE_SIZE_BYTES:
-                            return self._file_too_large(len(image))
-                    raw = bytes(image)
-                    del image
-                    return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
-
-                return self._read_text(stream, first, fp, path, mime, offset, limit)
+                    check_previous = False
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
@@ -510,12 +518,10 @@ class ReadFileTool(_FsTool):
         selected_offset = max(1, offset)
         selected_limit = limit or self._DEFAULT_LIMIT
         text = _TextRange(selected_offset, selected_limit, self._MAX_CHARS)
-        # A late UTF-8 error changes the interpretation of the entire file. Run
-        # both candidates on the same bytes, rather than reopening a mutable file.
-        latin = (
-            _TextRange(selected_offset, selected_limit, self._MAX_CHARS)
-            if not bom_length and _is_text_extension(fp.suffix.lower()) else None
-        )
+        # ASCII is identical in UTF-8 and Latin-1. Fork the accumulated range
+        # only when a non-ASCII byte makes the two interpretations differ.
+        allow_latin = not bom_length and _is_text_extension(fp.suffix.lower())
+        latin: _TextRange | None = None
         decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
         digest = hashlib.sha256()
         bytes_read = 0
@@ -528,8 +534,11 @@ class ReadFileTool(_FsTool):
                 return self._file_too_large(bytes_read)
             digest.update(chunk)
             payload = chunk[bom_length:] if bytes_read == len(chunk) else chunk
-            if latin is not None:
-                latin.feed(payload.decode("latin-1"))
+            if allow_latin:
+                if latin is None and not payload.isascii():
+                    latin = deepcopy(text)
+                if latin is not None:
+                    latin.feed(payload.decode("latin-1"))
             if decode_error is None:
                 buffered = len(decoder.getstate()[0])
                 try:
