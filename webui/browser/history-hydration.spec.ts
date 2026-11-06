@@ -289,8 +289,9 @@ test("synthetic HTTP-first cumulative text suppresses delayed covered chunks but
   backend.healthy();
 });
 
-test("the open context sidebar keeps its slot while a new conversation hydrates", async ({ page }) => {
+test("the open context sidebar keeps its slot through hydration and empty conversation transitions", async ({ page }) => {
   const { backend } = await openFixture(page);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   const contextHistory = (chatId: string, name: string, tokens: number) => {
     const turn = `${chatId}-context`;
     return history([
@@ -311,6 +312,9 @@ test("the open context sidebar keeps its slot while a new conversation hydrates"
   await expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
   await sidebar.evaluate((node) => node.setAttribute("data-session-slot", "retained"));
   const expectSlot = async () => {
+    await page.locator(".thread-layout").evaluate(async (node) => {
+      await Promise.all(node.getAnimations().map((animation) => animation.finished));
+    });
     await expect(sidebar).toHaveAttribute("data-session-slot", "retained");
     await expect.poll(() => sidebar.evaluate((node) => node.getBoundingClientRect().width)).toBe(420);
     await expect.poll(() => sidebar.locator(".file-preview-content").evaluate((node) => {
@@ -328,7 +332,10 @@ test("the open context sidebar keeps its slot while a new conversation hydrates"
   await expect(sidebar.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
   await expectSlot();
 
-  await backend.release(target, contextHistory(B, "second.md", 2000));
+  await backend.release(target, history([], { chatId: B }));
+  await expect(page.locator('.thread-layout[data-layout="hero"]')).toBeVisible();
+  await expectSlot();
+  for (const event of contextHistory(B, "second.md", 2000).events) await backend.send(event);
   await expect(sidebar.getByRole("button", { name: "second.md", exact: true })).toBeVisible();
   await expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
   await expectSlot();
