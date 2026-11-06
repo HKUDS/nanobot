@@ -1901,6 +1901,7 @@
     },
     "composer": {
       "placeholder": "Digite / para ver comandos, @ para mencionar conversas ou aplicativos e $ para escolher habilidades",
+      "placeholderCompact": "Digite uma mensagem…",
       "placeholderOpening": "Abrindo um novo tópico…",
       "inputAria": "Campo de mensagem",
       "goalStateStrip": "Objetivo: {{label}}",

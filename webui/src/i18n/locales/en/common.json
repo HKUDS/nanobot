@@ -2093,6 +2093,7 @@
     },
     "composer": {
       "placeholder": "Type / for commands, @ for chats or apps, $ for skills",
+      "placeholderCompact": "Type a message…",
       "placeholderOpening": "Opening a new topic…",
       "inputAria": "Message input",
       "goalStateStrip": "Goal: {{label}}",

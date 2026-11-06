@@ -1129,6 +1129,7 @@ export function ThreadComposer({
   const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey, persistDraft) : undefined);
   const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
+  const [compactPlaceholder, setCompactPlaceholder] = useState(false);
   const [placeholderHintRequested, setPlaceholderHintRequested] = useState(false);
   const [placeholderHintOpen, setPlaceholderHintOpen] = useState(false);
   const [placeholderHintBottomGap, setPlaceholderHintBottomGap] = useState(0);
@@ -1175,6 +1176,7 @@ export function ThreadComposer({
   const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
   const { readingTextSize, customReadingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const placeholderMeasureRef = useRef<HTMLSpanElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const tabFocusRequested = useRef(false);
@@ -1244,6 +1246,31 @@ export function ThreadComposer({
   }, [activeTurnId, isStreaming, pendingQueueKey, setQueuedPrompt]);
 
   const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholder");
+  const showCompactPlaceholder = placeholder === undefined && compactPlaceholder;
+  const displayedPlaceholder = showCompactPlaceholder ? t("thread.composer.placeholderCompact") : resolvedPlaceholder;
+
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    const text = placeholderMeasureRef.current;
+    if (!input || !text || placeholder !== undefined) return;
+    const measure = () => {
+      const style = getComputedStyle(input);
+      const available = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (available > 0) setCompactPlaceholder(text.getBoundingClientRect().width > available);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(input);
+    observer?.observe(text);
+    window.addEventListener("resize", measure);
+    let active = true;
+    void document.fonts?.ready.then(() => { if (active) measure(); });
+    return () => {
+      active = false;
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [placeholder, resolvedPlaceholder, compactControls, readingTextSize, customReadingTextSize]);
 
   const maxAttachments = ingressLimits?.attachments.max_count
     ?? MAX_ATTACHMENTS_PER_MESSAGE;
@@ -1888,7 +1915,7 @@ export function ThreadComposer({
     }
     const form = formRef.current!;
     const measure = () => {
-      setPlaceholderHintOpen(input.scrollWidth > input.clientWidth);
+      setPlaceholderHintOpen(showCompactPlaceholder || input.scrollWidth > input.clientWidth);
       setPlaceholderHintBottomGap(form.getBoundingClientRect().bottom - input.getBoundingClientRect().bottom);
     };
     measure();
@@ -1898,7 +1925,7 @@ export function ThreadComposer({
     let active = true;
     void document.fonts?.ready.then(() => { if (active) measure(); });
     return () => { active = false; observer?.disconnect(); };
-  }, [placeholderHintRequested, mentionInput.value, resolvedPlaceholder, sessionDragPreview, readingTextSize, customReadingTextSize]);
+  }, [placeholderHintRequested, mentionInput.value, resolvedPlaceholder, showCompactPlaceholder, sessionDragPreview, readingTextSize, customReadingTextSize]);
 
   // Runs before paint so switching sessions never flashes stale draft text.
   useLayoutEffect(() => {
@@ -2773,6 +2800,11 @@ export function ThreadComposer({
         ) : null}
         <GoalStateStrip goalState={goalState} />
         <div className="thread-composer-input relative min-w-0">
+          {placeholder === undefined ? (
+            <span className="pointer-events-none invisible absolute h-0 w-0 overflow-hidden">
+              <span ref={placeholderMeasureRef} aria-hidden className="inline-block whitespace-pre text-composer [text-autospace:no-autospace]">{resolvedPlaceholder}</span>
+            </span>
+          ) : null}
           {hasInlineDecorations ? (
             <ComposerInlineReferenceOverlay
               overlayRef={mentionOverlayRef}
@@ -2821,7 +2853,7 @@ export function ThreadComposer({
                   onPaste={onPaste}
                   rows={1}
                   enterKeyHint={hasCoarsePointer ? "enter" : undefined}
-                  placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
+                  placeholder={sessionDragPreview ? "" : displayedPlaceholder}
                   disabled={interactionDisabled}
                   aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
                   aria-description={sessionDragPreview ? undefined : resolvedPlaceholder}
