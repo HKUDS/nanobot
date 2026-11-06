@@ -91,11 +91,7 @@ import {
   ModelPresetBadge,
   type ModelPresetOption,
 } from "@/components/thread/ModelPresetBadge";
-import {
-  ComposerUsagePopover,
-  type ComposerContextUsage,
-  type ComposerRoundUsage,
-} from "@/components/thread/ComposerUsagePopover";
+import type { ComposerUsageControl } from "@/components/thread/ComposerUsagePopover";
 import {
   ACCEPT_ATTR,
   acceptedAttachmentKind,
@@ -239,13 +235,7 @@ interface ThreadComposerProps {
   modelNeedsSetup?: boolean;
   onModelBadgeClick?: () => void;
   onManageModels?: () => void;
-  contextUsage?: ComposerContextUsage | null;
-  recentRoundUsage?: readonly ComposerRoundUsage[];
-  contextSnapshots?: readonly import("@/lib/types").ContextSnapshot[];
-  onOpenContextFile?: (path: string) => void;
-  contextSidebarHost?: HTMLElement | null;
-  contextSidebarOpen?: boolean;
-  onContextSidebarOpenChange?: (open: boolean) => void;
+  renderContextUsage?: ComposerUsageControl;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   onMentionSearch?: () => void;
@@ -1083,13 +1073,7 @@ export function ThreadComposer({
   modelNeedsSetup = false,
   onModelBadgeClick,
   onManageModels,
-  contextUsage = null,
-  recentRoundUsage = [],
-  contextSnapshots = [],
-  onOpenContextFile,
-  contextSidebarHost,
-  contextSidebarOpen,
-  onContextSidebarOpenChange,
+  renderContextUsage,
   variant = "thread",
   slashCommands = [],
   onMentionSearch,
@@ -1179,7 +1163,6 @@ export function ThreadComposer({
   const formRef = useRef<HTMLFormElement>(null);
   const tabFocusRequested = useRef(false);
   const [compactControls, setCompactControls] = useState(false);
-  const [usageTriggerHost, setUsageTriggerHost] = useState<HTMLSpanElement | null>(null);
 
   useEffect(() => {
     // Automatic session focus should not open the hint; keyboard navigation should.
@@ -2599,9 +2582,8 @@ export function ThreadComposer({
     />
   ) : null;
   const usageInMeta = mobileWorkspaceControls || compactControls;
-  const usageControl = !voiceRecorder.isRecording && (contextUsage || recentRoundUsage.length || contextSnapshots.length) ? (
-    <ComposerUsagePopover triggerHost={usageTriggerHost} context={contextUsage} rounds={recentRoundUsage} snapshots={contextSnapshots} onOpenFile={onOpenContextFile} showLabel={usageInMeta} compactLabel={mobileWorkspaceControls} sidebarHost={contextSidebarHost} open={contextSidebarOpen} onOpenChange={onContextSidebarOpenChange} />
-  ) : null;
+  const usageControl = !voiceRecorder.isRecording
+    ? renderContextUsage?.({ showLabel: usageInMeta, compactLabel: mobileWorkspaceControls }) : null;
   const inputTextClasses = cn(
     // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
     "w-full resize-none bg-transparent text-composer [text-autospace:no-autospace]",
@@ -2915,7 +2897,7 @@ export function ThreadComposer({
             )}
           >
             {modelControl}
-            {!usageInMeta && usageControl ? <span className="contents" ref={setUsageTriggerHost} /> : null}
+            {!usageInMeta ? usageControl : null}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -2992,13 +2974,12 @@ export function ThreadComposer({
           </div>
           {usageInMeta && usageControl || mobileWorkspaceControls && accessControl ? (
             <div className={cn("ml-auto flex shrink-0 items-center gap-1", mobileWorkspaceControls && "h-11 max-w-[calc(100%-3rem)]")}>
-              {usageInMeta && usageControl ? <span className="contents" ref={setUsageTriggerHost} /> : null}
+              {usageInMeta ? usageControl : null}
               {mobileWorkspaceControls ? accessControl : null}
             </div>
           ) : null}
         </div>
       ) : null}
-      {usageControl}
     </form>
   );
 }

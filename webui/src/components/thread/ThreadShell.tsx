@@ -20,9 +20,11 @@ import { latestSubagentInputKey } from "@/lib/subagent-tasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
-import type {
-  ComposerContextUsage,
-  ComposerRoundUsage,
+import {
+  ComposerUsagePopover,
+  type ComposerContextUsage,
+  type ComposerRoundUsage,
+  type ComposerUsageControl,
 } from "@/components/thread/ComposerUsagePopover";
 import {
   modelPresetOptionsFromSettings,
@@ -240,6 +242,7 @@ interface ThreadShellProps {
   composerPortalTarget?: HTMLElement | null;
   navigationFrame?: HTMLElement | null;
   composerActive?: boolean;
+  multiplePanes?: boolean;
   composerInputAriaLabel?: string;
   emptyComposerVariant?: "hero" | "thread";
   workspaceScope?: WorkspaceScopePayload | null;
@@ -461,6 +464,7 @@ export function ThreadShell({
   composerPortalTarget,
   navigationFrame,
   composerActive = true,
+  multiplePanes = false,
   composerInputAriaLabel,
   emptyComposerVariant = "hero",
   workspaceScope = null,
@@ -535,14 +539,16 @@ export function ThreadShell({
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
   const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
-  useLayoutEffect(() => { setContextSidebarOpen(false); }, [previewSessionKey]);
+  useLayoutEffect(() => {
+    if (multiplePanes) setContextSidebarOpen(false);
+  }, [multiplePanes, previewSessionKey]);
   const [sidebarEnterWidth, setSidebarEnterWidth] = useState(0);
   const [contextSidebarHost, setContextSidebarHost] = useState<HTMLElement | null>(null);
   const setSidebarHost = useCallback((node: HTMLElement | null) => { shellRef.current = node; setContextSidebarHost(node); }, []);
   const [closingPreview, setClosingPreview] = useState<{ key: string; state: FilePreviewState } | null>(null);
   const filePreviewClosing = closingPreview?.key === previewSessionKey;
   const visiblePreview = filePreviewClosing ? closingPreview.state : previewState;
-  const activePreview = visiblePreview.tabs.find((tab) => tab.id === visiblePreview.activeId);
+  const activePreview = contextSidebarOpen ? undefined : visiblePreview.tabs.find((tab) => tab.id === visiblePreview.activeId);
   const previewOpen = Boolean(activePreview);
   const sidebarOpen = previewOpen || contextSidebarOpen;
   const [localComposerHost, setLocalComposerHost] = useState<HTMLDivElement | null>(null);
@@ -554,7 +560,7 @@ export function ThreadShell({
     // attached until that destination is ready.
     if (!composerDestination) { if (!inlineComposer) composerMount.remove(); return; }
     if (composerMount.parentElement === composerDestination) return;
-    // Move the host, not the React subtree: drafts, graph replay and exit presence survive.
+    // Move the host, not the React subtree, to preserve the input and its draft.
     const focused = document.activeElement instanceof HTMLElement && composerMount.contains(document.activeElement)
       ? document.activeElement : null;
     const selection = document.getSelection();
@@ -579,10 +585,10 @@ export function ThreadShell({
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const shellRef = useRef<HTMLElement | null>(null);
   const [conversationElement, setConversationElement] = useState<HTMLDivElement | null>(null);
-  const composerSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const [composerSurface, setComposerSurface] = useState<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const shell = contextSidebarHost;
-    const surface = composerSurfaceRef.current;
+    const surface = composerSurface;
     if (!sidebarOpen || !inlineComposer || !shell || !surface) return;
     // Metadata can wrap below the input card. Align sidebars to the visible
     // surface, rather than assuming a fixed composer/footer padding.
@@ -596,7 +602,7 @@ export function ThreadShell({
     observer.observe(composerMount);
     observer.observe(surface);
     return () => observer.disconnect();
-  }, [contextSidebarHost, sidebarOpen, inlineComposer, composerDestination, composerMount]);
+  }, [contextSidebarHost, sidebarOpen, inlineComposer, composerDestination, composerMount, composerSurface]);
   const filePreviewWidthRef = useRef(FILE_PREVIEW_DEFAULT_WIDTH);
   const filePreviewCloseTimerRef = useRef<number | null>(null);
   const filePreviewResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -732,7 +738,9 @@ export function ThreadShell({
   useEffect(() => {
     if (hasAppMentions) requestMentionCatalogs();
   }, [hasAppMentions, requestMentionCatalogs]);
-  const usageSnapshots = useMemo(() => composerUsageSnapshots(messages, modelRequests), [messages, modelRequests]);
+  const usageSnapshots = useMemo(
+    () => messagesReady ? composerUsageSnapshots(messages, modelRequests) : [], [messages, modelRequests, messagesReady],
+  );
   const composerContextUsage = useMemo(
     () => latestComposerContextUsage(usageSnapshots),
     [usageSnapshots],
@@ -742,7 +750,7 @@ export function ThreadShell({
     [usageSnapshots],
   );
   const contextGraphSnapshots = useMemo(
-    () => composerContextSnapshots(messages, modelRequests), [messages, modelRequests],
+    () => messagesReady ? composerContextSnapshots(messages, modelRequests) : [], [messages, modelRequests, messagesReady],
   );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
@@ -1318,7 +1326,7 @@ export function ThreadShell({
     [chatId, onForkChat],
   );
 
-  const composer = (
+  const composer = (renderContextUsage: ComposerUsageControl | undefined) => (
     <div className={composerVariant === "hero" ? "thread-composer-stack is-hero" : "thread-composer-stack"}>
       {modelFallback?.chatId === chatId && !modelFallback.dismissed ? (
         <ModelFallbackNotice
@@ -1373,15 +1381,9 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
-          contextUsage={composerContextUsage}
-          recentRoundUsage={composerRoundUsage}
-          contextSnapshots={contextGraphSnapshots}
-          onOpenContextFile={handleOpenFilePreview}
-          contextSidebarHost={contextSidebarHost}
-          contextSidebarOpen={contextSidebarOpen}
-          onContextSidebarOpenChange={handleContextSidebarOpenChange}
+          renderContextUsage={renderContextUsage}
           variant={composerVariant}
-          surfaceRef={composerSurfaceRef}
+          surfaceRef={setComposerSurface}
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
           cliApps={cliApps}
@@ -1433,13 +1435,7 @@ export function ThreadShell({
           modelNeedsSetup={modelBadge.needsSetup}
           onModelBadgeClick={modelBadge.needsSetup ? onOpenModelSettings : undefined}
           onManageModels={onOpenModelSettings}
-          contextUsage={composerContextUsage}
-          recentRoundUsage={composerRoundUsage}
-          contextSnapshots={contextGraphSnapshots}
-          onOpenContextFile={handleOpenFilePreview}
-          contextSidebarHost={contextSidebarHost}
-          contextSidebarOpen={contextSidebarOpen}
-          onContextSidebarOpenChange={handleContextSidebarOpenChange}
+          renderContextUsage={renderContextUsage}
           variant="hero"
           slashCommands={availableSlashCommands}
           onMentionSearch={requestMentionCatalogs}
@@ -1447,7 +1443,7 @@ export function ThreadShell({
           mcpPresets={mcpPresets}
           sessions={mentionSessions}
           skills={skills}
-          surfaceRef={composerSurfaceRef}
+          surfaceRef={setComposerSurface}
           onInspectAttachment={inspectAttachment}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
@@ -1585,17 +1581,28 @@ export function ThreadShell({
       {headerPortalTarget && headerActive
         ? createPortal(threadHeader, headerPortalTarget)
         : null}
-      {createPortal(
-        <div
-          hidden={!composerActive}
-          aria-hidden={!composerActive}
-          data-testid={composerActive ? "active-pane-composer" : undefined}
-          data-active-composer={composerActive || undefined}
-        >
-          {composer}
-        </div>,
-        composerMount,
-      )}
+      <ComposerUsagePopover
+        sessionKey={previewSessionKey}
+        context={composerContextUsage}
+        rounds={composerRoundUsage}
+        snapshots={contextGraphSnapshots}
+        sidebarHost={contextSidebarHost}
+        open={contextSidebarOpen}
+        onOpenChange={handleContextSidebarOpenChange}
+        onOpenFile={handleOpenFilePreview}
+      >
+        {(renderContextUsage) => createPortal(
+          <div
+            hidden={!composerActive}
+            aria-hidden={!composerActive}
+            data-testid={composerActive ? "active-pane-composer" : undefined}
+            data-active-composer={composerActive || undefined}
+          >
+            {composer(renderContextUsage)}
+          </div>,
+          composerMount,
+        )}
+      </ComposerUsagePopover>
       {activePreview && previewSessionKey ? (
         <FileActionsProvider key={previewSessionKey} value={fileActions}>
         <PreviewPane

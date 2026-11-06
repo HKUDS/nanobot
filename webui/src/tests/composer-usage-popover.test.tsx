@@ -1,5 +1,6 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createPortal } from "react-dom";
 import { describe, expect, it } from "vitest";
 import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
 import type { ContextSnapshot } from "@/lib/types";
@@ -53,8 +54,10 @@ describe("Context sidebar", () => {
     const toolbar = document.createElement("span");
     const footer = document.createElement("span");
     document.body.append(toolbar, footer);
-    const content = (host: HTMLElement) => <ComposerUsagePopover triggerHost={host} context={null} rounds={[]}
-      snapshots={[first, { ...first, id: "2", usage: { prompt_tokens: 2000 } }]} />;
+    const content = (host: HTMLElement) => <ComposerUsagePopover context={null} rounds={[]}
+      snapshots={[first, { ...first, id: "2", usage: { prompt_tokens: 2000 } }]}>
+      {(renderControl) => createPortal(renderControl?.({ showLabel: false, compactLabel: false }), host)}
+    </ComposerUsagePopover>;
     const view = render(content(toolbar));
     await user.click(within(toolbar).getByTestId("composer-context-usage"));
     const sidebar = screen.getByRole("complementary");
@@ -72,6 +75,25 @@ describe("Context sidebar", () => {
     await user.click(within(footer).getByTestId("composer-context-usage"));
     await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
     view.unmount(); toolbar.remove(); footer.remove();
+  });
+
+  it("resets session playback without replacing the open sidebar", async () => {
+    const user = userEvent.setup();
+    const content = (sessionKey: string, snapshots: ContextSnapshot[]) => (
+      <ComposerUsagePopover sessionKey={sessionKey} context={null} rounds={[]} snapshots={snapshots} />
+    );
+    const view = render(content("first-session", [first, { ...first, id: "2", usage: { prompt_tokens: 2000 } }]));
+    await user.click(screen.getByTestId("composer-context-usage"));
+    const sidebar = screen.getByRole("complementary");
+    await within(sidebar).findByRole("button", { name: "a.md" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Play context history" }));
+    expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+    view.rerender(content("second-session", [{ ...first, id: "other", usage: { prompt_tokens: 3000 },
+      graph: { nodes: [{ path: "/other.md", name: "other.md", state: "loaded", tokens: 300 }], edges: [] } }]));
+    expect(screen.getByRole("complementary")).toBe(sidebar);
+    expect(within(sidebar).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "30");
+    expect(await within(sidebar).findByRole("button", { name: "other.md" })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "a.md" })).not.toBeInTheDocument();
   });
 
   it("opens a pane-contained drawer with a visible close control on narrow panes", async () => {

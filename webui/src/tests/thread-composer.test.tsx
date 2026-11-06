@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
@@ -648,17 +649,16 @@ describe("ThreadComposer", () => {
 
   it("shows a compact context meter beside the model selector", async () => {
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        modelLabel="gpt-5.6-sol"
-        modelPreset="gpt-5-6-sol"
-        modelProvider="openai_codex"
-        contextUsage={{
-          contextTokens: 74_900,
-          contextWindowTokens: 1_000_000,
-        }}
-        placeholder="Ask anything..."
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 74_900, contextWindowTokens: 1_000_000 }} rounds={[]}>
+        {(renderContextUsage) => <ThreadComposer
+          onSend={vi.fn()}
+          modelLabel="gpt-5.6-sol"
+          modelPreset="gpt-5-6-sol"
+          modelProvider="openai_codex"
+          renderContextUsage={renderContextUsage}
+          placeholder="Ask anything..."
+        />}
+      </ComposerUsagePopover>,
     );
 
     const context = screen.getByTestId("composer-context-usage");
@@ -683,11 +683,13 @@ describe("ThreadComposer", () => {
       moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), arc: vi.fn(), fill: vi.fn(),
       roundRect: vi.fn(), fillText: vi.fn(), measureText: (text: string) => ({ width: text.length * 6 }),
     } as unknown as CanvasRenderingContext2D);
-    render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 200, contextWindowTokens: 1000 }}
-      contextSnapshots={[
+    render(<ComposerUsagePopover context={{ contextTokens: 200, contextWindowTokens: 1000 }} rounds={[]}
+      snapshots={[
         { id: "first", contextWindowTokens: 1000, usage: { prompt_tokens: 100 }, graph: { nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 40 }], edges: [] } },
         { id: "second", contextWindowTokens: 1000, usage: { prompt_tokens: 200 }, graph: { nodes: [{ path: "/b.md", name: "b.md", state: "loaded", tokens: 60 }], edges: [] } },
-      ]} />);
+      ]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
     expect(await screen.findByRole("button", { name: "b.md" })).toBeInTheDocument();
     expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
@@ -701,9 +703,10 @@ describe("ThreadComposer", () => {
   });
 
   it("shows the latest round cache metrics when inspecting legacy history", () => {
-    render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 14700, contextWindowTokens: 200000 }}
-      recentRoundUsage={[{ inputTokens: 18000, cachedTokens: 12000 },
-        { inputTokens: 29400, cachedTokens: 26180 }]} />);
+    render(<ComposerUsagePopover context={{ contextTokens: 14700, contextWindowTokens: 200000 }}
+      rounds={[{ inputTokens: 18000, cachedTokens: 12000 }, { inputTokens: 29400, cachedTokens: 26180 }]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
     const meter = screen.getByRole("progressbar", { name: "Context" });
     fireEvent.pointerEnter(meter.parentElement!.parentElement!);
@@ -713,8 +716,9 @@ describe("ThreadComposer", () => {
   });
 
   it("keeps context usage visible when the provider omits cache metrics", () => {
-    render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 14700, contextWindowTokens: 200000 }}
-      recentRoundUsage={[{ inputTokens: 29400 }]} />);
+    render(<ComposerUsagePopover context={{ contextTokens: 14700, contextWindowTokens: 200000 }} rounds={[{ inputTokens: 29400 }]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
     const meter = screen.getByRole("progressbar", { name: "Context" });
     expect(meter).toHaveAttribute("aria-valuenow", "7");
@@ -1223,15 +1227,17 @@ describe("ThreadComposer", () => {
     const onSend = vi.fn();
     const onWorkspaceScopeChange = vi.fn();
     const { container } = render(
-      <ThreadComposer
-        variant={variant}
-        compactWhenIdle
-        onSend={onSend}
-        modelLabel="codex"
-        workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: "full", restrict_to_workspace: false }}
-        onWorkspaceScopeChange={onWorkspaceScopeChange}
-        contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }}
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+        {(renderContextUsage) => <ThreadComposer
+          variant={variant}
+          compactWhenIdle
+          onSend={onSend}
+          modelLabel="codex"
+          workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: "full", restrict_to_workspace: false }}
+          onWorkspaceScopeChange={onWorkspaceScopeChange}
+          renderContextUsage={renderContextUsage}
+        />}
+      </ComposerUsagePopover>,
     );
     const form = container.querySelector("form")!;
     const input = screen.getByRole("textbox");
@@ -1276,9 +1282,11 @@ describe("ThreadComposer", () => {
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(rect({ width: 320, height: 160 }));
     const scope = { project_path: "/srv/workspace", project_name: "workspace", access_mode: "full" as const };
     const onWorkspaceScopeChange = vi.fn();
-    const { container } = render(<ThreadComposer variant={variant} onSend={vi.fn()} workspaceScope={scope}
-      workspaceDefaultScope={scope} {...workspacePickerProps(scope)} workspaceControls={{ can_change_project: true }}
-      onWorkspaceScopeChange={onWorkspaceScopeChange} contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }} />);
+    const { container } = render(<ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+      {(renderContextUsage) => <ThreadComposer variant={variant} onSend={vi.fn()} workspaceScope={scope}
+        workspaceDefaultScope={scope} {...workspacePickerProps(scope)} workspaceControls={{ can_change_project: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     const meta = container.querySelector(".thread-composer-meta")!;
     const workspace = screen.getByRole("button", { name: "Switch directory" });
     const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
@@ -1304,14 +1312,10 @@ describe("ThreadComposer", () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
     render(
-      <ThreadComposer
-        onSend={onSend}
-        contextUsage={{ contextTokens: 10000, contextWindowTokens: 200000 }}
-        recentRoundUsage={[{
-          inputTokens: 10000,
-          cachedTokens: 8000,
-        }]}
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 10000, contextWindowTokens: 200000 }}
+        rounds={[{ inputTokens: 10000, cachedTokens: 8000 }]}>
+        {(renderContextUsage) => <ThreadComposer onSend={onSend} renderContextUsage={renderContextUsage} />}
+      </ComposerUsagePopover>,
     );
     const trigger = screen.getByTestId("composer-context-usage");
     await user.click(trigger);
@@ -1340,7 +1344,9 @@ describe("ThreadComposer", () => {
       () => rect({ width, height: 160 }),
     );
     const user = userEvent.setup();
-    render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }} />);
+    render(<ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     await user.click(screen.getByTestId("composer-context-usage"));
     expect(screen.getByRole("dialog")).toHaveClass("mt-auto");
 

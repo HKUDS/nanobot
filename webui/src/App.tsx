@@ -3118,6 +3118,7 @@ function Shell({
                           composerPortalTarget={context.composerPortalTarget}
                           navigationFrame={context.navigationFrame}
                           composerActive={context.active}
+                          multiplePanes={context.multiplePanes}
                           composerInputAriaLabel={t("workbench.composerAria", {
                             title: pane.title,
                           })}
