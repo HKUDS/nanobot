@@ -1,4 +1,4 @@
-import { pastedFilePath, PastedPathRange, isLocalAttachment, type LocalAttachment } from "../../../../packages/client-events/attachments";
+import { pastedFilePath, PastedPathRange, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
   CompactIcon,
@@ -31,7 +31,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type Ref,
@@ -147,6 +146,13 @@ import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
+import {
+  queuedImagesToSendImages,
+  queuedUploadBytes,
+  readyImagesToQueuedImages,
+  useQueuedPrompt,
+  type QueuedPromptContent,
+} from "@/components/thread/useQueuedPrompt";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
@@ -306,9 +312,6 @@ const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 12;
 const SLASH_RECENTS_STORAGE_KEY = "nanobot.webui.slashCommandRecents";
 const SLASH_RECENTS_LIMIT = 5;
-const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
-const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
-const QUEUED_PROMPTS_LIMIT = 20;
 const SESSION_MENTIONS_LIMIT = 8;
 
 function VoiceRecordingMeter({
@@ -356,61 +359,6 @@ interface SlashPaletteLayout {
   placement: SlashPalettePlacement;
   maxHeight: number;
 }
-
-interface QueuedPrompt {
-  id: string;
-  text: string;
-  images?: QueuedPromptImage[];
-  quotedContext?: string;
-  sessionMentions?: SessionMention[];
-  autoAfterTurnId?: string;
-  autoPaused?: boolean;
-  autoSendPageId?: string;
-}
-
-let queuedPromptPageId: string | undefined;
-
-function getQueuedPromptPageId(): string {
-  return queuedPromptPageId ??= crypto.randomUUID();
-}
-
-function canAutoSendQueuedPrompt(prompt: QueuedPrompt): boolean {
-  return !prompt.autoPaused && prompt.autoSendPageId === getQueuedPromptPageId();
-}
-
-function pauseQueuedPrompt(prompt: QueuedPrompt): QueuedPrompt {
-  return { ...prompt, autoAfterTurnId: undefined, autoSendPageId: undefined, autoPaused: true };
-}
-
-function mergeQueuedPrompt(first: QueuedPrompt, next: QueuedPrompt): QueuedPrompt {
-  const prompts = [first, next];
-  const mentions = new Map<string, SessionMention>();
-  for (const prompt of prompts) {
-    for (const mention of prompt.sessionMentions ?? []) {
-      if (!mentions.has(mention.session_key)) mentions.set(mention.session_key, mention);
-    }
-  }
-  return {
-    id: first.id,
-    text: prompts.map((prompt) => prompt.text).filter(Boolean).join("\n"),
-    images: prompts.flatMap((prompt) => prompt.images ?? []),
-    quotedContext: [...new Set(prompts.map((prompt) => prompt.quotedContext).filter(Boolean))].join("\n\n"),
-    sessionMentions: [...mentions.values()],
-    autoAfterTurnId: first.autoAfterTurnId,
-    autoPaused: prompts.some((prompt) => prompt.autoPaused),
-    autoSendPageId: first.autoSendPageId,
-  };
-}
-
-function queuedUploadBytes(image: QueuedPromptImage): number {
-  if (image.local) return 0;
-  const dataUrl = image.dataUrl ?? "";
-  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
-  return Math.floor(base64.length * 3 / 4) - padding;
-}
-
-type QueuedPromptImage = RestoredReadyImage;
 
 interface CliAppMentionQuery {
   query: string;
@@ -523,238 +471,7 @@ function storeSlashRecents(commands: string[]): void {
   }
 }
 
-function queuedPromptsStorageKey(key?: string | null): string | null {
-  const clean = key?.trim();
-  return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
-}
-
-function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const candidate = item as Partial<SessionMention>;
-    const name = candidate.name?.trim().slice(0, 80);
-    const sessionKey = candidate.session_key?.trim().slice(0, 512);
-    if (
-      !name
-      || !sessionKey?.startsWith("websocket:")
-      || !/^[\p{L}\p{N}_-]+$/u.test(name)
-    ) return [];
-    return [{
-      ...(typeof candidate.id === "string" && /^handle_[a-f0-9]{32}$/i.test(candidate.id)
-        ? { id: candidate.id }
-        : {}),
-      name,
-      session_key: sessionKey,
-      title: candidate.title?.trim().slice(0, 160) ?? "",
-    }];
-  });
-}
-
-function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | null {
-  if (!item || typeof item !== "object") return null;
-  const record = item as Partial<QueuedPrompt>;
-  if (typeof record.text !== "string") return null;
-  const text = record.text.trim();
-  const images = Array.isArray(record.images)
-    ? record.images.flatMap((image): QueuedPromptImage[] => {
-        if (!image || typeof image !== "object") return [];
-        const candidate = image as Partial<QueuedPromptImage>;
-        if (isLocalAttachment(candidate.local)) {
-          return [{ local: candidate.local, kind: candidate.local.kind, name: candidate.local.name }];
-        }
-        if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:")) {
-          return [];
-        }
-        const kind = candidate.kind === "file" || candidate.kind === "image" || candidate.kind === "video"
-          ? candidate.kind
-          : candidate.dataUrl.startsWith("data:image/")
-            ? "image"
-            : "file";
-        return [{
-          dataUrl: candidate.dataUrl,
-          kind,
-          ...(typeof candidate.name === "string" && candidate.name.trim()
-            ? { name: candidate.name.trim() }
-            : {}),
-        }];
-      })
-    : [];
-  const quotedContext = typeof record.quotedContext === "string"
-    ? record.quotedContext.trim()
-    : "";
-  const sessionMentions = normalizeQueuedSessionMentions(record.sessionMentions);
-  if (!text && images.length === 0) return null;
-  const id = typeof record.id === "string" && record.id.trim()
-    ? record.id
-    : `queued-prompt-restored-${index}`;
-  const prompt: QueuedPrompt = {
-    id,
-    text,
-    ...(images.length > 0 ? { images } : {}),
-    ...(quotedContext ? { quotedContext } : {}),
-    ...(sessionMentions.length > 0 ? { sessionMentions } : {}),
-    ...(typeof record.autoAfterTurnId === "string" && record.autoAfterTurnId.trim()
-      ? { autoAfterTurnId: record.autoAfterTurnId.trim() }
-      : {}),
-    ...(record.autoPaused === true ? { autoPaused: true } : {}),
-    ...(typeof record.autoSendPageId === "string" ? { autoSendPageId: record.autoSendPageId } : {}),
-  };
-  return canAutoSendQueuedPrompt(prompt) ? prompt : pauseQueuedPrompt(prompt);
-}
-
-function readQueuedPrompt(storageKey: string): QueuedPrompt | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return null;
-    return parsed.slice(0, QUEUED_PROMPTS_LIMIT)
-      .map((item, index) => normalizeQueuedPrompt(item, index))
-      .filter((item): item is QueuedPrompt => item != null)
-      .reduce<QueuedPrompt | null>((pending, prompt) => (
-        pending ? mergeQueuedPrompt(pending, prompt) : prompt
-      ), null);
-  } catch {
-    return null;
-  }
-}
-
-function storeQueuedPrompt(storageKey: string, prompt: QueuedPrompt | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (!prompt) {
-      window.localStorage.removeItem(storageKey);
-      return;
-    }
-    // Retain the v1 array shape so existing queued drafts remain readable.
-    window.localStorage.setItem(storageKey, JSON.stringify([prompt]));
-  } catch {
-    // localStorage persistence is a convenience; the in-memory draft still works.
-  }
-}
-
-interface QueuedPromptSnapshot {
-  prompt: QueuedPrompt | null;
-  sending: boolean;
-  error: string | null;
-}
-
-// Delivery can outlive the composer during attachment upload or topic navigation.
-// Keep one owner per mounted/sending topic; idle, unmounted owners are reloaded from storage.
-const queuedPromptStores = new Map<string, QueuedPromptStore>();
-
-class QueuedPromptStore {
-  private snapshot: QueuedPromptSnapshot;
-  private listeners = new Set<() => void>();
-
-  constructor(private storageKey: string | null) {
-    this.snapshot = { prompt: storageKey ? readQueuedPrompt(storageKey) : null, sending: false, error: null };
-  }
-
-  getSnapshot = () => this.snapshot;
-
-  subscribe = (listener: () => void) => {
-    if (this.storageKey) queuedPromptStores.set(this.storageKey, this);
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-      this.release();
-    };
-  };
-
-  private release() {
-    if (this.storageKey && !this.snapshot.sending && this.listeners.size === 0
-      && queuedPromptStores.get(this.storageKey) === this) queuedPromptStores.delete(this.storageKey);
-  }
-
-  private publish(next: QueuedPromptSnapshot) {
-    if (this.storageKey && next.prompt !== this.snapshot.prompt) storeQueuedPrompt(this.storageKey, next.prompt);
-    this.snapshot = next;
-    for (const listener of this.listeners) listener();
-    this.release();
-  }
-
-  set = (next: QueuedPrompt | null | ((current: QueuedPrompt | null) => QueuedPrompt | null)) => {
-    const prompt = typeof next === "function" ? next(this.snapshot.prompt) : next;
-    if (prompt !== this.snapshot.prompt) this.publish({ ...this.snapshot, prompt, error: null });
-  };
-
-  send(prompt: QueuedPrompt, send: () => void | boolean | Promise<void | boolean>) {
-    if (this.snapshot.sending) return;
-    const retained = pauseQueuedPrompt(prompt);
-    this.publish({ prompt: retained, sending: true, error: null });
-    const finish = (accepted: void | boolean, error?: unknown) => {
-      const failed = accepted === false || error !== undefined;
-      this.publish({
-        prompt: failed ? retained : null,
-        sending: false,
-        error: failed ? error instanceof Error ? error.message : "Message not sent; queued draft retained" : null,
-      });
-    };
-    try {
-      const result = send();
-      if (result instanceof Promise) void result.then((accepted) => finish(accepted), (error: unknown) => finish(false, error));
-      else finish(result);
-    } catch (error) {
-      finish(false, error);
-    }
-  }
-}
-
-function queuedPromptStoreFor(storageKey: string | null): QueuedPromptStore {
-  if (!storageKey) return new QueuedPromptStore(null);
-  let store = queuedPromptStores.get(storageKey);
-  if (!store) {
-    store = new QueuedPromptStore(storageKey);
-    queuedPromptStores.set(storageKey, store);
-  }
-  return store;
-}
-
-function expireQueuedPromptAuthorization(): void {
-  queuedPromptPageId = undefined;
-  for (const store of queuedPromptStores.values()) {
-    store.set((prompt) => prompt && !prompt.autoPaused ? pauseQueuedPrompt(prompt) : prompt);
-  }
-}
-
-// Saved content survives a page's lifetime; permission to execute it does not.
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", expireQueuedPromptAuthorization);
-  document.addEventListener("freeze", expireQueuedPromptAuthorization);
-}
-
-function readyImagesToQueuedImages(
-  images: AttachedImage[],
-): QueuedPromptImage[] {
-  return images.map((img) => ({
-    dataUrl: img.dataUrl,
-    local: img.local,
-    kind: img.kind,
-    name: img.file.name,
-  }));
-}
-
-function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendAttachment[] | undefined {
-  if (!images?.length) return undefined;
-  return images.flatMap((img): SendAttachment[] => {
-    if (img.local) return [{
-      media: { path: img.local.path, name: img.local.name },
-      preview: { kind: img.local.kind, url: img.local.url, name: img.local.name },
-    }];
-    if (!img.dataUrl) return [];
-    return [{
-      media: { data_url: img.dataUrl, ...(img.name ? { name: img.name } : {}) },
-      preview: {
-        kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : img.dataUrl.startsWith("data:video/") ? "video" : "file"),
-        url: img.dataUrl, ...(img.name ? { name: img.name } : {}),
-      },
-    }];
-  });
-}
-
-function queuedPromptLabel(prompt: QueuedPrompt): string {
+function queuedPromptLabel(prompt: QueuedPromptContent): string {
   const text = prompt.text.trim();
   if (text) return text;
   return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "File attachment";
@@ -1062,7 +779,7 @@ export function ThreadComposer({
   compactWhenIdle = false,
   isStreaming = false,
   activeTurnId = null,
-  completedTurnIds = EMPTY_COMPLETED_TURN_IDS,
+  completedTurnIds,
   modelLabel = null,
   modelDetail = null,
   modelPreset = null,
@@ -1137,11 +854,84 @@ export function ThreadComposer({
   pathCheckScope.current = scopeIdentity;
   useEffect(() => () => { pathCheckGeneration.current += 1; }, []);
   const [modelSetupAttentionRequest, setModelSetupAttentionRequest] = useState(0);
-  const queuedPromptStorageKey = queuedPromptsStorageKey(pendingQueueKey);
-  const queuedPromptStore = useMemo(() => queuedPromptStoreFor(queuedPromptStorageKey), [queuedPromptStorageKey]);
-  const queueSnapshot = useSyncExternalStore(queuedPromptStore.subscribe, queuedPromptStore.getSnapshot);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusTextarea = useCallback(() => {
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+  const maxAttachments = ingressLimits?.attachments.max_count
+    ?? MAX_ATTACHMENTS_PER_MESSAGE;
+  const maxFileBytes = ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES;
+  const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
+
+  const formatRejection = useCallback(
+    (reason: Exclude<AttachmentError, "too_large">): string => {
+      const key = `thread.composer.imageRejected.${reason}`;
+      const fallback = reason === "too_many_videos"
+        ? "Max 1 video per message"
+        : reason === "too_many_attachments"
+        ? `Max ${maxAttachments} attachments per message`
+        : reason === "empty_file"
+          ? "Empty files cannot be attached"
+          : reason === "total_too_large"
+            ? "Attachments are too large together — remove some or use smaller files"
+            : "Unsupported file type";
+      return t(key, { max: maxAttachments, defaultValue: fallback });
+    },
+    [maxAttachments, t],
+  );
+
+  const formatUploadTooLarge = useCallback(
+    (size: number, maximum: number) => t("thread.composer.imageRejected.too_large", {
+      size: formatBytes(size), max: formatBytes(maximum),
+    }),
+    [t],
+  );
+
+  const textTooLargeMessage = useCallback(
+    () => t("thread.composer.textTooLarge", {
+      max: formatBytes(maxTextBytes),
+      defaultValue: `Message text is too large (max ${formatBytes(maxTextBytes)})`,
+    }),
+    [maxTextBytes, t],
+  );
+
+  const queuedPromptError = useCallback((prompt: QueuedPromptContent): string | null => {
+    if (utf8Bytes(formatQuotedUserMessage(prompt.text, prompt.quotedContext)) > maxTextBytes) {
+      return textTooLargeMessage();
+    }
+    const attachments = prompt.images ?? [];
+    const videos = attachments.filter((item) => item.kind === "video").length;
+    if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
+    if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
+    const oversized = attachments.find((item) => queuedUploadBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes));
+    if (oversized) {
+      return formatUploadTooLarge(queuedUploadBytes(oversized), oversized.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
+    }
+    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedUploadBytes(item)), 0);
+    if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
+      return formatRejection("total_too_large");
+    }
+    if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
+      return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
+    }
+    return null;
+  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
+
+  const {
+    snapshot: queueSnapshot,
+    collect: collectQueuedPrompt,
+    enqueue: enqueueQueuedPrompt,
+    clear: clearQueuedPrompt,
+    pause: pauseQueue,
+    send: sendQueuedPrompt,
+  } = useQueuedPrompt(pendingQueueKey, { isStreaming, activeTurnId, completedTurnIds }, {
+    disabled: !!disabled || sendPending,
+    onSend,
+    validate: queuedPromptError,
+    onValidationError: setInlineError,
+    onSendAttempt: focusTextarea,
+  });
   const queuedPrompt = queueSnapshot.prompt;
-  const setQueuedPrompt = queuedPromptStore.set;
   const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
   useEffect(() => {
     if (queueSnapshot.error) setInlineError(queueSnapshot.error);
@@ -1159,7 +949,6 @@ export function ThreadComposer({
   const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
   const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
   const { readingTextSize, customReadingTextSize } = useLocalPreferences();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const placeholderMeasureRef = useRef<HTMLSpanElement>(null);
   const mentionOverlayRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -1201,9 +990,7 @@ export function ThreadComposer({
   }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
-  const queuedPromptCounterRef = useRef(0);
   const previousPendingQueueKeyRef = useRef(pendingQueueKey);
-  const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
   const voiceShortcutDownRef = useRef(false);
   const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHero = variant === "hero";
@@ -1218,15 +1005,6 @@ export function ThreadComposer({
     && !!onFavoriteWorkspaceProject
     && workspaceControls?.can_change_project !== false;
   const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
-
-  useEffect(() => {
-    if (!isStreaming || !activeTurnId) return;
-    setQueuedPrompt((prompt) => (
-      !prompt || prompt.autoPaused || prompt.autoAfterTurnId === activeTurnId
-        ? prompt
-        : { ...prompt, autoAfterTurnId: activeTurnId }
-    ));
-  }, [activeTurnId, isStreaming, pendingQueueKey, setQueuedPrompt]);
 
   const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholder");
   const showCompactPlaceholder = placeholder === undefined && compactPlaceholder;
@@ -1255,10 +1033,6 @@ export function ThreadComposer({
     };
   }, [placeholder, resolvedPlaceholder, compactControls, readingTextSize, customReadingTextSize]);
 
-  const maxAttachments = ingressLimits?.attachments.max_count
-    ?? MAX_ATTACHMENTS_PER_MESSAGE;
-  const maxFileBytes = ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES;
-  const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
   const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
     useAttachedImages({ ingressLimits });
   const encoding = encodingFiles || pathInspection !== null;
@@ -1273,38 +1047,6 @@ export function ThreadComposer({
     }
     setDraftAttachmentsReady(true);
   }, [enqueue, addLocal, initialDraft]);
-
-  const formatRejection = useCallback(
-    (reason: Exclude<AttachmentError, "too_large">): string => {
-      const key = `thread.composer.imageRejected.${reason}`;
-      const fallback = reason === "too_many_videos"
-        ? "Max 1 video per message"
-        : reason === "too_many_attachments"
-        ? `Max ${maxAttachments} attachments per message`
-        : reason === "empty_file"
-          ? "Empty files cannot be attached"
-          : reason === "total_too_large"
-            ? "Attachments are too large together — remove some or use smaller files"
-            : "Unsupported file type";
-      return t(key, { max: maxAttachments, defaultValue: fallback });
-    },
-    [maxAttachments, t],
-  );
-
-  const formatUploadTooLarge = useCallback(
-    (size: number, maximum: number) => t("thread.composer.imageRejected.too_large", {
-      size: formatBytes(size), max: formatBytes(maximum),
-    }),
-    [t],
-  );
-
-  const textTooLargeMessage = useCallback(
-    () => t("thread.composer.textTooLarge", {
-      max: formatBytes(maxTextBytes),
-      defaultValue: `Message text is too large (max ${formatBytes(maxTextBytes)})`,
-    }),
-    [maxTextBytes, t],
-  );
 
   const addFiles = useCallback(
     (files: File[]) => {
@@ -1873,10 +1615,6 @@ export function ThreadComposer({
     };
   }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
 
-  const focusTextarea = useCallback(() => {
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, []);
-
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el || mentionInput.isComposing) return;
@@ -2003,9 +1741,9 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const handleStop = useCallback(() => {
-    setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
+    pauseQueue();
     onStop?.();
-  }, [onStop, setQueuedPrompt]);
+  }, [onStop, pauseQueue]);
 
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
@@ -2128,64 +1866,29 @@ export function ThreadComposer({
     if (restoreFocus) focusTextarea();
   }, [focusTextarea]);
 
-  const queuedPromptError = useCallback((prompt: QueuedPrompt): string | null => {
-    if (utf8Bytes(formatQuotedUserMessage(prompt.text, prompt.quotedContext)) > maxTextBytes) {
-      return textTooLargeMessage();
-    }
-    const attachments = prompt.images ?? [];
-    const videos = attachments.filter((item) => item.kind === "video").length;
-    if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
-    if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
-    const oversized = attachments.find((item) => queuedUploadBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes));
-    if (oversized) {
-      return formatUploadTooLarge(queuedUploadBytes(oversized), oversized.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
-    }
-    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedUploadBytes(item)), 0);
-    if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
-      return formatRejection("total_too_large");
-    }
-    if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
-      return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
-    }
-    return null;
-  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
-
-  const collectGuidancePrompt = useCallback((): QueuedPrompt => {
-    queuedPromptCounterRef.current += 1;
-    const prompt: QueuedPrompt = {
-      id: `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`,
-      text: value.trim(),
-      autoSendPageId: getQueuedPromptPageId(),
-      images: readyImagesToQueuedImages(readyImages),
-      ...(activeTurnId ? { autoAfterTurnId: activeTurnId } : {}),
-      ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
-      sessionMentions: activeSessionMentions,
-    };
-    return queuedPrompt ? mergeQueuedPrompt(queuedPrompt, prompt) : prompt;
-  }, [activeSessionMentions, activeTurnId, normalizedQuotedContext, queuedPrompt, readyImages, value]);
+  const collectGuidancePrompt = useCallback(() => collectQueuedPrompt({
+    text: value,
+    images: readyImagesToQueuedImages(readyImages),
+    ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
+    sessionMentions: activeSessionMentions,
+  }), [activeSessionMentions, collectQueuedPrompt, normalizedQuotedContext, readyImages, value]);
 
   const queueGuidancePrompt = useCallback(() => {
     if (!canQueueGuidance) return;
-    const prompt = collectGuidancePrompt();
-    const error = queuedPromptError(prompt);
-    if (error) {
-      setInlineError(error);
-      return;
-    }
-    setQueuedPrompt(prompt);
+    if (!enqueueQueuedPrompt(collectGuidancePrompt())) return;
     clear();
     clearComposerText();
     onQuotedContextChange?.(null);
-  }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, queuedPromptError, setQueuedPrompt]);
+  }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, enqueueQueuedPrompt]);
 
   const removeQueuedPrompt = useCallback(() => {
-    setQueuedPrompt(null);
+    clearQueuedPrompt();
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [setQueuedPrompt]);
+  }, [clearQueuedPrompt]);
 
-  const editQueuedPrompt = useCallback((pending: QueuedPrompt) => {
+  const editQueuedPrompt = useCallback((pending: QueuedPromptContent) => {
     const prompt = hasComposerContent || normalizedQuotedContext ? collectGuidancePrompt() : pending;
-    setQueuedPrompt(null);
+    clearQueuedPrompt();
     replaceMentionInput(prompt.text, prompt.text.length);
     setBoundSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
@@ -2198,51 +1901,7 @@ export function ThreadComposer({
       clear();
     }
     focusTextarea();
-  }, [clear, collectGuidancePrompt, hasComposerContent, normalizedQuotedContext, onQuotedContextChange, replaceMentionInput, focusTextarea, restoreReadyImages, setQueuedPrompt]);
-
-  const sendQueuedPrompt = useCallback(
-    (prompt: QueuedPrompt, extraOptions?: SendOptions) => {
-      if (interactionDisabled) return;
-      const error = queuedPromptError(prompt);
-      if (error) {
-        setQueuedPrompt(pauseQueuedPrompt(prompt));
-        setInlineError(error);
-        return;
-      }
-      const text = prompt.text.trim();
-      const queuedImages = queuedImagesToSendImages(prompt.images);
-      const options: SendOptions | undefined = (
-        extraOptions || prompt.quotedContext || prompt.sessionMentions?.length || isStreaming
-      )
-        ? {
-            ...extraOptions,
-            ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-            ...(prompt.sessionMentions?.length ? { sessionMentions: prompt.sessionMentions } : {}),
-            ...(isStreaming ? { continueActiveTurn: true } : {}),
-          }
-        : undefined;
-      queuedPromptStore.send(prompt, () => (
-        options ? onSend(text, queuedImages, options)
-          : queuedImages?.length ? onSend(text, queuedImages)
-          : onSend(text)
-      ));
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    },
-    [interactionDisabled, isStreaming, onSend, queuedPromptStore, queuedPromptError, setQueuedPrompt],
-  );
-
-  useEffect(() => {
-    const previous = previousQueueRunRef.current;
-    previousQueueRunRef.current = { key: pendingQueueKey, isStreaming };
-    // Switching to an idle session is not completion of the previous session's run.
-    if (previous.key !== pendingQueueKey) return;
-    if (isStreaming || interactionDisabled || !queuedPrompt || !canAutoSendQueuedPrompt(queuedPrompt)) return;
-    const waitingTurnCompleted = queuedPromptStorageKey !== null && queuedPrompt.autoAfterTurnId !== undefined
-      ? completedTurnIds.includes(queuedPrompt.autoAfterTurnId)
-      : previous.isStreaming;
-    if (!waitingTurnCompleted) return;
-    sendQueuedPrompt(queuedPrompt);
-  }, [completedTurnIds, interactionDisabled, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt, queuedPromptStorageKey]);
+  }, [clear, collectGuidancePrompt, hasComposerContent, normalizedQuotedContext, onQuotedContextChange, replaceMentionInput, focusTextarea, restoreReadyImages, clearQueuedPrompt]);
 
   const submit = useCallback(() => {
     if (requiresModelSetup) {
@@ -2326,7 +1985,7 @@ export function ThreadComposer({
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      if ((!isStreaming && !isUserShell) || finalizeActiveTurn) setQueuedPrompt(null);
+      if ((!isStreaming && !isUserShell) || finalizeActiveTurn) clearQueuedPrompt();
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2371,7 +2030,7 @@ export function ThreadComposer({
     queuedPrompt,
     queuedPromptError,
     sendQueuedPrompt,
-    setQueuedPrompt,
+    clearQueuedPrompt,
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
@@ -3028,7 +2687,7 @@ function QueuedPromptPreview({
   onDelete,
   onEdit,
 }: {
-  prompt: QueuedPrompt;
+  prompt: QueuedPromptContent;
   disabled: boolean;
   editDisabled: boolean;
   label: string;
