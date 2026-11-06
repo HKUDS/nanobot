@@ -8,7 +8,6 @@ import type { ContextGraph, ContextSnapshot } from "@/lib/types";
 import type { ComposerContextUsage, ComposerRoundUsage } from "./ComposerUsagePopover";
 
 import { ContextReplayButton } from "./ContextReplayButton";
-import { useContextGraph, type ContextGraphLoader } from "./useContextGraph";
 
 const ContextGraphScene = lazy(() => import("./ContextGraphScene").then(module => ({ default: module.ContextGraphScene })));
 
@@ -22,38 +21,29 @@ function latestUsageSnapshot(snapshots: readonly ContextSnapshot[]) {
   }
 }
 
-export function ContextInspector({ context, rounds, snapshots, onOpenFile, sidebar = false, expandable = true, active = true, loadGraph }: {
+export function ContextInspector({ context, rounds, snapshots, onOpenFile, sidebar = false, expandable = true }: {
   context: ComposerContextUsage | null; rounds: readonly ComposerRoundUsage[];
   snapshots: readonly ContextSnapshot[]; onOpenFile?: (path: string) => void; sidebar?: boolean; expandable?: boolean;
-  active?: boolean; loadGraph?: ContextGraphLoader;
 }) {
   const { t, i18n } = useTranslation();
   const layoutId = useId();
   const reducedMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
-  const [playback, setReplay] = useState<{
-    frames: readonly ContextSnapshot[]; index: number; startedAt: number; interval: number;
-    epoch: string | undefined; loader: ContextGraphLoader | undefined;
-  } | null>(null);
+  const [replay, setReplay] = useState<{ frames: readonly ContextSnapshot[]; index: number; startedAt: number; interval: number } | null>(null);
   const [readyGraph, setReadyGraph] = useState<ContextGraph | null>(null);
   const [meterHover, setMeterHover] = useState(false);
   const epoch = snapshots[0]?.id;
-  const replay = active && playback && playback.epoch === epoch && playback.loader === loadGraph ? playback : null;
-  const snapshot = replay ? replay.frames[replay.index] : snapshots.at(-1);
-  const detail = useContextGraph(snapshot, active, epoch, loadGraph);
-  const graph = snapshot ? detail.graph : EMPTY_GRAPH;
-  const displayedGraph = active ? detail.displayedGraph ?? (snapshot ? undefined : EMPTY_GRAPH) : undefined;
-  useEffect(() => { setReplay(null); }, [epoch, loadGraph, active]);
-  useEffect(() => { if (!active) setExpanded(false); }, [active]);
+  useEffect(() => { setReplay(null); }, [epoch]);
   useEffect(() => {
-    if (!replay || !graph || readyGraph !== graph) return;
+    if (!replay || readyGraph !== replay.frames[replay.index].graph) return;
     // Keep a shared timeline instead of adding rendering time to every step.
     // Advance only after painting each snapshot, even when catching up.
     const remaining = replay.startedAt + (replay.index + 1) * replay.interval - performance.now();
     const timer = window.setTimeout(() => setReplay((current) => current && current.index + 1 < current.frames.length
       ? { ...current, index: current.index + 1 } : null), Math.max(0, remaining));
     return () => window.clearTimeout(timer);
-  }, [replay, readyGraph, graph]);
+  }, [replay, readyGraph]);
+  const snapshot = replay ? replay.frames[replay.index] : snapshots.at(-1);
   // The live graph advances before usage arrives; replay stays frame-local.
   const usageSnapshot = replay ? snapshot : latestUsageSnapshot(snapshots);
   const latestRound = rounds.at(-1);
@@ -72,19 +62,9 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   openFileCallback.current = onOpenFile;
   const openFile = useCallback((path: string) => { setExpanded(false); openFileCallback.current?.(path); }, []);
   const content = (large: boolean) => <motion.div layoutId={layoutId} transition={{ duration: reducedMotion ? 0 : 0.25, ease: [0.2, 0, 0, 1] }} className={cn("flex flex-col gap-3", sidebar && !large && "h-full min-h-0")}>
-    <div className={cn("relative", sidebar && !large && "flex min-h-0 flex-1 flex-col")}>
-      {displayedGraph && <Suspense fallback={<div role="status" aria-busy="true" className={cn(surface, "flex min-h-[300px] items-center justify-center text-sm text-muted-foreground", sidebar && !large && "min-h-0 flex-1")}>{t("chat.loading")}</div>}>
-        <ContextGraphScene graph={displayedGraph} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? toggleExpanded : undefined} onOpenFile={onOpenFile ? openFile : undefined} />
-      </Suspense>}
-      {(!displayedGraph || !graph) && <div className={cn(surface, "flex min-h-[300px] flex-col items-center justify-center px-4 text-center text-sm text-muted-foreground", sidebar && !large && "min-h-0 flex-1", displayedGraph && "absolute inset-0 z-20 justify-start bg-transparent pt-4")}>
-        <div className={cn("flex flex-col items-center gap-3", displayedGraph && "rounded-lg bg-card/95 px-3 py-2")}>
-          {active && (detail.error ? <>
-            <p role="alert">{t("thread.composer.context.loadError")}</p>
-            <button type="button" onClick={detail.retry} className="rounded-md px-3 py-2 text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring">{t("common.retry")}</button>
-          </> : <p role="status" aria-busy="true">{t("chat.loading")}</p>)}
-        </div>
-      </div>}
-    </div>
+    <Suspense fallback={<div aria-busy="true" className={cn(surface, "min-h-[300px]", sidebar && !large && "min-h-0 flex-1")} />}>
+      <ContextGraphScene graph={snapshot?.graph ?? EMPTY_GRAPH} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? toggleExpanded : undefined} onOpenFile={onOpenFile ? openFile : undefined} />
+    </Suspense>
     <div className="flex shrink-0 items-center gap-3">
     <div onPointerEnter={() => setMeterHover(true)} onPointerLeave={() => setMeterHover(false)} className={cn(surface, "relative flex h-14 min-w-0 flex-1 items-center gap-4 px-4 transition-transform duration-150 ease-out motion-reduce:transition-none", meterHover && "scale-[1.015]")}>
       <div className="flex h-11 flex-1 items-center">
@@ -107,12 +87,12 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
         </dl>
       </div>}
     </div>
-    <ContextReplayButton disabled={!active || replay !== null || snapshots.length < 2}
+    <ContextReplayButton disabled={replay !== null || snapshots.length < 2}
       onPlay={() => {
         setMeterHover(false);
         // Scale by request count: our replay unit is a snapshot, not a graph edge.
         const stepsPerSecond = Math.min(20, Math.max(5, 0.5 * Math.sqrt(snapshots.length)));
-        setReplay({ frames: [...snapshots], index: 0, startedAt: performance.now(), interval: 1000 / stepsPerSecond, epoch, loader: loadGraph });
+        setReplay({ frames: [...snapshots], index: 0, startedAt: performance.now(), interval: 1000 / stepsPerSecond });
       }} />
     </div>
   </motion.div>;

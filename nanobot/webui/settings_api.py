@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import httpx
 
 from nanobot import __version__
-from nanobot.audio.transcription import resolve_transcription_config
 from nanobot.config.loader import get_config_path, load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.webui import settings_capabilities as capabilities
@@ -186,43 +185,6 @@ def settings_payload(
         runtime_capability_overrides=runtime_capability_overrides,
         restart_required_sections=restart_required_sections,
         apply_state=apply_state,
-    )
-
-
-def chat_settings_payload(
-    *,
-    surface: str | None = "browser",
-    runtime_capability_overrides: dict[str, Any] | None = None,
-    config_path: Path | None = None,
-) -> dict[str, Any]:
-    """Read composer settings without building editor capabilities or usage history."""
-    config = _load_settings_config(config_path)
-    model_settings = models.model_settings_payload(config, oauth_status=_oauth_provider_status)
-    return decorate_settings_payload(
-        {
-            "agent": {
-                key: model_settings["agent"][key]
-                for key in ("model", "provider", "resolved_provider", "model_preset")
-            },
-            "model_presets": [
-                {
-                    key: preset[key]
-                    for key in (
-                        "name", "label", "active", "is_default", "model", "provider",
-                        "resolved_provider", "context_window_tokens", "reasoning_effort",
-                    )
-                }
-                for preset in model_settings["model_presets"]
-            ],
-            "model_call_order": model_settings["model_call_order"],
-            "providers": [
-                {key: provider[key] for key in ("name", "label", "configured")}
-                for provider in model_settings["providers"]
-            ],
-            "transcription": {"provider": resolve_transcription_config(config).provider},
-        },
-        surface=surface,
-        runtime_capability_overrides=runtime_capability_overrides,
     )
 
 

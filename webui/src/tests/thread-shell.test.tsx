@@ -14,10 +14,8 @@ import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { ThreadTranscript } from "@/lib/thread-transcript";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
-import * as voiceRecorder from "@/hooks/useVoiceRecorder";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type {
-  ChatSettingsPayload,
   CliAppsPayload,
   ConnectionStatus,
   SettingsPayload,
@@ -366,20 +364,6 @@ function stubThreadResizeObserver() {
   return {
     observers,
     restore: () => vi.stubGlobal("ResizeObserver", original),
-  };
-}
-
-function chatModelSettings(model: string, provider: string): ChatSettingsPayload {
-  return {
-    surface: "browser", runtime_surface: "browser",
-    agent: { model, provider, resolved_provider: provider, model_preset: "default" },
-    model_presets: [{
-      name: "default", active: true, is_default: true, model, provider,
-      context_window_tokens: 65536, reasoning_effort: null,
-    }],
-    model_call_order: [],
-    providers: [{ name: provider, label: provider, configured: true }],
-    transcription: { provider: "groq" },
   };
 }
 
@@ -1132,54 +1116,6 @@ describe("ThreadShell", () => {
     geometry.mockRestore();
   });
 
-  it("opens historical context with one selected detail request and preserves file preview", async () => {
-    const client = makeClient();
-    const envelope = { chat_id: "deferred-usage", turn_id: "turn" };
-    const graph = { nodes: [{ path: "/latest.md", name: "latest.md", state: "loaded", tokens: 179 }], edges: [] };
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
-      const path = String(input);
-      if (path.includes("/webui-thread/context-graph?")) return Promise.resolve(httpJson({ graph }));
-      if (path.includes("/file-preview?")) return Promise.resolve(httpJson({
-        path: "/latest.md", display_path: "latest.md", project_path: "/", kind: "text", language: "markdown",
-        size: 15, content: "Preview content", truncated: false,
-      }));
-      if (path.includes("websocket%3Adeferred-usage/webui-thread?")) return Promise.resolve(httpJson({
-        schemaVersion: 3, projection: "events", events: [
-          { ...envelope, event: "user_message", text: "Read the files", starts_turn: true, turn_seq: 1 },
-          ...[1, 2].map((number) => ({ ...envelope, event: "model_request", request_id: `request-${number}`, run_id: "run",
-            phase: "completed", sequence: number * 2, turn_seq: number + 1, context_window_tokens: 1000,
-            usage: { context_tokens: number * 80, request_count: number }, request_usage: { context_tokens: number * 80 },
-            context_graph_detail_ref: number === 1 ? "older-ref" : "latest-ref" })),
-          { ...envelope, event: "message", text: "Saved answer", turn_seq: 4 },
-          { ...envelope, event: "turn_end", turn_seq: 5 },
-        ],
-      }));
-      return Promise.resolve(new Response(null, { status: 404 }));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const thread = <ThreadShell session={session("deferred-usage")} title="Deferred usage"
-      onToggleSidebar={() => {}} settingsSnapshot={modelSettings("test-model", "deepseek")} />;
-    const view = render(wrap(client, thread));
-    await screen.findByText("Saved answer");
-    const detailCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes("/context-graph?"));
-    expect(detailCalls()).toHaveLength(0);
-    const trigger = await screen.findByTestId("composer-context-usage");
-    expect(trigger).toHaveAccessibleName("Context 16%. Open context usage");
-    fireEvent.click(trigger);
-    await waitFor(() => expect(detailCalls()).toHaveLength(1));
-    await act(async () => { await vi.dynamicImportSettled(); });
-    const node = await screen.findByRole("button", { name: "latest.md" });
-    expect(detailCalls()).toHaveLength(1);
-    expect(String(detailCalls()[0][0])).toContain("ref=latest-ref");
-    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "16");
-    fireEvent.click(node);
-    expect(await screen.findByText("About 179 tokens")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    expect(await screen.findByText("Preview content")).toBeVisible();
-    expect(detailCalls()).toHaveLength(1);
-    view.unmount();
-  });
-
   it("updates composer usage from active model snapshots without changing the body", async () => {
     const client = makeClient();
     const envelope = { chat_id: "live-usage", turn_id: "live-turn" };
@@ -1449,14 +1385,14 @@ describe("ThreadShell", () => {
 
   it.each([true, false])("waits for parent settings and retries only on failure (success: %s)", async (success) => {
     const client = makeClient();
-    const settings = chatModelSettings("deepseek-v4-pro", "deepseek");
+    const settings = modelSettings("deepseek-v4-pro", "deepseek");
     const settingsRequest = vi.fn(() => Promise.resolve(httpJson(settings)));
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => (
-      String(input) === "/api/settings?scope=chat"
+      String(input).endsWith("/api/settings")
         ? settingsRequest()
         : Promise.resolve(httpJson({}))
     )));
-    const view = (loading: boolean, snapshot: ChatSettingsPayload | null) => wrap(
+    const view = (loading: boolean, snapshot: SettingsPayload | null) => wrap(
       client,
       <ThreadShell session={null} title="New topic" onToggleSidebar={() => {}}
         settingsLoading={loading} settingsSnapshot={snapshot} />,
@@ -1468,54 +1404,6 @@ describe("ThreadShell", () => {
     rerender(view(false, success ? settings : null));
     expect(await screen.findByTestId("composer-model-logo-deepseek")).toBeInTheDocument();
     expect(settingsRequest).toHaveBeenCalledTimes(success ? 0 : 1);
-  });
-
-  it("uses accepted compact refreshes for model and transcription, without overwriting a newer snapshot", async () => {
-    const recorder = vi.spyOn(voiceRecorder, "useVoiceRecorder");
-    const client = makeClient();
-    const initial = chatModelSettings("deepseek-v4-pro", "deepseek");
-    const updated = { ...chatModelSettings("gpt-5.5", "openai_codex"), transcription: { provider: "xiaomi_mimo" } };
-    let releaseSettings!: (response: Response) => void;
-    const pendingSettings = new Promise<Response>((resolve) => { releaseSettings = resolve; });
-    const settingsRequest = vi.fn().mockReturnValueOnce(pendingSettings).mockResolvedValue(httpJson(initial));
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings?scope=chat"
-      ? settingsRequest() : Promise.resolve(httpJson({}))));
-    const view = (snapshot: ChatSettingsPayload) => wrap(client,
-      <ThreadShell session={null} title="New topic" onToggleSidebar={() => {}} settingsSnapshot={snapshot} />);
-    const { rerender } = render(view(initial));
-    act(() => client._emitRuntimeModelUpdate("gpt-5.5"));
-    await waitFor(() => expect(settingsRequest).toHaveBeenCalledTimes(1));
-    rerender(view(updated));
-    await screen.findByTestId("composer-model-logo-openai_codex");
-    await act(async () => { releaseSettings(httpJson(initial)); await pendingSettings; });
-    expect(screen.getByTestId("composer-model-logo-openai_codex")).toBeInTheDocument();
-    expect(recorder.mock.calls.at(-1)?.[0].wantsWav).toBe(true);
-
-    act(() => client._emitRuntimeModelUpdate("deepseek-v4-pro"));
-    await screen.findByTestId("composer-model-logo-deepseek");
-    expect(recorder.mock.calls.at(-1)?.[0].wantsWav).toBe(false);
-    expect(settingsRequest).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === "/api/settings")).toBe(false);
-    recorder.mockRestore();
-  });
-
-  it("rejects a model-settings refresh after its client is replaced", async () => {
-    const client = makeClient();
-    const settings = chatModelSettings("deepseek-v4-pro", "deepseek");
-    let release!: (response: Response) => void;
-    const pending = new Promise<Response>(resolve => { release = resolve; });
-    const refresh = vi.fn(() => pending);
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings?scope=chat"
-      ? refresh() : Promise.resolve(httpJson({}))));
-    const view = (owner: typeof client) => wrap(owner,
-      <ThreadShell session={null} title="New topic" onToggleSidebar={() => {}} settingsSnapshot={settings} />);
-    const { rerender } = render(view(client));
-    act(() => client._emitRuntimeModelUpdate("gpt-5.5"));
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
-    rerender(view(makeClient()));
-    await act(async () => { release(httpJson(chatModelSettings("gpt-5.5", "openai"))); await pending; });
-    expect(screen.getByTestId("composer-model-logo-deepseek")).toBeInTheDocument();
-    expect(screen.queryByTestId("composer-model-logo-openai")).not.toBeInTheDocument();
   });
 
   it("updates the composer model logo when settings snapshot changes", async () => {
@@ -1868,7 +1756,8 @@ describe("ThreadShell", () => {
 
   it.each([false, true])("keeps model setup actionable without a repeated tooltip (existing history: %s)", async (hasHistory) => {
     const client = makeClient();
-    const settings = chatModelSettings("anthropic/claude-opus-4-5", "anthropic");
+    const settings = modelSettings("anthropic/claude-opus-4-5", "anthropic");
+    settings.agent.has_api_key = false;
     settings.providers = [{ name: "anthropic", label: "Anthropic", configured: false }];
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("websocket%3Asetup-tooltip/webui-thread")) {

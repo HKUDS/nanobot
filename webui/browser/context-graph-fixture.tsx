@@ -7,7 +7,7 @@ import { initializeI18n } from "@/i18n";
 import type { ContextSnapshot } from "@/lib/types";
 import "../src/globals.css";
 
-const snapshots = [
+const snapshots: ContextSnapshot[] = [
   { id: "first", contextWindowTokens: 10000, usage: { prompt_tokens: 1000 }, graph: {
     nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 100 }], edges: [],
   } },
@@ -15,7 +15,7 @@ const snapshots = [
     nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 100 }, { path: "/b.md", name: "b.md", state: "discovered", tokens: 0 }],
     edges: [{ source: "/a.md", target: "/b.md" }],
   } },
-] satisfies ContextSnapshot[];
+];
 const largeNodes = Array.from({ length: 500 }, (_, index) => ({ path: `/file-${index}.md`, name: `file-${index}.md`, state: "loaded" as const, tokens: 100 }));
 const large: ContextSnapshot[] = [{ id: "large", contextWindowTokens: 100000, usage: { prompt_tokens: 50000 }, graph: {
   nodes: largeNodes, edges: largeNodes.slice(1).map((node, index) => ({ source: largeNodes[Math.floor(index / 2)].path, target: node.path })),

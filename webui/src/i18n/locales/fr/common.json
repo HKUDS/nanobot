@@ -1926,7 +1926,6 @@
         "tooltip": "Contexte {{percent}} %",
         "detailsLabel": "Ouvrir l’utilisation du contexte",
         "panelTitle": "Utilisation du contexte",
-        "loadError": "Impossible de charger le graphe de contexte.",
         "contextTitle": "Contexte",
         "cacheHitRate": "Taux de réussite du cache",
         "tokenUsage": "{{used}} / {{limit}}",

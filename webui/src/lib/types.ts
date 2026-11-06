@@ -196,23 +196,20 @@ export interface ContextGraph {
   edges: { source: string; target: string }[];
 }
 
-export type ContextInspection = {
+export interface ContextInspection {
+  graph: ContextGraph;
   estimated_tokens: number;
   context_window_tokens: number;
-} & ({ graph: ContextGraph; graph_detail_ref?: never } | { graph?: never; graph_detail_ref: string });
+}
 
-/** An inline live graph or a durable, session-scoped historical reference. */
-export type ContextGraphSource =
-  | { graph: ContextGraph; graphDetailRef?: never }
-  | { graph?: never; graphDetailRef: string };
-
-export type ContextSnapshot = ContextGraphSource & {
+export interface ContextSnapshot {
   turnSeq?: number;
   estimatedTokens?: number;
   id: string;
+  graph: ContextGraph;
   usage?: TurnUsage;
   contextWindowTokens?: number;
-};
+}
 
 export interface UIModelRequestSnapshot {
   contextSnapshots?: ContextSnapshot[];
@@ -722,15 +719,6 @@ export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPendi
 
 export type RuntimeConfigValue = string | number | boolean | string[] | null;
 
-
-export type ChatSettingsPayload = Pick<SettingsPayload, "surface" | "runtime_surface" | "model_call_order"> & {
-  agent: Pick<SettingsPayload["agent"], "model" | "provider" | "resolved_provider" | "model_preset">;
-  model_presets: Array<Pick<SettingsPayload["model_presets"][number],
-    "name" | "label" | "active" | "is_default" | "model" | "provider" | "resolved_provider"
-    | "context_window_tokens" | "reasoning_effort">>;
-  providers: Array<Pick<SettingsPayload["providers"][number], "name" | "label" | "configured">>;
-  transcription?: Pick<NonNullable<SettingsPayload["transcription"]>, "provider">;
-};
 
 export interface SettingsPayload {
   runtime_config?: Record<string, RuntimeConfigValue>;
@@ -1648,7 +1636,6 @@ export type InboundEvent =
       event: "model_request";
       request_usage?: TurnUsage | null;
       context_graph?: ContextGraph;
-      context_graph_detail_ref?: string;
       chat_id: string;
       request_id: string;
       run_id: string;

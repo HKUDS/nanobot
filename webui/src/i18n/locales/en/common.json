@@ -2132,7 +2132,6 @@
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",
         "panelTitle": "Context usage",
-        "loadError": "Could not load the context graph.",
         "contextTitle": "Context",
         "cacheHitRate": "Cache hit rate",
         "tokenUsage": "{{used}} / {{limit}}",

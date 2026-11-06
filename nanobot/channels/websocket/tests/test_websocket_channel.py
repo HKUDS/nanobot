@@ -5076,7 +5076,6 @@ async def test_bootstrap_exposes_native_surface(bus: MagicMock, start_listener) 
         body = response.json()
         assert body["runtime_surface"] == "native"
         assert body["runtime_capabilities"]["can_restart_engine"] is True
-        assert body["terminal"]["webui"]["min_protocol"] == body["terminal"]["webui"]["max_protocol"] == 1
         assert body["token"].startswith("nbwt_")
         assert body["api_token"].startswith("nbwt_")
         assert body["api_token"] != body["token"]
@@ -7037,15 +7036,7 @@ async def test_thread_replays_durable_compaction_boundaries(history, tmp_path, m
     assert event["phase"] == "succeeded"
     assert event["compaction_id"] == "compact"
     if state == "present":
-        saved = event["context_snapshot"]
-        assert saved["estimated_tokens"] == snapshot["estimated_tokens"]
-        assert saved["context_window_tokens"] == snapshot["context_window_tokens"]
-        detail_path = f"/api/sessions/{encoded}/webui-thread/context-graph?ref={saved['graph_detail_ref']}"
-        detail = await gateway.http._dispatch_session_routes(
-            Request(detail_path, Headers([("Authorization", "Bearer tok")])), detail_path.split("?", 1)[0],
-        )
-        assert detail.status_code == 200
-        assert json.loads(detail.body)["graph"] == snapshot["graph"]
+        assert event["context_snapshot"] == snapshot
     else:
         # Historical reads must not invent a snapshot from today's disk files.
         assert "context_snapshot" not in event
@@ -7055,118 +7046,57 @@ async def test_thread_replays_durable_compaction_boundaries(history, tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_deferred_context_graph_routes_preserve_pages_and_read_only_the_selected_fact(history, monkeypatch):
+async def test_context_graph_dictionary_pages_are_self_contained_and_opt_in(history):
     from urllib.parse import quote
 
     from websockets.http11 import Request
 
-    from nanobot.session.display_history import HistoryReader
-    from nanobot.webui.history import fact_from_record
-
-    key = "websocket:deferred-graphs"
-    graph = {"nodes": [{"path": f"/file-{i}.md", "name": f"file-{i}.md", "tokens": i, "state": "loaded"}
-                       for i in range(200)], "edges": []}
-    for number in range(2):
+    key = "websocket:graph-pages"
+    graph = {"nodes": [{"path": "/guide.md", "name": "guide.md", "tokens": 10, "state": "loaded"}], "edges": []}
+    for number in range(3):
         history.append(key, {"event": "user", "text": f"question {number}"})
-        history.append(key, {"event": "model_request", "request_id": str(number), "run_id": str(number),
-                             "sequence": 1, "phase": "started", "context_graph": graph, "request_usage": None})
-        history.append(key, {"event": "model_request", "request_id": str(number), "run_id": str(number),
-                             "sequence": 2, "phase": "completed", "context_graph": graph,
-                             "request_usage": {"context_tokens": number + 10}, "usage": {"request_count": 1},
-                             "round_usages": [{"prompt_tokens": 20}], "context_window_tokens": 1000})
-        history.append(key, {"event": "context_compaction", "compaction_id": str(number), "phase": "succeeded",
-                             "context_snapshot": {"graph": graph, "estimated_tokens": 5, "context_window_tokens": 1000}})
-        history.append(key, {"event": "message", "text": f"answer {number}"})
-        history.append(key, {"event": "turn_end", "usage": {"context_tokens": number + 10}})
-    for number in range(2):
-        history.append("websocket:another-chat", {"event": "user", "text": f"other question {number}"})
-        history.append("websocket:another-chat", {"event": "model_request", "request_id": str(number),
-                                                  "run_id": str(number), "sequence": 1, "phase": "started",
-                                                  "context_graph": graph})
-        history.append("websocket:another-chat", {"event": "turn_end"})
+        history.append(key, {"event": "model_request", "request_id": str(number), "run_id": str(number), "sequence": 2, "phase": "completed", "context_graph": graph, "request_usage": {"context_tokens": number + 10}})
+        history.append(key, {"event": "context_compaction", "compaction_id": str(number), "phase": "succeeded", "context_snapshot": {"graph": graph, "estimated_tokens": 5, "context_window_tokens": 100}})
+        history.append(key, {"event": "turn_end"})
     channel = _ch(MagicMock(), session_manager=history.sessions)
     channel.gateway.tokens.api_tokens["tok"] = time.monotonic() + 300
-    http = channel.gateway.http
     encoded = quote(key, safe="")
 
-    async def get(path, token="tok", etag=None):
-        headers = [("Authorization", f"Bearer {token}")]
+    async def fetch(before=None, compact=False, etag=None):
+        query = "include_model_requests=1&limit=1"
+        if before:
+            query += "&before=" + quote(before, safe="")
+        if compact:
+            query += "&context_graph_encoding=references-v1"
+        headers = [("Authorization", "Bearer tok")]
         if etag:
             headers.append(("If-None-Match", etag))
-        response = await http._dispatch_session_routes(Request(path, Headers(headers)), path.split("?", 1)[0])
-        assert response is not None
-        return response
+        return await channel.gateway.http._handle_webui_thread_get_async(Request(f"/api/sessions/{encoded}/webui-thread?{query}", Headers(headers)), encoded)
 
     before = None
-    detail_refs = []
-    read_entry = HistoryReader.read_entry
-    selected = []
-
-    def one_entry(reader, ordinal, position):
-        selected.append((reader.key, ordinal, position))
-        return read_entry(reader, ordinal, position)
-
-    def unexpected(*args, **kwargs):
-        pytest.fail("deferred history must not expand graphs or read an entire turn for detail")
-
-    for ordinal in (1, 0):
-        path = f"/api/sessions/{encoded}/webui-thread?include_model_requests=1&limit=1"
-        if before:
-            path += "&before=" + quote(before, safe="")
-        with monkeypatch.context() as patch:
-            patch.setattr("nanobot.session.history_graph.GraphDecoder.graph", unexpected)
-            response = await get(path)
-        assert response.status_code == 200
-        deferred = json.loads(response.body)
-        assert deferred["page"]["loaded_event_count"] == 6
-        assert [event["event"] for event in deferred["events"]] == [
-            "user_message", "model_request", "model_request", "context_compaction", "message", "turn_end",
-        ]
-        assert [event["text"] for event in deferred["events"] if "text" in event] == [
-            f"question {ordinal}", f"answer {ordinal}",
-        ]
-        requests = [event for event in deferred["events"] if event["event"] == "model_request"]
-        assert [event["request_id"] for event in requests] == [str(ordinal), str(ordinal)]
-        assert requests[1]["request_usage"] == {"context_tokens": ordinal + 10}
-        assert requests[1]["round_usages"] == [{"prompt_tokens": 20}]
-        assert requests[1]["context_window_tokens"] == 1000
-        assert (await get(path, etag=response.headers["ETag"])).status_code == 304
-        with monkeypatch.context() as patch:
-            patch.setattr(HistoryReader, "read_entries", unexpected)
-            patch.setattr(HistoryReader, "read_entry", one_entry)
-            for event in deferred["events"]:
-                target = event.get("context_snapshot", event)
-                field = "graph_detail_ref" if "context_snapshot" in event else "context_graph_detail_ref"
-                if field not in target:
-                    continue
-                ref = target.pop(field)
-                detail_refs.append(ref)
-                count = len(selected)
-                detail = await get(f"/api/sessions/{encoded}/webui-thread/context-graph?ref={ref}")
-                assert detail.status_code == 200
-                assert len(selected) == count + 1
-                assert selected[-1] == (key, ordinal, 3 if field == "graph_detail_ref" else event["sequence"])
-                assert json.loads(detail.body)["graph"] == graph
-                if field == "graph_detail_ref":
-                    assert target == {"estimated_tokens": 5, "context_window_tokens": 1000}
-        before = deferred["page"]["before_cursor"]
-    assert len(set(detail_refs)) == 6  # Identical graph bodies still address their own immutable fact.
-
-    path = f"/api/sessions/{encoded}/webui-thread/context-graph?ref={detail_refs[0]}"
-    with monkeypatch.context() as patch:
-        patch.setattr(HistoryReader, "read_entry", unexpected)
-        assert (await get(path, token="expired")).status_code == 401
-        assert (await get(path.replace(encoded, quote("websocket:another-chat", safe="")))).status_code == 404
-        assert (await get(path.split("?", 1)[0] + "?ref=malformed")).status_code == 404
-    await history.sessions.state.reset(key)
-    await history.sessions.state.append_history(key, [
-        fact_from_record({"event": "user", "text": "replacement"}),
-        fact_from_record({"event": "model_request", "request_id": "new", "run_id": "new", "sequence": 1,
-                          "phase": "started", "context_graph": graph}),
-    ], expected_generation=None)
-    # Reusing turn/position after reset must not revive a previous generation's reference.
-    stale = f"/api/sessions/{encoded}/webui-thread/context-graph?ref={detail_refs[3]}"
-    assert (await get(stale)).status_code == 404
-    fresh = await get(f"/api/sessions/{encoded}/webui-thread?include_model_requests=1")
-    ref = json.loads(fresh.body)["events"][1]["context_graph_detail_ref"]
-    assert (await get(f"/api/sessions/{encoded}/webui-thread/context-graph?ref={ref}")).status_code == 200
+    seen = []
+    for _ in range(3):
+        old_response = await fetch(before)
+        compact_response = await fetch(before, compact=True, etag=old_response.headers["ETag"])
+        assert compact_response.status_code == 200
+        old = json.loads(old_response.body)
+        compact = json.loads(compact_response.body)
+        assert "context_graphs" not in old
+        assert len(compact["context_graphs"]) == 1
+        assert compact["context_graph_nodes"] == graph["nodes"]
+        assert compact["context_graph_edges"] == graph["edges"]
+        decoded_graphs = {key: {
+            "nodes": [compact["context_graph_nodes"][index] for index in descriptor["nodes"]],
+            "edges": [compact["context_graph_edges"][index] for index in descriptor["edges"]],
+        } for key, descriptor in compact["context_graphs"].items()}
+        for event in compact["events"]:
+            if "context_graph_ref" in event:
+                event["context_graph"] = decoded_graphs[event.pop("context_graph_ref")]
+                seen.append(event["request_id"])
+            if "context_snapshot" in event:
+                snapshot = event["context_snapshot"]
+                snapshot["graph"] = decoded_graphs[snapshot.pop("graph_ref")]
+        assert compact["events"] == old["events"]
+        assert compact["page"]["before_cursor"] == old["page"]["before_cursor"]
+        before = compact["page"]["before_cursor"]
+    assert seen == ["2", "1", "0"]

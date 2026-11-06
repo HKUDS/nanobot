@@ -1940,7 +1940,6 @@
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso do contexto",
         "panelTitle": "Uso do contexto",
-        "loadError": "Não foi possível carregar o grafo de contexto.",
         "contextTitle": "Contexto",
         "cacheHitRate": "Taxa de acertos de cache",
         "tokenUsage": "{{used}} / {{limit}}",

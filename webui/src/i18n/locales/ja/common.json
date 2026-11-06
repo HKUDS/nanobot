@@ -1926,7 +1926,6 @@
         "tooltip": "コンテキスト {{percent}}%",
         "detailsLabel": "コンテキスト使用量を開く",
         "panelTitle": "コンテキスト使用量",
-        "loadError": "コンテキストグラフを読み込めませんでした。",
         "contextTitle": "コンテキスト",
         "cacheHitRate": "キャッシュヒット率",
         "tokenUsage": "{{used}} / {{limit}}",

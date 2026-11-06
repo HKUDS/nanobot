@@ -29,6 +29,7 @@ from websockets.http11 import Response
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.subagent_status import SubagentSessionError
 from nanobot.command.application import builtin_command_palette
+from nanobot.context_graph import ContextGraph
 from nanobot.cron.binding import CronBindingError, binding_revision
 from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob, CronSchedule
@@ -133,7 +134,6 @@ from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import (
     TranscriptReplayStats,
     build_session_thread_response,
-    build_webui_context_graph_detail_response,
     build_webui_thread_response,
     build_webui_trace_detail_response,
     webui_transcript_revision,
@@ -360,6 +360,47 @@ class _HistoryProjection(Protocol[_ProjectionResult]):
 class _PreparedThreadResponse:
     data: dict[str, Any]
     headers: list[tuple[str, str]]
+
+
+def _encode_thread_response(data: dict[str, Any], *, graph_references: bool, **kwargs: Any) -> Response:
+    if graph_references:
+        graphs: dict[str, object] = {}
+        references: dict[int, tuple[str, ContextGraph]] = {}
+        nodes: list[object] = []
+        edges: list[object] = []
+        node_ids: dict[int, int] = {}
+        edge_ids: dict[int, int] = {}
+
+        def index(value: object, values: list[object], ids: dict[int, int]) -> int:
+            identity = id(value)
+            if identity not in ids:
+                ids[identity] = len(values)
+                values.append(value)
+            return ids[identity]
+
+        def reference(graph: ContextGraph) -> str:
+            identity = id(graph)
+            if identity not in references:
+                key = str(len(graphs))
+                references[identity] = (key, graph)
+                graphs[key] = {
+                    "nodes": [index(node, nodes, node_ids) for node in graph["nodes"]],
+                    "edges": [index(edge, edges, edge_ids) for edge in graph["edges"]],
+                }
+            return references[identity][0]
+
+        for event in data.get("events", []):
+            if "context_graph" in event:
+                event["context_graph_ref"] = reference(event.pop("context_graph"))
+            snapshot = event.get("context_snapshot")
+            if isinstance(snapshot, dict) and "graph" in snapshot:
+                snapshot = cast(dict[str, Any], snapshot)
+                event["context_snapshot"] = {**snapshot, "graph_ref": reference(snapshot["graph"])}
+                event["context_snapshot"].pop("graph")
+        data["context_graphs"] = graphs
+        data["context_graph_nodes"] = nodes
+        data["context_graph_edges"] = edges
+    return _http_json_response(data, **kwargs)
 
 
 class GatewayHTTPHandler:
@@ -815,10 +856,6 @@ class GatewayHTTPHandler:
         if m:
             return await self._project_session_history(request, m.group(1), self._handle_prompt_index_get)
 
-        m = re.match(r"^/api/sessions/([^/]+)/webui-thread/context-graph$", got)
-        if m:
-            return await self._project_session_history(request, m.group(1), self._handle_webui_context_graph_get)
-
         m = re.match(r"^/api/sessions/([^/]+)/webui-thread/trace-detail$", got)
         if m:
             return await self._project_session_history(request, m.group(1), self._handle_webui_trace_detail_get)
@@ -1132,7 +1169,8 @@ class GatewayHTTPHandler:
             prepared = await self._project_session_history(request, key, project)
             if isinstance(prepared, _PreparedThreadResponse):
                 response = await asyncio.to_thread(
-                    _http_json_response, prepared.data,
+                    _encode_thread_response, prepared.data,
+                    graph_references=_query_first(_parse_query(request.path), "context_graph_encoding") == "references-v1",
                     accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
                     extra_headers=prepared.headers, metrics=diagnostics.response,
                 )
@@ -1237,6 +1275,7 @@ class GatewayHTTPHandler:
         include_model_requests = _query_first(query, "include_model_requests") == "1"
         revision_variant = {
             "include_model_requests": include_model_requests,
+            "context_graph_encoding": _query_first(query, "context_graph_encoding"),
             "active_turn_id": active_turn_id,
             "active_turn_started_at": active_turn_started_at,
             "active_turn_transcript_persistence_failed": (
@@ -1291,19 +1330,6 @@ class GatewayHTTPHandler:
             data["revision"] = final_revision
         return _PreparedThreadResponse(
             data=data, headers=response_headers,
-        )
-
-    def _handle_webui_context_graph_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:
-        # Admission and session identity are checked by _project_session_history.
-        detail_ref = _query_first(_parse_query(request.path), "ref")
-        if not detail_ref:
-            return _http_error(400, "missing context graph detail ref")
-        data = build_webui_context_graph_detail_response(detail_ref, history=history)
-        if data is None:
-            return _http_error(404, "context graph detail not found")
-        return _http_json_response(
-            data, accept_encoding=_combined_list_header(request.headers, "Accept-Encoding"),
-            extra_headers=_NO_STORE_HEADERS,
         )
 
     def _handle_webui_trace_detail_get(self, request: WsRequest, key: str, *, history: HistoryReader) -> Response:

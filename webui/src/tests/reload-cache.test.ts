@@ -20,15 +20,32 @@ describe("tab reload cache", () => {
     expect(new WebuiThreadCache().get("websocket:b")).toBeUndefined();
   });
 
-  it("restores all 50 graph references and usages from tab storage", () => {
+  it.each(["inline", "references"])("restores all 50 growing graph frames from compact tab storage (%s)", (format) => {
     activateReloadCache("ws://localhost:8765/?token=first");
-    const events = Array.from({ length: 50 }, (_, index) => ({
+    const nodes = Array.from({ length: 300 }, (_, index) => ({
+      path: `/workspace/${index}.md`, name: `${index}.md`, tokens: 256, state: "loaded",
+    }));
+    const edges = nodes.flatMap((node, source) => [1, 2, 3].flatMap((offset) => source + offset < nodes.length
+      ? [{ source: node.path, target: nodes[source + offset].path }] : []));
+    const graphs = Array.from({ length: 50 }, (_, index) => {
+      const count = 251 + index;
+      const paths = new Set(nodes.slice(0, count).map((node) => node.path));
+      return { nodes: nodes.slice(0, count), edges: edges.filter((edge) => paths.has(edge.source) && paths.has(edge.target)) };
+    });
+    const table = Object.fromEntries(graphs.map((graph, index) => [String(index), {
+      nodes: graph.nodes.map((node) => nodes.indexOf(node)), edges: graph.edges.map((edge) => edges.indexOf(edge)),
+    }]));
+    const events = graphs.map((graph, index) => ({
       event: "model_request", chat_id: "growing", request_id: String(index), run_id: "run", sequence: index + 1,
       phase: "completed", request_usage: { context_tokens: 10000 + index },
-      context_graph_detail_ref: `graph-${index}`,
+      ...(format === "inline" ? { context_graph: structuredClone(graph) } : { context_graph_ref: String(index) }),
     }));
     const body = parseWebuiThreadPayload({ schemaVersion: 3, sessionKey: "websocket:growing", revision: "growing-50",
-      projection: "events", active_turn_id: null, page: { before_cursor: "older", has_more_before: true }, events,
+      projection: "events", active_turn_id: null, page: { before_cursor: "older", has_more_before: true },
+      events: [{ event: "context_compaction", chat_id: "growing", compaction_id: "checkpoint", phase: "succeeded",
+        context_snapshot: { estimated_tokens: 100, context_window_tokens: 100000,
+          ...(format === "inline" ? { graph: structuredClone(graphs[0]) } : { graph_ref: "0" }) } }, ...events],
+      ...(format === "references" ? { context_graphs: table, context_graph_nodes: nodes, context_graph_edges: edges } : {}),
     });
     const cache = new WebuiThreadCache();
     cache.set("websocket:growing", body);
@@ -38,24 +55,17 @@ describe("tab reload cache", () => {
     expect(raw!.length).toBeLessThanOrEqual(512 * 1024);
     const restored = new WebuiThreadCache().get("websocket:growing");
     expect(restored).toEqual(body);
+    expect(restored).not.toHaveProperty("context_graphs");
+    expect(restored).not.toHaveProperty("context_graph_nodes");
+    expect(restored).not.toHaveProperty("context_graph_edges");
     const frames = restored!.events.filter((event) => event.event === "model_request");
     expect(frames).toHaveLength(50);
     for (let index = 0; index < frames.length; index += 1) {
-      expect(frames[index].context_graph_detail_ref).toBe(`graph-${index}`);
+      expect(frames[index].context_graph).toEqual(graphs[index]);
       expect(frames[index].request_usage?.context_tokens).toBe(10000 + index);
     }
-  });
-
-  it("restores deferred references and compaction estimates without materializing graphs", () => {
-    activateReloadCache("ws://localhost:8765/");
-    const body = parseWebuiThreadPayload({ schemaVersion: 3, projection: "events", events: [
-      { event: "context_compaction", chat_id: "chat", compaction_id: "compact", phase: "succeeded",
-        context_snapshot: { graph_detail_ref: "baseline", estimated_tokens: 100, context_window_tokens: 1000 } },
-      { event: "model_request", chat_id: "chat", request_id: "request", run_id: "run", sequence: 2, phase: "completed",
-        context_graph_detail_ref: "request-graph", request_usage: { context_tokens: 200 }, round_usages: [{ prompt_tokens: 200 }] },
-    ] });
-    new WebuiThreadCache().set("websocket:chat", body);
-    expect(new WebuiThreadCache().get("websocket:chat")).toEqual(body);
+    expect(frames[0].context_graph?.nodes[0]).toBe(frames[49].context_graph?.nodes[0]);
+    expect(frames[0].context_graph?.edges[0]).toBe(frames[49].context_graph?.edges[0]);
   });
 
   it("does not restore another gateway's data or data after logout", () => {

@@ -1926,7 +1926,6 @@
         "tooltip": "Ngữ cảnh {{percent}}%",
         "detailsLabel": "Mở mức sử dụng ngữ cảnh",
         "panelTitle": "Mức sử dụng ngữ cảnh",
-        "loadError": "Không thể tải đồ thị ngữ cảnh.",
         "contextTitle": "Ngữ cảnh",
         "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",
         "tokenUsage": "{{used}} / {{limit}}",

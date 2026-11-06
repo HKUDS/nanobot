@@ -5,7 +5,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SidebarPanel } from "@/components/ui/sidebar-panel";
 import { ContextInspector } from "./ContextInspector";
-import type { ContextGraphLoader } from "./useContextGraph";
 import type { ContextSnapshot } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -27,8 +26,6 @@ export function ComposerUsagePopover({
   context,
   rounds,
   snapshots = [],
-  active = true,
-  loadGraph,
   onOpenFile,
   showLabel = false,
   compactLabel = false,
@@ -41,8 +38,6 @@ export function ComposerUsagePopover({
   context: ComposerContextUsage | null;
   rounds: readonly ComposerRoundUsage[];
   snapshots?: readonly ContextSnapshot[];
-  active?: boolean;
-  loadGraph?: ContextGraphLoader;
   onOpenFile?: (path: string) => void;
   showLabel?: boolean;
   compactLabel?: boolean;
@@ -181,7 +176,6 @@ export function ComposerUsagePopover({
   };
 
   const inspector = <ContextInspector key={sessionKey} sidebar expandable={!narrow} context={context} rounds={rounds} snapshots={snapshots}
-    active={open && active} loadGraph={loadGraph}
     onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
   const onPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); close(); }

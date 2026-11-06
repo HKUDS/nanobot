@@ -715,8 +715,8 @@ for (const elapsedMs of [0, 80]) test(`fast responses reclaim completed slots an
   await completePrepend(history, body, "Question 16", "Question 28", nextHeld.anchorTop);
   await expect(body.locator(".thread-history-slot")).toHaveCount(0);
   expect(history.reads).toEqual([
-    "?limit=120&before=40&include_model_requests=1",
-    "?limit=120&before=28&include_model_requests=1",
+    "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=120&before=28&include_model_requests=1&context_graph_encoding=references-v1",
   ]);
 });
 
@@ -924,10 +924,10 @@ test("navigation-window loading and errors remain visible and retry uses the nav
   await positionAtTop(body);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
   expect(history.reads).toEqual([
-    "?limit=24&after=38&include_model_requests=1",
-    "?limit=24&after=50&include_model_requests=1",
-    "?limit=24&before=38&include_model_requests=1",
-    "?limit=24&before=38&include_model_requests=1",
+    "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=50&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
   ]);
 });
 
@@ -972,8 +972,8 @@ test("failed Blocks animate without visible error text; pulling retries once and
   expect((await historyGeometry(body, "Question 40")).slotBeforeKey).toBe("u40");
   await expectCoordinates(body, "Question 40", held);
   expect(history.reads).toEqual([
-    "?limit=120&before=40&include_model_requests=1",
-    "?limit=120&before=40&include_model_requests=1",
+    "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
   ]);
 
   history.complete();
@@ -1015,9 +1015,9 @@ test("cross-path unloaded rail jump has visible navigation feedback outside a sc
   await expect.poll(() => history.reads.length).toBe(3);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
   expect(history.reads).toEqual([
-    "?limit=120&before=40&include_model_requests=1",
-    "?limit=24&after=10&include_model_requests=1",
-    "?limit=24&after=10&include_model_requests=1",
+    "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=10&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=10&include_model_requests=1&context_graph_encoding=references-v1",
   ]);
   history.complete();
   await expect(body.getByText("Question 10", { exact: true })).toBeInViewport();
@@ -1060,10 +1060,10 @@ test("cross-path newer has visible navigation feedback and forward input retries
   await expect.poll(() => history.reads.length).toBe(4);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
   expect(history.reads).toEqual([
-    "?limit=24&after=10&include_model_requests=1",
-    "?limit=24&before=10&include_model_requests=1",
-    "?limit=24&after=22&include_model_requests=1",
-    "?limit=24&after=22&include_model_requests=1",
+    "?limit=24&after=10&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=10&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=22&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=22&include_model_requests=1&context_graph_encoding=references-v1",
   ]);
   history.complete();
   await expect(body.getByText("Question 33", { exact: true })).toBeAttached();
@@ -1109,8 +1109,8 @@ test("cross-path older errors never float after latest or a loaded rail jump, bu
       await retry.click();
       await expect.poll(() => history.reads.length).toBe(initialReads + 2);
       expect(history.reads.slice(initialReads)).toEqual([
-        "?limit=120&before=40&include_model_requests=1",
-        "?limit=120&before=40&include_model_requests=1",
+        "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+        "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
       ]);
       history.complete();
       await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
@@ -1202,9 +1202,9 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await expectAnchorCoordinate(body, "Question 26", secondHeld.anchorTop);
   expect((await historyGeometry(body, "Question 26")).slotBeforeKey).toBeNull();
   expect(history.reads).toEqual([
-    "?limit=24&after=38&include_model_requests=1",
-    "?limit=24&before=38&include_model_requests=1",
-    "?limit=24&before=26&include_model_requests=1",
+    "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
   ]);
 
   const atNewHead = await approachNextHead("Question 14");
@@ -1229,10 +1229,10 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await expect(header).toHaveCount(0);
   await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
   expect(history.reads).toEqual([
-    "?limit=24&after=38&include_model_requests=1",
-    "?limit=24&before=38&include_model_requests=1",
-    "?limit=24&before=26&include_model_requests=1",
-    "?limit=24&before=14&include_model_requests=1",
+    "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=14&include_model_requests=1&context_graph_encoding=references-v1",
   ]);
 
   const atKeyboardHead = await approachNextHead("Question 2");
@@ -1261,11 +1261,11 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await expect(body.getByText("Question 26", { exact: true })).toHaveCount(0);
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(26);
   expect(history.reads).toEqual([
-    "?limit=24&after=38&include_model_requests=1",
-    "?limit=24&before=38&include_model_requests=1",
-    "?limit=24&before=26&include_model_requests=1",
-    "?limit=24&before=14&include_model_requests=1",
-    "?limit=24&before=2&include_model_requests=1",
+    "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=14&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=2&include_model_requests=1&context_graph_encoding=references-v1",
   ]);
 });
 

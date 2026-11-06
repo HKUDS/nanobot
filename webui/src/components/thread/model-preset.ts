@@ -1,6 +1,6 @@
 import type { ModelPresetOption } from "@/components/thread/ModelPresetBadge";
 import { inferProviderFromModelName, providerDisplayLabel } from "@/lib/provider-brand";
-import type { ChatSettingsPayload } from "@/lib/types";
+import type { SettingsPayload } from "@/lib/types";
 
 function compactModelName(modelName: string | null): string | null {
   if (!modelName) return null;
@@ -19,9 +19,9 @@ export interface ModelBadgeInfo {
 }
 
 function modelPresetForBadge(
-  settings: ChatSettingsPayload | null,
+  settings: SettingsPayload | null,
   scopedPreset: string | null,
-): ChatSettingsPayload["model_presets"][number] | null {
+): SettingsPayload["model_presets"][number] | null {
   if (!settings) return null;
   const presets = settings.model_presets ?? [];
   if (scopedPreset) {
@@ -37,7 +37,7 @@ function modelPresetForBadge(
 
 export function toModelBadgeInfo(
   modelName: string | null,
-  settings: ChatSettingsPayload | null,
+  settings: SettingsPayload | null,
   modelPreset: string | null = null,
 ): ModelBadgeInfo {
   const scopedPreset = modelPreset?.trim() || null;
@@ -74,7 +74,7 @@ export function toModelBadgeInfo(
 }
 
 export function modelPresetOptionsFromSettings(
-  settings: ChatSettingsPayload | null,
+  settings: SettingsPayload | null,
 ): ModelPresetOption[] {
   if (!settings) return [];
   const order = new Map(

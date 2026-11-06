@@ -40,11 +40,10 @@ import {
   ApiError,
   fetchFilePreviewAvailability,
   fetchFilePreview,
-  fetchWebuiContextGraph,
   fetchFileReferenceMetadata,
   fetchInstalledCliApps,
   fetchMcpPresets,
-  fetchChatSettings,
+  fetchSettings,
   fetchWorkspaces,
   fetchWorkspaceDirectories,
   listSlashCommands,
@@ -66,7 +65,7 @@ import type {
   FilePreviewPayload,
   FileReferenceMetadata,
   RoundUsage,
-  ChatSettingsPayload,
+  SettingsPayload,
   SlashCommand,
   SkillSummary,
   UIMessage,
@@ -252,7 +251,7 @@ interface ThreadShellProps {
   workspaceScopeDisabled?: boolean;
   workspaceError?: string | null;
   onWorkspaceScopeChange?: (scope: WorkspaceScopePayload) => void;
-  settingsSnapshot?: ChatSettingsPayload | null;
+  settingsSnapshot?: SettingsPayload | null;
   settingsLoading?: boolean;
   onOpenModelSettings?: () => void;
   skills?: SkillSummary[];
@@ -528,8 +527,7 @@ export function ThreadShell({
     isPayload: isMcpPresetsPayload,
     selectItems: installedMcpPresetsFromPayload,
   });
-  const [settings, setSettings] = useState<ChatSettingsPayload | null>(settingsSnapshot);
-  const settingsRefreshGenerationRef = useRef(0);
+  const [settings, setSettings] = useState<SettingsPayload | null>(settingsSnapshot);
   const [modelFallback, setModelFallback] = useState<{
     chatId: string;
     model: string;
@@ -753,10 +751,6 @@ export function ThreadShell({
   const contextGraphSnapshots = useMemo(
     () => messagesReady ? composerContextSnapshots(messages, modelRequests) : [], [messages, modelRequests, messagesReady],
   );
-  // Loader identity scopes inspector requests/cache even when two clients share a session key.
-  const loadContextGraph = useMemo(() => historyKey
-    ? (ref: string, signal: AbortSignal) => fetchWebuiContextGraph(token, historyKey, ref, signal)
-    : undefined, [client, historyKey, token]);
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
   const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"
@@ -932,23 +926,20 @@ export function ThreadShell({
   );
 
   const refreshModelSettings = useCallback(async () => {
-    const generation = ++settingsRefreshGenerationRef.current;
     try {
-      const payload = await fetchChatSettings(getToken());
-      if (generation === settingsRefreshGenerationRef.current) setSettings(payload);
+      setSettings(await fetchSettings(getToken()));
     } catch {
-      if (generation === settingsRefreshGenerationRef.current && !settingsSnapshot) setSettings(null);
+      if (!settingsSnapshot) setSettings(null);
     }
   }, [getToken, settingsSnapshot]);
 
   useEffect(() => {
     if (settingsSnapshot) {
       setSettings(settingsSnapshot);
-    } else if (!settingsLoading) {
-      void refreshModelSettings();
+      return;
     }
-    return () => { settingsRefreshGenerationRef.current += 1; };
-  }, [client, refreshModelSettings, settingsLoading, settingsSnapshot]);
+    if (!settingsLoading) void refreshModelSettings();
+  }, [refreshModelSettings, settingsLoading, settingsSnapshot]);
 
   useEffect(() => {
     return client.onRuntimeModelUpdate(() => {
@@ -1416,7 +1407,7 @@ export function ThreadShell({
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
           pendingQueueKey={temporary ? null : chatId}
-          transcriptionProvider={settings?.transcription?.provider}
+          transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}
           focusRequest={composerFocusSignal}
@@ -1468,7 +1459,7 @@ export function ThreadShell({
           workspaceProjectLocked={projectLocked}
           workspaceError={workspaceError}
           onWorkspaceScopeChange={onWorkspaceScopeChange}
-          transcriptionProvider={settings?.transcription?.provider}
+          transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}
           onQuotedContextChange={setQuotedContext}
@@ -1597,8 +1588,6 @@ export function ThreadShell({
         context={composerContextUsage}
         rounds={composerRoundUsage}
         snapshots={contextGraphSnapshots}
-        active={composerActive && messagesReady}
-        loadGraph={loadContextGraph}
         sidebarHost={contextSidebarHost}
         open={contextSidebarOpen}
         onOpenChange={handleContextSidebarOpenChange}
