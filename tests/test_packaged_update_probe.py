@@ -282,7 +282,8 @@ async def _prepare(directory):
     with pytest.raises(ValueError, match=secret):
         asyncio.run(namespace["_prepare"](tmp_path))
     document = (tmp_path / "acceptance-preflight.json").read_text()
-    assert json.loads(document) == {"error_type": "ValueError", "frames": [["update_handoff.py", 4]]}
+    assert json.loads(document) == {"error_type": "ValueError", "frames": [["update_handoff.py", 4]],
+                                    "stop_states": []}
     assert secret not in document
 
 
@@ -295,7 +296,10 @@ def test_phase_failure_identifies_failed_assertion_without_exporting_private_val
     probe.write(job / "status.json", {"phase": update_phase, "mutation_started": False, "message": secret})
     probe.write(job / "supervision.json", {"state": "needs_attention", "confirmation_id": secret})
     probe.write(job / "acceptance-preflight.json", {"error_type": "ReleaseFeedError", "message": secret,
-                                                  "frames": [["release_feed.py", 300, secret], [secret, 2]]})
+                                                  "frames": [["release_feed.py", 300, secret], [secret, 2]],
+                                                  "stop_states": ["busy", secret, "busy"]})
+    probe.write(job / "acceptance-busy.json", {"active": True, "channel_delivery": False,
+                                              "pending_queues": secret, "message": secret})
     try:
         probe.replace_once(b"missing seam", b"needle", secret.encode())
     except ValueError as error:
@@ -307,6 +311,8 @@ def test_phase_failure_identifies_failed_assertion_without_exporting_private_val
     assert record["update_phase"] == ("handoff_failed" if update_phase == "handoff_failed" else "incomplete")
     assert record["mutation_started"] is False and record["recovery_needs_attention"] is True
     assert record["preflight_error"] == "ReleaseFeedError" and record["preflight_frames"] == [["release_feed.py", 300]]
+    assert record["stop_states"] == ["busy"]
+    assert record["busy_flags"] == {"active": True, "channel_delivery": False}
     assert secret not in document and str(tmp_path) not in document
     assert "private-value-must-not-be-exported" not in document
 

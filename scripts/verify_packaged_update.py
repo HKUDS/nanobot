@@ -46,6 +46,9 @@ TWO_JOURNEY_SCENARIOS = {"upgrade-again", "import-failure", "restart-failure", "
 LANE_TIMEOUT = 30 * 60
 PREFLIGHT_MODULES = {"update_handoff.py", "update_worker.py", "update_plan.py", "update_stop.py",
                      "update_profiles.py", "release_feed.py", "installation_lock.py", "data_access.py"}
+STOP_STATES = {"ready", "busy", "released", "stopping", "refused"}
+BUSY_FLAGS = {"paused", "active", "inbound", "events", "pending_queues", "active_tasks",
+              "background_tasks", "deferred_automation_turns", "channel_delivery", "registered_work"}
 
 
 def digest(path: Path) -> str:
@@ -88,6 +91,11 @@ def phase_failure(root: Path, phase: str, error: Exception) -> None:
         record["preflight_frames"] = [[row[0], row[1]] for row in preflight["frames"]
                                       if isinstance(row, list) and len(row) >= 2
                                       and row[0] in PREFLIGHT_MODULES and type(row[1]) is int]
+        record["stop_states"] = sorted({value for value in preflight.get("stop_states", [])
+                                        if isinstance(value, str) and value in STOP_STATES})
+        busy = read(directory / "acceptance-busy.json")
+        record["busy_flags"] = {key: value for key, value in busy.items()
+                                if key in BUSY_FLAGS and type(value) is bool}
     write(root / "phase-failure.json", record)
 
 
@@ -204,7 +212,7 @@ def transport():
         # shutdown, worker or recovery semantics. Never export exception values.
         handoff = files["nanobot/update_handoff.py"].replace(b"\r\n", b"\n")
         files["nanobot/update_handoff.py"] = replace_once(handoff, b"    except Exception:\n", f'''    except Exception as acceptance_error:
-        from nanobot.update_worker import write_record
+        from nanobot.update_worker import read_record, write_record
         acceptance_trace = acceptance_error.__traceback__
         acceptance_frames = []
         while acceptance_trace is not None:
@@ -214,8 +222,34 @@ def transport():
             acceptance_trace = acceptance_trace.tb_next
         write_record(directory / 'acceptance-preflight.json', {{
             'error_type': type(acceptance_error).__name__, 'frames': acceptance_frames,
+            'stop_states': [value for path in (directory / 'stop-replies').glob('*.json')
+                            if (value := read_record(path).get('state')) in {sorted(STOP_STATES)!r}],
         }})
 '''.encode())
+        # Diagnose a real idle-admission refusal in the disposable old gateway.
+        # Observe booleans only, after the original guard has already refused.
+        stop = files.get("nanobot/update_stop.py")
+        if stop is not None:
+            needle = b"        except (RuntimeBusyError, RuntimeMaintenanceError):\n"
+            files["nanobot/update_stop.py"] = replace_once(stop.replace(b"\r\n", b"\n"), needle, needle + b'''            try:
+                from nanobot.update_worker import write_record
+                acceptance_owner = maintenance.__self__
+                acceptance_bus = acceptance_owner.bus
+                acceptance_flags = {
+                    'paused': acceptance_bus.admission.paused,
+                    'active': bool(acceptance_bus.admission._active),
+                    'inbound': bool(acceptance_bus.inbound_size),
+                    'events': bool(acceptance_bus.has_pending_events),
+                    **{name.removeprefix('_'): bool(getattr(acceptance_owner, name)) for name in (
+                        '_pending_queues', '_active_tasks', '_background_tasks', '_deferred_automation_turns')},
+                    'channel_delivery': any(check() for check in acceptance_bus.admission._pending_checks
+                        if getattr(check, '__qualname__', '').startswith('ChannelManager.')),
+                    'registered_work': any(check() for check in acceptance_bus.admission._pending_checks),
+                }
+                write_record(directory / 'acceptance-busy.json', acceptance_flags)
+            except Exception:
+                pass  # Diagnostic failure must not alter the existing refusal.
+''')
         if scenario == "restore-interruption":
             needle = b"    os.rename(original, environment)\n"
             files["nanobot/update_fallback.py"] = replace_once(files["nanobot/update_fallback.py"].replace(b"\r\n", b"\n"), needle, b'''    if not (directory / 'restore-fault-fired').exists():
