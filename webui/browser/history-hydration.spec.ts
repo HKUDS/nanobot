@@ -289,6 +289,52 @@ test("synthetic HTTP-first cumulative text suppresses delayed covered chunks but
   backend.healthy();
 });
 
+test("the open context sidebar keeps its slot while a new conversation hydrates", async ({ page }) => {
+  const { backend } = await openFixture(page);
+  const contextHistory = (chatId: string, name: string, tokens: number) => {
+    const turn = `${chatId}-context`;
+    return history([
+      input(turn, `Inspect ${name}`, chatId),
+      { ...at(turn, 1, "activity", chatId), event: "model_request", request_id: `${turn}-request`,
+        run_id: turn, sequence: 1, phase: "completed", context_window_tokens: 10000,
+        usage: { prompt_tokens: tokens, context_tokens: tokens },
+        request_usage: { prompt_tokens: tokens, context_tokens: tokens },
+        context_graph: { nodes: [{ path: `/${name}`, name, state: "loaded", tokens: 100 }], edges: [] } },
+      { ...at(turn, 2, "answer", chatId), event: "message", text: `Inspected ${name}.` },
+      { ...at(turn, 3, "complete", chatId), event: "turn_end" },
+    ], { chatId });
+  };
+  await backend.release(await backend.read(), contextHistory(A, "first.md", 1000));
+  await page.getByTestId("composer-context-usage").click();
+  const sidebar = page.getByTestId("context-sidebar");
+  await expect(sidebar.getByRole("button", { name: "first.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
+  await sidebar.evaluate((node) => node.setAttribute("data-session-slot", "retained"));
+  const expectSlot = async () => {
+    await expect(sidebar).toHaveAttribute("data-session-slot", "retained");
+    await expect.poll(() => sidebar.evaluate((node) => node.getBoundingClientRect().width)).toBe(420);
+    await expect.poll(() => sidebar.locator(".file-preview-content").evaluate((node) => {
+      const surface = document.querySelector(".thread-composer-surface")!;
+      return Math.abs(node.getBoundingClientRect().bottom - surface.getBoundingClientRect().bottom);
+    })).toBeLessThan(1);
+    expect((await sidebar.locator(".file-preview-content").boundingBox())!.height).toBeGreaterThan(300);
+  };
+  await expectSlot();
+
+  await page.getByRole("button", { name: "Conversation B", exact: true }).click();
+  const target = await backend.read(B);
+  // The pane stays open with unknown usage, never the outgoing session's graph.
+  await expect(sidebar.getByRole("button", { name: "first.md", exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+  await expectSlot();
+
+  await backend.release(target, contextHistory(B, "second.md", 2000));
+  await expect(sidebar.getByRole("button", { name: "second.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
+  await expectSlot();
+  backend.healthy();
+});
+
 test("switching away from file edits does not rebuild the outgoing diff before history hands over", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("nanobot-webui.settings-preferences", JSON.stringify({

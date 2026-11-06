@@ -49,6 +49,7 @@ export interface WorkbenchPane {
 
 interface PaneRenderContext {
   active: boolean;
+  multiplePanes: boolean;
   headerPortalTarget: HTMLElement | null | undefined;
   composerPortalTarget: HTMLElement | null | undefined;
   navigationFrame: HTMLElement | null | undefined;
@@ -725,6 +726,7 @@ export function PaneWorkbench({
                 >
                   {renderPane(pane, {
                     active,
+                    multiplePanes: displayedPanes.length > 1,
                     headerPortalTarget: chrome && displayedPanes.length > 1 ? headerPortalTarget : undefined,
                     composerPortalTarget: chrome ? composerPortalTarget : undefined,
                     navigationFrame: displayedPanes.length === 1 ? navigationFrame : undefined,

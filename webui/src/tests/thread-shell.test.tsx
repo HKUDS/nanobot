@@ -1026,10 +1026,13 @@ describe("ThreadShell", () => {
       event: "context_compaction", chat_id: "usage-chart",
       compaction_id: "success", phase: "succeeded",
     }));
+    expect(screen.getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("progressbar", { name: "Context" })).not.toHaveAttribute("aria-valuenow");
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
     await waitFor(() => expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument());
   });
 
-  it("closes the graph on session switch and reopens with the new session context", async () => {
+  it.each([false, true])("switches context in the same side slot unless multiple panes are visible (%s)", async (multiplePanes) => {
     const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       const bottom = this.classList.contains("thread-preview-layout") ? 900
         : this.classList.contains("thread-composer-surface") && this.isConnected ? 880 : 0;
@@ -1046,7 +1049,7 @@ describe("ThreadShell", () => {
     const footer = document.createElement("div");
     document.body.append(footer);
     const view = render(wrap(client, <ThreadShell
-      composerPortalTarget={footer}
+      composerPortalTarget={footer} multiplePanes={multiplePanes}
       session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
       settingsSnapshot={modelSettings("test-model", "deepseek")}
     />));
@@ -1066,27 +1069,48 @@ describe("ThreadShell", () => {
     fireEvent.click(trigger);
     expect(await screen.findByRole("button", { name: "first.md" })).toBeInTheDocument();
     expect((host as HTMLElement).style.getPropertyValue("--sidebar-bottom-inset")).toBe("20px");
+    const sidebar = screen.getByTestId("context-sidebar");
     await act(async () => view.rerender(wrap(client, <ThreadShell
-      composerPortalTarget={footer}
+      composerPortalTarget={footer} multiplePanes={multiplePanes}
       session={session("other-usage")} title="Other usage" onToggleSidebar={() => {}}
       settingsSnapshot={modelSettings("test-model", "deepseek")}
     />)));
+    expect(screen.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument();
+    if (!multiplePanes) {
+      expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
+      expect(screen.getByRole("progressbar", { name: "Context" })).not.toHaveAttribute("aria-valuenow");
+      expect((host as HTMLElement).style.getPropertyValue("--sidebar-bottom-inset")).toBe("20px");
+    }
     act(() => client._emitChat("other-usage", {
       event: "model_request", chat_id: "other-usage", turn_id: "other-turn", request_id: "other", run_id: "other-run",
       phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
       usage: { prompt_tokens: 200, context_tokens: 200 },
+      request_usage: { prompt_tokens: 200, context_tokens: 200 },
       context_graph: { nodes: [{ path: "/other.md", name: "other.md", state: "loaded", tokens: 60 }], edges: [] },
     }));
     const newInput = screen.getByRole("textbox");
     expect(newInput).not.toBe(input);
-    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
-    expect(host).not.toHaveAttribute("data-preview-open");
-    expect(footer).toContainElement(newInput);
-    fireEvent.click(screen.getByTestId("composer-context-usage"));
+    if (multiplePanes) {
+      await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+      expect(host).not.toHaveAttribute("data-preview-open");
+      expect(footer).toContainElement(newInput);
+      fireEvent.click(screen.getByTestId("composer-context-usage"));
+    } else {
+      expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
+    }
     expect(await screen.findByRole("button", { name: "other.md" })).toBeInTheDocument();
     expect((host as HTMLElement).style.getPropertyValue("--sidebar-bottom-inset")).toBe("20px");
-    expect(screen.getByTestId("context-sidebar")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
     expect(host.querySelector(".thread-conversation")).toContainElement(newInput);
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+    await act(async () => view.rerender(wrap(client, <ThreadShell
+      composerPortalTarget={footer} multiplePanes={multiplePanes}
+      session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />)));
+    expect(host).not.toHaveAttribute("data-preview-open");
+    expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument();
     view.unmount();
     footer.remove();
     geometry.mockRestore();

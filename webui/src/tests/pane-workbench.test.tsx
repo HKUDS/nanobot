@@ -68,7 +68,7 @@ function WorkbenchHarness({
       onSplitRatiosChange={onSplitRatiosChange}
       renderPane={(pane, context) => (
         <>
-          <button type="button">Focus {pane.title}</button>
+          <button type="button" data-multiple-panes={context.multiplePanes}>Focus {pane.title}</button>
           {context.headerPortalTarget && context.active ? createPortal(
             context.headerActions,
             context.headerPortalTarget,
@@ -114,6 +114,7 @@ describe("PaneWorkbench", () => {
       onLayoutChange={vi.fn()} onPaneOrderChange={vi.fn()}
       renderPane={(_pane, context) => {
         expect(context.headerPortalTarget).toBeUndefined();
+        expect(context.multiplePanes).toBe(false);
         return <div data-testid="local-toolbar">{context.headerActions}</div>;
       }} />);
     expect(screen.getByTestId("workbench-header-host")).toBeEmptyDOMElement();
@@ -165,6 +166,8 @@ describe("PaneWorkbench", () => {
     const grid = screen.getByTestId("pane-grid");
     expect(Array.from(grid.children).map((pane) => pane.getAttribute("aria-label")))
       .toEqual(["Alpha", "Beta"]);
+    expect(screen.getByRole("button", { name: "Focus Alpha" })).toHaveAttribute("data-multiple-panes", "true");
+    expect(screen.getByRole("button", { name: "Focus Beta" })).toHaveAttribute("data-multiple-panes", "true");
     expect(screen.getByLabelText("Composer Beta")).toBeVisible();
     expect(screen.getByLabelText("Composer Alpha")).not.toBeVisible();
 
@@ -396,13 +399,15 @@ describe("PaneWorkbench", () => {
       onPaneOrderChange: vi.fn(),
       renderPane: (pane: { key: string; title: string }, context: {
         headerActions: ReactNode;
-      }) => <>{context.headerActions}<span>{pane.title}</span></>,
+        multiplePanes: boolean;
+      }) => <>{context.headerActions}<span data-multiple-panes={context.multiplePanes}>{pane.title}</span></>,
     };
 
     const { rerender } = render(<PaneWorkbench {...props} activePaneKey="gamma" />);
 
     expect(screen.getByTestId("pane-grid").children).toHaveLength(1);
     expect(screen.getByTestId("workbench-pane-gamma")).toBeInTheDocument();
+    expect(screen.getByText("gamma", { selector: "span" })).toHaveAttribute("data-multiple-panes", "false");
     expect(screen.queryByRole("button", { name: "Layout" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add pane" })).not.toBeInTheDocument();
     expect(screen.queryByRole("separator")).not.toBeInTheDocument();
