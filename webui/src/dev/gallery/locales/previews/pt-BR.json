@@ -179,6 +179,16 @@
     "reset": "Redefinir prévia",
     "hint": "Selecione um estado de recuperação e teste continuar ou fechar."
   },
+  "sandbox": {
+    "title": "Aviso de comandos",
+    "description": "Compare componentes ausentes, instalações desprotegidas e falhas de inicialização com o componente real.",
+    "options": "O aviso não toma o foco nem repete comandos. Mude o estado, feche-o e continue digitando.",
+    "missing": "Componente não encontrado",
+    "permissions": "Verificar instalação",
+    "startup": "Inicialização indisponível",
+    "hint": "Apenas demonstração. Nenhum comando é executado ou ajuste alterado.",
+    "settingsAction": "Configurações do sandbox solicitadas (demonstração)."
+  },
   "fallback": {
     "title": "ModelFallbackNotice · Modelo alternativo",
     "description": "Veja avisos de modelo alternativo e autorização expirada, configurações e fechamento.",

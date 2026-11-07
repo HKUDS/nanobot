@@ -3,12 +3,12 @@ import { useTranslation } from "react-i18next";
 
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { AboutSettingsLayout } from "@/components/settings/overview/AboutSettingsView";
-import { SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
+import { SettingsGroup, SettingsRow, StatusPill } from "@/components/settings/shared/SettingsControls";
 import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { cn } from "@/lib/utils";
 
-type Control = "switch" | "input" | "duration" | "idle-timeout" | "segments" | "edit" | "text" | "feature";
+type Control = "switch" | "input" | "duration" | "idle-timeout" | "segments" | "edit" | "text" | "feature" | "status";
 const block = "rounded bg-muted-foreground/20";
 
 function Title({ heading = false }: { heading?: boolean }) {
@@ -18,12 +18,13 @@ function Title({ heading = false }: { heading?: boolean }) {
 }
 
 function Row({ control }: { control: Control }) {
+  const { t } = useTranslation();
   const toggle = control === "switch" || control === "feature";
   return <div data-settings-skeleton-row className="settings-row">
     <div className="flex h-5 items-center"><div className={cn(block, "h-3.5 w-32 max-w-full")} /></div>
     <div className="settings-control">
       {control === "feature" ? <div className={cn(block, "mr-3 h-3 w-14")} /> : null}
-      {control === "idle-timeout" ? <div className="flex items-center gap-2">
+      {control === "status" ? <StatusPill><span className="text-transparent">{t("settings.sandbox.states.off")}</span></StatusPill> : control === "idle-timeout" ? <div className="flex items-center gap-2">
         <div className={cn(block, "h-9 w-28 rounded-full")} /><div className={cn(block, "h-3 w-10")} />
       </div> : control === "duration" ? <div className="w-full"><div className={cn(block, "h-9 w-full rounded-full")} /><div className="mt-1.5 flex h-4 items-center"><div className={cn(block, "h-2.5 w-4/5 opacity-60")} /></div></div> : <div data-skeleton-switch={toggle ? "" : undefined} className={cn(block,
         toggle ? "h-5 w-9 shrink-0 rounded-full" : control === "input" ? "h-9 w-full rounded-full"
@@ -50,18 +51,34 @@ function ProxyGroup() {
   </SettingsGroup></section>;
 }
 
-function RuntimeGroups({ page }: { page: RuntimeConfigPage }) {
+function SandboxGroup() {
+  const { t } = useTranslation();
+  return <section><Title /><SettingsGroup>
+    <Row control="switch" /><Row control="input" /><Row control="status" />
+    <div className="settings-list-inset pb-4 pt-1">
+      <div className="flex items-start gap-2 text-ui leading-6">
+        <div className={cn(block, "mt-1 h-4 w-4 shrink-0")} />
+        <p className="text-transparent">{t("settings.sandbox.help.off")}</p>
+      </div>
+      <p className="mt-2 text-caption leading-5 text-transparent">{t("settings.sandbox.scope")}</p>
+    </div>
+    <div className="settings-list-inset flex min-h-12 items-center"><div className={cn(block, "h-3 w-24")} /></div>
+  </SettingsGroup></section>;
+}
+
+function RuntimeGroups({ page, sandboxSupported = false }: { page: RuntimeConfigPage; sandboxSupported?: boolean }) {
   return <>{RUNTIME_CONFIG_GROUPS.filter((group) => group.page === page).map((group) => group.id === "chat"
     ? <Group key={group.id} controls={["switch", "segments"]} />
     : group.id === "proxy" ? <ProxyGroup key={group.id} />
-    : <Group key={group.id} controls={RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id && (!field.when || field.when.value === true)).flatMap<Control>((field) =>
+    : group.id === "shell" && sandboxSupported ? <SandboxGroup key={group.id} />
+    : <Group key={group.id} controls={RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id && field.path !== "tools.exec.sandbox_launcher" && (!field.when || field.when.value === true)).flatMap<Control>((field) =>
       field.kind === "idle-compaction" ? ["switch", "idle-timeout"] : [
         field.kind === "boolean" || field.kind === "toggle" ? "switch" : field.kind === "list" ? "edit" : field.kind === "duration" ? "duration" : "input",
       ],
     )} />)}</>;
 }
 
-export function SettingsSectionSkeleton({ section, showRestart = false }: { section: SettingsSectionKey; showRestart?: boolean }) {
+export function SettingsSectionSkeleton({ section, showRestart = false, sandboxSupported = false }: { section: SettingsSectionKey; showRestart?: boolean; sandboxSupported?: boolean }) {
   const { t } = useTranslation();
   let content: ReactNode = null;
   if (isCapabilitySection(section)) content = <>
@@ -105,7 +122,7 @@ export function SettingsSectionSkeleton({ section, showRestart = false }: { sect
       content = <><RuntimeGroups page="runtime" /><Group controls={["input", "segments", "input", "input"]} /><Group controls={["input"]} /><Group controls={showRestart ? ["text", "text", "input"] : ["text", "text"]} /></>;
       break;
     case "advanced":
-      content = <RuntimeGroups page="advanced" />;
+      content = <RuntimeGroups page="advanced" sandboxSupported={sandboxSupported} />;
       break;
     case "about":
       content = <AboutSettingsLayout starLink={null} versionCheck={

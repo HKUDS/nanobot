@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
+import { SandboxNotice } from "@/components/thread/SandboxNotice";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
@@ -33,6 +34,8 @@ export function ChatFailureFixture({ parameters }: { parameters: URLSearchParams
         ? <StreamErrorNotice error={{ kind: "model_request_failed", chatId: "fixture", errorKind: "authentication" }} onDismiss={dismiss} onOpenSettings={settings} />
         : parameters.get("notice") === "fallback"
         ? <ModelFallbackNotice model="Fallback model" onDismiss={dismiss} onOpenSettings={settings} />
+        : parameters.get("notice") === "sandbox"
+        ? <SandboxNotice issue="missing" onDismiss={dismiss} onOpenSettings={settings} />
         : <RecoveryNotice
           state={{ recovery_id: "fixture-recovery", status: "awaiting_user", reason: "model_request_failed", failure_error_kind: "authentication" }}
           onContinue={async () => { setVisible(false); setAction("continued"); }}

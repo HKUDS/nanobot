@@ -28,7 +28,7 @@ import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-dr
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
-import type { SettingsExitGuard } from "@/components/settings/contracts";
+import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import {
   MAX_WORKBENCH_PANES,
@@ -140,6 +140,7 @@ type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
+  settingsFocus?: SettingsFocusTarget;
   temporary?: boolean;
 };
 const loadThreadShell = () => import("@/components/thread/ThreadShell");
@@ -259,11 +260,13 @@ function readShellRoute(): ShellRoute {
   const temporary = Boolean(returnChat && "temporary" in returnChat && returnChat.temporary === true);
 
   if (path === "/settings") {
+    const focus = params.get("focus");
     return {
       view: shellViewForSettingsSection(settingsSection),
       activeKey,
       temporary,
       settingsSection,
+      settingsFocus: settingsSection === "advanced" && (focus === "sandbox" || focus === "sandbox-launcher") ? focus : undefined,
     };
   }
   if (path === "/apps") {
@@ -324,6 +327,7 @@ function shellRouteHash(route: ShellRoute): string {
   const params = new URLSearchParams();
   if (route.view === "settings" && route.settingsSection !== "overview") {
     params.set("section", route.settingsSection);
+    if (route.settingsSection === "advanced" && route.settingsFocus) params.set("focus", route.settingsFocus);
   }
   const query = params.toString();
   return `#/${route.view}${query ? `?${query}` : ""}`;
@@ -889,6 +893,7 @@ function Shell({
   const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
+  const [settingsFocus, setSettingsFocus] = useState<SettingsFocusTarget | undefined>(initialRouteRef.current.settingsFocus);
   const [hostSidebarOpen, setHostSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
@@ -948,6 +953,7 @@ function Shell({
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
   currentShellRouteRef.current = {
     view, activeKey, settingsSection: settingsInitialSection,
+    settingsFocus,
     temporary: Boolean(activeKey && temporarySessions[activeKey]),
   };
   const registerSettingsExitGuard = useCallback((guard: SettingsExitGuard | null) => {
@@ -1007,6 +1013,7 @@ function Shell({
     setActiveKey(route.activeKey);
     setView(route.view);
     setSettingsInitialSection(route.settingsSection);
+    setSettingsFocus(route.settingsFocus);
     writeShellRoute({
       ...route,
       temporary: route.temporary || Boolean(route.activeKey && temporarySessionsRef.current[route.activeKey]),
@@ -1034,6 +1041,7 @@ function Shell({
           setActiveKey(route.activeKey);
           setView(route.view);
           setSettingsInitialSection(route.settingsSection);
+          setSettingsFocus(route.settingsFocus);
           writeShellRoute(route, true);
           setWorkspaceError(null);
           if (route.view === "chat" && !route.activeKey) setDraftWorkspaceScope(null);
@@ -1043,6 +1051,7 @@ function Shell({
       setActiveKey(route.activeKey);
       setView(route.view);
       setSettingsInitialSection(route.settingsSection);
+      setSettingsFocus(route.settingsFocus);
       setWorkspaceError(null);
       if (route.view === "chat" && !route.activeKey) {
         setDraftWorkspaceScope(null);
@@ -1763,6 +1772,11 @@ function Shell({
   const onOpenModelSettings = useCallback(() => {
     onOpenSettings("models");
   }, [onOpenSettings]);
+  const onOpenSandboxSettings = useCallback((target: SettingsFocusTarget) => {
+    setSessionSearchOpen(false);
+    navigate({ view: "settings", activeKey, settingsSection: "advanced", settingsFocus: target });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
 
   const onOpenApps = useCallback(() => {
     setSessionSearchOpen(false);
@@ -2596,6 +2610,7 @@ function Shell({
                             settingsSnapshot={settingsSnapshot}
                             settingsLoading={settingsLoading}
                             onOpenModelSettings={onOpenModelSettings}
+                            onOpenSandboxSettings={onOpenSandboxSettings}
                             skills={skills}
                           />
                         );
@@ -2662,6 +2677,7 @@ function Shell({
                           settingsSnapshot={settingsSnapshot}
                           settingsLoading={settingsLoading}
                           onOpenModelSettings={onOpenModelSettings}
+                          onOpenSandboxSettings={onOpenSandboxSettings}
                           skills={skills}
                         />
                       );
@@ -2681,6 +2697,7 @@ function Shell({
                     registerExitGuard={registerSettingsExitGuard}
                     themePreference={themePreference}
                     initialSection={settingsInitialSection}
+                    focusTarget={settingsFocus}
                     initialSettings={settingsSnapshot}
                     showSidebar={view === "settings"}
                     mainNavigationExpanded={showMainSidebar && hostSidebarOpen}

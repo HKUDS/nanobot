@@ -2,7 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { SettingsExitGuard } from "@/components/settings/contracts";
+import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
@@ -43,6 +43,7 @@ import {
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
 import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
+import { useClient } from "@/providers/ClientProvider";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
@@ -52,6 +53,7 @@ import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
   registerExitGuard?: (guard: SettingsExitGuard | null) => void;
+  focusTarget?: SettingsFocusTarget;
   controller: SettingsController;
   themePreference: ThemePreference;
   showSidebar: boolean;
@@ -76,6 +78,7 @@ interface SettingsPageProps {
 
 export function SettingsPage({
   registerExitGuard,
+  focusTarget,
   controller,
   themePreference,
   showSidebar,
@@ -92,6 +95,7 @@ export function SettingsPage({
   isRestarting,
   hostChromeInset,
 }: SettingsPageProps) {
+  const { client, webuiCapabilities } = useClient();
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
   const presetDeletedCallback = useRef<(() => void) | null>(null);
@@ -193,7 +197,9 @@ export function SettingsPage({
     : controllerPendingRestartSections;
 
   const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
-    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
+    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState} client={client}
+      focusTarget={page === "advanced" ? focusTarget : undefined}
+      sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")}
       onRestart={showSidebar ? undefined : restartViaSettingsSurface} isRestarting={restartInProgress}
       remoteBrowserAccess={remoteBrowserAccess}>
       {page === "advanced" ? (
@@ -770,7 +776,8 @@ export function SettingsPage({
           ) : null}
 
           {loading && !sectionReady ? (
-            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar} />
+            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar}
+              sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")} />
           ) : error && !sectionReady ? (
             <SettingsGroup>
               <SettingsRow title={t("settings.status.loadError")}>

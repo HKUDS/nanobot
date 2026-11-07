@@ -477,6 +477,63 @@
       "password": "Password",
       "proxyReferenceAuth": "Set authentication in the referenced proxy URL."
     },
+    "sandbox": {
+      "title": "Command sandbox",
+      "method": "Isolation method",
+      "off": "No isolation",
+      "status": "Saved configuration",
+      "check": "Check sandbox",
+      "checking": "Checking…",
+      "scope": "Checks the saved launcher with temporary test files only. This is not a full security audit. Restart the gateway to apply saved changes to command execution.",
+      "path": "Trusted launcher path",
+      "pathHelp": "Usually leave this blank for system lookup. For a custom installation, ask the package maintainer for the full launcher path. The file and its parent directories must be root-owned and not group- or world-writable, and outside writable agent paths.",
+      "automatic": "System lookup",
+      "checkError": "Could not complete the check. Reopen settings and try again.",
+      "saveError": "Could not save. Keep your draft and try again.",
+      "disableTitle": "Turn off command isolation?",
+      "disableHelp": "After restart, commands run with the gateway account’s permissions. File tools also lose the workspace restriction supplied by this sandbox; independently configured restrictions still apply.",
+      "keep": "Keep isolation",
+      "disable": "Turn off isolation",
+      "notice": {
+        "title": "Commands need attention",
+        "missing": "The command component could not be found. Check its installation; you can keep chatting.",
+        "path": "The configured command component is unavailable. Check its location and access permissions.",
+        "permissions": "The command component is not in a protected location. Contact the package maintainer or administrator.",
+        "startup": "The isolation environment could not start. Check the installation and system restrictions.",
+        "openSettings": "Check settings"
+      },
+      "states": {
+        "disabled": "Commands disabled",
+        "off": "Isolation off",
+        "unsupported": "Not supported",
+        "unchecked": "Not checked",
+        "unavailable": "Unavailable",
+        "passed": "Basic check passed",
+        "checking": "Checking…"
+      },
+      "help": {
+        "disabled": "Enable commands to use a sandbox.",
+        "off": "Commands are not isolated. Choose an isolation method to protect the host.",
+        "unsupported": "This isolation method is not supported on the gateway’s operating system.",
+        "unchecked": "Run a check to test the saved sandbox configuration.",
+        "unsaved": "Save changes, then check the sandbox.",
+        "unavailable": "The sandbox cannot start. Commands will not run in this sandbox.",
+        "passed": "The launcher started, temporary workspace writes worked, and the external test file was blocked.",
+        "checking": "Starting a bounded sandbox test…"
+      },
+      "reasons": {
+        "launcher_missing": "Launcher not found. Install it on the gateway or set a trusted absolute path below.",
+        "path_not_absolute": "Enter an absolute path, not a command name.",
+        "not_executable": "The path must point to an executable file.",
+        "agent_writable": "The launcher is in an agent-writable path. Ask the package maintainer for a protected installation.",
+        "unprotected_installation": "The launcher or a parent directory is writable by a non-root user. Ask the administrator for a protected installation.",
+        "path_unavailable": "Cannot read this path. Check that it exists on the gateway and is accessible.",
+        "platform_unsupported": "Choose the isolation method supported by this gateway’s operating system.",
+        "probe_failed": "The isolation test failed. Check the launcher installation, kernel namespace support and additional mounts.",
+        "probe_timeout": "The check timed out. Check the launcher installation and host restrictions, then try again.",
+        "unknown": "The launcher is unavailable. Check its installation and access permissions."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",
       "commandRuntime": {

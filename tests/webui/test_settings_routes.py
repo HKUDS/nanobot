@@ -65,6 +65,31 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
     return request
 
 
+async def test_sandbox_check_is_authenticated_explicit_and_serialized(tmp_path, monkeypatch):
+    path = "/api/settings/sandbox/check"
+    router = _router(config_path=tmp_path / "config.json")
+    response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
+    assert response.status_code == 405
+    unauthorized = _router(authorized=False, config_path=tmp_path / "config.json")
+    assert (await unauthorized.dispatch(None, _mutation_request(path, {}), path)).status_code == 401
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def probe(config, workspace):
+        started.set()
+        await release.wait()
+        return {"state": "passed", "reason": "", "launcher": "/usr/bin/bwrap", "revision": "test", "supported_backend": "bwrap"}
+
+    monkeypatch.setattr("nanobot.webui.settings_system.check_sandbox", probe)
+    first = asyncio.create_task(router.dispatch(None, _mutation_request(path, {}), path))
+    await asyncio.wait_for(started.wait(), 2)
+    try:
+        assert (await router.dispatch(None, _mutation_request(path, {}), path)).status_code == 409
+    finally:
+        release.set()
+    assert (await first).status_code == 200
+    assert (await router.dispatch(None, _mutation_request(path, {}), path)).status_code == 200
+
+
 @pytest.mark.asyncio
 async def test_nanobot_update_requires_auth_local_permission_and_websocket(tmp_path, monkeypatch):
     router = _router(config_path=tmp_path / "config.json")

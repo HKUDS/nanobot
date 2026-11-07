@@ -282,7 +282,7 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     : parameters.get("case") === "new-chat-skeleton"
     ? <ClientProvider client={railClient} token="fixture"><NewChatSkeletonFixture /></ClientProvider>
     : parameters.get("case") === "skeleton-additions"
-    ? <ClientProvider client={railClient} token="fixture"><SkeletonAdditionsFixture /></ClientProvider>
+    ? <ClientProvider client={railClient} token="fixture" webuiCapabilities={parameters.has("sandboxSettings") ? ["webui.sandbox-settings.v1"] : []}><SkeletonAdditionsFixture /></ClientProvider>
     : parameters.get("case") === "skeleton"
     ? <ClientProvider client={railClient} token="fixture"><SkeletonFixture surface={parameters.get("surface") ?? "skills"} loading={parameters.has("loading")} /></ClientProvider>
     : parameters.get("case") === "tools-catalog"

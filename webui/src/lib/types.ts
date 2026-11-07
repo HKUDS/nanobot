@@ -453,6 +453,8 @@ export interface ToolProgressEvent {
   arguments?: unknown;
   result?: unknown;
   error?: unknown;
+  /** Gateway-owned classification; never inferred from command output. */
+  error_code?: string;
   files?: unknown[];
   embeds?: unknown[];
 }
@@ -719,6 +721,14 @@ export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPendi
 
 export type RuntimeConfigValue = string | number | boolean | string[] | null;
 
+
+export interface SandboxCheck {
+  state: "disabled" | "off" | "unsupported" | "unchecked" | "unavailable" | "passed";
+  reason: string;
+  launcher: string | null;
+  revision: string;
+  supported_backend: "bwrap" | "seatbelt" | null;
+}
 
 export interface SettingsPayload {
   runtime_config?: Record<string, RuntimeConfigValue>;
@@ -1014,6 +1024,7 @@ export interface SettingsPayload {
     exec_enabled: boolean;
     exec_max_runtime_limit?: number;
     exec_sandbox?: string | null;
+    exec_sandbox_status?: SandboxCheck;
     exec_path_prepend_set: boolean;
     exec_path_append_set: boolean;
   };

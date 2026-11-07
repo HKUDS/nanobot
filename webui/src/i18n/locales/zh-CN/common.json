@@ -477,6 +477,63 @@
       "password": "密码",
       "proxyReferenceAuth": "请在引用的代理 URL 中设置认证信息。"
     },
+    "sandbox": {
+      "title": "命令沙箱",
+      "method": "隔离方式",
+      "off": "不隔离",
+      "status": "已保存配置",
+      "check": "检测沙箱",
+      "checking": "检测中…",
+      "scope": "仅使用临时文件检测已保存的启动器，不代表完整安全审计。保存后需重启网关，命令执行才会使用新配置。",
+      "path": "可信启动器路径",
+      "pathHelp": "通常留空，由系统自动查找。特殊安装请向安装包维护者索取启动器的完整路径。文件及上级目录须归 root 所有、不可被组或其他用户写入，且不在 Agent 可写范围内。",
+      "automatic": "系统自动查找",
+      "checkError": "检测未完成，请重新打开设置后重试。",
+      "saveError": "保存失败，草稿已保留，请重试。",
+      "disableTitle": "关闭命令隔离？",
+      "disableHelp": "重启后，命令将以网关账号的权限直接运行。文件工具也会失去此沙箱附带的目录限制；单独设置的目录限制仍然保留。",
+      "keep": "保留隔离",
+      "disable": "关闭隔离",
+      "notice": {
+        "title": "命令暂时不可用",
+        "missing": "未找到命令运行组件。请检查安装位置，聊天仍可继续。",
+        "path": "配置的运行组件路径不可用。请检查位置和访问权限。",
+        "permissions": "运行组件所在位置不符合安全要求。请联系安装包维护者或管理员。",
+        "startup": "隔离环境未能启动。请检查安装和系统限制。",
+        "openSettings": "检查设置"
+      },
+      "states": {
+        "disabled": "命令已停用",
+        "off": "未隔离",
+        "unsupported": "系统不支持",
+        "unchecked": "尚未检测",
+        "unavailable": "不可用",
+        "passed": "基础检测通过",
+        "checking": "检测中…"
+      },
+      "help": {
+        "disabled": "启用命令执行后可使用沙箱。",
+        "off": "命令未隔离，可选择隔离方式保护宿主机。",
+        "unsupported": "网关所在系统不支持此隔离方式。",
+        "unchecked": "点击检测沙箱，验证已保存的配置。",
+        "unsaved": "请先保存配置，再检测沙箱。",
+        "unavailable": "沙箱无法启动，命令不会在此沙箱中执行。",
+        "passed": "启动器可运行，临时工作区可写，外部测试文件访问已被阻止。",
+        "checking": "正在进行有时间限制的沙箱测试…"
+      },
+      "reasons": {
+        "launcher_missing": "未找到启动器，请在网关安装，或在下方填写可信绝对路径。",
+        "path_not_absolute": "请填写绝对路径，而不是命令名称。",
+        "not_executable": "该路径必须指向可执行文件。",
+        "agent_writable": "启动器位于 Agent 可写范围，请联系安装包维护者提供受保护的安装位置。",
+        "unprotected_installation": "启动器或上级目录可被非 root 用户写入，请联系管理员调整安装位置。",
+        "path_unavailable": "无法读取路径，请确认文件在网关上存在且可访问。",
+        "platform_unsupported": "请选择网关所在系统支持的隔离方式。",
+        "probe_failed": "隔离测试失败，请检查启动器安装、内核命名空间支持和额外挂载。",
+        "probe_timeout": "检测超时，请检查启动器安装和宿主机限制后重试。",
+        "unknown": "启动器不可用，请检查安装和访问权限。"
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "已保存，重启 API 服务后生效。",
       "commandRuntime": {

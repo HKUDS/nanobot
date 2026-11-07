@@ -477,6 +477,63 @@
       "password": "Mot de passe",
       "proxyReferenceAuth": "Configurez l’authentification dans l’URL du proxy référencée."
     },
+    "sandbox": {
+      "title": "Bac à sable des commandes",
+      "method": "Mode d’isolation",
+      "off": "Sans isolation",
+      "status": "Configuration enregistrée",
+      "check": "Vérifier le bac à sable",
+      "checking": "Vérification…",
+      "scope": "Teste uniquement le lanceur enregistré avec des fichiers temporaires. Ce n’est pas un audit de sécurité complet. Redémarrez la passerelle pour appliquer les changements aux commandes.",
+      "path": "Chemin du lanceur de confiance",
+      "pathHelp": "Laissez généralement ce champ vide pour la recherche système. Pour une installation personnalisée, demandez le chemin complet du lanceur au responsable du paquet. Le fichier et ses dossiers parents doivent appartenir à root, sans écriture pour le groupe ou les autres utilisateurs, hors des chemins modifiables par l’agent.",
+      "automatic": "Recherche système",
+      "checkError": "La vérification a échoué. Rouvrez les paramètres et réessayez.",
+      "saveError": "Enregistrement impossible. Le brouillon est conservé ; réessayez.",
+      "disableTitle": "Désactiver l’isolation ?",
+      "disableHelp": "Après redémarrage, les commandes utiliseront les droits du compte de la passerelle. Les outils de fichiers perdront aussi la restriction d’espace de travail fournie par ce bac à sable ; les restrictions indépendantes restent actives.",
+      "keep": "Garder l’isolation",
+      "disable": "Désactiver l’isolation",
+      "notice": {
+        "title": "Les commandes nécessitent une vérification",
+        "missing": "Le composant d’exécution est introuvable. Vérifiez son installation ; vous pouvez continuer à discuter.",
+        "path": "Le composant configuré est indisponible. Vérifiez son emplacement et ses droits d’accès.",
+        "permissions": "Le composant n’est pas dans un emplacement protégé. Contactez le responsable du paquet ou l’administrateur.",
+        "startup": "L’environnement isolé n’a pas pu démarrer. Vérifiez l’installation et les restrictions du système.",
+        "openSettings": "Vérifier les paramètres"
+      },
+      "states": {
+        "disabled": "Commandes désactivées",
+        "off": "Sans isolation",
+        "unsupported": "Non pris en charge",
+        "unchecked": "Non vérifié",
+        "unavailable": "Indisponible",
+        "passed": "Test de base réussi",
+        "checking": "Vérification…"
+      },
+      "help": {
+        "disabled": "Activez les commandes pour utiliser un bac à sable.",
+        "off": "Les commandes ne sont pas isolées. Choisissez une méthode pour protéger l’hôte.",
+        "unsupported": "Le système de la passerelle ne prend pas en charge cette méthode.",
+        "unchecked": "Lancez la vérification de la configuration enregistrée.",
+        "unsaved": "Enregistrez les changements, puis lancez la vérification.",
+        "unavailable": "Le bac à sable ne peut pas démarrer. Aucune commande n’y sera exécutée.",
+        "passed": "Le lanceur a démarré, l’écriture dans l’espace de travail temporaire a réussi et le fichier externe a été bloqué.",
+        "checking": "Test avec durée limitée en cours…"
+      },
+      "reasons": {
+        "launcher_missing": "Lanceur introuvable. Installez-le sur la passerelle ou indiquez un chemin absolu de confiance.",
+        "path_not_absolute": "Indiquez un chemin absolu, pas un nom de commande.",
+        "not_executable": "Le chemin doit désigner un fichier exécutable.",
+        "agent_writable": "L’agent peut modifier ce chemin. Demandez une installation protégée au responsable du paquet.",
+        "unprotected_installation": "Un utilisateur autre que root peut modifier le lanceur ou un dossier parent. Demandez une installation protégée à l’administrateur.",
+        "path_unavailable": "Chemin illisible. Vérifiez sa présence et ses droits sur la passerelle.",
+        "platform_unsupported": "Choisissez une méthode compatible avec le système de la passerelle.",
+        "probe_failed": "Le test a échoué. Vérifiez l’installation, les espaces de noms du noyau et les montages supplémentaires.",
+        "probe_timeout": "Délai dépassé. Vérifiez l’installation et les restrictions de l’hôte, puis réessayez.",
+        "unknown": "Lanceur indisponible. Vérifiez son installation et ses droits."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "Enregistré. Redémarrez le service API pour appliquer les modifications.",
       "commandRuntime": {

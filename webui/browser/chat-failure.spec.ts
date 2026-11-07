@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 
 for (const width of [1440, 390]) {
   for (const variant of ["thread", "hero"]) {
-    for (const notice of ["recovery", "stream", "fallback"]) {
-      test(`${notice} aligns with ${variant} composer at ${width}px`, async ({ page }) => {
+    for (const notice of ["recovery", "stream", "fallback", "sandbox"]) {
+      test(`${notice} aligns with ${variant} composer at ${width}px`, async ({ page }, info) => {
         await page.setViewportSize({ width, height: 1000 });
         await page.emulateMedia({ reducedMotion: "reduce" });
         await page.addInitScript(({ dark, locale }) => {
@@ -29,6 +29,17 @@ for (const width of [1440, 390]) {
           expect(box.x + box.width).toBeLessThanOrEqual(noticeBox.x + noticeBox.width);
         }
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+        if (notice === "sandbox") {
+          await expect(alert).toHaveAttribute("role", "status");
+          await expect(alert).toHaveAttribute("aria-live", "polite");
+          const input = page.getByRole("textbox");
+          await input.fill("Keep this unsent draft / 保留草稿");
+          await expect(input).toBeFocused();
+          await alert.getByRole("button").first().click();
+          await expect(page.getByLabel("Fixture action")).toHaveText("settings");
+          await expect(input).toHaveValue("Keep this unsent draft / 保留草稿");
+          await page.screenshot({ path: info.outputPath("sandbox-notice.png") });
+        }
         if (notice === "recovery") {
           await expect(alert).toContainText(width === 390 ? "模型提供商验证失败" : "Model provider authorization failed");
           await alert.getByRole("button").first().click();

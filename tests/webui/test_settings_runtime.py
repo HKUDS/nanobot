@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,58 @@ def test_shared_proxy_roundtrip_preserves_independent_feature_switches(tmp_path)
         assert saved.providers.openai.use_proxy is True
     update_runtime_config_settings({"tools.web.use_proxy": True}, config_path=path)
     assert load_config(path).tools.web.use_proxy is True
+
+
+def test_legacy_sandbox_config_roundtrip_and_rejected_override_are_atomic(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"tools": {"exec": {"sandbox": "bwrap", "sandboxRoBinds": ["/opt/tools"]}}}))
+    config = load_config(path)
+    assert config.tools.exec.sandbox_launcher == ""
+    payload = update_runtime_config_settings({"tools.exec.timeout": 75}, config_path=path)
+    assert payload["runtime_config"]["tools.exec.sandbox_launcher"] == ""
+    assert load_config(path).tools.exec.sandbox_ro_binds == ["/opt/tools"]
+    before = path.read_bytes()
+    reason = "path_not_absolute" if os.name == "posix" else "platform_unsupported"
+    with pytest.raises(WebUISettingsError, match=f"sandbox_launcher_{reason}"):
+        update_runtime_config_settings({"tools.exec.sandbox_launcher": "bin/bwrap", "tools.exec.timeout": 99}, config_path=path)
+    assert path.read_bytes() == before
+    update_runtime_config_settings({"tools.exec.sandbox_launcher": ""}, config_path=path)
+    assert load_config(path).tools.exec.sandbox == "bwrap"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix protected launcher permissions")
+def test_sandbox_environment_paths_are_validated_without_rewriting_references(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("SANDBOX_TEST_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("SANDBOX_TEST_LAUNCHER", "/bin/sh")
+    monkeypatch.delenv("SANDBOX_TEST_MISSING_PROVIDER", raising=False)
+    config = Config.model_validate({
+        "agents": {"defaults": {"workspace": "${SANDBOX_TEST_WORKSPACE}"}},
+        "providers": {"openai": {"apiKey": "${SANDBOX_TEST_MISSING_PROVIDER}"}},
+        "tools": {"exec": {"sandbox": "bwrap"}},
+    })
+    save_config(config, path)
+    payload = update_runtime_config_settings({
+        "tools.exec.sandbox_launcher": "${SANDBOX_TEST_LAUNCHER}",
+    }, config_path=path)
+    saved = load_config(path)
+    assert payload["runtime_config"]["tools.exec.sandbox_launcher"] == "${SANDBOX_TEST_LAUNCHER}"
+    assert saved.tools.exec.sandbox_launcher == "${SANDBOX_TEST_LAUNCHER}"
+    assert saved.agents.defaults.workspace == "${SANDBOX_TEST_WORKSPACE}"
+    assert saved.providers.openai.api_key == "${SANDBOX_TEST_MISSING_PROVIDER}"
+    before = path.read_bytes()
+    monkeypatch.setenv("SANDBOX_TEST_RW_BIND", str(Path("/bin/sh").resolve().parent))
+    with pytest.raises(WebUISettingsError, match="sandbox_launcher_agent_writable"):
+        update_runtime_config_settings({
+            "tools.exec.sandbox_rw_binds": ["${SANDBOX_TEST_RW_BIND}"],
+        }, config_path=path)
+    assert path.read_bytes() == before
+    monkeypatch.delenv("SANDBOX_TEST_LAUNCHER")
+    with pytest.raises(WebUISettingsError, match="sandbox_launcher_path_unavailable"):
+        update_runtime_config_settings({
+            "tools.exec.sandbox_launcher": "${SANDBOX_TEST_LAUNCHER}",
+        }, config_path=path)
+    assert path.read_bytes() == before
 
 
 def test_enabling_web_proxy_without_an_address_preserves_config(tmp_path):

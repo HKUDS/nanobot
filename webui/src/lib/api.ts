@@ -1595,6 +1595,12 @@ export async function updateRuntimeConfigSettings(
   return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
 }
 
+export async function checkSandboxSettings(
+  transport: WebUIMutationTransport,
+): Promise<{ sandbox: import("@/lib/types").SandboxCheck }> {
+  return mutation(transport, "settings.sandbox.check", {});
+}
+
 export function starPromptAction(
   transport: WebUIMutationTransport,
   action: "claim" | "dismiss",

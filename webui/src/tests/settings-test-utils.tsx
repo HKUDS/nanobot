@@ -128,6 +128,7 @@ export function settingsPayload(): SettingsPayload {
 type SettingsViewTestOptions = Partial<Pick<
   React.ComponentProps<typeof SettingsView>,
   | "initialSection"
+  | "focusTarget"
   | "initialSettings"
   | "themePreference"
   | "onChangeTheme"
@@ -140,7 +141,7 @@ type SettingsViewTestOptions = Partial<Pick<
   | "onStartAutomationChat"
   | "onNativeEngineRestart"
   | "onRestart"
->> & { client?: NanobotClient };
+>> & { client?: NanobotClient; webuiCapabilities?: string[] };
 
 export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
@@ -151,10 +152,11 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
         handler("open");
         return () => {};
       },
-    } as never} token="tok">
+    } as never} token="tok" webuiCapabilities={options.webuiCapabilities}>
       <SettingsView
         themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}
+        focusTarget={options.focusTarget}
         initialSettings={options.initialSettings}
         skills={options.skills}
         skillsLoading={options.skillsLoading}

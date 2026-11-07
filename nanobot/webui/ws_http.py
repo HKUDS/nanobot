@@ -217,6 +217,7 @@ _WEBUI_MUTATION_PATHS = {
     "settings.image_generation.update": "/api/settings/image-generation/update",
     "settings.transcription.update": "/api/settings/transcription/update",
     "settings.runtime_config.update": "/api/settings/runtime-config/update",
+    "settings.sandbox.check": "/api/settings/sandbox/check",
     "settings.network_safety.update": "/api/settings/network-safety/update",
     "settings.cli_app.install": "/api/settings/cli-apps/install",
     "settings.cli_app.update": "/api/settings/cli-apps/update",
