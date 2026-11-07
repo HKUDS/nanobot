@@ -486,7 +486,7 @@
       "checking": "Đang kiểm tra…",
       "scope": "Chỉ kiểm tra trình khởi chạy đã lưu bằng tệp tạm. Đây không phải kiểm toán bảo mật đầy đủ. Khởi động lại gateway để áp dụng thay đổi cho lệnh.",
       "path": "Đường dẫn trình khởi chạy tin cậy",
-      "pathHelp": "Đường dẫn tuyệt đối tùy chọn từ nhà phát hành tin cậy. Tệp và thư mục cha phải thuộc root, không cho nhóm/người khác ghi, và nằm ngoài vùng ghi của Agent. Để trống để tìm trong hệ thống.",
+      "pathHelp": "Thông thường hãy để trống để tìm trong hệ thống. Với cài đặt tùy chỉnh, hãy hỏi người duy trì gói về đường dẫn đầy đủ của trình khởi chạy. Tệp và thư mục cha phải thuộc root, không cho nhóm/người khác ghi, và nằm ngoài vùng ghi của Agent.",
       "automatic": "Tìm trong hệ thống",
       "checkError": "Chưa kiểm tra được. Mở lại cài đặt và thử lại.",
       "saveError": "Không lưu được. Bản nháp được giữ lại; hãy thử lại.",
@@ -494,6 +494,14 @@
       "disableHelp": "Sau khi khởi động lại, lệnh chạy với quyền tài khoản gateway. Công cụ tệp cũng mất giới hạn vùng làm việc do sandbox này cung cấp; các giới hạn được đặt riêng vẫn có hiệu lực.",
       "keep": "Giữ cô lập",
       "disable": "Tắt cô lập",
+      "notice": {
+        "title": "Cần kiểm tra lệnh",
+        "missing": "Không tìm thấy thành phần thực thi lệnh. Hãy kiểm tra cài đặt; bạn vẫn có thể trò chuyện.",
+        "path": "Không thể sử dụng thành phần đã cấu hình. Hãy kiểm tra vị trí và quyền truy cập.",
+        "permissions": "Thành phần thực thi không nằm ở vị trí được bảo vệ. Hãy liên hệ người bảo trì gói hoặc quản trị viên.",
+        "startup": "Không thể khởi động môi trường cách ly. Hãy kiểm tra cài đặt và các hạn chế của hệ thống.",
+        "openSettings": "Kiểm tra cài đặt"
+      },
       "states": {
         "disabled": "Đã tắt lệnh",
         "off": "Không cô lập",

@@ -486,7 +486,7 @@
       "checking": "Comprobando…",
       "scope": "Solo prueba el lanzador guardado con archivos temporales. No es una auditoría de seguridad completa. Reinicia la puerta de enlace para aplicar los cambios a los comandos.",
       "path": "Ruta del lanzador de confianza",
-      "pathHelp": "Ruta absoluta opcional de un lanzador de confianza. El archivo y sus directorios padre deben ser de root, sin escritura para grupos u otros usuarios, y estar fuera de las rutas de escritura del agente. Déjala vacía para buscar en el sistema.",
+      "pathHelp": "Normalmente, déjala vacía para buscar en el sistema. Para una instalación personalizada, pide la ruta completa del lanzador al responsable del paquete. El archivo y sus directorios padre deben ser de root, sin escritura para grupos u otros usuarios, y estar fuera de las rutas de escritura del agente.",
       "automatic": "Búsqueda del sistema",
       "checkError": "No se pudo completar la prueba. Abre los ajustes de nuevo y reinténtalo.",
       "saveError": "No se pudo guardar. El borrador se conserva; vuelve a intentarlo.",
@@ -494,6 +494,14 @@
       "disableHelp": "Tras reiniciar, los comandos usarán los permisos de la cuenta de la puerta de enlace. Las herramientas de archivos también perderán la restricción de espacio de trabajo de este sandbox; las restricciones independientes se mantienen.",
       "keep": "Mantener aislamiento",
       "disable": "Desactivar aislamiento",
+      "notice": {
+        "title": "Los comandos requieren atención",
+        "missing": "No se encontró el componente de ejecución. Revisa su instalación; puedes seguir chateando.",
+        "path": "El componente configurado no está disponible. Revisa su ubicación y permisos de acceso.",
+        "permissions": "El componente no está en una ubicación protegida. Contacta al responsable del paquete o al administrador.",
+        "startup": "El entorno de aislamiento no pudo iniciarse. Revisa la instalación y las restricciones del sistema.",
+        "openSettings": "Revisar ajustes"
+      },
       "states": {
         "disabled": "Comandos desactivados",
         "off": "Sin aislamiento",

@@ -6,10 +6,11 @@ import { SettingsGroup, SettingsRow } from "@/components/settings/shared/Setting
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Disclosure } from "@/components/ui/disclosure";
 
-export function SettingsAdvancedOptions({ children }: { children: ReactNode }) {
+export function SettingsAdvancedOptions({ children, initialOpen = false }: { children: ReactNode; initialOpen?: boolean }) {
   const { t } = useTranslation();
   return (
     <Disclosure
+      initialOpen={initialOpen}
       summaryClassName="settings-list-inset flex min-h-12 cursor-pointer items-center justify-between gap-4 rounded-xl text-[13px] leading-5 text-muted-foreground settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       summary={<>
         {t("settings.runtimeConfig.advancedOptions")}

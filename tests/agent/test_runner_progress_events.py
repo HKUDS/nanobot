@@ -7,11 +7,47 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner
+from nanobot.agent.tools.base import ToolResult
+from nanobot.agent.tools.registry import with_tool_error_hint
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.utils.progress_events import output_events
 
 _DEFAULTS = AgentDefaults()
+
+
+@pytest.mark.asyncio
+async def test_tool_error_code_is_display_metadata_not_model_content() -> None:
+    provider, tools = MagicMock(), MagicMock()
+    tool_call = ToolCallRequest(id="sandbox-call", name="exec", arguments={"command": "printf test"})
+    responses = iter([
+        LLMResponse(content="", tool_calls=[tool_call]),
+        LLMResponse(content="Please check the installation.", tool_calls=[]),
+    ])
+    provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(responses))
+    tools.get_definitions.return_value = []
+    tools.prepare_call.return_value = (None, tool_call.arguments, None)
+    text = "Error: sandbox launcher not found: bwrap"
+    tools.execute = AsyncMock(return_value=ToolResult.error(text, error_code="sandbox_launcher_missing"))
+    events: list[dict] = []
+
+    async def on_progress(content: str, *, tool_hint: bool = False, tool_events: list[dict] | None = None) -> None:
+        events.extend(tool_events or [])
+
+    await AgentRunner().run(make_run_spec(
+        provider, tools=tools, model="test", initial_messages=[{"role": "user", "content": "Run a command"}],
+        max_iterations=3, max_tool_result_chars=_DEFAULTS.max_tool_result_chars,
+        hook=AgentProgressHook(output_events(on_progress=on_progress)),
+    ))
+
+    finished = events[-1]
+    assert finished["phase"] == "error"
+    assert finished["error_code"] == "sandbox_launcher_missing"
+    assert finished["error"] == with_tool_error_hint(text)
+    request = provider.chat_stream_with_retry.call_args.kwargs
+    tool_message = next(message for message in request["messages"] if message["role"] == "tool")
+    assert tool_message["content"] == with_tool_error_hint(text)
+    assert "error_code" not in tool_message
 
 
 @pytest.mark.asyncio

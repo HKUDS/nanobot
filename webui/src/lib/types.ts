@@ -453,6 +453,8 @@ export interface ToolProgressEvent {
   arguments?: unknown;
   result?: unknown;
   error?: unknown;
+  /** Gateway-owned classification; never inferred from command output. */
+  error_code?: string;
   files?: unknown[];
   embeds?: unknown[];
 }

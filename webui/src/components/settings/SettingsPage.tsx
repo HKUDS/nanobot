@@ -2,7 +2,7 @@ import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { SettingsExitGuard } from "@/components/settings/contracts";
+import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
@@ -53,6 +53,7 @@ import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
   registerExitGuard?: (guard: SettingsExitGuard | null) => void;
+  focusTarget?: SettingsFocusTarget;
   controller: SettingsController;
   themePreference: ThemePreference;
   showSidebar: boolean;
@@ -77,6 +78,7 @@ interface SettingsPageProps {
 
 export function SettingsPage({
   registerExitGuard,
+  focusTarget,
   controller,
   themePreference,
   showSidebar,
@@ -196,6 +198,7 @@ export function SettingsPage({
 
   const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
     <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState} client={client}
+      focusTarget={page === "advanced" ? focusTarget : undefined}
       sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")}
       onRestart={showSidebar ? undefined : restartViaSettingsSurface} isRestarting={restartInProgress}
       remoteBrowserAccess={remoteBrowserAccess}>

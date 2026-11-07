@@ -486,7 +486,7 @@
       "checking": "Verificando…",
       "scope": "Testa apenas o iniciador salvo com arquivos temporários. Não é uma auditoria completa de segurança. Reinicie o gateway para aplicar as alterações aos comandos.",
       "path": "Caminho do iniciador confiável",
-      "pathHelp": "Caminho absoluto opcional de um iniciador confiável. O arquivo e as pastas superiores devem pertencer ao root, sem escrita por grupos ou outros usuários, fora dos caminhos graváveis pelo agente. Deixe vazio para busca no sistema.",
+      "pathHelp": "Normalmente, deixe vazio para busca no sistema. Para uma instalação personalizada, peça o caminho completo do iniciador ao mantenedor do pacote. O arquivo e as pastas superiores devem pertencer ao root, sem escrita por grupos ou outros usuários, fora dos caminhos graváveis pelo agente.",
       "automatic": "Busca no sistema",
       "checkError": "Não foi possível verificar. Reabra as configurações e tente novamente.",
       "saveError": "Não foi possível salvar. O rascunho foi mantido; tente novamente.",
@@ -494,6 +494,14 @@
       "disableHelp": "Após reiniciar, os comandos usarão as permissões da conta do gateway. As ferramentas de arquivos também perderão a restrição de espaço de trabalho deste sandbox; as restrições independentes continuam ativas.",
       "keep": "Manter isolamento",
       "disable": "Desativar isolamento",
+      "notice": {
+        "title": "Os comandos precisam de atenção",
+        "missing": "O componente de execução não foi encontrado. Verifique a instalação; você pode continuar conversando.",
+        "path": "O componente configurado está indisponível. Verifique o local e as permissões de acesso.",
+        "permissions": "O componente não está em um local protegido. Entre em contato com o responsável pelo pacote ou administrador.",
+        "startup": "O ambiente de isolamento não pôde iniciar. Verifique a instalação e as restrições do sistema.",
+        "openSettings": "Verificar configurações"
+      },
       "states": {
         "disabled": "Comandos desativados",
         "off": "Isolamento desativado",

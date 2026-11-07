@@ -37,6 +37,16 @@ describe("Saved sandbox settings", () => {
     expect(sandbox.getByText(/Restart the gateway/)).toBeVisible();
   });
 
+  it("opens the launcher editor from a recovery link without editing or checking automatically", () => {
+    renderSettingsView({ initialSection: "advanced", initialSettings: payload(), webuiCapabilities: capability,
+      focusTarget: "sandbox-launcher" });
+    const sandbox = within(screen.getByRole("region", { name: "Command sandbox" }));
+    expect(sandbox.getByRole("button", { name: "Advanced options" })).toHaveAttribute("aria-expanded", "true");
+    expect(sandbox.getByRole("textbox", { name: "Trusted launcher path" })).toHaveFocus();
+    expect(sandbox.getByRole("textbox", { name: "Trusted launcher path" })).toHaveValue("");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+  });
+
   it("retains rejected path drafts and localizes errors", async () => {
     const sandbox = open();
     fireEvent.click(sandbox.getByRole("button", { name: "Advanced options" }));
@@ -119,5 +129,23 @@ describe("Saved sandbox settings", () => {
     finish({ sandbox: { ...settings.advanced.exec_sandbox_status, state: "passed", reason: "" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Check sandbox" })).not.toBeDisabled());
     expect(screen.queryByText("Basic check passed")).not.toBeInTheDocument();
+  });
+
+  it("does not refocus the launcher when restart state changes", () => {
+    const settings = payload();
+    const client = { requestMutation: vi.fn() } as unknown as NanobotClient;
+    function Harness({ restarting }: { restarting: boolean }) {
+      const state = useRuntimeConfigSettings(settings, client, () => {});
+      return <><button>Keep focus here</button><RuntimeConfigSettings page="advanced" settings={settings} state={state}
+        client={client} sandboxSupported isRestarting={restarting} remoteBrowserAccess={false} focusTarget="sandbox-launcher" /></>;
+    }
+    const { rerender } = render(<Harness restarting={false} />);
+    expect(screen.getByRole("textbox", { name: "Trusted launcher path" })).toHaveFocus();
+    const other = screen.getByRole("button", { name: "Keep focus here" });
+    other.focus();
+    rerender(<Harness restarting />);
+    expect(other).toHaveFocus();
+    rerender(<Harness restarting={false} />);
+    expect(other).toHaveFocus();
   });
 });

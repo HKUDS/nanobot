@@ -10,6 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent.tools.base import ToolResult
+from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.sandbox_check import check_sandbox, sandbox_settings_status
 from nanobot.agent.tools.sandbox_launcher import SandboxLauncherError, resolve_sandbox_launcher
 from nanobot.agent.tools.shell import ExecTool
@@ -38,6 +40,7 @@ async def test_nonstandard_bwrap_is_not_silently_run_without_sandbox(tmp_path, m
     result = await tool.execute(command="printf ran > command-ran")
 
     assert "sandbox launcher not found: bwrap" in result
+    assert isinstance(result, ToolResult) and result.error_code == "sandbox_launcher_missing"
     assert not marker.exists()
 
 
@@ -57,6 +60,9 @@ async def test_writable_custom_launcher_is_rejected_before_execution(tmp_path, l
     tool = ExecTool(working_dir=str(workspace), sandbox="bwrap", sandbox_launcher=str(launcher))
     response = await tool.execute(command="echo command-ran", shell="/bin/sh", login=True)
     assert "sandbox launcher rejected" in response
+    assert isinstance(response, ToolResult) and response.error_code in {
+        "sandbox_agent_writable", "sandbox_unprotected_installation",
+    }
     assert not marker.exists()
     if sys.platform.startswith("linux"):
         status = await check_sandbox(config, workspace)
@@ -149,6 +155,26 @@ async def test_native_probe_checks_isolation_without_touching_workspace(tmp_path
     # The same resolver and backend must work for actual command execution.
     tool = ExecTool(working_dir=str(tmp_path), sandbox=backend, sandbox_launcher=result["launcher"])
     assert "actual-command" in await tool.execute(command="printf actual-command")
+    failed_command = await tool.execute(command="printf 'sandbox launcher not found: bwrap'; exit 1")
+    assert "Exit code: 1" in failed_command
+    assert (failed_command.error_code if isinstance(failed_command, ToolResult) else None) is None
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix launch boundary")
+@pytest.mark.parametrize("failure_target", ["launcher", "cwd"])
+async def test_only_an_os_error_for_the_launcher_is_classified_as_a_sandbox_failure(tmp_path, monkeypatch, failure_target):
+    backend = "seatbelt" if sys.platform == "darwin" else "bwrap"
+    launcher = "/usr/bin/sandbox-exec" if backend == "seatbelt" else "/bin/sh"
+
+    async def start(*, command, cwd, **kwargs):
+        raise PermissionError(13, "launch rejected", command[0] if failure_target == "launcher" else cwd)
+
+    manager = ExecSessionManager()
+    monkeypatch.setattr(manager, "start", start)
+    tool = ExecTool(working_dir=str(tmp_path), sandbox=backend, sandbox_launcher=launcher, session_manager=manager)
+    result = await tool.execute(command="printf not-run")
+    assert isinstance(result, ToolResult) and result.is_error
+    assert result.error_code == ("sandbox_start_failed" if failure_target == "launcher" else None)
 
 
 async def test_missing_environment_launcher_does_not_fall_back_or_launch(tmp_path, monkeypatch):

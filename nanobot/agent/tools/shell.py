@@ -364,7 +364,13 @@ class ExecTool(Tool):
                 result += "\nInitial wait ended; session remains active."
             return ToolResult.error(result) if poll.failed else result
         except Exception as exc:
-            return ToolResult.error(f"Error executing command: {exc}")
+            # Only an OS rejection of the actual launcher is attributable here.
+            # A command's nonzero exit or stderr is not proof of a sandbox fault.
+            code = "sandbox_start_failed" if (
+                isinstance(exc, OSError) and self.sandbox and not _IS_WINDOWS
+                and isinstance(prepared.command, list) and exc.filename == prepared.command[0]
+            ) else None
+            return ToolResult.error(f"Error executing command: {exc}", error_code=code)
 
     def _resolve_timeout(self, timeout: object) -> int | None:
         if timeout is not None:
@@ -483,8 +489,12 @@ class ExecTool(Tool):
                     )
                 except SandboxLauncherError as exc:
                     if exc.reason == "launcher_missing":
-                        return ToolResult.error(f"Error: sandbox launcher not found: {command[0]}")
-                    return ToolResult.error(f"Error: sandbox launcher rejected: {exc.reason}")
+                        return ToolResult.error(
+                            f"Error: sandbox launcher not found: {command[0]}", error_code="sandbox_launcher_missing",
+                        )
+                    return ToolResult.error(
+                        f"Error: sandbox launcher rejected: {exc.reason}", error_code=f"sandbox_{exc.reason}",
+                    )
                 cwd = str(Path(workspace).resolve())
 
         return _PreparedCommand(

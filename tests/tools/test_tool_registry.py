@@ -425,14 +425,16 @@ async def test_registry_uses_structured_tool_result_for_errors(already_hinted: b
     )
     error_content = "Error: real failure" + (error_hint if already_hinted else "")
     failing_tool = _FakeTool("failing_tool")
-    failing_tool.execute = AsyncMock(return_value=ToolResult.error(error_content))
+    failing_tool.execute = AsyncMock(return_value=ToolResult.error(error_content, error_code="sandbox_launcher_missing"))
     registry.register(failing_tool)
 
     error_result = await registry.execute("failing_tool", {})
 
     assert isinstance(error_result, ToolResult)
     assert error_result.is_error
+    assert error_result.error_code == "sandbox_launcher_missing"
     assert error_result == "Error: real failure" + error_hint
+    assert json.dumps({"content": error_result}) == json.dumps({"content": "Error: real failure" + error_hint})
 
 
 def test_get_definitions_returns_cached_result() -> None:
