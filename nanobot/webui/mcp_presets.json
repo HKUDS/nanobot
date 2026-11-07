@@ -125,6 +125,24 @@
     "note": "Free anonymous access for light use; no API key is required."
   },
   {
+    "name": "fxmacrodata",
+    "display_name": "FXMacroData",
+    "category": "finance",
+    "description": "Look up central-bank rates, inflation, jobs and GDP releases, release calendars and FX rates from official sources through FXMacroData's hosted MCP server.",
+    "docs_url": "https://fxmacrodata.com/documentation/mcp-server",
+    "transport": "streamableHttp",
+    "install_supported": true,
+    "brand_domain": "fxmacrodata.com",
+    "brand_color": "#05131D",
+    "server": {
+      "type": "streamableHttp",
+      "url": "https://mcp.fxmacrodata.com/mcp",
+      "tool_timeout": 60
+    },
+    "requires": "Network access",
+    "note": "USD data works without an API key. Other currencies and FX rates need an FXMacroData key, sent as an Authorization: Bearer header on a custom MCP server."
+  },
+  {
     "name": "exa",
     "display_name": "Exa",
     "category": "web",
