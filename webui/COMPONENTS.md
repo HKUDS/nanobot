@@ -58,7 +58,7 @@ Prompt navigation retains at most three server pages. Static ready Blocks appear
 
 ## Theme artwork and surface motion
 
-The application theme remains the single owner for paired day/night artwork. The Sidebar keeps the original daytime mark and uses a sleeping-cap variant in dark mode; the Star invitation pairs matching day/night illustrations. Both layers reserve the same geometry. `.theme-art` blends opacity for System changes and browsers without native snapshots; a native root View Transition owns the whole-frame fade instead. Reduced motion switches artwork directly. Warm/cool decoration is limited to entry and empty states, not conversation reading surfaces.
+The application theme remains the single owner for paired day/night artwork. The Sidebar keeps the original daytime mark and uses a sleeping-cap variant in dark mode; the Star invitation pairs matching day/night illustrations. Both layers reserve the same geometry. `.theme-art` blends opacity for System changes and browsers without native snapshots; a native root View Transition owns the whole-frame fade instead. Reduced motion switches artwork directly. Entry and conversation surfaces keep their normal theme colors without decorative ambient glow.
 
 Dropdowns and popovers use Radix's resolved transform origin and side, so motion stays attached to the trigger after collision handling. Radix owns their presence and focus. `SidebarPanel` retains its content until the slot and surface finish their actual exit animations, ignores descendant activity, and cancels teardown when reopened. Closing content is inert and hidden from assistive navigation; callers still own focus restoration. Disclosures keep their existing in-flow height transition and draft retention.
 
