@@ -13,14 +13,16 @@ import { checkSandboxSettings } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type { SandboxCheck, SettingsPayload } from "@/lib/types";
 import type { RuntimeConfigController } from "./RuntimeConfigSettings";
+import type { SettingsFocusTarget } from "@/components/settings/contracts";
 import { RUNTIME_CONFIG_FIELDS } from "./runtime-config-fields";
 
-export function SandboxSettings({ settings, state, client, isRestarting, children }: {
+export function SandboxSettings({ settings, state, client, isRestarting, children, focusTarget }: {
   settings: SettingsPayload;
   state: RuntimeConfigController;
   client: NanobotClient;
   isRestarting: boolean;
   children: ReactNode;
+  focusTarget?: SettingsFocusTarget;
 }) {
   const { t } = useTranslation();
   const tx = (key: string) => t(`settings.sandbox.${key}`);
@@ -30,6 +32,15 @@ export function SandboxSettings({ settings, state, client, isRestarting, childre
   const [checkError, setCheckError] = useState(false);
   const [confirmDisable, setConfirmDisable] = useState(false);
   const generation = useRef(0);
+  const section = useRef<HTMLElement>(null);
+  const launcherInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!focusTarget) return;
+    section.current?.scrollIntoView({ block: "start" });
+    const target = focusTarget === "sandbox-launcher" && launcherInput.current && !launcherInput.current.disabled
+      ? launcherInput.current : section.current;
+    target?.focus({ preventScroll: true });
+  }, [focusTarget]);
   useEffect(() => {
     generation.current += 1;
     setResult(null);
@@ -68,7 +79,7 @@ export function SandboxSettings({ settings, state, client, isRestarting, childre
       if (id === generation.current) setChecking(false);
     }
   };
-  return <section aria-label={tx("title")}>
+  return <section ref={section} tabIndex={-1} className="scroll-mt-6" aria-label={tx("title")}>
     <SettingsSectionTitle>{tx("title")}</SettingsSectionTitle>
     <SettingsGroup>
       <SettingsRow title={t("settings.runtimeConfig.fields.tools_exec_enable.label")}>
@@ -98,12 +109,12 @@ export function SandboxSettings({ settings, state, client, isRestarting, childre
         {checkError ? <p role="alert" className="mt-2 text-caption text-destructive">{tx("checkError")}</p> : null}
         {error ? <p id="sandbox-settings-error" role="alert" className="mt-2 text-caption text-destructive">{error}</p> : null}
       </div>
-      <SettingsAdvancedOptions>
+      <SettingsAdvancedOptions initialOpen={focusTarget === "sandbox-launcher"}>
         {saved.supported_backend ? <div className="settings-list-inset pb-4 pt-2">
           <label htmlFor="runtime-tools.exec.sandbox_launcher" className="text-control-label">{tx("path")}</label>
           <p id="sandbox-launcher-help" className="mb-3 mt-1 text-caption leading-5 text-muted-foreground">{tx("pathHelp")}</p>
           <div className="flex flex-wrap items-center gap-2">
-            <Input id="runtime-tools.exec.sandbox_launcher" className="min-w-0 flex-1 basis-56 text-ui" value={String(state.value(launcherField.path))}
+            <Input ref={launcherInput} id="runtime-tools.exec.sandbox_launcher" className="min-w-0 flex-1 basis-56 text-ui" value={String(state.value(launcherField.path))}
               aria-invalid={state.invalidField === launcherField.path || undefined}
               aria-describedby={state.invalidField === launcherField.path ? "sandbox-launcher-help sandbox-settings-error" : "sandbox-launcher-help"}
               placeholder={tx("automatic")} disabled={busy} onChange={(event) => state.change(launcherField, event.target.value)} />

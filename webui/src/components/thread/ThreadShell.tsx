@@ -13,6 +13,8 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
+import { SandboxNotice } from "@/components/thread/SandboxNotice";
+import { useSandboxNotice } from "@/components/thread/useSandboxNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
@@ -254,6 +256,7 @@ interface ThreadShellProps {
   settingsSnapshot?: SettingsPayload | null;
   settingsLoading?: boolean;
   onOpenModelSettings?: () => void;
+  onOpenSandboxSettings?: (target: "sandbox" | "sandbox-launcher") => void;
   skills?: SkillSummary[];
 }
 
@@ -476,6 +479,7 @@ export function ThreadShell({
   settingsSnapshot = null,
   settingsLoading = false,
   onOpenModelSettings,
+  onOpenSandboxSettings,
   skills = [],
 }: ThreadShellProps) {
   const { t } = useTranslation();
@@ -534,6 +538,7 @@ export function ThreadShell({
     reauthProvider?: string;
     dismissed: boolean;
   } | null>(null);
+  const sandboxNotice = useSandboxNotice(client, chatId, webuiCapabilities.includes("webui.sandbox-settings.v1"));
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
@@ -1352,6 +1357,12 @@ export function ThreadShell({
           onDismiss={dismissStreamError}
           onOpenSettings={onOpenModelSettings}
         />
+      ) : null}
+      {sandboxNotice.issue && onOpenSandboxSettings && !streamError && !recoveryState ? (
+        <SandboxNotice issue={sandboxNotice.issue} onDismiss={sandboxNotice.dismiss}
+          onOpenSettings={() => onOpenSandboxSettings(
+            sandboxNotice.issue === "missing" || sandboxNotice.issue === "path" ? "sandbox-launcher" : "sandbox",
+          )} />
       ) : null}
       {restoredFirstDraft?.chatId === chatId && restoredFirstDraft.error ? (
         <p role="alert" className="px-3 text-sm text-destructive">{restoredFirstDraft.error}</p>

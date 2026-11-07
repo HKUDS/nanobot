@@ -128,6 +128,7 @@ export function settingsPayload(): SettingsPayload {
 type SettingsViewTestOptions = Partial<Pick<
   React.ComponentProps<typeof SettingsView>,
   | "initialSection"
+  | "focusTarget"
   | "initialSettings"
   | "themePreference"
   | "onChangeTheme"
@@ -155,6 +156,7 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
       <SettingsView
         themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}
+        focusTarget={options.focusTarget}
         initialSettings={options.initialSettings}
         skills={options.skills}
         skillsLoading={options.skillsLoading}

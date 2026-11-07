@@ -17,7 +17,7 @@ import { updateRuntimeConfigSettings } from "@/lib/api";
 import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import type { RuntimeConfigValue, SettingsPayload } from "@/lib/types";
-import type { ApplySettingsPayload } from "@/components/settings/contracts";
+import type { ApplySettingsPayload, SettingsFocusTarget } from "@/components/settings/contracts";
 
 type Draft = string | boolean;
 
@@ -172,13 +172,14 @@ export function useRuntimeConfigSettings(
 export type RuntimeConfigController = ReturnType<typeof useRuntimeConfigSettings>;
 
 export function RuntimeConfigSettings({
-  page, settings, state, client, sandboxSupported = false, onRestart, isRestarting, remoteBrowserAccess, children,
+  page, settings, state, client, sandboxSupported = false, onRestart, isRestarting, remoteBrowserAccess, children, focusTarget,
 }: {
   page: RuntimeConfigPage;
   settings: SettingsPayload;
   state: RuntimeConfigController;
   client?: NanobotClient;
   sandboxSupported?: boolean;
+  focusTarget?: SettingsFocusTarget;
   onRestart?: () => void;
   isRestarting: boolean;
   remoteBrowserAccess: boolean;
@@ -310,6 +311,7 @@ export function RuntimeConfigSettings({
           </section>
         );
         return sandbox ? <SandboxSettings key={group.id} settings={settings} state={state}
+          focusTarget={focusTarget}
           client={client!} isRestarting={isRestarting}>{section}</SandboxSettings> : section;
       })}
     </div>

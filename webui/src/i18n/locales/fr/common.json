@@ -486,7 +486,7 @@
       "checking": "Vérification…",
       "scope": "Teste uniquement le lanceur enregistré avec des fichiers temporaires. Ce n’est pas un audit de sécurité complet. Redémarrez la passerelle pour appliquer les changements aux commandes.",
       "path": "Chemin du lanceur de confiance",
-      "pathHelp": "Chemin absolu facultatif d’un lanceur de confiance. Le fichier et ses dossiers parents doivent appartenir à root, sans écriture pour le groupe ou les autres utilisateurs, hors des chemins modifiables par l’agent. Laissez vide pour la recherche système.",
+      "pathHelp": "Laissez généralement ce champ vide pour la recherche système. Pour une installation personnalisée, demandez le chemin complet du lanceur au responsable du paquet. Le fichier et ses dossiers parents doivent appartenir à root, sans écriture pour le groupe ou les autres utilisateurs, hors des chemins modifiables par l’agent.",
       "automatic": "Recherche système",
       "checkError": "La vérification a échoué. Rouvrez les paramètres et réessayez.",
       "saveError": "Enregistrement impossible. Le brouillon est conservé ; réessayez.",
@@ -494,6 +494,14 @@
       "disableHelp": "Après redémarrage, les commandes utiliseront les droits du compte de la passerelle. Les outils de fichiers perdront aussi la restriction d’espace de travail fournie par ce bac à sable ; les restrictions indépendantes restent actives.",
       "keep": "Garder l’isolation",
       "disable": "Désactiver l’isolation",
+      "notice": {
+        "title": "Les commandes nécessitent une vérification",
+        "missing": "Le composant d’exécution est introuvable. Vérifiez son installation ; vous pouvez continuer à discuter.",
+        "path": "Le composant configuré est indisponible. Vérifiez son emplacement et ses droits d’accès.",
+        "permissions": "Le composant n’est pas dans un emplacement protégé. Contactez le responsable du paquet ou l’administrateur.",
+        "startup": "L’environnement isolé n’a pas pu démarrer. Vérifiez l’installation et les restrictions du système.",
+        "openSettings": "Vérifier les paramètres"
+      },
       "states": {
         "disabled": "Commandes désactivées",
         "off": "Sans isolation",

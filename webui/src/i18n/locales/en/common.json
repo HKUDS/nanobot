@@ -486,7 +486,7 @@
       "checking": "Checking…",
       "scope": "Checks the saved launcher with temporary test files only. This is not a full security audit. Restart the gateway to apply saved changes to command execution.",
       "path": "Trusted launcher path",
-      "pathHelp": "Optional absolute path to a launcher from a trusted publisher. The file and its parent directories must be root-owned and not group- or world-writable, and outside writable agent paths. Leave blank for system lookup.",
+      "pathHelp": "Usually leave this blank for system lookup. For a custom installation, ask the package maintainer for the full launcher path. The file and its parent directories must be root-owned and not group- or world-writable, and outside writable agent paths.",
       "automatic": "System lookup",
       "checkError": "Could not complete the check. Reopen settings and try again.",
       "saveError": "Could not save. Keep your draft and try again.",
@@ -494,6 +494,14 @@
       "disableHelp": "After restart, commands run with the gateway account’s permissions. File tools also lose the workspace restriction supplied by this sandbox; independently configured restrictions still apply.",
       "keep": "Keep isolation",
       "disable": "Turn off isolation",
+      "notice": {
+        "title": "Commands need attention",
+        "missing": "The command component could not be found. Check its installation; you can keep chatting.",
+        "path": "The configured command component is unavailable. Check its location and access permissions.",
+        "permissions": "The command component is not in a protected location. Contact the package maintainer or administrator.",
+        "startup": "The isolation environment could not start. Check the installation and system restrictions.",
+        "openSettings": "Check settings"
+      },
       "states": {
         "disabled": "Commands disabled",
         "off": "Isolation off",
