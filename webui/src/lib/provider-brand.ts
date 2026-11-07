@@ -217,6 +217,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
   orcarouter: brand("orcarouter.ai", "#111827", "OR"),
   ovms: brand("openvino.ai", "#0071C5", "OV"),
   qianfan: brand("cloud.baidu.com", "#2932E1", "QF"),
+  runcrate: brand("runcrate.ai", "#1A2B79", "RC"),
   // Its landing page redirects without an icon; favicon proxies return their own placeholder.
   searxng: {
     logoUrl: "https://raw.githubusercontent.com/searxng/searxng/master/searx/static/themes/simple/img/favicon.svg",
