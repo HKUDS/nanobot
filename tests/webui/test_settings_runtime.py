@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,8 @@ def test_legacy_sandbox_config_roundtrip_and_rejected_override_are_atomic(tmp_pa
     assert payload["runtime_config"]["tools.exec.sandbox_launcher"] == ""
     assert load_config(path).tools.exec.sandbox_ro_binds == ["/opt/tools"]
     before = path.read_bytes()
-    with pytest.raises(WebUISettingsError, match="sandbox_launcher_path_not_absolute"):
+    reason = "path_not_absolute" if os.name == "posix" else "platform_unsupported"
+    with pytest.raises(WebUISettingsError, match=f"sandbox_launcher_{reason}"):
         update_runtime_config_settings({"tools.exec.sandbox_launcher": "bin/bwrap", "tools.exec.timeout": 99}, config_path=path)
     assert path.read_bytes() == before
     update_runtime_config_settings({"tools.exec.sandbox_launcher": ""}, config_path=path)
