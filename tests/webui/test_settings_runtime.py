@@ -53,6 +53,41 @@ def test_legacy_sandbox_config_roundtrip_and_rejected_override_are_atomic(tmp_pa
     assert load_config(path).tools.exec.sandbox == "bwrap"
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Unix protected launcher permissions")
+def test_sandbox_environment_paths_are_validated_without_rewriting_references(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("SANDBOX_TEST_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("SANDBOX_TEST_LAUNCHER", "/bin/sh")
+    monkeypatch.delenv("SANDBOX_TEST_MISSING_PROVIDER", raising=False)
+    config = Config.model_validate({
+        "agents": {"defaults": {"workspace": "${SANDBOX_TEST_WORKSPACE}"}},
+        "providers": {"openai": {"apiKey": "${SANDBOX_TEST_MISSING_PROVIDER}"}},
+        "tools": {"exec": {"sandbox": "bwrap"}},
+    })
+    save_config(config, path)
+    payload = update_runtime_config_settings({
+        "tools.exec.sandbox_launcher": "${SANDBOX_TEST_LAUNCHER}",
+    }, config_path=path)
+    saved = load_config(path)
+    assert payload["runtime_config"]["tools.exec.sandbox_launcher"] == "${SANDBOX_TEST_LAUNCHER}"
+    assert saved.tools.exec.sandbox_launcher == "${SANDBOX_TEST_LAUNCHER}"
+    assert saved.agents.defaults.workspace == "${SANDBOX_TEST_WORKSPACE}"
+    assert saved.providers.openai.api_key == "${SANDBOX_TEST_MISSING_PROVIDER}"
+    before = path.read_bytes()
+    monkeypatch.setenv("SANDBOX_TEST_RW_BIND", str(Path("/bin/sh").resolve().parent))
+    with pytest.raises(WebUISettingsError, match="sandbox_launcher_agent_writable"):
+        update_runtime_config_settings({
+            "tools.exec.sandbox_rw_binds": ["${SANDBOX_TEST_RW_BIND}"],
+        }, config_path=path)
+    assert path.read_bytes() == before
+    monkeypatch.delenv("SANDBOX_TEST_LAUNCHER")
+    with pytest.raises(WebUISettingsError, match="sandbox_launcher_path_unavailable"):
+        update_runtime_config_settings({
+            "tools.exec.sandbox_launcher": "${SANDBOX_TEST_LAUNCHER}",
+        }, config_path=path)
+    assert path.read_bytes() == before
+
+
 def test_enabling_web_proxy_without_an_address_preserves_config(tmp_path):
     path = tmp_path / "config.json"
     save_config(Config(), path)

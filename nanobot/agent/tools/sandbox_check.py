@@ -19,6 +19,8 @@ from nanobot.agent.tools.sandbox_launcher import (
     sandbox_platform,
 )
 from nanobot.agent.tools.shell_config import ExecToolConfig
+from nanobot.config.errors import ConfigLoadError
+from nanobot.config.loader import resolve_config_env_vars
 
 _PROBE_TIMEOUT_S = 5
 
@@ -32,9 +34,19 @@ class SandboxCheck(TypedDict):
 
 
 def sandbox_settings_status(config: ExecToolConfig, workspace: Path) -> SandboxCheck:
+    return _prepare_settings(config, workspace)[2]
+
+
+def _prepare_settings(config: ExecToolConfig, workspace: Path) -> tuple[ExecToolConfig, Path, SandboxCheck]:
     import sys
 
     backend = "bwrap" if sys.platform.startswith("linux") else "seatbelt" if sys.platform == "darwin" else None
+    missing_env = False
+    try:
+        config = resolve_config_env_vars(config)
+        workspace = Path(resolve_config_env_vars(str(workspace))).expanduser()
+    except ConfigLoadError:
+        missing_env = True
     revision = hashlib.sha256(json.dumps(
         {"config": config.model_dump(), "workspace": str(workspace)}, sort_keys=True,
     ).encode()).hexdigest()
@@ -48,6 +60,8 @@ def sandbox_settings_status(config: ExecToolConfig, workspace: Path) -> SandboxC
         result["state"] = "off"
     elif sandbox_platform(config.sandbox) == "unsupported":
         result.update(state="unsupported", reason="platform_unsupported")
+    elif missing_env:
+        result.update(state="unavailable", reason="path_unavailable")
     else:
         try:
             result["launcher"] = resolve_sandbox_launcher(
@@ -56,11 +70,11 @@ def sandbox_settings_status(config: ExecToolConfig, workspace: Path) -> SandboxC
             )
         except SandboxLauncherError as exc:
             result.update(state="unavailable", reason=exc.reason)
-    return result
+    return config, workspace, result
 
 
 async def check_sandbox(config: ExecToolConfig, workspace: Path) -> SandboxCheck:
-    result = await asyncio.to_thread(sandbox_settings_status, config, workspace)
+    config, workspace, result = await asyncio.to_thread(_prepare_settings, config, workspace)
     if result["state"] != "unchecked":
         return result
     # Use synthetic files only. Never run startup/login profiles or an arbitrary
