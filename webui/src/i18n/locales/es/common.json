@@ -510,7 +510,7 @@
         "unchecked": "Comprueba la configuración guardada del sandbox.",
         "unsaved": "Guarda los cambios y comprueba el sandbox.",
         "unavailable": "El sandbox no puede iniciarse. No se ejecutarán comandos en él.",
-        "passed": "El lanzador arrancó, se pudo escribir en el espacio de trabajo y se bloqueó el archivo externo de prueba.",
+        "passed": "El lanzador arrancó, se pudo escribir en el espacio de trabajo temporal y se bloqueó el archivo externo de prueba.",
         "checking": "Ejecutando una prueba con tiempo limitado…"
       },
       "reasons": {

@@ -510,7 +510,7 @@
         "unchecked": "Jalankan pemeriksaan konfigurasi sandbox tersimpan.",
         "unsaved": "Simpan perubahan, lalu periksa sandbox.",
         "unavailable": "Sandbox tidak bisa dimulai. Perintah tidak akan dijalankan di sandbox ini.",
-        "passed": "Peluncur berjalan, ruang kerja dapat ditulis, dan berkas uji eksternal diblokir.",
+        "passed": "Peluncur berjalan, ruang kerja sementara dapat ditulis, dan berkas uji eksternal diblokir.",
         "checking": "Menjalankan uji sandbox dengan batas waktu…"
       },
       "reasons": {

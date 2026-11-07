@@ -510,7 +510,7 @@
         "unchecked": "Verifique a configuração salva do sandbox.",
         "unsaved": "Salve as alterações e verifique o sandbox.",
         "unavailable": "O sandbox não inicia. Os comandos não serão executados nele.",
-        "passed": "O iniciador abriu, a gravação no espaço de trabalho funcionou e o arquivo externo foi bloqueado.",
+        "passed": "O iniciador abriu, a gravação no espaço de trabalho temporário funcionou e o arquivo externo foi bloqueado.",
         "checking": "Executando um teste com limite de tempo…"
       },
       "reasons": {

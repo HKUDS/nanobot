@@ -510,7 +510,7 @@
         "unchecked": "Chạy kiểm tra cấu hình sandbox đã lưu.",
         "unsaved": "Lưu thay đổi rồi kiểm tra sandbox.",
         "unavailable": "Không thể khởi chạy sandbox. Lệnh sẽ không chạy trong sandbox này.",
-        "passed": "Trình khởi chạy hoạt động, vùng làm việc ghi được và tệp thử bên ngoài bị chặn.",
+        "passed": "Trình khởi chạy hoạt động, vùng làm việc tạm ghi được và tệp thử bên ngoài bị chặn.",
         "checking": "Đang chạy kiểm tra sandbox có giới hạn thời gian…"
       },
       "reasons": {

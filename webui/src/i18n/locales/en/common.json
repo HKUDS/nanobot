@@ -510,7 +510,7 @@
         "unchecked": "Run a check to test the saved sandbox configuration.",
         "unsaved": "Save changes, then check the sandbox.",
         "unavailable": "The sandbox cannot start. Commands will not run in this sandbox.",
-        "passed": "The launcher started, workspace writes worked, and the external test file was blocked.",
+        "passed": "The launcher started, temporary workspace writes worked, and the external test file was blocked.",
         "checking": "Starting a bounded sandbox test…"
       },
       "reasons": {
