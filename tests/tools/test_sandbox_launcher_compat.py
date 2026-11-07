@@ -1,10 +1,18 @@
 """Regression coverage for nonstandard sandbox launcher installations."""
 
+import asyncio
 import os
+import signal
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from nanobot.agent.tools.sandbox_check import check_sandbox, sandbox_settings_status
+from nanobot.agent.tools.sandbox_launcher import SandboxLauncherError, resolve_sandbox_launcher
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.shell_config import ExecToolConfig
 
 
 @pytest.mark.skipif(os.name != "posix", reason="requires Unix launcher preparation")
@@ -29,3 +37,133 @@ async def test_nonstandard_bwrap_is_not_silently_run_without_sandbox(tmp_path, m
 
     assert "sandbox launcher not found: bwrap" in result
     assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix protected launcher permissions")
+@pytest.mark.parametrize("location", ["workspace", "apphome"])
+async def test_writable_custom_launcher_is_rejected_before_execution(tmp_path, location):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    installation = workspace if location == "workspace" else tmp_path / "apphome" / "nanobot" / "bin"
+    installation.mkdir(parents=True, exist_ok=True)
+    launcher = installation / "bwrap"
+    marker = tmp_path / "launcher-ran"
+    launcher.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    launcher.chmod(0o755)
+    config = ExecToolConfig(sandbox="bwrap", sandbox_launcher=str(launcher))
+    # Rejection is independent of the selected shell and PATH.
+    tool = ExecTool(working_dir=str(workspace), sandbox="bwrap", sandbox_launcher=str(launcher))
+    response = await tool.execute(command="echo command-ran", shell="/bin/sh", login=True)
+    assert "sandbox launcher rejected" in response
+    assert not marker.exists()
+    if sys.platform.startswith("linux"):
+        status = await check_sandbox(config, workspace)
+        assert status["state"] == "unavailable"
+        assert status["reason"] in {"agent_writable", "unprotected_installation"}
+        assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix protected launcher permissions")
+def test_root_owned_override_and_expanded_writable_bind(monkeypatch):
+    launcher = Path("/bin/sh").resolve()
+    assert resolve_sandbox_launcher("bwrap", str(launcher)) == str(launcher)
+    monkeypatch.setenv("SANDBOX_TEST_BIND", str(launcher.parent))
+    with pytest.raises(SandboxLauncherError, match="agent_writable"):
+        resolve_sandbox_launcher("bwrap", str(launcher), writable_roots=(Path("$SANDBOX_TEST_BIND"),))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix absolute paths")
+@pytest.mark.parametrize("path,reason", [("bin/bwrap", "path_not_absolute"), ("/nonexistent-nanobot-launcher", "path_unavailable")])
+def test_custom_launcher_requires_existing_absolute_file(path, reason):
+    with pytest.raises(SandboxLauncherError, match=reason):
+        resolve_sandbox_launcher("bwrap", path)
+
+
+def test_copied_custom_launcher_config_does_not_assume_unix_permissions_on_windows(monkeypatch):
+    monkeypatch.setattr("nanobot.agent.tools.sandbox_launcher.os", SimpleNamespace(name="nt"))
+    with pytest.raises(SandboxLauncherError, match="platform_unsupported"):
+        resolve_sandbox_launcher("bwrap", "C:\\tools\\bwrap.exe")
+
+
+@pytest.mark.parametrize("settings,state", [({"enable": False}, "disabled"), ({}, "off")])
+async def test_disabled_settings_do_not_launch_a_probe(settings, state, tmp_path, monkeypatch):
+    async def unexpected(*args, **kwargs):
+        pytest.fail("disabled sandbox must not start a process")
+    monkeypatch.setattr("asyncio.create_subprocess_exec", unexpected)
+    assert (await check_sandbox(ExecToolConfig(**settings), tmp_path))["state"] == state
+
+
+async def test_unsupported_platform_reports_no_isolation_without_running(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    status = await check_sandbox(ExecToolConfig(sandbox="bwrap"), tmp_path)
+    assert status["state"] == "unsupported"
+    assert status["supported_backend"] is None
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix native sandbox")
+async def test_native_probe_checks_isolation_without_touching_workspace(tmp_path):
+    backend = "seatbelt" if sys.platform == "darwin" else "bwrap"
+    config = ExecToolConfig(sandbox=backend)
+    if sandbox_settings_status(config, tmp_path)["state"] == "unavailable":
+        pytest.skip("native sandbox launcher is not installed")
+    original = tmp_path / "keep.txt"
+    original.write_text("user data")
+    result = await check_sandbox(config, tmp_path)
+    assert result["state"] == "passed", result
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.txt"]
+    assert original.read_text() == "user data"
+    # The same resolver and backend must work for actual command execution.
+    tool = ExecTool(working_dir=str(tmp_path), sandbox=backend, sandbox_launcher=result["launcher"])
+    assert "actual-command" in await tool.execute(command="printf actual-command")
+
+
+def test_probe_revision_changes_when_saved_policy_changes(tmp_path):
+    config = ExecToolConfig(sandbox="bwrap")
+    before = sandbox_settings_status(config, tmp_path)["revision"]
+    config.sandbox_rw_binds = ["/opt/agent-cache"]
+    assert sandbox_settings_status(config, tmp_path)["revision"] != before
+    assert sandbox_settings_status(ExecToolConfig(sandbox="bwrap"), tmp_path / "other")["revision"] != before
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix process-group cleanup")
+@pytest.mark.parametrize("finish", ["timeout", "cancel"])
+async def test_probe_reaps_its_process_on_timeout_or_request_cancellation(tmp_path, monkeypatch, finish):
+    started, exited = asyncio.Event(), asyncio.Event()
+
+    class Process:
+        pid = 12345
+        returncode = None
+
+        async def wait(self):
+            await exited.wait()
+            return self.returncode
+
+    process = Process()
+
+    async def spawn(*args, **kwargs):
+        assert kwargs["start_new_session"]
+        started.set()
+        return process
+
+    def kill(pid, sig):
+        assert (pid, sig) == (process.pid, signal.SIGKILL)
+        process.returncode = -9
+        exited.set()
+
+    monkeypatch.setattr("nanobot.agent.tools.sandbox_check.sandbox_settings_status", lambda *_: {
+        "state": "unchecked", "reason": "", "launcher": "/test/launcher", "revision": "test", "supported_backend": "bwrap",
+    })
+    monkeypatch.setattr("nanobot.agent.tools.sandbox_check.resolve_sandbox_launcher", lambda *_args, **_kwargs: "/test/launcher")
+    monkeypatch.setattr("nanobot.agent.tools.sandbox_check._PROBE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(os, "killpg", kill)
+    task = asyncio.create_task(check_sandbox(ExecToolConfig(sandbox="bwrap"), tmp_path))
+    await asyncio.wait_for(started.wait(), 1)
+    if finish == "cancel":
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        assert (await task)["reason"] == "probe_timeout"
+    assert exited.is_set()
+    assert process.returncode == -9

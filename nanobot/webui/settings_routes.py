@@ -131,6 +131,7 @@ _CAPABILITY_ROUTES = {
 }
 
 _SYSTEM_ROUTES = {
+    "/api/settings/sandbox/check": "sandbox-check",
     "/api/settings/runtime-config/update": "runtime-config-update",
     "/api/settings/cli-apps": "cli-list",
     "/api/settings/cli-apps/install": "cli-install",
@@ -162,6 +163,7 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/sandbox/check",
     "/api/settings/nanobot-update/channel",
     "/api/settings/nanobot-update/plan/create",
     "/api/settings/nanobot-update/job/prepare",
