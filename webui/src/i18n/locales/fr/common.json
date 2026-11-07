@@ -510,7 +510,7 @@
         "unchecked": "Lancez la vérification de la configuration enregistrée.",
         "unsaved": "Enregistrez les changements, puis lancez la vérification.",
         "unavailable": "Le bac à sable ne peut pas démarrer. Aucune commande n’y sera exécutée.",
-        "passed": "Le lanceur a démarré, l’écriture dans l’espace de travail a réussi et le fichier externe a été bloqué.",
+        "passed": "Le lanceur a démarré, l’écriture dans l’espace de travail temporaire a réussi et le fichier externe a été bloqué.",
         "checking": "Test avec durée limitée en cours…"
       },
       "reasons": {
