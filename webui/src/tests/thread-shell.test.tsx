@@ -1200,11 +1200,16 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("button", { name: "Play context history" })).toBeEnabled();
     expect(screen.getByText("Waiting for answer")).toBeInTheDocument();
     const sidebar = screen.getByTestId("context-sidebar");
+    // HappyDOM has no CSS timeline; retain a real pending exit for the close assertions.
+    let finishExit!: () => void;
+    const finished = new Promise<void>((resolve) => { finishExit = resolve; });
+    Object.defineProperty(sidebar, "getAnimations", { value: () => [{ finished }] });
     fireEvent.click(trigger);
     expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
     expect(sidebar).toHaveAttribute("data-closing");
     expect(footer).toContainElement(input);
     expect(input).toHaveValue("Preserve this draft");
+    await act(async () => finishExit());
     await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
     view.unmount();
     footer.remove();
