@@ -8,6 +8,7 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
+from nanobot.agent.tools.drive_config import DriveToolConfig
 from nanobot.agent.tools.filesystem_config import FileToolsConfig
 from nanobot.agent.tools.image_generation_config import ImageGenerationToolConfig
 from nanobot.agent.tools.self_config import MyToolConfig
@@ -436,6 +437,7 @@ class ToolsConfig(Base):
     image_generation: ImageGenerationToolConfig = Field(
         default_factory=ImageGenerationToolConfig,
     )
+    drive: DriveToolConfig = Field(default_factory=DriveToolConfig)
     max_session_messages_per_minute: int = Field(default=6, ge=1)
     restrict_to_workspace: bool = False  # policy intent: keep tool access inside workspace when possible
     webui_allow_local_service_access: bool = Field(
