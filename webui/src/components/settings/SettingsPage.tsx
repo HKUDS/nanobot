@@ -773,7 +773,8 @@ export function SettingsPage({
           ) : null}
 
           {loading && !sectionReady ? (
-            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar} />
+            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar}
+              sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")} />
           ) : error && !sectionReady ? (
             <SettingsGroup>
               <SettingsRow title={t("settings.status.loadError")}>

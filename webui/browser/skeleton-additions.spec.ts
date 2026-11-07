@@ -55,8 +55,9 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
     });
 
     test("settings sections preserve their loaded row layout", async ({ page }, testInfo) => {
-      for (const section of ["notifications", "capabilities", "runtime", "advanced", "overview", "models", "about"]) {
-        const extra = `&section=${section}${section === "notifications" ? "&notificationPermission=granted" : ""}`;
+      for (const surface of ["notifications", "capabilities", "runtime", "advanced", "sandbox", "overview", "models", "about"]) {
+        const section = surface === "sandbox" ? "advanced" : surface;
+        const extra = `&section=${section}${section === "notifications" ? "&notificationPermission=granted" : ""}${surface === "sandbox" ? "&sandboxSettings" : ""}`;
         await page.goto(fixture("settings", "loaded", extra));
         const target = page.locator("[data-settings-section]");
         if (section === "notifications") {
@@ -72,7 +73,8 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
         }
         if (section === "runtime") await expect(page.locator('[data-settings-section] button').filter({ hasText: locale === "en" ? "Start API server" : "启动 API 服务" })).toBeVisible();
         await settle(page);
-        const selector = section === "overview" ? "section button.group" : section === "models" ? '[data-testid^="model-call-order-row"], .settings-footer' : section === "about" ? ".settings-list-row" : ".settings-row";
+        // Collapsed options remain mounted for drafts but do not occupy the visible layout.
+        const selector = section === "overview" ? "section button.group" : section === "models" ? '[data-testid^="model-call-order-row"], .settings-footer' : section === "about" ? ".settings-list-row" : ".settings-row:not([inert] *)";
         const notificationDetails = section === "notifications" ? ", .settings-list-inset > .border-t, section > p" : "";
         const proxyForm = section === "advanced" ? ", [data-shared-proxy-editor]" : "";
         const loaded = await boxes(target.locator(selector + notificationDetails + proxyForm));
