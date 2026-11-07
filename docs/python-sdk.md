@@ -669,6 +669,24 @@ Context providers are trusted host extensions, and `RuntimeContextBlock.content`
 
 Hooks let you observe or customize the agent loop. Subclass `AgentHook` and override the methods you need.
 
+
+### Tool invocation identity for idempotent side effects
+
+While a tool runs, the runtime binds the identity of that logical invocation to the current task. Tools with external side effects (sending a message, creating a ticket, charging an account) can read it to deduplicate: the `tool_call_id` is the provider's stable id for the call, and the `invocation_key` is derived from the session key and that id, so it is the same if the same call is retried and different for every other call or session. Outside tool execution the helper returns `None`; without a session (ephemeral or SDK runs with no `session_key`) the key is `None` and the tool should fall back to the `tool_call_id` alone.
+
+```python
+from nanobot import current_tool_invocation_context
+
+
+class CreateTicketTool(Tool):
+    async def execute(self, title: str, **kwargs):
+        invocation = current_tool_invocation_context()
+        idempotency_key = invocation.invocation_key if invocation else None
+        return await self._client.create_ticket(title, idempotency_key=idempotency_key)
+```
+
+The identity is scoped to one tool call: concurrent calls in the same response each see their own, and the previous value is restored as soon as the call returns.
+
 ### Hook lifecycle
 
 | Method | When |
