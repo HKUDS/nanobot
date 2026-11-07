@@ -35,6 +35,22 @@ def test_shared_proxy_roundtrip_preserves_independent_feature_switches(tmp_path)
     assert load_config(path).tools.web.use_proxy is True
 
 
+def test_legacy_sandbox_config_roundtrip_and_rejected_override_are_atomic(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"tools": {"exec": {"sandbox": "bwrap", "sandboxRoBinds": ["/opt/tools"]}}}))
+    config = load_config(path)
+    assert config.tools.exec.sandbox_launcher == ""
+    payload = update_runtime_config_settings({"tools.exec.timeout": 75}, config_path=path)
+    assert payload["runtime_config"]["tools.exec.sandbox_launcher"] == ""
+    assert load_config(path).tools.exec.sandbox_ro_binds == ["/opt/tools"]
+    before = path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="sandbox_launcher_path_not_absolute"):
+        update_runtime_config_settings({"tools.exec.sandbox_launcher": "bin/bwrap", "tools.exec.timeout": 99}, config_path=path)
+    assert path.read_bytes() == before
+    update_runtime_config_settings({"tools.exec.sandbox_launcher": ""}, config_path=path)
+    assert load_config(path).tools.exec.sandbox == "bwrap"
+
+
 def test_enabling_web_proxy_without_an_address_preserves_config(tmp_path):
     path = tmp_path / "config.json"
     save_config(Config(), path)

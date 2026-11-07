@@ -43,6 +43,7 @@ import {
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
 import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
+import { useClient } from "@/providers/ClientProvider";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
@@ -92,6 +93,7 @@ export function SettingsPage({
   isRestarting,
   hostChromeInset,
 }: SettingsPageProps) {
+  const { client, webuiCapabilities } = useClient();
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
   const presetDeletedCallback = useRef<(() => void) | null>(null);
@@ -193,7 +195,8 @@ export function SettingsPage({
     : controllerPendingRestartSections;
 
   const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
-    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
+    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState} client={client}
+      sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")}
       onRestart={showSidebar ? undefined : restartViaSettingsSurface} isRestarting={restartInProgress}
       remoteBrowserAccess={remoteBrowserAccess}>
       {page === "advanced" ? (

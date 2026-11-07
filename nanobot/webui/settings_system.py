@@ -17,6 +17,7 @@ import httpx
 from pydantic import ValidationError
 from pydantic.alias_generators import to_snake
 
+from nanobot.agent.tools.sandbox_check import check_sandbox, sandbox_settings_status
 from nanobot.build_info import COMMIT
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.connect import ChannelConnectError, ChannelConnector, ManagedChannelConnector
@@ -167,6 +168,7 @@ def system_settings_payload(
             "exec_enabled": exec_config.enable,
             "exec_max_runtime_limit": exec_config.max_runtime_limit,
             "exec_sandbox": exec_config.sandbox or None,
+            "exec_sandbox_status": sandbox_settings_status(exec_config, config.workspace_path),
             "exec_path_prepend_set": bool(exec_config.path_prepend),
             "exec_path_append_set": bool(exec_config.path_append),
         },
@@ -457,6 +459,7 @@ class SystemSettingsHandler:
         self._closing_connectors = False
         self._update_jobs = UpdateJobService()
         self._remove_update_work: Callable[[], None] | None = None
+        self._sandbox_check_running = False
 
     def _has_pending_connectors(self) -> bool:
         return self._closing_connectors or any(
@@ -503,6 +506,17 @@ class SystemSettingsHandler:
         channel_name: str | None = None,
         connect_action: str | None = None,
     ) -> SettingsRouteResult:
+        if action == "sandbox-check":
+            if self._sandbox_check_running:
+                return SettingsRouteResult.failure(409, "sandbox_check_busy")
+            self._sandbox_check_running = True
+            try:
+                config = await asyncio.to_thread(self.settings.config.load)
+                return SettingsRouteResult.success({
+                    "sandbox": await check_sandbox(config.tools.exec, config.workspace_path),
+                })
+            finally:
+                self._sandbox_check_running = False
         if action == "runtime-config-update":
             values = (request.payload or {}).get("values")
             if not isinstance(values, dict):

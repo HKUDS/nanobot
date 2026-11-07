@@ -10,6 +10,7 @@ import { SharedProxyEditor } from "@/components/settings/shared/SharedProxyEdito
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { ShellRuntimeControl } from "@/components/settings/system/ShellRuntimeControl";
 import { IdleCompactionControl } from "@/components/settings/system/IdleCompactionControl";
+import { SandboxSettings } from "@/components/settings/system/SandboxSettings";
 import { Input } from "@/components/ui/input";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigField, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { updateRuntimeConfigSettings } from "@/lib/api";
@@ -120,8 +121,10 @@ export function useRuntimeConfigSettings(
       setSaved((prev) => ({ ...prev, [group]: true }));
     } catch (error) {
       const message = (error as Error).message;
-      setErrors((prev) => ({ ...prev, [group]: message }));
-      setInvalidField(changed.find((field) => message.startsWith(field.path))?.path ?? null);
+      const sandboxReason = message.match(/sandbox_launcher_([a-z_]+)/)?.[1];
+      setErrors((prev) => ({ ...prev, [group]: sandboxReason
+        ? t(`settings.sandbox.reasons.${sandboxReason}`, { defaultValue: t("settings.sandbox.saveError") }) : message }));
+      setInvalidField(sandboxReason ? "tools.exec.sandbox_launcher" : changed.find((field) => message.startsWith(field.path))?.path ?? null);
     } finally {
       setSaving(null);
     }
@@ -169,11 +172,13 @@ export function useRuntimeConfigSettings(
 export type RuntimeConfigController = ReturnType<typeof useRuntimeConfigSettings>;
 
 export function RuntimeConfigSettings({
-  page, settings, state, onRestart, isRestarting, remoteBrowserAccess, children,
+  page, settings, state, client, sandboxSupported = false, onRestart, isRestarting, remoteBrowserAccess, children,
 }: {
   page: RuntimeConfigPage;
   settings: SettingsPayload;
   state: RuntimeConfigController;
+  client?: NanobotClient;
+  sandboxSupported?: boolean;
   onRestart?: () => void;
   isRestarting: boolean;
   remoteBrowserAccess: boolean;
@@ -193,18 +198,20 @@ export function RuntimeConfigSettings({
       {restartPending && onRestart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
         onRestart={onRestart} isRestarting={isRestarting} /> : null}
       {groups.map((group) => {
-        if (group.enabledBy && state.value(group.enabledBy) === false) return null;
+        const sandbox = group.id === "shell" && sandboxSupported && settings.advanced.exec_sandbox_status && client;
+        if (group.enabledBy && state.value(group.enabledBy) === false && !sandbox) return null;
         if (group.id === "chat") return <div key={group.id}>{children}</div>;
-        const fields = RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id);
+        const fields = RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group.id
+          && field.path !== "tools.exec.sandbox_launcher" && (!sandbox || field.path !== "tools.exec.sandbox"));
         const dirty = fields.filter(state.visible).some(state.dirty);
         const title = tr(`groups.${group.id}.title`);
         const errorId = `runtime-error-${group.id}`;
         const inlineError = fields.some((field) => field.kind === "duration" && state.invalidField === field.path);
         const section = (
           <section key={group.id} aria-label={title}>
-            <SettingsSectionTitle>{group.id === "proxy"
+            {!sandbox ? <SettingsSectionTitle>{group.id === "proxy"
               ? <SettingsHint description={tr("fields.network_proxy.help")}>{title}</SettingsHint>
-              : title}</SettingsSectionTitle>
+              : title}</SettingsSectionTitle> : null}
             <form noValidate onSubmit={(event) => { event.preventDefault(); void state.save(group.id); }}
               onBlur={(event) => {
                 if (event.relatedTarget && event.currentTarget.contains(event.relatedTarget)) return;
@@ -298,11 +305,12 @@ export function RuntimeConfigSettings({
                     onRestart={onRestart} isRestarting={isRestarting} />
                 </SettingsGroup>
               </fieldset>
-              {state.errors[group.id] && !inlineError ? <p id={errorId} role="alert" className="mt-2 break-words px-1 text-[12px] text-destructive">{state.errors[group.id]}</p> : null}
+              {state.errors[group.id] && !inlineError && !sandbox ? <p id={errorId} role="alert" className="mt-2 break-words px-1 text-[12px] text-destructive">{state.errors[group.id]}</p> : null}
             </form>
           </section>
         );
-        return section;
+        return sandbox ? <SandboxSettings key={group.id} settings={settings} state={state}
+          client={client!} isRestarting={isRestarting}>{section}</SandboxSettings> : section;
       })}
     </div>
   );

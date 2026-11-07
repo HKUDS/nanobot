@@ -477,6 +477,55 @@
       "password": "密碼",
       "proxyReferenceAuth": "請在參照的代理 URL 中設定認證資訊。"
     },
+    "sandbox": {
+      "title": "命令沙箱",
+      "method": "隔離方式",
+      "off": "不隔離",
+      "status": "已儲存設定",
+      "check": "檢測沙箱",
+      "checking": "檢測中…",
+      "scope": "僅使用暫存檔檢測已儲存的啟動器，不代表完整安全稽核。儲存後須重新啟動閘道，命令執行才會使用新設定。",
+      "path": "可信啟動器路徑",
+      "pathHelp": "選填可信來源啟動器的絕對路徑。檔案及上層目錄須由 root 擁有、不可供群組或其他使用者寫入，且不在 Agent 可寫範圍內。留空則使用系統查找。",
+      "automatic": "系統自動查找",
+      "checkError": "檢測未完成，請重新開啟設定後再試。",
+      "saveError": "儲存失敗，草稿已保留，請再試。",
+      "disableTitle": "關閉命令隔離？",
+      "disableHelp": "重新啟動後，命令將以閘道帳號的權限直接執行。此操作不會變更檔案工具的權限。",
+      "keep": "保留隔離",
+      "disable": "關閉隔離",
+      "states": {
+        "disabled": "命令已停用",
+        "off": "未隔離",
+        "unsupported": "系統不支援",
+        "unchecked": "尚未檢測",
+        "unavailable": "無法使用",
+        "passed": "基本檢測通過",
+        "checking": "檢測中…"
+      },
+      "help": {
+        "disabled": "啟用命令執行後可使用沙箱。",
+        "off": "命令未隔離，可選擇隔離方式保護主機。",
+        "unsupported": "閘道所在系統不支援此隔離方式。",
+        "unchecked": "點選檢測沙箱，驗證已儲存的設定。",
+        "unsaved": "請先儲存設定，再檢測沙箱。",
+        "unavailable": "沙箱無法啟動，命令不會在此沙箱中執行。",
+        "passed": "啟動器可執行、工作區可寫入，外部測試檔案存取已被阻止。",
+        "checking": "正在進行有時間限制的沙箱測試…"
+      },
+      "reasons": {
+        "launcher_missing": "找不到啟動器，請在閘道安裝，或在下方填寫可信絕對路徑。",
+        "path_not_absolute": "請填寫絕對路徑，而非命令名稱。",
+        "not_executable": "此路徑必須指向可執行檔。",
+        "agent_writable": "啟動器位於 Agent 可寫範圍，請聯絡套件維護者提供受保護的安裝位置。",
+        "unprotected_installation": "啟動器或上層目錄可由非 root 使用者寫入，請聯絡管理員調整安裝位置。",
+        "path_unavailable": "無法讀取路徑，請確認檔案存在於閘道且可存取。",
+        "platform_unsupported": "請選擇閘道所在系統支援的隔離方式。",
+        "probe_failed": "隔離測試失敗，請檢查啟動器安裝、核心命名空間支援及額外掛載。",
+        "probe_timeout": "檢測逾時，請檢查啟動器安裝和主機限制後再試。",
+        "unknown": "啟動器無法使用，請檢查安裝及存取權限。"
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "已儲存，重新啟動 API 服務後生效。",
       "commandRuntime": {

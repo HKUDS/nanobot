@@ -17,6 +17,7 @@
   "tools.exec.path_prepend",
   "tools.exec.path_append",
   "tools.exec.sandbox",
+  "tools.exec.sandbox_launcher",
   "tools.exec.sandbox_ro_binds",
   "tools.exec.sandbox_rw_binds",
   "tools.exec.allowed_env_keys",

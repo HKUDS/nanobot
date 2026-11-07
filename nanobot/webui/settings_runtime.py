@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipaddress
 import math
 import re
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -33,6 +33,7 @@ RUNTIME_CONFIG_PATHS = (
     "tools.exec.path_prepend",
     "tools.exec.path_append",
     "tools.exec.sandbox",
+    "tools.exec.sandbox_launcher",
     "tools.exec.sandbox_ro_binds",
     "tools.exec.sandbox_rw_binds",
     "tools.exec.allowed_env_keys",
@@ -152,6 +153,19 @@ def update_runtime_config(
             raise WebUISettingsError("Set an API key in System before using a network bind address.")
     if "tools.exec.sandbox" in values and validated.tools.exec.sandbox not in {"", "bwrap", "seatbelt"}:
         raise WebUISettingsError("tools.exec.sandbox: choose no sandbox, bwrap, or seatbelt")
+    if {"tools.exec.sandbox_launcher", "tools.exec.sandbox_rw_binds"} & values.keys() and validated.tools.exec.sandbox_launcher:
+        from nanobot.agent.tools.sandbox_launcher import (
+            SandboxLauncherError,
+            resolve_sandbox_launcher,
+        )
+
+        try:
+            resolve_sandbox_launcher(
+                validated.tools.exec.sandbox, validated.tools.exec.sandbox_launcher,
+                writable_roots=(validated.workspace_path, *map(Path, validated.tools.exec.sandbox_rw_binds)),
+            )
+        except SandboxLauncherError as exc:
+            raise WebUISettingsError(f"sandbox_launcher_{exc.reason}") from None
     if "tools.ssrf_whitelist" in values:
         for cidr in validated.tools.ssrf_whitelist:
             try:

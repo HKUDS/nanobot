@@ -527,11 +527,12 @@ class TestSandboxPlatform:
     async def test_sandbox_applied_on_unix(self, tmp_path, backend):
         mock_proc = _CompletedProcess(b"sandboxed")
         trusted_bin = tmp_path / "trusted-bin"
+        launcher = "bwrap" if backend == "bwrap" else "/usr/bin/sandbox-exec"
 
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
             patch("nanobot.agent.tools.shell.shutil.which", side_effect=lambda name, **_kwargs: str(trusted_bin / name)),
-            patch("nanobot.agent.tools.shell.wrap_command", return_value=f"{backend} -- sh -c ls") as mock_wrap,
+            patch("nanobot.agent.tools.shell.wrap_command", return_value=f"{launcher} -- sh -c ls") as mock_wrap,
             patch.object(ExecTool, "_spawn", return_value=mock_proc) as mock_spawn,
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
@@ -541,7 +542,7 @@ class TestSandboxPlatform:
         mock_wrap.assert_called_once()
         spawned_cmd = mock_spawn.call_args[0][0]
         assert isinstance(spawned_cmd, list)
-        assert spawned_cmd[0] == str(trusted_bin / backend)
+        assert spawned_cmd[0] == str(trusted_bin / launcher)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])

@@ -50,6 +50,7 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "shell", path: "tools.exec.path_prepend", kind: "text" },
   { group: "shell", path: "tools.exec.path_append", kind: "text" },
   { group: "shell", path: "tools.exec.sandbox", kind: "select", options: ["", "bwrap", "seatbelt"] },
+  { group: "shell", path: "tools.exec.sandbox_launcher", kind: "text", manual: true },
   { group: "shell", path: "tools.exec.sandbox_ro_binds", kind: "list", when: { path: "tools.exec.sandbox", value: ["bwrap", "seatbelt"] } },
   { group: "shell", path: "tools.exec.sandbox_rw_binds", kind: "list", when: { path: "tools.exec.sandbox", value: ["bwrap", "seatbelt"] } },
   { group: "shell", path: "tools.exec.allowed_env_keys", kind: "list" },
