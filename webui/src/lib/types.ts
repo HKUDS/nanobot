@@ -1763,7 +1763,15 @@ export interface OutboundMcpPresetMention {
   brand_color?: string | null;
 }
 
+export interface WebuiThreadRecordRange {
+  turn: number;
+  start: number;
+  end: number;
+}
+
 interface WebuiThreadPagePayload {
+  history_generation?: string | null;
+  record_range?: WebuiThreadRecordRange;
   before_cursor?: string | null;
   has_more_before?: boolean;
   after_cursor?: string | null;

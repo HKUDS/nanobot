@@ -29,6 +29,18 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
         const body = await fetchLatestWebuiThread(client, getToken(), key, signal);
         if (!body || signal.aborted) return;
         const { completedTurnIds, snapshot } = persistedCanonicalRunState(body);
+        if (body.page?.record_range) {
+          if (!Array.isArray(body.completed_turn_ids)) return;
+          const mounted = client.hasTranscript(chatId);
+          if (client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)) {
+            webuiThreadCache.set(key, body);
+          }
+          // A mounted owner must accept (or stage) the fragment before settling.
+          // Explicit completion is otherwise independent of a newer run, but the
+          // fragment is not proof that its WS content is covered.
+          if (!mounted) client.settleFragmentRunLifecycle(chatId, completedTurnIds);
+          return;
+        }
         const explicitlyCompleted = turnId !== null && completedTurnIds.includes(turnId);
         if (!explicitlyCompleted && (snapshot.hasPendingToolCalls || snapshot.activeTurnId)) return;
         if (turnId && !explicitlyCompleted && !snapshot.observedTurnIds.includes(turnId)) return;

@@ -271,7 +271,6 @@ def test_thread_response_preserves_optional_stream_ids(history, delta_event, end
         "wire-first", "wire-first", "wire-second", "wire-second", None, None,
     ]
     assert all("stream_id" not in event for event in stream_events[-2:])
-    assert all("projection_receipts" not in event for event in stream_events)
     assert history.read(key) == original_rows
 
 
@@ -280,7 +279,7 @@ def test_thread_response_preserves_optional_stream_ids(history, delta_event, end
     [("delta", "stream_end", "answer"), ("reasoning_delta", "reasoning_end", "reasoning")],
 )
 @pytest.mark.parametrize("completed_text", [None, "canonical text"])
-def test_thread_response_receipts_for_folded_legacy_deltas(
+def test_complete_turn_folds_legacy_deltas_into_authoritative_stream_snapshots(
     history, delta_event, end_event, phase, completed_text,
 ) -> None:
     key = "websocket:folded-receipts"
@@ -310,9 +309,8 @@ def test_thread_response_receipts_for_folded_legacy_deltas(
     assert [(event["stream_id"], event["turn_seq"], event["text"]) for event in ends] == [
         ("primary", 9, primary_text), ("secondary", 10, "other"),
     ]
-    assert [event["projection_receipts"] for event in ends] == [
-        [{"turn_id": "turn-folded", "ranges": [[3, 4], [8, 9]]}],
-        [{"turn_id": "turn-folded", "ranges": [[6, 6], [10, 10]]}],
+    assert [event["event"] for event in payload["events"]] == [
+        "user_message", "message", end_event, end_event, "turn_end",
     ]
     assert history.read(key) == original_rows
     # Migration compaction retains its existing record format, without HTTP metadata.
@@ -570,15 +568,16 @@ def test_single_oversized_turn_is_bounded_and_marked(history, tmp_path, monkeypa
 
     assert latest is not None
     assert stats.selected_records <= 5
-    assert stats.selected_bytes <= 1_200
+    assert stats.source_bytes <= 1_200
     assert stats.capped_by_records is True
     assert stats.capped_by_bytes is True
     assert stats.truncated_oversized_turn is True
     assert latest["page"]["truncated_oversized_turn"] is True
-    assert _message_contents(latest) == ["question", "final answer"]
+    assert latest["page"]["record_range"] == {"turn": 0, "start": 18, "end": 23}
+    assert _message_contents(latest) == ["final answer"]
 
 
-def test_truncated_turn_does_not_advertise_ambiguous_trace_detail(history,
+def test_sliced_turn_keeps_full_trace_details_inline(history,
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -623,10 +622,11 @@ def test_truncated_turn_does_not_advertise_ambiguous_trace_detail(history,
 
     assert payload is not None
     assert payload["page"]["truncated_oversized_turn"] is True
-    trace_event = next(event for event in payload["events"] if event.get("kind") == "progress")
-    assert trace_event["text"] == "second_3(…)"
-    assert "trace_detail" not in trace_event
-    assert len(json.dumps(trace_event).encode("utf-8")) < 4_096
+    traces = [event for event in payload["events"] if event.get("kind") == "progress"]
+    assert [event["text"] for event in traces] == [
+        f"second_{idx}({('x' * 12_000)})" for idx in range(4)
+    ]
+    assert all("trace_detail" not in event for event in traces)
 
 
 def test_page_cursor_survives_appends_after_latest_page(history,

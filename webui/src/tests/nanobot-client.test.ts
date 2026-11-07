@@ -174,6 +174,83 @@ describe("NanobotClient", () => {
     client.close();
   });
 
+  it.each(["recovery_state", "attached"] as const)("waits for a canonical running identity after unscoped %s starts a new recovery", (event) => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "recovery:old-recovery", status: "running", started_at: 100 });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "recovery:old-recovery" });
+    const state = { status: "resuming", recovery_id: "new-recovery", attempts: 1 };
+    socket.fakeMessage(event === "recovery_state"
+      ? { event, chat_id: "chat", ...state }
+      : { event, chat_id: "chat", recovery_state: state });
+    expect(client.getRunState("chat")).toMatchObject({ active: true, unsettled: false, latestTurnId: "recovery:old-recovery" });
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "recovery:new-recovery", status: "running", started_at: 200 });
+    expect(client.getRunState("chat")).toMatchObject({ active: true, unsettled: true,
+      latestTurnId: "recovery:new-recovery", startedAt: 200 });
+    client.close();
+  });
+
+  it.each(["recovery_state", "attached"] as const)("prefers an explicit turn_id over recovery_id on %s", (event) => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "turn-explicit", status: "running", started_at: 100 });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "turn-explicit" });
+    const state = { status: "resuming", recovery_id: "new-recovery", attempts: 1 };
+    socket.fakeMessage(event === "recovery_state"
+      ? { event, chat_id: "chat", turn_id: "turn-explicit", ...state }
+      : { event, chat_id: "chat", turn_id: "turn-explicit", recovery_state: state });
+    expect(client.getRunState("chat")).toMatchObject({ active: false, unsettled: false, latestTurnId: "turn-explicit" });
+    client.close();
+  });
+
+  it("delivers a recovered state after the recovery turn ends", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const received = vi.fn();
+    client.onTranscript("chat", received);
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1" });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "recovery:r1" });
+    const recovered = { event: "recovery_state", chat_id: "chat", status: "recovered", recovery_id: "r1", reason: "continued" };
+    socket.fakeMessage(recovered);
+    expect(received).toHaveBeenCalledWith(recovered);
+    expect(client.getRunState("chat").active).toBe(false);
+    client.close();
+  });
+
+  it("allows Continue after fragment completion and loop guard, preserving the reused canonical id's live content", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1", attempts: 1 });
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "recovery:r1", status: "running", started_at: 100 });
+    client.settleFragmentRunLifecycle("chat", ["recovery:r1"]);
+    socket.fakeMessage({ event: "attached", chat_id: "chat", recovery_state: {
+      status: "awaiting_user", recovery_id: "r1", reason: "loop_guard", attempts: 1,
+    } });
+    expect(client.getRunState("chat").active).toBe(false);
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1", attempts: 2 });
+    expect(client.getRunState("chat").active).toBe(true);
+    const content = { event: "delta", chat_id: "chat", turn_id: "recovery:r1", text: "Continued output" };
+    socket.fakeMessage(content);
+    const replay = vi.fn();
+    client.onTranscript("chat", replay);
+    expect(replay).toHaveBeenCalledWith(content);
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "recovery:r1" });
+    expect(client.getRunState("chat").active).toBe(false);
+    client.close();
+  });
+
   it("reconciles simultaneous client submissions to the gateway-owned turn", () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -1801,6 +1878,40 @@ describe("NanobotClient", () => {
     expect(chatHandler).toHaveBeenCalledWith(
       expect.objectContaining({ event: "delta", text: "still live" }),
     );
+  });
+
+  it("bounds fragment lifecycle tombstones without pruning buffered content or releasing the latest owner", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "current", status: "running", started_at: 100 });
+    const buffered = { event: "delta", chat_id: "chat", turn_id: "current", text: "Unconsumed live content" };
+    const oldContent = { event: "message", chat_id: "chat", turn_id: "history-0", text: "Unconsumed older content" };
+    socket.fakeMessage(buffered);
+    socket.fakeMessage(oldContent);
+    client.settleFragmentRunLifecycle("chat", ["current"]);
+    const history = Array.from({ length: 300 }, (_, index) => `history-${index}`);
+    client.settleFragmentRunLifecycle("chat", history);
+
+    expect(history.filter((id) => client.isRunCompleted("chat", id))).toHaveLength(255);
+    expect(client.isRunCompleted("chat", "history-0")).toBe(false);
+    expect(client.isRunCompleted("chat", "history-299")).toBe(true);
+    expect(client.isRunCompleted("chat", "current")).toBe(true);
+    const settled = client.getRunState("chat");
+    const late = { event: "delta", chat_id: "chat", turn_id: "current", text: "Late live content" };
+    const streamEnd = { event: "stream_end", chat_id: "chat", turn_id: "current", stream_id: "wire" };
+    socket.fakeMessage(late);
+    socket.fakeMessage(streamEnd);
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "current", status: "running", started_at: 999 });
+    expect(client.getRunState("chat")).toEqual(settled);
+    expect(settled).toMatchObject({ active: false, unsettled: false, latestTurnId: "current", startedAt: null });
+    const replay = vi.fn();
+    client.onTranscript("chat", replay);
+    for (const content of [buffered, oldContent, late, streamEnd]) expect(replay).toHaveBeenCalledWith(content);
+    expect(replay).not.toHaveBeenCalledWith(expect.objectContaining({ event: "goal_status" }));
+    client.close();
   });
 
   it("clears the run cache and fences delayed frames after canonical completion", () => {

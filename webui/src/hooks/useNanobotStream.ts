@@ -130,8 +130,8 @@ function appendProjectedSessionInput(
   return [...messages, row];
 }
 
-function createTranscript(messages: UIMessage[], saved: ThreadTranscriptSnapshot | undefined, historyKey: string | null) {
-  const owner = new ThreadTranscript(messages, saved);
+function createTranscript(messages: UIMessage[], saved: ThreadTranscriptSnapshot | undefined, historyKey: string | null, temporary: boolean) {
+  const owner = new ThreadTranscript(messages, saved, { recordLiveContributions: !temporary });
   // The first paint must not enter the welcome layout while history is pending.
   owner.paging = { ...owner.paging, loading: !!historyKey && owner.paging.version === 0,
     hasMoreBefore: historyKey ? owner.paging.hasMoreBefore : false };
@@ -145,7 +145,7 @@ export function useNanobotStream(
   onTurnEnd?: () => void,
   onStreamDetach?: (messages: UIMessage[]) => void,
   completedTurnIds: readonly string[] = EMPTY_COMPLETED_TURN_IDS,
-  history?: { key: string | null; cache?: ThreadMessageCache },
+  history?: { key: string | null; cache?: ThreadMessageCache; temporary?: boolean },
   historyActiveTurnId: string | null = null,
 ): {
   messages: UIMessage[];
@@ -181,10 +181,12 @@ export function useNanobotStream(
 } {
   const { client, getToken } = useClient();
   const historyKey = history?.key ?? null;
+  const temporary = history?.temporary === true;
   const messageCache = history?.cache;
   const [initialTranscript] = useState(() => createTranscript(initialMessages,
-    chatId ? messageCache?.get(chatId) : undefined, historyKey));
+    chatId ? messageCache?.get(chatId) : undefined, historyKey, temporary));
   const transcriptRef = useRef(initialTranscript);
+  const deferredCanonicalRef = useRef<{ owner: ThreadTranscript; generation: number; canonical: ReturnType<typeof persistedCanonicalRunState> }>();
   const [historyState, setHistoryState] = useState(initialTranscript.paging);
   const publishHistory = useCallback(() => setHistoryState(transcriptRef.current.paging), []);
   const [refreshSeq, setRefreshSeq] = useState(0);
@@ -333,6 +335,7 @@ export function useNanobotStream(
       for (let index = 0; index < events.length; index++) {
         const event = events[index];
         const chunks = [event.text];
+        const parts = [event];
         const members = event.turn.turnSeq === undefined ? [] : [event.turn.turnSeq];
         let turn = event.turn;
         while (index + 1 < events.length) {
@@ -345,6 +348,7 @@ export function useNanobotStream(
               && (nextEvent.source !== event.source
                 || JSON.stringify(nextEvent.responseSources) !== JSON.stringify(event.responseSources)))) break;
           chunks.push(nextEvent.text);
+          parts.push(nextEvent);
           if (nextEvent.turn.turnSeq !== undefined) members.push(nextEvent.turn.turnSeq);
           turn = { ...turn, ...nextEvent.turn };
           index++;
@@ -379,8 +383,12 @@ export function useNanobotStream(
           }
           projectedEvent.projection_receipts = [{ turn_id: turn.turnId, ranges }];
         }
+        const contributions = parts.map((part) => ({
+          ...projectedEvent, text: part.text, turn_id: part.turn.turnId, turn_phase: part.turn.turnPhase,
+          turn_seq: part.turn.turnSeq, stream_id: part.streamId, projection_receipts: undefined,
+        }));
         transcriptRef.current.project(projectedEvent, {
-          createId: () => crypto.randomUUID(), now: Date.now(), startSeq: event.turn.turnSeq,
+          createId: () => crypto.randomUUID(), now: Date.now(), startSeq: event.turn.turnSeq, contributions,
         });
       }
       return transcriptRef.current.messages;
@@ -495,7 +503,8 @@ export function useNanobotStream(
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.
   useEffect(() => {
-    transcriptRef.current = createTranscript(initialMessages, chatId ? messageCache?.get(chatId) : undefined, historyKey);
+    deferredCanonicalRef.current = undefined;
+    transcriptRef.current = createTranscript(initialMessages, chatId ? messageCache?.get(chatId) : undefined, historyKey, temporary);
     setMessages(transcriptRef.current.messages);
     setMessageScope({ chatId, historyKey, client });
     setRunState(chatId ? client.getRunState(chatId) : null);
@@ -504,7 +513,7 @@ export function useNanobotStream(
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
     setRecoveryState(null);
     clearPendingStreamWork();
-  }, [chatId, client, historyKey, clearActivitySegment, clearPendingStreamWork, setMessages]);
+  }, [chatId, client, historyKey, temporary, clearActivitySegment, clearPendingStreamWork, setMessages]);
 
   useEffect(() => {
     if (!chatId || (!hasPendingToolCalls && !initialStreaming)) return;
@@ -535,6 +544,20 @@ export function useNanobotStream(
   }, [publishHistory]);
   const latestReadOwnerRef = useRef<ThreadTranscript>();
   const detailRequestsRef = useRef(new Map<string, Promise<{ ref: string; events: ThreadProjectionEvent[] } | null>>());
+  const reconcileCanonical = useCallback((generation: number, canonical: ReturnType<typeof persistedCanonicalRunState>, accepted: boolean) => {
+    if (!chatId) return;
+    const settle = !canonical.snapshot.hasPendingToolCalls
+      && client.canReconcileCanonicalCompletion(chatId, generation, canonical.completedTurnIds, canonical.snapshot);
+    if (accepted && settle && client.reconcileCanonicalCompletion(chatId, generation,
+      canonical.completedTurnIds, canonical.snapshot)) {
+      setRetryStatus(null);
+    } else client.fenceCanonicalCompletedTurns(chatId, canonical.completedTurnIds);
+  }, [chatId, client]);
+  const settleFragment = useCallback((canonical: ReturnType<typeof persistedCanonicalRunState>) => {
+    if (!chatId) return;
+    client.settleFragmentRunLifecycle(chatId, canonical.completedTurnIds);
+    if (!client.getRunState(chatId)?.active) setRetryStatus(null);
+  }, [chatId, client]);
 
   useEffect(() => {
     if (!historyKey) return;
@@ -552,8 +575,6 @@ export function useNanobotStream(
       flushPendingStreamEvents();
       const decision = ownRead ? read : owner.begin(seed ? "initial" : "latest");
       const canonical = body ? persistedCanonicalRunState(body) : null;
-      const settle = chatId && canonical && !canonical.snapshot.hasPendingToolCalls
-        && client.canReconcileCanonicalCompletion(chatId, generation, canonical.completedTurnIds, canonical.snapshot);
       const accepted = owner.accept(body, decision);
       // Commit the received owner before cache listeners/ledger callbacks can reenter.
       setMessages(owner.messages);
@@ -564,11 +585,22 @@ export function useNanobotStream(
         else webuiThreadCache.delete(historyKey);
         publishing = false;
       }
-      if (ownRead && chatId && canonical) {
-        if (accepted && settle && client.reconcileCanonicalCompletion(chatId, generation,
-          canonical.completedTurnIds, canonical.snapshot)) {
-          setRetryStatus(null);
-        } else client.fenceCanonicalCompletedTurns(chatId, canonical.completedTurnIds);
+      if (chatId && canonical && (ownRead || !seed)) {
+        if (accepted && owner.hasPendingFragmentGap) {
+          deferredCanonicalRef.current = { owner, generation, canonical };
+        } else if (body?.page?.record_range) {
+          if (accepted && Array.isArray(body.completed_turn_ids)) {
+            if (owner.lastAcceptanceCovered) {
+              if (deferredCanonicalRef.current?.owner === owner) deferredCanonicalRef.current = undefined;
+              settleFragment(canonical);
+            } else {
+              deferredCanonicalRef.current = { owner, generation, canonical };
+            }
+          }
+        } else if (ownRead && !owner.hasPendingFragmentGap) {
+          if (deferredCanonicalRef.current?.owner === owner) deferredCanonicalRef.current = undefined;
+          reconcileCanonical(generation, canonical, accepted);
+        }
       }
     };
     const cached = webuiThreadCache.get(historyKey);
@@ -588,7 +620,7 @@ export function useNanobotStream(
         else { owner.finishRead(read, (error as Error).message); publishHistory(); }
       });
     return () => { disposed = true; controller.abort(); cancelOlderRead(); unsubscribe(); };
-  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, refreshSeq, setMessages]);
+  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, reconcileCanonical, refreshSeq, setMessages, settleFragment]);
 
   const loadOlder = useCallback(async () => {
     const owner = transcriptRef.current;
@@ -603,8 +635,24 @@ export function useNanobotStream(
       const body = await fetchWebuiThread(getToken(), historyKey, { before, limit: 120, signal: controller.signal });
       if (olderReadRef.current !== operation || transcriptRef.current !== owner) return;
       flushPendingStreamEvents();
-      owner.accept(body, read);
+      const wasBridging = owner.hasPendingFragmentGap;
+      const accepted = owner.accept(body, read);
       setMessages(owner.messages);
+      const deferred = deferredCanonicalRef.current;
+      if (accepted && !owner.hasPendingFragmentGap && owner.lastAcceptanceCovered) {
+        if (deferred?.owner === owner
+          && deferred.canonical.completedTurnIds.every((turn) => owner.projection.closedTurnIds.has(turn))) {
+          deferredCanonicalRef.current = undefined;
+          if (chatId && client.getRunGeneration(chatId) === deferred.generation) {
+            messageCache?.set(chatId, owner.save());
+            settleFragment(deferred.canonical);
+          } else {
+            setRefreshSeq((value) => value + 1);
+          }
+        } else if (wasBridging) {
+          setRefreshSeq((value) => value + 1);
+        }
+      }
     } catch (error) {
       if (olderReadRef.current === operation && transcriptRef.current === owner) {
         owner.finishRead(read, (error as Error).message);
@@ -613,7 +661,14 @@ export function useNanobotStream(
     } finally {
       if (olderReadRef.current === operation) olderReadRef.current = null;
     }
-  }, [flushPendingStreamEvents, getToken, historyKey, publishHistory, setMessages]);
+  }, [chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, setMessages, settleFragment]);
+
+  useEffect(() => {
+    const bridging = transcriptRef.current.hasPendingFragmentGap;
+    if (historyKey && historyState.version > 0 && historyState.hasMoreBefore
+      && !historyState.loading && !historyState.loadingOlder && !historyState.olderError
+      && (bridging || (messages.length === 0 && !historyState.error))) void loadOlder();
+  }, [historyKey, historyState, loadOlder, messages.length]);
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const owner = transcriptRef.current;
