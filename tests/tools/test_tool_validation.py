@@ -1181,3 +1181,94 @@ def test_exec_guard_allows_resolved_home_inside_workspace(tmp_path, monkeypatch)
     monkeypatch.setattr(Path, "expanduser", expanduser)
     tool = ExecTool(restrict_to_workspace=True)
     assert tool._guard_command("cat ~/file.txt", str(tmp_path)) is None
+
+
+class RefSchemaTool(Tool):
+    """Tool whose parameters use the shapes MCP servers emit for model/union/array params."""
+
+    @property
+    def name(self) -> str:
+        return "ref_schema"
+
+    @property
+    def description(self) -> str:
+        return "ref schema tool"
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "addr": {"$ref": "#/$defs/Address"},
+                "count": {"anyOf": [{"type": "integer"}, {"type": "string"}]},
+                "pair": {
+                    "type": "array",
+                    "items": [{"type": "string"}, {"type": "integer"}],
+                },
+                "coords": {
+                    "type": "array",
+                    "prefixItems": [{"type": "number"}, {"type": "number"}],
+                    "items": False,
+                },
+            },
+            "required": ["addr"],
+            "$defs": {
+                "Address": {
+                    "type": "object",
+                    "properties": {
+                        "city": {"type": "string"},
+                        "zip": {"type": "integer"},
+                    },
+                    "required": ["city", "zip"],
+                }
+            },
+        }
+
+    async def execute(self, **kwargs: Any) -> str:
+        return "ok"
+
+
+def test_validate_ref_param_enforces_nested_schema() -> None:
+    tool = RefSchemaTool()
+    errors = tool.validate_params({"addr": {"zip": "98101"}})
+    assert "missing required addr.city" in errors
+    assert "addr.zip should be integer" in errors
+    assert tool.validate_params({"addr": {"city": "Seattle", "zip": 98101}}) == []
+
+
+def test_validate_ref_param_rejects_non_object() -> None:
+    tool = RefSchemaTool()
+    assert tool.validate_params({"addr": "Seattle"}) == ["addr should be object"]
+
+
+def test_ref_param_json_string_surfaces_validation_error() -> None:
+    # Casting deliberately abstains on $ref parameters; validation is the
+    # boundary that must reject a JSON string standing in for the object.
+    tool = RefSchemaTool()
+    casted = tool.cast_params({"addr": '{"city": "Seattle", "zip": "98101"}'})
+    assert tool.validate_params(casted) == ["addr should be object"]
+
+
+def test_validate_anyof_param_requires_a_matching_branch() -> None:
+    tool = RefSchemaTool()
+    addr = {"city": "Seattle", "zip": 98101}
+    assert tool.validate_params({"addr": addr, "count": {"n": 1}}) != []
+    assert tool.validate_params({"addr": addr, "count": 3}) == []
+    assert tool.validate_params({"addr": addr, "count": "three"}) == []
+
+
+def test_tuple_items_schema_casts_and_validates_per_position() -> None:
+    tool = RefSchemaTool()
+    addr = {"city": "Seattle", "zip": 98101}
+    assert tool.cast_params({"addr": addr, "pair": ["a", "1"]})["pair"] == ["a", 1]
+    errors = tool.validate_params({"addr": addr, "pair": ["a", "one"]})
+    assert errors == ["pair[1] should be integer"]
+    assert tool.validate_params({"addr": addr, "pair": ["a", 1]}) == []
+
+
+def test_prefix_items_schema_validates_per_position() -> None:
+    tool = RefSchemaTool()
+    addr = {"city": "Seattle", "zip": 98101}
+    assert tool.validate_params({"addr": addr, "coords": [1.5, 2.5]}) == []
+    errors = tool.validate_params({"addr": addr, "coords": [1.5, "west"]})
+    assert errors == ["coords[1] should be number"]
