@@ -1172,9 +1172,6 @@ class EmailChannel(BaseChannel):
 
         Returns list of saved file paths.
         """
-        if not msg.is_multipart():
-            return []
-
         saved: list[Path] = []
         saved_names: set[str] = set()
         media_dir = get_media_dir("email")
