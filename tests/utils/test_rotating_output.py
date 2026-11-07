@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from nanobot.utils.rotating_output import (
     BACKGROUND_LOG_BACKUP_COUNT_ENV,
     BACKGROUND_LOG_MAX_BYTES_ENV,
@@ -36,6 +38,31 @@ def test_rotating_output_rotates_oversized_existing_file_before_append(tmp_path:
 
     assert log_path.read_text(encoding="utf-8") == "fresh"
     assert (tmp_path / "gateway.log.1").read_text(encoding="utf-8") == "existing output"
+
+
+@pytest.mark.parametrize("initial_text", ["", "kept"])
+@pytest.mark.parametrize("operation", ["write", "empty_write", "fileno"])
+def test_closed_output_does_not_reopen_log(
+    tmp_path: Path, initial_text: str, operation: str
+) -> None:
+    log_path = tmp_path / "gateway.log"
+    with RotatingTextOutput(log_path, max_bytes=8, backup_count=1) as output:
+        output.write(initial_text)
+
+    try:
+        with pytest.raises(ValueError, match="closed"):
+            if operation == "fileno":
+                output.fileno()
+            else:
+                output.write("" if operation == "empty_write" else "after close")
+
+        assert output.closed
+        assert log_path.exists() == bool(initial_text)
+        if initial_text:
+            assert log_path.read_text(encoding="utf-8") == initial_text
+        assert not (tmp_path / "gateway.log.1").exists()
+    finally:
+        output.close()
 
 
 def test_rotating_output_splits_one_oversized_write_at_utf8_boundaries(
