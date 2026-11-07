@@ -90,7 +90,7 @@ export function SandboxSettings({ settings, state, client, isRestarting, childre
         <div className="flex items-start gap-2 text-ui leading-6 text-muted-foreground">
           {checking ? <Loader2 className="mt-1 h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
             : status === "passed" ? <ShieldCheck className="mt-1 h-4 w-4 shrink-0" aria-hidden /> : <CircleAlert className="mt-1 h-4 w-4 shrink-0" aria-hidden />}
-          <p>{reason ? t(`settings.sandbox.reasons.${reason}`, { defaultValue: tx("reasons.unknown") }) : tx(`help.${dirty ? "unsaved" : status}`)}</p>
+          <p>{!saved.supported_backend && enabled ? tx("help.unsupported") : reason ? t(`settings.sandbox.reasons.${reason}`, { defaultValue: tx("reasons.unknown") }) : tx(`help.${dirty ? "unsaved" : status}`)}</p>
         </div>
         {launcher ? <p className="mt-2 break-all font-mono text-caption text-muted-foreground">{launcher}</p> : null}
         <p className="mt-2 text-caption leading-5 text-muted-foreground">{tx("scope")}</p>

@@ -74,7 +74,9 @@ async def check_sandbox(config: ExecToolConfig, workspace: Path) -> SandboxCheck
         script = (
             "printf checked > inside && "
             f"! test -r {shlex.quote(str(canary))} && "
-            f"! (printf changed > {shlex.quote(str(canary))})"
+            # bwrap may allow writing a new file in its private tmpfs at the
+            # same path. What must stay unchanged is the host-side canary.
+            f"(printf changed > {shlex.quote(str(canary))} || true)"
         )
         argv = shlex.split(wrap_command(
             config.sandbox, script, str(project), str(project),
