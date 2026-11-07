@@ -2,9 +2,12 @@
 
 import os
 
+import pytest
+
 from nanobot.agent.tools.shell import ExecTool
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires Unix launcher preparation")
 async def test_nonstandard_bwrap_is_not_silently_run_without_sandbox(tmp_path, monkeypatch):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -17,7 +20,6 @@ async def test_nonstandard_bwrap_is_not_silently_run_without_sandbox(tmp_path, m
     launcher.chmod(0o700)
     marker = workspace / "command-ran"
 
-    monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
     monkeypatch.setattr(os, "defpath", str(default_bin))
     monkeypatch.setenv("PATH", str(extra_bin))
     monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: workspace)
