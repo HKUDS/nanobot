@@ -491,7 +491,7 @@
       "checkError": "Could not complete the check. Reopen settings and try again.",
       "saveError": "Could not save. Keep your draft and try again.",
       "disableTitle": "Turn off command isolation?",
-      "disableHelp": "Commands will run with the gateway account’s permissions after restart. This does not change file-tool permissions.",
+      "disableHelp": "After restart, commands run with the gateway account’s permissions. File tools also lose the workspace restriction supplied by this sandbox; independently configured restrictions still apply.",
       "keep": "Keep isolation",
       "disable": "Turn off isolation",
       "states": {

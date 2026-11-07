@@ -491,7 +491,7 @@
       "checkError": "Não foi possível verificar. Reabra as configurações e tente novamente.",
       "saveError": "Não foi possível salvar. O rascunho foi mantido; tente novamente.",
       "disableTitle": "Desativar o isolamento?",
-      "disableHelp": "Após reiniciar, os comandos usarão as permissões da conta do gateway. As permissões das ferramentas de arquivos não mudam.",
+      "disableHelp": "Após reiniciar, os comandos usarão as permissões da conta do gateway. As ferramentas de arquivos também perderão a restrição de espaço de trabalho deste sandbox; as restrições independentes continuam ativas.",
       "keep": "Manter isolamento",
       "disable": "Desativar isolamento",
       "states": {

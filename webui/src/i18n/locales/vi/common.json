@@ -491,7 +491,7 @@
       "checkError": "Chưa kiểm tra được. Mở lại cài đặt và thử lại.",
       "saveError": "Không lưu được. Bản nháp được giữ lại; hãy thử lại.",
       "disableTitle": "Tắt cô lập lệnh?",
-      "disableHelp": "Sau khi khởi động lại, lệnh chạy với quyền tài khoản gateway. Quyền của công cụ tệp không thay đổi.",
+      "disableHelp": "Sau khi khởi động lại, lệnh chạy với quyền tài khoản gateway. Công cụ tệp cũng mất giới hạn vùng làm việc do sandbox này cung cấp; các giới hạn được đặt riêng vẫn có hiệu lực.",
       "keep": "Giữ cô lập",
       "disable": "Tắt cô lập",
       "states": {
