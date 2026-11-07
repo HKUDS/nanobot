@@ -199,6 +199,7 @@ for (const width of [1440, 390]) {
           oldBlend: oldTheme.mixBlendMode, newBlend: newTheme.mixBlendMode,
           isolation: getComputedStyle(root, "::view-transition-image-pair(root)").isolation,
           mask: newTheme.maskImage, clip: newTheme.clipPath,
+          artworkDuration: getComputedStyle(document.querySelector(".theme-art")!).transitionDuration,
         };
       });
       expect(middle.durations).toEqual([200, 200]);
@@ -212,6 +213,7 @@ for (const width of [1440, 390]) {
       expect(middle.isolation).toBe("isolate");
       expect(middle.mask).toBe("none");
       expect(middle.clip).toBe("none");
+      expect(middle.artworkDuration).toBe("0s");
       await expect(toggle).toBeFocused();
       expect(await input.boundingBox()).toEqual(box);
       await page.screenshot({ path: test.info().outputPath(`crossfade-${width}-${initial}-mid.png`), animations: "allow" });

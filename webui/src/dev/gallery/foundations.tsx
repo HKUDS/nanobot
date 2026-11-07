@@ -257,9 +257,9 @@ function Sidebars() {
   return <div className="space-y-3">
     <Button onClick={() => setOpen(!open)}>{t("controls.sidebarPanel.toggle")}</Button>
     <div className="thread-preview-layout relative h-64 overflow-hidden rounded-xl border">
-      {open && <SidebarPanel width={320} header={<span>{t("controls.sidebarPanel.title")}</span>}>
+      <SidebarPanel open={open} width={320} header={<span>{t("controls.sidebarPanel.title")}</span>}>
         <p className="p-4 text-sm">{t("controls.sidebarPanel.content")}</p>
-      </SidebarPanel>}
+      </SidebarPanel>
     </div>
   </div>;
 }

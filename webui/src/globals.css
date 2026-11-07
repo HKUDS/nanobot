@@ -144,6 +144,7 @@
     --sidebar-border: 40 8% 90.5%;
     --settings-canvas: var(--background);
     --settings-surface: 60 6% 96.7%;
+    --brand-ambient: 36 96% 78%;
     --automation-view-track: hsl(0 0% 91%);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.26);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
@@ -216,10 +217,37 @@
     --sidebar-border: var(--border);
     --settings-canvas: var(--background);
     --settings-surface: var(--card);
+    --brand-ambient: 219 58% 58%;
     --automation-view-track: hsl(var(--muted) / 0.65);
     --scrollbar-thumb: hsl(var(--muted-foreground) / 0.28);
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.44);
   }
+}
+
+/* Decoration belongs to entry/empty states, never to conversation reading surfaces. */
+.brand-atmosphere {
+  position: relative;
+  isolation: isolate;
+}
+
+.brand-atmosphere::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  top: -72px;
+  left: 50%;
+  width: min(420px, 100%);
+  height: 240px;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse at center, hsl(var(--brand-ambient) / 0.22), transparent 68%);
+}
+
+.brand-atmosphere-welcome::before {
+  top: -100px;
+  width: min(620px, 100%);
+  height: 250px;
+  opacity: 0.65;
 }
 
 @layer base {
