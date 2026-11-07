@@ -986,6 +986,8 @@
       "newPresetHelp": "Enregistrez un modèle et ses réglages pour les réutiliser.",
       "presets": "Préréglages de modèle",
       "presetName": "Nom du préréglage",
+      "presetDescription": "Description",
+      "presetDescriptionHelp": "Notes facultatives sur les cas d’utilisation de ce préréglage.",
       "presetNameHelp": "Les noms doivent être uniques ; ils servent aussi à /model.",
       "presetNameDuplicate": "Un préréglage portant ce nom existe déjà.",
       "presetNamePlaceholder": "p. ex. Rédaction rapide",

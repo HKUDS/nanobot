@@ -4696,6 +4696,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
                 "label": "Fast writing",
                 "provider": "openai",
                 "model": "openai/gpt-4.1-mini",
+                "description": "Drafts and low-risk summaries",
             },
         )
         assert created_preset.status_code == 200
@@ -4709,6 +4710,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         }
         assert created_presets["fast-writing"]["label"] == "fast-writing"
         assert created_presets["fast-writing"]["provider"] == "openai"
+        assert created_body["model_preset_descriptions_supported"] is True
+        assert created_presets["fast-writing"]["description"] == "Drafts and low-risk summaries"
 
         updated_preset = await _webui_mutate(
             webui_client,
@@ -4728,6 +4731,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
             preset["name"]: preset for preset in updated_preset_body["model_presets"]
         }
         assert updated_presets["Codex"]["label"] == "Codex"
+        assert updated_presets["Codex"]["description"] == "Drafts and low-risk summaries"
 
         call_order_updated = await _webui_mutate(
             webui_client,

@@ -986,6 +986,8 @@
       "newPresetHelp": "Guarda un modelo y sus ajustes para reutilizarlos.",
       "presets": "Preajustes de modelo",
       "presetName": "Nombre del preajuste",
+      "presetDescription": "Descripción",
+      "presetDescriptionHelp": "Notas opcionales sobre cuándo usar este preajuste.",
       "presetNameHelp": "Los nombres deben ser únicos; también se usan en /model.",
       "presetNameDuplicate": "Ya existe un preajuste con este nombre.",
       "presetNamePlaceholder": "p. ej., Escritura rápida",

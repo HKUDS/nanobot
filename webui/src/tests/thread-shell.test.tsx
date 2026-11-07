@@ -1562,6 +1562,8 @@ describe("ThreadShell", () => {
       is_default: false,
     });
     settings.model_call_order = ["fast"];
+    settings.model_presets.find((preset) => preset.name === "fast")!.description = "Quick first drafts";
+    settings.model_presets.find((preset) => preset.name === "extra")!.description = "Careful review";
 
     const view = (preset: string) => wrap(client, (
       <ThreadShell
@@ -1576,7 +1578,10 @@ describe("ThreadShell", () => {
     const badge = await screen.findByRole("button", { name: "Default" });
     expect(badge).toHaveTextContent("Default");
     fireEvent.click(badge);
-    fireEvent.click(await screen.findByRole("option", { name: /^fast\b/i }));
+    const fastOption = await screen.findByRole("option", { name: "fast" });
+    expect(fastOption).toHaveTextContent("Quick first drafts");
+    expect(fastOption).toHaveAccessibleDescription("Quick first drafts");
+    fireEvent.click(fastOption);
 
     expect(client.sendSystemCommand).toHaveBeenCalledWith(
       "preset-order",
@@ -1584,7 +1589,9 @@ describe("ThreadShell", () => {
     );
     expect(await screen.findByLabelText("fast", { selector: "button" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "fast" }));
-    fireEvent.click(await screen.findByRole("option", { name: /^extra\b/i }));
+    const extraOption = await screen.findByRole("option", { name: "extra" });
+    expect(extraOption).toHaveTextContent("Careful review");
+    fireEvent.click(extraOption);
     expect(client.sendSystemCommand).toHaveBeenLastCalledWith(
       "preset-order",
       "/model extra",

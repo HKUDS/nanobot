@@ -119,6 +119,139 @@ async function openPresetAdvancedOptions() {
 describe("Settings models", () => {
   installSettingsViewTestHooks();
 
+  it("edits, restores, and clears usage notes without changing preset identity or generation settings", async () => {
+    let { payload } = settingsPayloadWithBackup();
+    payload.model_preset_descriptions_supported = true;
+    payload.model_presets[0].description = "Everyday tasks";
+    payload.model_presets[1].description = "Long-form drafting";
+    requestMutationMock.mockImplementation(async (action, args) => {
+      expect(action).toBe("settings.model_configuration.update");
+      payload = {
+        ...payload,
+        model_presets: payload.model_presets.map((preset) => preset.name === args.name ? {
+          ...preset,
+          description: args.description ?? preset.description,
+          temperature: args.temperature ?? preset.temperature,
+        } : preset),
+      };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    expect(within(screen.getByTestId("model-call-order-row-primary")).getByText("Everyday tasks")).toBeInTheDocument();
+    await togglePresetEditor("backup");
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue("Long-form drafting");
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await togglePresetEditor();
+    const notes = "  快速写作 ✍️\nUse for first drafts.  ";
+    const description = screen.getByRole("textbox", { name: "Description" });
+    expect(description).toHaveValue("Everyday tasks");
+    expect(description).toHaveAccessibleDescription("Optional notes on when to use this preset.");
+    fireEvent.change(description, { target: { value: notes } });
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", { name: "primary", description: notes }, 20_000,
+    ));
+    await waitFor(() => expect(presetSaveButton()).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await togglePresetEditor();
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(notes);
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByLabelText("Temperature"), { target: { value: "0.4" } });
+    returnToPresetEditor();
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", { name: "primary", temperature: 0.4 }, 20_000,
+    ));
+    await waitFor(() => expect(presetSaveButton()).toBeDisabled());
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(notes);
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), { target: { value: "" } });
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", { name: "primary", description: "" }, 20_000,
+    ));
+    await waitFor(() => expect(presetSaveButton()).toBeDisabled());
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "Preset name" })).toHaveValue("primary");
+    expect(within(screen.getByTestId("model-call-order-row-primary")).queryByText(notes)).not.toBeInTheDocument();
+    expect(payload.model_call_order).toEqual(["primary", "backup"]);
+  });
+
+  it("starts new preset notes empty and saves them with the new preset", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    payload.model_preset_descriptions_supported = true;
+    payload.model_presets[0].description = "Existing preset notes";
+    const writerPreset = {
+      ...payload.model_presets[0], name: "Writer", active: false,
+      model: "openai/gpt-4o-mini", provider: "openai", description: "Short first drafts",
+    };
+    const createdPayload = {
+      ...payload, model_presets: [...payload.model_presets, writerPreset], created_model_preset: "Writer",
+    };
+    requestMutationMock
+      .mockResolvedValueOnce(createdPayload)
+      .mockResolvedValueOnce({ ...createdPayload, model_call_order: ["primary", "backup", "Writer"] });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue("");
+    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), { target: { value: "Writer" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), { target: { value: "Short first drafts" } });
+    const model = await openModelPicker();
+    fireEvent.change(model, { target: { value: "openai/gpt-4o-mini" } });
+    fireEvent.keyDown(model, { key: "Enter" });
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenNthCalledWith(
+      1, "settings.model_configuration.create", expect.objectContaining({
+        name: "Writer", provider: "openai", model: "openai/gpt-4o-mini", description: "Short first drafts",
+      }), 20_000,
+    ));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_call_order.update", { order: ["primary", "backup", "Writer"] }, 20_000,
+    ));
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue("Short first drafts");
+    expect(within(screen.getByTestId("model-call-order-row-Writer")).getByText("Short first drafts")).toBeInTheDocument();
+  });
+
+  it.each([undefined, false])("omits notes when creating and updating presets without host support (%s)", async (supported) => {
+    const { payload } = settingsPayloadWithBackup();
+    payload.model_preset_descriptions_supported = supported;
+    if (supported === false) payload.model_presets[0].description = "Read-only usage notes";
+    const updatedPayload = {
+      ...payload, model_presets: payload.model_presets.map((preset) => preset.name === "primary" ? { ...preset, temperature: 0.4 } : preset),
+    };
+    const createdPayload = {
+      ...updatedPayload,
+      model_presets: [...updatedPayload.model_presets, { ...payload.model_presets[0], name: "Writer", active: false }],
+      created_model_preset: "Writer",
+    };
+    requestMutationMock
+      .mockResolvedValueOnce(updatedPayload)
+      .mockResolvedValueOnce(createdPayload)
+      .mockResolvedValueOnce({ ...createdPayload, model_call_order: ["primary", "backup", "Writer"] });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+    expect(screen.queryByRole("textbox", { name: "Description" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    fireEvent.change(screen.getByLabelText("Temperature"), { target: { value: "0.4" } });
+    returnToPresetEditor();
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.model_configuration.update", { name: "primary", temperature: 0.4 }, 20_000,
+    ));
+    await waitFor(() => expect(presetSaveButton()).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
+    expect(screen.queryByRole("textbox", { name: "Description" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Preset name" }), { target: { value: "Writer" } });
+    const model = await openModelPicker();
+    fireEvent.change(model, { target: { value: "openai/gpt-4o-mini" } });
+    fireEvent.keyDown(model, { key: "Enter" });
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.create", expect.objectContaining({ name: "Writer", model: "openai/gpt-4o-mini" }), 20_000,
+    ));
+    for (const [, args] of requestMutationMock.mock.calls) expect(args).not.toHaveProperty("description");
+  });
+
   it("saves request overrides in a preset and restores inheritance when cleared", async () => {
     const payload = settingsPayload();
     payload.model_request_overrides_supported = true;

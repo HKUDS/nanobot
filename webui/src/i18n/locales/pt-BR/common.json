@@ -629,6 +629,8 @@
       "newPresetHelp": "Salve um modelo e seus ajustes para reutilizar.",
       "presets": "Predefinições de modelo",
       "presetName": "Nome da predefinição",
+      "presetDescription": "Descrição",
+      "presetDescriptionHelp": "Notas opcionais sobre quando usar esta predefinição.",
       "presetNameHelp": "Os nomes devem ser únicos; também são usados por /model.",
       "presetNameDuplicate": "Já existe uma predefinição com este nome.",
       "presetNamePlaceholder": "ex.: Escrita rápida",

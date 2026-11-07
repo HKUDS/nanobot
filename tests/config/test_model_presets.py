@@ -226,6 +226,7 @@ def test_legacy_defaults_config_without_presets_still_resolves() -> None:
     assert resolved.context_window_tokens == 128_000
     assert resolved.temperature == 0.2
     assert resolved.reasoning_effort == "low"
+    assert resolved.description == ""
 
 
 def test_resolve_preset_returns_active_preset() -> None:
@@ -312,6 +313,7 @@ def test_model_presets_serializes_with_camel_case_root_key() -> None:
             "fast": {
                 "model": "openai/gpt-4.1",
                 "provider": "openai",
+                "description": "Everyday coding and tests",
             }
         },
     })
@@ -321,6 +323,7 @@ def test_model_presets_serializes_with_camel_case_root_key() -> None:
     assert "modelPresets" in dumped
     assert "model_presets" not in dumped
     assert dumped["modelPresets"]["fast"]["model"] == "openai/gpt-4.1"
+    assert dumped["modelPresets"]["fast"]["description"] == "Everyday coding and tests"
 
 
 def test_resolve_preset_can_target_named_preset_without_activating() -> None:
