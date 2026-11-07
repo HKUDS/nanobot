@@ -1801,6 +1801,7 @@ class OpenAICompatProvider(LLMProvider):
             self._content_parts: list[str] = []
             self._reasoning_parts: list[str] = []
             self._tool_calls: dict[int, dict[str, Any]] = {}
+            self._last_unindexed: int | None = None
             self._finish_reason = "stop"
             self._usage: LLMUsage | None = None
 
@@ -1810,8 +1811,27 @@ class OpenAICompatProvider(LLMProvider):
                 "extra_content": None, "prov": None, "fn_prov": None,
             })
 
-        def _accum_tc(self, tc: Any, idx_hint: int) -> None:
-            tc_index: int = _get(tc, "index") if _get(tc, "index") is not None else idx_hint
+        def _unindexed_key(self, tc: Any) -> int:
+            # Gemini sends complete parallel calls without indexes; fragments continue the last call.
+            tc_id = _get(tc, "id")
+            fn = _get(tc, "function")
+            name = _get(fn, "name") if fn is not None else None
+            key = self._last_unindexed
+            last = self._tool_calls.get(key) if key is not None else None
+            if (
+                key is None
+                or last is None
+                or (tc_id and last["id"] and str(tc_id) != last["id"])
+                or (name and not tc_id and last["name"])
+            ):
+                key = max(self._tool_calls, default=-1) + 1
+                self._last_unindexed = key
+            return key
+
+        def _accum_tc(self, tc: Any) -> None:
+            tc_index = _get(tc, "index")
+            if tc_index is None:
+                tc_index = self._unindexed_key(tc)
             buf = self._tool_call(tc_index)
             tc_id = _get(tc, "id")
             if tc_id:
@@ -1876,8 +1896,8 @@ class OpenAICompatProvider(LLMProvider):
                 text = cls._extract_thinking_content(raw_delta_content)
             if text:
                 self._reasoning_parts.append(text)
-            for idx, tc in enumerate(cast(Iterable[object], delta.get("tool_calls") or [])):
-                self._accum_tc(tc, idx)
+            for tc in cast(Iterable[object], delta.get("tool_calls") or []):
+                self._accum_tc(tc)
             self._accum_legacy_function_call(delta.get("function_call"))
             self._usage = cls._extract_usage(chunk_map) or self._usage
 
