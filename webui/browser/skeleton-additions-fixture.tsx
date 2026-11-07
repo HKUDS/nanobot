@@ -45,6 +45,11 @@ const previewSettings: SettingsPayload = {
   ])),
 };
 let detailState = "loaded";
+if (new URLSearchParams(location.search).has("sandboxSettings")) {
+  previewSettings.advanced.exec_sandbox_status = {
+    state: "off", reason: "", launcher: null, revision: "fixture", supported_backend: "bwrap",
+  };
+}
 
 export function installSkeletonPreviewApi() {
   // Windows headless Chromium can report denied even after a context permission grant.
