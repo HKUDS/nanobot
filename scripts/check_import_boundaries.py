@@ -43,10 +43,13 @@ _ADAPTERS = (
 
 _TOOL_CONFIG_MODULES = (
     "nanobot.agent.tools.cli_apps_config",
+    "nanobot.agent.tools.drive_config",
     "nanobot.agent.tools.filesystem_config",
+    "nanobot.agent.tools.google_config",
     "nanobot.agent.tools.image_generation_config",
     "nanobot.agent.tools.self_config",
     "nanobot.agent.tools.shell_config",
+    "nanobot.agent.tools.sheets_config",
     "nanobot.agent.tools.web_config",
 )
 
