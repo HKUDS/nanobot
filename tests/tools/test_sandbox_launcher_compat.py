@@ -14,6 +14,7 @@ from nanobot.agent.tools.sandbox_check import check_sandbox, sandbox_settings_st
 from nanobot.agent.tools.sandbox_launcher import SandboxLauncherError, resolve_sandbox_launcher
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.shell_config import ExecToolConfig
+from nanobot.config.loader import resolve_config_env_vars
 
 
 @pytest.mark.skipif(os.name != "posix", reason="requires Unix launcher preparation")
@@ -102,15 +103,24 @@ async def test_unsupported_platform_reports_no_isolation_without_running(tmp_pat
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Unix native sandbox")
-async def test_native_probe_checks_isolation_without_touching_workspace(tmp_path):
+@pytest.mark.parametrize("env_refs", [False, True])
+async def test_native_probe_checks_isolation_without_touching_workspace(tmp_path, monkeypatch, env_refs):
     backend = "seatbelt" if sys.platform == "darwin" else "bwrap"
     config = ExecToolConfig(sandbox=backend)
     status = sandbox_settings_status(config, tmp_path)
     if status["state"] == "unavailable":
         pytest.skip("native sandbox launcher is not installed")
+    workspace = tmp_path
+    if env_refs:
+        monkeypatch.setenv("SANDBOX_TEST_LAUNCHER", status["launcher"])
+        monkeypatch.setenv("SANDBOX_TEST_WORKSPACE", str(tmp_path))
+        config.sandbox_launcher = "${SANDBOX_TEST_LAUNCHER}"
+        workspace = Path("${SANDBOX_TEST_WORKSPACE}")
+        status = sandbox_settings_status(config, workspace)
+        assert status == sandbox_settings_status(resolve_config_env_vars(config), tmp_path)
     original = tmp_path / "keep.txt"
     original.write_text("user data")
-    result = await check_sandbox(config, tmp_path)
+    result = await check_sandbox(config, workspace)
     if backend == "bwrap":
         # An installed launcher is not proof that the host permits namespaces.
         # Establish this independently of nanobot's wrapper and probe. In that
@@ -132,9 +142,28 @@ async def test_native_probe_checks_isolation_without_touching_workspace(tmp_path
     assert result["state"] == "passed", result
     assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.txt"]
     assert original.read_text() == "user data"
+    if env_refs:
+        assert config.sandbox_launcher == "${SANDBOX_TEST_LAUNCHER}"
+        monkeypatch.setenv("SANDBOX_TEST_WORKSPACE", str(tmp_path / "other"))
+        assert sandbox_settings_status(config, workspace)["revision"] != result["revision"]
     # The same resolver and backend must work for actual command execution.
     tool = ExecTool(working_dir=str(tmp_path), sandbox=backend, sandbox_launcher=result["launcher"])
     assert "actual-command" in await tool.execute(command="printf actual-command")
+
+
+async def test_missing_environment_launcher_does_not_fall_back_or_launch(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("SANDBOX_TEST_MISSING_LAUNCHER", raising=False)
+
+    async def unexpected(*args, **kwargs):
+        pytest.fail("unresolved launcher must not start a process")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", unexpected)
+    config = ExecToolConfig(sandbox="bwrap", sandbox_launcher="${SANDBOX_TEST_MISSING_LAUNCHER}")
+    status = await check_sandbox(config, tmp_path)
+    assert status["state"] == "unavailable"
+    assert status["reason"] == "path_unavailable"
+    assert status["launcher"] is None
 
 
 def test_probe_revision_changes_when_saved_policy_changes(tmp_path):
@@ -170,9 +199,9 @@ async def test_probe_reaps_its_process_on_timeout_or_request_cancellation(tmp_pa
         process.returncode = -9
         exited.set()
 
-    monkeypatch.setattr("nanobot.agent.tools.sandbox_check.sandbox_settings_status", lambda *_: {
+    monkeypatch.setattr("nanobot.agent.tools.sandbox_check._prepare_settings", lambda config, workspace: (config, workspace, {
         "state": "unchecked", "reason": "", "launcher": "/test/launcher", "revision": "test", "supported_backend": "bwrap",
-    })
+    }))
     monkeypatch.setattr("nanobot.agent.tools.sandbox_check.resolve_sandbox_launcher", lambda *_args, **_kwargs: "/test/launcher")
     monkeypatch.setattr("nanobot.agent.tools.sandbox_check._PROBE_TIMEOUT_S", 0.01)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)

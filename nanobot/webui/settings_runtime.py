@@ -8,6 +8,8 @@ from typing import Any, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from nanobot.config.errors import ConfigLoadError
+from nanobot.config.loader import resolve_config_env_vars
 from nanobot.config.schema import Config
 from nanobot.security.network import is_loopback_host
 from nanobot.webui.settings_contracts import WebUISettingsError
@@ -160,10 +162,14 @@ def update_runtime_config(
         )
 
         try:
+            exec_config = resolve_config_env_vars(validated.tools.exec)
+            workspace = Path(resolve_config_env_vars(str(validated.workspace_path))).expanduser()
             resolve_sandbox_launcher(
-                validated.tools.exec.sandbox, validated.tools.exec.sandbox_launcher,
-                writable_roots=(validated.workspace_path, *map(Path, validated.tools.exec.sandbox_rw_binds)),
+                exec_config.sandbox, exec_config.sandbox_launcher,
+                writable_roots=(workspace, *map(Path, exec_config.sandbox_rw_binds)),
             )
+        except ConfigLoadError:
+            raise WebUISettingsError("sandbox_launcher_path_unavailable") from None
         except SandboxLauncherError as exc:
             raise WebUISettingsError(f"sandbox_launcher_{exc.reason}") from None
     if "tools.ssrf_whitelist" in values:
