@@ -3,6 +3,7 @@
 import asyncio
 import os
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -104,11 +105,30 @@ async def test_unsupported_platform_reports_no_isolation_without_running(tmp_pat
 async def test_native_probe_checks_isolation_without_touching_workspace(tmp_path):
     backend = "seatbelt" if sys.platform == "darwin" else "bwrap"
     config = ExecToolConfig(sandbox=backend)
-    if sandbox_settings_status(config, tmp_path)["state"] == "unavailable":
+    status = sandbox_settings_status(config, tmp_path)
+    if status["state"] == "unavailable":
         pytest.skip("native sandbox launcher is not installed")
     original = tmp_path / "keep.txt"
     original.write_text("user data")
     result = await check_sandbox(config, tmp_path)
+    if backend == "bwrap":
+        # An installed launcher is not proof that the host permits namespaces.
+        # Establish this independently of nanobot's wrapper and probe. In that
+        # environment, detection must report failure and execution stay closed.
+        baseline = subprocess.run(
+            [status["launcher"], "--ro-bind", "/", "/", "--", "/bin/true"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if baseline.returncode:
+            assert "namespace" in baseline.stderr.lower(), baseline.stderr
+            assert any(word in baseline.stderr.lower() for word in ("permission denied", "not permitted")), baseline.stderr
+            assert result["state"] == "unavailable"
+            assert result["reason"] == "probe_failed"
+            tool = ExecTool(working_dir=str(tmp_path), sandbox=backend)
+            await tool.execute(command="printf unconfined > command-ran")
+            assert not (tmp_path / "command-ran").exists()
+            assert original.read_text() == "user data"
+            return
     assert result["state"] == "passed", result
     assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.txt"]
     assert original.read_text() == "user data"
