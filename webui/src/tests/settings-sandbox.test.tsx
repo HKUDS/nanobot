@@ -94,6 +94,16 @@ describe("Saved sandbox settings", () => {
     expect(screen.queryByRole("button", { name: "Check sandbox" })).not.toBeInTheDocument();
   });
 
+  it("does not tell an unsupported host with isolation off to choose a sandbox", () => {
+    const settings = payload();
+    settings.runtime_config!["tools.exec.sandbox"] = "";
+    settings.advanced.exec_sandbox_status = { ...settings.advanced.exec_sandbox_status!, state: "off", reason: "", supported_backend: null };
+    renderSettingsView({ initialSection: "advanced", initialSettings: settings, webuiCapabilities: capability });
+    expect(screen.getByText("This isolation method is not supported on the gateway’s operating system.")).toBeVisible();
+    expect(screen.queryByText(/Choose an isolation method/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Check sandbox" })).not.toBeInTheDocument();
+  });
+
   it("ignores a completed probe from the previously selected host", async () => {
     let finish!: (response: unknown) => void;
     const first = { requestMutation: vi.fn(() => new Promise((resolve) => { finish = resolve; })) } as unknown as NanobotClient;
