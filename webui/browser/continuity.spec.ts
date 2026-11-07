@@ -45,6 +45,8 @@ for (const name of ["Conversation actions", "Quick note"]) {
     const box = (await surface.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(width);
+    // Exercise Escape after the first interactive paint, not before Radix's layer effect.
+    await surface.evaluate(() => new Promise(requestAnimationFrame));
     if (name === "Quick note") await page.getByRole("textbox", { name: "Quick note draft" }).press("Escape");
     else await surface.press("Escape");
     await expect(surface).toBeHidden();
@@ -123,6 +125,7 @@ test("reduced motion keeps the same controls without travel or delayed teardown"
     await expect(surface).toHaveCSS("pointer-events", "auto");
     if (name === "Quick note") await expect(page.getByRole("textbox", { name: "Quick note draft" })).toBeFocused();
     else await expect(surface).toBeFocused();
+    await surface.evaluate(() => new Promise(requestAnimationFrame));
     if (name === "Quick note") await page.getByRole("textbox", { name: "Quick note draft" }).press("Escape");
     else await surface.press("Escape");
     await expect(surface).toBeHidden();
