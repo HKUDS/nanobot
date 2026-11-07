@@ -100,6 +100,75 @@ class TestActiveTaskTracking:
 
         assert "test:c1" not in loop._active_tasks
 
+    @pytest.mark.asyncio
+    async def test_successful_task_does_not_log(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        release = asyncio.Event()
+        task = asyncio.create_task(release.wait())
+
+        loop._track_active_task("test:c1", task)
+        release.set()
+        await task
+        await asyncio.sleep(0)
+
+        mock_logger.opt.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failed_task_is_retrieved_and_logged(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        failure = RuntimeError("session worker failure")
+        loop_errors: list[dict[str, object]] = []
+        event_loop = asyncio.get_running_loop()
+        previous_handler = event_loop.get_exception_handler()
+        event_loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+
+        async def fail():
+            raise failure
+
+        try:
+            task = asyncio.create_task(fail())
+            loop._track_active_task("test:c1", task)
+            with pytest.raises(RuntimeError):
+                await task
+            await asyncio.sleep(0)
+        finally:
+            event_loop.set_exception_handler(previous_handler)
+
+        assert "test:c1" not in loop._active_tasks
+        assert not loop_errors
+        mock_logger.opt.assert_called_once_with(exception=failure)
+        mock_logger.opt.return_value.error.assert_called_once_with(
+            "Session worker task for '{}' failed",
+            "test:c1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelled_task_is_removed_without_error(self, monkeypatch):
+        loop, _bus = _make_loop()
+        mock_logger = MagicMock()
+        monkeypatch.setattr("nanobot.agent.loop.logger", mock_logger)
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def wait_forever():
+            started.set()
+            await release.wait()
+
+        task = asyncio.create_task(wait_forever())
+        loop._track_active_task("test:c1", task)
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+
+        assert "test:c1" not in loop._active_tasks
+        mock_logger.opt.assert_not_called()
+
 
 async def _wait_for_background_callbacks(loop) -> None:
     for _ in range(10):
