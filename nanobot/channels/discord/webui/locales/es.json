@@ -45,6 +45,13 @@
           "false": "Apagado"
         }
       },
+      "silentProgress": {
+        "label": "Progreso silencioso",
+        "choices": {
+          "true": "encendido",
+          "false": "Apagado"
+        }
+      },
       "replyToMessage": {
         "label": "Responder al mensaje",
         "choices": {
