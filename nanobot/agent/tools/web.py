@@ -62,6 +62,7 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "brave", "label": "Brave Search", "credential": "api_key"},
     {"name": "tavily", "label": "Tavily", "credential": "api_key"},
     {"name": "searxng", "label": "SearXNG", "credential": "base_url"},
+    {"name": "google_browser_scraper", "label": "Google Browser Scraper", "credential": "base_url"},
     {"name": "jina", "label": "Jina", "credential": "api_key"},
     {"name": "kagi", "label": "Kagi", "credential": "api_key"},
     {"name": "exa", "label": "Exa", "credential": "api_key"},
@@ -444,6 +445,9 @@ class WebSearchTool(Tool):
         if provider == "searxng":
             base_url = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
             return "searxng" if base_url else "duckduckgo"
+        if provider == "google_browser_scraper":
+            base_url = (self.config.base_url or os.environ.get("GBS_BASE_URL", "")).strip()
+            return "google_browser_scraper" if base_url else "duckduckgo"
         if provider == "jina":
             api_key = self.config.api_key or os.environ.get("JINA_API_KEY", "")
             return "jina" if api_key else "duckduckgo"
@@ -481,8 +485,9 @@ class WebSearchTool(Tool):
 
     @property
     def exclusive(self) -> bool:
-        """DuckDuckGo searches are serialized because ddgs is not concurrency-safe."""
-        return self._effective_provider() == "duckduckgo"
+        """DuckDuckGo searches are serialized because ddgs is not concurrency-safe, and
+        google-browser-scraper's because its server runs one browser search at a time."""
+        return self._effective_provider() in ("duckduckgo", "google_browser_scraper")
 
     async def execute(
         self,
@@ -513,6 +518,8 @@ class WebSearchTool(Tool):
             return await self._search_tavily(query, n)
         elif provider == "searxng":
             return await self._search_searxng(query, n)
+        elif provider == "google_browser_scraper":
+            return await self._search_google_browser_scraper(query, n)
         elif provider == "jina":
             return await self._search_jina(query, n)
         elif provider == "brave":
@@ -719,6 +726,63 @@ class WebSearchTool(Tool):
             return _format_results(query, r.json().get("results", []), n)
         except Exception as e:
             return ToolResult.error(f"Error: {e}")
+
+    async def _search_google_browser_scraper(self, query: str, n: int) -> str:
+        """Search Google through a self-hosted google-browser-scraper server.
+
+        `google-browser-scraper serve` runs each query in a real browser through the
+        user's own proxy and answers SerpApi-style JSON. A blocked page (captcha,
+        refused exit) comes back as HTTP 200 with an error status and is reported
+        as an error, not as an empty result.
+        """
+        base_url = (self.config.base_url or os.environ.get("GBS_BASE_URL", "")).strip()
+        if not base_url:
+            logger.warning("GBS_BASE_URL not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        endpoint = f"{base_url.rstrip('/')}/search.json"
+        is_valid, error_msg = _validate_url(endpoint)
+        if not is_valid:
+            return ToolResult.error(f"Error: invalid google-browser-scraper URL: {error_msg}")
+        headers = {"User-Agent": self.user_agent}
+        api_key = self.config.api_key or os.environ.get("GBS_API_KEY", "")
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        try:
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.get(
+                    endpoint,
+                    params={"q": query},
+                    headers=headers,
+                    timeout=float(self.config.timeout),
+                )
+                r.raise_for_status()
+            data = cast(object, r.json())
+        except httpx.HTTPStatusError as e:
+            return ToolResult.error(
+                f"Error: google-browser-scraper search failed ({e.response.status_code})"
+            )
+        except Exception as e:
+            return ToolResult.error(f"Error: google-browser-scraper search failed: {e}")
+        if not isinstance(data, dict):
+            return ToolResult.error("Error: google-browser-scraper returned an unexpected body")
+        record = cast(dict[str, Any], data)
+        meta = cast(dict[str, Any], record.get("search_metadata") or {})
+        if meta.get("status") != "Success":
+            verdict = meta.get("page_verdict") or "error"
+            return ToolResult.error(f"Error: google-browser-scraper got no results page ({verdict})")
+        organic = cast(list[object], record.get("organic_results") or [])
+        items: list[dict[str, Any]] = [
+            {
+                "title": result.get("title", ""),
+                "url": result["link"],
+                "content": result.get("snippet", ""),
+            }
+            for result_value in organic
+            if isinstance(result_value, dict)
+            for result in (cast(dict[str, Any], result_value),)
+            if result.get("link")
+        ]
+        return _format_results(query, items, n)
 
     async def _search_jina(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("JINA_API_KEY", "")
