@@ -47,6 +47,7 @@ import { DisplayMathFixture } from "./display-math-fixture";
 import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
 import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
 import { AppearanceFixture } from "./appearance-fixture";
+import { ContinuityFixture } from "./continuity-fixture";
 import { installSubagentDockApi, SubagentDockFixture } from "./subagent-dock-fixture";
 
 const history: UIMessage[] = [
@@ -226,7 +227,9 @@ if (parameters.get("case") === "appearance" && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "appearance"
+  {parameters.get("case") === "continuity"
+    ? <ContinuityFixture />
+    : parameters.get("case") === "appearance"
     ? <AppearanceFixture />
     : parameters.get("case") === "loaded-session-search"
     ? <LoadedSessionSearchFixture />

@@ -104,7 +104,11 @@ export function ReadingSettings({ preferences, onChange }: {
                         if (!commitDraft()) event.preventDefault();
                       }}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter") event.currentTarget.blur();
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          // Keep an invalid edit focused so hover/blur dismissal cannot hide its feedback.
+                          if (commitDraft()) event.currentTarget.blur();
+                        }
                         if (event.key === "Escape") {
                           event.preventDefault();
                           event.stopPropagation();

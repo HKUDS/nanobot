@@ -40,6 +40,7 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
               <span className="appearance-theme-miniature" data-mode={value} aria-hidden>
                 <span className="appearance-mini-sidebar"><span /><span /><span /></span>
                 <span className="appearance-mini-main"><span /><span /><span /><span /></span>
+                <span className="appearance-mini-sky"><Sun /><Moon /></span>
               </span>
               <span className="appearance-theme-label text-ui-label">
                 <span className="flex min-w-0 items-center gap-1.5"><Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /><span>{label}</span></span>

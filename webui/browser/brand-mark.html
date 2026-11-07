@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>nanobot · 昼夜小猫对比</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 48px 24px; color: #262626; background: #f4f3f0; font-family: system-ui, sans-serif; }
+      main { max-width: 760px; margin: auto; }
+      h1 { margin: 0 0 12px; font-size: 28px; font-weight: 600; }
+      p { margin: 0 0 28px; color: #666; line-height: 1.6; }
+      .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+      figure { margin: 0; padding: 36px 24px 24px; border-radius: 24px; text-align: center; background: white; }
+      .night { color: #eee; background: #303030; }
+      .large { display: block; width: 144px; height: 144px; margin: 0 auto 28px; object-fit: contain; }
+      figcaption { font-size: 17px; font-weight: 500; }
+      .actual { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 32px; font-size: 12px; opacity: 0.75; }
+      .actual img { width: 32px; height: 32px; object-fit: contain; }
+      footer { margin-top: 22px; color: #777; font-size: 12px; line-height: 1.6; }
+      @media (max-width: 500px) { body { padding: 28px 16px; } .pair { gap: 12px; } figure { padding: 28px 12px 20px; } .large { width: 104px; height: 104px; } .actual { flex-direction: column; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>同一只小猫，陪你从白天到夜晚。</h1>
+      <p>白天还是熟悉的橘猫，夜晚戴上小睡帽，安静陪着你。</p>
+      <div class="pair">
+        <figure><img class="large" src="/brand/nanobot_mark.svg" alt="原版睁眼橘猫" /><figcaption>白天 · 原版</figcaption><div class="actual"><img src="/brand/nanobot_mark.svg" alt="" /><span>侧栏实际大小 · 32px</span></div></figure>
+        <figure class="night"><img class="large" src="/brand/nanobot_mark_night.svg" alt="戴睡帽的夜间橘猫" /><figcaption>夜晚 · 小睡帽</figcaption><div class="actual"><img src="/brand/nanobot_mark_night.svg" alt="" /><span>侧栏实际大小 · 32px</span></div></figure>
+      </div>
+      <footer>图形对比预览。实际侧栏跟随应用深浅主题，不代表 Agent 停止运行；Dock、favicon 和原版素材均未改变。</footer>
+    </main>
+  </body>
+</html>
