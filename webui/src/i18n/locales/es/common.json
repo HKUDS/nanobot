@@ -491,7 +491,7 @@
       "checkError": "No se pudo completar la prueba. Abre los ajustes de nuevo y reinténtalo.",
       "saveError": "No se pudo guardar. El borrador se conserva; vuelve a intentarlo.",
       "disableTitle": "¿Desactivar el aislamiento?",
-      "disableHelp": "Tras reiniciar, los comandos usarán los permisos de la cuenta de la puerta de enlace. No cambia los permisos de las herramientas de archivos.",
+      "disableHelp": "Tras reiniciar, los comandos usarán los permisos de la cuenta de la puerta de enlace. Las herramientas de archivos también perderán la restricción de espacio de trabajo de este sandbox; las restricciones independientes se mantienen.",
       "keep": "Mantener aislamiento",
       "disable": "Desactivar aislamiento",
       "states": {

@@ -491,7 +491,7 @@
       "checkError": "Pemeriksaan gagal. Buka ulang pengaturan dan coba lagi.",
       "saveError": "Gagal menyimpan. Draf tetap tersimpan; coba lagi.",
       "disableTitle": "Nonaktifkan isolasi perintah?",
-      "disableHelp": "Setelah mulai ulang, perintah berjalan dengan izin akun gateway. Izin alat berkas tidak berubah.",
+      "disableHelp": "Setelah mulai ulang, perintah berjalan dengan izin akun gateway. Alat berkas juga kehilangan pembatasan ruang kerja dari sandbox ini; pembatasan yang diatur terpisah tetap berlaku.",
       "keep": "Pertahankan isolasi",
       "disable": "Nonaktifkan isolasi",
       "states": {

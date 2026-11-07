@@ -491,7 +491,7 @@
       "checkError": "La vérification a échoué. Rouvrez les paramètres et réessayez.",
       "saveError": "Enregistrement impossible. Le brouillon est conservé ; réessayez.",
       "disableTitle": "Désactiver l’isolation ?",
-      "disableHelp": "Après redémarrage, les commandes utiliseront les droits du compte de la passerelle. Les droits des outils de fichiers ne changent pas.",
+      "disableHelp": "Après redémarrage, les commandes utiliseront les droits du compte de la passerelle. Les outils de fichiers perdront aussi la restriction d’espace de travail fournie par ce bac à sable ; les restrictions indépendantes restent actives.",
       "keep": "Garder l’isolation",
       "disable": "Désactiver l’isolation",
       "states": {
