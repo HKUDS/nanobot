@@ -407,7 +407,7 @@ function AuthForm({
           aria-labelledby="webui-auth-title"
           className="w-full max-w-xs"
         >
-          <div className="brand-atmosphere text-center">
+          <div className="text-center">
             <img
               src="/brand/nanobot_mark.svg"
               alt=""

@@ -1471,7 +1471,7 @@ export function ThreadShell({
   const emptyState = initialHistoryLoading ? (
     <ThreadLoadingSkeleton />
   ) : (
-    <div className="brand-atmosphere brand-atmosphere-welcome flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
+    <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
       <HeroGreeting text={t(heroGreetingKey)} />
     </div>
   );
