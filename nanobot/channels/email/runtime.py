@@ -1230,6 +1230,10 @@ class EmailChannel(BaseChannel):
     def _reply_subject(self, base_subject: str) -> str:
         subject = (base_subject or "").strip() or "nanobot reply"
         prefix = self.config.subject_prefix or "Re: "
-        if subject.lower().startswith("re:"):
+        folded_subject = subject.casefold()
+        configured_prefix = prefix.strip().casefold()
+        if folded_subject.startswith("re:") or (
+            configured_prefix and folded_subject.startswith(configured_prefix)
+        ):
             return subject
         return f"{prefix}{subject}"
