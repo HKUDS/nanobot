@@ -1,4 +1,4 @@
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion, type EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { ProviderParameterFields } from "@/components/settings/models/ProviderParameterFields";
 import { providerJsonValue } from "@/components/settings/models/providerForm";
 import type { Dispatch, SetStateAction, ReactNode } from "react";
@@ -48,6 +48,7 @@ export function imageGenerationFormFromPayload(payload: SettingsPayload): ImageG
 
 export function ImageGenerationSettings({
   embedded = false,
+  editCompletion,
   error,
   children,
   token,
@@ -65,6 +66,7 @@ export function ImageGenerationSettings({
   requiresRestartPending,
 }: {
   embedded?: boolean;
+  editCompletion?: EditCompletion;
   error?: string;
   children?: ReactNode;
   token: string;
@@ -87,7 +89,8 @@ export function ImageGenerationSettings({
     settings.image_generation.providers.find((provider) => provider.name === form.provider);
   const providerConfigured = !!selectedProvider?.configured;
   const missingCredential = form.enabled && !providerConfigured;
-  useAutoSave(form, dirty, saving, onSave, !embedded && !missingCredential);
+  const localEdits = useEditCompletion(form, dirty, onSave, !editCompletion && !missingCredential);
+  const edits = editCompletion ?? localEdits;
   const aspectOptions = optionRowsWithCurrent(
     IMAGE_ASPECT_RATIO_OPTIONS.map((value) => ({ name: value, label: value })),
     form.defaultAspectRatio,
@@ -97,6 +100,7 @@ export function ImageGenerationSettings({
     form.defaultImageSize,
   );
   const selectProvider = (provider: string) => {
+    edits.complete();
     const nextProvider = settings.image_generation.providers.find((row) => row.name === provider);
     onChangeForm((prev) => ({
       ...prev,
@@ -108,7 +112,7 @@ export function ImageGenerationSettings({
   };
 
   return (
-    <div className="settings-stack">
+    <div className="settings-stack" onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture} onBlurCapture={edits.onBlurCapture}>
       <section>
         {!embedded ? <SettingsSectionTitle>{tx("settings.sections.imageGeneration", "Image generation")}</SettingsSectionTitle> : null}
         <SettingsGroup>
@@ -116,7 +120,7 @@ export function ImageGenerationSettings({
           <SettingsRow title={tx("settings.rows.imageGeneration", "Image generation")}>
             <ToggleButton
               checked={form.enabled}
-              onChange={(enabled) => onChangeForm((prev) => ({ ...prev, enabled }))}
+              onChange={(enabled) => { edits.complete(); onChangeForm((prev) => ({ ...prev, enabled })); }}
               ariaLabel={tx("settings.rows.imageGeneration", "Image generation")}
               label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
@@ -172,7 +176,7 @@ export function ImageGenerationSettings({
                 "settings.image.typeModelId",
                 "Type the model ID supported by this provider.",
               )}
-              onChange={(model) => onChangeForm((prev) => ({ ...prev, model }))}
+              onChange={(model) => { edits.complete(); onChangeForm((prev) => ({ ...prev, model })); }}
             />
           </SettingsRow>
           <SettingsRow title={tx("settings.rows.defaultAspectRatio", "Default aspect ratio")}>
@@ -180,9 +184,10 @@ export function ImageGenerationSettings({
               providers={aspectOptions}
               value={form.defaultAspectRatio}
               emptyLabel={tx("settings.image.selectAspect", "Select aspect")}
-              onChange={(defaultAspectRatio) =>
-                onChangeForm((prev) => ({ ...prev, defaultAspectRatio }))
-              }
+              onChange={(defaultAspectRatio) => {
+                edits.complete();
+                onChangeForm((prev) => ({ ...prev, defaultAspectRatio }));
+              }}
             />
           </SettingsRow>
           <SettingsRow title={tx("settings.rows.defaultImageSize", "Default size")}>
@@ -190,9 +195,10 @@ export function ImageGenerationSettings({
               providers={sizeOptions}
               value={form.defaultImageSize}
               emptyLabel={tx("settings.image.selectSize", "Select size")}
-              onChange={(defaultImageSize) =>
-                onChangeForm((prev) => ({ ...prev, defaultImageSize }))
-              }
+              onChange={(defaultImageSize) => {
+                edits.complete();
+                onChangeForm((prev) => ({ ...prev, defaultImageSize }));
+              }}
             />
           </SettingsRow>
           <SettingsAdvancedOptions>

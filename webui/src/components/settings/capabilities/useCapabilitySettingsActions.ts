@@ -1,9 +1,9 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import type { TFunction } from "i18next";
 
 import {
   webSearchProviderAcceptsApiKey,
-  webSearchProviderRequiresApiKey,
+  webSearchDraftState,
 } from "@/components/settings/capabilities/WebSettings";
 import type { CapabilitySettingsState } from "@/components/settings/capabilities/useCapabilitySettingsState";
 import type {
@@ -32,9 +32,6 @@ interface CapabilitySettingsActionsOptions {
   maybeRestartHostEngine: MaybeRestartHostEngine;
   setPendingRestartSections: Dispatch<SetStateAction<PendingRestartSections>>;
   installCapabilities: (names: string[]) => Promise<boolean>;
-  imageGenerationDirty: boolean;
-  transcriptionDirty: boolean;
-  networkSafetyDirty: boolean;
 }
 
 export function useCapabilitySettingsActions({
@@ -46,15 +43,10 @@ export function useCapabilitySettingsActions({
   maybeRestartHostEngine,
   setPendingRestartSections,
   installCapabilities,
-  imageGenerationDirty,
-  transcriptionDirty,
-  networkSafetyDirty,
 }: CapabilitySettingsActionsOptions) {
   const {
     imageGenerationForm,
-    imageGenerationSaving,
     networkSafetyForm,
-    networkSafetySaving,
     setImageGenerationSaving,
     setNetworkSafetySaving,
     setTranscriptionSaving,
@@ -63,11 +55,11 @@ export function useCapabilitySettingsActions({
     setWebSearchKeyVisible,
     setWebSearchSaving,
     transcriptionForm,
-    transcriptionSaving,
     webSearchForm,
     webSearchKeyEditing,
-    webSearchSaving,
   } = state;
+  const latestWebSearchForm = useRef(webSearchForm);
+  latestWebSearchForm.current = webSearchForm;
   const setError = (section: "image" | "voice" | "web" | "safety", message?: string) =>
     state.setCapabilityErrors((prev) => ({ ...prev, [section]: message }));
 
@@ -76,8 +68,8 @@ export function useCapabilitySettingsActions({
     setImageGenerationSaving(true);
     try {
       const payload = await updateImageGenerationSettings(client, values);
-      applyPayload(payload, { preserveCapabilityForms: true });
-      state.setImageGenerationForm(imageGenerationFormFromPayload(payload));
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      state.setImageGenerationForm((current) => current === imageGenerationForm ? imageGenerationFormFromPayload(payload) : current);
       if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
@@ -92,81 +84,78 @@ export function useCapabilitySettingsActions({
     persistImageSettings({ ...imageGenerationForm, ...values });
 
   const saveImageGenerationSettings = async () => {
-    if (!settings || !imageGenerationDirty || imageGenerationSaving) return;
+    if (!settings || !Number.isFinite(imageGenerationForm.maxImagesPerTurn)) return false;
     if (imageGenerationForm.enabled && !settings.image_generation.providers.find(
       (provider) => provider.name === imageGenerationForm.provider,
-    )?.configured) return;
+    )?.configured) return false;
     try {
       await persistImageSettings(imageGenerationForm);
+      return true;
     } catch (err) {
       const message = (err as Error).message;
       setError("image", message === "image generation provider is not configured"
         ? t("settings.image.missingCredential") : message);
+      return false;
     }
   };
 
   const saveTranscriptionSettings = async () => {
-    if (!settings || !transcriptionDirty || transcriptionSaving) return;
+    if (!settings || !Number.isFinite(transcriptionForm.maxDurationSec) || !Number.isFinite(transcriptionForm.maxUploadMb)) return false;
     setError("voice");
     setTranscriptionSaving(true);
     try {
       const payload = await updateTranscriptionSettings(client, transcriptionForm);
-      applyPayload(payload, { preserveCapabilityForms: true });
-      state.setTranscriptionForm(transcriptionFormFromPayload(payload));
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      state.setTranscriptionForm((current) => current === transcriptionForm ? transcriptionFormFromPayload(payload) : current);
       if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
       await maybeRestartHostEngine(payload);
       setError("voice");
+      return true;
     } catch (err) {
       setError("voice", (err as Error).message);
+      return false;
     } finally {
       setTranscriptionSaving(false);
     }
   };
 
   const saveNetworkSafetySettings = async () => {
-    if (!settings || !networkSafetyDirty || networkSafetySaving) return;
+    if (!settings) return false;
     setError("safety");
     setNetworkSafetySaving(true);
     try {
       const payload = await updateNetworkSafetySettings(client, networkSafetyForm);
-      applyPayload(payload, { preserveCapabilityForms: true });
-      state.setNetworkSafetyForm(networkSafetyFormFromPayload(payload));
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      state.setNetworkSafetyForm((current) => current === networkSafetyForm ? networkSafetyFormFromPayload(payload) : current);
       if (!payload.restart_required_sections && payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
       }
       await maybeRestartHostEngine(payload);
       setError("safety");
+      return true;
     } catch (err) {
       setError("safety", (err as Error).message);
+      return false;
     } finally {
       setNetworkSafetySaving(false);
     }
   };
 
   const saveWebSearch = async () => {
-    if (!settings || webSearchSaving) return;
+    if (!settings || !Number.isFinite(webSearchForm.maxResults ?? settings.web_search.max_results) ||
+      !Number.isFinite(webSearchForm.timeout ?? settings.web_search.timeout)) return false;
     const provider = settings.web_search.providers.find((item) => item.name === webSearchForm.provider);
-    if (!provider) return;
+    if (!provider) return false;
     const apiKey = webSearchForm.apiKey?.trim() ?? "";
     const baseUrl = webSearchForm.baseUrl?.trim() ?? "";
-    const hasExistingSecret =
-      webSearchProviderAcceptsApiKey(provider) &&
-      webSearchForm.provider === settings.web_search.provider &&
-      !!settings.web_search.api_key_hint;
-
-    if (webSearchProviderRequiresApiKey(provider) && !apiKey && !hasExistingSecret) {
-      return;
-    }
-    if (provider.credential === "base_url" && !baseUrl) {
-      return;
-    }
+    if (webSearchDraftState(settings, webSearchForm).missingCredential) return false;
 
     setError("web");
     setWebSearchSaving(true);
     try {
-      if (provider.name === "olostep" && !(await installCapabilities(["olostep"]))) return;
+      if (provider.name === "olostep" && !(await installCapabilities(["olostep"]))) return false;
       const webFetchRestartRequired =
         (webSearchForm.useJinaReader ?? settings.web.fetch.use_jina_reader) !==
         settings.web.fetch.use_jina_reader;
@@ -184,12 +173,12 @@ export function useCapabilitySettingsActions({
       }
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
       const payload = await updateWebSearchSettings(client, update);
-      applyPayload(payload, { preserveCapabilityForms: true });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       if (!payload.restart_required_sections && (payload.requires_restart || webFetchRestartRequired)) {
         setPendingRestartSections((prev) => ({ ...prev, browser: true }));
       }
       await maybeRestartHostEngine(payload);
-      setWebSearchForm((prev) => ({
+      setWebSearchForm((prev) => prev !== webSearchForm ? prev : ({
         provider: payload.web_search.provider,
         apiKey: "",
         baseUrl: payload.web_search.base_url ?? prev.baseUrl ?? "",
@@ -197,11 +186,15 @@ export function useCapabilitySettingsActions({
         timeout: payload.web_search.timeout,
         useJinaReader: payload.web.fetch.use_jina_reader,
       }));
-      setWebSearchKeyVisible(false);
-      setWebSearchKeyEditing(false);
+      if (latestWebSearchForm.current === webSearchForm) {
+        setWebSearchKeyVisible(false);
+        setWebSearchKeyEditing(false);
+      }
       setError("web");
+      return true;
     } catch (err) {
       setError("web", (err as Error).message);
+      return false;
     } finally {
       setWebSearchSaving(false);
     }

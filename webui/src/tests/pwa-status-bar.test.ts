@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import postcss, { type Rule } from "postcss";
+import postcss, { type Document, type Rule } from "postcss";
 import { describe, expect, it } from "vitest";
 
 const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
@@ -38,7 +38,7 @@ describe("iOS standalone status-bar surface", () => {
     const enabled = rules.filter((rule) => declarations(rule).display === "block");
     expect(enabled).toHaveLength(1);
     const conditions: Record<string, string> = {};
-    for (let parent = enabled[0].parent; parent; parent = parent.parent) {
+    for (let parent: Rule["parent"] | Document = enabled[0].parent; parent; parent = parent.parent) {
       if (parent.type === "atrule" && "name" in parent) conditions[parent.name] = parent.params;
     }
     expect(conditions.media).toBe("(display-mode: standalone)");

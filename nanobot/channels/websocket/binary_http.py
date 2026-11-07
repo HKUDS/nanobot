@@ -25,8 +25,8 @@ class BinaryHTTPBridge:
     """Own HTTP connections alongside a websockets ``serve`` instance.
 
     Pass ``connection_factory`` as ``create_connection`` to serve/unix_serve.
-    After closing the listening server, await ``shutdown`` before disposing the
-    upload store. Request decompression is deliberately disabled: declared body
+    After closing the listener, await ``shutdown`` before ``server.wait_closed``
+    and disposing the upload store. Request decompression is deliberately disabled: declared body
     lengths must measure the exact bytes the upload store writes.
     """
 

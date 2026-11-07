@@ -1,17 +1,14 @@
 import { useTranslation } from "react-i18next";
 
-/** Quiet layout placeholders while the authenticated application starts. */
-export function StartupShell({ embedded = false }: { embedded?: boolean }) {
+import { readStartupLayout, StartupSkeleton, type StartupSurface } from "./StartupSkeleton";
+
+export function StartupShell({ embedded = false, surface, sidebarExpanded }: {
+  embedded?: boolean;
+  surface?: StartupSurface;
+  sidebarExpanded?: boolean;
+}) {
   const { t } = useTranslation();
-  const Root = embedded ? "section" : "main";
-  return (
-    <Root className="startup-shell" aria-busy="true">
-      <div className="startup-header" aria-hidden="true">
-        <span className="startup-control-shadow" />
-        <span className="startup-control-shadow" />
-      </div>
-      <div className="startup-composer" aria-hidden="true" />
-      <span className="startup-status" role="status">{t("app.loading.connecting")}</span>
-    </Root>
-  );
+  const layout = readStartupLayout();
+  return <StartupSkeleton {...layout} embedded={embedded} surface={surface ?? layout.surface}
+    sidebarExpanded={sidebarExpanded ?? layout.sidebarExpanded} label={t("app.loading.boot")} />;
 }

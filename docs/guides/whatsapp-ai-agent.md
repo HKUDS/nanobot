@@ -2,6 +2,9 @@
 
 This guide connects nanobot to WhatsApp through the `whatsapp` channel. The channel links as a WhatsApp device and uses the same nanobot agent runtime, tools, memory, and workspace as the CLI and WebUI.
 
+> [!NOTE]
+> WhatsApp also offers an official Agent Platform where the agent appears as its own chat and talks only to you. That is a separate channel with different tradeoffs — no group support, no end-to-end encryption, and limited country availability, but an officially supported interface that does not rely on a linked device. See [Connect nanobot to WhatsApp Agent Platform](./whatsapp-agent-platform.md) to compare them.
+
 ## What this guide builds
 
 - WhatsApp optional dependencies installed
@@ -94,6 +97,7 @@ Send the message again after approval. Confirm that your private chat now receiv
 
 ## Troubleshooting
 
+- If WhatsApp cannot load `libmagic`, install it with `brew install libmagic` on macOS or `sudo apt install libmagic1` on Debian/Ubuntu. On Windows, check the `python-magic-bin` installation and Python architecture.
 - If QR linking fails, rerun `nanobot channels login whatsapp`.
 - If you are migrating from the old bridge, remove `bridgeUrl` and `bridgeToken`, then re-login.
 - If a sender appears as a LID instead of a phone number, let nanobot learn the mapping at runtime or use `lidMappings` in the full reference.

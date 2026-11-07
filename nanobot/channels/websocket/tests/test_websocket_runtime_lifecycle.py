@@ -8,6 +8,7 @@ import pytest
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel
+from nanobot.pairing.events import PairingChanged
 
 
 class _FakeSocket:
@@ -44,6 +45,7 @@ class _FakeServer:
 def _channel() -> WebSocketChannel:
     gateway = MagicMock()
     gateway.session_manager = None
+    gateway.transcripts.initialize = AsyncMock()
     gateway.http.settings_routes.close = AsyncMock()
     gateway.http.remote_instances.close = AsyncMock()
     return WebSocketChannel(
@@ -69,6 +71,8 @@ async def test_websocket_does_not_report_running_before_bind_succeeds(monkeypatc
 
     assert exc_info.value is bind_error
     assert channel.is_running is False
+    await channel.bus.publish(PairingChanged())
+    assert channel.bus.outbound_size == 0
     assert not any(
         call.args and call.args[0] == "WebSocket server listening on {}"
         for call in channel.logger.info.call_args_list
@@ -111,6 +115,10 @@ async def test_websocket_restarts_only_its_listener_after_serving_socket_is_lost
                 break
             await asyncio.sleep(0)
         assert channel.is_running is True
+        await channel.bus.publish(PairingChanged())
+        notification = await channel.bus.consume_outbound()
+        assert notification.channel == "websocket" and notification.chat_id == "*"
+        assert isinstance(notification.event, PairingChanged)
 
         first.socket.open = False
         for _ in range(50):
@@ -128,3 +136,5 @@ async def test_websocket_restarts_only_its_listener_after_serving_socket_is_lost
         await start_task
 
     assert second.closed is True
+    await channel.bus.publish(PairingChanged())
+    assert channel.bus.outbound_size == 0

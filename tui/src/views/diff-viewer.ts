@@ -24,6 +24,8 @@ export interface DiffViewerTheme {
   error: ColorInput
   addedBackground: ColorInput | null
   removedBackground: ColorInput | null
+  selectionBackground: ColorInput
+  selectionForeground: ColorInput
   syntax: SyntaxStyle
 }
 
@@ -94,7 +96,6 @@ function stat(edit: FileEditEvent): string {
   return `+${added} -${deleted}`
 }
 
-/** Full-screen, read-only projection of file-edit events owned by the session. */
 export class DiffViewer {
   readonly root: BoxRenderable
   private readonly header: TextRenderable
@@ -295,8 +296,8 @@ export class DiffViewer {
         removedLineNumberBg: this.theme.removedBackground || RGBA.defaultBackground(),
         addedSignColor: this.theme.success,
         removedSignColor: this.theme.error,
-        selectionBg: this.theme.border,
-        selectionFg: this.theme.text,
+        selectionBg: this.theme.selectionBackground,
+        selectionFg: this.theme.selectionForeground,
       }))
       if (edit.diff?.truncated) {
         this.scroll.add(this.text("… Diff truncated by the gateway; line counts may be larger.", "accent"))

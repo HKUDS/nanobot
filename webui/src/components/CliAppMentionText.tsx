@@ -10,7 +10,11 @@ import { logoFallbackUrls } from "@/lib/provider-brand";
 import { sessionHandleColor } from "@/lib/session-handle";
 import type { CliAppInfo, McpPresetInfo, SessionMention } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { composerMentionLabel, type CapabilityMentionSegment } from "@/lib/composer-mention-text";
+import {
+  composerMentionLabel,
+  isCapabilityMentionStart,
+  type CapabilityMentionSegment,
+} from "@/lib/composer-mention-text";
 
 // Paint-only weight keeps the native textarea's regular-width caret and wrapping in sync.
 const COMPOSER_BRAND_NAME_CLASS = "[-webkit-text-stroke:0.4px_currentColor]";
@@ -64,19 +68,19 @@ export function splitCapabilityMentionSegments(
   }
 
   const segments: CapabilityMentionSegment[] = [];
-  const mentionRe = /(^|[\s([{])@([\p{L}\p{N}_-]+)(?=$|[^\p{L}\p{N}_-])/giu;
+  const mentionRe = /@([\p{L}\p{N}_-]+)(?=$|[^\p{L}\p{N}_-])/giu;
   let cursor = 0;
   let match: RegExpExecArray | null;
   while ((match = mentionRe.exec(value)) !== null) {
-    const prefix = match[1] ?? "";
-    const name = match[2] ?? "";
+    if (!isCapabilityMentionStart(value, match.index)) continue;
+    const name = match[1] ?? "";
     const key = name.toLowerCase();
     const session = sessionsByName.get(key);
     const app = session ? null : cliAppsByName.get(key);
     const preset = session || app ? null : mcpPresetsByName.get(key);
     if (!app && !preset && !session) continue;
 
-    const mentionStart = match.index + prefix.length;
+    const mentionStart = match.index;
     const mentionEnd = mentionStart + name.length + 1;
     if (mentionStart > cursor) {
       segments.push({ kind: "text", text: value.slice(cursor, mentionStart) });
@@ -179,7 +183,6 @@ function CliAppMentionToken({
   isHero?: boolean;
 }) {
   const { t } = useTranslation();
-  const color = app.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const displayName = app.display_name?.trim() || app.name;
   const mentionName = variant === "message"
     ? displayName
@@ -195,7 +198,6 @@ function CliAppMentionToken({
       title={t("thread.composer.mentions.cliTitle", {
         name: variant === "message" ? `${displayName} (${label})` : displayName,
       })}
-      color={color}
       className={variant === "composer" ? "font-normal" : "inline-flex max-w-full items-baseline [overflow-wrap:anywhere]"}
     >
       <span
@@ -250,7 +252,6 @@ function McpPresetMentionToken({
   isHero?: boolean;
 }) {
   const { t } = useTranslation();
-  const color = preset.brand_color || INLINE_TOKEN_HIGHLIGHT_COLOR;
   const displayName = preset.display_name?.trim() || preset.name;
   const mentionName = variant === "message"
     ? displayName
@@ -266,7 +267,6 @@ function McpPresetMentionToken({
       title={t("thread.composer.mentions.mcpTitle", {
         name: variant === "message" ? `${displayName} (${label})` : displayName,
       })}
-      color={color}
       className={variant === "composer" ? "font-normal" : "inline-flex max-w-full items-baseline [overflow-wrap:anywhere]"}
     >
       <span

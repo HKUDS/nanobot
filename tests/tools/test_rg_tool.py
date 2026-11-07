@@ -1,5 +1,3 @@
-"""Registration and exec delegation for ripgrep."""
-
 import asyncio
 import os
 import re
@@ -181,8 +179,10 @@ async def test_direct_process_preserves_arguments_and_output_limit(tmp_path):
 async def test_direct_process_timeout(tmp_path):
     result = await ExecTool(working_dir=str(tmp_path)).execute(
         command=[sys.executable, "-c", "import time; time.sleep(20)"], timeout=1,
+        yield_time_ms=5000,
     )
-    assert "timed out after 1 seconds" in result
+    assert "Reason: max_runtime" in result
+    assert "Exit code:" in result
 
 
 async def test_direct_process_cancellation_reaps_child(tmp_path, monkeypatch):
@@ -211,11 +211,10 @@ async def test_direct_process_cancellation_reaps_child(tmp_path, monkeypatch):
 async def test_direct_search_uses_configured_path(tmp_path, monkeypatch):
     installed = shutil.which("rg")
     assert installed
-    bin_dir = tmp_path / "custom bin"
-    bin_dir.mkdir()
-    shutil.copy2(installed, bin_dir / ("rg.exe" if sys.platform == "win32" else "rg"))
+    # Keep installed launchers with their adjacent files (e.g. Scoop's .shim).
+    bin_dir = os.path.dirname(installed)
     monkeypatch.setenv("PATH", "")
-    result = await RgTool(working_dir=str(tmp_path), path_prepend=str(bin_dir)).execute(
+    result = await RgTool(working_dir=str(tmp_path), path_prepend=bin_dir).execute(
         args=["--version"],
     )
     assert "ripgrep" in result
@@ -224,12 +223,14 @@ async def test_direct_search_uses_configured_path(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
 def test_direct_search_preserves_sandbox_and_arguments(tmp_path, monkeypatch, backend):
+    trusted_bin = tmp_path / "trusted-bin"
     monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
+    monkeypatch.setattr("nanobot.agent.tools.shell.shutil.which", lambda name, **_kwargs: str(trusted_bin / os.path.basename(name)))
     args = ["rg", "-F", "hello | $HOME; 'world'", "."]
     prepared = RgTool(working_dir=str(tmp_path), sandbox=backend)._prepare_command(args)
     assert isinstance(prepared, _PreparedCommand)
     assert isinstance(prepared.command, list)
-    assert prepared.command[0] == ("bwrap" if backend == "bwrap" else "/usr/bin/sandbox-exec")
+    assert prepared.command[0] == str(trusted_bin / ("bwrap" if backend == "bwrap" else "sandbox-exec"))
     assert prepared.command[-2] == "-c"
     inner_command = prepared.command[-1].split("\n")[-1]
     assert shlex.split(inner_command) == args

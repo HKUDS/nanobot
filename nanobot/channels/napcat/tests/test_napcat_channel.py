@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -161,6 +162,62 @@ async def test_download_image_rejects_redirects(tmp_path, monkeypatch) -> None:
         {"url": "https://example.com/a.png", "kwargs": {"allow_redirects": False}}
     ]
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_download_image_ignores_unparsable_declared_size(tmp_path, monkeypatch) -> None:
+    channel = _channel()
+    channel._media_root = tmp_path
+    channel._http = _FakeHttp(_FakeResponse(status=200, chunks=[b"png-bytes"]))
+    monkeypatch.setattr(
+        "nanobot.channels.napcat.runtime.validate_url_target",
+        lambda _url: (True, ""),
+    )
+
+    for declared in ("", "unknown", "12KB"):
+        result = await channel._download_image(
+            {"url": "https://example.com/a.png", "file": "a.png", "file_size": declared}
+        )
+        assert result is not None, declared
+        assert Path(result).read_bytes() == b"png-bytes"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_bytes", [32, 3])
+async def test_message_with_unparsable_image_size_still_routes(tmp_path, monkeypatch, max_bytes) -> None:
+    channel = _channel(NapcatConfig(allow_from=["*"], max_image_bytes=max_bytes))
+    channel._media_root = tmp_path
+    channel._http = _FakeHttp(_FakeResponse(status=200, chunks=[b"png-bytes"]))
+    monkeypatch.setattr(
+        "nanobot.channels.napcat.runtime.validate_url_target",
+        lambda _url: (True, ""),
+    )
+
+    await channel._on_message(
+        {
+            "message_id": 7,
+            "message_type": "private",
+            "user_id": "user1",
+            "sender": {"nickname": "Alice"},
+            "message": [
+                {"type": "text", "data": {"text": "look at this"}},
+                {
+                    "type": "image",
+                    "data": {
+                        "url": "https://example.com/a.png",
+                        "file": "a.png",
+                        "file_size": "",
+                    },
+                },
+            ],
+        }
+    )
+
+    msg = await channel.bus.consume_inbound()
+    assert msg.content == "look at this"
+    expected = [str(tmp_path / "a.png")] if max_bytes >= len(b"png-bytes") else []
+    assert msg.media == expected
+    assert sorted(str(path) for path in tmp_path.iterdir()) == expected
 
 
 @pytest.mark.asyncio

@@ -11,13 +11,14 @@ import type { SettingsPayload } from "@/lib/types";
 const NO_PROVIDER = {};
 const DEFAULT_VALUE = ":default";
 
-export function ReasoningEffortPicker({ token, provider, model, savedValues, value, onChange }: {
+export function ReasoningEffortPicker({ token, provider, model, savedValues, value, onChange, onSelect }: {
   token: string;
   provider: SettingsPayload["providers"][number] | undefined;
   model: string;
   savedValues?: string[];
   value: string;
   onChange: (value: string) => void;
+  onSelect?: () => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -37,7 +38,7 @@ export function ReasoningEffortPicker({ token, provider, model, savedValues, val
     open,
     values,
     selectedValue: value || DEFAULT_VALUE,
-    onSelect: (selected) => { onChange(selected === DEFAULT_VALUE ? "" : selected); close(); },
+    onSelect: (selected) => { onSelect?.(); onChange(selected === DEFAULT_VALUE ? "" : selected); close(); },
     onClose: close,
   });
   return (
@@ -82,7 +83,11 @@ export function ReasoningEffortPicker({ token, provider, model, savedValues, val
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          if (restoreFocus.current) input.current?.focus({ preventScroll: true });
+          const active = document.activeElement;
+          const owner = input.current?.closest('[role="dialog"]');
+          if (restoreFocus.current && (active === document.body || active === input.current || active === owner)) {
+            input.current?.focus({ preventScroll: true });
+          }
           restoreFocus.current = false;
         }}
         onEscapeKeyDown={() => { restoreFocus.current = true; }}

@@ -19,7 +19,6 @@ export function formatTokenCount(value: number): string {
   return `${compact}k`
 }
 
-/** Read-only explanation of the session-owned context replayed to the agent. */
 export class ContextPanel {
   readonly root: BoxRenderable
   private readonly stats: TextRenderable

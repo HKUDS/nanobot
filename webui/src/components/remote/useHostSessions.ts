@@ -58,6 +58,13 @@ export function useHostSessions() {
     publish();
   }, [publish]);
   const local = useCallback(() => { cancel(); select(null); }, [cancel, select]);
+  // A notification may reveal its existing view, never reconnect a host.
+  const reveal = useCallback((id: string) => {
+    const frame = cache.current.get(id);
+    if (!frame?.loaded || frame.offline) return false;
+    cancel(); select(frame.connection);
+    return true;
+  }, [cancel, select]);
   const applyDirectory = useCallback((next: RemoteDirectory) => {
     setDirectory(next); setDirectoryError(false);
     // Names are metadata, not a new host session. Keep iframe URLs, drafts,
@@ -263,5 +270,5 @@ export function useHostSessions() {
     };
   }, [applyDirectory, client, getToken, publish]);
   return { directory, directoryError, refresh, rename, selected, recentIds, frames, pending,
-    error: failure?.code || "", errorId: failure?.id, clearError, connect, cancel, local, disconnect, remove, loaded };
+    error: failure?.code || "", errorId: failure?.id, clearError, connect, cancel, local, reveal, disconnect, remove, loaded };
 }

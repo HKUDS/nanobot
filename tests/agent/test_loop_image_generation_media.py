@@ -35,7 +35,6 @@ async def test_generate_image_does_not_attach_media_to_final_response(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Generating an image does not attach it to the final outbound response."""
     set_config_path(tmp_path / "config.json")
     monkeypatch.setattr(
         "nanobot.agent.tools.image_generation.get_image_gen_provider",
@@ -85,5 +84,4 @@ async def test_generate_image_does_not_attach_media_to_final_response(
 
     assert result is not None
     assert result.content == "Done"
-    # Image delivery requires a separate message tool call.
     assert result.media == []

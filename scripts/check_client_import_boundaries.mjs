@@ -1,4 +1,3 @@
-/** Check client imports without loading application or channel modules. */
 import { Glob } from "bun";
 import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -119,6 +118,14 @@ export function findViolations(compiler, root, file, source, options, project) {
       if (TUI_VIEWS.some((prefix) => targetPath !== null && within(targetPath, prefix)) || uiPackage(specifier)) {
         rules.push("tui-client");
       }
+    }
+    if (within(relative, "webui/src") && within(specifier, "pele")
+      && relative !== "webui/src/components/markdown-diagrams/pele.worker.ts") {
+      rules.push("diagram-worker-engine");
+    }
+    if (within(relative, "webui/src") && ["saxes", "css-tree"].some((name) => within(specifier, name))
+      && relative !== "webui/src/components/markdown-diagrams/svg-image.ts") {
+      rules.push("diagram-worker-output");
     }
     if (within(relative, "webui/src/lib") && WEBUI_VIEWS.some((prefix) => targetPath !== null && within(targetPath, prefix))) {
       rules.push("webui-lib");

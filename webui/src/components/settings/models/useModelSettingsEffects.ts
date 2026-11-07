@@ -56,7 +56,7 @@ export function useProviderOAuthPolling({
           timer = window.setTimeout(() => void poll(), 1000);
           return;
         }
-        applyPayload(payload, { preserveAgentForm: true });
+        applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
         setError(null);
         closeProviderOAuthFlow(false);
       } catch (err) {

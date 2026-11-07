@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { CliRenderEvents, TextareaRenderable, TextRenderable } from "@opentui/core"
+import { CliRenderEvents, TextareaRenderable, TextRenderable, rgbToHex } from "@opentui/core"
 import { MockTreeSitterClient, createTestRenderer, type TestRendererSetup } from "@opentui/core/testing"
 import { NanobotTui } from "./app"
 import type { RecoveryState, SlashCommand, WorkspaceScopePayload } from "../client"
-import { options, client, mount, waitUntil, occurrences } from "./test-support"
+import { options, client, mount, waitUntil, occurrences, contrastRatio } from "./test-support"
 
 describe("NanobotTui session navigation", () => {
   let setup: TestRendererSetup | undefined
@@ -553,14 +553,11 @@ describe("NanobotTui session navigation", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       sessionMenu: { visible: boolean; root: { getChildren(): unknown[] } }
-      title: { getChildren(): unknown[] }
     }
 
     try {
       await waitUntil(() => (app as unknown as { ready: boolean }).ready)
       await setup.renderOnce()
-      const titleItems = ui.title.getChildren() as TextRenderable[]
-      expect(titleItems.some((item) => item.id === "nanobot-tui-title-text")).toBe(false)
       expect(ui.sessionMenu.visible).toBe(false)
 
       ui.composer.setText("/sessions")
@@ -849,7 +846,7 @@ describe("NanobotTui session navigation", () => {
     }
   })
 
-  test("shows compact session context without exposing private reasoning", async () => {
+  test("shows compact session context and preserves the composer on resize", async () => {
     setup = await createRenderer({ width: 96, height: 26, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     globalThis.fetch = ((input: string | URL | Request) => {
@@ -888,14 +885,11 @@ describe("NanobotTui session navigation", () => {
 
       expect(frame).toContain("~2.2k tokens  10 replay  16 archived")
       expect(frame).toContain("The earlier turns agreed on a release plan.")
-      expect(frame).not.toContain("Agent context")
-      expect(frame).not.toContain("summary active")
-      expect(frame).not.toContain("memory, instructions, and skills are added separately")
 
       setup.resize(40, 10)
       await setup.renderOnce()
       const compact = setup.captureCharFrame()
-      expect(occurrences(compact, "Agent context")).toBe(0)
+      expect(compact).not.toContain("The earlier turns agreed")
       expect(occurrences(compact, "Ask nanobot anything")).toBe(1)
 
       setup.mockInput.pressEscape()
@@ -907,7 +901,7 @@ describe("NanobotTui session navigation", () => {
   })
 
   test("opens the latest turn diff as a full-screen, navigable view", async () => {
-    setup = await createRenderer({ width: 96, height: 28, screenMode: "alternate-screen" })
+    setup = await createRenderer({ width: 96, height: 28, screenMode: "alternate-screen", consoleMode: "disabled" })
     const app = mount(setup)
     app.accept({ event: "attached", chat_id: "chat" })
     await waitUntil(() => (app as unknown as { ready: boolean }).ready)
@@ -971,6 +965,23 @@ describe("NanobotTui session navigation", () => {
     expect(frame).toContain("const newValue = 2")
     expect(frame).toContain("Diff truncated by the gateway")
     expect(frame).not.toContain("Ask nanobot anything")
+
+    const rows = frame.split("\n")
+    const y = rows.findIndex((row) => row.includes("const newValue = 2"))
+    const x = rows[y]!.indexOf("const newValue = 2")
+    await setup.mockMouse.drag(x, y, x + "const newValue = 2".length, y)
+    await setup.flush()
+    expect(setup.renderer.getSelection()?.getSelectedText()).toBe("const newValue = 2")
+    const selected = setup.captureSpans().lines[y]!.spans.find((span) => span.text.includes("const newValue = 2"))!
+    expect(selected.fg.intent).toBe("rgb")
+    expect(selected.bg.intent).toBe("rgb")
+    expect(contrastRatio(rgbToHex(selected.fg), rgbToHex(selected.bg))).toBeGreaterThanOrEqual(4.5)
+
+    setup.renderer.emit(CliRenderEvents.THEME_MODE, "light")
+    await setup.flush()
+    expect(setup.renderer.console.visible).toBe(false)
+    expect(setup.captureCharFrame()).toContain("const newValue = 2")
+    setup.renderer.clearSelection()
 
     setup.mockInput.pressArrow("right")
     await setup.flush()

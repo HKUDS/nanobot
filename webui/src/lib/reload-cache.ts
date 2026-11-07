@@ -58,6 +58,7 @@ export function readReloadSessions(): ChatSummary[] {
       ...(typeof row.modelPreset === "string" ? { modelPreset: row.modelPreset } : {}),
       ...(typeof row.runStartedAt === "number" ? { runStartedAt: row.runStartedAt } : {}),
       ...(workspaceScope ? { workspaceScope } : {}),
+      ...(typeof row.projectLocked === "boolean" ? { projectLocked: row.projectLocked } : {}),
     }];
   });
 }

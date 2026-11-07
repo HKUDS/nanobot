@@ -51,7 +51,7 @@ describe("Settings navigation on mobile", () => {
     const menu = screen.getByRole("menu", { name: "Settings sections" });
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
     expect(menu).toHaveAttribute("data-side", "bottom");
-    expect(within(menu).getByRole("menuitem", { name: "Models", exact: true }))
+    expect(within(menu).getByRole("menuitem", { name: "Models" }))
       .toHaveAttribute("aria-current", "page");
     expect(within(menu).getByRole("menuitem", { name: "Restart" })).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -70,7 +70,7 @@ describe("Settings navigation on mobile", () => {
     const user = userEvent.setup();
     render(<Sidebar activeSection="image" />);
     await user.click(screen.getByRole("button", { name: "Settings: Capabilities" }));
-    expect(screen.getByRole("menuitem", { name: "Capabilities", exact: true }))
+    expect(screen.getByRole("menuitem", { name: "Capabilities" }))
       .toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("menuitem", { name: "Restart" })).not.toBeInTheDocument();
   });
@@ -109,7 +109,7 @@ describe("Settings navigation on mobile", () => {
     render(<Sidebar />);
     screen.getByRole("button", { name: "Settings: Models" }).focus();
     await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Overview", exact: true })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Overview" })).toHaveFocus();
     await user.keyboard("{ArrowDown}{Enter}");
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Settings: Appearance" })).toHaveFocus();
@@ -123,7 +123,7 @@ describe("Settings navigation on mobile", () => {
       { keys: "[TouchA>]", target }, { keys: "[/TouchA]", target },
     ]);
     await tap(screen.getByRole("button", { name: "Settings: Models" }));
-    await tap(screen.getByRole("menuitem", { name: "System", exact: true }));
+    await tap(screen.getByRole("menuitem", { name: "System" }));
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Settings: System" })).toBeVisible();
   });
@@ -147,11 +147,11 @@ describe("Settings navigation on mobile", () => {
     const restart = vi.fn();
     const { rerender } = render(<Sidebar onRestart={restart} restartPending />);
     expect(screen.getByRole("status")).toHaveTextContent("Saved. Restart to apply changes.");
-    await user.click(screen.getByRole("button", { name: "Restart", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Restart" }));
     expect(restart).toHaveBeenCalledOnce();
     rerender(<Sidebar onRestart={restart} restartPending isRestarting />);
     const runningLabel = screen.getByRole("status").textContent!;
-    expect(screen.getByRole("button", { name: runningLabel, exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: runningLabel })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Settings: Models" }));
     expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: runningLabel }))
       .toHaveAttribute("aria-disabled", "true");
@@ -171,7 +171,7 @@ describe("Settings navigation on mobile", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
     expect(document.body.style.pointerEvents).not.toBe("none");
     expect(screen.queryByRole("button", { name: "Settings: Models" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Models", exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Models" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Restart" }));
     expect(restart).toHaveBeenCalledOnce();
     resize(true);
@@ -187,7 +187,7 @@ describe("Settings navigation on mobile", () => {
       ...settingsPayload(), requires_restart: true,
     }, onBackToChat: back });
     await user.click(screen.getByRole("button", { name: "Settings: Models" }));
-    await user.click(screen.getByRole("menuitem", { name: "Appearance", exact: true }));
+    await user.click(screen.getByRole("menuitem", { name: "Appearance" }));
     await user.click(screen.getByRole("button", { name: "Back to chat" }));
     const dialog = screen.getByRole("dialog", { name: "Restart before leaving?" });
     expect(back).not.toHaveBeenCalled();

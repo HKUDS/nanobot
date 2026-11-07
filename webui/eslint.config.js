@@ -21,6 +21,7 @@ export default tseslint.config(
   {
     files: [
       "webui/src/**/*.{ts,tsx}",
+      "webui/browser/**/*.{ts,tsx}",
       "nanobot/channels/*/webui/**/*.{ts,tsx}",
       "nanobot/channels/*/tests/webui/**/*.{ts,tsx}",
     ],

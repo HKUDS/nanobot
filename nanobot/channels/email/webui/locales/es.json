@@ -158,8 +158,7 @@
       },
       "trustedAuthservIds": {
         "label": "Servicios de autenticación confiables",
-        "placeholder": "mx.google.com, separados por comas",
-        "help": "Introduce valores authserv-id de confianza.\n\nValores authserv-id exactos añadidos por el servicio receptor. Obligatorio al verificar SPF o DKIM."
+        "placeholder": "mx.google.com, separados por comas"
       }
     }
   }

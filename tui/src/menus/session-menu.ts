@@ -23,7 +23,6 @@ function updatedLabel(value: string | null): string {
   return `${Math.floor(age / 86_400_000)}d`
 }
 
-/** Searchable session navigation over the gateway-owned session list. */
 export class SessionMenu {
   readonly root: BoxRenderable
   private readonly picker: PickerMenu<SessionMenuRow>
@@ -49,6 +48,7 @@ export class SessionMenu {
       key: (session) => session.chatId,
       searchText: (session) => [
         sessionLabel(session),
+        session.handle ? `@${session.handle.name}` : "",
         session.modelPreset || "",
         session.preview,
         session.chatId,
@@ -60,6 +60,7 @@ export class SessionMenu {
       render: (session, selected) => {
         const age = updatedLabel(session.updatedAt)
         const detail = [
+          session.handle ? `@${session.handle.name}` : "",
           this.showWorkspaces ? this.workspaceLabel(session) : "",
           this.modelOverride(session),
         ]

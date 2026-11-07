@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Check, ChevronDown, Clipboard, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -38,14 +38,12 @@ export interface ChannelSetupSurfaceViewProps {
   connectFlow?: ReactNode;
   onAdvancedOpenChange: (open: boolean) => void;
   onChangeField: (key: string, value: string) => void;
-  onFieldBlur: (key: string) => void;
   onToggleSecret: (key: string) => void;
   onClearSecret: (key: string, clear: boolean) => void;
   onApplyPreset: (preset: ChannelProviderPreset) => void;
   onSubmit: () => void;
   onCheckConnection: () => void;
   onToggleEnabled: (enabled: boolean) => void;
-  onSaveConnectionSettings: () => void;
   onCopyCommand: () => void;
   onNotice: (notice: string | null) => void;
 }
@@ -55,15 +53,30 @@ export function ChannelSetupSurfaceView({
   configuredFields, fieldValues, visibleSecrets, clearedSecrets, fieldErrors, actionPending,
   enabled, autoSaving, autoSaveState, advancedOpen, advancedPanelId, validation, validating,
   notice, connectFlow, onAdvancedOpenChange,
-  onChangeField: setFieldValue, onFieldBlur: saveSecretOnBlur, onToggleSecret: toggleSecret,
+  onChangeField: setFieldValue, onToggleSecret: toggleSecret,
   onClearSecret: setSecretCleared, onApplyPreset: applyPreset, onSubmit: saveCredentialSettings,
   onCheckConnection: checkCurrentSettings, onToggleEnabled: toggleEnabled,
-  onSaveConnectionSettings: saveConnectionSettings, onCopyCommand: copyCommand, onNotice: setNotice,
+  onCopyCommand: copyCommand, onNotice: setNotice,
 }: ChannelSetupSurfaceViewProps) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const mode = setup.mode ?? "credentials";
+  // Keep feedback's footprint so blur-save updates cannot move the close target mid-click.
+  const lastNotice = useRef(notice);
+  if (notice) lastNotice.current = notice;
   const hasAdvanced = advancedFields.length > 0 || savedSecretFields.length > 0 || availablePresets.length > 0;
+  const advancedFormProps = {
+    fields: advancedFields,
+    values: fieldValues,
+    configuredFields,
+    visibleSecrets,
+    onChange: setFieldValue,
+    onToggleSecret: toggleSecret,
+    errors: fieldErrors,
+    clearedSecrets,
+    onClearSecret: setSecretCleared,
+    disabled: actionPending,
+  };
   const inlineActions = mode === "credentials" && primaryFields.length === 1
     && !advancedOpen && !setup.presets?.length && !setup.actions?.length;
   const credentialActions = mode === "credentials" ? (
@@ -136,6 +149,11 @@ export function ChannelSetupSurfaceView({
         </div>
       </div>
       <ChannelRuntimeError message={feature.runtime_error} />
+      {setup.privacyNotice ? (
+        <p className="text-pretty text-sm leading-relaxed text-muted-foreground">
+          {setup.privacyNotice}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-4">
         <section className={cn("min-w-0", inlineActions ? "flex-[1_1_20rem]" : "w-full")}>
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -199,7 +217,6 @@ export function ChannelSetupSurfaceView({
                   configuredFields={configuredFields}
                   visibleSecrets={visibleSecrets}
                   onChange={setFieldValue}
-                  onFieldBlur={saveSecretOnBlur}
                   onToggleSecret={toggleSecret}
                   errors={fieldErrors}
                   clearedSecrets={clearedSecrets}
@@ -237,21 +254,12 @@ export function ChannelSetupSurfaceView({
               ))}
             </div>
             {advancedFields.length ? (
-              <div onBlur={() => void saveConnectionSettings()}>
-                <CredentialForm
-                  fields={advancedFields}
-                  values={fieldValues}
-                  configuredFields={configuredFields}
-                  visibleSecrets={visibleSecrets}
-                  onChange={setFieldValue}
-                  onFieldBlur={saveSecretOnBlur}
-                  onToggleSecret={toggleSecret}
-                  errors={fieldErrors}
-                  clearedSecrets={clearedSecrets}
-                  onClearSecret={setSecretCleared}
-                  compact
-                  disabled={actionPending}
-                />
+              <div>
+                {mode === "connect" ? (
+                  <ChannelFieldGroups {...advancedFormProps} requirements={[]} sectionLabels={setup.sectionLabels} />
+                ) : (
+                  <CredentialForm {...advancedFormProps} compact />
+                )}
               </div>
             ) : null}
           </div>
@@ -273,10 +281,10 @@ export function ChannelSetupSurfaceView({
         aria-live="polite"
         className={cn(
           "rounded-control bg-muted/55 px-3 py-2.5 text-[12px] leading-5 text-muted-foreground",
-          !notice && "sr-only",
+          !notice && (lastNotice.current ? "invisible" : "sr-only"),
         )}
       >
-        {notice ?? ""}
+        {notice ?? lastNotice.current ?? ""}
       </div>
     </form>
   );

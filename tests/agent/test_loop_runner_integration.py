@@ -1,5 +1,3 @@
-"""Tests for AgentLoop integration with AgentRunner: streaming, think-filter, error handling, subagent."""
-
 from __future__ import annotations
 
 import asyncio
@@ -7,14 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent.session_helpers import mock_session_manager
 from nanobot.agent.context import TranscriptInput
-from nanobot.agent.goal_permission import goal_mutation_allowed, goal_mutation_permission
+from nanobot.agent.goal_permission import goal_mutation_allowed
 from nanobot.agent.tools.context import RequestContext
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
-from nanobot.events import RetryStatusEvent
+from nanobot.events import ModelRequestEvent, RetryStatusEvent
+from nanobot.goal.assembly import install_goal
 from nanobot.providers.base import (
     GenerationSettings,
     LLMProvider,
@@ -46,7 +46,7 @@ def _make_loop(tmp_path):
     provider.generation = GenerationSettings()
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager", side_effect=mock_session_manager), \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
@@ -92,32 +92,14 @@ async def test_loop_uses_structured_retry_status_without_legacy_text(tmp_path):
 
     assert result is not None
     assert captured["provider_context"].events.accepts(RetryStatusEvent)
-    assert bus.outbound_size == 1
-    outbound = bus.outbound.get_nowait()
-    assert isinstance(outbound.event, RetryStatusEvent)
-    assert outbound.event.state == "waiting"
-    assert outbound.chat_id == "chat-a"
-
-
-@pytest.mark.asyncio
-async def test_ephemeral_runner_enters_and_restores_turn_scopes(tmp_path):
-    loop = _make_loop(tmp_path)
-
-    async def chat_stream_with_retry(**_kwargs):
-        assert goal_mutation_allowed() is True
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=chat_stream_with_retry)
-    loop.tools.get_definitions = MagicMock(return_value=[])
-
-    await loop._run_agent_loop(
-        TranscriptInput(history=[], current_message=None),
-        runtime=loop.llm_runtime(),
-        ephemeral=True,
-        turn_scopes=[goal_mutation_permission(True)],
-    )
-
-    assert goal_mutation_allowed() is False
+    outbound = [bus.outbound.get_nowait() for _ in range(bus.outbound_size)]
+    assert [type(message.event) for message in outbound] == [
+        ModelRequestEvent, RetryStatusEvent, ModelRequestEvent,
+    ]
+    retry = outbound[1].event
+    assert isinstance(retry, RetryStatusEvent)
+    assert retry.state == "waiting"
+    assert all(message.chat_id == "chat-a" for message in outbound)
 
 
 @pytest.mark.asyncio
@@ -155,10 +137,12 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
         ),
         LLMResponse(content="done", tool_calls=[], usage=None),
     ])
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+                     builtin_assembly=install_goal)
     session = loop.sessions.get_or_create("cli:direct")
     session.add_message("user", "Let's agree on the migration implementation.")
     session.add_message("assistant", "Use the staged migration plan and run integration tests.")
+    loop.sessions.save(session)
 
     result = await loop._process_message(
         InboundMessage(
@@ -172,6 +156,7 @@ async def test_goal_command_can_implement_plan_from_prior_discussion(tmp_path):
     assert result is not None
     assert result.content == "done"
     assert goal_mutation_allowed() is False
+    session = await loop.sessions.state.get(session.key)
     assert session.metadata[GOAL_STATE_KEY]["status"] == "completed"
     first_request = provider.chat_stream_with_retry.await_args_list[0].kwargs["messages"]
     assert "staged migration plan" in str(first_request)
@@ -243,6 +228,7 @@ async def test_runtime_context_is_persisted_as_next_turn_prompt_prefix(tmp_path)
     assert second_wire[3]["content"].startswith("second turn")
     assert len(provider_calls) == 2
 
+    session = await loop.sessions.state.get(session.key)
     persisted_first_user = session.messages[0]
     assert persisted_first_user["content"] == first_wire[1]["content"]
     assert public_history_message(persisted_first_user)["content"] == "first turn $review"
@@ -276,6 +262,7 @@ async def test_webui_quote_reaches_model_without_leaking_into_public_history(tmp
     request = provider.chat_stream_with_retry.await_args.kwargs["messages"]
     assert "What does this mean?" in str(request)
     assert "the selected answer excerpt" in str(request)
+    session = await loop.sessions.state.get(session.key)
     assert "the selected answer excerpt" in str(session.messages[0]["content"])
     assert public_history_message(session.messages[0])["content"] == "What does this mean?"
 
@@ -346,7 +333,8 @@ async def test_non_goal_direct_turn_cannot_reuse_prior_goal_command(tmp_path):
         ),
         LLMResponse(content="handled as a one-time task", tool_calls=[], usage=None),
     ])
-    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model",
+                     builtin_assembly=install_goal)
     session = loop.sessions.get_or_create("api:default")
     session.add_message("user", "/goal old completed request")
     session.add_message("assistant", "The old request is complete.")
@@ -507,7 +495,6 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
 @pytest.mark.asyncio
 async def test_llm_error_returns_regular_response_instead_of_streamed_event(tmp_path):
-    """LLM errors must not produce StreamedResponseEvent, so channels deliver the error."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus

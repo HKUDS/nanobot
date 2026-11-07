@@ -26,7 +26,6 @@ const emptyProfile = (): Omit<RemoteProfile, "id" | "connected"> => ({
   config_path: "~/.nanobot/config.json", runtime_user: "",
 });
 
-/** The page is a server directory. Add/edit/first-use verification share one dialog. */
 export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChromeInset = false, onBackToChat }: {
   mainNavigationExpanded?: boolean;
   hostChromeInset?: boolean;

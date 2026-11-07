@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import postcss from "postcss";
+import postcss, { type Document, type Rule } from "postcss";
 import tailwindcss from "tailwindcss";
 import loadConfig from "tailwindcss/loadConfig";
 import { describe, expect, it } from "vitest";
@@ -52,7 +52,7 @@ describe("sidebar touch hover isolation", () => {
     result.root.walkRules((rule) => {
       if (rule.selector.includes(":hover")) {
         hoverSelectors.push(rule.selector);
-        let parent = rule.parent;
+        let parent: Rule["parent"] | Document = rule.parent;
         let hoverMedia = false;
         while (parent) {
           if (parent.type === "atrule" && "name" in parent

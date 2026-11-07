@@ -1,5 +1,3 @@
-"""Regression tests for WebSocket listener health probing portability."""
-
 from __future__ import annotations
 
 import errno
@@ -86,7 +84,6 @@ def test_unsupported_sockopt_falls_back_to_fd_liveness(unsupported_errno: int) -
 
 
 def test_listener_health_uses_unsupported_sockopt_fallback() -> None:
-    """The fallback must be wired into the health check that controls readiness."""
     sock = _StubSocket(fileno=3, error=OSError(errno.ENOPROTOOPT, "Protocol not available"))
     server: Any = _StubServer(sock)
 
@@ -103,7 +100,6 @@ def test_unexpected_oserror_propagates() -> None:
 
 
 def test_listener_health_rejects_invalid_socket_state() -> None:
-    """``EINVAL`` can mean that a live socket isn't actually listening."""
     sock = _StubSocket(fileno=3, error=OSError(errno.EINVAL, "Invalid argument"))
     server: Any = _StubServer(sock)
 
@@ -111,7 +107,6 @@ def test_listener_health_rejects_invalid_socket_state() -> None:
 
 
 def test_unsupported_sockopt_still_rejects_dead_fd() -> None:
-    """The portability fallback must not mask an already-closed listener."""
     sock = _StubSocket(fileno=-1, error=OSError(errno.ENOPROTOOPT, "Protocol not available"))
 
     assert WebSocketChannel._socket_is_accepting(sock) is False

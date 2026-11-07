@@ -1,11 +1,8 @@
-"""Tools for sending bounded messages between persisted sessions."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections import OrderedDict, deque
 from collections.abc import Callable
@@ -57,46 +54,6 @@ class _PendingReply:
     target_handle: str
     request: SessionMessageEnvelope
     timer: _CancelHandle | None = None
-
-
-@tool_parameters(tool_parameters_schema())
-class ListSessionsTool(Tool):
-    """List the handles of other persisted sessions."""
-
-    def __init__(self, sessions: SessionManager) -> None:
-        self._handles = SessionHandleResolver(sessions)
-
-    @classmethod
-    def create(cls, ctx: ToolContext) -> Tool:
-        if ctx.sessions is None:
-            raise RuntimeError("list_sessions requires a session manager")
-        return cls(ctx.sessions)
-
-    @classmethod
-    def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.sessions is not None
-
-    @property
-    def name(self) -> str:
-        return "list_sessions"
-
-    @property
-    def description(self) -> str:
-        return "List other persisted sessions by @handle."
-
-    async def execute(self, **kwargs: Any) -> str:
-        request = current_request_context()
-        if request is None or not request.session_key:
-            return ToolResult.error("Error: session context is unavailable")
-        handles = await asyncio.to_thread(self._handles.list_all)
-        return json.dumps(
-            [
-                f"@{handle.name}"
-                for handle in handles
-                if handle.session_key != request.session_key
-            ],
-            ensure_ascii=True,
-        )
 
 
 @tool_parameters(
@@ -219,14 +176,11 @@ class SendSessionMessageTool(Tool):
             target_name = normalize_session_handle(target_handle)
         except ValueError as exc:
             raise SessionMessageError(str(exc)) from exc
-        target = await asyncio.to_thread(self._handles.resolve, target_name)
+        target = await self._handles.aresolve(target_name)
         if target is None:
             raise SessionMessageError(f"session @{target_name} was not found")
 
-        source = await asyncio.to_thread(
-            self._handles.handle_for_session,
-            source_session_key,
-        )
+        source = await self._handles.ahandle_for_session(source_session_key)
         if source is None:
             raise SessionMessageError("source session was not found")
         envelope: SessionMessageEnvelope = {
@@ -279,7 +233,6 @@ class SendSessionMessageTool(Tool):
         return f"@{target.name}"
 
     def _prune_expired_rate_limits(self, cutoff: float) -> None:
-        """Drop sources ordered by their most recent successful send."""
         while self._sent_at:
             _, sent_at = next(iter(self._sent_at.items()))
             if sent_at[-1] > cutoff:

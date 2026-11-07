@@ -71,6 +71,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "navigation-settled": "current-automatic-mode",
     "user-scroll": "browsing-history",
     "boundary-scroll": "browsing-history",
+    "composer-input": "idle",
     "resume-follow": "current-automatic-mode",
   },
   "navigating-history": {
@@ -79,6 +80,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "navigation-settled": "browsing-history",
     "user-scroll": "browsing-history",
     "boundary-scroll": "browsing-history",
+    "composer-input": "browsing-history",
     "resume-follow": "current-automatic-mode",
   },
   "browsing-history": {
@@ -164,6 +166,7 @@ export class ThreadMotionCoordinator {
     hasOutput: false,
   };
   private mode: ThreadMotionMode = "idle";
+  private historyNavigationPromptId: string | null = null;
   private promptPositioned = false;
   private measurementFrameId: number | null = null;
   private geometryDirty = false;
@@ -309,12 +312,21 @@ export class ThreadMotionCoordinator {
   }
 
   navigateHistoryTo(top: number): ThreadCameraFollowResult | null {
-    this.camera.cancel();
+    return this.beginHistoryNavigation(top, null);
+  }
+
+  navigateHistoryToPrompt(promptId: string): ThreadCameraFollowResult | null {
+    const geometry = this.measure(promptId);
+    if (!geometry || geometry.promptTop === null) return null;
+    return this.beginHistoryNavigation(geometry.promptTop, promptId);
+  }
+
+  private beginHistoryNavigation(top: number, promptId: string | null): ThreadCameraFollowResult | null {
+    if (this.mode !== "navigating-history") this.camera.cancel();
     this.transition("navigate-history");
+    this.historyNavigationPromptId = promptId;
     const result = this.camera.navigateTo(top);
-    if (!result || result === "settled") {
-      this.transition("navigation-settled");
-    }
+    if (!result || result === "settled") this.transition("navigation-settled");
     return result;
   }
 
@@ -330,13 +342,14 @@ export class ThreadMotionCoordinator {
    * A scroll event reports geometry; it does not prove user intent. Explicit
    * input handlers call takeUserControl() before the browser scrolls. Layout,
    * sticky positioning, and camera writes therefore remain automatic even
-   * when the browser emits an intermediate scroll event for them.
+   * when the browser emits an intermediate scroll event for them. Proximity
+   * to a detached history page's bottom must not count as near the live tail.
    */
-  observeScroll(nearBottom: boolean): ThreadScrollOwner {
+  observeScroll(nearLiveTail: boolean): ThreadScrollOwner {
     switch (this.mode) {
       case "navigating-latest":
         if (!this.camera.isFollowing()) {
-          if (nearBottom) {
+          if (nearLiveTail) {
             this.settleLatestNavigation();
           } else {
             this.invalidateGeometry();
@@ -346,7 +359,7 @@ export class ThreadMotionCoordinator {
       case "navigating-history":
         if (!this.camera.isFollowing()) {
           this.transition("navigation-settled");
-          if (nearBottom) {
+          if (nearLiveTail) {
             this.resumeAutoFollow();
           } else {
             this.resumeFollowArmed = true;
@@ -354,7 +367,7 @@ export class ThreadMotionCoordinator {
         }
         return "navigation";
       case "browsing-history":
-        if (!nearBottom) {
+        if (!nearLiveTail) {
           this.resumeFollowArmed = true;
           return "user";
         }
@@ -362,7 +375,7 @@ export class ThreadMotionCoordinator {
         this.resumeAutoFollow();
         return "automatic";
       default:
-        if (!nearBottom) this.invalidateGeometry();
+        if (!nearLiveTail) this.invalidateGeometry();
         return "automatic";
     }
   }
@@ -378,6 +391,7 @@ export class ThreadMotionCoordinator {
     this.composerInputDuringTurn = false;
     this.resumeFollowArmed = false;
     this.mode = "idle";
+    this.historyNavigationPromptId = null;
     this.promptPositioned = false;
   }
 
@@ -410,6 +424,7 @@ export class ThreadMotionCoordinator {
         : transition;
     if (nextMode === this.mode) return false;
     this.mode = nextMode;
+    if (nextMode !== "navigating-history") this.historyNavigationPromptId = null;
     return true;
   }
 
@@ -434,14 +449,23 @@ export class ThreadMotionCoordinator {
     if (!this.geometryDirty) return;
     this.geometryDirty = false;
 
+    const navigationPromptId = this.mode === "navigating-history"
+      ? this.historyNavigationPromptId
+      : null;
     const needsPromptGeometry =
-      !this.isHistoryMode()
-      && this.turn.id !== null
-      && !this.promptPositioned;
-    const geometry = this.measure(needsPromptGeometry ? this.turn.promptId : null);
+      navigationPromptId !== null
+      || (!this.isHistoryMode() && this.turn.id !== null && !this.promptPositioned);
+    const geometry = this.measure(navigationPromptId ?? (needsPromptGeometry ? this.turn.promptId : null));
     if (!geometry) return;
     this.onGeometry?.(geometry);
 
+    if (this.mode === "navigating-history" && navigationPromptId !== null) {
+      if (geometry.promptTop !== null) {
+        const result = this.camera.navigateTo(geometry.promptTop);
+        if (!result || result === "settled") this.transition("navigation-settled");
+      }
+      return;
+    }
     if (this.mode === "navigating-latest") {
       const result = this.camera.navigateTo(geometry.maxScrollTop);
       if (!result || result === "settled") {

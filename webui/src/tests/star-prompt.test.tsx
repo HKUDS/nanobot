@@ -144,7 +144,7 @@ it.each(supportedLocales.map(({ code }) => code))("localizes the complete invita
   ].join(" "));
   expect(screen.getByRole("button", { name: i18n.t("starPrompt.later") })).toBeVisible();
   expect(screen.getByRole("button", { name: i18n.t("starPrompt.never") })).toBeVisible();
-  expect(screen.getByRole("button", { name: i18n.t("common.close"), exact: true })).toBeVisible();
+  expect(screen.getByRole("button", { name: i18n.t("common.close") })).toBeVisible();
   expect(screen.getByRole("link", { name: i18n.t("starPrompt.action") })).toHaveAttribute("rel", "noopener noreferrer");
 });
 
@@ -156,7 +156,7 @@ it.each(["close button", "Escape"])("restores focus after %s without permanently
   await enter();
   expect(screen.getByRole("heading", { name: "Glad we could help." })).toHaveFocus();
   if (method === "Escape") await user.keyboard("{Escape}");
-  else await user.click(screen.getByRole("button", { name: "Close", exact: true }));
+  else await user.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Previous control" })).toHaveFocus();
   expect(action).toHaveBeenCalledTimes(1);

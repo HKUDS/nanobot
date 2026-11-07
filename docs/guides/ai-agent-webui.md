@@ -29,6 +29,17 @@ The launcher checks setup, enables the local WebSocket channel after confirmatio
 
 When nanobot edits a file, the WebUI activity timeline can show the changed line counts, a unified diff, and an **Open file** action for a read-only preview. File previews use the chat's current workspace access mode: restricted access stays inside the selected workspace, while Full Access can preview files outside the workspace when the gateway allows it.
 
+## Browser notifications
+
+When the WebUI is in the background, browser notifications tell you when a task finishes, fails, or needs attention. Click a notification to return to its chat.
+
+1. Open **Settings → Notifications**.
+2. Turn on **Browser notifications** and allow the browser's permission request.
+3. Select **Test notification** to try it. If nothing appears, check the browser's site permissions, system notification settings, and Do Not Disturb.
+4. Enable **Completion sound** separately if you want a page chime.
+
+Keep the page open and connected, and use HTTPS or localhost. On iPhone or iPad, open the web app from the Home Screen. If your browser cannot enable notifications, follow the guidance shown in Settings.
+
 ## Production notes
 
 - Use `nanobot gateway --background` when you do not want to keep a terminal open, then open the configured WebUI URL in a browser.

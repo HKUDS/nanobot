@@ -9,6 +9,7 @@ import pytest
 
 from nanobot.agent.tools.image_generation import ImageGenerationTool, ImageGenerationToolConfig
 from nanobot.config.loader import set_config_path
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import Config, ProviderConfig
 from nanobot.providers.image_generation import GeneratedImageResponse, image_gen_provider_configs
 
@@ -188,7 +189,8 @@ def test_image_generation_tool_passes_provider_proxy_to_client(
             provider="openai_codex",
             model="openai-codex/gpt-image-2",
         ),
-        provider_configs={"openai_codex": ProviderConfig(proxy=proxy)},
+        provider_configs={"openai_codex": ProviderConfig(use_proxy=True)},
+        network=NetworkConfig(proxy=proxy),
     )
 
     client = tool._provider_client()

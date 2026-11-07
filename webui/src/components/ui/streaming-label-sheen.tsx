@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-/** L→R sheen on the glyphs themselves; inactive labels stay solid muted text. */
 export function StreamingLabelSheen({
   children,
   active,
@@ -22,7 +21,7 @@ export function StreamingLabelSheen({
         data-sheen-text={active ? sheenText : undefined}
         className={cn(
           "block w-fit max-w-full truncate pr-0.5 font-medium leading-normal",
-          active ? "streaming-text-sheen after:pr-0.5" : "text-muted-foreground",
+          active ? "streaming-text-sheen" : "text-muted-foreground",
         )}
       >
         {children}

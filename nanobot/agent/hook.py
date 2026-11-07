@@ -1,5 +1,3 @@
-"""Shared lifecycle hook primitives for agent runs."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -26,6 +24,8 @@ class AgentHookContext:
     tool_results: list[Any] = field(default_factory=list)
     tool_events: list[dict[str, str]] = field(default_factory=list)
     streamed_content: bool = False
+    # Raw segments observed this round, retained only if its terminal response fails.
+    streamed_content_parts: list[str] = field(default_factory=list, repr=False)
     streamed_reasoning: bool = False
     stream_continues_current_message: bool = False
     final_content: str | None = None
@@ -73,6 +73,13 @@ class AgentHook:
     def wants_streaming(self) -> bool:
         return False
 
+    def has_run_hooks(self) -> bool:
+        """Whether run-level callbacks consume a detached context snapshot."""
+        return any(
+            getattr(getattr(self, name), "__func__", None) is not getattr(AgentHook, name)
+            for name in ("before_run", "after_run", "on_error", "on_finally")
+        )
+
     async def before_run(self, context: AgentRunHookContext) -> None:
         pass
 
@@ -83,6 +90,10 @@ class AgentHook:
         pass
 
     async def on_finally(self, context: AgentRunHookContext) -> None:
+        pass
+
+    async def before_model_request(self) -> None:
+        """Observe a prepared logical request, including recovery requests."""
         pass
 
     async def before_iteration(self, context: AgentHookContext) -> None:
@@ -100,6 +111,13 @@ class AgentHook:
         event: dict[str, Any],
     ) -> None:
         """Observe a provider-hosted tool lifecycle event."""
+        pass
+
+    async def on_tool_execution_event(self, context: AgentHookContext) -> None:
+        """One call's start or terminal result with call-local tool lists.
+
+        Cancellation notification is best-effort; channels own queued delivery.
+        """
         pass
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
@@ -172,6 +190,14 @@ class CompositeHook(AgentHook):
     def wants_streaming(self) -> bool:
         return any(h.wants_streaming() for h in self._hooks)
 
+    def has_run_hooks(self) -> bool:
+        if any(
+            getattr(getattr(self, name), "__func__", None) is not getattr(CompositeHook, name)
+            for name in ("before_run", "after_run", "on_error", "on_finally")
+        ):
+            return True
+        return any(h.has_run_hooks() for h in self._hooks)
+
     async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for h in self._hooks:
             if getattr(h, "_reraise", False):
@@ -184,6 +210,9 @@ class CompositeHook(AgentHook):
                 logger.opt(exception=tool_log_content_allowed()).error(
                     "AgentHook.{} error in {}", method_name, type(h).__name__,
                 )
+
+    async def before_model_request(self) -> None:
+        await self._for_each_hook_safe("before_model_request")
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)
@@ -212,6 +241,9 @@ class CompositeHook(AgentHook):
         event: dict[str, Any],
     ) -> None:
         await self._for_each_hook_safe("on_provider_tool_event", context, event)
+
+    async def on_tool_execution_event(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("on_tool_execution_event", context)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_execute_tools", context)

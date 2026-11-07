@@ -1,4 +1,4 @@
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
+import { useEditCompletion, type EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -38,6 +38,7 @@ export function visibleWebuiDefaultAccessMode(mode: string | null | undefined): 
 }
 
 export function AdvancedSettings({
+  editCompletion,
   error,
   form,
   dirty,
@@ -49,6 +50,7 @@ export function AdvancedSettings({
   onRestart,
   isRestarting,
 }: {
+  editCompletion?: EditCompletion;
   error?: string;
   form: NetworkSafetySettingsUpdate;
   dirty: boolean;
@@ -61,10 +63,11 @@ export function AdvancedSettings({
   isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
-  useAutoSave(form, dirty, saving, onSave);
+  const localEdits = useEditCompletion(form, dirty, onSave, !editCompletion);
+  const edits = editCompletion ?? localEdits;
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className="settings-stack">
+    <div className="settings-stack" onChangeCapture={edits.onChangeCapture} onFocusCapture={edits.onFocusCapture} onBlurCapture={edits.onBlurCapture}>
       <section>
         <SettingsSectionTitle>
           {isNativeHostSurface

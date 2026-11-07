@@ -15,6 +15,7 @@ interface MarkdownTextProps {
   streaming?: boolean;
   preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
+  documentPath?: string;
 }
 
 const loadMarkdownRenderer = () => import("@/components/MarkdownTextRenderer");
@@ -27,6 +28,7 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
   streaming,
   preserveStreamingLayout,
   onOpenFilePreview,
+  documentPath,
 }: {
   source: string;
   className?: string;
@@ -34,6 +36,7 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
   streaming: boolean;
   preserveStreamingLayout: boolean;
   onOpenFilePreview?: (path: string) => void;
+  documentPath?: string;
 }) {
   return (
     <LazyMarkdownRenderer
@@ -42,6 +45,7 @@ const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
       streaming={streaming}
       preserveStreamingLayout={preserveStreamingLayout}
       onOpenFilePreview={onOpenFilePreview}
+      documentPath={documentPath}
     >
       {source}
     </LazyMarkdownRenderer>
@@ -73,13 +77,13 @@ export function preloadMarkdownText(): Promise<void> {
   return loadMarkdownRenderer().then(() => undefined);
 }
 
-/** Lazy boundary for the heavier GFM, math, and code renderer. */
 export function MarkdownText({
   children,
   className,
   streaming = false,
   preserveStreamingLayout = false,
   onOpenFilePreview,
+  documentPath,
 }: MarkdownTextProps) {
   const renderedSource = children;
   const renderPhase = streaming ? "streaming" : "complete";
@@ -91,8 +95,9 @@ export function MarkdownText({
 
   const plainFallback = (
     <div
+      data-theme-ink
       className={cn(
-        "whitespace-pre-wrap break-words leading-relaxed text-foreground/92",
+        "whitespace-pre-wrap break-words text-reading text-foreground/92",
         streaming && "streaming-text-fallback",
         className,
       )}
@@ -111,6 +116,7 @@ export function MarkdownText({
           streaming={streaming}
           preserveStreamingLayout={preserveStreamingLayout}
           onOpenFilePreview={onOpenFilePreview}
+          documentPath={documentPath}
         />
       </Suspense>
     </MarkdownRendererBoundary>

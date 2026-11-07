@@ -128,6 +128,11 @@ describe("provider brand logos", () => {
     expect(providerBrand("bocha")?.initials).toBe("B");
   });
 
+  it("reuses the bundled DeepSeek brand for DeepSeek web search settings", () => {
+    expect(providerBrand("deepseek")?.logoUrl).toMatch(/^\/src\/assets\/providers\/.*\.svg$/);
+    expect(providerBrand("deepseek")?.initials).toBe("DS");
+  });
+
   it("keeps Keenable web search settings on the first-party brand domain", () => {
     expect(providerBrand("keenable")?.logoUrls).toContain("https://keenable.ai/favicon.ico");
     expect(providerBrand("keenable")?.initials).toBe("K");

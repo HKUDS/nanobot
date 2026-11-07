@@ -25,7 +25,7 @@ export function WebSearchRun({ run, turnActive }: { run: WebSearchRunModel; turn
         tone={status === "error" ? "error" : status === "done" ? "success" : "active"}
         label={presentation.label}
         detail={presentation.detail}
-        detailClassName="whitespace-pre-line"
+        labelClassName={presentation.detail ? "max-w-[50%]" : undefined}
       />
       {run.sources.map((source) => (
         <WebActivityRow

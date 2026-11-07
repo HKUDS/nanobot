@@ -66,7 +66,6 @@ interface ModelSettingsActionsOptions {
   remoteBrowserAccess: boolean;
   closeProviderOAuthFlow: (cancelPending?: boolean) => void;
   installCapabilities: (names: string[]) => Promise<boolean>;
-  modelDirty: boolean;
   configuredModelProviderOptions: Array<{ name: string; label: string }>;
 }
 
@@ -83,7 +82,6 @@ export function useModelSettingsActions({
   remoteBrowserAccess,
   closeProviderOAuthFlow,
   installCapabilities,
-  modelDirty,
   configuredModelProviderOptions,
 }: ModelSettingsActionsOptions) {
   const oauthMounted = useRef(true);
@@ -128,9 +126,20 @@ export function useModelSettingsActions({
     visibleProviderKeys,
   } = state;
 
+  const latestSettings = useRef(settings);
+  latestSettings.current = settings;
+  // Renaming changes the server key, not the owner of already queued edits.
+  const editTargetSequence = useRef(0);
+  const editTargetRef = useRef({ name: modelPresetEditingName, identity: 0 });
+  if (editTargetRef.current.name !== modelPresetEditingName) {
+    editTargetSequence.current += 1;
+    editTargetRef.current = { name: modelPresetEditingName, identity: editTargetSequence.current };
+  }
+  const editTarget = editTargetRef.current;
+
   const presetNameConflict = (name: string, currentName?: string) => {
     const normalized = name.toLowerCase();
-    return settings?.model_presets.some(
+    return latestSettings.current?.model_presets.some(
       (preset) =>
         !preset.is_default &&
         preset.name !== currentName &&
@@ -158,15 +167,15 @@ export function useModelSettingsActions({
   const saveModelSettings = async () => {
     if (
       !settings ||
-      saving ||
       modelCallOrderSaving ||
       modelConfigurationSaving ||
       !Number.isSafeInteger(form.maxTokens) ||
       form.maxTokens <= 0 ||
       !Number.isSafeInteger(form.contextWindowTokens) ||
-      form.contextWindowTokens <= 0
+      form.contextWindowTokens <= 0 ||
+      !Number.isFinite(form.temperature) || form.temperature < 0 || form.temperature > 2
     ) {
-      return;
+      return false;
     }
 
     if (modelPresetCreating) {
@@ -181,11 +190,11 @@ export function useModelSettingsActions({
         form.temperature < 0 ||
         form.temperature > 2
       ) {
-        return;
+        return false;
       }
       if (presetNameConflict(name)) {
         showPresetNameConflict();
-        return;
+        return false;
       }
       setModelPresetNameError(null);
       setModelConfigurationSaving(true);
@@ -207,7 +216,7 @@ export function useModelSettingsActions({
         });
         const createdPreset = payload.created_model_preset;
         const nextOrder = createdPreset ? [...modelCallOrder, createdPreset] : null;
-        applyPayload(payload);
+        applyPayload(payload, { preserveCapabilityForms: true });
         if (createdPreset) {
           setForm(agentDraftFromPayload(payload, createdPreset));
           setModelPresetEditingName(createdPreset);
@@ -216,7 +225,7 @@ export function useModelSettingsActions({
         let finalPayload = payload;
         if (nextOrder) {
           const orderedPayload = await updateModelCallOrder(client, nextOrder);
-          applyPayload(orderedPayload);
+          applyPayload(orderedPayload, { preserveCapabilityForms: true });
           finalPayload = orderedPayload;
         }
         if (createdPreset) {
@@ -232,19 +241,19 @@ export function useModelSettingsActions({
       } finally {
         setModelConfigurationSaving(false);
       }
-      return;
+      return false;
     }
 
-    if (!modelDirty) return;
-    const selectedPreset = settings.model_presets.find(
-      (preset) => !preset.is_default && preset.name === modelPresetEditingName,
+    const targetName = editTarget.name;
+    const selectedPreset = latestSettings.current?.model_presets.find(
+      (preset) => !preset.is_default && preset.name === targetName,
     );
-    if (!selectedPreset) return;
+    if (!selectedPreset) return false;
     const nextName = form.modelPreset.trim();
     const nameChanged = form.modelPreset !== selectedPreset.name;
     if (nameChanged && presetNameConflict(nextName, selectedPreset.name)) {
       showPresetNameConflict();
-      return;
+      return false;
     }
     setModelPresetNameError(null);
     const reasoningEffort = form.reasoningEffort || null;
@@ -274,14 +283,20 @@ export function useModelSettingsActions({
           extraBody: form.extraBody !== providerJsonValue(selectedPreset.extra_body) ? form.extraBody : undefined,
         } : {}),
       });
-      applyPayload(payload);
-      setForm(agentDraftFromPayload(payload, nextName));
-      setModelPresetEditingName(nextName);
+      latestSettings.current = payload;
+      editTarget.name = nextName;
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setForm((current) => current === form ? agentDraftFromPayload(payload, nextName) : current);
+      if (editTargetRef.current === editTarget) {
+        setModelPresetEditingName(nextName);
+      }
       onModelNameChange(payload.agent.model || null);
       setModelPresetNameError(null);
       setError(null);
+      return true;
     } catch (err) {
       handlePresetSaveError(err);
+      return false;
     } finally {
       setSaving(false);
     }
@@ -294,8 +309,8 @@ export function useModelSettingsActions({
         name: modelPresetEditingName,
         ...values,
       });
-      applyPayload(payload);
-      setForm(agentDraftFromPayload(payload, modelPresetEditingName));
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      setForm((current) => current === form ? agentDraftFromPayload(payload, modelPresetEditingName) : current);
       setError(null);
     } finally {
       setSaving(false);
@@ -364,7 +379,7 @@ export function useModelSettingsActions({
     setModelCallOrderSaving(true);
     try {
       const payload = await updateModelCallOrder(client, nextOrder);
-      applyPayload(payload, { preserveAgentForm: true });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       onModelNameChange(payload.agent.model || null);
       setError(null);
     } catch (err) {
@@ -380,7 +395,7 @@ export function useModelSettingsActions({
     setModelMigrationSaving(true);
     try {
       const payload = await migrateModelConfigurations(client);
-      applyPayload(payload);
+      applyPayload(payload, { preserveCapabilityForms: true });
       onModelNameChange(payload.agent.model || null);
       setError(null);
     } catch (err) {
@@ -402,7 +417,7 @@ export function useModelSettingsActions({
     setSaving(true);
     try {
       const payload = await deleteModelConfiguration(client, modelPresetPendingDelete.name);
-      applyPayload(payload);
+      applyPayload(payload, { preserveCapabilityForms: true });
       setModelPresetPendingDelete(null);
       setError(null);
       return true;
@@ -441,7 +456,7 @@ export function useModelSettingsActions({
         if (provider.provider_api_configurable) update.api = providerForm.api;
       }
       for (const field of provider.advanced_fields ?? []) {
-        if (field === "proxy") update.proxy = providerForm.proxy.trim();
+        if (field === "use_proxy") update.use_proxy = providerForm.useProxy;
         if (field === "extra_headers") {
           update.extraHeaders = providerForm.extraHeaders.trim();
         }
@@ -454,7 +469,7 @@ export function useModelSettingsActions({
         if (field === "profile") update.profile = providerForm.profile.trim();
       }
       const payload = await updateProviderSettings(client, update);
-      applyPayload(payload, { preserveAgentForm: true });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       if (payload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, image: true }));
       }
@@ -485,13 +500,13 @@ export function useModelSettingsActions({
         apiKey: draft.apiKey.trim() || undefined,
         apiBase: draft.apiBase.trim(),
         ...(settings?.provider_api_configuration_supported ? { api: draft.api } : {}),
-        proxy: draft.proxy.trim(),
+        use_proxy: draft.useProxy,
         extraHeaders: draft.extraHeaders.trim(),
         extraBody: draft.extraBody.trim(),
         extraQuery: draft.extraQuery.trim(),
         thinkingStyle: draft.thinkingStyle.trim(),
       });
-      applyPayload(payload, { preserveAgentForm: true });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       setError(null);
       return payload;
     } catch (err) {
@@ -546,7 +561,7 @@ export function useModelSettingsActions({
       }
       popup?.close();
       closeProviderOAuthFlow(false);
-      applyPayload(payload, { preserveAgentForm: true });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       setError(null);
     } catch (err) {
       popup?.close();
@@ -571,7 +586,7 @@ export function useModelSettingsActions({
       );
       if (providerOAuthFlowRef.current?.flow_id !== flow.flow_id) return;
       if (isProviderOAuthPending(payload)) return;
-      applyPayload(payload, { preserveAgentForm: true });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
       setError(null);
       closeProviderOAuthFlow(false);
     } catch (err) {
@@ -619,6 +634,7 @@ export function useModelSettingsActions({
   };
 
   return {
+    modelEditIdentity: String(editTarget.identity),
     beginModelPresetCreation,
     cancelModelPresetCreation,
     changeModelCallOrder,

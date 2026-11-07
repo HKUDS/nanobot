@@ -1,3 +1,5 @@
+import { isContextGraph, isContextInspection } from "@/lib/context-graph";
+import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
   ApiServicePayload,
   AutomationChatsPayload,
@@ -9,6 +11,7 @@ import type {
   ChannelConnectPayload,
   ChannelValidationPayload,
   ChatSummary,
+  ContextGraph,
   CliAppsPayload,
   FilePreviewPayload,
   FileReferenceMetadata,
@@ -21,6 +24,7 @@ import type {
   ModelConfigurationUpdate,
   NetworkSafetySettingsUpdate,
   PairingPayload,
+  PromptIndex,
   ProviderCreationUpdate,
   ProviderModelsPayload,
   ProviderOAuthCompletionResult,
@@ -204,6 +208,7 @@ export async function listSessions(
     run_started_at?: number | null;
     recovery_state?: RecoveryState | null;
     workspace_scope?: WorkspaceScopePayload | null;
+    project_locked?: boolean;
     handle?: SessionHandle | null;
   };
   const body = await request<{ sessions: Row[] }>(
@@ -225,6 +230,7 @@ export async function listSessions(
       runStartedAt: s.run_started_at ?? null,
       recoveryState: s.recovery_state ?? null,
       workspaceScope: s.workspace_scope ?? null,
+      projectLocked: s.project_locked ?? true,
       handle,
     };
   });
@@ -235,6 +241,7 @@ export interface FetchWebuiThreadOptions {
   limit?: number;
   direction?: "latest";
   before?: string | null;
+  after?: string | null;
   signal?: AbortSignal;
   revision?: string;
   cached?: WebuiThreadPersistedPayload;
@@ -310,11 +317,21 @@ function isProjectionTraceDetail(value: unknown): boolean {
     && value.traceCount >= 0;
 }
 
-function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
+function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet<unknown> = new Set()): ThreadProjectionEvent {
   if (!isRecord(value) || typeof value.event !== "string" || typeof value.chat_id !== "string") {
     throw new Error("Invalid WebUI thread event");
   }
-  if (!hasValidProjectionMetadata(value)) {
+  if (!hasValidProjectionMetadata(value)
+    || (value.stream_id !== undefined && typeof value.stream_id !== "string")
+    || (value.projection_receipts !== undefined && (
+      !Array.isArray(value.projection_receipts)
+      || !value.projection_receipts.every((receipt: unknown) => isRecord(receipt)
+        && typeof receipt.turn_id === "string" && receipt.turn_id.length > 0
+        && Array.isArray(receipt.ranges)
+        && receipt.ranges.every((range: unknown) => Array.isArray(range)
+          && range.length === 2 && Number.isSafeInteger(range[0]) && range[0] >= 0
+          && Number.isSafeInteger(range[1]) && range[1] >= range[0]))
+    ))) {
     throw new Error("Invalid WebUI thread event metadata");
   }
   switch (value.event) {
@@ -368,8 +385,26 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
       if (value.text !== undefined && typeof value.text !== "string") break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
-      if (typeof value.compaction_id !== "string" || typeof value.phase !== "string") break;
+      if (value.context_snapshot !== undefined && !isContextInspection(value.context_snapshot, (graph): graph is ContextGraph => validatedGraphs.has(graph) || isContextGraph(graph))) break;
+      if (typeof value.compaction_id !== "string" || !value.compaction_id
+        || !isCompactionPhase(value.phase)
+        || (value.reason !== undefined && !isCompactionReason(value.reason))) break;
       return value as unknown as ThreadProjectionEvent;
+    case "model_request": {
+      if (value.context_graph !== undefined && !validatedGraphs.has(value.context_graph) && !isContextGraph(value.context_graph)) break;
+      const isUsage = (usage: unknown) => isRecord(usage)
+        && Object.values(usage).every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0);
+      if (typeof value.request_id !== "string" || !value.request_id
+        || typeof value.run_id !== "string" || !value.run_id
+        || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < 0
+        || !["started", "completed", "failed", "cancelled"].includes(String(value.phase))
+        || (value.usage !== undefined && !isUsage(value.usage))
+        || (value.request_usage != null && !isUsage(value.request_usage))
+        || (value.round_usages !== undefined && (!Array.isArray(value.round_usages) || !value.round_usages.every(isUsage)))
+        || (value.context_window_tokens !== undefined && (typeof value.context_window_tokens !== "number"
+          || !Number.isFinite(value.context_window_tokens) || value.context_window_tokens < 0))) break;
+      return value as unknown as ThreadProjectionEvent;
+    }
     case "turn_end":
       return value as unknown as ThreadProjectionEvent;
   }
@@ -383,12 +418,57 @@ export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPay
   if (value.projection !== "events" || !Array.isArray(value.events)) {
     throw new Error("Invalid WebUI thread events");
   }
-  const events = value.events.map(parseThreadProjectionEvent);
-  return {
-    ...value,
-    projection: "events",
-    events,
-  } as unknown as WebuiThreadPersistedPayload;
+  const graphs = new Map<string, ContextGraph>();
+  if (value.context_graphs !== undefined) {
+    if (!isRecord(value.context_graphs)) throw new Error("Invalid context graph dictionary");
+    const table = { nodes: value.context_graph_nodes, edges: value.context_graph_edges };
+    if (!isContextGraph(table)) throw new Error("Invalid context graph entity table");
+    const resolveIndex = <T,>(entries: readonly T[], index: unknown): T => {
+      if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index >= entries.length) {
+        throw new Error("Unknown context graph entity reference");
+      }
+      return entries[index];
+    };
+    for (const [key, descriptor] of Object.entries(value.context_graphs)) {
+      if (!isRecord(descriptor) || !Array.isArray(descriptor.nodes) || !Array.isArray(descriptor.edges)) {
+        throw new Error("Invalid context graph dictionary entry");
+      }
+      const nodes = descriptor.nodes.map((index: unknown) => resolveIndex(table.nodes, index));
+      const paths = new Set(nodes.map((node) => node.path));
+      const edges = descriptor.edges.map((index: unknown) => {
+        const edge = resolveIndex(table.edges, index);
+        if (!paths.has(edge.source) || !paths.has(edge.target)) throw new Error("Invalid context graph edge reference");
+        return edge;
+      });
+      graphs.set(key, { nodes, edges });
+    }
+  }
+  const validatedGraphs = new Set(graphs.values());
+  const resolveGraph = (key: unknown): ContextGraph => {
+    const graph = typeof key === "string" ? graphs.get(key) : undefined;
+    if (!graph) throw new Error("Unknown context graph reference");
+    return graph;
+  };
+  const events = value.events.map((raw) => {
+    if (!isRecord(raw)) return parseThreadProjectionEvent(raw);
+    const event = { ...raw };
+    if (event.context_graph_ref !== undefined) {
+      if (event.context_graph !== undefined) throw new Error("Ambiguous context graph reference");
+      event.context_graph = resolveGraph(event.context_graph_ref);
+      delete event.context_graph_ref;
+    }
+    if (isRecord(event.context_snapshot) && event.context_snapshot.graph_ref !== undefined) {
+      if (event.context_snapshot.graph !== undefined) throw new Error("Ambiguous context graph reference");
+      const { graph_ref, ...snapshot } = event.context_snapshot;
+      event.context_snapshot = { ...snapshot, graph: resolveGraph(graph_ref) };
+    }
+    return parseThreadProjectionEvent(event, validatedGraphs);
+  });
+  const body: Record<string, unknown> = { ...value, projection: "events", events };
+  delete body.context_graphs;
+  delete body.context_graph_nodes;
+  delete body.context_graph_edges;
+  return body as unknown as WebuiThreadPersistedPayload;
 }
 
 function parseWebuiThreadTraceDetailPayload(value: unknown): WebuiThreadTraceDetailPayload {
@@ -402,7 +482,7 @@ function parseWebuiThreadTraceDetailPayload(value: unknown): WebuiThreadTraceDet
   }
   return {
     message_id: value.message_id,
-    events: value.events.map(parseThreadProjectionEvent),
+    events: value.events.map((event) => parseThreadProjectionEvent(event)),
   };
 }
 
@@ -418,6 +498,9 @@ export async function fetchWebuiThread(
   if (options?.limit !== undefined) params.set("limit", String(options.limit));
   if (options?.direction) params.set("direction", options.direction);
   if (options?.before) params.set("before", options.before);
+  if (options?.after) params.set("after", options.after);
+  params.set("include_model_requests", "1");
+  params.set("context_graph_encoding", "references-v1");
   const query = params.toString();
   const suffix = query ? `?${query}` : "";
   const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;
@@ -433,6 +516,34 @@ export async function fetchWebuiThread(
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return parseWebuiThreadPayload(await res.json());
+}
+
+export async function fetchPromptIndex(token: string, key: string, signal: AbortSignal, cached?: PromptIndex): Promise<PromptIndex> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const query = cached?.revision ? `?since=${encodeURIComponent(cached.revision)}` : "";
+  if (cached?.revision) headers["If-None-Match"] = `"${cached.revision}"`;
+  const res = await fetchWithTimeout(`/api/sessions/${encodeURIComponent(key)}/webui-thread/prompts${query}`, {
+    headers, credentials: "same-origin", cache: "no-store", signal,
+  });
+  if (res.status === 304 && cached) return cached;
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (!isRecord(body) || !Array.isArray(body.prompts)) throw new Error("Invalid prompt index");
+  const replaceFrom = body.replaceFrom ?? 0;
+  if (typeof replaceFrom !== "number" || !Number.isSafeInteger(replaceFrom)
+    || replaceFrom < 0 || replaceFrom > (cached?.prompts.length ?? 0)
+    || (body.revision != null && typeof body.revision !== "string")) throw new Error("Invalid prompt index revision");
+  const prompts = body.prompts.map((item: unknown) => {
+    if (!isRecord(item) || typeof item.id !== "string" || typeof item.preview !== "string"
+      || typeof item.answerPreview !== "string" || typeof item.cursor !== "string" || typeof item.turnId !== "string"
+      || typeof item.createdAt !== "number" || !Number.isFinite(item.createdAt)) {
+      throw new Error("Invalid prompt summary");
+    }
+    return { id: item.id, preview: item.preview, answerPreview: item.answerPreview,
+      cursor: item.cursor, createdAt: item.createdAt, turnId: item.turnId };
+  });
+  return { prompts: [...(cached?.prompts.slice(0, replaceFrom) ?? []), ...prompts],
+    revision: typeof body.revision === "string" ? body.revision : undefined };
 }
 
 export async function fetchWebuiThreadTraceDetail(
@@ -732,24 +843,40 @@ export async function fetchSettingsUsage(
   );
 }
 
+export type UpdateChannel = "stable" | "preview";
+export interface ReleaseStatus {
+  channel: UpdateChannel;
+  revision: number;
+  currentVersion: string;
+  state: "available" | "current" | "ahead" | "waiting_stable" | "withdrawn" | "unavailable" | "publishing" | "unsupported";
+}
 export interface VersionCheckResult {
+  installation_method?: UpdateMethod | null;
+  releaseStatus?: ReleaseStatus;
+  can_change_channel?: boolean;
   updateAvailable: {
     currentVersion: string;
     latestVersion: string;
     pypiUrl?: string;
+    releaseUrl?: string;
   } | null;
 }
 
 export async function checkVersion(
   token: string,
   base: string = "",
+  channelStatus = false,
 ): Promise<VersionCheckResult> {
   return request<VersionCheckResult>(
-    `${base}/api/settings/version-check`,
+    `${base}/api/settings/version-check${channelStatus ? "?channel_status=1" : ""}`,
     token,
     undefined,
-    10_000,
+    90_000,
   );
+}
+
+export function changeUpdateChannel(transport: WebUIMutationTransport, channel: UpdateChannel, revision: number): Promise<{ channel: UpdateChannel; revision: number }> {
+  return mutation(transport, "settings.nanobot.update.channel", { channel, revision });
 }
 
 export async function fetchWorkspaces(
@@ -762,6 +889,73 @@ export async function fetchWorkspaces(
     undefined,
     API_READ_TIMEOUT_MS,
   );
+}
+
+export type UpdateMethod = "managed" | "uv" | "pipx" | "pip" | "source" | "container" | "system";
+export interface UpdateGuide {
+  method: UpdateMethod;
+  host: string;
+  environment: string;
+  shell: "sh" | "powershell";
+  inspect_command: string | null;
+  update_command: string | null;
+  verify_command: string | null;
+  reason: "registry" | "preview" | "policy" | "extras" | "manager" | "source" | "container" | "system" | "review" | "restart";
+}
+export interface UpdateReview {
+  id: string;
+  installation_id: string;
+  host: string;
+  running_version: string;
+  target_version: string;
+  channel?: UpdateChannel;
+  action: "upgrade" | "downgrade" | "restart" | "none";
+  validity: "current" | "expired" | "installation_changed" | "profiles_changed" | "channel_changed";
+  execution_blocked_reason: string | null;
+  automatic_recovery?: boolean;
+  guide?: UpdateGuide | null;
+  profiles: { id: string; workspace: string; reviewed_state: string; stop: boolean; restart: boolean }[];
+}
+export interface UpdateReviewResponse {
+  plan: UpdateReview;
+  installation_allowed: boolean;
+  execution_available: boolean;
+}
+export type UpdateJobPhase = "preparation_requested" | "preparing" | "preparation_failed" | "ready"
+  | "checking" | "stopping" | "handoff_failed" | "backing_up" | "installing" | "verifying"
+  | "installed" | "restarting" | "activating" | "finalizing" | "restart_failed" | "succeeded" | "failed" | "cancelled";
+export interface UpdateJob {
+  id: string;
+  installation_id: string;
+  target_version: string;
+  running_version: string;
+  recorded_phase: UpdateJobPhase;
+  recovery_active?: boolean;
+  service_restored?: boolean;
+  automatic_recovery?: boolean;
+  previous_version?: string;
+  mutation_started: boolean;
+  execution_confirmation_id: string | null;
+  recovery_command?: string;
+}
+export function createUpdateReview(transport: WebUIMutationTransport): Promise<UpdateReviewResponse> {
+  return mutation(transport, "settings.nanobot.update.plan", { restart_running: true }, 60_000);
+}
+export function readUpdateReview(token: string, id: string): Promise<UpdateReviewResponse> {
+  return request(`/api/settings/nanobot-update/plan?id=${encodeURIComponent(id)}`, token, undefined, API_READ_TIMEOUT_MS);
+}
+export function readUpdateJob(token: string, id: string): Promise<{ job: UpdateJob }> {
+  return request(`/api/settings/nanobot-update/job?id=${encodeURIComponent(id)}`, token, undefined, API_READ_TIMEOUT_MS);
+}
+export function prepareUpdate(transport: WebUIMutationTransport, id: string): Promise<{ job: UpdateJob }> {
+  return mutation(transport, "settings.nanobot.update.prepare", { id });
+}
+export function settleUpdate(transport: WebUIMutationTransport, id: string): Promise<{ job: UpdateJob }> {
+  return mutation(transport, "settings.nanobot.update.settle", { id });
+}
+export function executeUpdate(transport: WebUIMutationTransport, id: string, previousConfirmation?: string): Promise<{ job: UpdateJob }> {
+  return mutation(transport, previousConfirmation ? "settings.nanobot.update.retry" : "settings.nanobot.update.execute",
+    { id, confirm_restart: true, ...(previousConfirmation ? { previous_confirmation_id: previousConfirmation } : {}) });
 }
 
 export async function fetchWorkspaceDirectories(
@@ -1000,11 +1194,12 @@ export async function startMcpOAuth(
   transport: WebUIMutationTransport,
   name: string,
   reset: boolean = false,
+  values: Record<string, string> = {},
 ): Promise<McpOAuthFlowPayload> {
   return mutation<McpOAuthFlowPayload>(
     transport,
     "settings.mcp.oauth_start",
-    { name, ...(reset ? { reset: true } : {}) },
+    { ...values, name, ...(reset ? { reset: true } : {}) },
     30_000,
   );
 }
@@ -1086,7 +1281,7 @@ export async function fetchProviderModels(
 
 export async function runMcpPresetAction(
   transport: WebUIMutationTransport,
-  action: "enable" | "disable" | "remove" | "test" | "reconnect",
+  action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy",
   name: string,
   values: Record<string, string> = {},
 ): Promise<McpPresetsPayload> {

@@ -73,10 +73,10 @@ describe("quick pairing", () => {
     let finish!: (value: { id: string }) => void;
     mocks.action.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     mocks.connect.mockRejectedValueOnce(new Error("ssh_connection_closed"));
-    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     act(() => { if (typeof expiry === "function") expiry(); });
     await act(async () => finish({ id: "paired-server" }));
-    expect(await screen.findByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeEnabled();
     expect(screen.getByRole("heading", { name: "Open this nanobot?" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Get a new command" })).not.toBeInTheDocument();
   });

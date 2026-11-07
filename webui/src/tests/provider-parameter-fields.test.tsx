@@ -20,12 +20,12 @@ it.each([
   const dialog = screen.getByRole("dialog", { name: title });
   const editor = within(dialog).getByRole("textbox");
   fireEvent.change(editor, { target: { value: '{"X-Token":"••••••••"}' } });
-  fireEvent.click(within(dialog).getByRole("button", { name: "保存", exact: true }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
   expect(await within(dialog).findByRole("alert")).toHaveTextContent("掩码没有对应的已保存密钥。请输入实际值，或删除该项。");
   expect(editor).toHaveValue('{"X-Token":"••••••••"}');
   expect(editor).toHaveFocus();
   fireEvent.change(editor, { target: { value: '{"X-Token":"fixture-value"}' } });
-  await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "保存", exact: true })); });
+  await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "保存" })); });
   expect(save).toHaveBeenLastCalledWith({ [formKey]: '{"X-Token":"fixture-value"}' });
   expect(screen.queryByRole("dialog", { name: title })).not.toBeInTheDocument();
 });
@@ -35,7 +35,7 @@ it("lets the gateway preserve an existing masked secret without rejecting it in 
   const save = vi.fn().mockResolvedValue(undefined);
   render(<ProviderParameterFields inherit fields={["extra_headers"]} form={{ ...form, extraHeaders: masked }} onChange={vi.fn()} onSave={save} />);
   fireEvent.click(screen.getByRole("button", { name: "Headers Entries: 1 Edit" }));
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save", exact: true })); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Save" })); });
   expect(save).toHaveBeenCalledWith({ extraHeaders: masked });
   expect(screen.queryByRole("dialog", { name: "Headers" })).not.toBeInTheDocument();
 });
@@ -69,7 +69,7 @@ it("waits for persistence, keeps errors and drafts in place, and lets users canc
   const dialog = screen.getByRole("dialog", { name: "Body parameters" });
   const editor = within(dialog).getByRole("textbox");
   fireEvent.change(editor, { target: { value: '{"watermark":false}' } });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Save", exact: true }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   expect(within(dialog).getByRole("button", { name: i18n.t("settings.actions.saving") })).toBeDisabled();
   expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
   fireEvent.keyDown(editor, { key: "Escape" });

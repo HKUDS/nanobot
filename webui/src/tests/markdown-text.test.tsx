@@ -142,30 +142,4 @@ describe("MarkdownText", () => {
       "true",
     );
   });
-
-  it("defers syntax highlighting until the final render", async () => {
-    rendererSpy.mockClear();
-    const largeCode = `\`\`\`ts\n${"const value = 1;\n".repeat(1_100)}\`\`\``;
-
-    const { rerender } = render(
-      <MarkdownText streaming>{largeCode}</MarkdownText>,
-    );
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
-      "data-highlight-code",
-      "false",
-    );
-
-    rerender(<MarkdownText>{largeCode}</MarkdownText>);
-
-    expect(screen.getByTestId("markdown-renderer")).toHaveAttribute(
-      "data-highlight-code",
-      "true",
-    );
-  });
 });

@@ -48,9 +48,11 @@ describe("NanobotTui with a Herdr pane title reporter", () => {
     await setup.mockInput.typeText("/")
     await setup.flush()
     const commandFrame = setup.captureCharFrame()
-    expect(commandFrame).toContain("/sessions")
     expect(commandFrame).toContain("/new-chat")
     expect(commandFrame).toContain("/branch")
+    await setup.mockInput.typeText("sessions")
+    await setup.flush()
+    expect(setup.captureCharFrame()).toContain("/sessions")
     setup.mockInput.pressEscape()
     ui.composer.setText("")
 

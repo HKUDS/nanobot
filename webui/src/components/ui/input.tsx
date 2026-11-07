@@ -13,7 +13,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       <input
         type={type}
         className={cn(
-          "touch-text-input flex h-10 w-full rounded-full border border-input bg-background px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          "touch-text-input flex h-10 w-full rounded-full border border-input bg-background px-3 py-2 text-ui-body file:border-0 file:bg-transparent file:text-control-label placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
           variant === "search" || type === "search"
             ? "focus:outline-none" : formControlFocusClassName,
           className,

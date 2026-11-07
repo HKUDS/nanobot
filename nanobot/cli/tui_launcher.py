@@ -1,5 +1,3 @@
-"""Launch the TypeScript terminal client against the local gateway."""
-
 from __future__ import annotations
 
 import hashlib
@@ -17,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from nanobot import __version__
+from nanobot.bun import BunUnavailableError, bun_environment, ensure_bun
 from nanobot.cli.process_identity import named_executable
 from nanobot.cli.runtime_config import _model_display
 from nanobot.cli.webui_support import (
@@ -187,12 +186,12 @@ def resolve_tui_command(*, data_dir: Path | None = None) -> list[str]:
     asset = f"nanobot-tui-{system}-{machine}{suffix}"
     source_dir = _source_checkout_tui_dir()
     if source_dir is not None:
-        bun = shutil.which("bun")
-        if not bun:
-            raise TuiUnavailableError(
-                "this source checkout requires Bun to run its matching TUI; "
-                "install Bun, then run `nanobot agent` again"
-            )
+        try:
+            bun = ensure_bun()
+        except BunUnavailableError as exc:
+            available = shutil.which("bun")
+            hint = f" (Bun found at {available!r} but could not be used)" if available else ""
+            raise TuiUnavailableError(f"{exc}{hint}") from exc
         return _resolve_source_tui_command(source_dir, bun, data_dir=data_dir)
 
     packaged = Path(__file__).resolve().parents[1] / "tui" / "bin" / asset
@@ -212,7 +211,6 @@ def resolve_tui_command(*, data_dir: Path | None = None) -> list[str]:
 
 
 def _source_checkout_tui_dir() -> Path | None:
-    """Return this checkout's TUI source, never a neighboring unrelated directory."""
     return _tui_source_dir(Path(__file__).resolve().parents[2])
 
 
@@ -229,13 +227,15 @@ def _resolve_source_tui_command(
 ) -> list[str]:
     dependency = source_dir / "node_modules" / "@opentui" / "core"
     try:
-        install = subprocess.run(
-            [bun, "install", "--frozen-lockfile"],
-            cwd=source_dir,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        with bun_environment(bun) as env:
+            install = subprocess.run(
+                [bun, "install", "--frozen-lockfile"],
+                cwd=source_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
     except OSError as exc:
         raise TuiUnavailableError(f"could not install TUI dependencies: {exc}") from exc
     if install.returncode != 0 or not dependency.is_dir():
@@ -251,7 +251,6 @@ def _resolve_source_tui_command(
 
 
 def _download_release_tui(asset: str, *, data_dir: Path | None = None) -> Path | None:
-    """Install the complete, version-matched TUI release bundle."""
     if os.environ.get("NANOBOT_TUI_NO_DOWNLOAD") == "1":
         return None
     version = __version__.strip()
@@ -505,7 +504,6 @@ def _ensure_gateway(
 
 
 def _tui_gateway_connection(config: Config) -> tuple[str, str]:
-    """Read the small bootstrap subset without importing the WebSocket runtime."""
     raw: object = getattr(config.channels, "websocket", None)
     settings = cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
     host = _host_for_local_browser(str(settings.get("host") or "127.0.0.1"))
@@ -523,7 +521,6 @@ def _tui_gateway_connection(config: Config) -> tuple[str, str]:
 
 
 def _websocket_chat_id(session_id: str) -> str | None:
-    """Map the CLI selector to the WebSocket namespace used by the native TUI."""
     if is_webui_session_key(session_id):
         return webui_chat_id(session_id)
     if ":" in session_id:
@@ -535,13 +532,11 @@ def _websocket_chat_id(session_id: str) -> str | None:
 
 
 def _initial_tui_chat_id(session_id: str | None) -> str | None:
-    """Start fresh unless the caller explicitly selects a TUI chat."""
     if session_id is not None:
         return _websocket_chat_id(session_id)
     return None
 
 
 def _initial_tui_workspace(workspace_override: str | None) -> Path:
-    """Use the launch directory unless the caller explicitly selects a workspace."""
     workspace = Path(workspace_override) if workspace_override is not None else Path.cwd()
     return workspace.expanduser().resolve(strict=False)

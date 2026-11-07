@@ -1,4 +1,5 @@
 import type { ThemeMode } from "@opentui/core"
+import type { LocalAttachment } from "../../../packages/client-events/attachments"
 
 import type {
   GatewayConnection,
@@ -33,6 +34,7 @@ export interface ChatClient {
   close(): void
   send(content: string, options?: MessageOptions): string
   sendAttachments(content: string, options: MessageOptions): Promise<string>
+  inspectAttachment(path: string): Promise<LocalAttachment>
   attach(chatId: string): void
   newChat(scope?: WorkspaceScopePayload): void
   forkChat?(sourceChatId: string, beforeUserIndex: number, title?: string): void

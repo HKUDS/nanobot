@@ -26,6 +26,12 @@ export const LOCAL_COMMANDS: TuiCommand[] = [
     action: "usage",
   },
   {
+    command: "/diagrams",
+    title: "Mermaid diagrams",
+    description: "View, zoom and copy diagrams in this conversation (Ctrl+G)",
+    action: "diagrams",
+  },
+  {
     command: "/diff",
     title: "Last turn diff",
     description: "Inspect file changes from the latest turn",

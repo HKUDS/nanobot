@@ -11,7 +11,6 @@ export class BootstrapAuthRequiredError extends Error {
   }
 }
 
-/** Read a previously saved bootstrap secret from localStorage. */
 export function loadSavedSecret(): string {
   if (typeof window === "undefined") return "";
   try {
@@ -21,7 +20,6 @@ export function loadSavedSecret(): string {
   }
 }
 
-/** Persist the bootstrap secret so page reloads don't re-prompt. */
 export function saveSecret(secret: string): void {
   try {
     window.localStorage.setItem(SECRET_STORAGE_KEY, secret);
@@ -30,7 +28,6 @@ export function saveSecret(secret: string): void {
   }
 }
 
-/** Clear the saved bootstrap secret (sign out). */
 export function clearSavedSecret(): void {
   try {
     window.localStorage.removeItem(SECRET_STORAGE_KEY);

@@ -32,7 +32,7 @@ describe("settings text editor copy", () => {
     expect(dialog).toHaveAccessibleDescription(help);
     expect(within(dialog).getAllByText(help)).toHaveLength(1);
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Headers" }), { target: { value: '{"Accept":"application/json"}' } });
-    fireEvent.click(within(dialog).getByRole("button", { name: i18n.t("settings.actions.save"), exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: i18n.t("settings.actions.save") }));
     expect(save).toHaveBeenCalledWith('{"Accept":"application/json"}');
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
     expect(warning).not.toHaveBeenCalled();

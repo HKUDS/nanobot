@@ -1,5 +1,3 @@
-"""Utility functions for nanobot."""
-
 from __future__ import annotations
 
 import sys
@@ -30,7 +28,6 @@ class _LazyModuleAlias(ModuleType):
 
 
 _LEGACY_MODULE_ALIASES = {
-    "webui_thread_disk": "nanobot.webui.thread_disk",
     "webui_transcript": "nanobot.webui.transcript",
     "webui_turn_helpers": "nanobot.session.webui_turns",
 }

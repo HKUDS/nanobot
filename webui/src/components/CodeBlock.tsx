@@ -1,4 +1,4 @@
-import { Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -6,6 +6,7 @@ import { useThemeValue } from "@/hooks/useTheme";
 import { hasAnsi, parseAnsiSegments, stripAnsi } from "@/lib/ansi";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { normalizeCodeLanguage } from "@/lib/code-language";
+import { discardCodeHighlight } from "@/lib/code-highlight-cache";
 import { cn } from "@/lib/utils";
 
 interface CodeBlockProps {
@@ -14,119 +15,53 @@ interface CodeBlockProps {
   className?: string;
   chrome?: "default" | "none";
   highlight?: boolean;
+  ansi?: boolean;
   showLineNumbers?: boolean;
   wrapLongLines?: boolean;
   viewportHighlight?: boolean;
 }
 
-interface HighlightedCodeProps {
-  language?: string;
-  code: string;
-  isDark: boolean;
-  chrome: "default" | "none";
-  showLineNumbers: boolean;
-  wrapLongLines: boolean;
-  viewportHighlight: boolean;
-}
-
-const CODE_FONT_STACK = [
-  '"JetBrains Mono"',
-  '"SFMono-Regular"',
-  '"SF Mono"',
-  '"Fira Code"',
-  '"Cascadia Code"',
-  '"Source Code Pro"',
-  "Menlo",
-  "Consolas",
-  "monospace",
-].join(", ");
-
 const ANSI_LANGUAGES = new Set(["ansi", "ansi-output"]);
 
 const LazyHighlightedCode = lazy(async () => {
-  const [
-    { default: SyntaxHighlighter },
-    { default: oneDark },
-    { default: oneLight },
-    { ViewportCodeRows },
-  ] = await Promise.all([
-    import("react-syntax-highlighter/dist/esm/prism-async-light"),
-    import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
-    import("react-syntax-highlighter/dist/esm/styles/prism/one-light"),
-    import("@/components/ViewportCodeRows"),
-  ]);
-
-  return {
-    default({
-      language,
-      code,
-      isDark,
-      chrome,
-      showLineNumbers,
-      wrapLongLines,
-      viewportHighlight,
-    }: HighlightedCodeProps) {
-      const theme = isDark ? oneDark : oneLight;
-      const transparentTheme = chrome === "none" ? {
-        ...theme,
-        'pre[class*="language-"]': {
-          ...theme['pre[class*="language-"]'],
-          background: "transparent",
-        },
-        'code[class*="language-"]': {
-          ...theme['code[class*="language-"]'],
-          background: "transparent",
-        },
-      } : theme;
-
-      return (
-        <SyntaxHighlighter
-          language={language || "text"}
-          style={transparentTheme}
-          customStyle={{
-            background: "transparent",
-            margin: 0,
-            padding: chrome === "none" ? "0.75rem 1rem" : "1rem 3.5rem 1rem 1.25rem",
-            fontFamily: CODE_FONT_STACK,
-            fontSize: "13px",
-            lineHeight: chrome === "none" ? 1.55 : 1.6,
-            tabSize: 2,
-            // FilePreviewPanel owns both scroll axes. Replacing this <pre>
-            // during progressive highlighting must not reset horizontal scroll.
-            ...(viewportHighlight ? { overflow: "visible" } : {}),
-          }}
-          codeTagProps={{
-            style: {
-              background: "transparent",
-              fontFamily: CODE_FONT_STACK,
-              ...(viewportHighlight ? { lineHeight: "inherit" } : {}),
-            },
-          }}
-          lineNumberStyle={{
-            minWidth: "2.6em",
-            paddingRight: "1.15rem",
-            color: isDark ? "rgba(212, 212, 216, 0.45)" : "rgba(63, 63, 70, 0.68)",
-            fontFamily: CODE_FONT_STACK,
-            userSelect: "none",
-          }}
-          PreTag="pre"
-          showLineNumbers={showLineNumbers && !viewportHighlight}
-          wrapLongLines={wrapLongLines}
-          renderer={viewportHighlight ? props => <ViewportCodeRows {...props} /> : undefined}
-        >
-          {code}
-        </SyntaxHighlighter>
-      );
-    },
-  };
+  const { HighlightedCode } = await import("./HighlightedCode");
+  return { default: HighlightedCode };
 });
+
+class CodeHighlightBoundary extends Component<{
+  code: string;
+  language: string;
+  fallback: ReactNode;
+  children: ReactNode;
+}, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    discardCodeHighlight(this.props.code, this.props.language);
+    console.warn("Code highlighting failed.", error);
+  }
+
+  componentDidUpdate(previous: Readonly<{ code: string; language: string }>) {
+    if (this.state.failed && (previous.code !== this.props.code || previous.language !== this.props.language)) {
+      this.setState({ failed: false });
+    }
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
 
 function renderPlainText(value: string): ReactNode {
   return value;
 }
 
-function renderAnsiText(value: string): ReactNode {
-  return parseAnsiSegments(value).map((segment, index) => (
+function renderAnsiText(value: string, theme: "light" | "dark"): ReactNode {
+  return parseAnsiSegments(value, theme).map((segment, index) => (
     <span key={index} style={segment.style}>
       {segment.text}
     </span>
@@ -154,28 +89,27 @@ function CodeTextBlock({
   return (
     <pre
       className={cn(
-        "m-0 bg-transparent font-mono text-[13px] text-foreground/90",
+        "m-0 bg-transparent font-mono text-code text-foreground/90",
         compact ? "overflow-visible" : "overflow-x-auto",
         showLineNumbers ? "whitespace-pre" : "whitespace-pre-wrap",
         chrome === "default"
-          ? "py-4 pl-5 pr-14 leading-[1.6]"
-          : compact ? "px-4 py-3 leading-[1.55]" : "p-3 leading-[1.55]",
+          ? "py-4 pl-5 pr-14"
+          : compact ? "py-3 pl-2 pr-4" : "p-3",
         className,
       )}
       data-testid={testId}
-      style={compact ? { fontFamily: CODE_FONT_STACK } : undefined}
     >
       <code className="text-inherit">
         {showLineNumbers && compact ? (
           <span className="flex min-w-max">
-            <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground/60"
-              style={{ minWidth: "4.25em" }}>{lines.map((_, index) => index + 1).join("\n")}</span>
+            <span aria-hidden className="shrink-0 select-none pr-[1.15rem] text-right text-muted-foreground"
+              style={{ minWidth: `calc(${String(lines.length).length}ch + 1.15rem)` }}>{lines.map((_, index) => index + 1).join("\n")}</span>
             <span>{renderText(code)}</span>
           </span>
         ) : showLineNumbers ? (
           lines.map((line, index) => (
             <span key={index} className="flex min-w-max">
-              <span className="w-10 shrink-0 select-none pr-4 text-right text-muted-foreground/60">
+              <span className="w-10 shrink-0 select-none pr-4 text-right text-muted-foreground">
                 {index + 1}
               </span>
               <span className="whitespace-pre">{renderText(line || " ")}</span>
@@ -199,6 +133,7 @@ export const CodeBlock = memo(function CodeBlock({
   className,
   chrome = "default",
   highlight = true,
+  ansi = true,
   showLineNumbers = false,
   wrapLongLines = true,
   viewportHighlight = false,
@@ -207,13 +142,13 @@ export const CodeBlock = memo(function CodeBlock({
   const rootRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [highlightedSource, setHighlightedSource] = useState<string | null>(null);
-  const renderAnsi = useMemo(() => shouldRenderAnsi(language, code), [language, code]);
+  const renderAnsi = useMemo(() => ansi && shouldRenderAnsi(language, code), [ansi, language, code]);
   const plainCode = useMemo(() => renderAnsi ? stripAnsi(code) : code, [renderAnsi, code]);
   const isDark = useThemeValue() === "dark";
   const hasChrome = chrome === "default";
   const syntaxLanguage = normalizeCodeLanguage(language);
   const useViewportHighlight = viewportHighlight && showLineNumbers && !wrapLongLines;
-  // Minified/very large previews must not monopolize the main thread in Prism.
+  // Minified/very large previews must not monopolize the main thread during highlighting.
   // Plain text still contains the entire preview, with normal selection and find.
   const withinHighlightBudget = useMemo(() => {
     if (!useViewportHighlight) return true;
@@ -251,6 +186,8 @@ export const CodeBlock = memo(function CodeBlock({
     };
   }, [code, deferHighlight]);
   const copyLabel = copied ? t("code.copied") : t("code.copyAria");
+  const plainBlock = <CodeTextBlock code={code} chrome={chrome} showLineNumbers={showLineNumbers}
+    testId="plain-code-fallback" compact={useViewportHighlight} />;
 
   const onCopy = useCallback(() => {
     void copyTextToClipboard(plainCode).then((ok) => {
@@ -264,7 +201,7 @@ export const CodeBlock = memo(function CodeBlock({
     <div
       ref={rootRef}
       className={cn(
-        "not-prose relative",
+        "not-prose relative code-content font-mono text-code",
         useViewportHighlight ? "overflow-visible" : "overflow-hidden",
         hasChrome && "rounded-floating bg-secondary/70",
         className,
@@ -277,47 +214,30 @@ export const CodeBlock = memo(function CodeBlock({
           chrome={chrome}
           showLineNumbers={showLineNumbers}
           testId="ansi-code"
-          renderText={renderAnsiText}
+          renderText={(value) => renderAnsiText(value, isDark ? "dark" : "light")}
           compact={useViewportHighlight}
         />
       ) : highlight && withinHighlightBudget && (!deferHighlight || highlightedSource === code) ? (
-        <Suspense
-          fallback={
-            <CodeTextBlock
+        <CodeHighlightBoundary code={code} language={syntaxLanguage} fallback={plainBlock}>
+          <Suspense fallback={plainBlock}>
+            <LazyHighlightedCode
+              language={syntaxLanguage}
               code={code}
               chrome={chrome}
               showLineNumbers={showLineNumbers}
-              testId="plain-code-fallback"
-              compact={useViewportHighlight}
+              wrapLongLines={wrapLongLines}
+              viewportHighlight={useViewportHighlight}
             />
-          }
-        >
-          <LazyHighlightedCode
-            language={syntaxLanguage}
-            code={code}
-            isDark={isDark}
-            chrome={chrome}
-            showLineNumbers={showLineNumbers}
-            wrapLongLines={wrapLongLines}
-            viewportHighlight={useViewportHighlight}
-          />
-        </Suspense>
-      ) : (
-        <CodeTextBlock
-          code={code}
-          chrome={chrome}
-          showLineNumbers={showLineNumbers}
-          testId="plain-code-fallback"
-          compact={useViewportHighlight}
-        />
-      )}
+          </Suspense>
+        </CodeHighlightBoundary>
+      ) : plainBlock}
       {hasChrome ? (
         <button
           type="button"
           onClick={onCopy}
           className={cn(
             "absolute right-2.5 top-2.5 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full",
-            "text-muted-foreground/75 transition-colors hover:text-foreground",
+            "text-muted-foreground transition-colors hover:text-foreground",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
           )}
           aria-label={copyLabel}

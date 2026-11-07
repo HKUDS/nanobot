@@ -1,5 +1,3 @@
-"""Email channel implementation using IMAP polling + SMTP replies."""
-
 import asyncio
 import html
 import imaplib
@@ -23,6 +21,7 @@ from typing import Any, Literal, cast
 from loguru import logger
 from pydantic import Field, field_validator
 
+from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -65,7 +64,6 @@ class EmailConfig(Base):
     subject_prefix: str = "Re: "
     allow_from: list[str] = Field(default_factory=list)
 
-    # Email authentication verification (anti-spoofing)
     verify_dkim: bool = True   # Require Authentication-Results with dkim=pass
     verify_spf: bool = True    # Require Authentication-Results with spf=pass
     trusted_authserv_ids: list[str] = Field(default_factory=list)
@@ -84,7 +82,7 @@ class EmailConfig(Base):
 
     # Attachment handling — set allowed types to enable (e.g. ["application/pdf", "image/*"], or ["*"] for all)
     allowed_attachment_types: list[str] = Field(default_factory=list)
-    max_attachment_size: int = 2_000_000  # 2MB per attachment
+    max_attachment_size: int = 2_000_000
     max_attachments_per_email: int = 5
 
 
@@ -164,7 +162,7 @@ class EmailChannel(BaseChannel):
         self._self_addresses = self._collect_self_addresses()
         self._last_subject_by_chat: dict[str, str] = {}
         self._last_message_id_by_chat: dict[str, str] = {}
-        self._processed_uids: set[str] = set()  # Capped to prevent unbounded growth
+        self._processed_uids: set[str] = set()
         self._MAX_PROCESSED_UIDS = 100000
 
     async def start(self) -> None:
@@ -245,12 +243,10 @@ class EmailChannel(BaseChannel):
         ):
             return
         if not self.config.consent_granted:
-            self.logger.warning("Skip email send: consent_granted is false")
-            return
+            raise DeliveryRejectedError("Email consent_granted is false")
 
         if not self.config.smtp_host:
-            self.logger.warning("SMTP host not configured")
-            return
+            raise DeliveryRejectedError("SMTP host not configured")
 
         # Skip progress messages to prevent sending an empty email after each tool call
         if isinstance(msg.event, ProgressEvent):
@@ -259,17 +255,14 @@ class EmailChannel(BaseChannel):
 
         to_addr = msg.chat_id.strip()
         if not to_addr:
-            self.logger.warning("Missing recipient address")
-            return
+            raise DeliveryRejectedError("Missing email recipient address")
 
-        # Determine if this is a reply (recipient has sent us an email before)
         is_reply = to_addr in self._last_subject_by_chat
         force_send = bool((msg.metadata or {}).get("force_send"))
 
         # autoReplyEnabled only controls automatic replies, not proactive sends
         if is_reply and not self.config.auto_reply_enabled and not force_send:
-            self.logger.info("Skip automatic reply to {}: auto_reply_enabled is false", to_addr)
-            return
+            raise DeliveryRejectedError("Email auto_reply_enabled is false")
 
         base_subject = self._last_subject_by_chat.get(to_addr, "nanobot reply")
         subject = self._reply_subject(base_subject)
@@ -390,7 +383,6 @@ class EmailChannel(BaseChannel):
             smtp.send_message(msg)
 
     def _fetch_new_messages(self) -> tuple[list[dict[str, Any]], set[str]]:
-        """Poll IMAP and return parsed unread messages plus skipped message UIDs."""
         return self._fetch_messages(
             search_criteria=("UNSEEN",),
             mark_seen=self.config.mark_seen,
@@ -465,13 +457,6 @@ class EmailChannel(BaseChannel):
         skipped_uids: set[str],
         cycle_uids: set[str],
     ) -> list[dict[str, Any]] | None:
-        """Fetch messages by arbitrary IMAP search criteria.
-
-        Uses UID SEARCH so already-processed UIDs are recognized before any
-        FETCH at all, then fetches headers only to evaluate every filter — the
-        full body (and any attachments) is downloaded only for messages that
-        pass every check and are actually going to be delivered.
-        """
         mailbox = self.config.imap_mailbox or "INBOX"
 
         client = self._open_imap_client(mailbox=mailbox, missing_mailbox_ok=True)
@@ -514,7 +499,6 @@ class EmailChannel(BaseChannel):
                     skipped_uids.add(uid)
                     continue
 
-                # --- Anti-spoofing: verify Authentication-Results ---
                 spf_pass, dkim_pass = self._check_authentication_results(parsed, sender)
                 if self.config.verify_spf and not spf_pass:
                     self.logger.warning(
@@ -569,7 +553,6 @@ class EmailChannel(BaseChannel):
                     f"{body}"
                 )
 
-                # --- Attachment extraction ---
                 attachment_paths: list[str] = []
                 if self.config.allowed_attachment_types:
                     saved = self._extract_attachments(
@@ -611,7 +594,6 @@ class EmailChannel(BaseChannel):
     def _mark_seen_uid(
         self, client: Any, uid: str, features: _ServerFeatures | None
     ) -> _ServerFeatures:
-        """Mark a single UID \\Seen, reusing session-learned STORE support."""
         if features is None:
             features = self._server_features(client)
         self._uid_store_flag(client, uid, "\\Seen", features)
@@ -650,7 +632,6 @@ class EmailChannel(BaseChannel):
             client.logout()
 
     def _collect_self_addresses(self) -> set[str]:
-        """Return normalized email addresses owned by this channel instance."""
         candidates = (
             self.config.from_address,
             self.config.smtp_username,
@@ -677,12 +658,10 @@ class EmailChannel(BaseChannel):
         return ""
 
     def _is_self_address(self, sender: str) -> bool:
-        """Return True when an inbound sender belongs to the bot itself."""
         normalized_sender = self._normalize_address(sender)
         return bool(normalized_sender) and normalized_sender in self._self_addresses
 
     def _remember_processed_uid(self, uid: str, dedupe: bool, cycle_uids: set[str]) -> None:
-        """Track a fetched UID so skipped messages are not reprocessed forever."""
         if not uid:
             return
         cycle_uids.add(uid)
@@ -690,7 +669,6 @@ class EmailChannel(BaseChannel):
             self._processed_uids.add(uid)
             # mark_seen is the primary dedup; this set is a safety net
             if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
-                # Evict a random half to cap memory; mark_seen is the primary dedup
                 self._processed_uids = set(list(self._processed_uids)[len(self._processed_uids) // 2:])
 
     def _should_apply_post_action(self) -> bool:
@@ -848,8 +826,13 @@ class EmailChannel(BaseChannel):
         if msg.is_multipart():
             plain_parts: list[str] = []
             html_parts: list[str] = []
-            for part in msg.walk():
+            parts = [msg]
+            while parts:
+                part = parts.pop()
                 if part.get_content_disposition() == "attachment":
+                    continue
+                if part.is_multipart():
+                    parts.extend(reversed(part.get_payload()))
                     continue
                 content_type = part.get_content_type()
                 try:
@@ -889,7 +872,6 @@ class EmailChannel(BaseChannel):
         return payload.strip()
 
     def _check_authentication_results(self, parsed_msg: Any, sender: str) -> tuple[bool, bool]:
-        """Return aligned SPF/DKIM verdicts from one trusted producer header."""
         from_headers: list[Any] = parsed_msg.get_all("From") or []
         if (
             len(from_headers) != 1
@@ -1194,6 +1176,7 @@ class EmailChannel(BaseChannel):
             return []
 
         saved: list[Path] = []
+        saved_names: set[str] = set()
         media_dir = get_media_dir("email")
 
         for part in msg.walk():
@@ -1220,11 +1203,17 @@ class EmailChannel(BaseChannel):
 
             raw_name = part.get_filename() or "attachment"
             sanitized = safe_filename(raw_name) or "attachment"
-            dest = media_dir / f"{uid}_{sanitized}"
+            filename = Path(f"{uid}_{sanitized}")
+            dest = media_dir / filename
+            index = 1
+            while dest.name.casefold() in saved_names:
+                dest = media_dir / f"{filename.stem}_{index}{filename.suffix}"
+                index += 1
 
             try:
                 dest.write_bytes(payload)
                 saved.append(dest)
+                saved_names.add(dest.name.casefold())
                 logger.info("Attachment saved: {}", dest)
             except Exception as exc:
                 logger.warning("Failed to save attachment {}: {}", dest, exc)

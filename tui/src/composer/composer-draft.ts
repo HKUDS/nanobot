@@ -1,4 +1,5 @@
 import type { OutboundMedia } from "../client"
+import type { LocalAttachment } from "../../../packages/client-events/attachments"
 
 const LARGE_PASTE_CHARS = 1_000
 const LARGE_PASTE_LINES = 10
@@ -31,7 +32,7 @@ interface DraftImage {
 /** Keeps large pasted text and image payloads out of the editable composer surface. */
 export class ComposerDraft {
   private readonly pastes = new Map<string, string>()
-  private readonly images = new Map<string, OutboundMedia>()
+  private readonly images = new Map<string, OutboundMedia & { kind: LocalAttachment["kind"] }>()
 
   get imageCount(): number {
     return this.images.size
@@ -67,13 +68,27 @@ export class ComposerDraft {
   }
 
   image(image: DraftImage, visible = ""): PasteInsertion | null {
-    if (this.images.size >= MAX_DRAFT_IMAGES) return null
+    if ([...this.images.values()].filter((item) => item.kind !== "video").length >= MAX_DRAFT_IMAGES) return null
     const index = this.nextImageIndex(visible)
     const label = `[Image #${index}]`
     this.images.set(label, {
+      kind: "image",
       data_url: image.dataUrl,
       name: `clipboard-image-${index}.${IMAGE_EXTENSIONS[image.mimeType]}`,
     })
+    return { text: `${label} `, compacted: true, description: label.slice(1, -1) }
+  }
+
+  localFile(file: LocalAttachment, visible = ""): PasteInsertion | null {
+    const current = [...this.images.values()]
+    if (file.kind === "video"
+      ? current.some((item) => item.kind === "video")
+      : current.filter((item) => item.kind !== "video").length >= MAX_DRAFT_IMAGES) return null
+    const prefix = file.kind === "video" ? "Video" : file.kind === "image" ? "Image" : "File"
+    let index = 1
+    let label = `[${prefix} #${index}: ${file.name}]`
+    while (this.imageLabelInUse(label, visible)) label = `[${prefix} #${++index}: ${file.name}]`
+    this.images.set(label, { kind: file.kind, path: file.path, name: file.name })
     return { text: `${label} `, compacted: true, description: label.slice(1, -1) }
   }
 
@@ -180,7 +195,7 @@ export class ComposerDraft {
     return [...this.images]
       .filter(([label]) => visible.includes(label))
       .sort(([left], [right]) => visible.indexOf(left) - visible.indexOf(right))
-      .map(([, media]) => media)
+      .map(([, { kind: _kind, ...media }]) => media)
   }
 
   prune(visible: string): void {

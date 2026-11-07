@@ -6,6 +6,7 @@ import { channelTranslator } from "@/channel-plugins/i18n";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { SETTINGS_SEARCH_INPUT_CLASS, SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
+import { SkeletonStatus } from "@/components/settings/shared/SkeletonStatus";
 import { Button } from "@/components/ui/button";
 import { DisclosureContent } from "@/components/ui/disclosure";
 import { SearchInput } from "@/components/ui/input";
@@ -102,7 +103,15 @@ export function LinearMemberAccessView({ snapshot, disabled = false, onLoad, onS
         {payload && !error && visible.length === 0 ? <p className="settings-list-inset py-3 text-[12px] text-muted-foreground">
           {tx("members.empty", "No matching active members.")}
         </p> : null}
-        <SettingsGroup>
+        {expanded && loading && !payload ? <SkeletonStatus label={tx("members.loading", "Finding members…")} className="space-y-0">
+          {[0, 1, 2].map((index) => <div key={index} data-member-skeleton-row className="settings-disclosure-row">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="h-8 w-8 shrink-0 rounded-full bg-muted-foreground/20" />
+              <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5"><div className="h-3 w-24 rounded bg-muted-foreground/20" /></div>
+            </div>
+            <div className="h-5 w-[38px] rounded-full bg-muted-foreground/20" />
+          </div>)}
+        </SkeletonStatus> : <SettingsGroup>
           <ul className="max-h-80 overflow-y-auto" aria-label={tx("members.title", "Member access")}>
             {visible.map((member) => {
               const save = saves[member.id];
@@ -135,7 +144,7 @@ export function LinearMemberAccessView({ snapshot, disabled = false, onLoad, onS
               </li>;
             })}
           </ul>
-        </SettingsGroup>
+        </SettingsGroup>}
       </DisclosureContent>
     </section>
   );

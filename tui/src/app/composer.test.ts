@@ -7,6 +7,7 @@ import type { ClipboardImageReader } from "../composer/clipboard-image"
 import { options, client, mount, waitUntil, occurrences } from "./test-support"
 import { LOCAL_COMMANDS } from "./commands"
 import type { CommandMenu } from "../menus/command-menu"
+import type { Transcript } from "../rendering/transcript"
 
 describe("NanobotTui composer", () => {
   let setup: TestRendererSetup | undefined
@@ -50,6 +51,35 @@ describe("NanobotTui composer", () => {
 
     expect(sent).toEqual(["first"])
     expect(composer.plainText).toBe("next")
+  })
+
+  test("submits with keypad Enter and keeps its modified forms as newlines", async () => {
+    const sent: string[] = []
+    setup = await createRenderer({
+      width: 72,
+      height: 20,
+      screenMode: "alternate-screen",
+      kittyKeyboard: true,
+    })
+    const app = mount(setup, sent)
+    app.accept({ event: "attached", chat_id: "chat" })
+    await waitUntil(() => (app as unknown as { ready: boolean }).ready)
+    const composer = (app as unknown as { composer: TextareaRenderable }).composer
+
+    await setup.mockInput.typeText("11111")
+    await setup.mockInput.pressKeys(["\u001b[57414u"])
+    await waitUntil(() => sent.length === 1)
+    expect(sent).toEqual(["11111"])
+
+    app.accept({ event: "turn_end", chat_id: "chat" })
+    for (const modifier of [2, 3, 5]) {
+      composer.setText("first")
+      composer.cursorOffset = 5
+      await setup.mockInput.pressKeys([`\u001b[57414;${modifier}u`])
+      await setup.mockInput.typeText("second")
+      expect(composer.plainText).toBe("first\nsecond")
+      expect(sent).toEqual(["11111"])
+    }
   })
 
   test("inserts newlines with Shift+Enter and the universal Ctrl+J fallback", async () => {
@@ -102,6 +132,119 @@ describe("NanobotTui composer", () => {
     await setup.flush()
     expect(composer.placeholder).toBe("Ask nanobot anything")
     expect(setup.captureCharFrame()).toContain("Ask nanobot anything")
+  })
+
+  test("turns a confirmed pasted video path into a removable reference and retains failed sends", async () => {
+    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+    const transport = client()
+    transport.inspectAttachment = async (path) => {
+      if (path.includes("missing")) throw new Error("file not found")
+      return { path, name: "my clip.mp4", size: 6, kind: "video", mime: "video/mp4", url: "/api/media/sig/path" }
+    }
+    const sentOptions: MessageOptions[] = []
+    transport.sendAttachments = async (_content, options) => {
+      sentOptions.push(options)
+      if (sentOptions.length === 1) throw new Error("source unavailable")
+      return "accepted"
+    }
+    const app = NanobotTui.mount(setup.renderer, options, transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; status: { plainText: string } }
+    await waitUntil(() => ui.ready)
+    await setup.mockInput.pasteBracketedText('"/project/my clip.mp4"')
+    await waitUntil(() => ui.composer.plainText.includes("[Video #1: my clip.mp4]"))
+    ui.composer.submit()
+    await waitUntil(() => ui.status.plainText.includes("source unavailable"))
+    expect(ui.composer.plainText).toContain("[Video #1: my clip.mp4]")
+    expect(sentOptions[0]?.media).toEqual([{ path: "/project/my clip.mp4", name: "my clip.mp4" }])
+    ui.composer.submit()
+    await waitUntil(() => ui.composer.plainText === "")
+    await setup.mockInput.pasteBracketedText("./missing.mp4")
+    await waitUntil(() => ui.status.plainText.includes("file not found"))
+    expect(ui.composer.plainText).toBe("./missing.mp4")
+  })
+
+  test.each([false, true])("preserves text %s while a native pasted path is checked", async (prepend) => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
+    const transport = client()
+    let complete!: (file: Awaited<ReturnType<typeof transport.inspectAttachment>>) => void
+    transport.inspectAttachment = () => new Promise((resolve) => { complete = resolve })
+    const sent: Array<{ content: string; options: MessageOptions }> = []
+    transport.sendAttachments = async (content, options) => { sent.push({ content, options }); return "accepted" }
+    const app = NanobotTui.mount(setup.renderer, options, transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; pathInspectionPending: boolean }
+    await waitUntil(() => ui.ready)
+    const path = "/project/image.png"
+    await setup.mockInput.pasteBracketedText(path)
+    if (prepend) ui.composer.cursorOffset = 0
+    await setup.mockInput.typeText(prepend ? "请看 " : " describe it")
+    complete({ path, name: "image.png", size: 6, kind: "image", mime: "image/png", url: "/api/media/sig/path" })
+    await waitUntil(() => !ui.pathInspectionPending)
+    expect(ui.composer.plainText).toContain("[Image #1: image.png]")
+    ui.composer.submit()
+    await waitUntil(() => sent.length === 1)
+    expect(sent[0]?.content).toBe(prepend ? "请看" : "describe it")
+    expect(sent[0]?.options.media).toEqual([{ path, name: "image.png" }])
+  })
+
+  test("cancels an edited native path and clears checking status without losing the text", async () => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
+    const transport = client()
+    let complete!: (file: Awaited<ReturnType<typeof transport.inspectAttachment>>) => void
+    transport.inspectAttachment = () => new Promise((resolve) => { complete = resolve })
+    const app = NanobotTui.mount(setup.renderer, options, transport, new MockTreeSitterClient({ autoResolveTimeout: 0 }))
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; pathInspectionPending: boolean; status: { plainText: string }; draft: { imageCount: number } }
+    await waitUntil(() => ui.ready)
+    await setup.mockInput.pasteBracketedText("/project/image.png")
+    ui.composer.setText("/project/other.png")
+    complete({ path: "/project/image.png", name: "image.png", size: 6, kind: "image", mime: "image/png", url: "/api/media/sig/path" })
+    await waitUntil(() => !ui.pathInspectionPending)
+    expect(ui.draft.imageCount).toBe(0)
+    expect(ui.composer.plainText).toBe("/project/other.png")
+    expect(ui.status.plainText).not.toContain("Checking local attachment")
+  })
+
+  test("allows one referenced video plus four non-video attachments including a clipboard image", async () => {
+    setup = await createRenderer({ width: 100, height: 24, screenMode: "alternate-screen" })
+    const transport = client()
+    transport.inspectAttachment = async (path) => ({
+      path, name: path.split("/").at(-1)!, size: 6, url: "/api/media/sig/path",
+      kind: path.endsWith("mp4") ? "video" : "file",
+      mime: path.endsWith("mp4") ? "video/mp4" : "text/plain",
+    })
+    const sentOptions: MessageOptions[] = []
+    transport.sendAttachments = async (_content, options) => { sentOptions.push(options); return "accepted" }
+    const app = NanobotTui.mount(setup.renderer, options, transport,
+      new MockTreeSitterClient({ autoResolveTimeout: 0 }), undefined,
+      { read: async () => ({ mimeType: "image/png", dataUrl: "data:image/png;base64,eA==" }), dispose: async () => {} })
+    app.accept({ event: "attached", chat_id: "chat" })
+    const ui = app as unknown as { ready: boolean; pathInspectionPending: boolean; composer: TextareaRenderable; draft: { imageCount: number }; status: { plainText: string } }
+    await waitUntil(() => ui.ready)
+    for (const [index, name] of ["clip.mp4", "one.txt", "two.txt", "three.txt"].entries()) {
+      await setup.mockInput.pasteBracketedText(`/project/${name}`)
+      await waitUntil(() => !ui.pathInspectionPending)
+      expect(ui.draft.imageCount, `${name}: ${ui.composer.plainText}; ${ui.status.plainText}`).toBe(index + 1)
+    }
+    const beforeResize = ui.composer.plainText
+    for (const width of [140, 40, 100]) {
+      setup.resize(width, 30)
+      await setup.flush()
+      expect(ui.composer.plainText).toBe(beforeResize)
+      expect(ui.draft.imageCount).toBe(4)
+    }
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.draft.imageCount === 5)
+    setup.mockInput.pressKey("v", { ctrl: true })
+    await waitUntil(() => ui.status.plainText.includes("4 images or files"))
+    expect(ui.draft.imageCount).toBe(5)
+    ui.composer.submit()
+    await waitUntil(() => sentOptions.length === 1)
+    expect(sentOptions[0]?.media).toHaveLength(5)
+    expect(sentOptions[0]?.media?.filter((item) => item.path)).toHaveLength(4)
+    expect(sentOptions[0]?.media?.at(-1)?.data_url).toBe("data:image/png;base64,eA==")
+    await waitUntil(() => ui.composer.plainText === "")
   })
 
   test("compacts large pastes in the composer without changing the sent text", async () => {
@@ -248,7 +391,7 @@ describe("NanobotTui composer", () => {
     setup.mockInput.pressKey("v", { ctrl: true })
     await waitUntil(() => ui.composer.plainText === "这是什么？ [Image #1] ")
     setup.mockInput.pressTab()
-    expect(ui.status.plainText).toContain("Images cannot be queued")
+    expect(ui.status.plainText).toContain("Attachments cannot be queued")
     expect(ui.composer.plainText).toBe("这是什么？ [Image #1] ")
     ui.composer.submit()
     await waitUntil(() => sent.length === 2)
@@ -405,7 +548,7 @@ describe("NanobotTui composer", () => {
     setup.mockInput.pressKey("v", { ctrl: true })
     await waitUntil(() => ui.composer.plainText === "/model [Image #1] ")
     ui.composer.submit()
-    await waitUntil(() => ui.status.plainText.includes("Remove the image before running a command."))
+    await waitUntil(() => ui.status.plainText.includes("Remove attachments before running a command."))
 
     expect(sent).toEqual([])
     expect(ui.composer.plainText).toBe("/model [Image #1] ")
@@ -528,7 +671,7 @@ describe("NanobotTui composer", () => {
     ui.composer.setText("ask @github next")
     ui.composer.submit()
     await waitUntil(() => sent.length === 2)
-    expect(ui.status.plainText).not.toContain("Steering")
+    expect(ui.status.plainText).toMatch(/^Thinking\s+\d+s/u)
     expect(ui.composer.placeholder).toBe("Enter send now  Tab send next")
     expect(sentOptions[1]).toEqual({
       cliApps: [{ name: "github" }],
@@ -844,8 +987,8 @@ describe("NanobotTui composer", () => {
     expect(sent).toEqual(["start an active turn"])
   })
 
-  test("runs bang commands through the gateway without steering the agent", async () => {
-    setup = await createRenderer({ width: 80, height: 24, screenMode: "alternate-screen" })
+  test("runs bang commands through the gateway and copies their literal output without steering the agent", async () => {
+    setup = await createRenderer({ width: 100, height: 32, screenMode: "alternate-screen" })
     const sent: string[] = []
     const sentOptions: MessageOptions[] = []
     const app = NanobotTui.mount(
@@ -855,7 +998,9 @@ describe("NanobotTui composer", () => {
       new MockTreeSitterClient({ autoResolveTimeout: 0 }),
     )
     app.accept({ event: "attached", chat_id: "chat" })
-    const ui = app as unknown as { ready: boolean; composer: TextareaRenderable; activeTurn: boolean }
+    const ui = app as unknown as {
+      ready: boolean; composer: TextareaRenderable; activeTurn: boolean; transcript: Transcript
+    }
     await waitUntil(() => ui.ready)
 
     app.accept({ event: "goal_status", chat_id: "chat", status: "running" })
@@ -867,9 +1012,32 @@ describe("NanobotTui composer", () => {
     expect(sentOptions).toEqual([{ userShell: true }])
     expect(ui.activeTurn).toBe(true)
 
-    app.accept({ event: "message", chat_id: "chat", text: "/tmp/project", turn_id: "turn" })
+    const output = [
+      "  __pycache__ `ticks` ``` ````",
+      "![image](image.png) <b>HTML</b>",
+      "\\(x_1^2\\)",
+      "```mermaid",
+      "graph TD; A --> B",
+      "```",
+      "",
+    ].join("\n")
+    app.accept({ event: "message", chat_id: "chat", text: output, render_as: "text", turn_id: "turn" })
     await setup.flush()
-    expect(setup.captureCharFrame()).toContain("/tmp/project")
+    const text = ui.transcript.root.getChildren().flatMap((row) => row.getChildren())
+      .find((child) => child instanceof TextRenderable && child.plainText === output)
+    expect(text).toBeInstanceOf(TextRenderable)
+    expect(setup.captureCharFrame()).toContain("![image](image.png) <b>HTML</b>")
+    expect(setup.captureCharFrame()).toContain("\\(x_1^2\\)")
+    expect(setup.captureCharFrame()).toContain("```mermaid")
     expect(ui.activeTurn).toBe(true)
+
+    let copied = ""
+    setup.renderer.copyToClipboardOSC52 = (value) => { copied = value; return true }
+    if (!(text instanceof TextRenderable)) throw new Error("missing literal shell output")
+    await setup.mockMouse.drag(text.screenX, text.screenY, text.screenX, text.screenY + text.height - 1)
+    expect(setup.renderer.getSelection()?.getSelectedText()).toBe(output)
+    setup.mockInput.pressCtrlC()
+    await waitUntil(() => copied.length > 0)
+    expect(copied).toBe(output)
   })
 })

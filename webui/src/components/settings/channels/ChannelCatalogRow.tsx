@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { ChannelFeatureAction } from "@/channel-plugins/types";
 import { ToggleButton } from "@/components/ui/toggle-button";
+import { HoverHint } from "@/components/ui/hover-hint";
 import {
   ChannelLogo,
   ChannelStatusBadge,
@@ -20,15 +21,19 @@ export function ChannelCatalogRow({
   showBrandLogos,
   onSelect,
   actionKey,
-  actionsDisabled = false,
+  restartRequired = false,
   onAction,
+  onRestart,
+  isRestarting = false,
 }: {
   feature: NanobotFeatureInfo;
   showBrandLogos: boolean;
   onSelect: (connect?: boolean) => void;
   actionKey: string | null;
-  actionsDisabled?: boolean;
+  restartRequired?: boolean;
   onAction: ChannelFeatureAction;
+  onRestart?: () => void;
+  isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -39,6 +44,8 @@ export function ChannelCatalogRow({
   const ownActionBusy = pendingChecked !== null || actionKey === `install:${feature.name}`;
   const checked = alwaysEnabled || (pendingChecked ?? channelToggleChecked(feature));
   const anyActionBusy = Boolean(actionKey);
+  const actionsDisabled = restartRequired || isRestarting;
+  const showInstallRestartHint = feature.install_supported && actionsDisabled;
   const installButtonRef = useRef<HTMLButtonElement | null>(null);
   const [installHint, setInstallHint] = useState(false);
 
@@ -96,22 +103,43 @@ export function ChannelCatalogRow({
       ) : null}
       <div className="flex w-16 shrink-0 items-center justify-center">
         {!feature.installed ? (
-          <Button ref={installButtonRef} type="button" variant="outline" size="icon"
-            className={cn(
-              "h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0",
-              installHint && "border-[#2997FF]/60 bg-[#2997FF]/10 text-[#087FE7] ring-2 ring-[#2997FF]/25 ring-offset-2",
-            )}
-            disabled={actionsDisabled || anyActionBusy || !feature.install_supported}
-            aria-label={t("settings.channels.installChannel", { name: displayName })}
-            onClick={() => {
-              setInstallHint(false);
-              onAction("enable", feature.name, { installOnly: true, confirmed: true });
-            }}>
-            {ownActionBusy
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              : <Download className="h-3.5 w-3.5" aria-hidden />}
-            <span className="sr-only">{tx("settings.channels.install", "Install")}</span>
-          </Button>
+          <HoverHint enabled={showInstallRestartHint}
+            content={t(isRestarting ? "app.system.restarting" : "settings.channels.restartBeforeInstall")}>
+            <span role={showInstallRestartHint ? "group" : undefined}
+              tabIndex={showInstallRestartHint ? 0 : undefined}
+              aria-label={showInstallRestartHint ? t("settings.channels.installChannel", { name: displayName }) : undefined}
+              className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+              <Button ref={installButtonRef} type="button" variant="outline" size="icon"
+                className={cn(
+                  "h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0",
+                  installHint && "border-[#2997FF]/60 bg-[#2997FF]/10 text-[#087FE7] ring-2 ring-[#2997FF]/25 ring-offset-2",
+                )}
+                disabled={actionsDisabled || anyActionBusy || !feature.install_supported}
+                aria-label={t("settings.channels.installChannel", { name: displayName })}
+                onClick={() => {
+                  setInstallHint(false);
+                  onAction("enable", feature.name, { installOnly: true, confirmed: true });
+                }}>
+                {ownActionBusy
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  : <Download className="h-3.5 w-3.5" aria-hidden />}
+                <span className="sr-only">{tx("settings.channels.install", "Install")}</span>
+              </Button>
+            </span>
+          </HoverHint>
+        ) : feature.restart_pending ? (
+          <HoverHint content={t("settings.channels.restartRequired")}>
+            <Button type="button" variant="outline" size="icon"
+              className="h-[22px] w-[38px] min-w-0 shrink-0 rounded-full border-border/70 bg-background p-0"
+              aria-label={t("app.system.restart")}
+              aria-busy={isRestarting}
+              disabled={isRestarting || anyActionBusy || !onRestart}
+              onClick={onRestart}>
+              {isRestarting
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                : <RotateCcw className="h-3.5 w-3.5" aria-hidden />}
+            </Button>
+          </HoverHint>
         ) : (
           <ToggleButton checked={checked}
             label={checked ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}

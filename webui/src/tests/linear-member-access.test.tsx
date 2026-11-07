@@ -168,7 +168,8 @@ describe("Linear member access", () => {
     expect(requestMutation).toHaveBeenCalledTimes(1);
     fireEvent.click(header());
     expect(requestMutation).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Finding members…")).toBeVisible();
+    expect(screen.getByRole("status", { name: "Finding members…" })).toHaveAttribute("aria-busy", "true");
+    expect(document.querySelectorAll("[data-member-skeleton-row]")).toHaveLength(3);
     expect(screen.getByRole("textbox", { name: "Search members" })).toBeEnabled();
     expect(header()).toBeEnabled();
     expect(document.querySelector(".animate-spin")).toBeNull();

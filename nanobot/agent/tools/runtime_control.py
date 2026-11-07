@@ -1,5 +1,3 @@
-"""Explicit runtime state boundary used by :class:`MyTool`."""
-
 from __future__ import annotations
 
 import json
@@ -100,7 +98,7 @@ class RuntimeControl(Protocol):
 
     def set_model(self, model: str) -> LLMRuntime: ...
 
-    def set_model_preset(
+    async def set_model_preset(
         self,
         name: str,
         *,
@@ -156,7 +154,11 @@ class _RuntimeControlTarget(Protocol):
 
     def set_model_preset(self, name: str | None) -> LLMRuntime: ...
 
-    def set_session_model_preset(self, session_key: str, name: str) -> LLMRuntime: ...
+    async def set_session_model_preset(
+        self,
+        session_key: str,
+        name: str,
+    ) -> LLMRuntime: ...
 
 
 class AgentRuntimeControl:
@@ -227,14 +229,14 @@ class AgentRuntimeControl:
     def set_model(self, model: str) -> LLMRuntime:
         return self.__target.set_runtime_model(model)
 
-    def set_model_preset(
+    async def set_model_preset(
         self,
         name: str,
         *,
         session_key: str | None,
     ) -> LLMRuntime:
         if session_key is not None:
-            return self.__target.set_session_model_preset(session_key, name)
+            return await self.__target.set_session_model_preset(session_key, name)
         return self.__target.set_model_preset(name)
 
     def set_max_iterations(self, value: int) -> None:
@@ -278,8 +280,7 @@ def _snapshot_model_presets(
 def _snapshot_web_config(config: WebToolsConfig) -> dict[str, object]:
     return {
         "enable": config.enable,
-        # Proxy URLs may embed credentials. Presence is enough for diagnosis.
-        "proxy": "<configured>" if config.proxy else config.proxy,
+        "use_proxy": config.use_proxy,
         "user_agent": config.user_agent,
         "search": {
             "provider": config.search.provider,
@@ -296,7 +297,11 @@ def _snapshot_web_config(config: WebToolsConfig) -> dict[str, object]:
 def _snapshot_exec_config(config: ExecToolConfig) -> dict[str, object]:
     return {
         "enable": config.enable,
-        "timeout": config.timeout,
+        "max_runtime": config.max_runtime,
+        "max_runtime_limit": config.max_runtime_limit,
+        "idle_timeout": config.idle_timeout,
+        "idle_action": config.idle_action,
+        "timeout": config.max_runtime,
         "path_prepend": config.path_prepend,
         "path_append": config.path_append,
         "sandbox": config.sandbox,

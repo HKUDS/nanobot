@@ -1,5 +1,3 @@
-"""Synthetic privacy regressions for tool diagnostics, without external requests."""
-
 import asyncio
 import sys
 from contextlib import asynccontextmanager
@@ -48,7 +46,10 @@ async def test_mcp_reconnect_failure_obeys_private_log_policy(
         yield  # pragma: no cover
 
     monkeypatch.setattr("mcp.client.stdio.stdio_client", broken_stdio)
-    session = SimpleNamespace(call_tool=AsyncMock(side_effect=RuntimeError("session terminated")))
+    session = SimpleNamespace(
+        send_ping=AsyncMock(side_effect=RuntimeError("session terminated")),
+        call_tool=AsyncMock(),
+    )
     wrapper = MCPToolWrapper(session, "sample", SimpleNamespace(
         name="search", description="synthetic", inputSchema={},
     ))
@@ -63,6 +64,8 @@ async def test_mcp_reconnect_failure_obeys_private_log_policy(
         await provider.aclose()
 
     assert "failed" in result
+    session.send_ping.assert_awaited_once()
+    session.call_tool.assert_not_awaited()
     failures = [
         r for r in diagnostic_records
         if "connection failure" in r["message"] or "failed to connect" in r["message"]
@@ -83,7 +86,7 @@ async def test_runner_recovery_diagnostics_obey_private_policy(log_content, kind
     if kind == "injection":
         spec.injection_callback = AsyncMock(side_effect=ValueError(_SECRET))
     elif kind == "continuation":
-        spec.continuation_callback = MagicMock(side_effect=ValueError(_SECRET))
+        spec.continuation_callback = AsyncMock(side_effect=ValueError(_SECRET))
     elif kind == "finalization":
         spec.max_iterations = 0
         provider.chat_stream_with_retry = AsyncMock(side_effect=ValueError(_SECRET))
@@ -98,11 +101,14 @@ async def test_runner_recovery_diagnostics_obey_private_policy(log_content, kind
         spec.hook = BrokenFinallyHook()
 
     with request_context(RequestContext(channel="websocket", chat_id="test", log_content=log_content)):
-        if kind == "finally":
+        if kind in {"finally", "continuation"}:
             with pytest.raises(ValueError, match=_SECRET):
                 await AgentRunner().run(spec)
         else:
             await AgentRunner().run(spec)
+    if kind == "continuation":
+        assert all(_SECRET not in r["message"] for r in diagnostic_records)
+        return
     errors = [r for r in diagnostic_records if r["level"].name == "ERROR"]
     assert errors
     assert all((r["exception"] is not None) is log_content for r in errors)
@@ -124,7 +130,10 @@ async def test_mcp_private_errors_exclude_exception_payloads(
     log_content, kind, monkeypatch, diagnostic_records,
 ):
     session = MagicMock()
-    definition = SimpleNamespace(name="sample", description="sample", inputSchema={})
+    definition = SimpleNamespace(
+        name="sample", description="sample", inputSchema={},
+        annotations=types.ToolAnnotations(readOnlyHint=True) if kind == "retry" else None,
+    )
     error = ValueError(_SECRET)
     if kind in {"tool", "render", "retry"}:
         tool = MCPToolWrapper(session, "test", definition)
@@ -150,6 +159,8 @@ async def test_mcp_private_errors_exclude_exception_payloads(
     with request_context(RequestContext(channel="websocket", chat_id="test", log_content=log_content)):
         result = await tool.execute()
     assert "failed" in result or "malformed" in result
+    if kind == "retry":
+        assert session.call_tool.await_count == 2
     errors = [r for r in diagnostic_records if r["level"].name == "ERROR"]
     assert errors
     if log_content:
@@ -228,16 +239,18 @@ async def test_search_refresh_traceback_cannot_capture_private_call_arguments(
         lambda message: rendered.append(str(message)), format="{message}",
         diagnose=True, backtrace=True,
     )
+    settled = []
     try:
         with request_context(RequestContext(channel="websocket", chat_id="test", log_content=log_content)):
-            results, _ = await execute_tool_calls(
+            await execute_tool_calls(
                 tools, [ToolCallRequest(id="test", name="web_search", arguments={"query": _SECRET})],
                 concurrent=False, external_lookup_counts={}, workspace_violation_counts={},
                 hook=AgentHook(), context=AgentHookContext(iteration=1, messages=[]),
+                on_settled=AsyncMock(side_effect=settled.extend),
             )
     finally:
         logger.remove(sink)
-    assert results == ["synthetic result"]
+    assert [completed.result for completed in settled] == ["synthetic result"]
     assert "Failed to refresh web search config" in "\n".join(rendered)
     assert (_SECRET in "\n".join(rendered)) is log_content
 

@@ -8,6 +8,9 @@ type Role = "user" | "assistant" | "tool" | "system";
 type MessageKind = "message" | "trace" | "compaction";
 
 export interface UIContextCompaction extends ContextCompaction {
+  contextSnapshot?: ContextSnapshot;
+  /** Lifecycle event sequence, independent of the row's display position. */
+  turnSeq?: number;
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
   announce?: boolean;
 }
@@ -113,6 +116,8 @@ export interface UIMessage {
   id: string;
   role: Role;
   content: string;
+  /** Literal output bypasses Markdown and content-based reply recognition. */
+  renderAs?: "text";
   /** Invocation-time snapshots, never resolved from today's model presets. */
   responseSources?: ResponseSource[];
   kind?: MessageKind;
@@ -126,7 +131,6 @@ export interface UIMessage {
   toolEvents?: ToolProgressEvent[];
   /** Oversized persisted trace content that can be fetched when activity is expanded. */
   traceDetail?: UITraceDetail;
-  /** Activity rows: explicit file edits emitted by edit tools. */
   fileEdits?: UIFileEdit[];
   /** Activity rows created during the same agent phase share one collapsible block. */
   activitySegmentId?: string;
@@ -139,7 +143,6 @@ export interface UIMessage {
   compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
-  /** Signed or local UI-renderable media attachments. */
   media?: UIMediaAttachment[];
   /** App-specific CLI adapters explicitly attached to this user turn. */
   cliApps?: UICliAppAttachment[];
@@ -151,8 +154,6 @@ export interface UIMessage {
    * incrementally from ``reasoning_delta`` frames; finalized when
    * ``reasoning_end`` arrives. */
   reasoning?: string;
-  /** True while ``reasoning_delta`` frames are still arriving for this turn.
-   * Drives the shimmer header on ``ReasoningBubble``. */
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
@@ -172,10 +173,58 @@ export interface UIMessage {
   turnId?: string;
   turnPhase?: UITurnPhase;
   turnSeq?: number;
+  /** First contributing sequence; later content/source updates do not move this row. */
+  projectionStartSeq?: number;
+  /** Phase-qualified stream ownership survives memory-cache restoration. */
+  streamId?: string;
+  reasoningStreamId?: string;
   /** Ephemeral delivery lifecycle for optimistic user messages. */
   deliveryStatus?: MessageDeliveryStatus;
-  /** Structured rejection reason shown with a failed optimistic message. */
   deliveryErrorKind?: MessageDeliveryErrorKind;
+}
+
+/** Turn-owned telemetry, not a transcript row or body-history source. */
+export interface ContextGraphNode {
+  path: string;
+  name: string;
+  state: "loaded" | "discovered";
+  tokens: number;
+}
+
+export interface ContextGraph {
+  nodes: ContextGraphNode[];
+  edges: { source: string; target: string }[];
+}
+
+export interface ContextInspection {
+  graph: ContextGraph;
+  estimated_tokens: number;
+  context_window_tokens: number;
+}
+
+export interface ContextSnapshot {
+  turnSeq?: number;
+  estimatedTokens?: number;
+  id: string;
+  graph: ContextGraph;
+  usage?: TurnUsage;
+  contextWindowTokens?: number;
+}
+
+export interface UIModelRequestSnapshot {
+  contextSnapshots?: ContextSnapshot[];
+  runId: string;
+  sequence: number;
+  turnSeq?: number;
+  retiredRunIds: string[];
+  createdAt: number;
+  completedAt?: number;
+  /** Last turn sequence reporting fresh context usage. */
+  usageTurnSeq?: number;
+  ended?: boolean;
+  usage?: TurnUsage;
+  roundUsages?: RoundUsage[];
+  contextWindowTokens?: number;
 }
 
 export interface UICliAppAttachment {
@@ -345,6 +394,7 @@ export interface MarketplaceSkillSummary {
   downloads?: number;
   url: string;
   installed: boolean;
+  installation_status?: "available" | "installed" | "conflict" | "unknown";
   install_supported: boolean;
   metric: "installs_24h" | "installs_total";
   version?: string;
@@ -387,7 +437,6 @@ interface AgentUIBlob {
   data?: unknown;
 }
 
-/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
 export interface GoalStateWsPayload {
   active: boolean;
   status?: "active" | "blocked";
@@ -450,6 +499,8 @@ export interface ChatSummary {
   /** Durable recovery state that needs attention after an interrupted turn. */
   recoveryState?: RecoveryState | null;
   workspaceScope?: WorkspaceScopePayload | null;
+  /** Persisted sessions keep their project; only unpersisted drafts can change it. */
+  projectLocked?: boolean;
   /** Stable, server-owned @handle for this session. */
   handle?: SessionHandle | null;
 }
@@ -523,8 +574,6 @@ export interface WorkbenchState {
 
 export interface SidebarViewState {
   density: SidebarDensity;
-  show_previews: boolean;
-  show_timestamps: boolean;
   show_archived: boolean;
   sort: SidebarSortMode;
 }
@@ -615,7 +664,11 @@ interface ProviderModelInfo {
   description?: string | null;
   owned_by?: string | null;
   context_window?: number | null;
+  max_output_tokens?: number;
+  input_modalities?: string[];
+  output_modalities?: string[];
   reasoning_efforts?: string[];
+  default_reasoning_effort?: string;
   supports_backend_search?: boolean;
   api?: ModelAPIConfig | null;
 }
@@ -741,12 +794,12 @@ export interface SettingsPayload {
     oauth_account?: string | null;
     oauth_expires_at?: number | null;
     oauth_login_supported?: boolean;
-    proxy?: string | null;
+    use_proxy?: boolean;
     advanced_fields?: Array<
       | "extra_headers"
       | "extra_body"
       | "extra_query"
-      | "proxy"
+      | "use_proxy"
       | "thinking_style"
       | "region"
       | "profile"
@@ -772,7 +825,7 @@ export interface SettingsPayload {
   };
   web: {
     enable: boolean;
-    proxy?: string | null;
+    use_proxy?: boolean;
     user_agent?: string | null;
     search: {
       max_results: number;
@@ -959,6 +1012,7 @@ export interface SettingsPayload {
     private_service_protection_enabled: boolean;
     mcp_server_count: number;
     exec_enabled: boolean;
+    exec_max_runtime_limit?: number;
     exec_sandbox?: string | null;
     exec_path_prepend_set: boolean;
     exec_path_append_set: boolean;
@@ -1107,6 +1161,7 @@ export interface NanobotFeatureInfo {
   status: "enabled" | "missing_dependency" | "not_enabled" | string;
   install_supported: boolean;
   requires_restart: boolean;
+  restart_pending?: boolean;
 }
 
 export interface ChannelSetupContractField {
@@ -1234,6 +1289,7 @@ export interface McpPresetInfo {
   docs_url: string;
   transport: "stdio" | "streamableHttp" | "sse" | "oauth" | string;
   auth?: "oauth" | null;
+  use_proxy?: boolean;
   requires: string;
   note: string;
   install_supported: boolean;
@@ -1282,6 +1338,7 @@ export interface McpOAuthFlowPayload {
 
 export interface McpPresetsPayload {
   presets: McpPresetInfo[];
+  proxy_configured?: boolean;
   installed_count: number;
   requires_restart?: boolean;
   hot_reload?: {
@@ -1322,6 +1379,7 @@ export interface ChannelConnectPayload {
   qr_url?: string;
   interval_ms?: number;
   expires_at_ms?: number;
+  retrying?: boolean;
   nanobot_features?: NanobotFeaturesPayload;
 }
 
@@ -1367,7 +1425,7 @@ export interface ProviderSettingsUpdate {
   apiKey?: string;
   apiBase?: string;
   api?: ModelAPIConfig | null;
-  proxy?: string;
+  use_proxy?: boolean;
   extraHeaders?: string;
   extraBody?: string;
   extraQuery?: string;
@@ -1381,7 +1439,7 @@ export interface ProviderCreationUpdate {
   apiKey?: string;
   apiBase: string;
   api?: ModelAPIConfig | null;
-  proxy?: string;
+  use_proxy?: boolean;
   extraHeaders?: string;
   extraBody?: string;
   extraQuery?: string;
@@ -1476,11 +1534,12 @@ export type InboundEvent =
       event: "message_accepted";
       chat_id: string;
       turn_id: string;
+      media_urls?: UIMediaAttachment[];
       starts_turn?: boolean;
       active_turn_id?: string;
       started_at?: number;
     }
-  | {
+  | ({
       event: "user_message";
       chat_id: string;
       text: string;
@@ -1494,14 +1553,15 @@ export type InboundEvent =
       mcp_presets?: UIMcpPresetAttachment[];
       session_mentions?: SessionMention[];
       provenance?: { session_message?: UISessionMessage };
-    }
+    } & InboundTurnMetadata)
   | ({
       event: "message";
       chat_id: string;
       text: string;
+      render_as?: "text";
       reply_to?: string;
       media?: string[];
-      media_urls?: Array<{ url: string; name?: string }>;
+      media_urls?: Array<{ url: string; name?: string; kind?: UIMediaKind }>;
       tool_events?: ToolProgressEvent[];
       /** Oversized persisted activity detail, fetched only when the trace is expanded. */
       trace_detail?: UITraceDetail;
@@ -1516,7 +1576,8 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
-  | (NotificationEvent & InboundTurnMetadata)
+  | (Exclude<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata)
+  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection })
   | ({
       event: "file_edit";
       chat_id: string;
@@ -1557,6 +1618,7 @@ export type InboundEvent =
       /** Legacy persisted transcripts may carry the final reasoning text here. */
       text?: string;
     } & InboundTurnMetadata)
+  | { event: "pairing_changed" }
   | {
       event: "runtime_model_updated";
       model_name: string;
@@ -1570,6 +1632,19 @@ export type InboundEvent =
       fallback?: boolean;
       reauth_provider?: string;
     }
+  | ({
+      event: "model_request";
+      request_usage?: TurnUsage | null;
+      context_graph?: ContextGraph;
+      chat_id: string;
+      request_id: string;
+      run_id: string;
+      sequence: number;
+      phase: "started" | "completed" | "failed" | "cancelled";
+      usage?: TurnUsage;
+      round_usages?: RoundUsage[];
+      context_window_tokens?: number;
+    } & InboundTurnMetadata)
   | ({
       event: "turn_end";
       chat_id: string;
@@ -1637,6 +1712,7 @@ export type InboundEvent =
     };
 
 type ThreadProjectionEventName =
+  | "model_request"
   | "user_message"
   | "message"
   | "file_edit"
@@ -1653,6 +1729,9 @@ export type ThreadProjectionEvent = Extract<
 > & {
   projection_id?: string;
   created_at_ms?: number;
+  turn_seq?: number;
+  /** Actual facts represented by a compacted HTTP projection event. */
+  projection_receipts?: Array<{ turn_id: string; ranges: Array<[number, number]> }>;
 };
 
 /** Local draft/preview data, converted to HTTP binary before sending a message.
@@ -1662,10 +1741,7 @@ export type ThreadProjectionEvent = Extract<
  * surface. ``name`` is advisory and is surfaced as the placeholder label when
  * the session is replayed.
  */
-export interface OutboundMedia {
-  data_url: string;
-  name?: string;
-}
+export type OutboundMedia = import("../../../packages/client-events/attachments").DraftAttachment;
 
 export interface OutboundCliAppMention {
   name: string;
@@ -1687,12 +1763,28 @@ export interface OutboundMcpPresetMention {
   brand_color?: string | null;
 }
 
-/** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
 interface WebuiThreadPagePayload {
   before_cursor?: string | null;
   has_more_before?: boolean;
+  after_cursor?: string | null;
+  has_more_after?: boolean;
   user_message_offset?: number;
   loaded_event_count?: number;
+  truncated_oversized_turn?: boolean;
+}
+
+export interface PromptSummary {
+  id: string;
+  preview: string;
+  answerPreview: string;
+  createdAt: number;
+  cursor: string;
+  turnId: string;
+}
+
+export interface PromptIndex {
+  prompts: PromptSummary[];
+  revision?: string;
 }
 
 export interface WebuiThreadPersistedPayload {
@@ -1761,6 +1853,7 @@ export type Outbound =
       session_mentions?: SessionMention[];
       quoted_context?: string;
       intent?: "create_automation";
+      user_shell?: true;
       workspace_scope?: WorkspaceScopePayload;
       turn_id?: string;
       /** Marks messages sent by the embedded WebUI, without changing the

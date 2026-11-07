@@ -55,7 +55,9 @@ describe("channel logos", () => {
     expectFootprint(icon);
     expect(fallback).toHaveClass("opacity-0");
     expect(image).toHaveClass("opacity-100");
-    expect(image).not.toHaveClass("invert", "grayscale", "object-cover");
+    for (const className of ["invert", "grayscale", "object-cover"]) {
+      expect(image).not.toHaveClass(className);
+    }
     expect(icon).toHaveClass(presentation.logoLayout === "tile" ? "bg-transparent" : "bg-white");
     expect(image).toHaveClass(...(presentation.logoLayout === "tile" ? ["h-8", "w-8"] : ["h-6", "w-6"]));
   });

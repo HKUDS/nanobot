@@ -1,4 +1,3 @@
-"""Optional nanobot feature discovery and enablement."""
 from __future__ import annotations
 
 import json
@@ -6,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
@@ -223,10 +223,24 @@ def install_extra(
     *,
     runner: Any = run_install_command,
 ) -> InstallResult:
+    install_args, label = install_args_for_extra(extra, deps)
+    return install_packages(install_args, label, runner=runner, log_name=extra)
+
+
+def install_packages(
+    install_args: list[str],
+    label: str,
+    *,
+    upgrade: bool = False,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = run_install_command,
+    log_name: str | None = None,
+) -> InstallResult:
+    """Install into the running interpreter, bootstrapping pip only when needed."""
     import importlib
 
-    install_args, label = install_args_for_extra(extra, deps)
-    pip_cmd = [sys.executable, "-m", "pip", "install", *install_args]
+    pip_options = ["--upgrade", "--upgrade-strategy", "only-if-needed"] if upgrade else []
+    extra = log_name or label
+    pip_cmd = [sys.executable, "-m", "pip", "install", *pip_options, *install_args]
     if not install_args:
         logger.info("Optional feature '{}' has no installable dependencies for this platform", extra)
         return InstallResult(True, label, pip_cmd)
@@ -242,7 +256,9 @@ def install_extra(
     failed_proc = proc
     if missing_pip(proc):
         if shutil.which("uv"):
-            uv_cmd = ["uv", "pip", "install", "--python", sys.executable, *install_args]
+            uv_options = ["--upgrade-package", "nanobot-ai"] if upgrade else []
+            uv_args = ["--reinstall" if arg == "--force-reinstall" else arg for arg in install_args]
+            uv_cmd = ["uv", "pip", "install", "--python", sys.executable, *uv_options, *uv_args]
             uv_env = os.environ.copy()
             if index_url := os.environ.get("PIP_INDEX_URL", "").strip():
                 uv_env["UV_INDEX_URL"] = index_url
@@ -647,11 +663,6 @@ def _install_feature_dependencies(
     allow_install: bool,
     runner: Any,
 ) -> bool:
-    """Ensure one feature's declared dependencies are present.
-
-    Returns ``True`` only when this call ran an installer. Package-install
-    authorization belongs here so every WebUI action gets the same policy.
-    """
     if not dependencies or extra_installed(name, dependencies):
         return False
     if not allow_install:
@@ -852,7 +863,6 @@ def ensure_enabled_channel_dependencies(
 
 
 def _feature_requires_restart(name: str, *, is_channel: bool) -> bool:
-    """Return whether an installed feature needs the running engine rebuilt."""
     if is_channel:
         return True
     # These libraries are imported lazily or used by a newly spawned service.

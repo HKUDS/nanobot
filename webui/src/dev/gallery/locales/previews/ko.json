@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · 그룹 및 프로젝트 이름 변경",
+    "description": "그룹과 프로젝트의 이름 변경을 시험합니다. 주제 이름은 채팅 목록에서 바로 바꿉니다.",
+    "options": "호출자가 dialogTitle, description, placeholder를 제공합니다. title은 초기값이며 onConfirm은 양끝 공백을 제거한 이름을 받습니다. 빈 이름은 저장할 수 없습니다.",
+    "hint": "저장하면 위의 제목이 바뀝니다."
+  },
+  "delete": {
+    "title": "DeleteConfirm · 삭제 확인",
+    "description": "단일 채팅, 여러 채팅, 자동화가 연결된 채팅의 삭제를 비교합니다.",
+    "options": "count는 일괄 삭제 문구를 제어합니다. automations는 연결된 작업, 일정, 다음 실행 시간을 표시합니다. 확인하면 onConfirm을 호출합니다.",
+    "scenario": "삭제 시나리오",
+    "open": "삭제 확인 열기",
+    "confirmed": "예제 삭제를 확인했습니다.",
+    "hint": "단일 채팅, 여러 채팅 또는 자동화가 있는 채팅을 선택하세요."
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · 명령과 세션 식별자",
+    "description": "명령과 식별자를 편집하여 강조 표시와 일관된 세션 색상을 확인합니다.",
+    "options": "SlashCommandText는 command를, InlineTokenHighlight는 color와 내용을 받습니다. SessionHandleLabel은 id로 색상을 정합니다.",
+    "command": "명령 텍스트",
+    "run": "<command/> 명령으로 상태를 확인합니다.",
+    "handle": "세션 식별자",
+    "continue": "<session/>에서 작업을 계속합니다.",
+    "highlight": "공통 강조 표시",
+    "review": "<skill/>로 변경 사항을 검토합니다.",
+    "skill": "스킬: {{name}}"
+  },
+  "sessionLinks": {
+    "selected": "선택한 세션: {{name}}.",
+    "hint": "세션 멘션을 선택하여 결과를 확인하세요."
+  },
+  "userText": {
+    "title": "UserMessageText · 메시지 멘션",
+    "description": "스킬, 앱, MCP, 세션 멘션이 있는 메시지를 편집합니다.",
+    "options": "text는 원본 메시지입니다. cliApps, mcpPresets, sessionMentions로 멘션을 해석합니다. 스킬은 $name, 다른 멘션은 @name을 사용합니다.",
+    "message": "메시지 텍스트"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · 앱 멘션",
+    "description": "입력창과 메시지의 앱, MCP, 세션 멘션을 비교합니다.",
+    "options": "segment는 cli, mcp 또는 session과 메타데이터를 지정합니다. variant는 composer 또는 message를 선택합니다. 예제는 로컬 브랜드 이미지를 사용합니다.",
+    "position": "멘션 위치"
+  },
+  "productIcons": {
+    "title": "Product icons · 제품 아이콘",
+    "description": "아이콘을 살펴보고 크기와 선택 상태를 바꿉니다.",
+    "options": "아이콘은 size, strokeWidth, className 등의 LucideProps를 받습니다. 색상은 currentColor를 상속하며 버튼에는 접근 가능한 동작 이름이 있습니다.",
+    "size": "아이콘 크기",
+    "selected": "선택됨: {{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · 시작 대기 화면",
+    "description": "앱이 연결되는 동안 표시되는 차분한 대기 화면을 미리 봅니다.",
+    "options": "embedded는 section을, 그 외에는 main을 렌더링합니다. aria-busy와 로딩 상태를 계속 제공합니다. 대기 화면 스타일은 앱 진입점에서 가져옵니다."
+  },
+  "fileActions": {
+    "title": "FileActions · 파일 메뉴",
+    "description": "파일을 오른쪽 클릭하여 전체 경로, 상대 경로 또는 참조 텍스트를 복사합니다.",
+    "options": "path는 참조 텍스트입니다. metadata는 전체 경로와 선택적인 상대 경로를 제공합니다. 갤러리는 파일을 읽지 않고 메타데이터를 제공합니다.",
+    "scope": "파일 범위",
+    "hint": "오른쪽 클릭으로 복사 메뉴를 열거나 파일에 초점을 두고 Shift+F10을 누르세요."
+  },
+  "workbench": {
+    "title": "PaneWorkbench · 여러 창",
+    "description": "레이아웃을 바꾸고 창을 선택하거나 추가하며 위치와 크기를 조절합니다.",
+    "options": "호출자가 panes, activePaneKey, layout, splitRatios를 제어합니다. renderPane이 내용을 제공하며 콜백이 로컬 상태를 갱신합니다. 좁은 화면에는 활성 창을 표시합니다.",
+    "layout": "창 레이아웃",
+    "limit": "최대 4개 창",
+    "notes": "{{title}} 메모",
+    "active": "활성 창",
+    "activate": "이 창을 선택하여 활성화",
+    "hint": "활성 창: {{title}}. 아래 손잡이를 끌어 창을 이동하고 경계를 끌어 크기를 조절하세요."
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · 연결 상태",
+    "description": "연결됨, 연결 끊김, 연결 중, 오류 상태를 비교합니다.",
+    "options": "state가 아이콘과 텍스트를 제어합니다. compact는 화면의 텍스트를 숨기되 접근 가능한 상태와 툴팁을 유지합니다.",
+    "state": "연결 상태",
+    "withText": "텍스트와 상태",
+    "compact": "간략 표시"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · 버전 호환성",
+    "description": "호환성 결과별 버전, 준비 안내, 업그레이드 가이드를 확인합니다.",
+    "options": "profile이 있으면 대화 상자를 열고 compatibility가 결과와 버전을 제공합니다. onClose로 닫습니다. 이 컴포넌트는 정보만 표시합니다.",
+    "state": "버전 호환성",
+    "open": "호환성 세부 정보 보기"
+  },
+  "composer": {
+    "title": "ThreadComposer · 메시지 입력",
+    "description": "메시지, 첨부 파일, 명령, 인용과 처리 중·비활성 상태를 시험합니다.",
+    "options": "onSend가 성공하면 입력을 비웁니다. isStreaming은 중지와 대기열을, variant는 채팅 또는 시작 페이지 스타일을 제어합니다. 제출 내용은 이 미리보기에 남습니다.",
+    "statusCommand": "세션 상태",
+    "statusDescription": "현재 세션 상태 보기",
+    "compactCommand": "컨텍스트 압축",
+    "compactDescription": "현재 세션 컨텍스트 압축",
+    "helpCommand": "명령 도움말",
+    "helpDescription": "사용 가능한 명령 보기",
+    "state": "입력 상태",
+    "addQuote": "인용 추가",
+    "input": "예제 메시지",
+    "placeholder": "메시지를 입력하거나 /로 명령을 확인하세요",
+    "stopped": "예제 작업을 중지했습니다.",
+    "sent": "제출 내용: {{content}}{{attachments}}",
+    "attachments": " · 첨부 파일 수: {{amount}}",
+    "hint": "메시지 제출, 첨부 파일 선택, 모델 전환, 명령 메뉴를 시험해 보세요."
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · 모델 프리셋",
+    "description": "모델 메뉴, 키보드 탐색, 설정 필요 상태를 시험합니다.",
+    "options": "modelPresets가 프리셋을 제공하고 modelPreset과 onPresetChange가 선택을 제어합니다. needsSetup은 설정 진입점을 표시합니다.",
+    "state": "모델 컨트롤 상태",
+    "manage": "모델 관리를 열었습니다.",
+    "settings": "모델 설정을 열었습니다.",
+    "hint": "현재 프리셋: {{preset}}. 메뉴를 열거나 방향키로 전환하세요."
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · 컨텍스트 사용량",
+    "description": "컨텍스트, 캐시, 생성 시간과 경고 상태, 하단 패널을 확인합니다.",
+    "options": "context는 용량을, rounds는 턴별 통계를 제공합니다. bottomSheet는 모바일 패널을 선택합니다.",
+    "state": "사용량 상태",
+    "hint": "사용량 세부 정보를 열어 컨텍스트, 캐시, 턴별 생성 시간을 확인하세요."
+  },
+  "workspace": {
+    "title": "WorkspaceControls · 작업 디렉터리",
+    "description": "예제 프로젝트를 고르고 미리보기의 접근 모드를 바꿉니다.",
+    "options": "scope와 onChange가 선택을 제어하고 onLoadProjects가 예제 디렉터리를 제공합니다. 실제 경로 확인과 권한 적용은 게이트웨이가 담당합니다.",
+    "state": "작업 디렉터리 상태"
+  },
+  "navigator": {
+    "title": "PromptNavigator · 질문 탐색",
+    "description": "이전 질문을 검색하고 이동 콜백을 확인합니다.",
+    "options": "messages가 전체 대화를 제공하면 컴포넌트가 사용자 질문을 추출합니다. onJumpToPrompt는 대상 메시지 ID를 받습니다.",
+    "hint": "질문 탐색을 열고 질문을 검색하여 선택하세요.",
+    "empty": "아직 선택한 질문이 없습니다"
+  },
+  "header": {
+    "title": "ThreadHeader · 채팅 헤더",
+    "description": "사이드바, 테마, 임시 채팅, 질문 탐색 컨트롤을 시험합니다.",
+    "options": "title, handle, theme, temporaryChatEnabled가 표시 상태를 제공합니다. 콜백은 동작을 호출자에게 전달합니다.",
+    "jump": "{{id}}(으)로 이동했습니다",
+    "sidebar": "사이드바를 전환했습니다",
+    "hint": "헤더 동작을 시험해 보세요",
+    "temporary": "임시 채팅",
+    "regular": "일반 채팅"
+  },
+  "messages": {
+    "title": "ThreadMessages · 메시지 목록",
+    "description": "여러 턴의 대화, 메시지 메뉴, 분기, 선택 텍스트 인용을 살펴봅니다.",
+    "options": "messages는 투영된 메시지를 담습니다. onForkFromMessage는 사용자 질문 인덱스를, onQuoteSelection은 선택한 응답 텍스트를 받습니다.",
+    "quoted": "인용: {{text}}",
+    "forked": "질문 {{index}}에서 분기를 만들었습니다",
+    "hint": "메시지 메뉴를 열거나 응답 텍스트를 선택한 후 인용을 누르세요."
+  },
+  "viewport": {
+    "title": "ThreadViewport · 채팅 스크롤",
+    "description": "긴 대화의 질문 표시, 탐색 이동, 맨 아래로 돌아가기를 시험합니다.",
+    "options": "미리보기 높이는 고정입니다. messages가 기록을 제공하고 ref.jumpToUserPrompt가 질문으로 이동합니다. emptyState는 빈 채팅 내용을 제공합니다.",
+    "state": "채팅 보기",
+    "empty": "메시지를 입력하여 채팅을 시작하세요",
+    "hint": "스크롤로 질문 표시를 살펴보거나 탐색으로 이동한 후 맨 아래로 돌아가세요."
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · 기록 상태",
+    "description": "로딩, 기록의 시작, 오류와 재시도 상태를 표시합니다.",
+    "options": "loading은 요청 중임을, exhausted는 이전 메시지가 없음을 나타냅니다. error는 오류 정보를 제공하고 onRetry는 로딩을 재시도합니다.",
+    "state": "기록 상태",
+    "error": "예제 기록을 사용할 수 없습니다.",
+    "retries": "재시도 횟수: {{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · 작업 복구",
+    "description": "중단, 재개 중, 실패, 계속할 수 없음 상태와 계속·닫기 동작을 시험합니다.",
+    "options": "state는 복구 스냅샷입니다. onContinue와 onDismiss는 Promise를 반환합니다. 예제 콜백은 미리보기만 갱신합니다.",
+    "state": "복구 상태",
+    "continued": "예제 작업을 계속했습니다.",
+    "dismissed": "복구 알림을 닫았습니다.",
+    "reset": "미리보기 초기화",
+    "hint": "복구 상태를 선택한 후 계속하거나 닫아 보세요."
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · 대체 모델",
+    "description": "대체 모델과 인증 만료 알림, 설정 열기, 닫기를 확인합니다.",
+    "options": "model은 대체 모델을 지정하며 reauthProviderLabel은 만료된 인증 대상을 표시합니다. 호출자가 onOpenSettings와 onDismiss를 제공합니다.",
+    "state": "대체 모델 상태",
+    "showAgain": "다시 표시",
+    "hint": "모델 설정 링크와 닫기 버튼을 시험해 보세요."
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · 컨텍스트 압축",
+    "description": "압축 시작, 성공, 실패, 취소 상태를 비교합니다.",
+    "options": "compaction.phase가 알림을 선택하고 announce가 스크린 리더 안내를 제어합니다.",
+    "phase": "컨텍스트 압축 단계"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · 메시지 오류",
+    "description": "메시지 크기, 디렉터리 권한, 턴 거부, 모델 요청 오류를 비교합니다.",
+    "options": "error.kind가 오류 문구를 선택하고 onDismiss가 알림을 닫습니다.",
+    "kind": "메시지 오류 유형"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · 전체 활동",
+    "description": "추론과 도구 기록의 실행 중, 완료, 실패 상태를 살펴봅니다.",
+    "options": "messages에는 reasoning과 trace 투영이 들어갑니다. isTurnStreaming이 활동 상태를 제어하고 expanded는 호출자가 제어할 수 있습니다.",
+    "state": "활동 상태",
+    "error": "파일을 읽을 수 없습니다."
+  },
+  "search": {
+    "title": "WebSearchRun · 검색 활동",
+    "description": "웹 및 X 검색의 진행 상태와 출처를 확인합니다.",
+    "options": "run은 query, target, status, sources를 제공하고 turnActive가 실행 효과를 제어합니다. 공통 컴포넌트가 출처 사이트 아이콘을 불러옵니다.",
+    "state": "검색 상태",
+    "source": "검색 출처"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · 응답 출처",
+    "description": "이전 응답에 사용된 대체 프리셋, 모델, 제공업체를 확인합니다.",
+    "options": "sources는 응답 시점의 모델 스냅샷을 유지합니다. fallback이 true인 출처에만 배지를 표시합니다.",
+    "hint": "대체 모델 배지를 선택하여 응답에 사용된 프리셋, 모델, 제공업체를 확인하세요."
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · 파일 내용",
+    "description": "텍스트, 이미지, 잘림, 로딩, 오류를 비교합니다. 이미지를 선택하여 확대하세요.",
+    "options": "state가 표시 스냅샷을 제공하고 path가 파일 형식과 이름을 정합니다. 이미지 열기와 오류 콜백이 미리보기를 갱신합니다.",
+    "state": "파일 미리보기 상태"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · 세션 자동화",
+    "description": "작업 조회, 편집, 비활성화, 삭제와 로딩·오류 상태를 시험합니다.",
+    "options": "호출자가 jobs, loading, loadFailed, now를 제공합니다. onAction과 onEdit는 갱신된 작업을 반환하며 뷰가 대화 상자, 초점 복원, 결과 표시를 관리합니다.",
+    "state": "세션 자동화 상태",
+    "saveError": "예제 저장에 실패했습니다. 다시 시도하세요.",
+    "providerError": "예제 제공업체를 사용할 수 없습니다.",
+    "saved": "자동화를 저장했습니다.",
+    "openedChat": "예제 채팅을 열었습니다.",
+    "openedCalendar": "자동화 캘린더를 열었습니다.",
+    "actionError": "예제 동작에 실패했습니다. 다시 시도하세요.",
+    "delete": "삭제됨: {{name}}",
+    "run": "실행 요청됨: {{name}}",
+    "enable": "활성화됨: {{name}}",
+    "disable": "비활성화됨: {{name}}",
+    "hint": "세션 세부 정보를 열어 자동화 조회, 전환, 편집, 삭제를 시험해 보세요."
+  },
+  "subagent": {
+    "title": "SubagentThreadView · 하위 에이전트 메시지",
+    "description": "하위 에이전트의 메시지, 추론, 로딩, 실패와 재시도를 확인합니다.",
+    "options": "런타임이 messages를 투영합니다. loading과 error는 공통 기록 상태 표시를 사용하고, isStreaming과 activeTurnId는 활동을 지정합니다. 뷰는 기록을 가져오지 않습니다.",
+    "state": "하위 에이전트 채팅 상태"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · 페어링 경로",
+    "description": "경로를 선택해 로컬에 저장하고 저장 중, 오류, 새로고침 실패를 비교합니다.",
+    "options": "호출자가 route와 original을 관리하고 routes가 SSH 경로를 제공합니다. 저장 성공과 디렉터리 새로고침 실패를 따로 표시합니다. 갤러리와 설정이 같은 뷰를 사용합니다.",
+    "state": "경로 상태"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · 빠른 페어링",
+    "description": "초대 복사, 응답 코드 입력, 접근 확인, 기존 호스트와 재시도를 시험합니다.",
+    "options": "state가 페어링과 표시 상태를 제공하며 콜백이 동작을 실행합니다. routeSettings는 경로 설정을 구성합니다. 갤러리는 예제와 로컬 콜백을 사용하며 실제 페어링은 QuickPairSetup이 관리합니다.",
+    "state": "페어링 단계",
+    "open": "빠른 페어링 열기",
+    "connected": "선택한 연결: {{name}}.",
+    "ssh": "SSH 연결을 선택했습니다.",
+    "hint": "예제 초대와 응답 코드는 표시용입니다. 확인 동작은 로컬 결과만 갱신합니다."
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · SSH 주소",
+    "description": "SSH 별칭을 필터링하고 방향키로 선택하며 가져오기, 로딩, 오류를 비교합니다.",
+    "options": "discovery는 현재 설정의 호스트를 제공합니다. 호출자가 value, busy, error, 콜백을 제어합니다. customConfig는 사용자 설정의 별칭 탐색을 유지하고 inputRef는 선택 후 초점을 복원합니다.",
+    "state": "SSH 주소 상태",
+    "refreshed": "예제 주소를 새로 고쳤습니다.",
+    "entered": "입력 내용: {{value}}",
+    "hint": "입력하여 주소를 필터링하고 방향키로 SSH 별칭을 선택하세요."
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · 연결 표시기",
+    "description": "연결 색상, 애니메이션, 접근 가능한 상태 텍스트를 비교합니다.",
+    "options": "호출자가 status를 제공합니다. 페이지 컨테이너가 연결 구독을 관리합니다.",
+    "state": "연결 상태",
+    "idle": "대기 중",
+    "connecting": "연결 중",
+    "open": "연결됨",
+    "reconnecting": "재연결 중",
+    "closed": "연결 끊김",
+    "error": "연결 오류"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · 호스트 메뉴",
+    "description": "로컬 또는 예제 호스트를 고르고 대기, 오프라인, 접힘 상태를 비교합니다.",
+    "options": "picker는 호스트 데이터와 콜백을, status는 현재 연결 상태를 제공합니다. 실제 HostSwitcher는 클라이언트를 구독합니다.",
+    "state": "호스트 메뉴 상태",
+    "offline": "예제 호스트의 연결이 끊어졌습니다.",
+    "manage": "연결 관리를 열었습니다.",
+    "cancelled": "예제 호스트 전환을 취소했습니다.",
+    "selected": "미리보기 호스트: {{name}}"
+  },
+  "chats": {
+    "title": "ChatList · 채팅 목록",
+    "description": "채팅을 선택하고 메뉴에서 고정, 보관, 삭제를 시험합니다.",
+    "options": "호출자가 sessions, activeKey, 고정 및 보관 키를 제공합니다. 동작 콜백이 예제 목록을 갱신합니다.",
+    "state": "채팅 목록 상태",
+    "renamed": "변경된 이름: {{name}}",
+    "selected": "선택한 채팅: {{name}}",
+    "none": "없음"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · 사이드바 크기",
+    "description": "마우스나 키보드로 사이드바 크기를 바꾸고 접거나 펼칩니다.",
+    "options": "width와 open은 제어 상태입니다. onResize는 크기와 펼침 상태를 갱신하며 onDraggingChange는 끌기 상태를 알립니다.",
+    "content": "사이드바 내용",
+    "hint": "구분선을 끌거나 초점을 두고 방향키, Home, End, Enter를 사용하세요.",
+    "collapsed": "접힘",
+    "dragging": "끌기 중"
+  },
+  "language": {
+    "title": "LanguageSwitcher · 인터페이스 언어",
+    "description": "갤러리와 실제 컴포넌트의 표시 언어를 바꿉니다.",
+    "options": "게이트웨이 없이 앱의 i18n과 브라우저 언어 설정을 사용합니다. 상단 언어 선택기도 같은 컴포넌트입니다."
+  },
+  "channelMarks": {
+    "title": "Channel marks · 채널 표시",
+    "description": "대체 아바타 텍스트, 워크스페이스 아이콘, WebSocket 표시를 확인합니다.",
+    "options": "LinearAvatar는 name, url, workspace를 받습니다. 유효한 이미지가 없으면 대체 텍스트나 아이콘을 표시합니다.",
+    "name": "아바타 이름",
+    "member": "멤버 아바타",
+    "workspace": "워크스페이스 아이콘"
+  },
+  "secret": {
+    "title": "LinearSecretField · 비밀 키 편집",
+    "description": "키를 편집, 표시, 저장, 교체하고 저장 실패 시 초안 유지를 확인합니다.",
+    "options": "configured는 저장 상태를 나타내며 onSave가 영구 저장합니다. 갤러리 콜백은 로컬 상태만 갱신합니다.",
+    "state": "비밀 키 상태",
+    "error": "예제 저장에 실패했습니다.",
+    "hint": "예제 텍스트를 입력해 저장하거나 오류 상태를 골라 초안 유지를 확인하세요."
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · 채널 도움말",
+    "description": "실제 드롭다운 메뉴에서 채널 도움말을 확인합니다.",
+    "options": "내용은 채널의 기존 번역을 사용하고 호출자가 메뉴 컨테이너를 제공합니다.",
+    "open": "채널 도움말 열기"
+  },
+  "channel": {
+    "title": "{{channel}} · 채널 설정",
+    "description": "실제 채널 설정 양식과 상태를 살펴봅니다.",
+    "options": "채널 등록 정보, Python 설정 계약 스냅샷, 실제 ChannelSetupSurfaceView를 사용합니다. 입력, 자격 증명 표시, 프리셋, 확인, 전환은 이 미리보기만 변경합니다.",
+    "state": "채널 설정 상태",
+    "credentialsError": "예제 자격 증명이 거부되었습니다. 미리보기 값을 수정한 후 다시 시도하세요.",
+    "validation": "미리보기 설정"
+  },
+  "channelConnect": {
+    "state": "{{channel}} 연결 상태",
+    "error": "일시적으로 인증할 수 없습니다. 다시 시도하세요."
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ QR 연결",
+    "description": "QQ QR 로그인, 재시도와 App Secret 교체 경고를 확인합니다.",
+    "options": "뷰는 연결 상태와 콜백을 받습니다. 미리보기 작업은 로컬 상태만 변경하며 세션 생성과 QQ 폴링은 런타임에서 처리합니다."
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · Feishu QR 인증",
+    "description": "실제 Feishu QR 화면에서 대기, 성공, 만료, 취소, 오류를 시험합니다.",
+    "options": "connect, busy, error는 표시 상태이며 QR 코드는 로컬에서 생성합니다. 시작, 취소, 폴링은 기능 진입점이 제공하고 예제 콜백은 현재 예제만 바꿉니다."
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · Feishu 어시스턴트",
+    "description": "어시스턴트 카드, 실행·인증 상태, 전환, 고급 설정, 추가를 살펴봅니다.",
+    "options": "feature와 instances가 스냅샷을 제공합니다. 뷰는 초안과 저장 결과를 관리하며 onToggleInstance, onSaveInstance, renderConnectFlow가 런타임 동작을 연결합니다.",
+    "state": "어시스턴트 실행 상태",
+    "error": "어시스턴트가 중지되었습니다. 자격 증명을 확인한 후 다시 시작하세요.",
+    "on": "{{name}}: 켜짐",
+    "off": "{{name}}: 꺼짐",
+    "saved": "{{name}}: 미리보기 필드 {{amount}}개 저장됨"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · WhatsApp 기기 연결",
+    "description": "간단한 QR 화면에서 자동 연결, 성공, 만료, 오류와 다른 계정 연결을 시험합니다.",
+    "options": "뷰는 자동 시작과 간결한 레이아웃 표시 규칙을 유지합니다. 호출자가 상태와 재시도를 제어합니다. 실제 자동 시작, 강제 재시도, 폴링은 연결 진입점이 담당합니다."
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Linear 설정",
+    "description": "앱 정보, 키, 고급 설정, 워크스페이스, 멤버 권한, 브라우저 인증을 살펴봅니다.",
+    "options": "state와 workspaces가 스냅샷을 제공하고 콜백이 워크스페이스, 저장, MCP 동작을 연결합니다. 세 슬롯이 실제 멤버, 인증, 초기화 뷰를 구성합니다.",
+    "state": "Linear 설정 상태",
+    "runtimeError": "Linear webhook을 시작할 수 없습니다.",
+    "saveError": "설정을 저장할 수 없습니다. 초안은 유지됩니다.",
+    "inspectionError": "연결된 워크스페이스를 확인할 수 없습니다.",
+    "refreshed": "예제 워크스페이스를 새로 고쳤습니다.",
+    "removed": "제거한 예제 워크스페이스: {{name}}",
+    "mcp": "Linear MCP 설정을 선택했습니다."
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · 멤버 접근 권한",
+    "description": "멤버 검색, 권한 변경과 로딩, 빈 목록, 저장, 미확인 상태를 비교합니다.",
+    "options": "snapshot은 확인된 멤버 상태입니다. onLoad와 onSetAllowed는 채널 진입점이 담당하며 게이트웨이가 계속 권한을 검증합니다.",
+    "state": "멤버 상태",
+    "loadError": "멤버 디렉터리를 사용할 수 없습니다.",
+    "saveError": "접근 권한을 확인하지 못했습니다."
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Linear 인증",
+    "description": "브라우저 인증과 대기 안내, 시작, 취소, 성공, 실패 단계를 시험합니다.",
+    "options": "ChannelQrConnectFlowView를 재사용합니다. Linear는 인증 표시, 레이블, 초점을 처리하며 런타임 진입점이 세션 생성과 폴링을 담당합니다.",
+    "state": "인증 단계",
+    "error": "인증을 완료할 수 없습니다.",
+    "hint": "인증 링크와 워크스페이스는 예제입니다. 시작과 취소는 미리보기 단계만 바꿉니다."
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · 연결 초기화",
+    "description": "삭제·유지 범위, 처리 중 상태, 부분 초기화 후 재시도를 확인합니다.",
+    "options": "onReset이 전체 권한 취소와 정리 트랜잭션을 수행합니다. 뷰는 확인, 오류, 닫기 제한, 초점 복원을 관리합니다.",
+    "state": "초기화 결과",
+    "error": "채널을 중지할 수 없습니다. 앱 설정은 유지됩니다.",
+    "completed": "미리보기 워크스페이스와 앱 설정을 지웠습니다."
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · Weixin 설정",
+    "description": "Weixin 설정, 고급 옵션, 저장 결과, 로그인 만료 복구를 살펴봅니다.",
+    "options": "필드는 채널 설정 계약에서 가져옵니다. 뷰는 펼침과 키 표시를 관리하고 런타임 진입점이 자동 저장, 초안 병합, 로그인 복구를 담당합니다.",
+    "state": "Weixin 패널 상태"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · Weixin QR 및 인증 코드",
+    "description": "QR 스캔, 인증 코드, 성공, 만료, 취소, 연결 오류를 비교합니다.",
+    "options": "뷰는 연결 스냅샷과 콜백을 받고 인증 코드 초안을 유지합니다. QR 코드는 브라우저에서 생성합니다. 실제 진입점이 인증, 폴링 중단, 새로고침, 취소를 담당합니다.",
+    "state": "Weixin 연결 상태",
+    "error": "연결이 중단되었습니다. 다시 시도하세요.",
+    "refreshed": "새 미리보기 QR 코드를 표시했습니다.",
+    "hint": "인증 코드 미리보기에 123456을 입력하면 연결됩니다. 다른 입력은 초안을 유지하고 오류를 표시합니다."
+  }
+}

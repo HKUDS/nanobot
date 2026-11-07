@@ -1,10 +1,12 @@
 import { render, waitFor } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { beforeAll, expect, it } from "vitest";
 
-import { MarkdownText } from "@/components/MarkdownText";
+import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import mixedMathFixture from "@/tests/fixtures/markdown-math-mixed.md?raw";
 
 const mixedMath = mixedMathFixture.replaceAll("\r\n", "\n");
+
+beforeAll(preloadMarkdownText);
 
 it("retains a rendered TeX formula when an assistant response completes in streaming layout", async () => {
   const source = String.raw`Before

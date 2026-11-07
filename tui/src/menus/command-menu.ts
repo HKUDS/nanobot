@@ -11,6 +11,7 @@ type TuiCommandAction =
   | "context"
   | "usage"
   | "diff"
+  | "diagrams"
   | "branch"
   | "detach"
   | "exit"
@@ -54,7 +55,6 @@ export function resolveSlashCommandLifecycle(
   return command.lifecycle
 }
 
-/** Retained slash-command discovery with one small completion interface. */
 export class CommandMenu {
   readonly root: BoxRenderable
   private readonly picker: PickerMenu<CommandChoice>

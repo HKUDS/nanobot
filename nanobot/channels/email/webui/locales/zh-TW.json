@@ -158,8 +158,7 @@
       },
       "trustedAuthservIds": {
         "label": "可信郵件驗證服務",
-        "placeholder": "mx.google.com，以逗號分隔",
-        "help": "填寫可信的 authserv-id\n\n接收郵件服務新增的準確 authserv-id。啟用 SPF 或 DKIM 驗證時必填。"
+        "placeholder": "mx.google.com，以逗號分隔"
       }
     }
   }

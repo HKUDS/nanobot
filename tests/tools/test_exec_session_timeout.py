@@ -51,7 +51,7 @@ async def test_exec_session_hard_timeout_kills_process_tree_without_polling(tmp_
         assert not late_write.exists(), "the descendant wrote after the hard timeout"
         assert session.process.returncode != 0
 
-        final = await session_tool.execute(session_id=sid, timeout_ms=0)
+        final = await session_tool.execute(session_id=sid, until_exit=True, timeout_ms=2000)
         assert is_tool_error_result(final)
         assert "Command timed out; session was terminated." in final
         assert "parent started" in initial + final
@@ -76,7 +76,6 @@ async def test_exec_session_completed_before_deadline_keeps_output_for_late_poll
         )
         sid = _session_id(initial)
         await asyncio.wait_for(manager._sessions[sid].process.wait(), timeout=3)
-        # Read only after the original deadline: completion must not turn into a timeout.
         await asyncio.sleep(1.1)
 
         final = await session_tool.execute(session_id=sid, timeout_ms=0)
@@ -105,7 +104,7 @@ async def test_exec_session_zero_config_timeout_allows_unpolled_longer_process(t
         sid = _session_id(initial)
         await asyncio.wait_for(manager._sessions[sid].process.wait(), timeout=5)
 
-        final = await session_tool.execute(session_id=sid, timeout_ms=0)
+        final = await session_tool.execute(session_id=sid, until_exit=True, timeout_ms=2000)
         assert not is_tool_error_result(final)
         assert "completed without deadline" in initial + final
         assert "Exit code: 0" in final

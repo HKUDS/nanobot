@@ -8,7 +8,7 @@ const draft: ComposerDraft = {
   text: "  Keep this draft\n继续编辑",
   quotedContext: "Quoted answer",
   sessionMentions: [{ name: "other", title: "Other topic", session_key: "websocket:other" }],
-  files: [new File(["attachment"], "draft.txt", { type: "text/plain" })],
+  attachments: [new File(["attachment"], "draft.txt", { type: "text/plain" })],
 };
 
 afterEach(() => {
@@ -21,15 +21,15 @@ describe("composer draft storage", () => {
     const store = new ComposerDraftStore();
     store.set(key, draft, true);
     expect(store.get(key)).toBe(draft);
-    expect(new ComposerDraftStore().get(key, true)).toEqual({ ...draft, files: [] });
+    expect(new ComposerDraftStore().get(key, true)).toEqual({ ...draft, attachments: [] });
     expect(new ComposerDraftStore().get("websocket:other", true)).toBeUndefined();
-    expect(localStorage.getItem(storageKey)).not.toContain("files");
+    expect(JSON.parse(localStorage.getItem(storageKey)!).attachments).toEqual([]);
   });
 
   it("keeps the identity of an unchanged restored draft but advances it for edits", () => {
     const store = new ComposerDraftStore();
     store.set(key, draft, true);
-    store.set(key, { ...draft, files: [...draft.files], sessionMentions: [...draft.sessionMentions] }, true);
+    store.set(key, { ...draft, attachments: [...draft.attachments], sessionMentions: [...draft.sessionMentions] }, true);
     expect(store.get(key)).toBe(draft);
     const edited = { ...draft, text: "edited draft" };
     store.set(key, edited, true);
@@ -37,6 +37,27 @@ describe("composer draft storage", () => {
     const reverted = { ...draft };
     store.set(key, reverted, true);
     expect(store.get(key)).toBe(reverted);
+  });
+
+  it("keeps mixed attachment order in memory and the local subsequence after reload", () => {
+    const first = { path: "/project/first.png", name: "first.png", size: 8, mime: "image/png", kind: "image" as const, url: "" };
+    const last = { ...first, path: "/project/last.png", name: "last.png" };
+    const mixed = { ...draft, attachments: [first, draft.attachments[0], last] };
+    const store = new ComposerDraftStore();
+    store.set(key, mixed, true);
+    store.set(key, { ...mixed, attachments: [...mixed.attachments] }, true);
+    expect(store.get(key)).toBe(mixed);
+    expect(new ComposerDraftStore().get(key, true)?.attachments).toEqual([first, last]);
+    const reordered = { ...mixed, attachments: [last, draft.attachments[0], first] };
+    store.set(key, reordered, true);
+    expect(store.get(key)).toBe(reordered);
+    expect(new ComposerDraftStore().get(key, true)?.attachments).toEqual([last, first]);
+  });
+
+  it("reads local references already saved in v1 drafts", () => {
+    const local = { path: "/project/previous.png", name: "previous.png", size: 8, mime: "image/png", kind: "image", url: "" };
+    localStorage.setItem(storageKey, JSON.stringify({ text: "previous draft", quotedContext: null, sessionMentions: [], localAttachments: [local] }));
+    expect(new ComposerDraftStore().get(key, true)?.attachments).toEqual([local]);
   });
 
   it("requires explicit opt-in for both saving and restoring", () => {
@@ -52,7 +73,7 @@ describe("composer draft storage", () => {
     const store = new ComposerDraftStore();
     store.set(key, draft, true);
     store.set(key, { ...draft, text: "", quotedContext: null, sessionMentions: [] }, true);
-    expect(store.get(key)?.files).toEqual(draft.files);
+    expect(store.get(key)?.attachments).toEqual(draft.attachments);
     expect(new ComposerDraftStore().get(key, true)).toBeUndefined();
   });
 
@@ -82,7 +103,7 @@ describe("composer draft storage", () => {
     localStorage.setItem(storageKey, JSON.stringify({
       ...draft, sessionMentions: [null, { name: 42 }, ...draft.sessionMentions],
     }));
-    expect(new ComposerDraftStore().get(key, true)).toEqual({ ...draft, files: [] });
+    expect(new ComposerDraftStore().get(key, true)).toEqual({ ...draft, attachments: [] });
   });
 
   it("keeps editing usable when storage is unavailable and removes stale saved text", () => {

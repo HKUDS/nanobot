@@ -1,5 +1,3 @@
-"""Tests for /restart slash command."""
-
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +12,8 @@ import pytest
 from nanobot.agent.context import TranscriptInput
 from nanobot.bus.events import InboundMessage
 from nanobot.providers.base import LLMResponse, LLMUsage
+from nanobot.session.manager import Session
+from nanobot.session.state import SessionState
 
 
 def _make_loop():
@@ -28,8 +28,11 @@ def _make_loop():
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
+         patch("nanobot.agent.loop.SessionManager") as mock_sessions, \
          patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sessions.return_value.state = MagicMock(spec=SessionState)
+        mock_sessions.return_value.state.get = AsyncMock(side_effect=lambda key: Session(key))
+        mock_sessions.return_value.state.peek.return_value = None
         mock_sub_mgr.return_value.close = AsyncMock()
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
@@ -146,7 +149,6 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_restart_intercepted_in_run_loop(self):
-        """Verify /restart is handled at the run-loop level, without starting a session worker."""
         loop, bus = _make_loop()
         loop.restart_mode = "exec"
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
@@ -188,7 +190,6 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_status_intercepted_in_run_loop(self):
-        """Verify /status is handled at the run-loop level for immediate replies."""
         loop, bus = _make_loop()
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
 
@@ -210,7 +211,6 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_run_propagates_external_cancellation(self):
-        """External task cancellation should not be swallowed by the inbound wait loop."""
         loop, _bus = _make_loop()
 
         run_task = asyncio.create_task(loop.run())
@@ -240,7 +240,7 @@ class TestRestartCommand:
         session.metadata = {
             "_last_usage": LLMUsage.reported(input_tokens=0, output_tokens=0).to_dict()
         }
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
         loop._start_time = time.time() - 125
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(20500, "tiktoken")
@@ -277,7 +277,7 @@ class TestRestartCommand:
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = [{"role": "user"}]
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(1000, "tiktoken")
         )
@@ -332,7 +332,7 @@ class TestRestartCommand:
         session.metadata = {
             "_last_usage": LLMUsage.reported(input_tokens=1200, output_tokens=34).to_dict()
         }
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(0, "none")
         )
@@ -354,11 +354,11 @@ class TestRestartCommand:
         session.get_history.return_value = [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
-            {"role": "tool", "content": "tool result"},  # should be filtered out
+            {"role": "tool", "content": "tool result"},
             {"role": "user", "content": "How are you?"},
             {"role": "assistant", "content": "I am doing well."},
         ]
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history")
         response = await loop._process_message(msg)
@@ -366,7 +366,7 @@ class TestRestartCommand:
         assert response is not None
         assert "👤 You: Hello" in response.content
         assert "🤖 Bot: Hi there!" in response.content
-        assert "tool result" not in response.content  # tool messages filtered
+        assert "tool result" not in response.content
         assert response.metadata == {"render_as": "text"}
 
     @pytest.mark.asyncio
@@ -376,15 +376,15 @@ class TestRestartCommand:
         session.get_history.return_value = [
             {"role": "user", "content": f"message {i}"} for i in range(20)
         ]
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history 3")
         response = await loop._process_message(msg)
 
         assert response is not None
         assert "Last 3 message(s)" in response.content
-        assert "message 19" in response.content  # most recent
-        assert "message 0" not in response.content  # too old
+        assert "message 19" in response.content
+        assert "message 0" not in response.content
 
     @pytest.mark.asyncio
     async def test_history_clamps_count_and_extracts_text_blocks(self):
@@ -400,7 +400,7 @@ class TestRestartCommand:
             },
             *({"role": "assistant", "content": f"reply {i}"} for i in range(60)),
         ]
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history 999")
         response = await loop._process_message(msg)
@@ -426,7 +426,7 @@ class TestRestartCommand:
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = []
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history")
         response = await loop._process_message(msg)
@@ -439,7 +439,7 @@ class TestRestartCommand:
         loop, _bus = _make_loop()
         session = MagicMock()
         session.get_history.return_value = []
-        loop.sessions.get_or_create.return_value = session
+        loop.sessions.state.get = AsyncMock(return_value=session)
         loop.subagents.get_running_count.return_value = 0
         loop.subagents.get_running_count_by_session.return_value = 0
 

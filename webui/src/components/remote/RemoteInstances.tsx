@@ -4,13 +4,14 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { groupRemoteProfiles, isCompatibilityError, needsRemoteSetup } from "@/lib/remote-instances";
 import { HostCompatibilityDialog } from "./HostCompatibilityDialog";
-import { RemoteConnectionsPage } from "./RemoteConnectionsPage";
+import { LazyRemoteConnectionsPage } from "./LazyRemoteConnectionsPage";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { useHostSessions } from "./useHostSessions";
 import { HostNavigationContext, HostSwitcher, RemoteHostMenu, type HostPicker } from "./HostSwitcher";
 import { useSidebarHostBridge } from "./useSidebarHostBridge";
 import { readPairReturn, subscribePairReturn } from "@/lib/remote-pair-return";
 import { RemoteContext, type HostConnectionState } from "./remote-context";
+import { NOTIFICATION_OPEN_EVENT } from "@/lib/browser-notifications";
 
 /** Keep host views alive; navigation belongs in each view's sidebar, not a second header. */
 export function RemoteInstances({ children }: { children: ReactNode }) {
@@ -34,7 +35,16 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
     if (lastLocalFocus.current?.isConnected) lastLocalFocus.current.focus({ preventScroll: true });
   };
   const message = error ? t(`remote.errors.${error}`, { defaultValue: t("remote.errors.unknown") }) : "";
-  const bridge = useSidebarHostBridge(frames, selected?.id, frameNodes, restoreLocalFocus, { pendingName: pending?.name, error: message }, managing, () => changeManagement(false));
+  const bridge = useSidebarHostBridge(frames, selected?.id, frameNodes, restoreLocalFocus, { pendingName: pending?.name, error: message }, managing, () => changeManagement(false), (id) => {
+    if (hosts.reveal(id)) changeManagement(false);
+  });
+  useEffect(() => {
+    const revealLocal = () => {
+      if (window.parent === window) { returnLocal(); setManaging(false); }
+    };
+    window.addEventListener(NOTIFICATION_OPEN_EVENT, revealLocal);
+    return () => window.removeEventListener(NOTIFICATION_OPEN_EVENT, revealLocal);
+  }, [returnLocal]);
   useEffect(() => {
     if (!managing || !selected || !bridge.surface?.theme) return;
     // Management is drawn by the local shell, beside this host's sidebar.
@@ -164,7 +174,7 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
             className="absolute bottom-0 right-0 flex min-h-0 flex-col bg-background"
             style={{ left: offline ? 0 : Math.min(bridge.surface?.left || 0, Math.max(0, window.innerWidth - 280)), top: offline ? 0 : Math.min(bridge.surface?.top || 0, Math.max(0, window.innerHeight - 280)) }}>
             <ThemeProvider theme={bridge.surface?.theme || "light"}>
-              <RemoteConnectionsPage onBackToChat={() => changeManagement(false)} mainNavigationExpanded={!!bridge.surface?.left} />
+              <LazyRemoteConnectionsPage onBackToChat={() => changeManagement(false)} mainNavigationExpanded={!!bridge.surface?.left} />
             </ThemeProvider>
           </main>}
           {!managing && selected && (offline || !activeFrame?.loaded) && <div role="region" aria-label={t(offline ? recoveryTitle : "remote.opening")} className="absolute inset-0 overflow-y-auto bg-background p-6 text-center"><div className="flex min-h-full flex-col items-center justify-center gap-3">

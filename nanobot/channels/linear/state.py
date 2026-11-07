@@ -1,5 +1,3 @@
-"""Durable installation and webhook state owned by the Linear channel."""
-
 from __future__ import annotations
 
 import json

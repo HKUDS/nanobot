@@ -23,14 +23,8 @@
         "label": "Người dùng được phép",
         "placeholder": "ID người dùng, phân tách bằng dấu phẩy"
       },
-      "proxy": {
-        "label": "Proxy mạng"
-      },
-      "proxyUsername": {
-        "label": "Tên người dùng proxy"
-      },
-      "proxyPassword": {
-        "label": "Mật khẩu proxy"
+      "useProxy": {
+        "label": "Dùng proxy"
       },
       "intents": {
         "label": "Ý định của cổng"

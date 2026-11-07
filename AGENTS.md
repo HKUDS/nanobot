@@ -6,6 +6,7 @@ The Python gateway owns agent execution, sessions, tools, memory, and security p
 
 | When working on | Read |
 | --- | --- |
+| Finding the owning code and focused tests | [`.agent/navigation.md`](.agent/navigation.md) |
 | Core boundaries, extensions, or internal types | [`.agent/design.md`](.agent/design.md) |
 | Refactoring, fallbacks, or test selection | [`.agent/simplify.md`](.agent/simplify.md) |
 | User-facing copy, feature naming, or localization | [`.agent/copywriting.md`](.agent/copywriting.md) |
@@ -19,4 +20,6 @@ The Python gateway owns agent execution, sessions, tools, memory, and security p
 
 - Analyze the required behavior, state ownership, and root cause before extending existing code. Refactor when the structure causes the problem; a smaller diff does not justify another fallback.
 - Do not add defensive tests for hypothetical internal states or unsupported combinations. Each new test needs a reachable path and a meaningful contract to protect.
+- Do not add tests merely to prove that nonexistent behavior, removed code, or obsolete symbols are absent. Negative assertions must exercise a concrete, reachable risk and protect an observable behavioral contract; prefer testing supported actions and their results.
 - Do not run `ruff format`; mechanical formatting obscures git blame and creates unrelated diffs. This constraint takes precedence over the optional touched-file formatting in `CONTRIBUTING.md`.
+- Do not manually wrap prose in Markdown files. Keep each paragraph on one source line; use line breaks only for Markdown structure.

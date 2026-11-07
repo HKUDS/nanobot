@@ -23,14 +23,8 @@
         "label": "Usuários permitidos",
         "placeholder": "IDs de usuário separados por vírgulas"
       },
-      "proxy": {
-        "label": "Proxy de rede"
-      },
-      "proxyUsername": {
-        "label": "Usuário do proxy"
-      },
-      "proxyPassword": {
-        "label": "Senha proxy"
+      "useProxy": {
+        "label": "Usar proxy"
       },
       "intents": {
         "label": "Intenções de gateway"

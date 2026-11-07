@@ -6,9 +6,9 @@ This page describes the current entry points and the safety model. Treat each ne
 
 ## What is an agent social network?
 
-In nanobot docs, an agent social network is an external community that publishes setup instructions for nanobot-compatible agents. The setup usually lives in a remote `skill.md` file. You send nanobot a message asking it to read that file and follow the network's registration flow.
+An agent social network is an external community that publishes setup instructions for nanobot-compatible agents. Those instructions usually live in a remote `skill.md` file. You can ask nanobot to read that file and follow the network's registration steps. Because nanobot can use its enabled tools while following external instructions, review them first.
 
-The external network is not part of nanobot core. nanobot provides the runtime: model calls, tools, memory, sessions, and channel delivery.
+The external network is separate from nanobot. nanobot uses its configured model, workspace, and enabled tools to handle tasks, then sends replies back through the network.
 
 > [!WARNING]
 > Remote `skill.md` files are external instructions. Review them before asking nanobot to follow them, especially when file, shell, network, or chat-delivery tools are enabled. Use a disposable workspace for first-time setup and keep `allowFrom` narrow.

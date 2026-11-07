@@ -1,5 +1,3 @@
-"""Typer commands for foreground and background gateway control."""
-
 from __future__ import annotations
 
 import subprocess
@@ -38,7 +36,6 @@ WebUIBundlePreparer = Callable[[Config, BuildMode], None]
 
 
 def _resolved_config_selector(config: str | None) -> Path:
-    """Return the one canonical config identity used by every local client."""
     if config:
         return Path(config).expanduser().resolve(strict=False)
     from nanobot.config.loader import get_config_path
@@ -151,6 +148,12 @@ def create_gateway_app(
     ) -> None:
         """Start the nanobot gateway."""
         if ctx.invoked_subcommand is not None:
+            if config is not None or workspace is not None:
+                ctx.fail(
+                    "--config and --workspace must follow a management subcommand that "
+                    "supports them. See "
+                    f"'nanobot gateway {ctx.invoked_subcommand} --help'."
+                )
             return
         if foreground and background:
             console.print("[red]Error: --foreground and --background cannot be used together.[/red]")
@@ -235,6 +238,7 @@ def create_gateway_app(
             run_gateway(
                 cfg,
                 port=port,
+                verbose=verbose,
                 webui_bundle_mode=interactive_build_mode(),
                 unconfigured_provider_error=unconfigured_provider_error,
                 gateway_instance=instance,

@@ -1,8 +1,7 @@
-"""Build one bounded grep page from streams of located source lines."""
-
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from collections import deque
 from dataclasses import dataclass, field
 from itertools import chain, islice
@@ -43,7 +42,11 @@ def _format_line(line: LocatedDocumentLine, start: int | None, limit: int) -> st
 def _format_header(path: str, line: LocatedDocumentLine, start: int) -> str:
     locator = line.locator
     if locator.startswith("sheet="):
-        column_index = line.text[:start].count("\t") + 1
+        column_index = (
+            bisect_right(line.column_starts, start)
+            if line.column_starts is not None
+            else line.text[:start].count("\t") + 1
+        )
         column = ""
         while column_index:
             column_index, remainder = divmod(column_index - 1, 26)

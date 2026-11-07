@@ -5,8 +5,10 @@ field: ``{"google": {"thought_signature": "..."}}``.  This MUST survive the
 parse → serialize round-trip so the model can continue reasoning.
 """
 
-from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
 from nanobot.providers.base import ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -14,8 +16,6 @@ from nanobot.providers.registry import ProviderSpec
 
 GEMINI_EXTRA = {"google": {"thought_signature": "sig-abc-123"}}
 
-
-# ── ToolCallRequest serialization ──────────────────────────────────────
 
 def test_tool_call_request_serializes_extra_content() -> None:
     tc = ToolCallRequest(
@@ -55,26 +55,31 @@ def test_tool_call_request_omits_absent_extras() -> None:
     assert "provider_specific_fields" not in payload["function"]
 
 
-# ── _parse: SDK-object branch ──────────────────────────────────────────
-
-def _make_sdk_response_with_extra_content():
-    """Simulate a Gemini response via the OpenAI SDK (SimpleNamespace)."""
-    fn = SimpleNamespace(name="get_weather", arguments='{"city":"Tokyo"}')
-    tc = SimpleNamespace(
-        id="call_1",
-        index=0,
-        type="function",
-        function=fn,
-        extra_content=GEMINI_EXTRA,
-    )
-    msg = SimpleNamespace(
-        content=None,
-        tool_calls=[tc],
-        reasoning_content=None,
-    )
-    choice = SimpleNamespace(message=msg, finish_reason="tool_calls")
-    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
-    return SimpleNamespace(choices=[choice], usage=usage)
+def _make_sdk_response_with_extra_content() -> ChatCompletion:
+    return ChatCompletion.model_validate({
+        "id": "chatcmpl-gemini",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "gemini-3.1-pro-preview",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather", "arguments": '{"city":"Tokyo"}', "inner": "value",
+                    },
+                    "extra_content": GEMINI_EXTRA,
+                    "provider_tag": "opaque",
+                }],
+            },
+        }],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    })
 
 
 def test_parse_sdk_object_preserves_extra_content() -> None:
@@ -87,12 +92,14 @@ def test_parse_sdk_object_preserves_extra_content() -> None:
     tc = result.tool_calls[0]
     assert tc.name == "get_weather"
     assert tc.extra_content == GEMINI_EXTRA
+    assert tc.provider_specific_fields == {"provider_tag": "opaque"}
+    assert tc.function_provider_specific_fields == {"inner": "value"}
 
     payload = tc.to_openai_tool_call()
     assert payload["extra_content"] == GEMINI_EXTRA
+    assert payload["provider_specific_fields"] == {"provider_tag": "opaque"}
+    assert payload["function"]["provider_specific_fields"] == {"inner": "value"}
 
-
-# ── _parse: dict/mapping branch ───────────────────────────────────────
 
 def test_parse_dict_preserves_extra_content() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
@@ -125,14 +132,21 @@ def test_parse_dict_preserves_extra_content() -> None:
     assert payload["extra_content"] == GEMINI_EXTRA
 
 
-def test_parse_dict_deduplicates_duplicate_tool_call_ids() -> None:
+@pytest.mark.parametrize("as_sdk", [False, True], ids=["dict", "sdk"])
+def test_parse_deduplicates_duplicate_tool_call_ids(as_sdk: bool) -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
     response_dict = {
+        "id": "chatcmpl-parallel",
+        "object": "chat.completion",
+        "created": 0,
+        "model": "test-model",
         "choices": [
             {
+                "index": 0,
                 "message": {
+                    "role": "assistant",
                     "content": None,
                     "tool_calls": [{
                         "id": "call_same",
@@ -143,7 +157,9 @@ def test_parse_dict_deduplicates_duplicate_tool_call_ids() -> None:
                 "finish_reason": "tool_calls",
             },
             {
+                "index": 1,
                 "message": {
+                    "role": "assistant",
                     "content": None,
                     "tool_calls": [{
                         "id": "call_same",
@@ -156,7 +172,8 @@ def test_parse_dict_deduplicates_duplicate_tool_call_ids() -> None:
         ],
     }
 
-    result = provider._parse(response_dict)
+    response = ChatCompletion.model_validate(response_dict) if as_sdk else response_dict
+    result = provider._parse(response)
 
     ids = [tc.id for tc in result.tool_calls]
     assert len(ids) == 2
@@ -166,28 +183,40 @@ def test_parse_dict_deduplicates_duplicate_tool_call_ids() -> None:
     assert [tc.arguments for tc in result.tool_calls] == [{"path": "a.txt"}, {"path": "b.txt"}]
 
 
-# ── _parse_chunks: streaming round-trip ───────────────────────────────
-
 def test_parse_chunks_sdk_preserves_extra_content() -> None:
-    fn_delta = SimpleNamespace(name="get_weather", arguments='{"city":"Tokyo"}')
-    tc_delta = SimpleNamespace(
-        id="call_1",
-        index=0,
-        function=fn_delta,
-        extra_content=GEMINI_EXTRA,
-    )
-    delta = SimpleNamespace(content=None, tool_calls=[tc_delta])
-    choice = SimpleNamespace(finish_reason="tool_calls", delta=delta)
-    chunk = SimpleNamespace(choices=[choice], usage=None)
+    chunk = ChatCompletionChunk.model_validate({
+        "id": "chatcmpl-gemini",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "gemini-3.1-pro-preview",
+        "choices": [{
+            "index": 0,
+            "finish_reason": "tool_calls",
+            "delta": {"tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "get_weather", "arguments": '{"city":"Tokyo"}', "inner": "value",
+                },
+                "extra_content": GEMINI_EXTRA,
+                "provider_tag": "opaque",
+            }]},
+        }],
+    })
 
     result = OpenAICompatProvider._parse_chunks([chunk])
 
     assert len(result.tool_calls) == 1
     tc = result.tool_calls[0]
     assert tc.extra_content == GEMINI_EXTRA
+    assert tc.provider_specific_fields == {"provider_tag": "opaque"}
+    assert tc.function_provider_specific_fields == {"inner": "value"}
 
     payload = tc.to_openai_tool_call()
     assert payload["extra_content"] == GEMINI_EXTRA
+    assert payload["provider_specific_fields"] == {"provider_tag": "opaque"}
+    assert payload["function"]["provider_specific_fields"] == {"inner": "value"}
 
 
 def test_parse_chunks_dict_preserves_extra_content() -> None:
@@ -215,8 +244,6 @@ def test_parse_chunks_dict_preserves_extra_content() -> None:
     payload = tc.to_openai_tool_call()
     assert payload["extra_content"] == GEMINI_EXTRA
 
-
-# ── Model switching: stale extras shouldn't break other providers ─────
 
 def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:
     """When switching from Gemini to OpenAI, extra_content inside tool_calls
@@ -246,8 +273,6 @@ def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:
     assert sanitized[1]["tool_calls"][0]["extra_content"] == GEMINI_EXTRA
 
 
-# ── Replay to Gemini: preserve or backfill thought signatures ─────────
-
 def _gemini_provider() -> OpenAICompatProvider:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         return OpenAICompatProvider(
@@ -270,7 +295,6 @@ def _tool_call(tc_id: str, name: str, *, signed: bool = False) -> dict:
 
 
 def test_gemini_backfills_unsigned_tool_calls_and_keeps_results() -> None:
-    """Cross-provider history stays intact and receives the documented fallback."""
     provider = _gemini_provider()
     messages = [
         {"role": "user", "content": "check the sensor"},
@@ -295,7 +319,6 @@ def test_gemini_backfills_unsigned_tool_calls_and_keeps_results() -> None:
 
 
 def test_gemini_preserves_parallel_calls_when_only_first_is_signed() -> None:
-    """Gemini signs only the first native parallel call; all calls must replay."""
     provider = _gemini_provider()
     messages = [
         {"role": "user", "content": "do both"},
@@ -384,7 +407,6 @@ def test_gemini_requires_signature_on_first_parallel_call() -> None:
 
 
 def test_gemini_replay_preserves_signed_tool_calls() -> None:
-    """A pure Gemini-origin history replays unchanged (signature intact)."""
     provider = _gemini_provider()
     messages = [
         {"role": "user", "content": "hi"},
@@ -407,7 +429,6 @@ def test_gemini_replay_preserves_signed_tool_calls() -> None:
 
 
 def test_non_gemini_provider_keeps_unsigned_tool_calls() -> None:
-    """The filter is Gemini-scoped: other providers still replay unsigned calls."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 

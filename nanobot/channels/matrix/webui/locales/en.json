@@ -28,8 +28,12 @@
         "choices": {
           "mention": "Mentions only",
           "open": "All messages",
-          "allowlist": "Allowlist"
+          "allowlist": "Allowlist",
+          "listen": "Listen (reply on mention)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Room policy overrides (JSON)"
       },
       "allowFrom": {
         "label": "Allowed users"
@@ -67,6 +71,13 @@
           "false": "Off"
         }
       },
+      "replyToMessage": {
+        "label": "Quote replies",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
       "streaming": {
         "label": "Streaming",
         "choices": {
@@ -74,9 +85,8 @@
           "false": "Off"
         }
       },
-      "proxy": {
-        "label": "Network proxy",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Use proxy"
       }
     }
   }

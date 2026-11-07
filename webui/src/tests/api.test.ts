@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   changeAutomationChat,
+  parseWebuiThreadPayload,
   cancelMcpOAuth,
   configureChannel,
   completeMcpOAuth,
@@ -24,6 +25,7 @@ import {
   fetchMarketplaceSkillTrends,
   fetchNanobotFeatures,
   fetchProviderModels,
+  fetchPromptIndex,
   fetchSessionAutomations,
   fetchSettingsUsage,
   fetchSidebarState,
@@ -31,6 +33,7 @@ import {
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
+  fetchSubagentThread,
   fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
   importMcpConfig,
@@ -96,11 +99,19 @@ describe("webui API helpers", () => {
     vi.unstubAllGlobals();
   });
 
+  it("fetches a subagent thread from its parent session", async () => {
+    await fetchSubagentThread("tok", "websocket:chat-1", "task-1");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/websocket%3Achat-1/subagents/task-1/webui-thread",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
+    );
+  });
+
   it("percent-encodes websocket keys when fetching webui-thread snapshot", async () => {
     await fetchWebuiThread("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
@@ -116,12 +127,32 @@ describe("webui API helpers", () => {
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D",
+      "/api/sessions/websocket%3Achat-1/webui-thread?limit=120&before=abc%2B%2F%3D&include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
         credentials: "same-origin",
       }),
     );
+  });
+
+  it("revalidates prompt summaries and replaces only the changed suffix", async () => {
+    const prompt = { id: "u1", preview: "question", answerPreview: "", cursor: "cursor", turnId: "t1", createdAt: 1 };
+    const cached = { revision: "first", prompts: [prompt] };
+    const signal = new AbortController().signal;
+    vi.mocked(fetch).mockResolvedValueOnce({ status: 304 } as Response);
+    await expect(fetchPromptIndex("tok", "websocket:chat-1", signal, cached)).resolves.toBe(cached);
+    expect(fetch).toHaveBeenLastCalledWith("/api/sessions/websocket%3Achat-1/webui-thread/prompts?since=first",
+      expect.objectContaining({ headers: { Authorization: "Bearer tok", "If-None-Match": '"first"' }, cache: "no-store" }));
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({
+      revision: "second", replaceFrom: 1, prompts: [{ ...prompt, id: "u2" }],
+    }) } as Response);
+    const appended = await fetchPromptIndex("tok", "websocket:chat-1", signal, cached);
+    expect(appended.prompts.map((item) => item.id)).toEqual(["u1", "u2"]);
+    expect(appended.prompts[0]).toBe(prompt);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ revision: "third", replaceFrom: 1, prompts: [] }) } as Response);
+    expect((await fetchPromptIndex("tok", "websocket:chat-1", signal, appended)).prompts).toEqual([prompt]);
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ replaceFrom: 2, prompts: [] }) } as Response);
+    await expect(fetchPromptIndex("tok", "websocket:chat-1", signal, cached)).rejects.toThrow("Invalid prompt index revision");
   });
 
   it("revalidates a cached WebUI thread and reuses it on 304", async () => {
@@ -142,7 +173,7 @@ describe("webui API helpers", () => {
     })).resolves.toBe(cached);
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/webui-thread",
+      "/api/sessions/websocket%3Achat-1/webui-thread?include_model_requests=1&context_graph_encoding=references-v1",
       expect.objectContaining({
         headers: {
           Authorization: "Bearer tok",
@@ -166,6 +197,40 @@ describe("webui API helpers", () => {
 
     await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
       "Invalid WebUI thread projection event: file_edit",
+    );
+  });
+
+  it.each([
+    {},
+    { stream_id: "answer-1" },
+    { projection_receipts: [] },
+    { stream_id: "answer-1", projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 3], [5, 5]] }] },
+  ])("accepts optional stream identity and projection receipts: %j", async (metadata) => {
+    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", turn_id: "turn-1", turn_seq: 6, ...metadata };
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      schemaVersion: 3, projection: "events", events: [event],
+    })));
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).resolves.toMatchObject({ events: [event] });
+  });
+
+  it.each([
+    { stream_id: 123 },
+    { projection_receipts: null },
+    { projection_receipts: [{ turn_id: "", ranges: [[1, 2]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[2, 1]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[1]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[-1, 2]] }] },
+    { projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 2.5]] }] },
+  ])("rejects malformed stream identity or projection receipts at the HTTP boundary: %j", async (metadata) => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      schemaVersion: 3,
+      projection: "events",
+      events: [{ event: "stream_end", chat_id: "chat-1", text: "Reply", ...metadata }],
+    })));
+
+    await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
+      "Invalid WebUI thread event metadata",
     );
   });
 
@@ -292,22 +357,22 @@ describe("webui API helpers", () => {
   });
 
   it("aborts a WebUI thread request when its caller signal is aborted", async () => {
-    let requestSignal: AbortSignal | null = null;
+    const request: { signal?: AbortSignal | null } = {};
     vi.mocked(fetch).mockImplementation((_input, init) => new Promise((_resolve, reject) => {
-      requestSignal = init?.signal ?? null;
-      requestSignal?.addEventListener("abort", () => {
+      request.signal = init?.signal;
+      request.signal?.addEventListener("abort", () => {
         reject(new DOMException("Aborted", "AbortError"));
       });
     }));
     const controller = new AbortController();
 
-    const request = fetchWebuiThread("tok", "websocket:chat-1", {
+    const pending = fetchWebuiThread("tok", "websocket:chat-1", {
       signal: controller.signal,
     });
     controller.abort();
 
-    await expect(request).rejects.toMatchObject({ name: "AbortError" });
-    expect(requestSignal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(request.signal?.aborted).toBe(true);
   });
 
   it("percent-encodes websocket keys and paths when fetching file previews", async () => {
@@ -786,7 +851,7 @@ describe("webui API helpers", () => {
   it("serializes OAuth provider advanced settings", async () => {
     await updateProviderSettings(mutationTransport, {
       provider: "xai_grok",
-      proxy: "http://127.0.0.1:7890",
+      use_proxy: true,
       extraBody: '{"tools":[]}',
     });
 
@@ -794,7 +859,7 @@ describe("webui API helpers", () => {
       "settings.provider.update",
       {
         provider: "xai_grok",
-        proxy: "http://127.0.0.1:7890",
+        use_proxy: true,
         extraBody: '{"tools":[]}',
       },
       20_000,
@@ -809,7 +874,7 @@ describe("webui API helpers", () => {
       extraHeaders: '{"X-Tenant":"engineering"}',
       extraBody: '{"service_tier":"priority"}',
       extraQuery: '{"api-version":"2026-01-01"}',
-      proxy: "http://127.0.0.1:7890",
+      use_proxy: true,
       thinkingStyle: "enable_thinking",
     };
     await createProviderSettings(mutationTransport, update);
@@ -1127,6 +1192,18 @@ describe("webui API helpers", () => {
     );
   });
 
+  it.each(["true", "false"])("preserves explicit MCP proxy flag %s across setup and edits", async (use_proxy) => {
+    await runMcpPresetAction(mutationTransport, "enable", "notion", { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.enable", { name: "notion", use_proxy }, 20_000);
+    await startMcpOAuth(mutationTransport, "notion", false, { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.oauth_start", { name: "notion", use_proxy }, 30_000);
+    await runMcpPresetAction(mutationTransport, "proxy", "notion", { use_proxy });
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.proxy", { name: "notion", use_proxy }, 20_000);
+    const custom = { name: "docs", transport: "sse", url: "https://example.com/sse", use_proxy };
+    await saveCustomMcpServer(mutationTransport, custom);
+    expect(requestMutation).toHaveBeenLastCalledWith("settings.mcp.custom", custom, 20_000);
+  });
+
   it("serializes custom MCP, mcp.json import, and tool allowlist actions", async () => {
     const custom = {
       name: "docs",
@@ -1185,8 +1262,6 @@ describe("webui API helpers", () => {
       collapsed_groups: {},
       view: {
         density: "compact" as const,
-        show_previews: false,
-        show_timestamps: false,
         show_archived: true,
         sort: "updated_desc" as const,
       },
@@ -1234,7 +1309,7 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("maps generated session titles from the sessions list", async () => {
+  it.each([true, undefined])("maps saved sessions with project_locked=%s", async (projectLocked) => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -1244,6 +1319,7 @@ describe("webui API helpers", () => {
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
             title: "优化 WebUI 标题",
+            project_locked: projectLocked,
             model_preset: "fast",
             run_started_at: 1_700_000_000,
             handle: {
@@ -1259,6 +1335,7 @@ describe("webui API helpers", () => {
       {
         key: "websocket:chat-1",
         title: "优化 WebUI 标题",
+        projectLocked: true,
         preview: "",
         modelPreset: "fast",
         runStartedAt: 1_700_000_000,
@@ -1345,5 +1422,58 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
+  });
+});
+
+describe("context graph response dictionaries", () => {
+  const graph = { nodes: [{ path: "/guide.md", name: "guide.md", tokens: 10, state: "loaded" }], edges: [] };
+  const request = (id: string, fields: Record<string, unknown>) => ({
+    event: "model_request", chat_id: "chat", request_id: id, run_id: "run", sequence: 2,
+    phase: "completed", ...fields,
+  });
+  const payload = (events: unknown[], fields: Record<string, unknown> = {}) => ({ schemaVersion: 3, projection: "events", events, ...fields });
+
+  it("resolves repeated graphs and checkpoint graphs into shared domain objects", () => {
+    const result = parseWebuiThreadPayload(payload([
+      request("one", { context_graph_ref: "0", request_usage: { context_tokens: 20 } }),
+      request("two", { context_graph_ref: "0", request_usage: null }),
+      { event: "context_compaction", chat_id: "chat", compaction_id: "compact", phase: "succeeded",
+        context_snapshot: { graph_ref: "0", estimated_tokens: 10, context_window_tokens: 100 } },
+    ], { context_graphs: { "0": { nodes: [0], edges: [] } }, context_graph_nodes: graph.nodes, context_graph_edges: graph.edges }));
+    const requests = result.events.filter((event) => event.event === "model_request");
+    expect(requests[0].context_graph).toBe(requests[1].context_graph);
+    expect(requests[0].context_graph).toEqual(graph);
+    expect(requests[1].request_usage).toBeNull();
+    expect(result.events[2]).toMatchObject({ context_snapshot: { graph } });
+  });
+
+  it("preserves a growing timeline while sharing unchanged node and edge entities", () => {
+    const nodes = Array.from({ length: 300 }, (_, index) => ({ path: `/${index}.md`, name: `${index}.md`, tokens: 10, state: "loaded" }));
+    const edges = nodes.slice(1).map((node, index) => ({ source: nodes[index].path, target: node.path }));
+    const descriptors = Object.fromEntries(Array.from({ length: 50 }, (_, index) => [String(index), {
+      nodes: Array.from({ length: 251 + index }, (_, n) => n),
+      edges: Array.from({ length: 250 + index }, (_, n) => n),
+    }]));
+    const result = parseWebuiThreadPayload(payload(Array.from({ length: 50 }, (_, index) => request(String(index), { context_graph_ref: String(index) })), {
+      context_graphs: descriptors, context_graph_nodes: nodes, context_graph_edges: edges,
+    }));
+    const requests = result.events.filter((event) => event.event === "model_request");
+    for (let index = 0; index < requests.length; index += 1) {
+      expect(requests[index].context_graph?.nodes).toEqual(nodes.slice(0, 251 + index));
+      expect(requests[index].context_graph?.edges).toEqual(edges.slice(0, 250 + index));
+    }
+    expect(requests[0].context_graph).not.toBe(requests[1].context_graph);
+    expect(requests[0].context_graph?.nodes[0]).toBe(requests[49].context_graph?.nodes[0]);
+    expect(requests[0].context_graph?.edges[0]).toBe(requests[49].context_graph?.edges[0]);
+  });
+
+  it("continues to accept inline graphs from older hosts", () => {
+    const result = parseWebuiThreadPayload(payload([request("one", { context_graph: graph })]));
+    expect(result.events[0]).toMatchObject({ context_graph: graph });
+  });
+
+  it("rejects unknown references and invalid dictionary entries", () => {
+    expect(() => parseWebuiThreadPayload(payload([request("one", { context_graph_ref: "missing" })], { context_graphs: {}, context_graph_nodes: [], context_graph_edges: [] }))).toThrow("Unknown context graph reference");
+    expect(() => parseWebuiThreadPayload(payload([], { context_graphs: { "0": { nodes: [], edges: [0] } }, context_graph_nodes: [], context_graph_edges: [{ source: "missing", target: "missing" }] }))).toThrow("Invalid context graph entity table");
   });
 });

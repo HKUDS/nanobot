@@ -1,5 +1,3 @@
-"""Apply file edits by providing structured edit instructions."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,7 +29,6 @@ def _validate_patch_path(path: str) -> str:
 
 
 def _append_text(content: str, addition: str) -> str:
-    """Append text without merging it into an unterminated final line."""
     base = content.replace("\r\n", "\n")
     extra = addition.replace("\r\n", "\n")
     if base and extra and not base.endswith("\n") and not extra.startswith("\n"):
@@ -51,11 +48,11 @@ def _append_text(content: str, addition: str) -> str:
                     "workspace; absolute paths and '..' obey the workspace access policy."
                 ),
                 action=StringSchema(
-                    "Operation type: replace or add.",
+                    "replace updates a unique text match; add creates a file or appends to an existing one.",
                     enum=["replace", "add"],
                 ),
                 old_text=StringSchema(
-                    "Exact text to search for in the file. Required for replace.",
+                    "Exact text occurring once in the file; required for replace.",
                     nullable=True,
                 ),
                 new_text=StringSchema(
@@ -64,7 +61,7 @@ def _append_text(content: str, addition: str) -> str:
                 ),
                 required=["path", "action"],
             ),
-            description="List of edits to apply. Each edit specifies a file and the change to make.",
+            description="File edits, applied in order.",
             min_items=1,
             max_items=20,
         ),
@@ -86,11 +83,8 @@ class ApplyPatchTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Default tool for code edits. Supports multi-file changes in a single call. "
-            "Provide a list of structured edits, each specifying a file path, action "
-            "(replace/add), and the exact text to change. "
-            "Paths are resolved by the current workspace access policy. "
-            "Set dry_run=true to validate and preview without writing files. "
+            "Default tool for code edits, including multi-file changes. "
+            "Returns a file-change summary. "
             "Use edit_file only for small exact replacements on a single file."
         )
 

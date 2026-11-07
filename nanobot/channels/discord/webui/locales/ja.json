@@ -23,14 +23,8 @@
         "label": "許可ユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
       },
-      "proxy": {
-        "label": "ネットワークプロキシ"
-      },
-      "proxyUsername": {
-        "label": "プロキシのユーザー名"
-      },
-      "proxyPassword": {
-        "label": "プロキシパスワード"
+      "useProxy": {
+        "label": "プロキシを使う"
       },
       "intents": {
         "label": "ゲートウェイの意図"

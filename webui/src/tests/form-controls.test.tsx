@@ -17,10 +17,12 @@ describe("form control focus styles", () => {
       "focus-visible:ring-inset",
       "focus-visible:ring-ring/50",
     );
-    expect(element).not.toHaveClass(
+    for (const className of [
       "ring-offset-background",
       "focus-visible:ring-ring",
       "focus-visible:ring-offset-2",
-    );
+    ]) {
+      expect(element).not.toHaveClass(className);
+    }
   });
 });

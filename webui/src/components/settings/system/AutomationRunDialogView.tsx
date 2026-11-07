@@ -82,7 +82,7 @@ export function AutomationRunDialogView({ job, run, locale, open, result, onRetr
               </Button>
             </div>
           ) : result.response?.trim() ? (
-            <MarkdownText className="min-w-0 text-sm [overflow-wrap:anywhere]">{result.response}</MarkdownText>
+            <MarkdownText className="min-w-0 [overflow-wrap:anywhere]">{result.response}</MarkdownText>
           ) : (
             <p className="text-muted-foreground">{t(result.response === null
               ? "settings.automations.runDetails.noOutput"

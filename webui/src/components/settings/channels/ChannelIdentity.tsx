@@ -47,9 +47,11 @@ export function channelSetup(
   ): ChannelConfigField => ({
     ...localizeField(field.key),
     section: field.section,
+    control: field.control,
   });
   const presentation: ChannelSetupPresentation = {
     ...definition,
+    privacyNotice: setupMessages?.privacyNotice,
     primaryActionLabel: setupMessages?.primaryAction,
     docsLabel: setupMessages?.docsLabel,
     officialLabel: setupMessages?.officialLabel,
