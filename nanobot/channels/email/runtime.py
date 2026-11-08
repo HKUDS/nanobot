@@ -163,7 +163,32 @@ class EmailChannel(BaseChannel):
         self._last_subject_by_chat: dict[str, str] = {}
         self._last_message_id_by_chat: dict[str, str] = {}
         self._processed_uids: set[str] = set()
+        self._uidvalidity: bytes | None = None
+        self._pending_seen: set[str] = set()
+        self._deferred_post_actions: set[str] = set()
         self._MAX_PROCESSED_UIDS = 100000
+
+    @staticmethod
+    async def _imap_thread(func: Any, *args: Any) -> Any:
+        # Wait for the worker on cancellation before a poller can be restarted.
+        task = asyncio.create_task(asyncio.to_thread(func, *args))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError as cancellation:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException:
+                    break
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                pass
+            except BaseException as exc:
+                raise cancellation from exc
+            raise
 
     async def start(self) -> None:
         """Start polling IMAP for inbound emails."""
@@ -189,9 +214,24 @@ class EmailChannel(BaseChannel):
         poll_seconds = max(5, int(self.config.poll_interval_seconds))
         while self._running:
             try:
-                inbound_items, skipped_uids = await asyncio.to_thread(self._fetch_new_messages)
+                # Retry only the idempotent acknowledgement, never bus delivery.
+                for uid in sorted(self._pending_seen):
+                    try:
+                        await self._imap_thread(self._mark_seen_batch, [uid])
+                    except Exception:
+                        self.logger.exception("Error retrying seen acknowledgement for UID {}", uid)
+                    else:
+                        self._pending_seen.discard(uid)
+                ready = self._deferred_post_actions - self._pending_seen
+                if ready:
+                    # Remove before sending: MOVE/COPY may succeed even if the
+                    # connection or this task fails before receiving a reply.
+                    self._deferred_post_actions.difference_update(ready)
+                    await self._imap_thread(self._apply_post_actions_batch, sorted(ready))
+                inbound_items, skipped_uids = await self._imap_thread(self._fetch_new_messages)
                 should_apply_post_action = self._should_apply_post_action()
                 post_actions_uids: set[str] = set()
+                delivered_uids: set[str] = set()
                 for item in inbound_items:
                     sender = item["sender"]
                     subject = item.get("subject", "")
@@ -203,7 +243,7 @@ class EmailChannel(BaseChannel):
                         self._last_message_id_by_chat[sender] = message_id
 
                     try:
-                        await self._handle_message(
+                        delivered = await self._handle_message(
                             sender_id=sender,
                             chat_id=sender,
                             content=item["content"],
@@ -213,18 +253,43 @@ class EmailChannel(BaseChannel):
                     except Exception:
                         self.logger.exception("Error delivering email from {}", sender)
                         continue
+                    if not delivered:
+                        continue
 
                     metadata = item.get("metadata")
                     metadata_data = cast(dict[str, Any], metadata) if isinstance(metadata, dict) else {}
                     uid = str(metadata_data.get("uid") or "")
-                    if uid and should_apply_post_action:
-                        post_actions_uids.add(uid)
+                    if uid:
+                        # Bus acceptance precedes deduplication and IMAP acknowledgement.
+                        self._remember_processed_uid(uid, True, set())
+                        delivered_uids.add(uid)
+                        if self.config.mark_seen:
+                            self._pending_seen.add(uid)
+                        if should_apply_post_action:
+                            # Persist before the next delivery can be cancelled.
+                            self._deferred_post_actions.add(uid)
+
+                if self.config.mark_seen and delivered_uids:
+                    try:
+                        await self._imap_thread(self._mark_seen_batch, sorted(delivered_uids))
+                    except Exception:
+                        # Delivery succeeded; retain the acknowledgement for retry.
+                        self.logger.exception("Error marking delivered emails seen")
+                    else:
+                        self._pending_seen.difference_update(delivered_uids)
 
                 if should_apply_post_action and not self.config.post_action_ignore_skipped:
                     post_actions_uids.update(skipped_uids)
 
-                if post_actions_uids:
-                    await asyncio.to_thread(self._apply_post_actions_batch, sorted(post_actions_uids))
+                # Do not remove/move a message while its seen acknowledgement
+                # is pending: otherwise retry could target a vanished message.
+                self._deferred_post_actions.update(post_actions_uids)
+                ready = self._deferred_post_actions - self._pending_seen
+                if ready:
+                    # Once sent, MOVE/COPY has an uncertain outcome on failure or
+                    # cancellation; do not blindly retry it.
+                    self._deferred_post_actions.difference_update(ready)
+                    await self._imap_thread(self._apply_post_actions_batch, sorted(ready))
             except Exception:
                 self.logger.exception("Polling error")
 
@@ -438,6 +503,7 @@ class EmailChannel(BaseChannel):
                     messages,
                     skipped_uids,
                     cycle_uids,
+                    allow_epoch_switch=(attempt == 0),
                 )
                 return messages, skipped_uids
             except Exception as exc:
@@ -456,6 +522,8 @@ class EmailChannel(BaseChannel):
         messages: list[dict[str, Any]],
         skipped_uids: set[str],
         cycle_uids: set[str],
+        *,
+        allow_epoch_switch: bool = False,
     ) -> list[dict[str, Any]] | None:
         mailbox = self.config.imap_mailbox or "INBOX"
 
@@ -464,6 +532,8 @@ class EmailChannel(BaseChannel):
             return messages
 
         try:
+            if dedupe:
+                self._check_uidvalidity(client, establish=True, allow_epoch_switch=allow_epoch_switch)
             status, data = client.uid("SEARCH", None, *search_criteria)
             if status != "OK" or not data or not data[0]:
                 return messages
@@ -584,20 +654,52 @@ class EmailChannel(BaseChannel):
                     }
                 )
 
-                self._remember_processed_uid(uid, dedupe, cycle_uids)
+                # Avoid duplicates within an IMAP reconnect, but do not acknowledge
+                # accepted mail until the asynchronous bus delivery succeeds.
+                cycle_uids.add(uid)
+        finally:
+            self._close_imap_client(client)
 
-                if mark_seen:
-                    features = self._mark_seen_uid(client, uid, features)
+    def _mark_seen_batch(self, uids: list[str]) -> None:
+        client = self._open_imap_client(mailbox=self.config.imap_mailbox or "INBOX")
+        if client is None:
+            raise RuntimeError("Cannot select mailbox to mark messages seen")
+        try:
+            self._check_uidvalidity(client)
+            features: _ServerFeatures | None = None
+            for uid in uids:
+                features = self._mark_seen_uid(client, uid, features, require_success=True)
         finally:
             self._close_imap_client(client)
 
     def _mark_seen_uid(
-        self, client: Any, uid: str, features: _ServerFeatures | None
+        self, client: Any, uid: str, features: _ServerFeatures | None, *, require_success: bool = False
     ) -> _ServerFeatures:
         if features is None:
             features = self._server_features(client)
-        self._uid_store_flag(client, uid, "\\Seen", features)
+        if not self._uid_store_flag(client, uid, "\\Seen", features) and require_success:
+            raise RuntimeError(f"Could not mark UID {uid} seen")
         return features
+
+    def _check_uidvalidity(
+        self, client: Any, *, establish: bool = False, allow_epoch_switch: bool = False
+    ) -> None:
+        _, values = client.response("UIDVALIDITY")
+        value = values[0] if values else None
+        if not isinstance(value, bytes) or not value.isdigit() or int(value) == 0:
+            raise RuntimeError("IMAP UIDVALIDITY missing or invalid; refusing UID operations")
+        if self._uidvalidity is None and establish:
+            self._uidvalidity = value
+        if self._uidvalidity != value:
+            if establish and allow_epoch_switch:
+                # Only a fresh fetch may switch epochs, never a reconnect within
+                # a partial batch or an acknowledgement/post-action session.
+                self._processed_uids.clear()
+                self._pending_seen.clear()
+                self._deferred_post_actions.clear()
+                self._uidvalidity = value
+            else:
+                raise RuntimeError("IMAP UIDVALIDITY changed or unknown; refusing UID operations")
 
     def _open_imap_client(self, mailbox: str, *, missing_mailbox_ok: bool = False) -> Any | None:
         if self.config.imap_use_ssl:
@@ -684,6 +786,7 @@ class EmailChannel(BaseChannel):
             return
 
         try:
+            self._check_uidvalidity(client)
             features = self._server_features(client)
             # Apply all post-actions in one IMAP session. `features` also carries
             # session-learned behavior (e.g. UID STORE support) so later UIDs can

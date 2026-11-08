@@ -91,10 +91,10 @@ def test_fetch_unknown_charset_falls_back_to_utf8(monkeypatch, multipart, subtyp
     assert "Hello 世界" in items[0]["content"]
     assert "<p>" not in items[0]["content"]
     assert skipped_uids == set()
-    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") not in fake.uid_calls
 
 
-def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
+def test_fetch_new_messages_parses_unseen_without_acknowledging(monkeypatch) -> None:
     raw = _make_raw_email(subject="Invoice", body="Please pay")
 
     fake = _make_fake_imap(raw, uid=b"123")
@@ -107,7 +107,7 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     assert items[0]["sender"] == "alice@example.com"
     assert items[0]["subject"] == "Invoice"
     assert "Please pay" in items[0]["content"]
-    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") not in fake.uid_calls
     assert [call for call in fake.uid_calls if call[0] == "FETCH"] == [
         ("FETCH", "123", "(BODY.PEEK[HEADER])"),
         ("FETCH", "123", "(BODY.PEEK[])"),
@@ -115,9 +115,9 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     assert skipped_uids == set()
 
     items_again, skipped_again = channel._fetch_new_messages()
-    assert items_again == []
+    assert len(items_again) == 1
     assert skipped_again == set()
-    assert len([call for call in fake.uid_calls if call[0] == "FETCH"]) == 2
+    assert len([call for call in fake.uid_calls if call[0] == "FETCH"]) == 4
 
 
 def test_fetch_new_messages_returns_accepted_and_skipped_uids(monkeypatch) -> None:
@@ -170,6 +170,9 @@ def test_apply_post_actions_batch_delete_uses_one_connection(monkeypatch) -> Non
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
 
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
         def select(self, _mailbox: str):
             return "OK", [b"1"]
 
@@ -208,6 +211,7 @@ def test_apply_post_actions_batch_delete_uses_one_connection(monkeypatch) -> Non
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+    channel._uidvalidity = b"1"
     channel._apply_post_actions_batch(["123", "124"])
 
     assert fake.store_calls == []
@@ -230,6 +234,9 @@ def test_apply_post_actions_batch_move_copies_then_deletes(monkeypatch) -> None:
 
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
 
         def select(self, _mailbox: str):
             return "OK", [b"1"]
@@ -268,6 +275,7 @@ def test_apply_post_actions_batch_move_copies_then_deletes(monkeypatch) -> None:
         _make_config(post_action="move", post_action_move_mailbox="Processed"),
         MessageBus(),
     )
+    channel._uidvalidity = b"1"
     channel._apply_post_actions_batch(["123"])
 
     assert fake.uid_calls == [
@@ -286,6 +294,9 @@ def test_apply_post_actions_batch_move_prefers_uid_move_when_supported(monkeypat
 
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
 
         def select(self, _mailbox: str):
             return "OK", [b"1"]
@@ -309,6 +320,7 @@ def test_apply_post_actions_batch_move_prefers_uid_move_when_supported(monkeypat
         _make_config(post_action="move", post_action_move_mailbox="Processed"),
         MessageBus(),
     )
+    channel._uidvalidity = b"1"
     channel._apply_post_actions_batch(["123"])
 
     assert fake.uid_calls == [("MOVE", "123", "Processed")]
@@ -324,6 +336,9 @@ def test_apply_post_actions_batch_fallback_caches_uid_store_failure(monkeypatch)
 
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
 
         def select(self, _mailbox: str):
             return "OK", [b"2"]
@@ -360,6 +375,7 @@ def test_apply_post_actions_batch_fallback_caches_uid_store_failure(monkeypatch)
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(post_action="delete"), MessageBus())
+    channel._uidvalidity = b"1"
     channel._apply_post_actions_batch(["123", "124"])
 
     assert [call for call in fake.uid_calls if call[0] == "STORE"] == [("STORE", "123", "+FLAGS", "(\\Deleted)")]
@@ -377,6 +393,9 @@ def test_apply_post_actions_batch_delete_with_post_action_expunge_true_no_uidplu
 
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
 
         def select(self, _mailbox: str):
             return "OK", [b"2"]
@@ -411,6 +430,7 @@ def test_apply_post_actions_batch_delete_with_post_action_expunge_true_no_uidplu
     monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(post_action="delete", post_action_expunge=True), MessageBus())
+    channel._uidvalidity = b"1"
     channel._apply_post_actions_batch(["123", "124"])
 
     assert fake.store_calls == [(b"1", "+FLAGS", "\\Deleted"), (b"2", "+FLAGS", "\\Deleted")]
@@ -439,6 +459,7 @@ async def test_start_applies_post_action_only_after_delivery(monkeypatch) -> Non
 
     async def _fake_handle_message(**_kwargs):
         calls.append("delivered")
+        return True
 
     def _fake_batch(actions):
         assert calls == ["delivered"]
@@ -447,6 +468,7 @@ async def test_start_applies_post_action_only_after_delivery(monkeypatch) -> Non
 
     monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
     monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", lambda _uids: None)
     monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
 
     await channel.start()
@@ -481,6 +503,7 @@ async def test_start_skips_post_action_when_delivery_fails(monkeypatch) -> None:
 
     monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
     monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", lambda _uids: None)
     monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
 
     await channel.start()
@@ -517,12 +540,14 @@ async def test_start_keeps_post_actions_for_successful_emails_when_later_deliver
     async def _fake_handle_message(**kwargs):
         if kwargs["chat_id"] == "bob@example.com":
             raise RuntimeError("delivery failed")
+        return True
 
     def _fake_batch(actions):
         called_actions.extend(actions)
 
     monkeypatch.setattr(channel, "_fetch_new_messages", _fake_fetch)
     monkeypatch.setattr(channel, "_handle_message", _fake_handle_message)
+    monkeypatch.setattr(channel, "_mark_seen_batch", lambda _uids: None)
     monkeypatch.setattr(channel, "_apply_post_actions_batch", _fake_batch)
 
     await channel.start()
@@ -598,6 +623,9 @@ def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeyp
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
 
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
         def select(self, _mailbox: str):
             return "OK", [b"1"]
 
@@ -647,6 +675,9 @@ def test_fetch_new_messages_keeps_messages_collected_before_stale_retry(monkeypa
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
 
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
         def select(self, _mailbox: str):
             return "OK", [b"2"]
 
@@ -679,6 +710,9 @@ def test_fetch_new_messages_skips_missing_mailbox(monkeypatch) -> None:
     class MissingMailboxIMAP:
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
 
         def select(self, _mailbox: str):
             raise imaplib.IMAP4.error("Mailbox doesn't exist")
@@ -994,6 +1028,9 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
 
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
+
         def select(self, _mailbox: str):
             return "OK", [b"1"]
 
@@ -1038,6 +1075,9 @@ def _make_fake_imap(raw: bytes, uid: bytes = b"500"):
 
         def login(self, _user: str, _pw: str):
             return "OK", [b"logged in"]
+
+        def response(self, _code: str):
+            return "UIDVALIDITY", [b"1"]
 
         def select(self, _mailbox: str):
             return "OK", [b"1"]
@@ -1919,3 +1959,328 @@ async def test_send_with_media_and_reply_subject_and_in_reply_to(tmp_path, monke
             attachment_parts.append(part)
     assert len(attachment_parts) == 1
     assert attachment_parts[0].get_filename() == "summary.pdf"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mark_seen", [False, True])
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_real_poll_retries_after_bus_failure_or_cancellation(monkeypatch, mark_seen, cancel):
+    import asyncio
+
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(mark_seen=mark_seen, post_action="delete"), bus)
+    post_actions = []
+    monkeypatch.setattr(channel, "_apply_post_actions_batch", lambda uids: post_actions.extend(uids))
+    publish = bus.publish_inbound
+    attempts = 0
+
+    async def flaky_publish(msg):
+        nonlocal attempts
+        attempts += 1
+        channel._running = False
+        if attempts == 1:
+            if cancel:
+                raise asyncio.CancelledError()
+            raise RuntimeError("bus unavailable")
+        await publish(msg)
+
+    monkeypatch.setattr(bus, "publish_inbound", flaky_publish)
+    if cancel:
+        with pytest.raises(asyncio.CancelledError):
+            await channel.start()
+    else:
+        await channel.start()
+    assert bus.inbound_size == 0
+    assert "123" not in channel._processed_uids
+    assert not post_actions
+    assert not any(call[0] == "STORE" for call in fake.uid_calls)
+
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert "123" in channel._processed_uids
+    assert post_actions == ["123"]
+    assert any(call[0] == "STORE" for call in fake.uid_calls) == mark_seen
+    assert channel._fetch_new_messages() == ([], set())
+
+@pytest.mark.asyncio
+async def test_poll_retries_seen_without_redelivery(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    original_uid = fake.uid
+    failures = 0
+
+    def uid(command, *args):
+        nonlocal failures
+        if command == "STORE" and failures == 0:
+            failures += 1
+            raise OSError("connection lost")
+        return original_uid(command, *args)
+
+    fake.uid = uid
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(), bus)
+    publish = bus.publish_inbound
+
+    async def stop_after_delivery(message):
+        await publish(message)
+        channel._running = False
+
+    monkeypatch.setattr(bus, "publish_inbound", stop_after_delivery)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert channel._pending_seen == {"123"}
+    # Stop after the next fetch, allowing the pending acknowledgement to run.
+    fetch = channel._fetch_new_messages
+    def stop_after_fetch():
+        result = fetch()
+        channel._running = False
+        return result
+    monkeypatch.setattr(channel, "_fetch_new_messages", stop_after_fetch)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert not channel._pending_seen
+    assert ("STORE", "123", "+FLAGS", "(\\Seen)") in fake.uid_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("validity", [b"2", None])
+async def test_poll_refuses_ack_and_post_action_on_unverified_mailbox(monkeypatch, validity):
+    first = _make_fake_imap(_make_raw_email(), uid=b"123")
+    second = _make_fake_imap(_make_raw_email(), uid=b"123")
+    second.response = lambda _: ("UIDVALIDITY", [validity])
+    clients = iter([first, second, second])
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: next(clients))
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(post_action="delete"), bus)
+    publish = bus.publish_inbound
+    async def stop_after_delivery(message):
+        await publish(message)
+        channel._running = False
+    monkeypatch.setattr(bus, "publish_inbound", stop_after_delivery)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert channel._pending_seen == {"123"}
+    assert not second.uid_calls
+
+
+@pytest.mark.asyncio
+async def test_uncertain_move_is_not_retried_after_disconnect(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    fake.capability = lambda: ("OK", [b"IMAP4rev1 MOVE"])
+    original_uid = fake.uid
+    moves = []
+    def uid(command, *args):
+        if command == "MOVE":
+            moves.append(args)
+            raise OSError("connection lost after MOVE")
+        return original_uid(command, *args)
+    fake.uid = uid
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(post_action="move", post_action_move_mailbox="Archive"), bus)
+    publish = bus.publish_inbound
+    async def stop_after_delivery(message):
+        await publish(message)
+        channel._running = False
+    monkeypatch.setattr(bus, "publish_inbound", stop_after_delivery)
+    await channel.start()
+    fetch = channel._fetch_new_messages
+    def stop_after_fetch():
+        result = fetch()
+        channel._running = False
+        return result
+    monkeypatch.setattr(channel, "_fetch_new_messages", stop_after_fetch)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert moves == [("123", "Archive")]
+
+
+def test_reconnect_rejects_changed_uidvalidity_before_mixing_results(monkeypatch):
+    first = _make_fake_imap(_make_raw_email(), uid=b"123")
+    second = _make_fake_imap(_make_raw_email(), uid=b"123")
+    original = first.uid
+    def broken(command, *args):
+        if command == "SEARCH":
+            return "OK", [b"123 124"]
+        if command == "FETCH" and args[0] == "124":
+            raise imaplib.IMAP4.abort("socket error")
+        return original(command, *args)
+    first.uid = broken
+    second.response = lambda _: ("UIDVALIDITY", [b"2"])
+    clients = iter([first, second])
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: next(clients))
+    channel = EmailChannel(_make_config(), MessageBus())
+    with pytest.raises(RuntimeError, match="UIDVALIDITY changed"):
+        channel._fetch_new_messages()
+    assert not second.uid_calls
+    assert not channel._processed_uids
+
+
+@pytest.mark.asyncio
+async def test_seen_failure_defers_move_until_acknowledged(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    fake.capability = lambda: ("OK", [b"IMAP4rev1 MOVE"])
+    original = fake.uid
+    failed = False
+    def uid(command, *args):
+        nonlocal failed
+        if command == "STORE" and not failed:
+            failed = True
+            raise OSError("connection lost")
+        return original(command, *args)
+    fake.uid = uid
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(post_action="move", post_action_move_mailbox="Archive"), bus)
+    publish = bus.publish_inbound
+    async def stop_after_delivery(message):
+        await publish(message)
+        channel._running = False
+    monkeypatch.setattr(bus, "publish_inbound", stop_after_delivery)
+    await channel.start()
+    assert not any(call[0] == "MOVE" for call in fake.uid_calls)
+    assert channel._deferred_post_actions == {"123"}
+    fetch = channel._fetch_new_messages
+    def stop_after_fetch():
+        result = fetch()
+        channel._running = False
+        return result
+    monkeypatch.setattr(channel, "_fetch_new_messages", stop_after_fetch)
+    await channel.start()
+    assert not channel._pending_seen
+    assert not channel._deferred_post_actions
+    assert sum(call[0] == "MOVE" for call in fake.uid_calls) == 1
+    assert bus.inbound_size == 1
+
+
+def test_fresh_poll_switches_uidvalidity_and_discards_old_epoch(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    fake.response = lambda _: ("UIDVALIDITY", [b"2"])
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    channel = EmailChannel(_make_config(), MessageBus())
+    channel._uidvalidity = b"1"
+    channel._processed_uids.add("123")
+    channel._pending_seen.add("123")
+    channel._deferred_post_actions.add("123")
+    messages, _ = channel._fetch_new_messages()
+    assert len(messages) == 1
+    assert channel._uidvalidity == b"2"
+    assert not channel._processed_uids and not channel._pending_seen and not channel._deferred_post_actions
+    assert not any(call[0] in {"STORE", "MOVE", "COPY"} for call in fake.uid_calls)
+
+
+@pytest.mark.asyncio
+async def test_cancel_later_delivery_preserves_earlier_post_action(monkeypatch):
+    import asyncio
+
+    fake = _make_fake_imap(_make_raw_email(), uid=b"1 2")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(mark_seen=False, post_action="move", post_action_move_mailbox="Archive"), bus)
+    publish = bus.publish_inbound
+    calls = 0
+    async def deliver(message):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise asyncio.CancelledError()
+        await publish(message)
+    monkeypatch.setattr(bus, "publish_inbound", deliver)
+    with pytest.raises(asyncio.CancelledError):
+        await channel.start()
+    assert bus.inbound_size == 1
+    assert channel._deferred_post_actions == {"1"}
+    actions = []
+    monkeypatch.setattr(channel, "_apply_post_actions_batch", lambda uids: actions.extend(uids))
+    def finish_fetch():
+        channel._running = False
+        return [], set()
+    monkeypatch.setattr(channel, "_fetch_new_messages", finish_fetch)
+    await channel.start()
+    assert actions == ["1"]
+    assert not channel._deferred_post_actions
+
+
+@pytest.mark.asyncio
+async def test_imap_thread_drains_after_repeated_cancellation():
+    import asyncio
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    def worker():
+        started.set()
+        release.wait(5)
+        finished.set()
+    task = asyncio.create_task(EmailChannel._imap_thread(worker))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert finished.is_set()
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_poll_switches_epoch_without_writing_old_uids(monkeypatch):
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    fake.response = lambda _: ("UIDVALIDITY", [b"2"])
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(mark_seen=False, post_action="move", post_action_move_mailbox="Archive"), bus)
+    channel._uidvalidity = b"1"
+    channel._processed_uids.add("123")
+    channel._pending_seen.add("123")
+    channel._deferred_post_actions.add("123")
+    publish = bus.publish_inbound
+    async def deliver(message):
+        await publish(message)
+        channel._running = False
+    monkeypatch.setattr(bus, "publish_inbound", deliver)
+    await channel.start()
+    assert bus.inbound_size == 1
+    assert channel._uidvalidity == b"2"
+    # Only the newly delivered message can be moved, never the old pending UID.
+    assert sum(call[0] == "COPY" for call in fake.uid_calls) == 1
+    search_index = next(i for i, call in enumerate(fake.uid_calls) if call[0] == "SEARCH")
+    assert not any(call[0] in {"STORE", "MOVE", "COPY"} for call in fake.uid_calls[:search_index])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mark_seen", [False, True])
+async def test_revocation_between_fetch_and_delivery_does_not_acknowledge(monkeypatch, tmp_path, mark_seen):
+    from nanobot.pairing import store
+
+    monkeypatch.setattr(store, "_store_path", lambda: tmp_path / "pairing.json")
+    code = store.generate_code("email", "alice@example.com")
+    store.approve_code(code)
+    fake = _make_fake_imap(_make_raw_email(), uid=b"123")
+    monkeypatch.setattr("nanobot.channels.email.runtime.imaplib.IMAP4_SSL", lambda *_: fake)
+    bus = MessageBus()
+    channel = EmailChannel(_make_config(allow_from=[], mark_seen=mark_seen, post_action="delete"), bus)
+    fetch = channel._fetch_new_messages
+
+    def fetch_then_revoke():
+        result = fetch()
+        assert len(result[0]) == 1
+        assert store.revoke("email", "alice@example.com")
+        channel._running = False
+        return result
+
+    monkeypatch.setattr(channel, "_fetch_new_messages", fetch_then_revoke)
+    await channel.start()
+    assert bus.inbound_size == 0
+    assert "123" not in channel._processed_uids
+    assert not channel._pending_seen
+    assert not channel._deferred_post_actions
+    assert not any(call[0] in {"STORE", "MOVE", "COPY"} for call in fake.uid_calls)
