@@ -587,6 +587,18 @@ describe("ThreadMotionCoordinator", () => {
     expect(coordinator.snapshot().mode).toBe("browsing-history");
   });
 
+  it("settles camera navigation without relying on a scroll event", () => {
+    const { coordinator } = motionHarness();
+    coordinator.takeUserControl();
+    coordinator.navigateLatestTo(1_400);
+    coordinator.cameraSettled();
+    expect(coordinator.snapshot().mode).toBe("follow-latest");
+
+    coordinator.navigateHistoryTo(200);
+    coordinator.cameraSettled();
+    expect(coordinator.snapshot().mode).toBe("navigating-history");
+  });
+
   it("retargets smooth latest navigation before resuming automatic follow", () => {
     const {
       camera,

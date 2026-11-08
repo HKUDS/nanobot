@@ -68,3 +68,48 @@ test.describe("desktop transcript spacing", () => {
     expect(await scroller.evaluate(node => getComputedStyle(node).maskImage)).toContain("calc(100% - 36px)");
   });
 });
+
+test("bottom button stays hidden throughout smooth navigation", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+  await page.route("**/api/**", route => route.fulfill({ json: {} }));
+  await page.goto("/browser/fixture.html?case=mobile-chat-layout&project");
+  const scroller = page.locator(".thread-message-viewport");
+  const button = page.getByRole("button", { name: "Scroll to bottom" });
+  await expect.poll(() => scroller.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(100);
+  await expect(button).toBeHidden();
+  const readableDistance = () => scroller.evaluate(el => {
+    const rows = [...el.querySelectorAll<HTMLElement>(".thread-message-row")];
+    const row = rows.reverse().find(item => item.getBoundingClientRect().height > 0)!;
+    const gap = el.querySelector<HTMLElement>(".thread-message-end-gap")!;
+    return row.getBoundingClientRect().bottom - (el.getBoundingClientRect().bottom - gap.getBoundingClientRect().height);
+  });
+  expect(await readableDistance()).toBeLessThanOrEqual(1);
+  await scroller.hover();
+  await page.mouse.wheel(0, -120);
+  await expect(button).toBeVisible();
+  expect(await readableDistance()).toBeGreaterThan(0);
+  await expect(button).toBeVisible();
+  await page.evaluate(() => {
+    (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames = [];
+    let start = 0;
+    const sample = () => {
+      (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames.push(
+        Boolean(document.querySelector('button[aria-label="Scroll to bottom"]')),
+      );
+      if (performance.now() - start < 300) requestAnimationFrame(sample);
+    };
+    document.querySelector('button[aria-label="Scroll to bottom"]')!.addEventListener("click", () => {
+      start = performance.now();
+      requestAnimationFrame(sample);
+    }, { once: true });
+  });
+  await button.click();
+  await expect(button).toBeHidden();
+  await expect.poll(() => scroller.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(1);
+  await page.waitForTimeout(320);
+  const frames = await page.evaluate(() => (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames);
+  expect(frames.length).toBeGreaterThan(1);
+  expect(frames).not.toContain(true);
+  await expect(button).toBeHidden();
+});

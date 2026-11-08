@@ -18,6 +18,7 @@ export type ThreadCameraFollowResult = "started" | "retargeted" | "settled";
 interface ThreadCameraOptions {
   scheduler?: ThreadCameraScheduler;
   prefersReducedMotion?: () => boolean;
+  onSettled?: () => void;
 }
 
 function defaultScheduler(): ThreadCameraScheduler {
@@ -38,6 +39,7 @@ export class ThreadCameraController {
   private readonly getViewport: () => ThreadCameraViewport | null;
   private readonly scheduler: ThreadCameraScheduler;
   private readonly prefersReducedMotion: () => boolean;
+  private readonly onSettled?: () => void;
   private frameId: number | null = null;
   private phase: "idle" | "following" = "idle";
   private target = 0;
@@ -50,6 +52,7 @@ export class ThreadCameraController {
   ) {
     this.getViewport = getViewport;
     this.scheduler = options.scheduler ?? defaultScheduler();
+    this.onSettled = options.onSettled;
     this.prefersReducedMotion = options.prefersReducedMotion ?? defaultPrefersReducedMotion;
   }
 
@@ -132,6 +135,7 @@ export class ThreadCameraController {
     if (remainingMs === 0) {
       this.write(viewport, this.target);
       this.cancel();
+      this.onSettled?.();
       return;
     }
 
