@@ -177,18 +177,38 @@ for (const width of [1440, 390]) {
       await input.fill("Crossfade keeps the draft and layout");
       const box = await input.boundingBox();
       await expect(page.locator("[data-user-text-bubble]").first()).toBeInViewport();
+      const capture = await page.evaluateHandle(() => {
+        const sample: { ready: Promise<string | null> | null } = { ready: null };
+        const start = document.startViewTransition.bind(document);
+        document.startViewTransition = (...args) => {
+          const transition = start(...args);
+          document.startViewTransition = start;
+          sample.ready = transition.ready.then(() => {
+            // Capture in the renderer before a protocol round-trip can outlive the fade.
+            const fades = document.getAnimations().filter(animation => animation instanceof CSSAnimation
+              && animation.animationName.startsWith("theme-crossfade-"));
+            for (const fade of fades) {
+              fade.pause();
+              fade.currentTime = 100;
+            }
+            return null;
+          }, error => String(error));
+          return transition;
+        };
+        return sample;
+      });
       await toggle.focus();
       await page.keyboard.press("Space");
+      expect(await capture.evaluate(sample => sample.ready)).toBeNull();
+      await capture.dispose();
+      // Keep the observer later than the 200ms lifetime to guard the original race.
+      await page.waitForTimeout(350);
       await expect.poll(() => page.evaluate(() => document.getAnimations().filter(animation => animation instanceof CSSAnimation
         && animation.animationName.startsWith("theme-crossfade-")).length)).toBe(2);
       const middle = await page.evaluate(() => {
         const root = document.documentElement;
         const fades = document.getAnimations().filter(animation => animation instanceof CSSAnimation
           && animation.animationName.startsWith("theme-crossfade-"));
-        for (const fade of fades) {
-          fade.pause();
-          fade.currentTime = 100;
-        }
         const oldTheme = getComputedStyle(root, "::view-transition-old(root)");
         const newTheme = getComputedStyle(root, "::view-transition-new(root)");
         return {
