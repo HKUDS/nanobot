@@ -180,6 +180,8 @@
     "hint": "Pilih status pemulihan, lalu coba lanjutkan atau tutup."
   },
   "sandbox": {
+    "gateway": "Contoh gateway",
+    "unknownGateway": "Tidak ditentukan",
     "title": "Pemberitahuan perintah",
     "description": "Bandingkan komponen yang hilang, pemasangan tidak terlindungi, dan kegagalan awal dengan komponen produksi.",
     "options": "Pemberitahuan tidak mengambil fokus atau mengulang perintah. Ubah status, tutup, lalu lanjutkan mengetik.",

@@ -180,6 +180,8 @@
     "hint": "Select a recovery state, then try continuing or dismissing."
   },
   "sandbox": {
+    "gateway": "Example gateway",
+    "unknownGateway": "Not specified",
     "title": "Command notice",
     "description": "Use the production notice to compare missing components, unprotected installations, and startup failures.",
     "options": "The notice does not take focus or retry commands. Change its state, dismiss it, and keep typing.",

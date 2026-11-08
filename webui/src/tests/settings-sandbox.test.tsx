@@ -26,7 +26,7 @@ describe("Saved sandbox settings", () => {
 
   it("checks saved configuration explicitly without changing the isolation policy", async () => {
     const sandbox = open();
-    expect(sandbox.getByText(/Launcher not found/)).toBeVisible();
+    expect(sandbox.getByText(/Bubblewrap \(bwrap\) was not found on the gateway/)).toBeVisible();
     expect(requestMutationMock).not.toHaveBeenCalled();
     requestMutationMock.mockResolvedValue({ sandbox: {
       ...payload().advanced.exec_sandbox_status, state: "passed", reason: "", launcher: "/usr/bin/bwrap",
@@ -37,13 +37,20 @@ describe("Saved sandbox settings", () => {
     expect(sandbox.getByText(/Restart the gateway/)).toBeVisible();
   });
 
-  it("opens the launcher editor from a recovery link without editing or checking automatically", () => {
-    renderSettingsView({ initialSection: "advanced", initialSettings: payload(), webuiCapabilities: capability,
+  it.each([
+    ["bwrap", "Bubblewrap (bwrap)"],
+    ["seatbelt", "macOS Seatbelt (sandbox-exec)"],
+  ] as const)("opens the gateway's %s path editor without editing or checking automatically", (backend, launcher) => {
+    const settings = payload();
+    settings.runtime_config!["tools.exec.sandbox"] = backend;
+    settings.advanced.exec_sandbox_status!.supported_backend = backend;
+    renderSettingsView({ initialSection: "advanced", initialSettings: settings, webuiCapabilities: capability,
       focusTarget: "sandbox-launcher" });
     const sandbox = within(screen.getByRole("region", { name: "Command sandbox" }));
     expect(sandbox.getByRole("button", { name: "Advanced options" })).toHaveAttribute("aria-expanded", "true");
     expect(sandbox.getByRole("textbox", { name: "Trusted launcher path" })).toHaveFocus();
     expect(sandbox.getByRole("textbox", { name: "Trusted launcher path" })).toHaveValue("");
+    expect(sandbox.getByText(/Usually leave this blank for system lookup of/)).toHaveTextContent(launcher);
     expect(requestMutationMock).not.toHaveBeenCalled();
   });
 

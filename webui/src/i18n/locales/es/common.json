@@ -486,7 +486,8 @@
       "checking": "Comprobando…",
       "scope": "Solo prueba el lanzador guardado con archivos temporales. No es una auditoría de seguridad completa. Reinicia la puerta de enlace para aplicar los cambios a los comandos.",
       "path": "Ruta del lanzador de confianza",
-      "pathHelp": "Normalmente, déjala vacía para buscar en el sistema. Para una instalación personalizada, pide la ruta completa del lanzador al responsable del paquete. El archivo y sus directorios padre deben ser de root, sin escritura para grupos u otros usuarios, y estar fuera de las rutas de escritura del agente.",
+      "launcher": "lanzador del entorno aislado",
+      "pathHelp": "Normalmente, déjala vacía para buscar {{launcher}} en el sistema. Para una instalación personalizada, pide la ruta completa del lanzador al responsable del paquete. El archivo y sus directorios padre deben ser de root, sin escritura para grupos u otros usuarios, y estar fuera de las rutas de escritura del agente.",
       "automatic": "Búsqueda del sistema",
       "checkError": "No se pudo completar la prueba. Abre los ajustes de nuevo y reinténtalo.",
       "saveError": "No se pudo guardar. El borrador se conserva; vuelve a intentarlo.",
@@ -496,11 +497,12 @@
       "disable": "Desactivar aislamiento",
       "notice": {
         "title": "Los comandos requieren atención",
-        "missing": "No se encontró el componente de ejecución. Revisa su instalación; puedes seguir chateando.",
-        "path": "El componente configurado no está disponible. Revisa su ubicación y permisos de acceso.",
-        "permissions": "El componente no está en una ubicación protegida. Contacta al responsable del paquete o al administrador.",
-        "startup": "El entorno de aislamiento no pudo iniciarse. Revisa la instalación y las restricciones del sistema.",
-        "openSettings": "Revisar ajustes"
+        "missing": "La pasarela no encuentra {{launcher}}. Si está instalado, indica su ruta completa. Si no, contacta al responsable del paquete o al administrador. Puedes seguir chateando.",
+        "path": "La pasarela no puede usar la ruta configurada de {{launcher}}. Revisa la ruta completa y los permisos de acceso.",
+        "permissions": "{{launcher}} no está en una ubicación protegida. Contacta al responsable del paquete o al administrador.",
+        "startup": "{{launcher}} no pudo iniciarse. Revisa la instalación de la pasarela y las restricciones del sistema.",
+        "configurePath": "Configurar ruta de {{launcher}}",
+        "openSettings": "Abrir ajustes del entorno aislado"
       },
       "states": {
         "disabled": "Comandos desactivados",
@@ -522,7 +524,7 @@
         "checking": "Ejecutando una prueba con tiempo limitado…"
       },
       "reasons": {
-        "launcher_missing": "No se encontró el lanzador. Instálalo en la puerta de enlace o indica una ruta absoluta de confianza.",
+        "launcher_missing": "La pasarela no encuentra {{launcher}}. Si está instalado, indica su ruta completa abajo. Si no, contacta al responsable del paquete o al administrador.",
         "path_not_absolute": "Introduce una ruta absoluta, no un nombre de comando.",
         "not_executable": "La ruta debe apuntar a un archivo ejecutable.",
         "agent_writable": "El agente puede escribir en esta ruta. Pide una instalación protegida al responsable del paquete.",

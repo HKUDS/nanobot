@@ -486,7 +486,8 @@
       "checking": "Đang kiểm tra…",
       "scope": "Chỉ kiểm tra trình khởi chạy đã lưu bằng tệp tạm. Đây không phải kiểm toán bảo mật đầy đủ. Khởi động lại gateway để áp dụng thay đổi cho lệnh.",
       "path": "Đường dẫn trình khởi chạy tin cậy",
-      "pathHelp": "Thông thường hãy để trống để tìm trong hệ thống. Với cài đặt tùy chỉnh, hãy hỏi người duy trì gói về đường dẫn đầy đủ của trình khởi chạy. Tệp và thư mục cha phải thuộc root, không cho nhóm/người khác ghi, và nằm ngoài vùng ghi của Agent.",
+      "launcher": "trình khởi chạy sandbox",
+      "pathHelp": "Thông thường hãy để trống để tìm {{launcher}} trong hệ thống. Với cài đặt tùy chỉnh, hãy hỏi người duy trì gói về đường dẫn đầy đủ của trình khởi chạy. Tệp và thư mục cha phải thuộc root, không cho nhóm/người khác ghi, và nằm ngoài vùng ghi của Agent.",
       "automatic": "Tìm trong hệ thống",
       "checkError": "Chưa kiểm tra được. Mở lại cài đặt và thử lại.",
       "saveError": "Không lưu được. Bản nháp được giữ lại; hãy thử lại.",
@@ -496,11 +497,12 @@
       "disable": "Tắt cô lập",
       "notice": {
         "title": "Cần kiểm tra lệnh",
-        "missing": "Không tìm thấy thành phần thực thi lệnh. Hãy kiểm tra cài đặt; bạn vẫn có thể trò chuyện.",
-        "path": "Không thể sử dụng thành phần đã cấu hình. Hãy kiểm tra vị trí và quyền truy cập.",
-        "permissions": "Thành phần thực thi không nằm ở vị trí được bảo vệ. Hãy liên hệ người bảo trì gói hoặc quản trị viên.",
-        "startup": "Không thể khởi động môi trường cách ly. Hãy kiểm tra cài đặt và các hạn chế của hệ thống.",
-        "openSettings": "Kiểm tra cài đặt"
+        "missing": "Gateway không tìm thấy {{launcher}}. Nếu đã cài, hãy đặt đường dẫn đầy đủ. Nếu chưa, hãy liên hệ người duy trì gói hoặc quản trị viên. Bạn vẫn có thể trò chuyện.",
+        "path": "Gateway không thể dùng đường dẫn {{launcher}} đã cấu hình. Hãy kiểm tra đường dẫn đầy đủ và quyền truy cập.",
+        "permissions": "{{launcher}} không nằm ở vị trí được bảo vệ. Hãy liên hệ người duy trì gói hoặc quản trị viên.",
+        "startup": "{{launcher}} không khởi động được. Hãy kiểm tra cài đặt gateway và giới hạn hệ thống.",
+        "configurePath": "Đặt đường dẫn {{launcher}}",
+        "openSettings": "Mở cài đặt sandbox"
       },
       "states": {
         "disabled": "Đã tắt lệnh",
@@ -522,7 +524,7 @@
         "checking": "Đang chạy kiểm tra sandbox có giới hạn thời gian…"
       },
       "reasons": {
-        "launcher_missing": "Không tìm thấy trình khởi chạy. Cài trên gateway hoặc nhập đường dẫn tuyệt đối tin cậy bên dưới.",
+        "launcher_missing": "Gateway không tìm thấy {{launcher}}. Nếu đã cài, hãy nhập đường dẫn đầy đủ bên dưới. Nếu chưa, hãy liên hệ người duy trì gói hoặc quản trị viên.",
         "path_not_absolute": "Nhập đường dẫn tuyệt đối, không phải tên lệnh.",
         "not_executable": "Đường dẫn phải trỏ đến tệp thực thi.",
         "agent_writable": "Agent có thể ghi vào đường dẫn này. Hãy nhờ người duy trì gói cung cấp vị trí cài đặt được bảo vệ.",

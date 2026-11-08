@@ -486,7 +486,8 @@
       "checking": "Memeriksa…",
       "scope": "Hanya menguji peluncur tersimpan dengan berkas sementara. Ini bukan audit keamanan lengkap. Mulai ulang gateway untuk menerapkan perubahan ke eksekusi perintah.",
       "path": "Jalur peluncur tepercaya",
-      "pathHelp": "Biasanya biarkan kosong untuk pencarian sistem. Untuk instalasi khusus, minta jalur lengkap peluncur kepada pengelola paket. Berkas dan direktori induk harus dimiliki root, tidak dapat ditulis grup/pengguna lain, dan di luar jalur tulis agen.",
+      "launcher": "peluncur sandbox",
+      "pathHelp": "Biasanya biarkan kosong untuk mencari {{launcher}} di sistem. Untuk instalasi khusus, minta jalur lengkap peluncur kepada pengelola paket. Berkas dan direktori induk harus dimiliki root, tidak dapat ditulis grup/pengguna lain, dan di luar jalur tulis agen.",
       "automatic": "Pencarian sistem",
       "checkError": "Pemeriksaan gagal. Buka ulang pengaturan dan coba lagi.",
       "saveError": "Gagal menyimpan. Draf tetap tersimpan; coba lagi.",
@@ -496,11 +497,12 @@
       "disable": "Nonaktifkan isolasi",
       "notice": {
         "title": "Perintah perlu diperiksa",
-        "missing": "Komponen eksekusi tidak ditemukan. Periksa pemasangannya; Anda tetap dapat mengobrol.",
-        "path": "Komponen yang dikonfigurasi tidak tersedia. Periksa lokasi dan izin aksesnya.",
-        "permissions": "Komponen tidak berada di lokasi terlindungi. Hubungi pengelola paket atau administrator.",
-        "startup": "Lingkungan isolasi tidak dapat dimulai. Periksa pemasangan dan pembatasan sistem.",
-        "openSettings": "Periksa pengaturan"
+        "missing": "Gateway tidak menemukan {{launcher}}. Jika sudah terpasang, atur jalur lengkapnya. Jika belum, hubungi pengelola paket atau administrator. Anda tetap bisa mengobrol.",
+        "path": "Gateway tidak dapat menggunakan jalur {{launcher}} yang dikonfigurasi. Periksa jalur lengkap dan izin aksesnya.",
+        "permissions": "{{launcher}} tidak berada di lokasi terlindungi. Hubungi pengelola paket atau administrator.",
+        "startup": "{{launcher}} tidak dapat dimulai. Periksa instalasi gateway dan pembatasan sistem.",
+        "configurePath": "Atur jalur {{launcher}}",
+        "openSettings": "Buka pengaturan sandbox"
       },
       "states": {
         "disabled": "Perintah nonaktif",
@@ -522,7 +524,7 @@
         "checking": "Menjalankan uji sandbox dengan batas waktu…"
       },
       "reasons": {
-        "launcher_missing": "Peluncur tidak ditemukan. Pasang di gateway atau isi jalur absolut tepercaya di bawah.",
+        "launcher_missing": "Gateway tidak menemukan {{launcher}}. Jika sudah terpasang, masukkan jalur lengkapnya di bawah. Jika belum, hubungi pengelola paket atau administrator.",
         "path_not_absolute": "Masukkan jalur absolut, bukan nama perintah.",
         "not_executable": "Jalur harus menuju berkas yang dapat dieksekusi.",
         "agent_writable": "Agen dapat menulis ke jalur ini. Minta pemasangan terlindungi kepada pengelola paket.",

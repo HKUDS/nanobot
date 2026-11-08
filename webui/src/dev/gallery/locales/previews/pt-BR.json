@@ -180,6 +180,8 @@
     "hint": "Selecione um estado de recuperação e teste continuar ou fechar."
   },
   "sandbox": {
+    "gateway": "Gateway de exemplo",
+    "unknownGateway": "Não especificado",
     "title": "Aviso de comandos",
     "description": "Compare componentes ausentes, instalações desprotegidas e falhas de inicialização com o componente real.",
     "options": "O aviso não toma o foco nem repete comandos. Mude o estado, feche-o e continue digitando.",
