@@ -370,6 +370,50 @@ describe("Real update consent and recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Update & restart" }));
     await waitFor(() => expect(api.executeUpdate).toHaveBeenCalledOnce());
   });
+  it("stops polling a forbidden restored review and allows a manual retry", async () => {
+    vi.useFakeTimers();
+    sessionStorage.setItem("nanobot.pending-update.v1", id);
+    vi.mocked(api.readUpdateReview).mockRejectedValueOnce(new api.ApiError(403, "Forbidden"));
+    render(view());
+    await act(async () => {});
+    expect(screen.getByText(/Could not verify this update/)).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+    expect(api.readUpdateReview).toHaveBeenCalledTimes(1);
+    expect(api.readUpdateJob).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(api.readUpdateReview).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "Update & restart" })).toBeEnabled();
+    expect(api.executeUpdate).not.toHaveBeenCalled();
+  });
+  it("retries a transient restored review failure and recovers without consent", async () => {
+    vi.useFakeTimers();
+    sessionStorage.setItem("nanobot.pending-update.v1", id);
+    vi.mocked(api.readUpdateReview).mockRejectedValueOnce(new Error("offline"));
+    render(view());
+    await act(async () => {});
+    expect(api.readUpdateReview).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(api.readUpdateReview).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: "Update & restart" })).toBeEnabled();
+    expect(api.executeUpdate).not.toHaveBeenCalled();
+  });
+  it("offers a manual check and delayed recovery after repeated review failures", async () => {
+    vi.useFakeTimers();
+    sessionStorage.setItem("nanobot.pending-update.v1", id);
+    sessionStorage.setItem("nanobot.pending-update-recovery.v1", JSON.stringify({ id, command: "recover safely" }));
+    vi.mocked(api.readUpdateReview).mockRejectedValue(new Error("offline"));
+    render(view());
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: "Check again" })).toBeEnabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(123_000); });
+    expect(screen.getByDisplayValue("recover safely")).toBeVisible();
+    vi.mocked(api.readUpdateReview).mockResolvedValue(review);
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(screen.getByRole("button", { name: "Update & restart" })).toBeEnabled();
+    expect(api.executeUpdate).not.toHaveBeenCalled();
+  });
   it("waits for the restored review before enabling confirmation", async () => {
     sessionStorage.setItem("nanobot.pending-update.v1", id);
     let resolveReview!: (value: api.UpdateReviewResponse) => void;

@@ -323,8 +323,12 @@ class BaseChannel(ABC):
         authorization_id: str | None = None,
         require_existing_session: bool = False,
         session_generation: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Handle a message after checking its authorization subject.
+
+        Return True only after the inbound bus accepts the message. Return False
+        for a denied message, including when a pairing reply was sent. Delivery
+        errors propagate; callers must not acknowledge on an exception.
 
         ``sender_id`` is the identity recorded on the inbound message.  Channels
         where access is scoped to another entity (for example, a group or room)
@@ -342,7 +346,7 @@ class BaseChannel(ABC):
                     self.logger.warning(
                         "Pairing store unavailable; dropping DM from {}", sender_id
                     )
-                    return
+                    return False
                 record_delivery(code, "sending", on_change=self._pairing_changed)
                 try:
                     await self.send(
@@ -367,7 +371,7 @@ class BaseChannel(ABC):
                     "Add them to allowFrom list in config to grant access.",
                     sender_id,
                 )
-            return
+            return False
 
         meta = metadata or {}
         if self.supports_streaming:
@@ -386,6 +390,7 @@ class BaseChannel(ABC):
         )
 
         await self.bus.publish_inbound(msg)
+        return True
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:

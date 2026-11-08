@@ -503,12 +503,8 @@ class MattermostChannel(BaseChannel):
 
             file_ids: list[str] = []
             for media_path in msg.media or []:
-                try:
-                    fid = await self._upload_file(chat_id, media_path)
-                    if fid:
-                        file_ids.append(fid)
-                except Exception:
-                    self.logger.exception("Failed to upload file {}", media_path)
+                fid = await self._upload_file(chat_id, media_path)
+                file_ids.append(fid)
 
             if msg.content or file_ids:
                 text = msg.content or " "
@@ -669,27 +665,19 @@ class MattermostChannel(BaseChannel):
             body["file_ids"] = file_ids
         return await self._api_post("/api/v4/posts", body)
 
-    async def _upload_file(self, channel_id: str, file_path: str) -> str | None:
+    async def _upload_file(self, channel_id: str, file_path: str) -> str:
         path = Path(file_path)
-        if not path.exists():
-            self.logger.warning("file not found: {}", file_path)
-            return None
-
-        try:
-            files = {"files": (path.name, path.read_bytes())}
-            resp = await self._require_http_client().post(
-                "/api/v4/files",
-                data={"channel_id": channel_id},
-                files=files,
-            )
-            resp.raise_for_status()
-            data = cast(dict[str, Any], resp.json())
-            infos = cast(list[dict[str, Any]], data.get("file_infos", []))
-            if infos:
-                return infos[0].get("id")
-        except Exception as e:
-            self.logger.warning("file upload failed for {}: {}", file_path, e)
-        return None
+        files = {"files": (path.name, path.read_bytes())}
+        resp = await self._require_http_client().post(
+            "/api/v4/files", data={"channel_id": channel_id}, files=files,
+        )
+        resp.raise_for_status()
+        data = cast(dict[str, Any], resp.json())
+        infos = cast(list[dict[str, Any]], data.get("file_infos", []))
+        file_id = infos[0].get("id") if infos else None
+        if not isinstance(file_id, str) or not file_id:
+            raise ValueError(f"Mattermost upload returned no file id for {file_path}")
+        return file_id
 
     async def _download_file(self, file_id: str) -> str | None:
         try:
