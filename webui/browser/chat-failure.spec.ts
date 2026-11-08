@@ -1,4 +1,39 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+for (const locale of ["en", "zh-CN", "zh-TW", "fr", "ja", "ko", "es", "pt-BR", "vi", "id"]) {
+  for (const gateway of ["bwrap", "seatbelt"]) {
+    test(`sandbox path action fits a narrow view: ${gateway}, ${locale}`, async ({ page }) => {
+      const copy = JSON.parse(readFileSync(new URL(`../src/i18n/locales/${locale}/common.json`, import.meta.url), "utf8")).settings.sandbox;
+      const executable = gateway === "bwrap" ? "bwrap" : "sandbox-exec";
+      await page.setViewportSize({ width: 390, height: 1000 });
+      await page.addInitScript((locale) => localStorage.setItem("nanobot.locale", locale), locale);
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto(`/browser/fixture.html?case=chat-failure&notice=sandbox&gateway=${gateway}`);
+      const notice = page.locator(".thread-composer-notice");
+      await expect(notice).toContainText(gateway === "bwrap" ? "Bubblewrap (bwrap)" : "macOS Seatbelt (sandbox-exec)");
+      await expect(notice).not.toContainText(/{{|settings\.sandbox/);
+      const action = notice.getByRole("button", { name: copy.notice.configurePath.replace("{{launcher}}", executable), exact: true });
+      await expect(action).toBeInViewport({ ratio: 1 });
+      const bounds = (await notice.boundingBox())!;
+      const button = (await action.boundingBox())!;
+      expect(button.x).toBeGreaterThanOrEqual(bounds.x);
+      expect(button.x + button.width).toBeLessThanOrEqual(bounds.x + bounds.width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      await action.click();
+      await expect(page.getByLabel("Fixture action")).toHaveText("settings");
+    });
+  }
+}
+
+test("sandbox guidance stays generic without gateway backend details", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=chat-failure&notice=sandbox&gateway=unknown");
+  const notice = page.locator(".thread-composer-notice");
+  await expect(notice).toContainText("sandbox launcher");
+  await expect(notice).not.toContainText(/bwrap|sandbox-exec/);
+  await notice.getByRole("button", { name: "Open sandbox settings" }).click();
+  await expect(page.getByLabel("Fixture action")).toHaveText("settings");
+});
 
 for (const width of [1440, 390]) {
   for (const variant of ["thread", "hero"]) {

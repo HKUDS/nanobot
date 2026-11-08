@@ -31,8 +31,8 @@ function tool(receive: (event: InboundEvent) => void, values: Partial<ToolProgre
 
 describe("Live sandbox guidance", () => {
   it.each([
-    ["sandbox_path_unavailable", "Check its location and access permissions"],
-    ["sandbox_start_failed", "Check the installation and system restrictions"],
+    ["sandbox_path_unavailable", "Check its full path and access permissions"],
+    ["sandbox_start_failed", "Check the gateway installation and system restrictions"],
   ])("explains the known launcher failure %s", (error_code, copy) => {
     const { client, receive } = createStreamClient();
     render(<Harness client={client} />);
@@ -56,8 +56,10 @@ describe("Live sandbox guidance", () => {
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
     expect(draft).toHaveFocus();
     expect(draft).toHaveValue("Keep my draft");
+    expect(screen.getByRole("status")).toHaveTextContent("sandbox launcher");
+    expect(screen.getByRole("status")).not.toHaveTextContent(/bwrap|sandbox-exec/);
     expect(onOpen).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Check settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open sandbox settings" }));
     expect(onOpen).toHaveBeenCalledOnce();
   });
 

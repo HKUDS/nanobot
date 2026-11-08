@@ -241,17 +241,21 @@ function RecoveryPreview() {
 
 function SandboxPreview() {
   const { t } = useGalleryTranslation();
+  const [backend, setBackend] = useState<"bwrap" | "seatbelt" | null>("bwrap");
+  const gateway = backend === "bwrap" ? "Linux / fnOS" : backend === "seatbelt" ? "macOS" : t("previews.sandbox.unknownGateway");
   const [issue, setIssue] = useState<SandboxIssue>("missing");
   const [dismissed, setDismissed] = useState(false);
   const [opened, setOpened] = useState(false);
   return <div className="space-y-4">
+    <StatePicker label={t("previews.sandbox.gateway")} value={gateway} options={["Linux / fnOS", "macOS", t("previews.sandbox.unknownGateway")]}
+      onChange={(value) => setBackend(value === "Linux / fnOS" ? "bwrap" : value === "macOS" ? "seatbelt" : null)} />
     <div className="flex flex-wrap gap-2">
       {(["missing", "permissions", "startup"] as const).map((value) => <Button key={value}
         variant={issue === value ? "secondary" : "outline"} size="sm" className="rounded-full"
         onClick={() => { setIssue(value); setDismissed(false); setOpened(false); }}>{t(`previews.sandbox.${value}`)}</Button>)}
     </div>
     <div className="thread-composer-stack">
-      {!dismissed ? <SandboxNotice issue={issue} onDismiss={() => setDismissed(true)} onOpenSettings={() => setOpened(true)} /> : null}
+      {!dismissed ? <SandboxNotice issue={issue} backend={backend} onDismiss={() => setDismissed(true)} onOpenSettings={() => setOpened(true)} /> : null}
       <ThreadComposer workspaceControlsHidden onSend={() => false} onStop={() => {}} />
     </div>
     <Button variant="outline" size="sm" onClick={() => setDismissed(false)}>{t("previews.fallback.showAgain")}</Button>
@@ -374,7 +378,7 @@ export const conversationExamples: ComponentExample[] = [
     code: '<ModelFallbackNotice model="gpt-4.1" onDismiss={dismiss} onOpenSettings={openModelSettings} />' },
   { title: "previews.sandbox.title", files: ["thread/SandboxNotice"], Preview: SandboxPreview,
     description: "previews.sandbox.description", options: "previews.sandbox.options",
-    code: '<SandboxNotice issue="missing" onDismiss={dismiss} onOpenSettings={openSandboxSettings} />' },
+    code: '<SandboxNotice issue="missing" backend="bwrap" onDismiss={dismiss} onOpenSettings={openSandboxSettings} />' },
   { title: "previews.compaction.title", files: ["thread/ContextCompactionNotice"], Preview: CompactionPreview,
     description: "previews.compaction.description", options: "previews.compaction.options",
     code: '<ContextCompactionNotice compaction={{ id: "compaction-1", phase: "succeeded", announce: true }} />' },

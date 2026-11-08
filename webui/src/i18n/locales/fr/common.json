@@ -486,7 +486,8 @@
       "checking": "Vérification…",
       "scope": "Teste uniquement le lanceur enregistré avec des fichiers temporaires. Ce n’est pas un audit de sécurité complet. Redémarrez la passerelle pour appliquer les changements aux commandes.",
       "path": "Chemin du lanceur de confiance",
-      "pathHelp": "Laissez généralement ce champ vide pour la recherche système. Pour une installation personnalisée, demandez le chemin complet du lanceur au responsable du paquet. Le fichier et ses dossiers parents doivent appartenir à root, sans écriture pour le groupe ou les autres utilisateurs, hors des chemins modifiables par l’agent.",
+      "launcher": "lanceur de bac à sable",
+      "pathHelp": "Laissez généralement ce champ vide pour rechercher {{launcher}} dans le système. Pour une installation personnalisée, demandez le chemin complet du lanceur au responsable du paquet. Le fichier et ses dossiers parents doivent appartenir à root, sans écriture pour le groupe ou les autres utilisateurs, hors des chemins modifiables par l’agent.",
       "automatic": "Recherche système",
       "checkError": "La vérification a échoué. Rouvrez les paramètres et réessayez.",
       "saveError": "Enregistrement impossible. Le brouillon est conservé ; réessayez.",
@@ -496,11 +497,12 @@
       "disable": "Désactiver l’isolation",
       "notice": {
         "title": "Les commandes nécessitent une vérification",
-        "missing": "Le composant d’exécution est introuvable. Vérifiez son installation ; vous pouvez continuer à discuter.",
-        "path": "Le composant configuré est indisponible. Vérifiez son emplacement et ses droits d’accès.",
-        "permissions": "Le composant n’est pas dans un emplacement protégé. Contactez le responsable du paquet ou l’administrateur.",
-        "startup": "L’environnement isolé n’a pas pu démarrer. Vérifiez l’installation et les restrictions du système.",
-        "openSettings": "Vérifier les paramètres"
+        "missing": "La passerelle ne trouve pas {{launcher}}. S’il est installé, indiquez son chemin complet. Sinon, contactez le responsable du paquet ou l’administrateur. Vous pouvez continuer à discuter.",
+        "path": "La passerelle ne peut pas utiliser le chemin configuré de {{launcher}}. Vérifiez le chemin complet et les droits d’accès.",
+        "permissions": "{{launcher}} n’est pas dans un emplacement protégé. Contactez le responsable du paquet ou l’administrateur.",
+        "startup": "{{launcher}} n’a pas pu démarrer. Vérifiez l’installation de la passerelle et les restrictions du système.",
+        "configurePath": "Configurer le chemin de {{launcher}}",
+        "openSettings": "Ouvrir les paramètres du bac à sable"
       },
       "states": {
         "disabled": "Commandes désactivées",
@@ -522,7 +524,7 @@
         "checking": "Test avec durée limitée en cours…"
       },
       "reasons": {
-        "launcher_missing": "Lanceur introuvable. Installez-le sur la passerelle ou indiquez un chemin absolu de confiance.",
+        "launcher_missing": "La passerelle ne trouve pas {{launcher}}. S’il est installé, indiquez son chemin complet ci-dessous. Sinon, contactez le responsable du paquet ou l’administrateur.",
         "path_not_absolute": "Indiquez un chemin absolu, pas un nom de commande.",
         "not_executable": "Le chemin doit désigner un fichier exécutable.",
         "agent_writable": "L’agent peut modifier ce chemin. Demandez une installation protégée au responsable du paquet.",

@@ -1705,6 +1705,44 @@ describe("ThreadShell", () => {
     expect(await screen.findByText("backup")).toBeInTheDocument();
   });
 
+  it.each([
+    ["bwrap", "MacIntel", "Bubblewrap (bwrap)", "Configure bwrap path"],
+    ["seatbelt", "Linux x86_64", "macOS Seatbelt (sandbox-exec)", "Configure sandbox-exec path"],
+  ] as const)("uses the gateway's %s launcher and links to its path editor", async (backend, browserPlatform, launcher, action) => {
+    const platform = vi.spyOn(navigator, "platform", "get").mockReturnValue(browserPlatform);
+    try {
+      const client = makeClient();
+      const openSettings = vi.fn();
+      const settings = modelSettings("test-model", "deepseek");
+      settings.advanced.exec_sandbox_status = {
+        state: "unavailable", reason: "launcher_missing", launcher: null,
+        revision: "gateway-launcher", supported_backend: backend,
+      };
+      render(wrap(client, <ThreadShell session={session("sandbox-notice")} title="Sandbox notice"
+        onToggleSidebar={() => {}} settingsSnapshot={settings} onOpenSandboxSettings={openSettings}
+      />, undefined, "tok", ["webui.sandbox-settings.v1"]));
+      const input = await screen.findByRole("textbox");
+      fireEvent.change(input, { target: { value: "Keep my draft" } });
+      input.focus();
+      act(() => {
+        client._emitChat("sandbox-notice", { event: "user_message", chat_id: "sandbox-notice",
+          turn_id: "sandbox-turn", starts_turn: true, text: "Run a command" });
+        client._emitChat("sandbox-notice", { event: "message", chat_id: "sandbox-notice", text: "",
+          turn_id: "sandbox-turn", kind: "progress", tool_events: [{
+            name: "exec", phase: "error", error_code: "sandbox_launcher_missing", call_id: "sandbox-command",
+          }] });
+      });
+      const banner = (await screen.findByRole("button", { name: action })).closest<HTMLElement>('[role="status"]')!;
+      expect(banner).toHaveTextContent(launcher);
+      expect(input).toHaveFocus();
+      fireEvent.click(within(banner).getByRole("button", { name: action }));
+      expect(openSettings).toHaveBeenCalledWith("sandbox-launcher");
+      expect(input).toHaveValue("Keep my draft");
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
   it("shows a dismissible, session-scoped fallback notice without changing the composer preset", async () => {
     const client = makeClient();
     const openSettings = vi.fn();

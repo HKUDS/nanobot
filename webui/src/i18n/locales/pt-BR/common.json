@@ -486,7 +486,8 @@
       "checking": "Verificando…",
       "scope": "Testa apenas o iniciador salvo com arquivos temporários. Não é uma auditoria completa de segurança. Reinicie o gateway para aplicar as alterações aos comandos.",
       "path": "Caminho do iniciador confiável",
-      "pathHelp": "Normalmente, deixe vazio para busca no sistema. Para uma instalação personalizada, peça o caminho completo do iniciador ao mantenedor do pacote. O arquivo e as pastas superiores devem pertencer ao root, sem escrita por grupos ou outros usuários, fora dos caminhos graváveis pelo agente.",
+      "launcher": "iniciador do sandbox",
+      "pathHelp": "Normalmente, deixe vazio para buscar {{launcher}} no sistema. Para uma instalação personalizada, peça o caminho completo do iniciador ao mantenedor do pacote. O arquivo e as pastas superiores devem pertencer ao root, sem escrita por grupos ou outros usuários, fora dos caminhos graváveis pelo agente.",
       "automatic": "Busca no sistema",
       "checkError": "Não foi possível verificar. Reabra as configurações e tente novamente.",
       "saveError": "Não foi possível salvar. O rascunho foi mantido; tente novamente.",
@@ -496,11 +497,12 @@
       "disable": "Desativar isolamento",
       "notice": {
         "title": "Os comandos precisam de atenção",
-        "missing": "O componente de execução não foi encontrado. Verifique a instalação; você pode continuar conversando.",
-        "path": "O componente configurado está indisponível. Verifique o local e as permissões de acesso.",
-        "permissions": "O componente não está em um local protegido. Entre em contato com o responsável pelo pacote ou administrador.",
-        "startup": "O ambiente de isolamento não pôde iniciar. Verifique a instalação e as restrições do sistema.",
-        "openSettings": "Verificar configurações"
+        "missing": "O gateway não encontrou {{launcher}}. Se estiver instalado, configure o caminho completo. Caso contrário, contate o mantenedor do pacote ou administrador. Você pode continuar conversando.",
+        "path": "O gateway não pode usar o caminho configurado de {{launcher}}. Verifique o caminho completo e as permissões de acesso.",
+        "permissions": "{{launcher}} não está em um local protegido. Contate o mantenedor do pacote ou administrador.",
+        "startup": "{{launcher}} não pôde iniciar. Verifique a instalação do gateway e as restrições do sistema.",
+        "configurePath": "Configurar caminho de {{launcher}}",
+        "openSettings": "Abrir configurações do sandbox"
       },
       "states": {
         "disabled": "Comandos desativados",
@@ -522,7 +524,7 @@
         "checking": "Executando um teste com limite de tempo…"
       },
       "reasons": {
-        "launcher_missing": "Iniciador não encontrado. Instale-o no gateway ou informe um caminho absoluto confiável.",
+        "launcher_missing": "O gateway não encontrou {{launcher}}. Se estiver instalado, informe o caminho completo abaixo. Caso contrário, contate o mantenedor do pacote ou administrador.",
         "path_not_absolute": "Informe um caminho absoluto, não um nome de comando.",
         "not_executable": "O caminho deve apontar para um arquivo executável.",
         "agent_writable": "O agente pode gravar nesse caminho. Peça uma instalação protegida ao mantenedor do pacote.",

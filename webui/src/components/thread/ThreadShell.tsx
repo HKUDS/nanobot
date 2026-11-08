@@ -1360,6 +1360,7 @@ export function ThreadShell({
       ) : null}
       {sandboxNotice.issue && onOpenSandboxSettings && !streamError && !recoveryState ? (
         <SandboxNotice issue={sandboxNotice.issue} onDismiss={sandboxNotice.dismiss}
+          backend={settingsSnapshot?.advanced.exec_sandbox_status?.supported_backend}
           onOpenSettings={() => onOpenSandboxSettings(
             sandboxNotice.issue === "missing" || sandboxNotice.issue === "path" ? "sandbox-launcher" : "sandbox",
           )} />
