@@ -912,7 +912,14 @@ class AgentLoop:
 
     async def _cancel_active_tasks(self, key: str) -> int:
         pending = self._pending_queues.get(key)
-        tasks = tuple(self._active_tasks.pop(key, set()))
+        current = asyncio.current_task()
+        tracked = self._active_tasks.get(key, set())
+        # A command running on the session worker must keep its task and inbox
+        # registered until the worker finishes; only other tasks can be stopped.
+        owns_queue = current in tracked
+        if not owns_queue:
+            self._active_tasks.pop(key, None)
+        tasks = tuple(task for task in tracked if task is not current)
         cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
         journal_session = await self.sessions.state.read(key)
         journaled_followup_ids = (
@@ -934,7 +941,7 @@ class AgentLoop:
                 pass
             except Exception:
                 pass
-        if tasks and pending is not None and self._pending_queues.get(key) is pending:
+        if tasks and not owns_queue and pending is not None and self._pending_queues.get(key) is pending:
             # A task cancelled before its first step never enters the worker's
             # cleanup handler. Only reclaim that worker's original inbox.
             self._pending_queues.pop(key, None)

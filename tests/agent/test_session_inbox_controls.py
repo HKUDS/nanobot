@@ -49,6 +49,119 @@ async def loop(tmp_path):
         await agent.aclose()
 
 
+async def test_idle_new_resets_session_and_accepts_next_message(loop):
+    key = "websocket:new-test"
+    session = loop.sessions.get_or_create(key)
+    session.add_message("user", "old message")
+    session.last_archived = len(session.messages)
+    loop.sessions.save(session)
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="fresh reply"))
+    worker = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="websocket", sender_id="client", chat_id="new-test", content="/new",
+        ))
+        async with asyncio.timeout(5):
+            while True:
+                reply = await loop.bus.consume_outbound()
+                if reply.event is None:
+                    break
+        assert reply.content == "New session started."
+        assert (await loop.sessions.state.read(key)).messages == []
+
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="websocket", sender_id="client", chat_id="new-test", content="hello",
+        ))
+        async with asyncio.timeout(5):
+            while True:
+                reply = await loop.bus.consume_outbound()
+                if reply.event is None:
+                    break
+        assert reply.content == "fresh reply"
+        assert "old message" not in str((await loop.sessions.state.read(key)).messages)
+    finally:
+        loop.stop()
+        await asyncio.wait_for(worker, timeout=3)
+
+
+async def test_message_queued_during_idle_new_runs_in_reset_session(loop):
+    key = "websocket:queued-new"
+    entered, release = asyncio.Event(), asyncio.Event()
+    cancel_tasks = loop._cancel_active_tasks
+
+    async def blocked_cancel(session_key):
+        entered.set()
+        await release.wait()
+        result = await cancel_tasks(session_key)
+        assert asyncio.current_task() in loop._active_tasks[session_key]
+        assert session_key in loop._pending_queues
+        return result
+
+    loop._cancel_active_tasks = blocked_cancel
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="fresh reply"))
+    worker = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="websocket", sender_id="client", chat_id="queued-new", content="/new",
+        ))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="websocket", sender_id="client", chat_id="queued-new", content="hello",
+        ))
+        async with asyncio.timeout(5):
+            while loop._pending_queues[key].empty():
+                await asyncio.sleep(0.01)
+        release.set()
+        replies = []
+        async with asyncio.timeout(5):
+            while len(replies) < 2:
+                reply = await loop.bus.consume_outbound()
+                if reply.event is None:
+                    replies.append(reply.content)
+        assert replies == ["New session started.", "fresh reply"]
+        session = await loop.sessions.state.read(key)
+        assert any(str(message.get("content", "")).startswith("hello") for message in session.messages)
+    finally:
+        release.set()
+        loop.stop()
+        await asyncio.wait_for(worker, timeout=3)
+
+
+async def test_new_during_active_turn_stops_it_and_resets_session(loop):
+    key = "websocket:busy-new"
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def chat(**kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    loop.provider.chat_stream_with_retry = chat
+    loop.consolidator.archive_session = AsyncMock()
+    worker = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="websocket", sender_id="client", chat_id="busy-new", content="old message",
+        ))
+        await asyncio.wait_for(started.wait(), timeout=5)
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="websocket", sender_id="client", chat_id="busy-new", content="/new",
+        ))
+        async with asyncio.timeout(5):
+            while True:
+                reply = await loop.bus.consume_outbound()
+                if reply.event is None and reply.content == "New session started.":
+                    break
+        assert cancelled.is_set()
+        assert (await loop.sessions.state.read(key)).messages == []
+    finally:
+        loop.stop()
+        await asyncio.wait_for(worker, timeout=3)
+
+
 @pytest.mark.parametrize("followup_scope", ["same", "restricted", "other-project"])
 async def test_unified_followup_keeps_its_workspace_authority(loop, tmp_path, followup_scope):
     loop._unified_session = True
