@@ -77,29 +77,16 @@ def test_reject_missing_directory_outside_and_unreadable(tmp_path, monkeypatch):
         inspect_local_attachment(str(video), scope=scope, limits=AttachmentIngressLimits())
 
 
-def test_generic_uploaded_files_keep_name_and_kind_on_replay(tmp_path):
-    media = tmp_path / "media"
-    media.mkdir()
-    paths = [media / "0123456789ab_file_script.py", media / "0123456789cd_file_empty.png"]
-    paths[0].write_bytes(b"print(1)")
-    paths[1].write_bytes(b"")
-    gateway = WebUIMediaGateway(workspace_path=tmp_path, logger=Mock(), media_dir=lambda _: media)
-    attachments = gateway.augment_transcript_user_media([str(path) for path in paths], [], session_key="websocket:files")
-    assert [(item["name"], item["kind"]) for item in attachments] == [("script.py", "file"), ("empty.png", "file")]
-    for attachment, expected in zip(attachments, [b"print(1)", b""], strict=True):
-        sig, payload = attachment["url"].split("/")[-2:]
-        assert bytes(gateway.serve_signed_media(sig, payload).body) == expected
-
-
 @pytest.mark.parametrize("mime,name", [
     ("application/pdf", "report"),
     ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "report.dat"),
 ])
-async def test_uploaded_document_without_matching_suffix_is_readable_and_keeps_name(tmp_path, mime, name):
+async def test_uploaded_document_without_matching_suffix_is_readable_and_keeps_name(tmp_path, history, mime, name):
     from io import BytesIO
 
     from nanobot.agent.tools.filesystem import ReadFileTool
     from nanobot.channels.websocket.attachment_store import AttachmentStore
+    from nanobot.webui.transcript import WebUITranscriptRecorder
 
     data = BytesIO()
     if mime == "application/pdf":
@@ -128,7 +115,17 @@ async def test_uploaded_document_without_matching_suffix_is_readable_and_keeps_n
     result = await ReadFileTool(workspace=tmp_path).execute(path=path)
     assert expected in result
     gateway = WebUIMediaGateway(workspace_path=tmp_path, logger=Mock(), media_dir=lambda _: media)
-    attachment = gateway.augment_transcript_user_media([path], [], session_key="websocket:files")[0]
+    assert await WebUITranscriptRecorder(history.sessions).append_user_message(
+        "files", "read", media_paths=[path], media_info=[{"name": name, "kind": "file"}],
+        metadata=await history.metadata("files"),
+    )
+    response = history.build(
+        "websocket:files", session_messages=[],
+        augment_user_media=lambda paths, local: gateway.augment_transcript_user_media(
+            paths, local, session_key="websocket:files",
+        ),
+    )
+    attachment = response["events"][0]["media_urls"][0]
     assert (attachment["name"], attachment["kind"]) == (name, "file")
     sig, payload = attachment["url"].split("/")[-2:]
     assert bytes(gateway.serve_signed_media(sig, payload).body) == raw
@@ -219,9 +216,13 @@ async def test_mixed_media_replay_keeps_uploaded_cache_and_borrowed_freshness(tm
         response = build_session_thread_response(session, augment_user_media=augment)
     else:
         assert await WebUITranscriptRecorder(history.sessions).append_user_message(
-            "cache", "look", media_paths=paths, metadata=await history.metadata("cache", metadata),
+            "cache", "look", media_paths=paths, media_info=[{"name": "source.bin", "kind": "file"}, {}],
+            metadata=await history.metadata("cache", metadata),
         )
         response = history.build("websocket:cache", session_messages=[], augment_user_media=augment)
+        assert [(item["name"], item["kind"]) for item in response["events"][0]["media_urls"]] == [
+            ("source.bin", "file"), ("borrowed.png", "image"),
+        ]
     urls = response["events"][0]["media_urls"]
     scope = default_workspace_scope(tmp_path, True)
     borrowed.write_bytes(b"updated")
@@ -231,6 +232,10 @@ async def test_mixed_media_replay_keeps_uploaded_cache_and_borrowed_freshness(tm
         assert bytes(served.body) == expected
         assert served.headers["Cache-Control"] == cache
     assert sorted(path.name for path in media.iterdir()) == ["borrowed.png", "upload.png"]
+    if not canonical:
+        borrowed.write_bytes(b"")
+        refreshed = history.build("websocket:cache", session_messages=[], augment_user_media=augment)
+        assert refreshed["events"][0]["media_urls"][1]["kind"] == "file"
 
 
 @pytest.mark.parametrize("role", ["assistant", "user"])

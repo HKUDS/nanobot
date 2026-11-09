@@ -33,27 +33,22 @@ async def test_binary_larger_than_websocket_limit_preserves_layout(tmp_path):
         store.resolve([ref], owner="owner")
 
 
-@pytest.mark.parametrize("mime,filename,raw,pattern", [
-    ("application/pdf", "../../report.pdf", b"pdf", r"[0-9a-f]{12}_file_.+\.pdf"),
-    ("application/pdf", "report", b"pdf", r"[0-9a-f]{12}_filedoc_pdf_report\.pdf"),
-    ("application/pdf", "report.dat", b"pdf", r"[0-9a-f]{12}_filedoc_pdf_report\.dat\.pdf"),
-    ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "report", b"sheet", r"[0-9a-f]{12}_filedoc_xlsx_report\.xlsx"),
-    ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "report", b"slides", r"[0-9a-f]{12}_filedoc_pptx_report\.pptx"),
-    ("video/webm", "ignored.webm", b"video", r"[0-9a-f]{12}\.webm"),
-    ("text/markdown", "notes.md", b"notes", r"[0-9a-f]{12}_file_notes\.md"),
-    ("text/plain", "settings.ini", b"[settings]", r"[0-9a-f]{12}_file_settings\.ini"),
-    ("text/x-python", "script.py", b"print(1)", r"[0-9a-f]{12}_file_script\.py"),
-    ("application/octet-stream", "archive.tar.gz", b"\x00\xff", r"[0-9a-f]{12}_file_archive\.tar\.gz"),
-    ("application/octet-stream", "README", b"", r"[0-9a-f]{12}_file_README"),
-    ("application/octet-stream", ".gitignore", b"*.pyc", r"[0-9a-f]{12}_file_\.gitignore"),
-    ("image/png", "empty.png", b"", r"[0-9a-f]{12}_file_empty\.png"),
+@pytest.mark.parametrize("mime,filename,raw,suffix", [
+    ("application/pdf", "../../report.pdf", b"pdf", "report.pdf"),
+    ("application/pdf", "report.dat", b"pdf", "report.dat.pdf"),
+    ("video/webm", "ignored.webm", b"video", ".webm"),
+    ("text/x-python", "script.py", b"print(1)", "script.py"),
+    ("application/octet-stream", "archive.tar.gz", b"\x00\xff", "archive.tar.gz"),
+    ("application/octet-stream", "README", b"", "README"),
+    ("application/octet-stream", ".gitignore", b"*.pyc", ".gitignore"),
+    ("image/png", "empty.png", b"", "empty.png"),
 ])
-async def test_upload_preserves_generic_filename_and_bytes(tmp_path, mime, filename, raw, pattern):
+async def test_upload_preserves_generic_filename_and_bytes(tmp_path, mime, filename, raw, suffix):
     store = AttachmentStore(tmp_path)
     ref = await upload(store, raw, mime=mime, filename=filename)
     path = Path(store.commit([ref], owner="owner")[0])
     assert path.parent == tmp_path
-    assert re.fullmatch(pattern, path.name)
+    assert path.name.endswith(suffix)
     assert path.read_bytes() == raw
 
 

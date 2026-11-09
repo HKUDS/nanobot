@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import base64
 import mimetypes
-import re
 import uuid
 from pathlib import Path
 
@@ -15,9 +14,6 @@ from nanobot.utils.helpers import safe_filename
 
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 MAX_FILE_SIZE = DEFAULT_MAX_BYTES
-# Mark generic uploads so transcript replay keeps their names and file kind.
-UPLOADED_FILE_TAG = "_file_"
-_UPLOADED_DOCUMENT_TAG = "_filedoc_"
 _DOCUMENT_MIME_EXTENSIONS = {
     "application/pdf": ".pdf",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
@@ -105,33 +101,22 @@ def media_destination(
     if preserve_filename and base:
         base = "".join("_" if ord(char) < 32 or ord(char) == 127 else char for char in base).rstrip(" .")
         if base:
-            # Existing document readers dispatch by extension. Preserve that
-            # format hint separately from the name shown on transcript replay.
+            # Document readers dispatch by extension, even when the uploaded name does not match the MIME.
             document_ext = _DOCUMENT_MIME_EXTENSIONS.get(mime_type, "")
             format_ext = document_ext if Path(base).suffix.lower() != document_ext else ""
-            tag = f"{_UPLOADED_DOCUMENT_TAG}{format_ext[1:]}_" if format_ext else UPLOADED_FILE_TAG
             suffix = Path(base).suffix
             suffix_bytes = suffix.encode("utf-8")
             if len(suffix_bytes) > 120:
                 suffix = ""
                 suffix_bytes = b""
             stem = base[:-len(suffix)] if suffix else base
-            stem_bytes = stem.encode("utf-8")[:255 - 12 - len(tag) - len(suffix_bytes) - len(format_ext)]
+            stem_bytes = stem.encode("utf-8")[:255 - 13 - len(suffix_bytes) - len(format_ext)]
             name = stem_bytes.decode("utf-8", errors="ignore").rstrip(" .") + suffix
             if name:
-                return media_dir / f"{uuid.uuid4().hex[:12]}{tag}{name}{format_ext}"
+                return media_dir / f"{uuid.uuid4().hex[:12]}_{name}{format_ext}"
     stem = Path(base).stem[:80] if base else ""
     # Leave room for the 12-character ID, separator, and extension.
     max_stem_bytes = 255 - 13 - len(ext.encode("utf-8"))
     stem = stem.encode("utf-8")[:max_stem_bytes].decode("utf-8", errors="ignore")
     saved_name = f"{uuid.uuid4().hex[:12]}_{stem}{ext}" if stem else f"{uuid.uuid4().hex[:12]}{ext}"
     return media_dir / safe_filename(saved_name)
-
-
-def uploaded_file_name(stored_name: str) -> str | None:
-    """Recover a generic upload's display name from its media-storage name."""
-    document = re.fullmatch(r"[0-9a-f]{12}_filedoc_(pdf|docx|xlsx|pptx)_(.+)\.\1", stored_name)
-    if document:
-        return document.group(2)
-    generic = re.fullmatch(r"[0-9a-f]{12}_file_(.+)", stored_name)
-    return generic.group(1) if generic else None

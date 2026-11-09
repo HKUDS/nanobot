@@ -210,13 +210,13 @@ async def test_real_listener_large_binary_and_reference_delivery(gateway, mime, 
         assert path.exists()
 
 
-@pytest.mark.parametrize("mime,name,body", [
-    ("text/x-python", "script.py", b"print(1)"),
-    ("image/svg+xml", "graphic.svg", b"<svg/>"),
-    ("application/octet-stream", "archive.tar.gz", b"\x00\xff"),
-    ("image/png", "empty.png", b""),
+@pytest.mark.parametrize("mime,name,body,include_name", [
+    ("text/x-python", "script.py", b"print(1)", True),
+    ("image/svg+xml", "graphic.svg", b"<svg/>", False),
+    ("application/octet-stream", "archive.tar.gz", b"\x00\xff", True),
+    ("image/png", "empty.png", b"", True),
 ])
-async def test_real_webui_uploads_arbitrary_files_and_empty_images(gateway, mime, name, body):
+async def test_real_webui_uploads_arbitrary_files_and_empty_images(gateway, mime, name, body, include_name):
     channel, bus, http_url, _ = gateway
     token = channel.gateway.tokens.issue_token(60, audience="webui")
     ws_url = http_url.replace("http://", "ws://") + "/ws?token=" + token
@@ -228,16 +228,30 @@ async def test_real_webui_uploads_arbitrary_files_and_empty_images(gateway, mime
         async with http.post(http_url + capability["path"], data=body, headers=headers) as response:
             assert response.status == 201, await response.text()
             reference = (await response.json())["reference"]
+        attachment = {"reference": reference, **({"name": name} if include_name else {})}
         await ws.send(json.dumps({"type": "message", "chat_id": ready["chat_id"], "content": "inspect",
-                                  "webui": True, "turn_id": "any-file", "media": [{"reference": reference, "name": name}]}))
+                                  "webui": True, "turn_id": "any-file", "media": [attachment]}))
         accepted = await event(ws, "message_accepted")
         assert accepted["media_urls"][0]["kind"] == "file"
         assert accepted["media_urls"][0]["name"] == name
         inbound = await asyncio.wait_for(bus.consume_inbound(), 2)
         path = Path(inbound.media[0])
         assert path.read_bytes() == body
-        assert path.name.endswith("_file_" + name)
+        assert path.name.endswith("_" + name)
         assert inbound.metadata["_file_media_paths"] == [str(path)]
+        api_token = channel.gateway.tokens.issue_api_token(60)
+        async with http.get(
+            f"{http_url}/api/sessions/websocket:{ready['chat_id']}/webui-thread",
+            headers={"Authorization": f"Bearer {api_token}"},
+        ) as response:
+            assert response.status == 200, await response.text()
+            thread = await response.json()
+        user = next(item for item in thread["events"] if item["event"] == "user_message")
+        replayed = user["media_urls"][0]
+        assert (replayed["name"], replayed["kind"]) == (name, "file")
+        async with http.get(http_url + replayed["url"]) as response:
+            assert response.status == 200
+            assert await response.read() == body
 
 
 async def test_ordinary_websocket_upload_keeps_empty_image_as_file(gateway):

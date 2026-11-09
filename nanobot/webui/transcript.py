@@ -574,8 +574,8 @@ class WebUITranscriptRecorder:
 
     async def append_user_message(
         self, chat_id: str, text: str, *, metadata: dict[str, Any],
-        media_paths: list[str] | None = None, cli_apps: list[dict[str, Any]] | None = None,
-        mcp_presets: list[dict[str, Any]] | None = None,
+        media_paths: list[str] | None = None, media_info: list[dict[str, str]] | None = None,
+        cli_apps: list[dict[str, Any]] | None = None, mcp_presets: list[dict[str, Any]] | None = None,
         session_mentions: Sequence[Mapping[str, Any]] | None = None,
     ) -> bool:
         if text.strip() == "/stop" and not media_paths:
@@ -584,6 +584,7 @@ class WebUITranscriptRecorder:
             chat_id,
             text,
             media_paths=media_paths,
+            media_info=media_info,
             local_media_paths=_local_media_paths(metadata),
             cli_apps=cli_apps,
             mcp_presets=mcp_presets,
@@ -728,6 +729,7 @@ def build_user_transcript_event(
     text: str,
     *,
     media_paths: list[Any] | None = None,
+    media_info: list[dict[str, str]] | None = None,
     local_media_paths: list[str] | None = None,
     cli_apps: list[Any] | None = None,
     mcp_presets: list[Any] | None = None,
@@ -743,6 +745,8 @@ def build_user_transcript_event(
     }
     if paths:
         event["media_paths"] = paths
+        if media_info:
+            event["media_info"] = media_info
         local = [path for path in (local_media_paths or []) if path in paths]
         if local:
             event[INBOUND_META_LOCAL_MEDIA] = local
@@ -1436,6 +1440,16 @@ def _client_projection_event(
         ] if isinstance(raw_paths, list) else []
         if paths and augment_user_media is not None:
             media = augment_user_media(paths, _local_media_paths(record))
+            info = record.get("media_info")
+            if isinstance(info, list):
+                for attachment, item in zip(media, cast(list[object], info), strict=False):
+                    if isinstance(item, dict):
+                        fields = cast(dict[str, Any], item)
+                        if isinstance(fields.get("name"), str) and fields["name"]:
+                            attachment["name"] = fields["name"]
+                        kind = fields.get("kind")
+                        if isinstance(kind, str) and kind in {"file", "image", "video"}:
+                            attachment["kind"] = kind
             if media:
                 projected["media_urls"] = media
         for source_key, target_key in (
