@@ -453,6 +453,64 @@ def _extract_post_content(content_json: dict[str, Any]) -> tuple[str, list[str]]
     return "", []
 
 
+def _extract_post_attachments(
+    content_json: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Extract file attachments from a Feishu post (rich text) message.
+
+    Some Feishu ``post`` messages place a caption in ``content`` and
+    attachments in a ``files`` array that
+    ``_extract_post_content`` never reads, e.g.::
+
+        {"title": "",
+         "content": [[{"tag": "text", "text": "see attached"}]],
+         "files": [{"file_key": "file_v3_...", "file_name": "doc.pdf",
+                    "is_folder": false}]}
+
+    Handles the same three payload shapes as ``_extract_post_content``.
+    Returns ``(files, folders)``: entries with a usable ``file_key`` and
+    names of folders (``is_folder: true``), which are reported to the user
+    instead of attempting a file download.
+    """
+
+    def _files_in(block: Any) -> tuple[list[dict[str, Any]], list[str]] | None:
+        obj = _as_json_object(block)
+        if obj is None or "files" not in obj:
+            return None
+        files: list[dict[str, Any]] = []
+        folders: list[str] = []
+        for item in _as_json_list(obj.get("files")) or []:
+            entry = _as_json_object(item)
+            if entry is None:
+                continue
+            if entry.get("is_folder") is True:
+                name = entry.get("file_name")
+                folders.append(name if isinstance(name, str) and name else "folder")
+            elif isinstance(entry.get("file_key"), str) and entry["file_key"]:
+                files.append(entry)
+        return files, folders
+
+    root = content_json
+    post = _as_json_object(root.get("post"))
+    if post is not None:
+        root = post
+
+    found = _files_in(root)
+    if found is not None:
+        return found
+
+    for key in ("zh_cn", "en_us", "ja_jp"):
+        found = _files_in(root.get(key))
+        if found is not None:
+            return found
+    for val in root.values():
+        found = _files_in(val)
+        if found is not None:
+            return found
+
+    return [], []
+
+
 _ONBOARD_ACCOUNTS_URLS = {
     "feishu": "https://accounts.feishu.cn",
     "lark": "https://accounts.larksuite.com",
@@ -1775,7 +1833,8 @@ class FeishuChannel(BaseChannel):
                 return None, f"[{msg_type}: download failed]"
 
             if not filename:
-                filename = fallback_filename
+                supplied_name = content_json.get("file_name")
+                filename = supplied_name if isinstance(supplied_name, str) and supplied_name else fallback_filename
 
             # Feishu voice messages are opus in OGG container.
             # Use .ogg extension for better Whisper compatibility.
@@ -2580,6 +2639,20 @@ class FeishuChannel(BaseChannel):
                 for img_key in image_keys:
                     file_path, content_text = await self._download_and_save_media(
                         "image", {"image_key": img_key}, message_id
+                    )
+                    if file_path:
+                        media_paths.append(file_path)
+                    content_parts.append(content_text)
+                # Some posts include files alongside the text and images.
+                post_files, post_folders = _extract_post_attachments(content_json)
+                for folder_name in post_folders:
+                    content_parts.append(
+                        f"[folder: {folder_name} — folder attachments cannot be downloaded; "
+                        "ask the user to send a zip archive]"
+                    )
+                for entry in post_files:
+                    file_path, content_text = await self._download_and_save_media(
+                        "file", entry, message_id
                     )
                     if file_path:
                         media_paths.append(file_path)

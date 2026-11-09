@@ -762,6 +762,57 @@ async def test_on_message_keeps_longer_mention_key_that_shares_bot_prefix() -> N
 
 
 @pytest.mark.asyncio
+async def test_post_files_download_and_reach_inbound_message(monkeypatch, tmp_path) -> None:
+    channel = _make_feishu_channel()
+    channel._processed_message_ids.clear()
+    channel._add_reaction = AsyncMock(return_value=None)
+    monkeypatch.setattr(feishu, "get_media_dir", lambda _channel: tmp_path)
+    channel._download_file_sync = MagicMock(return_value=(b"pdf content", None))
+    payload = {
+        "content": [[{"tag": "text", "text": "Please read"}]],
+        "files": [{"file_key": "file_test", "file_name": "notice.pdf", "is_folder": False}],
+    }
+
+    await channel._on_message(_make_feishu_event(
+        message_id="om_post_file", msg_type="post", content=json.dumps(payload),
+    ))
+
+    inbound = await asyncio.wait_for(channel.bus.consume_inbound(), timeout=1)
+    saved = tmp_path / "notice.pdf"
+    channel._download_file_sync.assert_called_once_with("om_post_file", "file_test", "file")
+    assert saved.read_bytes() == b"pdf content"
+    assert inbound.media == [str(saved)]
+    assert "Please read" in inbound.content
+    assert str(saved) in inbound.content
+
+
+@pytest.mark.asyncio
+async def test_post_folder_and_failed_file_are_reported_without_media() -> None:
+    channel = _make_feishu_channel()
+    channel._processed_message_ids.clear()
+    channel._add_reaction = AsyncMock(return_value=None)
+    channel._download_file_sync = MagicMock(return_value=(None, None))
+    payload = {
+        "content": [[{"tag": "text", "text": "Please read"}]],
+        "files": [
+            {"file_name": "project", "is_folder": True},
+            {"file_key": "file_bad", "file_name": "broken.pdf", "is_folder": False},
+        ],
+    }
+
+    await channel._on_message(_make_feishu_event(
+        message_id="om_post_failure", msg_type="post", content=json.dumps(payload),
+    ))
+
+    inbound = await asyncio.wait_for(channel.bus.consume_inbound(), timeout=1)
+    channel._download_file_sync.assert_called_once_with("om_post_failure", "file_bad", "file")
+    assert inbound.media == []
+    assert "project" in inbound.content
+    assert "zip" in inbound.content
+    assert "download failed" in inbound.content
+
+
+@pytest.mark.asyncio
 async def test_on_message_audio_publishes_downloaded_path_and_transcription() -> None:
     channel = _make_feishu_channel()
     channel._processed_message_ids.clear()
