@@ -26,6 +26,33 @@ class ContextGraph(TypedDict):
     edges: list[ContextEdge]
 
 
+class ContextGraphParts(TypedDict):
+    kind: Literal["context_graph_parts"]
+    stage: ContextGraph
+    system: ContextGraph
+    reads: ContextGraph
+
+
+def merge_graph(target: ContextGraph, incoming: ContextGraph, *, accumulate: bool = False) -> ContextGraph:
+    nodes: dict[str, ContextNode] = {node["path"]: node.copy() for node in target["nodes"]}
+    for node in incoming["nodes"]:
+        previous = nodes.get(node["path"])
+        if previous is None:
+            nodes[node["path"]] = node.copy()
+        elif node["state"] == "loaded":
+            previous["name"] = node["name"]
+            previous["state"] = "loaded"
+            previous["tokens"] = (previous["tokens"] + node["tokens"] if accumulate
+                                  else max(previous["tokens"], node["tokens"]))
+    edges = {(edge["source"], edge["target"]): edge for edge in target["edges"]}
+    edges.update({(edge["source"], edge["target"]): edge for edge in incoming["edges"]})
+    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
+
+
+def graph_from_parts(parts: ContextGraphParts) -> ContextGraph:
+    return merge_graph(merge_graph(parts["stage"], parts["system"]), parts["reads"], accumulate=True)
+
+
 def parse_context_graph(value: object) -> ContextGraph | None:
     """Validate persisted graph data at the transcript boundary."""
     if not isinstance(value, dict):

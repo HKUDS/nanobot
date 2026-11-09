@@ -45,6 +45,13 @@ class SourceCapture:
         self.system_sources = None
         return event
 
+    def drain_system(self) -> PromptSourcesEvent | None:
+        if self.system_sources is None:
+            return None
+        event = PromptSourcesEvent((), tuple(self.system_sources))
+        self.system_sources = None
+        return event
+
 
 _sources: ContextVar[SourceCapture | None] = ContextVar("context_sources", default=None)
 _system_source: ContextVar[bool] = ContextVar("context_system_source", default=False)
@@ -72,6 +79,12 @@ def system_source_scope() -> Generator[None]:
         yield
     finally:
         _system_source.reset(token)
+
+
+def drain_system_sources() -> PromptSourcesEvent | None:
+    """Take a committed prompt rebuild without consuming pending turn sources."""
+    capture = _sources.get()
+    return capture.drain_system() if capture is not None else None
 
 
 def record_source(path: Path, content: str, *, loaded: bool = True) -> None:

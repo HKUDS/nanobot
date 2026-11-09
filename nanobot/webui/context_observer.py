@@ -11,7 +11,13 @@ from typing import Any, cast
 
 from loguru import logger
 
-from nanobot.context_graph import ContextGraph, ContextNode, graph_from_sources
+from nanobot.context_graph import (
+    ContextGraph,
+    ContextGraphParts,
+    graph_from_parts,
+    graph_from_sources,
+    merge_graph,
+)
 from nanobot.context_sources import PromptSource, SourceReceipt, parse_source_receipt
 from nanobot.file_references import source_receipt
 from nanobot.session.display_history import (
@@ -19,26 +25,10 @@ from nanobot.session.display_history import (
     HistoryKind,
     HistoryReader,
 )
-from nanobot.session.history_graph import decode_graph
+from nanobot.session.history_graph import decode_graph, decode_graph_parts
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 from nanobot.webui.session_identity import webui_session_key
-
-
-def merge_graph(target: ContextGraph, incoming: ContextGraph, *, accumulate: bool = False) -> ContextGraph:
-    nodes: dict[str, ContextNode] = {node["path"]: node.copy() for node in target["nodes"]}
-    for node in incoming["nodes"]:
-        previous = nodes.get(node["path"])
-        if previous is None:
-            nodes[node["path"]] = node.copy()
-        elif node["state"] == "loaded":
-            previous["name"] = node["name"]
-            previous["state"] = "loaded"
-            previous["tokens"] = (previous["tokens"] + node["tokens"] if accumulate
-                                  else max(previous["tokens"], node["tokens"]))
-    edges = {(edge["source"], edge["target"]): edge for edge in target["edges"]}
-    edges.update({(edge["source"], edge["target"]): edge for edge in incoming["edges"]})
-    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
 
 
 def read_source(event: Mapping[str, Any]) -> SourceReceipt | None:
@@ -80,11 +70,12 @@ class _State:
     system_turn_id: str | None = None
     calls: set[tuple[str | None, str]] = field(default_factory=set)
 
-    def request_graph(self, turn_id: object) -> ContextGraph:
-        graph = self.graph
-        if isinstance(turn_id, str) and turn_id and turn_id == self.system_turn_id:
-            graph = merge_graph(graph, self.system_graph)
-        return merge_graph(graph, self.reads, accumulate=True)
+    def request_parts(self, turn_id: object) -> ContextGraphParts:
+        system = (
+            self.system_graph if isinstance(turn_id, str) and turn_id and turn_id == self.system_turn_id
+            else {"nodes": [], "edges": []}
+        )
+        return {"kind": "context_graph_parts", "stage": self.graph, "system": system, "reads": self.reads}
 
     def apply(self, event: Mapping[str, Any], turn_id: str | None = None) -> None:
         call_id = event.get("call_id")
@@ -104,12 +95,16 @@ def _restore(history: HistoryReader, generation: str | None) -> _State:
     for turn in history.turns(reverse=True):
         for _, fact in reversed(history.read_entries(turn.ordinal)):
             boundary = fact.kind is HistoryKind.COMPACTION and fact.content.get("phase") == "succeeded"
-            graph = (
-                decode_graph(fact.content.get("context_graph"))
-                if fact.kind is HistoryKind.MODEL_REQUEST or boundary else None
-            )
-            if boundary or graph is not None:
-                if graph is not None:
+            value = fact.content.get("context_graph")
+            parts = decode_graph_parts(value) if fact.kind is HistoryKind.MODEL_REQUEST or boundary else None
+            graph = decode_graph(value) if parts is None and (fact.kind is HistoryKind.MODEL_REQUEST or boundary) else None
+            if boundary or parts is not None or graph is not None:
+                if parts is not None:
+                    state.graph = parts["stage"]
+                    state.system_graph = parts["system"]
+                    state.system_turn_id = fact.turn_id
+                    state.reads = parts["reads"]
+                elif graph is not None:
                     state.graph = graph
                 for event, turn_id in reversed(pending):
                     state.apply(event, turn_id)
@@ -189,20 +184,25 @@ class ContextGraphObserver:
         except Exception:
             logger.exception("Unable to observe prompt sources for context graph")
 
+    async def snapshot_parts(
+        self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
+    ) -> ContextGraphParts:
+        state = await self._state(chat_id, metadata, persistent=persistent)
+        return state.request_parts(metadata.get(WEBUI_TURN_METADATA_KEY))
+
     async def snapshot(
         self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
     ) -> ContextGraph:
-        state = await self._state(chat_id, metadata, persistent=persistent)
-        return state.request_graph(metadata.get(WEBUI_TURN_METADATA_KEY))
+        return graph_from_parts(await self.snapshot_parts(chat_id, metadata, persistent=persistent))
 
     async def reset(
         self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
-    ) -> ContextGraph | None:
+    ) -> ContextGraphParts | None:
         state = await self._state(chat_id, metadata, persistent=persistent)
         state.graph = {"nodes": [], "edges": []}
         state.reads = {"nodes": [], "edges": []}
         state.calls.clear()
         turn_id = metadata.get(WEBUI_TURN_METADATA_KEY)
         if isinstance(turn_id, str) and turn_id and state.system_turn_id == turn_id:
-            return state.request_graph(turn_id)
+            return state.request_parts(turn_id)
         return None

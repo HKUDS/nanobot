@@ -11,7 +11,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.context_graph import ContextGraph, ContextSnapshot
+from nanobot.context_graph import ContextGraph, ContextGraphParts, ContextSnapshot
 from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
@@ -254,6 +254,7 @@ class NotificationProjection:
     persistence: WebUIWirePersistence = "transient"
     deliver_offline: bool = False
     attach_turn_metadata: bool = False
+    context_graph_parts: ContextGraphParts | None = None
 
 
 def project_notification(

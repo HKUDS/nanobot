@@ -21,6 +21,7 @@ from uuid import uuid4
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
+from nanobot.context_sources import drain_system_sources
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
@@ -706,13 +707,18 @@ class ContextGovernor:
                 ),
             )
             raise
-        await state.events.emit(
-            ContextCompactionEvent(
-                compaction_id=compaction_id,
-                phase="succeeded",
-                reason="context_pressure",
-            ),
-        )
+        async def publish_success() -> None:
+            if (sources := drain_system_sources()) is not None:
+                await state.events.emit(sources)
+            await state.events.emit(
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="succeeded",
+                    reason="context_pressure",
+                ),
+            )
+
+        await shield_and_drain(publish_success())
         return prepared
 
     async def prepare_request(

@@ -6,7 +6,7 @@ import pytest
 from nanobot.agent.hook import AgentHookContext
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.context_graph import graph_from_sources
+from nanobot.context_graph import graph_from_parts, graph_from_sources
 from nanobot.context_sources import PromptSource
 from nanobot.events import EventSink
 from nanobot.file_references import REFERENCE_PARSERS, source_receipt
@@ -174,15 +174,17 @@ async def test_compaction_reuses_only_the_active_turns_system_sources(tmp_path):
     await observer.observe_prompt("chat", (), first, persistent=False,
                                   system_sources=(PromptSource(soul, "[Old](old.md)"),))
     await observer.snapshot("chat", first, persistent=False)
-    graph = await observer.reset("chat", first, persistent=False)
-    assert {node["name"] for node in graph["nodes"]} == {"SOUL.md", "old.md"}
+    parts = await observer.reset("chat", first, persistent=False)
+    assert parts is not None
+    assert {node["name"] for node in graph_from_parts(parts)["nodes"]} == {"SOUL.md", "old.md"}
 
     await observer.observe_prompt("chat", (), second, persistent=False,
                                   system_sources=(PromptSource(soul, "[New](new.md)"),))
     graph = await observer.snapshot("chat", second, persistent=False)
     assert {node["name"] for node in graph["nodes"]} == {"SOUL.md", "new.md"}
-    graph = await observer.reset("chat", second, persistent=False)
-    assert {node["name"] for node in graph["nodes"]} == {"SOUL.md", "new.md"}
+    parts = await observer.reset("chat", second, persistent=False)
+    assert parts is not None
+    assert {node["name"] for node in graph_from_parts(parts)["nodes"]} == {"SOUL.md", "new.md"}
     assert await observer.snapshot("other-chat", second, persistent=False) == EMPTY
 
 
