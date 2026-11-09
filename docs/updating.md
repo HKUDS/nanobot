@@ -54,7 +54,7 @@ Do not switch package managers to work around an error. Fixed wheel sources, loc
 
 ## Standalone API service removal
 
-`nanobot serve` and its OpenAI-compatible `/v1` endpoints have been removed. This also removes the API server controls in Settings and the `nanobot-api` Compose service. The Gateway, WebUI, Python SDK, and OpenAI-compatible model connections are separate and still supported. The Python SDK embeds nanobot in a Python application; it is not an HTTP-compatible replacement. Remove the retired `api` extra from install requirements if your deployment requested it.
+`nanobot serve` and its OpenAI-compatible `/v1` endpoints have been removed. This also removes the API server controls in Settings and the `nanobot-api` Compose service. The Gateway, WebUI, Python SDK, and OpenAI-compatible model connections are separate and still supported. The Python SDK embeds nanobot in a Python application; it is not an HTTP-compatible replacement. The `api` install extra is now empty so upgrades can preserve an existing installation's recorded extras. New installations do not need it.
 
 Before updating, stop any existing standalone API process through the launcher that started it. For a process started from Settings, use **Settings → System → Stop** in the old version. For Compose, use `docker compose stop nanobot-api` and `docker compose rm -f nanobot-api` with the old Compose file before switching to the new file. If you already switched, confirm which container belongs to your deployment and stop that old container explicitly; removing a service from the Compose file does not stop an existing container. Keep your bind mounts and volumes.
 

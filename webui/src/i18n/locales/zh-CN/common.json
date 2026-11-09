@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "已保存，重启 API 服务后生效。",
       "commandRuntime": {
         "custom": "自定义（秒）",
         "customLabel": "自定义运行时长（秒）",

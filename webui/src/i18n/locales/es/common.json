@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Guardado. Reinicia el servicio API para aplicar los cambios.",
       "commandRuntime": {
         "custom": "Personalizada (segundos)",
         "customLabel": "Duración personalizada (segundos)",

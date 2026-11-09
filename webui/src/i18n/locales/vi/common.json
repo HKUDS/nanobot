@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",
       "commandRuntime": {
         "custom": "Tùy chỉnh (giây)",
         "customLabel": "Thời gian chạy tùy chỉnh (giây)",

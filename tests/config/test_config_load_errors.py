@@ -3,7 +3,7 @@ import json
 import pytest
 
 from nanobot.config.errors import ConfigLoadError
-from nanobot.config.loader import load_config, resolve_config_env_vars
+from nanobot.config.loader import load_config, resolve_config_env_vars, save_config
 
 
 def test_load_config_missing_file_uses_defaults(tmp_path) -> None:
@@ -172,7 +172,6 @@ def test_load_config_malformed_legacy_sections_use_structured_error(
     assert "tools" in str(error)
 
 
-
 def test_loads_pre_removal_config_without_the_retired_service_secret(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     monkeypatch.delenv("REMOVED_SERVE_TOKEN", raising=False)
@@ -183,9 +182,15 @@ def test_loads_pre_removal_config_without_the_retired_service_secret(tmp_path, m
     })
     config_path.write_text(legacy, encoding="utf-8")
 
-    from nanobot.config.loader import resolve_config_env_vars
-
-    config = resolve_config_env_vars(load_config(config_path), config_path=config_path)
+    stored = load_config(config_path)
+    config = resolve_config_env_vars(stored, config_path=config_path)
     assert config.gateway.port == 18791
     assert config.providers.custom.api_base == "http://model:8000/v1"
     assert config_path.read_text(encoding="utf-8") == legacy
+
+    stored.gateway.port = 18792
+    save_config(stored, config_path)
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "api" not in saved
+    assert saved["gateway"]["port"] == 18792
+    assert saved["providers"]["custom"]["apiBase"] == "http://model:8000/v1"

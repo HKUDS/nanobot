@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Saved. Restart the API service to apply changes.",
       "commandRuntime": {
         "custom": "Custom (seconds)",
         "customLabel": "Custom runtime (seconds)",

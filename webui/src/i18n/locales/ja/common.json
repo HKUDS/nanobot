@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "保存しました。API サービスを再起動すると反映されます。",
       "commandRuntime": {
         "custom": "カスタム（秒）",
         "customLabel": "カスタム実行時間（秒）",

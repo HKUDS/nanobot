@@ -71,7 +71,7 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
           await expect(target.getByRole("switch")).toHaveCount(2);
           await expect(target.getByRole("switch").first()).toBeEnabled();
         }
-        if (section === "runtime") await expect(page.locator('[data-settings-section] button').filter({ hasText: locale === "en" ? "Start API server" : "启动 API 服务" })).toBeVisible();
+        if (section === "runtime") await expect(target.getByText("Langfuse", { exact: true })).toBeVisible();
         await settle(page);
         // Collapsed options remain mounted for drafts but do not occupy the visible layout.
         const selector = section === "overview" ? "section button.group" : section === "models" ? '[data-testid^="model-call-order-row"], .settings-footer' : section === "about" ? ".settings-list-row" : ".settings-row:not([inert] *)";

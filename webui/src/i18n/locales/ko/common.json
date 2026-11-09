@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "저장했습니다. API 서비스를 다시 시작하면 적용됩니다.",
       "commandRuntime": {
         "custom": "사용자 지정(초)",
         "customLabel": "사용자 지정 실행 시간(초)",
