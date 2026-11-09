@@ -114,24 +114,39 @@ def test_agent_plugin_reuses_mcp_catalog_and_runtime_action(
     )
     assert row["installed"] and row["configured"] and not row["enabled"]
 
+    mcp_presets_action("enable", {"name": ["linear"]})
+    linear_config = load_config().tools.mcp_servers["linear"]
+    asyncio.run(MCPOAuthStorage("linear", linear_config.url).set_tokens(
+        OAuthToken(access_token="synthetic-linear-token"),
+    ))
+    statuses = {"linear": "connecting"}
+
     async def reload() -> dict[str, object]:
+        statuses["linear"] = "connected"
         return {"ok": True, "message": "MCP reloaded.", "requires_restart": False}
 
     plugin_action = partial(
         mcp_presets_settings_action,
         query={"name": ["plugin-desktop"]},
+        mcp_runtime_status=lambda: statuses,
     )
     enabled = asyncio.run(plugin_action("enable", reload_mcp=reload))
     enabled_row = next(item for item in enabled["presets"] if item["name"] == "plugin-desktop")
     assert (enabled_row["enabled"], enabled_row["status"], enabled["requires_restart"]) == (
         True, "enabled", False
     )
+    linear_row = next(item for item in enabled["presets"] if item["name"] == "linear")
+    assert linear_row["installed"] and linear_row["configured"]
+    assert linear_row["runtime_status"] == "connected"
 
     disabled = asyncio.run(plugin_action("disable", reload_mcp=reload))
     disabled_row = next(item for item in disabled["presets"] if item["name"] == "plugin-desktop")
     assert (disabled_row["installed"], disabled_row["enabled"], disabled_row["status"]) == (
         True, False, "disabled"
     )
+    linear_row = next(item for item in disabled["presets"] if item["name"] == "linear")
+    assert linear_row["installed"] and linear_row["configured"]
+    assert linear_row["runtime_status"] == "connected"
 
     with pytest.raises(McpPresetError, match="enable and disable"):
         asyncio.run(plugin_action("remove"))

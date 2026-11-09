@@ -179,6 +179,18 @@
     "reset": "Reset preview",
     "hint": "Select a recovery state, then try continuing or dismissing."
   },
+  "sandbox": {
+    "gateway": "Example gateway",
+    "unknownGateway": "Not specified",
+    "title": "Command notice",
+    "description": "Use the production notice to compare missing components, unprotected installations, and startup failures.",
+    "options": "The notice does not take focus or retry commands. Change its state, dismiss it, and keep typing.",
+    "missing": "Component not found",
+    "permissions": "Installation needs attention",
+    "startup": "Startup unavailable",
+    "hint": "Component demo only. No commands run and no settings change.",
+    "settingsAction": "Requested sandbox settings (demo)."
+  },
   "fallback": {
     "title": "ModelFallbackNotice · Model fallback",
     "description": "View fallback-model and expired-authorization notices, settings and dismissal.",

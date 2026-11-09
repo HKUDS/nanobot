@@ -477,6 +477,65 @@
       "password": "Mot de passe",
       "proxyReferenceAuth": "Configurez l’authentification dans l’URL du proxy référencée."
     },
+    "sandbox": {
+      "title": "Bac à sable des commandes",
+      "method": "Mode d’isolation",
+      "off": "Sans isolation",
+      "status": "Configuration enregistrée",
+      "check": "Vérifier le bac à sable",
+      "checking": "Vérification…",
+      "scope": "Teste uniquement le lanceur enregistré avec des fichiers temporaires. Ce n’est pas un audit de sécurité complet. Redémarrez la passerelle pour appliquer les changements aux commandes.",
+      "path": "Chemin du lanceur de confiance",
+      "launcher": "lanceur de bac à sable",
+      "pathHelp": "Laissez généralement ce champ vide pour rechercher {{launcher}} dans le système. Pour une installation personnalisée, demandez le chemin complet du lanceur au responsable du paquet. Le fichier et ses dossiers parents doivent appartenir à root, sans écriture pour le groupe ou les autres utilisateurs, hors des chemins modifiables par l’agent.",
+      "automatic": "Recherche système",
+      "checkError": "La vérification a échoué. Rouvrez les paramètres et réessayez.",
+      "saveError": "Enregistrement impossible. Le brouillon est conservé ; réessayez.",
+      "disableTitle": "Désactiver l’isolation ?",
+      "disableHelp": "Après redémarrage, les commandes utiliseront les droits du compte de la passerelle. Les outils de fichiers perdront aussi la restriction d’espace de travail fournie par ce bac à sable ; les restrictions indépendantes restent actives.",
+      "keep": "Garder l’isolation",
+      "disable": "Désactiver l’isolation",
+      "notice": {
+        "title": "Les commandes nécessitent une vérification",
+        "missing": "La passerelle ne trouve pas {{launcher}}. S’il est installé, indiquez son chemin complet. Sinon, contactez le responsable du paquet ou l’administrateur. Vous pouvez continuer à discuter.",
+        "path": "La passerelle ne peut pas utiliser le chemin configuré de {{launcher}}. Vérifiez le chemin complet et les droits d’accès.",
+        "permissions": "{{launcher}} n’est pas dans un emplacement protégé. Contactez le responsable du paquet ou l’administrateur.",
+        "startup": "{{launcher}} n’a pas pu démarrer. Vérifiez l’installation de la passerelle et les restrictions du système.",
+        "configurePath": "Configurer le chemin de {{launcher}}",
+        "openSettings": "Ouvrir les paramètres du bac à sable"
+      },
+      "states": {
+        "disabled": "Commandes désactivées",
+        "off": "Sans isolation",
+        "unsupported": "Non pris en charge",
+        "unchecked": "Non vérifié",
+        "unavailable": "Indisponible",
+        "passed": "Test de base réussi",
+        "checking": "Vérification…"
+      },
+      "help": {
+        "disabled": "Activez les commandes pour utiliser un bac à sable.",
+        "off": "Les commandes ne sont pas isolées. Choisissez une méthode pour protéger l’hôte.",
+        "unsupported": "Le système de la passerelle ne prend pas en charge cette méthode.",
+        "unchecked": "Lancez la vérification de la configuration enregistrée.",
+        "unsaved": "Enregistrez les changements, puis lancez la vérification.",
+        "unavailable": "Le bac à sable ne peut pas démarrer. Aucune commande n’y sera exécutée.",
+        "passed": "Le lanceur a démarré, l’écriture dans l’espace de travail temporaire a réussi et le fichier externe a été bloqué.",
+        "checking": "Test avec durée limitée en cours…"
+      },
+      "reasons": {
+        "launcher_missing": "La passerelle ne trouve pas {{launcher}}. S’il est installé, indiquez son chemin complet ci-dessous. Sinon, contactez le responsable du paquet ou l’administrateur.",
+        "path_not_absolute": "Indiquez un chemin absolu, pas un nom de commande.",
+        "not_executable": "Le chemin doit désigner un fichier exécutable.",
+        "agent_writable": "L’agent peut modifier ce chemin. Demandez une installation protégée au responsable du paquet.",
+        "unprotected_installation": "Un utilisateur autre que root peut modifier le lanceur ou un dossier parent. Demandez une installation protégée à l’administrateur.",
+        "path_unavailable": "Chemin illisible. Vérifiez sa présence et ses droits sur la passerelle.",
+        "platform_unsupported": "Choisissez une méthode compatible avec le système de la passerelle.",
+        "probe_failed": "Le test a échoué. Vérifiez l’installation, les espaces de noms du noyau et les montages supplémentaires.",
+        "probe_timeout": "Délai dépassé. Vérifiez l’installation et les restrictions de l’hôte, puis réessayez.",
+        "unknown": "Lanceur indisponible. Vérifiez son installation et ses droits."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "Enregistré. Redémarrez le service API pour appliquer les modifications.",
       "commandRuntime": {
@@ -1614,6 +1673,10 @@
       "marketplaceNpxRequired": "Node.js avec npx est requis",
       "marketplaceInstalling": "Installation",
       "marketplaceInstalled": "Installée",
+      "marketplaceNameConflict": "Nom déjà utilisé",
+      "marketplaceOriginUnknown": "Source installée inconnue",
+      "marketplaceConflictHelp": "Vérifiez les compétences du même nom dans Installées avant de les supprimer pour utiliser une autre source.",
+      "marketplaceInstallConflict": "Conflit d’installation. Attendez la fin de l’installation en cours, puis vérifiez les compétences du même nom dans Installées.",
       "marketplaceInstall": "Installer",
       "marketplaceNoTrend": "Pas encore de tendance",
       "marketplaceTrendLabel": "Tendance des installations sur 8 semaines",
@@ -1858,8 +1921,6 @@
       "sessionInfo": "Détails de la session"
     },
     "sessionInfo": {
-      "title": "Session",
-      "untitled": "Sujet sans titre",
       "automations": "Automatisations",
       "count": "{{count}}",
       "loading": "Chargement des automatisations...",
@@ -1884,8 +1945,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Saisissez votre message…",
-      "placeholderHero": "Décrivez ce que vous souhaitez faire",
+      "placeholder": "Tapez / pour voir les commandes, @ pour les conversations ou les applis, $ pour les compétences",
+      "placeholderCompact": "Votre message…",
       "placeholderOpening": "Ouverture d’un nouveau sujet…",
       "inputAria": "Champ de message",
       "goalStateStrip": "Objectif: {{label}}",
@@ -1912,15 +1973,21 @@
       "reauthFallback": "Un modèle de secours a traité cette réponse.",
       "reauthSettings": "Ouvrir les paramètres du modèle",
       "context": {
+          "loaded": "Chargé",
+          "unloaded": "Non chargé",
+          "expand": "Agrandir le contexte",
+          "collapse": "Réduire le contexte",
+          "noFiles": "Aucun contexte enregistré pour le moment",
+          "estimatedNodeTokens": "Environ {{value}} tokens",
+          "openFile": "Ouvrir le fichier",
+          "history": "Historique du contexte",
+          "playHistory": "Lire l’historique du contexte",
         "tooltip": "Contexte {{percent}} %",
         "detailsLabel": "Ouvrir l’utilisation du contexte",
         "panelTitle": "Utilisation du contexte",
         "contextTitle": "Contexte",
-        "recentRounds": "Tours récents",
-        "inputTrend": "Jetons d’entrée",
-        "input": "Jetons d’entrée",
-        "cacheHitRate": "Taux de succès du cache KV",
-        "output": "Jetons de sortie",
+        "cacheHitRate": "Taux de réussite du cache",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Temps de génération"
       },
       "queued": {
@@ -2148,8 +2215,7 @@
     "fileEditDiffTruncated": "Différences tronquées. Ouvrez le fichier pour voir la modification complète.",
     "usage": {
       "context": "Dernier contexte : {{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} requêtes au modèle",
-      "estimated": "Inclut une estimation de l’utilisation"
+      "requests": "{{count}} requêtes au modèle"
     },
     "activityThinkingFor": "Réflexion pendant {{duration}}",
     "activityThought": "Réflexion terminée",

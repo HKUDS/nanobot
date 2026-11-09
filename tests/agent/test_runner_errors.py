@@ -71,7 +71,8 @@ async def test_tool_execution_does_not_duplicate_existing_error_hint():
         execute=AsyncMock(return_value=ToolResult.error("Error: boom" + error_hint)),
     )
 
-    results, events = await execute_tool_calls(
+    settled = []
+    await execute_tool_calls(
         tools,
         [ToolCallRequest(id="call_1", name="list_dir", arguments={})],
         concurrent=False,
@@ -79,11 +80,13 @@ async def test_tool_execution_does_not_duplicate_existing_error_hint():
         workspace_violation_counts={},
         hook=AgentHook(),
         context=AgentHookContext(iteration=0, messages=[]),
+        on_settled=AsyncMock(side_effect=settled.extend),
     )
 
-    assert results == ["Error: boom" + error_hint]
-    assert results[0].count(error_hint) == 1
-    assert events[0]["status"] == "error"
+    [completed] = settled
+    assert completed.result == "Error: boom" + error_hint
+    assert completed.result.count(error_hint) == 1
+    assert completed.event["status"] == "error"
 
 
 @pytest.mark.asyncio

@@ -142,6 +142,8 @@ If your change genuinely needs to step outside this, please call it out explicit
 
 Use the [release checklist](./docs/releasing.md) for candidate preparation, package checks, documentation coordination, and the final publication handoff.
 
+Stable feature releases and Stable patches are manual and share the same package workflow. Patches use generated change notes and update only affected documentation; they do not require a full wiki or promotional refresh. The Preview/dev line is intended for daily workflow delivery. The current first step supports opt-in daily candidate preparation only; publication remains separate and daily preparation is disabled by default. See the checklist for its activation boundary and remaining publication work.
+
 A stable install must never combine Python from one version with a TUI from another. Publish in this order:
 
 1. Before pushing a tag, set the package version, verify the exact candidate, build the source distribution, all five platform wheels and TUI archives, and review licenses, source offer, and relinking materials. Obtain the maintainer's source-offer commitment before publication.

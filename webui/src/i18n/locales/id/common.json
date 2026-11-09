@@ -477,6 +477,65 @@
       "password": "Kata sandi",
       "proxyReferenceAuth": "Atur autentikasi di URL proxy yang dirujuk."
     },
+    "sandbox": {
+      "title": "Sandbox perintah",
+      "method": "Metode isolasi",
+      "off": "Tanpa isolasi",
+      "status": "Konfigurasi tersimpan",
+      "check": "Periksa sandbox",
+      "checking": "Memeriksa…",
+      "scope": "Hanya menguji peluncur tersimpan dengan berkas sementara. Ini bukan audit keamanan lengkap. Mulai ulang gateway untuk menerapkan perubahan ke eksekusi perintah.",
+      "path": "Jalur peluncur tepercaya",
+      "launcher": "peluncur sandbox",
+      "pathHelp": "Biasanya biarkan kosong untuk mencari {{launcher}} di sistem. Untuk instalasi khusus, minta jalur lengkap peluncur kepada pengelola paket. Berkas dan direktori induk harus dimiliki root, tidak dapat ditulis grup/pengguna lain, dan di luar jalur tulis agen.",
+      "automatic": "Pencarian sistem",
+      "checkError": "Pemeriksaan gagal. Buka ulang pengaturan dan coba lagi.",
+      "saveError": "Gagal menyimpan. Draf tetap tersimpan; coba lagi.",
+      "disableTitle": "Nonaktifkan isolasi perintah?",
+      "disableHelp": "Setelah mulai ulang, perintah berjalan dengan izin akun gateway. Alat berkas juga kehilangan pembatasan ruang kerja dari sandbox ini; pembatasan yang diatur terpisah tetap berlaku.",
+      "keep": "Pertahankan isolasi",
+      "disable": "Nonaktifkan isolasi",
+      "notice": {
+        "title": "Perintah perlu diperiksa",
+        "missing": "Gateway tidak menemukan {{launcher}}. Jika sudah terpasang, atur jalur lengkapnya. Jika belum, hubungi pengelola paket atau administrator. Anda tetap bisa mengobrol.",
+        "path": "Gateway tidak dapat menggunakan jalur {{launcher}} yang dikonfigurasi. Periksa jalur lengkap dan izin aksesnya.",
+        "permissions": "{{launcher}} tidak berada di lokasi terlindungi. Hubungi pengelola paket atau administrator.",
+        "startup": "{{launcher}} tidak dapat dimulai. Periksa instalasi gateway dan pembatasan sistem.",
+        "configurePath": "Atur jalur {{launcher}}",
+        "openSettings": "Buka pengaturan sandbox"
+      },
+      "states": {
+        "disabled": "Perintah nonaktif",
+        "off": "Isolasi nonaktif",
+        "unsupported": "Tidak didukung",
+        "unchecked": "Belum diperiksa",
+        "unavailable": "Tidak tersedia",
+        "passed": "Uji dasar berhasil",
+        "checking": "Memeriksa…"
+      },
+      "help": {
+        "disabled": "Aktifkan perintah untuk memakai sandbox.",
+        "off": "Perintah tidak diisolasi. Pilih metode untuk melindungi host.",
+        "unsupported": "Sistem operasi gateway tidak mendukung metode ini.",
+        "unchecked": "Jalankan pemeriksaan konfigurasi sandbox tersimpan.",
+        "unsaved": "Simpan perubahan, lalu periksa sandbox.",
+        "unavailable": "Sandbox tidak bisa dimulai. Perintah tidak akan dijalankan di sandbox ini.",
+        "passed": "Peluncur berjalan, ruang kerja sementara dapat ditulis, dan berkas uji eksternal diblokir.",
+        "checking": "Menjalankan uji sandbox dengan batas waktu…"
+      },
+      "reasons": {
+        "launcher_missing": "Gateway tidak menemukan {{launcher}}. Jika sudah terpasang, masukkan jalur lengkapnya di bawah. Jika belum, hubungi pengelola paket atau administrator.",
+        "path_not_absolute": "Masukkan jalur absolut, bukan nama perintah.",
+        "not_executable": "Jalur harus menuju berkas yang dapat dieksekusi.",
+        "agent_writable": "Agen dapat menulis ke jalur ini. Minta pemasangan terlindungi kepada pengelola paket.",
+        "unprotected_installation": "Pengguna selain root dapat menulis ke peluncur atau induknya. Minta pemasangan terlindungi kepada administrator.",
+        "path_unavailable": "Jalur tidak dapat dibaca. Periksa keberadaan dan izinnya di gateway.",
+        "platform_unsupported": "Pilih metode yang didukung sistem operasi gateway.",
+        "probe_failed": "Uji isolasi gagal. Periksa pemasangan, namespace kernel, dan mount tambahan.",
+        "probe_timeout": "Waktu habis. Periksa pemasangan dan pembatasan host, lalu coba lagi.",
+        "unknown": "Peluncur tidak tersedia. Periksa pemasangan dan izin akses."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",
       "commandRuntime": {
@@ -1614,6 +1673,10 @@
       "marketplaceNpxRequired": "Node.js dengan npx diperlukan",
       "marketplaceInstalling": "Memasang",
       "marketplaceInstalled": "Terpasang",
+      "marketplaceNameConflict": "Nama sudah digunakan",
+      "marketplaceOriginUnknown": "Sumber instalasi tidak diketahui",
+      "marketplaceConflictHelp": "Periksa skill bernama sama di Terpasang sebelum menghapusnya untuk memakai sumber lain.",
+      "marketplaceInstallConflict": "Konflik instalasi. Tunggu instalasi selesai, lalu periksa skill bernama sama di Terpasang.",
       "marketplaceInstall": "Pasang",
       "marketplaceNoTrend": "Belum ada tren",
       "marketplaceTrendLabel": "Tren pemasangan 8 minggu",
@@ -1858,8 +1921,6 @@
       "sessionInfo": "Detail sesi"
     },
     "sessionInfo": {
-      "title": "Sesi",
-      "untitled": "Topik tanpa judul",
       "automations": "Otomasi",
       "count": "{{count}}",
       "loading": "Memuat otomasi...",
@@ -1884,8 +1945,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Ketik pesan Anda…",
-      "placeholderHero": "Jelaskan apa yang ingin Anda lakukan",
+      "placeholder": "Ketik / untuk melihat perintah, @ untuk memilih percakapan atau aplikasi, $ untuk memilih keterampilan",
+      "placeholderCompact": "Ketik pesan…",
       "placeholderOpening": "Membuka topik baru…",
       "inputAria": "Input pesan",
       "goalStateStrip": "Tujuan: {{label}}",
@@ -1912,15 +1973,21 @@
       "reauthFallback": "Model cadangan menangani respons ini.",
       "reauthSettings": "Buka pengaturan model",
       "context": {
+          "loaded": "Dimuat",
+          "unloaded": "Belum dimuat",
+          "expand": "Perbesar konteks",
+          "collapse": "Perkecil konteks",
+          "noFiles": "Belum ada konteks yang tercatat",
+          "estimatedNodeTokens": "Sekitar {{value}} token",
+          "openFile": "Buka berkas",
+          "history": "Riwayat konteks",
+          "playHistory": "Putar riwayat konteks",
         "tooltip": "Konteks {{percent}}%",
         "detailsLabel": "Buka penggunaan konteks",
         "panelTitle": "Penggunaan konteks",
         "contextTitle": "Konteks",
-        "recentRounds": "Putaran terbaru",
-        "inputTrend": "Token masukan",
-        "input": "Token masukan",
-        "cacheHitRate": "Rasio hit KV cache",
-        "output": "Token keluaran",
+        "cacheHitRate": "Rasio cache hit",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Waktu pembuatan"
       },
       "queued": {
@@ -2148,8 +2215,7 @@
     "fileEditDiffTruncated": "Perbedaan dipotong. Buka file untuk melihat perubahan lengkap.",
     "usage": {
       "context": "Konteks terbaru: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} permintaan model",
-      "estimated": "Termasuk penggunaan perkiraan"
+      "requests": "{{count}} permintaan model"
     },
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",

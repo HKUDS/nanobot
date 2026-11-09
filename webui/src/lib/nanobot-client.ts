@@ -363,11 +363,6 @@ export class NanobotClient {
     this.applyRunEffects(this.runs.transition({ kind: "restore-pending", chatId, generation, turnId }));
   }
 
-  /** Last ``goal_status`` ``started_at`` (unix sec) for *chatId*, if the turn is running. */
-  getRunStartedAt(chatId: string): number | null {
-    return this.runs.view(chatId).startedAt;
-  }
-
   /** Canonical lifecycle turn currently owning the run, retained after completion. */
   getRunTurnId(chatId: string): string | null {
     return this.runs.view(chatId).latestTurnId;

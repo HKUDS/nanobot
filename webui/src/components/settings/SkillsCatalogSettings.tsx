@@ -388,8 +388,8 @@ function SkillDetailSheet({
             "sm:right-3 sm:top-3",
           )}
           className={cn(
-            "w-full max-w-none gap-0 overflow-hidden border-l-0 p-0",
-            "sm:w-[min(34rem,calc(100vw-1rem))] sm:max-w-none sm:border-l",
+            "w-[calc(100vw-1rem)] max-w-none gap-0 p-0",
+            "sm:w-[min(34rem,calc(100vw-1rem))] sm:max-w-none",
           )}
         >
           <div

@@ -179,6 +179,18 @@
     "reset": "Restablecer vista previa",
     "hint": "Elige un estado de recuperación y prueba a continuar o cerrar."
   },
+  "sandbox": {
+    "gateway": "Pasarela de ejemplo",
+    "unknownGateway": "Sin especificar",
+    "title": "Aviso de comandos",
+    "description": "Compara componentes ausentes, instalaciones sin protección y errores de inicio con el componente real.",
+    "options": "El aviso no toma el foco ni reintenta comandos. Cambia el estado, ciérralo y sigue escribiendo.",
+    "missing": "Componente no encontrado",
+    "permissions": "Revisar instalación",
+    "startup": "Inicio no disponible",
+    "hint": "Solo demostración. No se ejecutan comandos ni se cambian ajustes.",
+    "settingsAction": "Se solicitaron los ajustes del sandbox (demostración)."
+  },
   "fallback": {
     "title": "ModelFallbackNotice · Modelo alternativo",
     "description": "Consulta avisos de modelo alternativo y autorización caducada, configuración y cierre.",

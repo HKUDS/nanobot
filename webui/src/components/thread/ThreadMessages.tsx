@@ -466,7 +466,7 @@ function MessageBlockMenu({
           data-message-block-menu data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
           onCloseAutoFocus={(event) => { if (activity?.expanded) event.preventDefault(); }}>
-          <DialogTitle className="px-2 pb-2 pe-10 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
+          <DialogTitle className="px-2 pb-2 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
           {actions}
         </DialogContent>
       </Dialog>

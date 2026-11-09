@@ -11,7 +11,8 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.events import AgentEvent, CompactionReason
+from nanobot.context_graph import ContextGraph, ContextGraphParts, ContextSnapshot
+from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 _JSONValue: TypeAlias = (
@@ -96,7 +97,22 @@ class TurnEndWirePayload(_ChatWirePayload):
     failure_message: NotRequired[str]
 
 
+class ModelRequestWirePayload(_ChatWirePayload):
+    request_usage: dict[str, int] | None
+    context_graph: NotRequired[ContextGraph]
+    event: Literal["model_request"]
+    request_id: str
+    run_id: str
+    sequence: int
+    phase: Literal["started", "completed", "failed", "cancelled"]
+    usage: NotRequired[dict[str, int]]
+    round_usages: NotRequired[list[dict[str, int]]]
+    context_window_tokens: NotRequired[int]
+
+
 class ContextCompactionWirePayload(_ChatWirePayload):
+    context_graph: NotRequired[ContextGraph]
+    context_snapshot: NotRequired[ContextSnapshot]
     event: Literal["context_compaction"]
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
@@ -178,6 +194,7 @@ class TurnModelWirePayload(_ChatWirePayload):
 
 
 WebUIWirePayload: TypeAlias = (
+    ModelRequestWirePayload |
     RetryStatusWirePayload | ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
     | SubagentTaskWirePayload | MessageWirePayload | StreamWirePayload | FileEditWirePayload
     | GoalStateWirePayload | GoalStatusWirePayload | SessionUpdatedWirePayload | UserInputWirePayload
@@ -237,15 +254,37 @@ class NotificationProjection:
     persistence: WebUIWirePersistence = "transient"
     deliver_offline: bool = False
     attach_turn_metadata: bool = False
+    context_graph_parts: ContextGraphParts | None = None
 
 
 def project_notification(
     chat_id: str, event: AgentEvent | None, metadata: Mapping[str, object] | None = None,
+    *, context_graph: ContextGraph | None = None,
 ) -> NotificationProjection | None:
     """Keep notification serialization and persistence decisions at one boundary."""
-    if isinstance(event, ContextCompactionEvent):
+    if isinstance(event, ModelRequestEvent):
+        payload: ModelRequestWirePayload = {
+            "event": "model_request", "chat_id": chat_id,
+            "request_id": event.request_id, "run_id": event.run_id,
+            "sequence": event.sequence, "phase": event.phase,
+            "request_usage": event.request_usage.to_turn_dict() if event.request_usage is not None else None,
+        }
+        if context_graph is not None:
+            payload["context_graph"] = context_graph
+        if event.usage is not None:
+            payload["usage"] = event.usage.to_turn_dict()
+        payload["round_usages"] = [usage.to_turn_dict() for usage in event.round_usages[-8:]]
+        if event.context_window_tokens is not None:
+            payload["context_window_tokens"] = event.context_window_tokens
         return NotificationProjection(
-            encode_context_compaction(chat_id, event),
+            payload, persistence="turn_activity", deliver_offline=True, attach_turn_metadata=True,
+        )
+    if isinstance(event, ContextCompactionEvent):
+        compaction_payload = encode_context_compaction(chat_id, event)
+        if context_graph is not None:
+            compaction_payload["context_graph"] = context_graph
+        return NotificationProjection(
+            compaction_payload,
             persistence="transient" if event.phase == "started" else "turn_activity",
             deliver_offline=True,
             attach_turn_metadata=True,

@@ -182,6 +182,7 @@ export interface SidebarPaneGroup {
     chatId: string;
     title: string;
     handle?: ChatSummary["handle"];
+    projectLocked?: ChatSummary["projectLocked"];
   }>;
 }
 
@@ -407,6 +408,18 @@ export const ChatList = memo(function ChatList({
     }
     return items;
   }, [paneGroups, sessions, t, titleOverrides]);
+  const archivableKeys = useMemo(() => {
+    const keys = new Set(sessions
+      .filter((session) => session.projectLocked !== false)
+      .map((session) => session.key));
+    for (const group of Object.values(paneGroups)) {
+      for (const pane of group.panes) {
+        if (pane.projectLocked === true) keys.add(pane.key);
+        else keys.delete(pane.key);
+      }
+    }
+    return keys;
+  }, [paneGroups, sessions]);
   const paneGroupTargets = useMemo(() => Array.from(new Map(
     Object.values(paneGroups)
       .filter((group) => group.visible ?? group.panes.length > 1)
@@ -699,8 +712,9 @@ export const ChatList = memo(function ChatList({
       if (confirmed) closeDeleteSelection();
     });
   };
-  const allSelectedArchived = selectedDeleteKeys.size > 0
-    && Array.from(selectedDeleteKeys).every((key) => archivedPanes.has(key) || archived.has(key));
+  const selectedArchiveKeys = Array.from(selectedDeleteKeys).filter((key) => archivableKeys.has(key));
+  const allSelectedArchived = selectedArchiveKeys.length > 0
+    && selectedArchiveKeys.every((key) => archivedPanes.has(key) || archived.has(key));
   return (
     <div ref={scrollViewportRef} className="sidebar-scroll-fade sidebar-scrollbar h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pb-2">
       <SidebarSelectionHighlight
@@ -1116,14 +1130,16 @@ export const ChatList = memo(function ChatList({
                                 <Pencil className="h-4 w-4 shrink-0" />
                                 {t("chat.rename")}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onSelect={() => onToggleArchive(s.key)}>
-                                {isArchived ? (
-                                  <ArchiveRestore className="h-4 w-4 shrink-0" />
-                                ) : (
-                                  <Archive className="h-4 w-4 shrink-0" />
-                                )}
-                                {isArchived ? t("chat.unarchive") : t("chat.archive")}
-                              </DropdownMenuItem>
+                              {s.projectLocked !== false ? (
+                                <DropdownMenuItem onSelect={() => onToggleArchive(s.key)}>
+                                  {isArchived ? (
+                                    <ArchiveRestore className="h-4 w-4 shrink-0" />
+                                  ) : (
+                                    <Archive className="h-4 w-4 shrink-0" />
+                                  )}
+                                  {isArchived ? t("chat.unarchive") : t("chat.archive")}
+                                </DropdownMenuItem>
+                              ) : null}
                               {paneGroup && onCreateTab ? (
                                 <DropdownMenuItem onSelect={() => onCreateTab(s.key)}>
                                   <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden />
@@ -1202,14 +1218,14 @@ export const ChatList = memo(function ChatList({
                 count: selectedDeleteKeys.size,
               })}
             </span>
-            {onArchiveMany ? (
+            {onArchiveMany && (selectedDeleteKeys.size === 0 || selectedArchiveKeys.length > 0) ? (
               <HoverHint content={t(allSelectedArchived ? "chat.unarchive" : "chat.archive")}>
                 <button
                   type="button"
                   aria-label={t(allSelectedArchived ? "chat.unarchive" : "chat.archive")}
                   disabled={selectedDeleteKeys.size === 0 || deleteConfirmationPending}
                   onClick={() => setPendingArchive({
-                    keys: Array.from(selectedDeleteKeys),
+                    keys: selectedArchiveKeys,
                     archive: !allSelectedArchived,
                   })}
                   className="touch-target inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-foreground transition-colors media-hover:hover:bg-sidebar-accent disabled:pointer-events-none disabled:opacity-40"
@@ -1589,14 +1605,16 @@ function ActivePaneRows({
                     <Pencil className="h-4 w-4 shrink-0" />
                     {t("chat.rename")}
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => onToggleArchive(pane.key)}>
-                    {isArchived ? (
-                      <ArchiveRestore className="h-4 w-4 shrink-0" />
-                    ) : (
-                      <Archive className="h-4 w-4 shrink-0" />
-                    )}
-                    {isArchived ? t("chat.unarchive") : t("chat.archive")}
-                  </DropdownMenuItem>
+                  {pane.projectLocked === true ? (
+                    <DropdownMenuItem onSelect={() => onToggleArchive(pane.key)}>
+                      {isArchived ? (
+                        <ArchiveRestore className="h-4 w-4 shrink-0" />
+                      ) : (
+                        <Archive className="h-4 w-4 shrink-0" />
+                      )}
+                      {isArchived ? t("chat.unarchive") : t("chat.archive")}
+                    </DropdownMenuItem>
+                  ) : null}
                   {onDetachPane ? (
                     <DropdownMenuItem onSelect={() => onDetachPane(group.tabKey, pane.key)}>
                       <Unplug className="h-4 w-4 shrink-0" />

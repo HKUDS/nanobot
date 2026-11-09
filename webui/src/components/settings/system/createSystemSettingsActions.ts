@@ -414,6 +414,7 @@ export function createSystemSettingsActions({
       return;
     }
 
+    state.toolsCatalog.invalidate();
     if (flow.status === "authorized" && flow.hot_reload) {
       if (flow.hot_reload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -487,7 +488,8 @@ export function createSystemSettingsActions({
     setMcpOAuthCompleting(false);
     setMcpOAuthCallbackError(null);
     try {
-      const flow = await startMcpOAuth(client, name, reset, values);
+      const flow = await startMcpOAuth(client, name, reset, values)
+        .finally(() => state.toolsCatalog.invalidate());
       mcpOAuthFlowRef.current = flow;
       setMcpOAuthFlow(flow);
       navigateMcpOAuthPopup(flow);

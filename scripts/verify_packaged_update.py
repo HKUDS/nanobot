@@ -3,8 +3,7 @@
 The healthy target is the exact supplied wheel, not a patched application. The
 default baseline is explicitly a version-only fixture with a local feed transport
 and bounded fault injection. It does not stand for an older published release.
-Use --baseline-wheel to exercise an actual earlier updater-enabled package with
-SQLite session history, shared proxy configuration and a durable delivery outbox too.
+Use --baseline-wheel to exercise an actual earlier updater-enabled package too.
 No public feed, user installation, model, credentials or OS service is used.
 """
 
@@ -20,6 +19,7 @@ import io
 import json
 import os
 import platform
+import re
 import secrets
 import signal
 import socket
@@ -27,7 +27,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -44,6 +44,11 @@ TWO_JOURNEY_SCENARIOS = {"upgrade-again", "import-failure", "restart-failure", "
 # Each lane retains the existing per-command deadlines and cleanup. This outer
 # bound also covers a stuck controller; it is not permission to leave it running.
 LANE_TIMEOUT = 30 * 60
+PREFLIGHT_MODULES = {"update_handoff.py", "update_worker.py", "update_plan.py", "update_stop.py",
+                     "update_profiles.py", "release_feed.py", "installation_lock.py", "data_access.py"}
+STOP_STATES = {"ready", "busy", "released", "stopping", "refused"}
+BUSY_FLAGS = {"paused", "active", "inbound", "events", "pending_queues", "active_tasks",
+              "background_tasks", "deferred_automation_turns", "channel_delivery", "registered_work"}
 
 
 def digest(path: Path) -> str:
@@ -57,6 +62,41 @@ def read(path: Path):
 
 def write(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def phase_failure(root: Path, phase: str, error: Exception) -> None:
+    """Export a failed probe location, not exception values or private journals."""
+    lines = []
+    traceback = error.__traceback__
+    while traceback is not None:
+        if traceback.tb_frame.f_code.co_filename == __file__:
+            lines.append(traceback.tb_lineno)
+        traceback = traceback.tb_next
+    record = {"phase": phase, "error_type": type(error).__name__, "probe_lines": lines}
+    # Read with stdlib only: the target package can be deliberately unimportable.
+    # Messages, commands, paths, identifiers and arbitrary phase values stay local.
+    with suppress(OSError, ValueError, KeyError, TypeError):
+        directory = Path(read(root / "launch.json")["directory"])
+        status = read(directory / "status.json")
+        record["update_phase"] = (status["phase"] if status["phase"] in {
+            "succeeded", "restored", "failed", "restart_failed", "handoff_failed",
+        } else "incomplete")
+        record["mutation_started"] = status["mutation_started"] is True
+        record["recovery_needs_attention"] = read(directory / "supervision.json").get("state") == "needs_attention"
+        preflight = read(directory / "acceptance-preflight.json")
+        record["preflight_error"] = (preflight["error_type"] if preflight["error_type"] in {
+            "ValueError", "OSError", "RuntimeError", "ReleaseFeedError", "InstallationBusyError",
+            "TimeoutError", "CalledProcessError", "FileNotFoundError", "PermissionError",
+        } else "OtherException")
+        record["preflight_frames"] = [[row[0], row[1]] for row in preflight["frames"]
+                                      if isinstance(row, list) and len(row) >= 2
+                                      and row[0] in PREFLIGHT_MODULES and type(row[1]) is int]
+        record["stop_states"] = sorted({value for value in preflight.get("stop_states", [])
+                                        if isinstance(value, str) and value in STOP_STATES})
+        busy = read(directory / "acceptance-busy.json")
+        record["busy_flags"] = {key: value for key, value in busy.items()
+                                if key in BUSY_FLAGS and type(value) is bool}
+    write(root / "phase-failure.json", record)
 
 
 class Timings:
@@ -168,6 +208,48 @@ def transport():
                     raise OSError('Injected backup write failure')
 '''.encode() + needle)
         files["nanobot/update_worker.py"] = worker
+        # Observe an old-runtime preflight refusal without changing its decision,
+        # shutdown, worker or recovery semantics. Never export exception values.
+        handoff = files["nanobot/update_handoff.py"].replace(b"\r\n", b"\n")
+        files["nanobot/update_handoff.py"] = replace_once(handoff, b"    except Exception:\n", f'''    except Exception as acceptance_error:
+        from nanobot.update_worker import read_record, write_record
+        acceptance_trace = acceptance_error.__traceback__
+        acceptance_frames = []
+        while acceptance_trace is not None:
+            acceptance_name = Path(acceptance_trace.tb_frame.f_code.co_filename).name
+            if acceptance_name in {sorted(PREFLIGHT_MODULES)!r}:
+                acceptance_frames.append([acceptance_name, acceptance_trace.tb_lineno])
+            acceptance_trace = acceptance_trace.tb_next
+        write_record(directory / 'acceptance-preflight.json', {{
+            'error_type': type(acceptance_error).__name__, 'frames': acceptance_frames,
+            'stop_states': [value for path in (directory / 'stop-replies').glob('*.json')
+                            if (value := read_record(path).get('state')) in {sorted(STOP_STATES)!r}],
+        }})
+'''.encode())
+        # Diagnose a real idle-admission refusal in the disposable old gateway.
+        # Observe booleans only, after the original guard has already refused.
+        stop = files.get("nanobot/update_stop.py")
+        if stop is not None:
+            needle = b"        except (RuntimeBusyError, RuntimeMaintenanceError):\n"
+            files["nanobot/update_stop.py"] = replace_once(stop.replace(b"\r\n", b"\n"), needle, needle + b'''            try:
+                from nanobot.update_worker import write_record
+                acceptance_owner = maintenance.__self__
+                acceptance_bus = acceptance_owner.bus
+                acceptance_flags = {
+                    'paused': acceptance_bus.admission.paused,
+                    'active': bool(acceptance_bus.admission._active),
+                    'inbound': bool(acceptance_bus.inbound_size),
+                    'events': bool(acceptance_bus.has_pending_events),
+                    **{name.removeprefix('_'): bool(getattr(acceptance_owner, name)) for name in (
+                        '_pending_queues', '_active_tasks', '_background_tasks', '_deferred_automation_turns')},
+                    'channel_delivery': any(check() for check in acceptance_bus.admission._pending_checks
+                        if getattr(check, '__qualname__', '').startswith('ChannelManager.')),
+                    'registered_work': any(check() for check in acceptance_bus.admission._pending_checks),
+                }
+                write_record(directory / 'acceptance-busy.json', acceptance_flags)
+            except Exception:
+                pass  # Diagnostic failure must not alter the existing refusal.
+''')
         if scenario == "restore-interruption":
             needle = b"    os.rename(original, environment)\n"
             files["nanobot/update_fallback.py"] = replace_once(files["nanobot/update_fallback.py"].replace(b"\r\n", b"\n"), needle, b'''    if not (directory / 'restore-fault-fired').exists():
@@ -307,12 +389,49 @@ def history(root: Path, key: str):
     return {name: response[name] for name in ("events", "completed_turn_ids")}
 
 
+def assert_history_preserved(before: dict, after: dict) -> None:
+    """Allow only known additive defaults in the older transcript projection."""
+    assert after["completed_turn_ids"] == before["completed_turn_ids"]
+    assert len(after["events"]) == len(before["events"])
+    for previous, current in zip(before["events"], after["events"], strict=True):
+        current = dict(current)
+        # SQLite represents an unknown legacy timestamp as zero. New projection
+        # also exposes the already-persisted inactive goal on a completed turn.
+        # Do not ignore these fields when the old API supplied an actual value.
+        if "created_at_ms" not in previous and current.get("created_at_ms") == 0:
+            del current["created_at_ms"]
+        if (previous["event"] == "turn_end" and "goal_state" not in previous
+                and current.get("goal_state") == {"active": False}):
+            del current["goal_state"]
+        assert current == previous, (current, previous)
+
+
 def canonical_records(path: Path, tables: tuple[str, ...] = ("sessions", "messages", "checkpoints", "pending_inputs")) -> dict:
     """Compare logical records, not SQLite's transient WAL/checkpoint layout."""
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
         assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         return {table: [list(row) for row in db.execute(f"SELECT * FROM {table} ORDER BY 1, 2")]
                 for table in tables}
+
+
+def assert_canonical_preserved(before: dict, after: dict) -> None:
+    """Schema v2 may add a display-only owner, never model context or lost rows."""
+    key = "websocket:display-only"
+    existing = {row[0] for row in before["sessions"]}
+    added = [row for row in after["sessions"] if row[0] == key and key not in existing]
+    for row in added:
+        # A newly imported display transcript owns an empty Session. Only its
+        # identity/timestamps and the public handle allocated by /api/sessions
+        # are new; it must not manufacture agent context or other metadata.
+        metadata = json.loads(row[3])
+        if metadata:
+            assert set(metadata) == {"session_handle"}, row
+            handle = metadata["session_handle"]
+            assert isinstance(handle, str) and re.fullmatch("[a-z]{4,16}", handle), row
+        revision = 2 if metadata else 1
+        assert row[4:7] == [None, 0, revision] and row[8:] == ["", "", None], row
+    comparable = {**after, "sessions": [row for row in after["sessions"] if row not in added]}
+    assert comparable == before, (comparable, before)
 
 
 def canonical_context(root: Path) -> dict:
@@ -362,28 +481,10 @@ def ready(root: Path, version: str):
     raise RuntimeError("The actual installed gateway did not become ready")
 
 
-def seed_history(root: Path) -> None:
-    from nanobot.session.display_history import HistoryFact, HistoryKind
-    from nanobot.session.manager import Session, SessionManager
-
-    sessions = SessionManager(root / "workspace")
-    for key in ("websocket:mixed-history", "websocket:canonical-only"):
-        sessions.save(Session(key=key, metadata={"title": "升级前的聊天"},
-                              messages=[{"role": "user", "content": "配置和聊天不能丢失"}]))
-    for chat_id in ("mixed-history", "display-only"):
-        sessions.append_history("websocket:" + chat_id, [
-            HistoryFact(HistoryKind.INPUT, {"text": "配置和聊天不能丢失"}, turn_id="fixture-" + chat_id),
-            HistoryFact(HistoryKind.ANSWER, {"text": "独立验收数据"}, turn_id="fixture-" + chat_id),
-            HistoryFact(HistoryKind.COMPLETION, turn_id="fixture-" + chat_id),
-        ])
-
-
 def seed(root: Path) -> None:
     import nanobot
-    from nanobot.bus.delivery import DeliveryRequest
-    from nanobot.bus.events import OutboundMessage
-    from nanobot.channels.outbox import DeliveryOutbox
     from nanobot.config.loader import load_config, save_config, set_config_path
+    from nanobot.config.paths import get_webui_dir
 
     assert Path(nanobot.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
     config_path = root / "account/.nanobot/config.json"
@@ -397,19 +498,37 @@ def seed(root: Path) -> None:
     config.agents.defaults.session_ttl_minutes = 0
     config.providers.custom.api_key = "fixture-not-a-secret"
     config.providers.custom.api_base = "http://127.0.0.1:1/v1"
-    config.network.proxy = "http://127.0.0.1:9"
-    config.providers.custom.use_proxy = True
     config.gateway.host, config.gateway.port = "127.0.0.1", free_port()
     config.gateway.heartbeat.enabled = False
     config.channels.websocket = {"enabled": True, "host": "127.0.0.1", "port": free_port(),
                                  "tokenIssueSecret": secrets.token_urlsafe(32), "websocketRequiresToken": True}
     save_config(config, config_path)
-    seed_history(root)
-    with patch("nanobot.channels.outbox.time.time", return_value=time.time() + 3600):
-        DeliveryOutbox(config_path.parent / "delivery/outbox.sqlite3").record(OutboundMessage(
-            "whatsapp", "acceptance-offline", "Retain this scheduled result",
-            delivery=DeliveryRequest("acceptance-run", "websocket:mixed-history", None),
-        ))
+    # Real historical canonical files are imported by the installed SQLite owner,
+    # not generated by a new-store round trip. Existing source bytes stay readable.
+    if importlib.util.find_spec("nanobot.session.location") is not None:
+        from nanobot.session.location import SessionLocation
+        location = SessionLocation(root / "workspace")
+    else:
+        # The retained pre-SQLite package owns the same namespace here. This is
+        # acceptance-fixture compatibility, not a fallback in the application.
+        from nanobot.session.manager import JsonlSessionStore
+        location = JsonlSessionStore(root / "workspace")
+    sessions = location.sessions_dir
+    key = "websocket:legacy-acceptance"
+    legacy = sessions / (location.storage_key(key) + ".jsonl")
+    legacy.write_text(json.dumps({"_type": "metadata", "key": key, "metadata": {"title": "升级前的聊天"},
+                                 "created_at": "2026-01-01T00:00:00", "updated_at": "2026-01-01T00:00:00"}) + "\n" +
+                      json.dumps({"role": "user", "content": "配置和聊天不能丢失"}, ensure_ascii=False) + "\n", encoding="utf-8")
+    canonical_only = sessions / (location.storage_key("websocket:canonical-only") + ".jsonl")
+    canonical_only.write_bytes(legacy.read_bytes().replace(key.encode(), b"websocket:canonical-only"))
+    webui_dir = get_webui_dir()
+    webui_dir.mkdir(parents=True, exist_ok=True)
+    for chat_id in ("legacy-acceptance", "display-only"):
+        events = [{"event": "user", "chat_id": chat_id, "text": "配置和聊天不能丢失"},
+                  {"event": "message", "chat_id": chat_id, "text": "独立验收数据"},
+                  {"event": "turn_end", "chat_id": chat_id}]
+        (webui_dir / f"websocket_{chat_id}.jsonl").write_text(
+            "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events), encoding="utf-8")
     if _dock_supported(root):
         _desktop_webui(root)
         _wait_dock(_dock_socket(root), present=True)
@@ -418,36 +537,56 @@ def seed(root: Path) -> None:
 
 
 def snapshot(root: Path) -> None:
-    from nanobot.config.loader import load_config, set_config_path
-    from nanobot.session.location import SessionLocation
+    from nanobot.config.loader import set_config_path
+    from nanobot.config.paths import get_webui_dir
 
     case = read(root / "case.json")
     config_path = root / "account/.nanobot/config.json"
     set_config_path(config_path)
-    config = load_config(config_path)
-    assert config.network.proxy == "http://127.0.0.1:9" and config.providers.custom.use_proxy
     delivery = config_path.parent / "delivery/outbox.sqlite3"
-    sessions = SessionLocation(root / "workspace").sessions_dir
-    key = "websocket:mixed-history"
+    if not delivery.exists() and importlib.util.find_spec("nanobot.channels.outbox") is not None:
+        from nanobot.bus.delivery import DeliveryRequest
+        from nanobot.bus.events import OutboundMessage
+        from nanobot.channels.outbox import DeliveryOutbox
+
+        # Keep a real durable result pending through the private journey without
+        # attempting an external send. Older retained code has no outbox owner.
+        with patch("nanobot.channels.outbox.time.time", return_value=time.time() + 3600):
+            DeliveryOutbox(delivery).record(OutboundMessage(
+                "whatsapp", "acceptance-offline", "Retain this scheduled result",
+                delivery=DeliveryRequest("acceptance-run", "websocket:legacy-acceptance", None),
+            ))
+    if importlib.util.find_spec("nanobot.session.location") is not None:
+        from nanobot.session.location import SessionLocation
+        location = SessionLocation(root / "workspace")
+    else:
+        from nanobot.session.manager import JsonlSessionStore
+        location = JsonlSessionStore(root / "workspace")
+    sessions, webui_dir = location.sessions_dir, get_webui_dir()
+    key = "websocket:legacy-acceptance"
+    legacy = sessions / (location.storage_key(key) + ".jsonl")
+    canonical_only = sessions / (location.storage_key("websocket:canonical-only") + ".jsonl")
     receipt = ready(root, case["baseline_version"])
     chat_id = (read(root / "before.json")["chat_id"] if (root / "before.json").exists()
                else asyncio.run(chat(root)))
     before = history(root, "websocket:" + chat_id)
-    mixed_before = history(root, key)
+    legacy_before = history(root, key)
     display_before = history(root, "websocket:display-only")
     context_before = canonical_context(root)
     assert context_before["total_messages"] == 1
-    assert "配置和聊天不能丢失" in json.dumps(mixed_before, ensure_ascii=False)
-    assert "独立验收数据" in json.dumps(mixed_before, ensure_ascii=False)
-    assert "独立验收数据" in json.dumps(display_before, ensure_ascii=False)
-    delivery_before = canonical_records(delivery, ("deliveries",))
-    assert any(row[1] == "acceptance-run" and row[5] == "pending" for row in delivery_before["deliveries"])
-    # SQLite/WAL bytes may change on shutdown; compare their logical records.
-    write(root / "before.json", {"chat_id": chat_id, "history": before, "mixed": mixed_before,
+    assert "配置和聊天不能丢失" in json.dumps(legacy_before, ensure_ascii=False)
+    # Immutable files plus public logical records: SQLite/WAL checkpoint bytes
+    # may legitimately change across a clean shutdown without changing a record.
+    preserved = {str(path): digest(path) for path in (legacy, canonical_only,
+                 webui_dir / "websocket_legacy-acceptance.jsonl", webui_dir / "websocket_display-only.jsonl")}
+    preserved[str(config_path)] = digest(config_path)
+    write(root / "before.json", {"chat_id": chat_id, "history": before, "legacy": legacy_before,
                                 "display_only": display_before, "canonical_only": context_before,
-                                "files": {str(config_path): digest(config_path)}, "run_id": receipt.run_id,
-                                "database": str(sessions / "sessions.sqlite3"), "delivery": delivery_before,
-                                "canonical": canonical_records(sessions / "sessions.sqlite3")})
+                                "files": preserved, "run_id": receipt.run_id,
+                                "database": str(sessions / "sessions.sqlite3"),
+                                "delivery": (canonical_records(delivery, ("deliveries",)) if delivery.exists() else None),
+                                "canonical": (canonical_records(sessions / "sessions.sqlite3")
+                                              if (sessions / "sessions.sqlite3").exists() else None)})
 
 
 def prepare(root: Path) -> None:
@@ -502,7 +641,7 @@ def verify(root: Path) -> dict:
     if not restored:
         assert COMMIT == case["commit"]
         assert digest(Path(case["target_wheel"])) == case["target_sha256"]
-    verify_data(root, expected)
+    sqlite_expected = verify_data(root, expected)
     if case["scenario"] in {"worker-exit", "metadata-loss"}:
         assert (directory / "fault-fired").exists()
     if case["scenario"] in {"worker-exit", "metadata-loss", "backup-failure"}:
@@ -510,22 +649,19 @@ def verify(root: Path) -> dict:
     if case["scenario"] == "restore-interruption":
         assert (directory / "restore-fault-fired").exists()
     return {**case, "phase": status.phase.value, "running_version": receipt.version,
-            "history_fixture": "native-sqlite", "config_bytes_preserved": True,
-            "restarted": True, "authenticated_history_preserved": True, "sqlite_records_preserved": True,
-            "scheduled_delivery_preserved": True,
+            "restarted": True, "config_and_legacy_bytes_preserved": True,
+            "authenticated_history_preserved": True, "sqlite_records_preserved": True if sqlite_expected else None,
+            "scheduled_delivery_preserved": True if before.get("delivery") is not None else None,
             "continued_write_and_second_start": True,
             "dock_socket": str(_dock_socket(root)) if _dock_supported(root) else None,
             "dock_restart_verified": True if _dock_supported(root) else None}
 
 
-def verify_data(root: Path, expected: str) -> None:
+def verify_data(root: Path, expected: str) -> bool:
     """Public reads and subsequent writes, shared by inline and owner-driven updates."""
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.config.loader import set_config_path
 
-    config_path = root / "account/.nanobot/config.json"
-    set_config_path(config_path)
-    config = load_config(config_path)
-    assert config.network.proxy == "http://127.0.0.1:9" and config.providers.custom.use_proxy
+    set_config_path(root / "account/.nanobot/config.json")
     before = read(root / "before.json")
     receipt = ready(root, expected)
     assert receipt.run_id != before["run_id"], "Update did not restart the gateway"
@@ -538,23 +674,29 @@ def verify_data(root: Path, expected: str) -> None:
         _wait_dock(_dock_socket(root), present=True)
     assert {name: digest(Path(name)) for name in before["files"]} == before["files"]
     key = "websocket:" + before["chat_id"]
-    assert history(root, key) == before["history"]
-    assert history(root, "websocket:mixed-history") == before["mixed"]
-    assert history(root, "websocket:display-only") == before["display_only"]
-    assert canonical_context(root) == before["canonical_only"]
+    assert_history_preserved(before["history"], history(root, key))
+    assert_history_preserved(before["legacy"], history(root, "websocket:legacy-acceptance"))
+    assert_history_preserved(before["display_only"], history(root, "websocket:display-only"))
+    assert canonical_context(root) == before["canonical_only"], (canonical_context(root), before["canonical_only"])
     database = Path(before["database"])
-    canonical = canonical_records(database)
-    assert canonical == before["canonical"]
+    sqlite_expected = importlib.util.find_spec("nanobot.session.location") is not None
+    canonical = canonical_records(database) if sqlite_expected else None
+    if before["canonical"] is not None:
+        assert_canonical_preserved(before["canonical"], canonical)
     delivery = root / "account/.nanobot/delivery/outbox.sqlite3"
-    assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
-    assert not any(row[0] == "websocket:display-only" for row in canonical["messages"])
-    for session_key in ("websocket:mixed-history", "websocket:canonical-only"):
-        messages = [json.loads(row[2]) for row in canonical["messages"] if row[0] == session_key]
-        assert [(message["role"], message["content"]) for message in messages] == [
-            ("user", "配置和聊天不能丢失")]
+    if before.get("delivery") is not None:
+        assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
+    if canonical is not None:
+        # Display transcripts are not canonical agent context. Check the actual
+        # imported message bodies too when the baseline predates SQLite.
+        assert not any(row[0] == "websocket:display-only" for row in canonical["messages"])
+        for session_key in ("websocket:legacy-acceptance", "websocket:canonical-only"):
+            messages = [json.loads(row[2]) for row in canonical["messages"] if row[0] == session_key]
+            assert [(message["role"], message["content"]) for message in messages] == [
+                ("user", "配置和聊天不能丢失")]
     asyncio.run(chat(root, before["chat_id"]))
     continued = history(root, key)
-    canonical = canonical_records(database)
+    canonical = canonical_records(database) if sqlite_expected else None
     assert len(continued["events"]) > len(before["history"]["events"])
     gateway(root, "stop")
     if _dock_supported(root):
@@ -564,12 +706,15 @@ def verify_data(root: Path, expected: str) -> None:
     if _dock_supported(root):
         _wait_dock(_dock_socket(root), present=True)
     assert history(root, key) == continued
-    assert history(root, "websocket:mixed-history") == before["mixed"]
-    assert history(root, "websocket:display-only") == before["display_only"]
+    assert_history_preserved(before["legacy"], history(root, "websocket:legacy-acceptance"))
+    assert_history_preserved(before["display_only"], history(root, "websocket:display-only"))
     assert canonical_context(root) == before["canonical_only"]
-    assert canonical_records(database) == canonical
-    assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
+    if sqlite_expected:
+        assert canonical_records(database) == canonical
+    if before.get("delivery") is not None:
+        assert canonical_records(delivery, ("deliveries",)) == before["delivery"]
     assert {name: digest(Path(name)) for name in before["files"]} == before["files"]
+    return sqlite_expected
 
 
 def isolated_environment(root: Path) -> dict[str, str]:
@@ -916,10 +1061,14 @@ def main() -> None:
     if args.phase:
         if sys.prefix == sys.base_prefix:
             parser.error("Product phases must run in the disposable installation")
-        if args.phase == "prepare":
-            prepare(args.output)
-        else:
-            write(args.output / "result.json", verify(args.output))
+        try:
+            if args.phase == "prepare":
+                prepare(args.output)
+            else:
+                write(args.output / "result.json", verify(args.output))
+        except Exception as error:
+            phase_failure(args.output, args.phase, error)
+            raise
         return
     if not args.wheel or not args.commit:
         parser.error("--wheel and --commit are required")

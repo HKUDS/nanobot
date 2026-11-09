@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CalendarClock, ListFilter } from "lucide-react";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { Button } from "@/components/ui/button";
@@ -34,19 +35,21 @@ export function MobileChatLayoutFixture({ parameters }: { parameters: URLSearchP
         sessionInfoAction={<Button variant="ghost" size="icon" aria-label="Session details"><CalendarClock className="h-3.5 w-3.5" /></Button>}
         promptNavigatorAction={<Button variant="ghost" size="icon" aria-label="Conversation navigation"><ListFilter className="h-3.5 w-3.5" /></Button>}
       />
-      <ThreadViewport messages={messages} isStreaming={false} conversationReady conversationKey="websocket:mobile-layout-preview"
-        hasMoreBefore={false} showScrollToBottomButton
-        composer={<ThreadComposer variant="thread" onSend={() => {}}
-          modelLabel="6.1-max" modelProvider="openai-codex" onTranscribeAudio={async () => ""}
-          contextUsage={parameters.has("no-context") ? null : { contextTokens: 44_000, contextWindowTokens: 200_000 }}
-          workspaceScope={scope} workspaceDefaultScope={initialScope} workspaceControls={catalog.controls}
-          workspaceProjectLocked={!parameters.has("project")}
-          onWorkspaceScopeChange={setScope} onLoadWorkspaceProjects={async () => catalog}
-          onResolveWorkspaceProject={async path => ({ path, name: "nanobot" })}
-          onFavoriteWorkspaceProject={async () => []}
-          onBrowseWorkspaceDirectories={async path => ({ path, parent: null, entries: [], truncated: false, host: "preview", platform: "Linux" })}
+      <ComposerUsagePopover context={parameters.has("no-context") ? null : { contextTokens: 44_000, contextWindowTokens: 200_000 }} rounds={[]}>
+        {(renderContextUsage) => <ThreadViewport messages={messages} isStreaming={false} conversationReady conversationKey="websocket:mobile-layout-preview"
+          hasMoreBefore={false} showScrollToBottomButton
+          composer={<ThreadComposer variant="thread" onSend={() => {}}
+            modelLabel="6.1-max" modelProvider="openai-codex" onTranscribeAudio={async () => ""}
+            renderContextUsage={renderContextUsage}
+            workspaceScope={scope} workspaceDefaultScope={initialScope} workspaceControls={catalog.controls}
+            workspaceProjectLocked={!parameters.has("project")}
+            onWorkspaceScopeChange={setScope} onLoadWorkspaceProjects={async () => catalog}
+            onResolveWorkspaceProject={async path => ({ path, name: "nanobot" })}
+            onFavoriteWorkspaceProject={async () => []}
+            onBrowseWorkspaceDirectories={async path => ({ path, parent: null, entries: [], truncated: false, host: "preview", platform: "Linux" })}
+          />}
         />}
-      />
+      </ComposerUsagePopover>
     </main>
   );
 }

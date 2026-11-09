@@ -93,6 +93,7 @@ async def test_dispatch_cancellation_restores_checkpoint():
     )
 
     loop.sessions.get_or_create = MagicMock(return_value=session)
+    loop.sessions.state.read = AsyncMock(return_value=session)
     loop.sessions.save = MagicMock()
 
     async def _cancel(*_args, **_kwargs):

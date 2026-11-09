@@ -147,11 +147,13 @@ async def test_only_repeat_reads_scan_model_results_once_per_batch(tmp_path, ope
     if operation == "repeat_batch":
         calls.append(ToolCallRequest(id="batch-2", name=name, arguments=arguments))
 
-    results, _ = await execute_tool_calls(
+    settled = []
+    await execute_tool_calls(
         tools, calls, concurrent=True, external_lookup_counts={}, workspace_violation_counts={},
         hook=AgentHook(), context=AgentHookContext(iteration=0, messages=[]),
-        model_messages=messages,
+        model_messages=messages, on_settled=AsyncMock(side_effect=settled.extend),
     )
+    results = [completed.result for completed in settled]
 
     if operation == "repeat_batch":
         assert results == ["[File unchanged since last read: data.txt]"] * 2
@@ -176,18 +178,20 @@ async def test_failed_file_read_restores_context(tmp_path, monkeypatch, error):
         raise error("read interrupted")
 
     monkeypatch.setattr(tool, "execute", fail)
+    settled = []
     request = execute_tool_calls(
         tools, [ToolCallRequest(id="failed-read", name="read_file", arguments={"path": "data.txt"})],
         concurrent=False, external_lookup_counts={}, workspace_violation_counts={},
         hook=AgentHook(), context=AgentHookContext(iteration=0, messages=[]),
-        model_messages=first.messages,
+        model_messages=first.messages, on_settled=AsyncMock(side_effect=settled.extend),
     )
     if error is asyncio.CancelledError:
         with pytest.raises(asyncio.CancelledError):
             await request
     else:
-        results, _ = await request
-        assert results[0].startswith("Error: RuntimeError: read interrupted")
+        await request
+        [completed] = settled
+        assert completed.result.startswith("Error: RuntimeError: read interrupted")
 
     monkeypatch.setattr(tool, "execute", original_execute)
     assert await tools.execute("read_file", {"path": "data.txt"}) == contents

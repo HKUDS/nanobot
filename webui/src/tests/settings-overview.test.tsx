@@ -241,6 +241,26 @@ describe("Settings overview and appearance", () => {
     expect(readLocalPreferences().customReadingTextSize).toBe(22);
   });
 
+  it("keeps an invalid Enter edit focused until corrected or cancelled", async () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom" });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "40" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Your text remains at 18 px.");
+    expect(readLocalPreferences().customReadingTextSize).toBe(18);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveValue(18);
+    expect(input).not.toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(input, { target: { value: "22" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).not.toHaveFocus();
+    expect(readLocalPreferences().customReadingTextSize).toBe(22);
+  });
+
   it.each(["", "40"])("restores the saved custom size after another tab interrupts draft %j", async (draft) => {
     writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom", customReadingTextSize: 24 });
     renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });

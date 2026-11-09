@@ -477,6 +477,65 @@
       "password": "密码",
       "proxyReferenceAuth": "请在引用的代理 URL 中设置认证信息。"
     },
+    "sandbox": {
+      "title": "命令沙箱",
+      "method": "隔离方式",
+      "off": "不隔离",
+      "status": "已保存配置",
+      "check": "检测沙箱",
+      "checking": "检测中…",
+      "scope": "仅使用临时文件检测已保存的启动器，不代表完整安全审计。保存后需重启网关，命令执行才会使用新配置。",
+      "path": "可信启动器路径",
+      "launcher": "沙箱启动器",
+      "pathHelp": "通常留空，由系统自动查找 {{launcher}}。特殊安装请向安装包维护者索取启动器的完整路径。文件及上级目录须归 root 所有、不可被组或其他用户写入，且不在 Agent 可写范围内。",
+      "automatic": "系统自动查找",
+      "checkError": "检测未完成，请重新打开设置后重试。",
+      "saveError": "保存失败，草稿已保留，请重试。",
+      "disableTitle": "关闭命令隔离？",
+      "disableHelp": "重启后，命令将以网关账号的权限直接运行。文件工具也会失去此沙箱附带的目录限制；单独设置的目录限制仍然保留。",
+      "keep": "保留隔离",
+      "disable": "关闭隔离",
+      "notice": {
+        "title": "命令暂时不可用",
+        "missing": "网关未找到 {{launcher}}。已安装请填写完整路径；未安装请联系安装包维护者或管理员。聊天仍可继续。",
+        "path": "网关无法使用配置的 {{launcher}} 路径。请检查完整路径和访问权限。",
+        "permissions": "{{launcher}} 所在位置不符合安全要求。请联系安装包维护者或管理员。",
+        "startup": "{{launcher}} 未能启动。请检查网关的安装和系统限制。",
+        "configurePath": "配置 {{launcher}} 路径",
+        "openSettings": "打开沙箱设置"
+      },
+      "states": {
+        "disabled": "命令已停用",
+        "off": "未隔离",
+        "unsupported": "系统不支持",
+        "unchecked": "尚未检测",
+        "unavailable": "不可用",
+        "passed": "基础检测通过",
+        "checking": "检测中…"
+      },
+      "help": {
+        "disabled": "启用命令执行后可使用沙箱。",
+        "off": "命令未隔离，可选择隔离方式保护宿主机。",
+        "unsupported": "网关所在系统不支持此隔离方式。",
+        "unchecked": "点击检测沙箱，验证已保存的配置。",
+        "unsaved": "请先保存配置，再检测沙箱。",
+        "unavailable": "沙箱无法启动，命令不会在此沙箱中执行。",
+        "passed": "启动器可运行，临时工作区可写，外部测试文件访问已被阻止。",
+        "checking": "正在进行有时间限制的沙箱测试…"
+      },
+      "reasons": {
+        "launcher_missing": "网关未找到 {{launcher}}。已安装请在下方填写完整路径；未安装请联系安装包维护者或管理员。",
+        "path_not_absolute": "请填写绝对路径，而不是命令名称。",
+        "not_executable": "该路径必须指向可执行文件。",
+        "agent_writable": "启动器位于 Agent 可写范围，请联系安装包维护者提供受保护的安装位置。",
+        "unprotected_installation": "启动器或上级目录可被非 root 用户写入，请联系管理员调整安装位置。",
+        "path_unavailable": "无法读取路径，请确认文件在网关上存在且可访问。",
+        "platform_unsupported": "请选择网关所在系统支持的隔离方式。",
+        "probe_failed": "隔离测试失败，请检查启动器安装、内核命名空间支持和额外挂载。",
+        "probe_timeout": "检测超时，请检查启动器安装和宿主机限制后重试。",
+        "unknown": "启动器不可用，请检查安装和访问权限。"
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "已保存，重启 API 服务后生效。",
       "commandRuntime": {
@@ -1820,6 +1879,10 @@
       "marketplaceNpxRequired": "请先安装包含 npx 的 Node.js",
       "marketplaceInstalling": "正在安装",
       "marketplaceInstalled": "已安装",
+      "marketplaceNameConflict": "技能名称已占用",
+      "marketplaceOriginUnknown": "已装技能来源未知",
+      "marketplaceConflictHelp": "请先在“已安装”中检查同名技能；如需更换来源，再移除原技能。",
+      "marketplaceInstallConflict": "安装冲突。请等待当前安装完成，再到“已安装”中检查同名技能。",
       "marketplaceInstall": "安装",
       "marketplaceNoTrend": "暂无趋势",
       "marketplaceTrendLabel": "近 8 周安装趋势",
@@ -2064,8 +2127,6 @@
       "sessionInfo": "会话详情"
     },
     "sessionInfo": {
-      "title": "会话",
-      "untitled": "未命名话题",
       "automations": "自动任务",
       "count": "{{count}}",
       "loading": "正在加载自动任务...",
@@ -2090,8 +2151,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "输入消息…",
-      "placeholderHero": "描述你想做的事",
+      "placeholder": "输入 / 查看命令，@ 引用会话或应用，$ 选择技能",
+      "placeholderCompact": "输入消息…",
       "placeholderOpening": "正在打开新话题…",
       "inputAria": "消息输入框",
       "goalStateStrip": "目标：{{label}}",
@@ -2117,15 +2178,21 @@
       "reauthFallback": "本次已由备用模型继续回复。",
       "reauthSettings": "打开模型设置",
       "context": {
+          "loaded": "已加载",
+          "unloaded": "未加载",
+          "expand": "展开上下文面板",
+          "collapse": "收起上下文面板",
+          "noFiles": "暂无上下文记录",
+          "estimatedNodeTokens": "约 {{value}} tokens",
+          "openFile": "打开文件",
+          "history": "上下文历史",
+          "playHistory": "播放上下文演变",
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "打开上下文用量",
         "panelTitle": "上下文用量",
         "contextTitle": "上下文",
-        "recentRounds": "最近轮次",
-        "inputTrend": "输入 Token",
-        "input": "输入 Token",
-        "cacheHitRate": "KV Cache 命中率",
-        "output": "输出 Token",
+        "cacheHitRate": "缓存命中率",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "生成耗时"
       },
       "queued": {
@@ -2534,8 +2601,7 @@
     "fileEditDiffTruncated": "仅显示部分差异，打开文件可查看完整内容。",
     "usage": {
       "context": "当前上下文：{{tokens}}{{capacity}}",
-      "requests": "本轮 {{count}} 次模型调用",
-      "estimated": "包含估算用量"
+      "requests": "本轮 {{count}} 次模型调用"
     }
   },
   "recovery": {

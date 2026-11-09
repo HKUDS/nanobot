@@ -7,9 +7,17 @@ import pytest
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.cli_apps import CliAppsTool
+from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
 from nanobot.agent.tools.filesystem import FileToolsConfig
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
+from nanobot.context_sources import (
+    PromptSource,
+    capture_sources,
+    record_source,
+    system_source_scope,
+)
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.security.workspace_access import build_workspace_scope
@@ -89,6 +97,50 @@ def test_subagent_respects_file_tool_toggle(tmp_path):
     assert file_tools.isdisjoint(tools.tool_names)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project_scoped", [False, True])
+async def test_subagent_respects_disabled_cli_apps_in_model_tools(tmp_path, project_scoped, monkeypatch):
+    monkeypatch.setattr("nanobot.apps.cli.service.get_runtime_subdir", lambda name: tmp_path / name)
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
+        tools_config=ToolsConfig(cli_apps=CliAppsToolConfig(enable=False)),
+    )
+    scope = build_workspace_scope(tmp_path, "restricted") if project_scoped else None
+
+    result = await manager.run_inline(
+        task="inspect the workspace",
+        session_key="test:direct",
+        runtime=_runtime(provider),
+        workspace_scope=scope,
+    )
+
+    assert result == "done"
+    definitions = provider.chat_stream_with_retry.await_args.kwargs["tools"]
+    tool_names = {definition["function"]["name"] for definition in definitions}
+    assert "read_file" in tool_names
+    assert "run_cli_app" not in tool_names
+
+
+def test_subagent_inherits_cli_app_runtime_settings(tmp_path):
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
+        tools_config=ToolsConfig(cli_apps=CliAppsToolConfig(run_timeout=17)),
+    )
+
+    tool = manager._build_tools().get("run_cli_app")
+
+    assert isinstance(tool, CliAppsTool)
+    assert tool.runtime.run_timeout == 17
+
+
 def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
     agent_workspace = tmp_path / "agent"
     project = tmp_path / "project"
@@ -166,6 +218,8 @@ async def test_subagent_keeps_project_runtime_scope_with_agent_owned_tools(tmp_p
     spec = manager.runner.run.call_args.args[0]
     assert spec.workspace == project
     assert spec.tools.get("read_file")._workspace == agent_workspace.resolve()
+    assert spec.tools.get("read_file")._restrict_to_workspace is True
+    assert manager.tools_config.restrict_to_workspace is False
 
 
 @pytest.mark.asyncio
@@ -249,11 +303,17 @@ async def test_subagent_pressure_uses_transient_summary(tmp_path):
         context_window_tokens=1_624,
     )
 
-    result = await manager.run_inline(
-        task="inspect the workspace",
-        session_key="test:direct",
-        runtime=runtime,
-    )
+    with capture_sources() as parent_sources:
+        with system_source_scope():
+            record_source(tmp_path / "SOUL.md", "parent prompt")
+        result = await manager.run_inline(
+            task="inspect the workspace",
+            session_key="test:direct",
+            runtime=runtime,
+        )
+        captured = parent_sources.drain()
+        assert captured.sources == ()
+        assert captured.system_sources == (PromptSource(tmp_path / "SOUL.md", "parent prompt"),)
 
     assert result == "done"
     consolidator.summarize_transcript.assert_awaited_once()

@@ -477,6 +477,65 @@
       "password": "비밀번호",
       "proxyReferenceAuth": "참조된 프록시 URL에서 인증 정보를 설정하세요."
     },
+    "sandbox": {
+      "title": "명령 샌드박스",
+      "method": "격리 방식",
+      "off": "격리 안 함",
+      "status": "저장된 설정",
+      "check": "샌드박스 확인",
+      "checking": "확인 중…",
+      "scope": "임시 파일만 사용해 저장된 실행기를 확인합니다. 전체 보안 감사가 아닙니다. 명령 실행에 저장된 설정을 적용하려면 게이트웨이를 다시 시작하세요.",
+      "path": "신뢰할 실행기 경로",
+      "launcher": "샌드박스 실행기",
+      "pathHelp": "보통은 비워 두고 시스템에서 {{launcher}}을(를) 찾도록 합니다. 사용자 지정 설치는 패키지 관리자에게 실행기의 전체 경로를 문의하세요. 파일과 상위 폴더는 root 소유여야 하며 그룹·다른 사용자가 쓸 수 없고 Agent 쓰기 범위 밖이어야 합니다.",
+      "automatic": "시스템에서 찾기",
+      "checkError": "확인하지 못했습니다. 설정을 다시 열고 재시도하세요.",
+      "saveError": "저장하지 못했습니다. 초안을 유지했습니다. 다시 시도하세요.",
+      "disableTitle": "명령 격리를 끌까요?",
+      "disableHelp": "다시 시작하면 게이트웨이 계정 권한으로 명령을 실행합니다. 파일 도구도 이 샌드박스가 제공한 작업 영역 제한을 잃습니다. 별도로 설정한 제한은 유지됩니다.",
+      "keep": "격리 유지",
+      "disable": "격리 끄기",
+      "notice": {
+        "title": "명령 설정을 확인해 주세요",
+        "missing": "게이트웨이에서 {{launcher}}을(를) 찾지 못했습니다. 설치되어 있다면 전체 경로를 설정하세요. 없다면 패키지 관리자에게 문의하세요. 채팅은 계속할 수 있습니다.",
+        "path": "게이트웨이에서 설정된 {{launcher}} 경로를 사용할 수 없습니다. 전체 경로와 접근 권한을 확인하세요.",
+        "permissions": "{{launcher}}이(가) 보호된 위치에 없습니다. 패키지 관리자에게 문의하세요.",
+        "startup": "{{launcher}}을(를) 시작하지 못했습니다. 게이트웨이 설치 상태와 시스템 제한을 확인하세요.",
+        "configurePath": "{{launcher}} 경로 설정",
+        "openSettings": "샌드박스 설정 열기"
+      },
+      "states": {
+        "disabled": "명령 비활성화",
+        "off": "격리 꺼짐",
+        "unsupported": "지원되지 않음",
+        "unchecked": "확인 전",
+        "unavailable": "사용 불가",
+        "passed": "기본 확인 통과",
+        "checking": "확인 중…"
+      },
+      "help": {
+        "disabled": "명령을 활성화하면 샌드박스를 사용할 수 있습니다.",
+        "off": "명령이 격리되지 않습니다. 호스트를 보호할 격리 방식을 선택하세요.",
+        "unsupported": "게이트웨이 운영체제가 이 격리 방식을 지원하지 않습니다.",
+        "unchecked": "저장된 샌드박스 설정을 확인하세요.",
+        "unsaved": "설정을 저장한 뒤 확인하세요.",
+        "unavailable": "샌드박스를 시작할 수 없습니다. 이 샌드박스에서는 명령을 실행하지 않습니다.",
+        "passed": "실행기 시작, 임시 작업 영역 쓰기 및 외부 테스트 파일 차단을 확인했습니다.",
+        "checking": "시간 제한이 있는 샌드박스 테스트 중…"
+      },
+      "reasons": {
+        "launcher_missing": "게이트웨이에서 {{launcher}}을(를) 찾지 못했습니다. 설치되어 있다면 아래에 전체 경로를 입력하세요. 없다면 패키지 관리자에게 문의하세요.",
+        "path_not_absolute": "명령 이름이 아닌 절대 경로를 입력하세요.",
+        "not_executable": "실행 파일을 가리키는 경로여야 합니다.",
+        "agent_writable": "Agent가 쓸 수 있는 경로입니다. 패키지 관리자에게 보호된 설치 위치를 요청하세요.",
+        "unprotected_installation": "실행기 또는 상위 폴더에 root 외 사용자가 쓸 수 있습니다. 관리자에게 보호된 설치를 요청하세요.",
+        "path_unavailable": "경로를 읽을 수 없습니다. 게이트웨이의 파일과 접근 권한을 확인하세요.",
+        "platform_unsupported": "게이트웨이 운영체제가 지원하는 격리 방식을 선택하세요.",
+        "probe_failed": "격리 테스트 실패. 설치, 커널 네임스페이스 지원 및 추가 마운트를 확인하세요.",
+        "probe_timeout": "확인 시간 초과. 설치와 호스트 제한을 확인하고 다시 시도하세요.",
+        "unknown": "실행기를 사용할 수 없습니다. 설치와 접근 권한을 확인하세요."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "저장했습니다. API 서비스를 다시 시작하면 적용됩니다.",
       "commandRuntime": {
@@ -1614,6 +1673,10 @@
       "marketplaceNpxRequired": "npx가 포함된 Node.js가 필요합니다",
       "marketplaceInstalling": "설치 중",
       "marketplaceInstalled": "설치됨",
+      "marketplaceNameConflict": "같은 이름의 스킬이 있음",
+      "marketplaceOriginUnknown": "설치 출처를 알 수 없음",
+      "marketplaceConflictHelp": "출처를 바꾸려면 먼저 설치됨에서 같은 이름의 스킬을 확인한 후 삭제하세요.",
+      "marketplaceInstallConflict": "설치가 충돌합니다. 진행 중인 설치가 끝나면 설치됨에서 같은 이름의 스킬을 확인하세요.",
       "marketplaceInstall": "설치",
       "marketplaceNoTrend": "추세 없음",
       "marketplaceTrendLabel": "8주 설치 추이",
@@ -1858,8 +1921,6 @@
       "sessionInfo": "세션 세부 정보"
     },
     "sessionInfo": {
-      "title": "세션",
-      "untitled": "제목 없는 주제",
       "automations": "자동화",
       "count": "{{count}}",
       "loading": "자동화를 불러오는 중...",
@@ -1884,8 +1945,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "메시지를 입력하세요…",
-      "placeholderHero": "하고 싶은 일을 알려 주세요",
+      "placeholder": "/로 명령어 보기, @로 대화나 앱 선택, $로 스킬 선택",
+      "placeholderCompact": "메시지 입력…",
       "placeholderOpening": "새 주제를 여는 중…",
       "inputAria": "메시지 입력",
       "goalStateStrip": "목표: {{label}}",
@@ -1912,15 +1973,21 @@
       "reauthFallback": "이번 응답은 대체 모델이 처리했습니다.",
       "reauthSettings": "모델 설정 열기",
       "context": {
+          "loaded": "불러옴",
+          "unloaded": "불러오지 않음",
+          "expand": "컨텍스트 확대",
+          "collapse": "컨텍스트 축소",
+          "noFiles": "아직 기록된 컨텍스트가 없습니다",
+          "estimatedNodeTokens": "약 {{value}} 토큰",
+          "openFile": "파일 열기",
+          "history": "컨텍스트 기록",
+          "playHistory": "컨텍스트 기록 재생",
         "tooltip": "컨텍스트 {{percent}}%",
         "detailsLabel": "컨텍스트 사용량 열기",
         "panelTitle": "컨텍스트 사용량",
         "contextTitle": "컨텍스트",
-        "recentRounds": "최근 라운드",
-        "inputTrend": "입력 토큰",
-        "input": "입력 토큰",
-        "cacheHitRate": "KV 캐시 적중률",
-        "output": "출력 토큰",
+        "cacheHitRate": "캐시 적중률",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "생성 시간"
       },
       "queued": {
@@ -2148,8 +2215,7 @@
     "fileEditDiffTruncated": "변경 사항의 일부만 표시됩니다. 전체 내용은 파일을 열어 확인하세요.",
     "usage": {
       "context": "최근 컨텍스트: {{tokens}}{{capacity}} 토큰",
-      "requests": "모델 요청 {{count}}회",
-      "estimated": "예상 사용량 포함"
+      "requests": "모델 요청 {{count}}회"
     },
     "activityThinkingFor": "{{duration}} 동안 생각 중",
     "activityThought": "생각함",

@@ -33,6 +33,7 @@ import { useRuntimeConfigSettings } from "@/components/settings/system/RuntimeCo
 import { createSystemSettingsActions } from "@/components/settings/system/createSystemSettingsActions";
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
+import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
@@ -113,7 +114,7 @@ export function useSettingsController({
   } = capabilityState;
   const draftsRef = useRef({ form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm });
   draftsRef.current = { form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm };
-  const systemState = useSystemSettingsState();
+  const systemState = useSystemSettingsState(getToolsCatalog(client, token));
   const featureCatalog = systemState.nanobotFeatures?.features ?? [];
 
   useEffect(() => {

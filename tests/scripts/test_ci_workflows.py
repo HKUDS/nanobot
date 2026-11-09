@@ -46,7 +46,7 @@ def test_accepted_handoff_uses_the_producer_id_and_requires_native_success():
     jobs = workflow("release-candidate.yml")["jobs"]
     assert jobs["candidate"]["outputs"]["prepared_artifact_id"] == "${{ steps.prepared.outputs.artifact-id }}"
     verified = jobs["verified"]
-    assert set(verified["needs"]) == {"candidate", "native"}
+    assert set(verified["needs"]) == {"plan", "candidate", "native"}
     gate = verified["steps"][0]
     assert gate["env"]["NATIVE_RESULT"] == "${{ needs.native.result }}"
     assert gate["run"] == 'test "$BUILD_RESULT" = success && test "$NATIVE_RESULT" = success'
@@ -69,7 +69,18 @@ def test_windows_installer_matrix_has_an_independent_required_job():
     assert "native_required" in installer["if"] and "python_required" in installer["if"]
     assert "github.event_name != 'push'" in installer["if"]
     commands = [step.get("run", "") for step in installer["steps"]]
-    assert any("tests/test_install_scripts.py" in command and "-n 4" in command for command in commands)
+    assert any("tests/test_install_scripts.py" in command and "-n 2" in command for command in commands)
     assert not any("tests/test_install_scripts.py" in step.get("run", "")
                    for step in jobs["windows_process"]["steps"])
     assert "windows_installers" in jobs["required"]["needs"]
+
+
+def test_windows_gateway_stop_checks_run_serially_without_losing_coverage():
+    job = workflow("ci.yml")["jobs"]["test"]
+    path = "tests/test_update_stop.py"
+    for item in job["strategy"]["matrix"]["include"]:
+        assert (f"--ignore={path}" in item["pytest_args"]) == (item["os"] == "windows-latest")
+    steps = [step for step in job["steps"] if path in step.get("run", "").split()]
+    assert len(steps) == 1
+    assert steps[0]["if"] == "runner.os == 'Windows'"
+    assert "-n" not in steps[0]["run"].split()

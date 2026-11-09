@@ -28,7 +28,6 @@ function fakeClient() {
     onRunCompletion: () => () => {},
     onError: () => () => {},
     onChat: () => () => {},
-    getRunStartedAt: () => null,
     onSessionUpdate: (handler: (chatId: string, scope?: string) => void) => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
@@ -939,6 +938,7 @@ describe("useSessions", () => {
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.messages[0]?.id).toBe("selected-user");
+    expect(result.current.messagesKey).toBe("websocket:selected");
     expect(result.current.hasMoreBefore).toBe(true);
     expect(result.current.userMessageOffset).toBe(4);
     expect(result.current.hasPendingToolCalls).toBe(true);
@@ -948,6 +948,7 @@ describe("useSessions", () => {
     rerender({ sessionKey: null });
 
     expect(result.current.messages).toEqual([]);
+    expect(result.current.messagesKey).toBeNull();
     expect(result.current.loading).toBe(false);
     expect(result.current.hasMoreBefore).toBe(false);
     expect(result.current.userMessageOffset).toBe(0);

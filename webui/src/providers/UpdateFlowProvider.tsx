@@ -100,6 +100,7 @@ export function UpdateFlowProvider({ client, token, enabled, canSettleHandoff = 
     };
     const refresh = async (manual = false) => {
       const feedback = manual ? new Promise(resolve => setTimeout(resolve, 600)) : Promise.resolve();
+      let readingReview = false;
       try {
         // API tokens belong to a gateway process. Let the client's authenticated
         // reconnect replace them before reading the new process's update journal.
@@ -116,9 +117,11 @@ export function UpdateFlowProvider({ client, token, enabled, canSettleHandoff = 
           setRecovery(next.recovery_command);
           try { sessionStorage.setItem(RECOVERY_KEY, JSON.stringify({ id: next.id, command: next.recovery_command, automatic: next.automatic_recovery === true })); } catch { /* Still available until reload. */ }
         }
-        setOffline(false);
-        setDelayed(false);
-        missingSince = 0;
+        if (next.recorded_phase !== "ready" || next.execution_confirmation_id) {
+          setOffline(false);
+          setDelayed(false);
+          missingSince = 0;
+        }
         setError("");
         if (next.recorded_phase === "ready" && approved.current === next.id) {
           await execute(next.id);
@@ -129,10 +132,14 @@ export function UpdateFlowProvider({ client, token, enabled, canSettleHandoff = 
           && !(next.service_restored && next.running_version !== next.previous_version)) return;
         // A refresh can recover files already staged, but not installation consent.
         if (next.recorded_phase === "ready" && !next.execution_confirmation_id) {
-          try {
-            const restored = await readUpdateReview(token, next.id);
-            if (active) setReview(restored);
-          } catch { if (active) setError(t("updates.reviewFailed")); }
+          readingReview = true;
+          const restored = await readUpdateReview(token, next.id);
+          if (active) {
+            setReview(restored);
+            setOffline(false);
+            setDelayed(false);
+            missingSince = 0;
+          }
         }
       } catch (reason) {
         if (!active) return;
@@ -142,9 +149,10 @@ export function UpdateFlowProvider({ client, token, enabled, canSettleHandoff = 
           approved.current = null;
           setOffline(false);
           setDelayed(false);
-          setError(t("updates.statusFailed"));
+          setError(t(readingReview ? "updates.reviewFailed" : "updates.statusFailed"));
           return;
         }
+        if (readingReview) setError(t("updates.reviewFailed"));
         reconnecting();
       } finally {
         if (manual) {

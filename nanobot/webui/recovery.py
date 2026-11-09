@@ -83,6 +83,9 @@ class RecoveryCoordinator:
 
     async def scan(self) -> None:
         """Recover every interrupted WebUI session once at gateway startup."""
+        from nanobot.webui.history import initialize_history
+
+        await initialize_history(self.sessions)
         for key in await self._recovery_candidates():
             metadata_payload = await self.sessions.state.read_metadata(key)
             raw_metadata = metadata_payload.get("metadata") if metadata_payload else None
@@ -143,6 +146,12 @@ class RecoveryCoordinator:
         state = recovery_state_from_metadata(session.metadata)
         if state and state["status"] in {"resuming", "awaiting_user", "failed"}:
             await self._cancel_active_recovery(message.session_key)
+            # Cancellation may have committed the checkpoint or completed the
+            # recovery. Classify a fresh owner draft after that handoff.
+            session = await self.sessions.state.get(message.session_key)
+            state = recovery_state_from_metadata(session.metadata)
+            if not state or state["status"] not in {"resuming", "awaiting_user", "failed"}:
+                return True
             if state.get("reason") != "model_request_failed":
                 restore_runtime_checkpoint(session)
                 if not restore_pending_interruption(session, superseded=True):

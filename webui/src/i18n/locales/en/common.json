@@ -477,6 +477,65 @@
       "password": "Password",
       "proxyReferenceAuth": "Set authentication in the referenced proxy URL."
     },
+    "sandbox": {
+      "title": "Command sandbox",
+      "method": "Isolation method",
+      "off": "No isolation",
+      "status": "Saved configuration",
+      "check": "Check sandbox",
+      "checking": "Checking…",
+      "scope": "Checks the saved launcher with temporary test files only. This is not a full security audit. Restart the gateway to apply saved changes to command execution.",
+      "path": "Trusted launcher path",
+      "launcher": "sandbox launcher",
+      "pathHelp": "Usually leave this blank for system lookup of {{launcher}}. For a custom installation, ask the package maintainer for the full launcher path. The file and its parent directories must be root-owned and not group- or world-writable, and outside writable agent paths.",
+      "automatic": "System lookup",
+      "checkError": "Could not complete the check. Reopen settings and try again.",
+      "saveError": "Could not save. Keep your draft and try again.",
+      "disableTitle": "Turn off command isolation?",
+      "disableHelp": "After restart, commands run with the gateway account’s permissions. File tools also lose the workspace restriction supplied by this sandbox; independently configured restrictions still apply.",
+      "keep": "Keep isolation",
+      "disable": "Turn off isolation",
+      "notice": {
+        "title": "Commands need attention",
+        "missing": "The gateway could not find {{launcher}}. If installed, set its full path. Otherwise, contact the package maintainer or administrator. You can keep chatting.",
+        "path": "The gateway cannot use the configured {{launcher}} path. Check its full path and access permissions.",
+        "permissions": "{{launcher}} is not in a protected location. Contact the package maintainer or administrator.",
+        "startup": "{{launcher}} could not start. Check the gateway installation and system restrictions.",
+        "configurePath": "Configure {{launcher}} path",
+        "openSettings": "Open sandbox settings"
+      },
+      "states": {
+        "disabled": "Commands disabled",
+        "off": "Isolation off",
+        "unsupported": "Not supported",
+        "unchecked": "Not checked",
+        "unavailable": "Unavailable",
+        "passed": "Basic check passed",
+        "checking": "Checking…"
+      },
+      "help": {
+        "disabled": "Enable commands to use a sandbox.",
+        "off": "Commands are not isolated. Choose an isolation method to protect the host.",
+        "unsupported": "This isolation method is not supported on the gateway’s operating system.",
+        "unchecked": "Run a check to test the saved sandbox configuration.",
+        "unsaved": "Save changes, then check the sandbox.",
+        "unavailable": "The sandbox cannot start. Commands will not run in this sandbox.",
+        "passed": "The launcher started, temporary workspace writes worked, and the external test file was blocked.",
+        "checking": "Starting a bounded sandbox test…"
+      },
+      "reasons": {
+        "launcher_missing": "{{launcher}} was not found on the gateway. If installed, enter its full path below. Otherwise, contact the package maintainer or administrator.",
+        "path_not_absolute": "Enter an absolute path, not a command name.",
+        "not_executable": "The path must point to an executable file.",
+        "agent_writable": "The launcher is in an agent-writable path. Ask the package maintainer for a protected installation.",
+        "unprotected_installation": "The launcher or a parent directory is writable by a non-root user. Ask the administrator for a protected installation.",
+        "path_unavailable": "Cannot read this path. Check that it exists on the gateway and is accessible.",
+        "platform_unsupported": "Choose the isolation method supported by this gateway’s operating system.",
+        "probe_failed": "The isolation test failed. Check the launcher installation, kernel namespace support and additional mounts.",
+        "probe_timeout": "The check timed out. Check the launcher installation and host restrictions, then try again.",
+        "unknown": "The launcher is unavailable. Check its installation and access permissions."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "Saved. Restart the API service to apply changes.",
       "commandRuntime": {
@@ -1820,6 +1879,10 @@
       "marketplaceNpxRequired": "Node.js with npx is required",
       "marketplaceInstalling": "Installing",
       "marketplaceInstalled": "Installed",
+      "marketplaceNameConflict": "Name already in use",
+      "marketplaceOriginUnknown": "Installed source unknown",
+      "marketplaceConflictHelp": "Review same-name skills in Installed before removing them to use another source.",
+      "marketplaceInstallConflict": "Installation conflict. Wait for any installation to finish, then review same-name skills in Installed.",
       "marketplaceInstall": "Install",
       "marketplaceNoTrend": "No trend yet",
       "marketplaceTrendLabel": "8-week install trend",
@@ -2064,8 +2127,6 @@
       "sessionInfo": "Session details"
     },
     "sessionInfo": {
-      "title": "Session",
-      "untitled": "Untitled topic",
       "automations": "Automations",
       "count": "{{count}}",
       "loading": "Loading automations...",
@@ -2090,8 +2151,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Type your message…",
-      "placeholderHero": "Describe what you’d like to do",
+      "placeholder": "Type / for commands, @ for chats or apps, $ for skills",
+      "placeholderCompact": "Type a message…",
       "placeholderOpening": "Opening a new topic…",
       "inputAria": "Message input",
       "goalStateStrip": "Goal: {{label}}",
@@ -2118,15 +2179,21 @@
       "reauthFallback": "A fallback model handled this response.",
       "reauthSettings": "Open model settings",
       "context": {
+          "loaded": "Loaded",
+          "unloaded": "Not loaded",
+          "expand": "Expand context panel",
+          "collapse": "Collapse context panel",
+          "noFiles": "No context recorded yet",
+          "estimatedNodeTokens": "About {{value}} tokens",
+          "openFile": "Open file",
+          "history": "Context history",
+          "playHistory": "Play context history",
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",
         "panelTitle": "Context usage",
         "contextTitle": "Context",
-        "recentRounds": "Recent rounds",
-        "inputTrend": "Input tokens",
-        "input": "Input tokens",
-        "cacheHitRate": "KV cache hit rate",
-        "output": "Output tokens",
+        "cacheHitRate": "Cache hit rate",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Generation time"
       },
       "queued": {
@@ -2534,8 +2601,7 @@
     "fileEditDiffTruncated": "Diff truncated. Open the file for the full change.",
     "usage": {
       "context": "Context now: {{tokens}}{{capacity}}",
-      "requests": "{{count}} calls this turn",
-      "estimated": "Includes estimated usage"
+      "requests": "{{count}} calls this turn"
     }
   },
   "recovery": {

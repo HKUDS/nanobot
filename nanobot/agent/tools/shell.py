@@ -29,6 +29,7 @@ from nanobot.agent.tools.exec_session import (
     format_session_poll,
 )
 from nanobot.agent.tools.sandbox import wrap_command
+from nanobot.agent.tools.sandbox_launcher import SandboxLauncherError, resolve_sandbox_launcher
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -178,6 +179,7 @@ class ExecTool(Tool):
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             webui_allow_local_service_access=ctx.config.webui_allow_local_service_access,
             sandbox=cfg.sandbox,
+            sandbox_launcher=cfg.sandbox_launcher,
             path_prepend=cfg.path_prepend,
             path_append=cfg.path_append,
             sandbox_ro_binds=cfg.sandbox_ro_binds,
@@ -209,6 +211,7 @@ class ExecTool(Tool):
         max_runtime_limit: int | None = None,
         idle_timeout: int = 300,
         idle_action: Literal["report", "terminate"] = "report",
+        sandbox_launcher: str = "",
     ):
         if timeout is not None and max_runtime is not None:
             raise ValueError("timeout and max_runtime are mutually exclusive")
@@ -220,6 +223,7 @@ class ExecTool(Tool):
         self._exec_config = ExecToolConfig.model_validate(values)
         self.working_dir = working_dir
         self.sandbox = sandbox
+        self.sandbox_launcher = sandbox_launcher
         self.deny_patterns = (deny_patterns or []) + [
             r"\brm\s+-[rf]{1,2}\b",
             r"\bdel\s+/[fq]\b",
@@ -360,7 +364,13 @@ class ExecTool(Tool):
                 result += "\nInitial wait ended; session remains active."
             return ToolResult.error(result) if poll.failed else result
         except Exception as exc:
-            return ToolResult.error(f"Error executing command: {exc}")
+            # Only an OS rejection of the actual launcher is attributable here.
+            # A command's nonzero exit or stderr is not proof of a sandbox fault.
+            code = "sandbox_start_failed" if (
+                isinstance(exc, OSError) and self.sandbox and not _IS_WINDOWS
+                and isinstance(prepared.command, list) and exc.filename == prepared.command[0]
+            ) else None
+            return ToolResult.error(f"Error executing command: {exc}", error_code=code)
 
     def _resolve_timeout(self, timeout: object) -> int | None:
         if timeout is not None:
@@ -429,25 +439,6 @@ class ExecTool(Tool):
             if guard_error:
                 return guard_error
 
-        if self.sandbox:
-            if _IS_WINDOWS:
-                logger.warning(
-                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
-                    self.sandbox,
-                )
-            else:
-                workspace = workspace_root or cwd
-                wrapped = wrap_command(
-                    self.sandbox,
-                    shlex.join(command) if isinstance(command, list) else command,
-                    workspace,
-                    cwd,
-                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
-                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
-                )
-                command = shlex.split(wrapped) if isinstance(command, list) else wrapped
-                cwd = str(Path(workspace).resolve())
-
         effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
@@ -463,6 +454,48 @@ class ExecTool(Tool):
         shell_program, shell_error = self._resolve_shell(shell)
         if shell_error:
             return shell_error
+
+        if self.sandbox:
+            if _IS_WINDOWS:
+                logger.warning(
+                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
+                    self.sandbox,
+                )
+            else:
+                # The host launches the sandbox, not a caller-selected shell.
+                # Shell selection, profiles and PATH setup run after confinement.
+                if isinstance(command, list):
+                    payload = shlex.join(command)
+                else:
+                    interpreter = shell_program or shutil.which("bash") or "/bin/bash"
+                    args = [interpreter]
+                    if login and Path(interpreter).name in {"bash", "zsh"}:
+                        args.append("-l")
+                    payload = shlex.join([*args, "-c", command])
+                workspace = workspace_root or cwd
+                command = shlex.split(wrap_command(
+                    self.sandbox,
+                    payload,
+                    workspace,
+                    cwd,
+                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
+                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
+                ))
+                # Project/tool and inherited PATH can contain writable programs.
+                try:
+                    command[0] = resolve_sandbox_launcher(
+                        self.sandbox, self.sandbox_launcher,
+                        writable_roots=(Path(workspace), *self.sandbox_rw_binds),
+                    )
+                except SandboxLauncherError as exc:
+                    if exc.reason == "launcher_missing":
+                        return ToolResult.error(
+                            f"Error: sandbox launcher not found: {command[0]}", error_code="sandbox_launcher_missing",
+                        )
+                    return ToolResult.error(
+                        f"Error: sandbox launcher rejected: {exc.reason}", error_code=f"sandbox_{exc.reason}",
+                    )
+                cwd = str(Path(workspace).resolve())
 
         return _PreparedCommand(
             command=command,

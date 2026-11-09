@@ -6,6 +6,7 @@ import {
 import { persistedCanonicalRunState } from "./canonical-run-snapshot";
 import { copyThreadCheckpoint, createThreadCheckpoint, type ThreadCheckpoint } from "./thread-checkpoint";
 import { hasPendingAgentActivity } from "./activity-timeline";
+import { reconcileModelRequest } from "./model-request";
 import type { ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "./types";
 
 type Ranges = Array<[number, number]>;
@@ -35,7 +36,8 @@ export interface ThreadPaging {
   error: string | null;
   olderError: string | null;
   beforeCursor: string | null;
-  hasMoreBefore: boolean;
+  /** Null until a history read establishes the oldest loaded boundary. */
+  hasMoreBefore: boolean | null;
   userMessageOffset: number;
   forkBoundaryMessageCount: number | null;
   truncated: boolean;
@@ -94,7 +96,7 @@ function copyText(value: TextSource): TextSource {
 }
 function emptyPaging(): ThreadPaging {
   return { loading: false, loadingOlder: false, error: null, olderError: null,
-    beforeCursor: null, hasMoreBefore: false, userMessageOffset: 0,
+    beforeCursor: null, hasMoreBefore: null, userMessageOffset: 0,
     forkBoundaryMessageCount: null, truncated: false, version: 0, lineage: 0,
     hasPendingToolCalls: false, completedTurnIds: [], completionIdsProvided: false, activeTurnId: null };
 }
@@ -159,6 +161,7 @@ export class ThreadTranscript {
   }
 
   get messages(): UIMessage[] { return this.projection.messages; }
+  get modelRequests() { return this.projection.modelRequests; }
 
   private installUnit(unit: Unit): void {
     this.order = Math.max(this.order, unit.order + 1);
@@ -246,6 +249,11 @@ export class ThreadTranscript {
   project(event: ThreadProjectionEvent, options: {
     createId: () => string; now: number; persisted?: boolean; sideChannel?: boolean; startSeq?: number;
   }): UIMessage[] {
+    // Telemetry never contributes body sources, memberships, or admission barriers.
+    if (event.event === "model_request") {
+      this.projection = projectThreadEvent(this.projection, event, options);
+      return this.messages;
+    }
     if (!options.persisted && this.represented(event)) return this.messages;
     if (!event.projection_id && (!event.turn_id || event.turn_seq === undefined)) {
       event = { ...event, projection_id: options.createId() };
@@ -478,15 +486,19 @@ export class ThreadTranscript {
     }
     if (keepSuffix) nextMessages.push(...this.messages.slice(previous)
       .filter((row) => !replaced.has(this.byRow.get(row.id)!)));
+    const modelRequests = new Map(this.modelRequests);
+    for (const [turn, snapshot] of candidate.modelRequests) {
+      modelRequests.set(turn, reconcileModelRequest(modelRequests.get(turn), snapshot));
+    }
     this.projection = fullyAdopt && read.kind !== "older"
-      ? { ...candidate.projection, messages: nextMessages,
+      ? { ...candidate.projection, messages: nextMessages, modelRequests,
           activitySegmentId: candidate.projection.activitySegmentId
             ? segments.get(candidate.projection.activitySegmentId) ?? null : null,
           fileEditSegmentId: candidate.projection.fileEditSegmentId
             ? segments.get(candidate.projection.fileEditSegmentId) ?? null : null,
           closedTurnIds: new Set([...this.projection.closedTurnIds, ...candidate.projection.closedTurnIds]),
           closedAnswerStreamIds: new Set([...this.projection.closedAnswerStreamIds, ...candidate.projection.closedAnswerStreamIds]) }
-      : { ...this.projection, messages: nextMessages };
+      : { ...this.projection, messages: nextMessages, modelRequests };
     if (fullyAdopt && read.kind !== "older") {
       const retained = new Set(prefix.map((row) => row.id));
       for (const unit of this.units) if (!Array.from(unit.rows).some((id) => retained.has(id))) replaced.add(unit);
@@ -559,6 +571,11 @@ export class ThreadTranscript {
       .filter((key) => retainedStreams.has(key)));
     const retainedTurns = new Set(Array.from(this.units).flatMap((unit) => Array.from(unit.members.keys())));
     for (const row of nextMessages) if (row.turnId) retainedTurns.add(row.turnId);
+    for (const [turn, snapshot] of modelRequests) {
+      if (reset && snapshot.ended && !retainedTurns.has(turn) && !candidate.modelRequests.has(turn)) {
+        modelRequests.delete(turn);
+      } else retainedTurns.add(turn);
+    }
     const retainedRows = new Set(nextMessages.map((row) => row.id));
     const retainedBoundaries = new Set(Array.from(this.units).flatMap((unit) => unit.text
       .map((text) => JSON.stringify([text.turn, text.phase, text.stream]))));

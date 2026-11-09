@@ -477,6 +477,65 @@
       "password": "Contraseña",
       "proxyReferenceAuth": "Configura la autenticación en la URL del proxy referenciada."
     },
+    "sandbox": {
+      "title": "Sandbox de comandos",
+      "method": "Método de aislamiento",
+      "off": "Sin aislamiento",
+      "status": "Configuración guardada",
+      "check": "Comprobar sandbox",
+      "checking": "Comprobando…",
+      "scope": "Solo prueba el lanzador guardado con archivos temporales. No es una auditoría de seguridad completa. Reinicia la puerta de enlace para aplicar los cambios a los comandos.",
+      "path": "Ruta del lanzador de confianza",
+      "launcher": "lanzador del entorno aislado",
+      "pathHelp": "Normalmente, déjala vacía para buscar {{launcher}} en el sistema. Para una instalación personalizada, pide la ruta completa del lanzador al responsable del paquete. El archivo y sus directorios padre deben ser de root, sin escritura para grupos u otros usuarios, y estar fuera de las rutas de escritura del agente.",
+      "automatic": "Búsqueda del sistema",
+      "checkError": "No se pudo completar la prueba. Abre los ajustes de nuevo y reinténtalo.",
+      "saveError": "No se pudo guardar. El borrador se conserva; vuelve a intentarlo.",
+      "disableTitle": "¿Desactivar el aislamiento?",
+      "disableHelp": "Tras reiniciar, los comandos usarán los permisos de la cuenta de la puerta de enlace. Las herramientas de archivos también perderán la restricción de espacio de trabajo de este sandbox; las restricciones independientes se mantienen.",
+      "keep": "Mantener aislamiento",
+      "disable": "Desactivar aislamiento",
+      "notice": {
+        "title": "Los comandos requieren atención",
+        "missing": "La pasarela no encuentra {{launcher}}. Si está instalado, indica su ruta completa. Si no, contacta al responsable del paquete o al administrador. Puedes seguir chateando.",
+        "path": "La pasarela no puede usar la ruta configurada de {{launcher}}. Revisa la ruta completa y los permisos de acceso.",
+        "permissions": "{{launcher}} no está en una ubicación protegida. Contacta al responsable del paquete o al administrador.",
+        "startup": "{{launcher}} no pudo iniciarse. Revisa la instalación de la pasarela y las restricciones del sistema.",
+        "configurePath": "Configurar ruta de {{launcher}}",
+        "openSettings": "Abrir ajustes del entorno aislado"
+      },
+      "states": {
+        "disabled": "Comandos desactivados",
+        "off": "Sin aislamiento",
+        "unsupported": "No compatible",
+        "unchecked": "Sin comprobar",
+        "unavailable": "No disponible",
+        "passed": "Prueba básica superada",
+        "checking": "Comprobando…"
+      },
+      "help": {
+        "disabled": "Activa los comandos para usar un sandbox.",
+        "off": "Los comandos no están aislados. Elige un método para proteger el equipo.",
+        "unsupported": "El sistema de la puerta de enlace no admite este método.",
+        "unchecked": "Comprueba la configuración guardada del sandbox.",
+        "unsaved": "Guarda los cambios y comprueba el sandbox.",
+        "unavailable": "El sandbox no puede iniciarse. No se ejecutarán comandos en él.",
+        "passed": "El lanzador arrancó, se pudo escribir en el espacio de trabajo temporal y se bloqueó el archivo externo de prueba.",
+        "checking": "Ejecutando una prueba con tiempo limitado…"
+      },
+      "reasons": {
+        "launcher_missing": "La pasarela no encuentra {{launcher}}. Si está instalado, indica su ruta completa abajo. Si no, contacta al responsable del paquete o al administrador.",
+        "path_not_absolute": "Introduce una ruta absoluta, no un nombre de comando.",
+        "not_executable": "La ruta debe apuntar a un archivo ejecutable.",
+        "agent_writable": "El agente puede escribir en esta ruta. Pide una instalación protegida al responsable del paquete.",
+        "unprotected_installation": "Un usuario distinto de root puede modificar el lanzador o un directorio padre. Pide una instalación protegida al administrador.",
+        "path_unavailable": "No se puede leer la ruta. Comprueba su existencia y permisos en la puerta de enlace.",
+        "platform_unsupported": "Elige un método compatible con el sistema de la puerta de enlace.",
+        "probe_failed": "La prueba falló. Comprueba la instalación, los espacios de nombres del núcleo y los montajes adicionales.",
+        "probe_timeout": "La prueba agotó el tiempo. Comprueba la instalación y las restricciones del equipo y reinténtalo.",
+        "unknown": "Lanzador no disponible. Comprueba su instalación y permisos."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "Guardado. Reinicia el servicio API para aplicar los cambios.",
       "commandRuntime": {
@@ -1615,6 +1674,10 @@
       "marketplaceNpxRequired": "Se requiere Node.js con npx",
       "marketplaceInstalling": "Instalando",
       "marketplaceInstalled": "Instalada",
+      "marketplaceNameConflict": "El nombre ya está en uso",
+      "marketplaceOriginUnknown": "Origen instalado desconocido",
+      "marketplaceConflictHelp": "Revisa las habilidades con el mismo nombre en Instaladas antes de eliminarlas para usar otro origen.",
+      "marketplaceInstallConflict": "Conflicto de instalación. Espera a que termine la instalación en curso y revisa las habilidades del mismo nombre en Instaladas.",
       "marketplaceInstall": "Instalar",
       "marketplaceNoTrend": "Sin tendencia todavía",
       "marketplaceTrendLabel": "Tendencia de instalaciones de 8 semanas",
@@ -1859,8 +1922,6 @@
       "sessionInfo": "Detalles de la sesión"
     },
     "sessionInfo": {
-      "title": "Sesión",
-      "untitled": "Tema sin título",
       "automations": "Automatizaciones",
       "count": "{{count}}",
       "loading": "Cargando automatizaciones...",
@@ -1885,8 +1946,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Escribe tu mensaje…",
-      "placeholderHero": "Describe lo que quieres hacer",
+      "placeholder": "Escribe / para ver comandos, @ para mencionar conversaciones o aplicaciones y $ para elegir habilidades",
+      "placeholderCompact": "Escribe un mensaje…",
       "placeholderOpening": "Abriendo un nuevo tema…",
       "inputAria": "Entrada de mensaje",
       "goalStateStrip": "Objetivo: {{label}}",
@@ -1913,15 +1974,21 @@
       "reauthFallback": "Un modelo alternativo respondió esta vez.",
       "reauthSettings": "Abrir ajustes del modelo",
       "context": {
+          "loaded": "Cargado",
+          "unloaded": "Sin cargar",
+          "expand": "Ampliar contexto",
+          "collapse": "Reducir contexto",
+          "noFiles": "Aún no hay contexto registrado",
+          "estimatedNodeTokens": "Unos {{value}} tokens",
+          "openFile": "Abrir archivo",
+          "history": "Historial de contexto",
+          "playHistory": "Reproducir historial del contexto",
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso del contexto",
         "panelTitle": "Uso del contexto",
         "contextTitle": "Contexto",
-        "recentRounds": "Rondas recientes",
-        "inputTrend": "Tokens de entrada",
-        "input": "Tokens de entrada",
-        "cacheHitRate": "Tasa de aciertos de KV Cache",
-        "output": "Tokens de salida",
+        "cacheHitRate": "Tasa de aciertos de caché",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Tiempo de generación"
       },
       "queued": {
@@ -2149,8 +2216,7 @@
     "fileEditDiffTruncated": "Diferencias truncadas. Abre el archivo para ver el cambio completo.",
     "usage": {
       "context": "Contexto más reciente: {{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} solicitudes al modelo",
-      "estimated": "Incluye uso estimado"
+      "requests": "{{count}} solicitudes al modelo"
     },
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",

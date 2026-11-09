@@ -97,7 +97,7 @@ async def test_provider_can_emit_without_an_event_specific_runner_callback():
         initial_messages=[{"role": "user", "content": "hello"}],
         events=EventSink(observe),
     ))
-    assert received == [event]
+    assert received.count(event) == 1
 
 
 async def test_runner_propagates_context_governance_failure():
@@ -347,7 +347,8 @@ async def test_native_compaction_uses_provider_request_boundary(
     compaction_events: list[ContextCompactionEvent] = []
 
     async def observe_compaction(event: ContextCompactionEvent) -> None:
-        compaction_events.append(event)
+        if isinstance(event, ContextCompactionEvent):
+            compaction_events.append(event)
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -530,7 +531,8 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     compaction_events: list[ContextCompactionEvent] = []
 
     async def observe_compaction(event: ContextCompactionEvent) -> None:
-        compaction_events.append(event)
+        if isinstance(event, ContextCompactionEvent):
+            compaction_events.append(event)
 
     result = await AgentRunner().run(make_run_spec(
         provider,

@@ -147,3 +147,71 @@ test("idle voice and ready send remain distinct from the composer in both themes
   }
   await test.info().attach("action-contrast", { body: JSON.stringify(measurements, null, 2), contentType: "application/json" });
 });
+
+
+test("a compact mobile composer preserves its placeholder, focus, and sizing", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, viewport: { width: 314, height: 844 }, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => localStorage.setItem("nanobot.locale", "fr"));
+    await page.goto("/browser/fixture.html?case=composer-action&composerVariant=thread");
+    await page.evaluate(() => document.fonts.ready);
+    const input = page.locator(".thread-composer-input textarea");
+    const action = page.locator(".composer-primary-action");
+    await expect(input).toHaveAttribute("placeholder", "Votre message…");
+    await expect.poll(() => input.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    const placeholder = (await input.getAttribute("aria-description"))!;
+    expect(placeholder).toContain("compétences");
+    const before = (await action.boundingBox())!;
+    const initialHeight = await input.evaluate(node => node.clientHeight);
+
+    await input.tap();
+    await expect(input).toBeFocused();
+    expect(await action.boundingBox()).toEqual(before);
+
+    await input.fill("Bonjour");
+    expect(await action.boundingBox()).toEqual(before);
+    await input.fill("Première ligne\nDeuxième ligne\nTroisième ligne");
+    await expect.poll(() => input.evaluate(node => node.clientHeight)).toBeGreaterThan(initialHeight);
+    await input.fill("");
+    await expect.poll(() => input.evaluate(node => node.clientHeight)).toBe(initialHeight);
+    expect(await action.boundingBox()).toEqual(before);
+
+    await page.locator(".thread-composer-footer button").first().focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(input).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
+for (const variant of ["hero", "thread"]) {
+  test(`placeholder follows available input width in a ${variant} composer`, async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+    await page.goto(`/browser/fixture.html?case=composer-action&composerVariant=${variant}`);
+    await page.evaluate(() => document.fonts.ready);
+    const container = page.locator("main");
+    const input = page.locator(".thread-composer-input textarea");
+    const fullHint = "Type / for commands, @ for chats or apps, $ for skills";
+    await expect(input).toHaveAttribute("placeholder", fullHint);
+
+    await container.evaluate(node => { node.style.maxWidth = "340px"; });
+    await expect(input).toHaveAttribute("placeholder", "Type a message…");
+    await expect(input).toHaveAttribute("aria-description", fullHint);
+    await expect.poll(() => input.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+
+    await input.fill("Keep this draft");
+    await container.evaluate(node => { node.style.maxWidth = "600px"; });
+    await expect(input).toHaveAttribute("placeholder", fullHint);
+    await container.evaluate(node => { node.style.setProperty("--text-reading-size", "28px"); });
+    await expect(input).toHaveAttribute("placeholder", "Type a message…");
+    await container.evaluate(node => { node.style.maxWidth = "900px"; });
+    await expect(input).toHaveAttribute("placeholder", fullHint);
+    await expect(input).toHaveValue("Keep this draft");
+
+    await page.goto(`/browser/fixture.html?case=composer-action&composerVariant=${variant}&opening`);
+    await page.locator("main").evaluate(node => { node.style.maxWidth = "340px"; });
+    await expect(input).toHaveAttribute("placeholder", "Opening a new topic…");
+  });
+}

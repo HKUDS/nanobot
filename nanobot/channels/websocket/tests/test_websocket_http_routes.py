@@ -880,6 +880,53 @@ async def test_webui_skills_marketplace_routes_search_and_install(
 
 
 @pytest.mark.asyncio
+async def test_webui_skill_source_identity_reaches_public_reads_and_mutations(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "skills" / "agent-browser"
+    directory.mkdir(parents=True)
+    content = "---\nname: agent-browser\n---\nKeep my local skill.\n"
+    (directory / "SKILL.md").write_text(content, encoding="utf-8")
+    (directory / ".nanobot-origin.json").write_text(json.dumps({
+        "provider": "skills_sh", "source": "vercel-labs/agent-browser", "skill_id": "agent-browser",
+    }), encoding="utf-8")
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"skills": [
+            {"skillId": "agent-browser", "source": "vercel-labs/agent-browser"},
+            {"skillId": "agent-browser", "source": "101-skills/superpowers"},
+        ]})
+
+    monkeypatch.setattr("nanobot.webui.skills_marketplace._skills_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ))
+    port = _free_port()
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        headers = {"Authorization": f"Bearer {channel.gateway.tokens.issue_api_token(300)}"}
+        for endpoint in ("search?q=agent-browser&provider=skills_sh", "trending?provider=skills_sh"):
+            response = await _http_get(f"http://127.0.0.1:{port}/api/webui/skills/{endpoint}", headers=headers)
+            assert response.status_code == 200
+            assert [row["installation_status"] for row in response.json()["skills"]] == ["installed", "conflict"]
+        # Old callers send no provider or new status fields; the host still enforces identity.
+        wrong = await _webui_mutate(channel, "skill.install", {
+            "source": "101-skills/superpowers", "skill": "agent-browser",
+        }, headers=headers)
+        assert wrong.status_code == 409
+        same = await _webui_mutate(channel, "skill.install", {
+            "source": "vercel-labs/agent-browser", "skill": "agent-browser",
+        }, headers=headers)
+        assert same.status_code == 200
+        assert same.json()["last_action"]["already_installed"] is True
+        assert any(skill["name"] == "agent-browser" for skill in same.json()["skills"])
+        assert (directory / "SKILL.md").read_text(encoding="utf-8") == content
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_webui_skill_install_rejects_overlapping_requests(
     bus: MagicMock,
     tmp_path: Path,
@@ -1543,6 +1590,34 @@ async def test_channel_connect_runtime_import_error_is_not_reported_as_unsupport
 
     assert response.status_code == 500
     assert "failed to start fake connection" in response.text
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_connect_reports_libmagic_failure(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.channels.whatsapp import runtime as whatsapp
+    from nanobot.channels.whatsapp.manifest import PLUGIN
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.load_channel_plugin", lambda _name: PLUGIN,
+    )
+
+    def missing_libmagic():
+        raise whatsapp.WhatsAppDependencyError("WhatsApp could not load libmagic.")
+
+    monkeypatch.setattr(whatsapp, "_load_neonize", missing_libmagic)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.connect.start",
+        {"channel": "whatsapp", "force": True},
+    )
+
+    assert response.status_code == 400
+    assert "WhatsApp could not load libmagic" in response.text
 
 
 @pytest.mark.asyncio
@@ -2414,6 +2489,8 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:sidebar")
+    await sm.state.fork("websocket:sidebar", "websocket:old", 0)
+    sm.get_or_create("websocket:draft")
     channel = _ch(bus, session_manager=sm, port=29911)
     server_task = asyncio.create_task(channel.start())
     try:
@@ -2430,7 +2507,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 
         payload = {
             "pinned_keys": ["websocket:sidebar"],
-            "archived_keys": ["websocket:old"],
+            "archived_keys": ["websocket:old", "websocket:draft"],
             "session_order": ["websocket:old", "websocket:sidebar"],
             "title_overrides": {"websocket:sidebar": "Pinned work"},
             "view": {"density": "compact", "show_archived": True},
@@ -2443,15 +2520,19 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert updated.status_code == 200
         body = updated.json()
         assert body["pinned_keys"] == ["websocket:sidebar"]
+        assert body["archived_keys"] == ["websocket:old"]
+        assert await sm.state.archived_keys() == ["websocket:old"]
         assert body["session_order"] == ["websocket:old", "websocket:sidebar"]
         assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
         assert body["view"]["density"] == "compact"
 
         state_path = tmp_path / "webui" / "sidebar-state.json"
         assert state_path.is_file()
-        assert json.loads(state_path.read_text(encoding="utf-8"))["pinned_keys"] == [
-            "websocket:sidebar"
-        ]
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        assert persisted["pinned_keys"] == ["websocket:sidebar"]
+        assert "archived_keys" not in persisted
+        read_back = await _http_get("http://127.0.0.1:29911/api/webui/sidebar-state", headers=auth)
+        assert read_back.json()["archived_keys"] == ["websocket:old"]
     finally:
         await channel.stop()
         await server_task
@@ -2532,6 +2613,7 @@ async def test_session_delete_removes_unpersisted_new_chat(
     project.mkdir()
     channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=_free_port())
     connection = AsyncMock()
+    channel._webui_connections.add(connection)
     connection.remote_address = ("127.0.0.1", 50123)
     connection.request.headers = {"Host": "localhost"}
 
@@ -2682,6 +2764,7 @@ async def test_remote_new_chat_accepts_server_project_path_and_full_access(
     other_project.mkdir()
     channel = _ch(bus, workspace_path=tmp_path, port=_free_port())
     connection = AsyncMock()
+    channel._webui_connections.add(connection)
     connection.remote_address = ("192.168.1.5", 50123)
     connection.request = _FakeReq(
         {

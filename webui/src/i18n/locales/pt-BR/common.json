@@ -477,6 +477,65 @@
       "password": "Senha",
       "proxyReferenceAuth": "Configure a autenticação na URL do proxy referenciada."
     },
+    "sandbox": {
+      "title": "Sandbox de comandos",
+      "method": "Método de isolamento",
+      "off": "Sem isolamento",
+      "status": "Configuração salva",
+      "check": "Verificar sandbox",
+      "checking": "Verificando…",
+      "scope": "Testa apenas o iniciador salvo com arquivos temporários. Não é uma auditoria completa de segurança. Reinicie o gateway para aplicar as alterações aos comandos.",
+      "path": "Caminho do iniciador confiável",
+      "launcher": "iniciador do sandbox",
+      "pathHelp": "Normalmente, deixe vazio para buscar {{launcher}} no sistema. Para uma instalação personalizada, peça o caminho completo do iniciador ao mantenedor do pacote. O arquivo e as pastas superiores devem pertencer ao root, sem escrita por grupos ou outros usuários, fora dos caminhos graváveis pelo agente.",
+      "automatic": "Busca no sistema",
+      "checkError": "Não foi possível verificar. Reabra as configurações e tente novamente.",
+      "saveError": "Não foi possível salvar. O rascunho foi mantido; tente novamente.",
+      "disableTitle": "Desativar o isolamento?",
+      "disableHelp": "Após reiniciar, os comandos usarão as permissões da conta do gateway. As ferramentas de arquivos também perderão a restrição de espaço de trabalho deste sandbox; as restrições independentes continuam ativas.",
+      "keep": "Manter isolamento",
+      "disable": "Desativar isolamento",
+      "notice": {
+        "title": "Os comandos precisam de atenção",
+        "missing": "O gateway não encontrou {{launcher}}. Se estiver instalado, configure o caminho completo. Caso contrário, contate o mantenedor do pacote ou administrador. Você pode continuar conversando.",
+        "path": "O gateway não pode usar o caminho configurado de {{launcher}}. Verifique o caminho completo e as permissões de acesso.",
+        "permissions": "{{launcher}} não está em um local protegido. Contate o mantenedor do pacote ou administrador.",
+        "startup": "{{launcher}} não pôde iniciar. Verifique a instalação do gateway e as restrições do sistema.",
+        "configurePath": "Configurar caminho de {{launcher}}",
+        "openSettings": "Abrir configurações do sandbox"
+      },
+      "states": {
+        "disabled": "Comandos desativados",
+        "off": "Isolamento desativado",
+        "unsupported": "Não compatível",
+        "unchecked": "Não verificado",
+        "unavailable": "Indisponível",
+        "passed": "Teste básico aprovado",
+        "checking": "Verificando…"
+      },
+      "help": {
+        "disabled": "Ative os comandos para usar um sandbox.",
+        "off": "Os comandos não estão isolados. Escolha um método para proteger o host.",
+        "unsupported": "O sistema do gateway não aceita este método.",
+        "unchecked": "Verifique a configuração salva do sandbox.",
+        "unsaved": "Salve as alterações e verifique o sandbox.",
+        "unavailable": "O sandbox não inicia. Os comandos não serão executados nele.",
+        "passed": "O iniciador abriu, a gravação no espaço de trabalho temporário funcionou e o arquivo externo foi bloqueado.",
+        "checking": "Executando um teste com limite de tempo…"
+      },
+      "reasons": {
+        "launcher_missing": "O gateway não encontrou {{launcher}}. Se estiver instalado, informe o caminho completo abaixo. Caso contrário, contate o mantenedor do pacote ou administrador.",
+        "path_not_absolute": "Informe um caminho absoluto, não um nome de comando.",
+        "not_executable": "O caminho deve apontar para um arquivo executável.",
+        "agent_writable": "O agente pode gravar nesse caminho. Peça uma instalação protegida ao mantenedor do pacote.",
+        "unprotected_installation": "Um usuário que não é root pode alterar o iniciador ou uma pasta superior. Peça uma instalação protegida ao administrador.",
+        "path_unavailable": "Não é possível ler o caminho. Verifique sua existência e permissões no gateway.",
+        "platform_unsupported": "Escolha um método aceito pelo sistema do gateway.",
+        "probe_failed": "O teste falhou. Verifique a instalação, os namespaces do kernel e as montagens adicionais.",
+        "probe_timeout": "Tempo esgotado. Verifique a instalação e as restrições do host e tente novamente.",
+        "unknown": "Iniciador indisponível. Verifique sua instalação e permissões."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "Salvo. Reinicie o serviço de API para aplicar as alterações.",
       "commandRuntime": {
@@ -1628,6 +1687,10 @@
       "marketplaceNpxRequired": "Node.js com npx é necessário",
       "marketplaceInstalling": "Instalando",
       "marketplaceInstalled": "Instalada",
+      "marketplaceNameConflict": "Nome já em uso",
+      "marketplaceOriginUnknown": "Origem instalada desconhecida",
+      "marketplaceConflictHelp": "Confira as habilidades com o mesmo nome em Instaladas antes de removê-las para usar outra origem.",
+      "marketplaceInstallConflict": "Conflito de instalação. Aguarde a instalação em andamento e confira as habilidades com o mesmo nome em Instaladas.",
       "marketplaceInstall": "Instalar",
       "marketplaceNoTrend": "Ainda sem tendência",
       "marketplaceTrendLabel": "Tendência de instalações em 8 semanas",
@@ -1872,8 +1935,6 @@
       "sessionInfo": "Detalhes da sessão"
     },
     "sessionInfo": {
-      "title": "Sessão",
-      "untitled": "Tópico sem título",
       "automations": "Automações",
       "count": "{{count}}",
       "loading": "Carregando automações...",
@@ -1898,8 +1959,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Digite sua mensagem…",
-      "placeholderHero": "Descreva o que você quer fazer",
+      "placeholder": "Digite / para ver comandos, @ para mencionar conversas ou aplicativos e $ para escolher habilidades",
+      "placeholderCompact": "Digite uma mensagem…",
       "placeholderOpening": "Abrindo um novo tópico…",
       "inputAria": "Campo de mensagem",
       "goalStateStrip": "Objetivo: {{label}}",
@@ -1926,15 +1987,21 @@
       "reauthFallback": "Um modelo alternativo respondeu desta vez.",
       "reauthSettings": "Abrir configurações do modelo",
       "context": {
+          "loaded": "Carregado",
+          "unloaded": "Não carregado",
+          "expand": "Expandir contexto",
+          "collapse": "Recolher contexto",
+          "noFiles": "Nenhum contexto registrado ainda",
+          "estimatedNodeTokens": "Cerca de {{value}} tokens",
+          "openFile": "Abrir arquivo",
+          "history": "Histórico de contexto",
+          "playHistory": "Reproduzir histórico do contexto",
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso do contexto",
         "panelTitle": "Uso do contexto",
         "contextTitle": "Contexto",
-        "recentRounds": "Rodadas recentes",
-        "inputTrend": "Tokens de entrada",
-        "input": "Tokens de entrada",
-        "cacheHitRate": "Taxa de acertos do cache KV",
-        "output": "Tokens de saída",
+        "cacheHitRate": "Taxa de acertos de cache",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Tempo de geração"
       },
       "queued": {
@@ -2342,8 +2409,7 @@
     "fileEditDiffTruncated": "Diferenças truncadas. Abra o arquivo para ver a alteração completa.",
     "usage": {
       "context": "Contexto atual: {{tokens}}{{capacity}}",
-      "requests": "{{count}} chamadas nesta rodada",
-      "estimated": "Inclui uso estimado"
+      "requests": "{{count}} chamadas nesta rodada"
     }
   },
   "recovery": {

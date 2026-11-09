@@ -53,7 +53,7 @@ class _FakeHTTPClient:
 
 
 def _make_channel_with_capture(**overrides) -> tuple[SignalChannel, list[dict]]:
-    """Build a SignalChannel with _handle_message captured into a list and a
+    """Build a SignalChannel with _publish_policy_checked_message captured into a list and a
     no-op _start_typing, used by every receive-flow test class.
     """
     ch = _make_channel(**overrides)
@@ -65,7 +65,7 @@ def _make_channel_with_capture(**overrides) -> tuple[SignalChannel, list[dict]]:
     async def noop_typing(chat_id):
         pass
 
-    ch._handle_message = capture  # type: ignore[method-assign]
+    ch._publish_policy_checked_message = capture  # type: ignore[method-assign]
     ch._start_typing = noop_typing  # type: ignore[method-assign]
     return ch, handled
 
@@ -488,9 +488,9 @@ class TestIsAllowed:
 
 
 class TestEndToEndDMRouting:
-    """End-to-end tests that keep the real _handle_message chain (no mock),
-    verifying that _check_inbound_policy + _handle_message work together
-    correctly for DM routing.  The override of _handle_message publishes
+    """End-to-end tests that keep the real policy-checked publish chain (no mock),
+    verifying that _check_inbound_policy + publish work together
+    correctly for DM routing.  The policy-checked helper publishes
     directly to bus (policy already checked); denied DMs call
     super()._handle_message which issues a pairing code.
     """
@@ -803,7 +803,7 @@ class TestHandleDataMessageDM:
         async def capture(**kwargs):
             handled.append(kwargs)
 
-        ch._handle_message = capture  # type: ignore[method-assign]
+        ch._publish_policy_checked_message = capture  # type: ignore[method-assign]
 
         async def noop_typing(chat_id):
             pass
@@ -890,7 +890,7 @@ class TestHandleDataMessageDM:
         async def record_stop(chat_id, **kwargs):
             typing_stopped.append(chat_id)
 
-        ch._handle_message = fail_handle  # type: ignore[method-assign]
+        ch._publish_policy_checked_message = fail_handle  # type: ignore[method-assign]
         ch._start_typing = noop_typing  # type: ignore[method-assign]
         ch._stop_typing = record_stop  # type: ignore[method-assign]
 
@@ -918,7 +918,7 @@ class TestHandleDataMessageGroup:
     async def test_group_disabled_rejected(self):
         ch = _make_channel(group_enabled=False)
         handled: list[dict] = []
-        ch._handle_message = lambda **kw: handled.append(kw)  # type: ignore[method-assign]
+        ch._publish_policy_checked_message = lambda **kw: handled.append(kw)  # type: ignore[method-assign]
         params = _group_envelope(group_id="grp==", message="hi")
         await ch._handle_receive_notification(params)
         assert handled == []
@@ -1010,7 +1010,7 @@ class TestHandleDataMessageGroup:
     async def test_bot_account_alias_learned_from_incoming(self):
         ch, handled = self._make_group_channel(require_mention=False)
         params = _dm_envelope(source_number="+10000000000", source_uuid="new-bot-uuid")
-        ch._handle_message = lambda **kw: handled.append(kw)  # type: ignore[method-assign]
+        ch._publish_policy_checked_message = lambda **kw: handled.append(kw)  # type: ignore[method-assign]
         ch._start_typing = lambda chat_id: None  # type: ignore[method-assign]
         await ch._handle_receive_notification(params)
         assert ch._id_matches_account("new-bot-uuid")
@@ -1339,7 +1339,7 @@ async def test_send_request_raises_when_not_connected() -> None:
 async def test_handle_notification_sync_message_does_not_forward() -> None:
     ch = _make_channel(dm_enabled=True, dm_policy="open")
     handled: list[dict] = []
-    ch._handle_message = lambda **kw: handled.append(kw)  # type: ignore[method-assign]
+    ch._publish_policy_checked_message = lambda **kw: handled.append(kw)  # type: ignore[method-assign]
 
     notification = {
         "envelope": {
@@ -1360,7 +1360,7 @@ async def test_handle_notification_sync_message_does_not_forward() -> None:
 async def test_handle_notification_no_source_skipped() -> None:
     ch = _make_channel(dm_enabled=True, dm_policy="open")
     handled: list[dict] = []
-    ch._handle_message = lambda **kw: handled.append(kw)  # type: ignore[method-assign]
+    ch._publish_policy_checked_message = lambda **kw: handled.append(kw)  # type: ignore[method-assign]
 
     notification = {"envelope": {"dataMessage": {"message": "ghost"}}}
     await ch._handle_receive_notification(notification)

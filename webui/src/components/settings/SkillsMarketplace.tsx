@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  Info,
   ExternalLink,
   Loader2,
   PackagePlus,
@@ -24,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
+  ApiError,
   fetchMarketplaceSkillTrends,
   fetchTrendingMarketplaceSkills,
   installMarketplaceSkill,
@@ -56,12 +58,17 @@ export function SkillsMarketplace({
   const [loading, setLoading] = useState(false);
   const [trendingLoading, setTrendingLoading] = useState(true);
   const [error, setError] = useState("");
+  const [installError, setInstallError] = useState("");
   const [provider, setProvider] = useState<MarketplaceProvider>("all");
   const [selected, setSelected] = useState<MarketplaceSkillSummary | null>(null);
-  const installedNames = useMemo(
-    () => new Set(installedSkills.map((skill) => skill.name)),
-    [installedSkills],
-  );
+  const installTrigger = useRef<HTMLElement | null>(null);
+  const selectSkill = (skill: MarketplaceSkillSummary) => {
+    installTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSelected(skill);
+  };
+  // Refresh server-owned installation facts only when the local inventory changes.
+  const inventory = installedSkills.map((skill) => `${skill.source}:${skill.name}`).sort().join("\n");
+  const [installRevision, setInstallRevision] = useState(0);
   const visibleTrending = useMemo(
     () =>
       provider === "all"
@@ -94,7 +101,7 @@ export function SkillsMarketplace({
     return () => {
       cancelled = true;
     };
-  }, [getToken]);
+  }, [getToken, inventory, installRevision]);
 
   useEffect(() => {
     const skills = query.trim().length < 2 ? trending : results;
@@ -107,7 +114,10 @@ export function SkillsMarketplace({
     fetchMarketplaceSkillTrends(getToken(), unresolved.map((skill) => skill.id))
       .then((payload) => {
         if (!cancelled) {
-          setTrends((current) => ({ ...current, ...payload.trends }));
+          setTrends((current) => ({
+            ...current,
+            ...Object.fromEntries(unresolved.map((skill) => [skill.id, payload.trends[skill.id] ?? []])),
+          }));
         }
       })
       .catch(() => undefined);
@@ -154,12 +164,12 @@ export function SkillsMarketplace({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [getToken, query, t]);
+  }, [getToken, query, t, inventory, installRevision]);
 
   const install = async (skill: MarketplaceSkillSummary) => {
     setSelected(null);
     onInstallingChange(skill.id);
-    setError("");
+    setInstallError("");
     try {
       const payload = await installMarketplaceSkill(
         client,
@@ -169,25 +179,18 @@ export function SkillsMarketplace({
         skill.version,
       );
       notifySkillsChanged(payload);
-      setResults((current) =>
-        current.map((item) =>
-          item.id === skill.id ? { ...item, installed: true } : item,
-        ),
-      );
-      setTrending((current) =>
-        current.map((item) =>
-          item.id === skill.id ? { ...item, installed: true } : item,
-        ),
-      );
     } catch (reason) {
-      setError(
-        reason instanceof Error
+      setInstallError(
+        reason instanceof ApiError && reason.status === 409
+          ? t("settings.skills.marketplaceInstallConflict")
+          : reason instanceof Error
           ? reason.message
           : t("settings.skills.marketplaceInstallFailed", {
               defaultValue: "Could not install this skill.",
             }),
       );
     } finally {
+      setInstallRevision((revision) => revision + 1);
       onInstallingChange("");
     }
   };
@@ -226,10 +229,19 @@ export function SkillsMarketplace({
         <ProviderFilter value={provider} onChange={setProvider} />
       </div>
 
-      {error ? (
-        <div className="rounded-control bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
-          {error}
+      {error || installError ? (
+        <div role="alert" className="rounded-control bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive">
+          {installError || error}
         </div>
+      ) : null}
+
+      {(query.trim().length < 2 ? visibleTrending : visibleResults).some((skill) =>
+        skill.installation_status === "conflict" || skill.installation_status === "unknown"
+        || (!skill.installation_status && skill.installed),
+      ) ? (
+        <p className="px-1 text-[12px] text-muted-foreground">
+          {t("settings.skills.marketplaceConflictHelp")}
+        </p>
       ) : null}
 
       {query.trim().length < 2 ? (
@@ -257,11 +269,10 @@ export function SkillsMarketplace({
           ) : visibleTrending.length ? (
             <MarketplaceSkillGroups
               skills={visibleTrending}
-              installedNames={installedNames}
               installing={installing}
               trends={trends}
               grouped={provider === "all"}
-              onSelect={setSelected}
+              onSelect={selectSkill}
             />
           ) : (
             <div className="px-5 py-10 text-center text-[13px] text-muted-foreground">
@@ -285,11 +296,10 @@ export function SkillsMarketplace({
           ) : (
             <MarketplaceSkillGroups
               skills={visibleResults}
-              installedNames={installedNames}
               installing={installing}
               trends={trends}
               grouped={provider === "all"}
-              onSelect={setSelected}
+              onSelect={selectSkill}
             />
           )}
         </div>
@@ -301,7 +311,10 @@ export function SkillsMarketplace({
           if (!open) setSelected(null);
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          installTrigger.current?.focus();
+        }}>
           <AlertDialogHeader>
             <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-control bg-amber-500/10 text-amber-700 dark:text-amber-300">
               <ShieldAlert className="h-5 w-5" aria-hidden />
@@ -384,14 +397,12 @@ function ProviderFilter({
 
 function MarketplaceSkillGroups({
   skills,
-  installedNames,
   installing,
   trends,
   grouped,
   onSelect,
 }: {
   skills: MarketplaceSkillSummary[];
-  installedNames: Set<string>;
   installing: string;
   trends: Record<string, number[]>;
   grouped: boolean;
@@ -406,7 +417,6 @@ function MarketplaceSkillGroups({
     return (
       <MarketplaceSkillList
         skills={skills}
-        installedNames={installedNames}
         installing={installing}
         trends={trends}
         onSelect={onSelect}
@@ -437,7 +447,6 @@ function MarketplaceSkillGroups({
             </div>
             <MarketplaceSkillList
               skills={providerSkills}
-              installedNames={installedNames}
               installing={installing}
               trends={trends}
               onSelect={onSelect}
@@ -451,13 +460,11 @@ function MarketplaceSkillGroups({
 
 function MarketplaceSkillList({
   skills,
-  installedNames,
   installing,
   trends,
   onSelect,
 }: {
   skills: MarketplaceSkillSummary[];
-  installedNames: Set<string>;
   installing: string;
   trends: Record<string, number[]>;
   onSelect: (skill: MarketplaceSkillSummary) => void;
@@ -468,7 +475,6 @@ function MarketplaceSkillList({
         <MarketplaceSkillRow
           key={skill.id}
           skill={skill}
-          installed={skill.installed || installedNames.has(skill.skill_id)}
           isInstalling={installing === skill.id}
           installBusy={Boolean(installing)}
           trend={trends[skill.id]}
@@ -481,26 +487,33 @@ function MarketplaceSkillList({
 
 function MarketplaceSkillRow({
   skill,
-  installed,
   isInstalling,
   installBusy,
   trend,
   onSelect,
 }: {
   skill: MarketplaceSkillSummary;
-  installed: boolean;
   isInstalling: boolean;
   installBusy: boolean;
   trend?: number[];
   onSelect: (skill: MarketplaceSkillSummary) => void;
 }) {
   const { t } = useTranslation();
+  // Older hosts only know the name, so their boolean cannot prove a source match.
+  const status = skill.installation_status ?? (skill.installed ? "unknown" : "available");
+  const installed = status === "installed";
+  const conflict = status === "conflict" || status === "unknown";
+  const conflictLabel = t(status === "unknown"
+    ? "settings.skills.marketplaceOriginUnknown"
+    : "settings.skills.marketplaceNameConflict");
   const actionLabel = t(
     isInstalling
       ? "settings.skills.marketplaceInstalling"
       : installed
         ? "settings.skills.marketplaceInstalled"
-        : "settings.skills.marketplaceInstall",
+        : conflict
+          ? "settings.skills.marketplaceNameConflict"
+          : "settings.skills.marketplaceInstall",
   );
 
   return (
@@ -530,10 +543,10 @@ function MarketplaceSkillRow({
           </a>
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-[12px] text-muted-foreground">
-          {skill.source}
+          <span className="truncate" title={skill.source}>{skill.source}</span>
           {skill.version ? <span>v{skill.version}</span> : null}
           {skill.provider === "skills_sh" ? (
-            <>
+            <span className="shrink-0">
               {skill.metric === "installs_24h"
                 ? t("settings.skills.marketplaceInstalls24h", {
                     count: skill.installs,
@@ -545,9 +558,14 @@ function MarketplaceSkillRow({
                     formattedCount: skill.installs.toLocaleString(),
                     defaultValue: "{{formattedCount}} installs",
                   })}
-            </>
+            </span>
           ) : null}
         </div>
+        {conflict ? (
+          <p className="mt-1 text-[12px] text-muted-foreground">
+            {conflictLabel}
+          </p>
+        ) : null}
       </div>
       {skill.provider === "skills_sh" ? <TrendSparkline values={trend} /> : null}
       <Button
@@ -555,7 +573,7 @@ function MarketplaceSkillRow({
         aria-label={`${actionLabel} ${skill.name}`}
         size="icon"
         variant="ghost"
-        disabled={installed || installBusy || !skill.install_supported}
+        disabled={installed || conflict || installBusy || !skill.install_supported}
         onClick={() => onSelect(skill)}
         className={cn(
           "h-9 w-9 shrink-0 rounded-full bg-muted/70 text-muted-foreground transition-[opacity,color] hover:text-foreground focus-visible:bg-foreground focus-visible:text-background focus-visible:opacity-100 sm:opacity-[0.55] sm:group-hover:opacity-100",
@@ -574,6 +592,8 @@ function MarketplaceSkillRow({
           <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden />
         ) : installed ? (
           <Check className="h-4 w-4" aria-hidden />
+        ) : conflict ? (
+          <Info className="h-4 w-4" aria-hidden />
         ) : (
           <PackagePlus className="h-4 w-4" aria-hidden />
         )}

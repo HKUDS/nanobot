@@ -504,5 +504,12 @@
     "view": "안내 보기",
     "dismissed": "미리보기에서 다시 알리지 않기를 선택했습니다",
     "starred": "미리보기에서 GitHub 링크를 선택했습니다"
+  },
+  "sidebarPanel": {
+    "title": "사이드 패널",
+    "toggle": "패널 표시 전환",
+    "content": "세부 정보는 현재 창 안에 표시됩니다.",
+    "description": "공통 열기 전환 효과를 사용하는 비모달 사이드 패널입니다.",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

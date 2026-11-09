@@ -36,9 +36,8 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.mcp_oauth import MCPOAuthHandlers
     from nanobot.config.schema import Config, MCPServerConfig
 
-# Transient connection errors that warrant a single retry.
-# These typically happen when an MCP server restarts or a network
-# connection is interrupted between calls.
+# Transient stream failures. Retrying also requires an operation safe to replay
+# or proof that the tool request has not started.
 _TRANSIENT_EXC_NAMES: frozenset[str] = frozenset((
     "ClosedResourceError",
     "BrokenResourceError",
@@ -522,10 +521,14 @@ class _MCPWrapperBase(Tool):
     _session: ClientSession
     _server_name: str
     _name: str
+    _replay_safe: bool
 
-    def _set_mcp_connection(self, session: ClientSession, server_name: str) -> None:
+    def _set_mcp_connection(
+        self, session: ClientSession, server_name: str, *, replay_safe: bool,
+    ) -> None:
         self._session = session
         self._server_name = server_name
+        self._replay_safe = replay_safe
         self._reconnect: _ReconnectCallback | None = None
 
     def set_reconnect_handler(self, reconnect: _ReconnectCallback) -> None:
@@ -540,14 +543,13 @@ class _MCPWrapperBase(Tool):
         if already_refreshed or not _is_session_terminated(exc) or self._reconnect is None:
             return False
         logger.warning(
-            "MCP {} '{}' session terminated; reconnecting server '{}' before retry",
+            "MCP {} '{}' session terminated; reconnecting server '{}'",
             capability_kind,
             self._name,
             self._server_name,
         )
         refreshed_tool = await self._reconnect(self._server_name, self._name, self)
-        refreshed_session = getattr(refreshed_tool, "_session", None)
-        if refreshed_session is None:
+        if not isinstance(refreshed_tool, _MCPWrapperBase):
             logger.warning(
                 "MCP {} '{}' could not refresh session for server '{}'",
                 capability_kind,
@@ -555,12 +557,23 @@ class _MCPWrapperBase(Tool):
                 self._server_name,
             )
             return False
-        self._session = refreshed_session
+        self._session = refreshed_tool._session
+        self._replay_safe = refreshed_tool._replay_safe
         return True
+
+    def _unknown_tool_outcome(self, reason: str) -> ToolResult:
+        logger.warning(
+            "MCP tool '{}' {}; outcome unknown, not replaying", self._name, reason,
+        )
+        return ToolResult.error(
+            f"(MCP tool call outcome is unknown; {reason}. The operation "
+            "may have completed and was not replayed after this failure. Check its outcome before "
+            "retrying to avoid duplicate side effects.)"
+        )
 
     async def _request_with_recovery(
         self,
-        request: Callable[[], Awaitable[_MCPResultT]],
+        request: Callable[[ClientSession], Awaitable[_MCPResultT]],
         timeout: float,
         capability_kind: Literal["tool", "resource", "prompt"],
     ) -> _MCPResultT | ToolResult:
@@ -569,10 +582,30 @@ class _MCPWrapperBase(Tool):
         operation = f"{capability_kind} {'read' if capability_kind == 'resource' else 'call'}"
         refreshed_session = False
         retried = False
+        request_started = False
+
+        async def attempt(session: ClientSession, replay_safe: bool) -> _MCPResultT:
+            nonlocal request_started
+            if not replay_safe and self._reconnect is not None:
+                # Repair stale sessions before submitting a non-replayable call.
+                # A failed ping proves that this attempt never called the tool;
+                # an exception from call_tool itself cannot provide that proof.
+                await session.send_ping()
+            request_started = True
+            return await request(session)
+
         while True:
+            # Keep the declaration bound to the actual session used by this
+            # attempt, even if another call reconnects this wrapper meanwhile.
+            session, replay_safe = self._session, self._replay_safe
+            if request_started and not replay_safe:
+                return self._unknown_tool_outcome("no longer permits safe replay after reconnect")
             try:
-                return await asyncio.wait_for(request(), timeout=timeout)
+                # Preflight and submission share the existing per-attempt timeout.
+                return await asyncio.wait_for(attempt(session, replay_safe), timeout=timeout)
             except asyncio.TimeoutError:
+                if request_started and not replay_safe:
+                    return self._unknown_tool_outcome(f"timed out after {timeout}s")
                 logger.warning(
                     "MCP {} '{}' timed out after {}s", capability_kind, self._name, timeout
                 )
@@ -584,6 +617,10 @@ class _MCPWrapperBase(Tool):
                 logger.warning("MCP {} '{}' was cancelled by server/SDK", capability_kind, self._name)
                 return ToolResult.error(f"(MCP {operation} was cancelled)")
             except Exception as exc:
+                if request_started and not replay_safe and (
+                    _is_session_terminated(exc) or isinstance(exc, httpx.TransportError)
+                ):
+                    return self._unknown_tool_outcome(f"lost its response ({type(exc).__name__})")
                 if await self._refresh_session_after_termination(
                     exc, refreshed_session, capability_kind
                 ):
@@ -673,13 +710,23 @@ class MCPToolWrapper(_MCPWrapperBase):
         tool_def: MCPToolDefinition,
         tool_timeout: int = 30,
     ):
-        self._set_mcp_connection(session, server_name)
         self._original_name = tool_def.name
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
         self._tool_timeout = tool_timeout
+        # Replay is opt-in through explicit server declarations, not inferred
+        # from names or destructiveHint=False (additive writes can duplicate).
+        # This trusts the server's contract; it is not client-side deduplication
+        # and does not change tool permissions or concurrency classification.
+        annotations = getattr(tool_def, "annotations", None)
+        self._set_mcp_connection(
+            session, server_name,
+            replay_safe=annotations is not None and (
+                annotations.readOnlyHint is True or annotations.idempotentHint is True
+            ),
+        )
 
     @property
     def name(self) -> str:
@@ -695,7 +742,7 @@ class MCPToolWrapper(_MCPWrapperBase):
 
     async def execute(self, **kwargs: Any) -> str:
         result = await self._request_with_recovery(
-            lambda: self._session.call_tool(self._original_name, arguments=kwargs),
+            lambda session: session.call_tool(self._original_name, arguments=kwargs),
             self._tool_timeout,
             "tool",
         )
@@ -781,7 +828,7 @@ class MCPResourceWrapper(_MCPWrapperBase):
         resource_def: Resource,
         resource_timeout: int = 30,
     ):
-        self._set_mcp_connection(session, server_name)
+        self._set_mcp_connection(session, server_name, replay_safe=True)
         self._uri = resource_def.uri
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_resource_{resource_def.name}")
         desc = resource_def.description or resource_def.name
@@ -813,12 +860,12 @@ class MCPResourceWrapper(_MCPWrapperBase):
         from mcp import types
 
         result = await self._request_with_recovery(
-            lambda: self._session.read_resource(self._uri),
+            lambda session: session.read_resource(self._uri),
             self._resource_timeout,
             "resource",
         )
         if isinstance(result, ToolResult):
-            return str(result)
+            return result
         parts: list[str] = []
         for block in result.contents:
             if isinstance(block, types.TextResourceContents):
@@ -842,7 +889,7 @@ class MCPPromptWrapper(_MCPWrapperBase):
         prompt_def: Prompt,
         prompt_timeout: int = 30,
     ):
-        self._set_mcp_connection(session, server_name)
+        self._set_mcp_connection(session, server_name, replay_safe=True)
         self._prompt_name = prompt_def.name
         self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_prompt_{prompt_def.name}")
         desc = prompt_def.description or prompt_def.name
@@ -887,12 +934,12 @@ class MCPPromptWrapper(_MCPWrapperBase):
         from mcp import types
 
         result = await self._request_with_recovery(
-            lambda: self._session.get_prompt(self._prompt_name, arguments=kwargs),
+            lambda session: session.get_prompt(self._prompt_name, arguments=kwargs),
             self._prompt_timeout,
             "prompt",
         )
         if isinstance(result, ToolResult):
-            return str(result)
+            return result
         parts: list[str] = []
         for message in result.messages:
             content = message.content

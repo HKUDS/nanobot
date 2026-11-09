@@ -6,11 +6,11 @@ from loguru import logger as default_logger
 
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.providers.base import LLMUsage
-from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.state import SessionState
 from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
+from nanobot.webui.goal_state import goal_state_ws_blob
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -98,16 +98,15 @@ class WebUISessionProjection:
         return tuple(events)
 
     async def persisted_goal_state(self, session_key: str) -> dict[str, Any] | None:
-        """Return an actionable persisted goal state for reconnect hydration."""
+        """Return the persisted goal snapshot, including an inactive state on reconnect."""
         if self._sessions is None:
             return None
         snapshot = await self._sessions.state.read_metadata(session_key)
-        raw_metadata = snapshot.get("metadata") if snapshot is not None else None
-        metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
-        goal_state = goal_state_ws_blob(metadata)
-        if not goal_state.get("active") and goal_state.get("status") != "blocked":
+        if snapshot is None:
             return None
-        return goal_state
+        raw_metadata = snapshot.get("metadata")
+        metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
+        return goal_state_ws_blob(metadata)
 
     @staticmethod
     def active_turn_status(chat_id: str) -> tuple[float, str | None] | None:

@@ -477,6 +477,65 @@
       "password": "Mật khẩu",
       "proxyReferenceAuth": "Thiết lập xác thực trong URL proxy được tham chiếu."
     },
+    "sandbox": {
+      "title": "Sandbox lệnh",
+      "method": "Cách cô lập",
+      "off": "Không cô lập",
+      "status": "Cấu hình đã lưu",
+      "check": "Kiểm tra sandbox",
+      "checking": "Đang kiểm tra…",
+      "scope": "Chỉ kiểm tra trình khởi chạy đã lưu bằng tệp tạm. Đây không phải kiểm toán bảo mật đầy đủ. Khởi động lại gateway để áp dụng thay đổi cho lệnh.",
+      "path": "Đường dẫn trình khởi chạy tin cậy",
+      "launcher": "trình khởi chạy sandbox",
+      "pathHelp": "Thông thường hãy để trống để tìm {{launcher}} trong hệ thống. Với cài đặt tùy chỉnh, hãy hỏi người duy trì gói về đường dẫn đầy đủ của trình khởi chạy. Tệp và thư mục cha phải thuộc root, không cho nhóm/người khác ghi, và nằm ngoài vùng ghi của Agent.",
+      "automatic": "Tìm trong hệ thống",
+      "checkError": "Chưa kiểm tra được. Mở lại cài đặt và thử lại.",
+      "saveError": "Không lưu được. Bản nháp được giữ lại; hãy thử lại.",
+      "disableTitle": "Tắt cô lập lệnh?",
+      "disableHelp": "Sau khi khởi động lại, lệnh chạy với quyền tài khoản gateway. Công cụ tệp cũng mất giới hạn vùng làm việc do sandbox này cung cấp; các giới hạn được đặt riêng vẫn có hiệu lực.",
+      "keep": "Giữ cô lập",
+      "disable": "Tắt cô lập",
+      "notice": {
+        "title": "Cần kiểm tra lệnh",
+        "missing": "Gateway không tìm thấy {{launcher}}. Nếu đã cài, hãy đặt đường dẫn đầy đủ. Nếu chưa, hãy liên hệ người duy trì gói hoặc quản trị viên. Bạn vẫn có thể trò chuyện.",
+        "path": "Gateway không thể dùng đường dẫn {{launcher}} đã cấu hình. Hãy kiểm tra đường dẫn đầy đủ và quyền truy cập.",
+        "permissions": "{{launcher}} không nằm ở vị trí được bảo vệ. Hãy liên hệ người duy trì gói hoặc quản trị viên.",
+        "startup": "{{launcher}} không khởi động được. Hãy kiểm tra cài đặt gateway và giới hạn hệ thống.",
+        "configurePath": "Đặt đường dẫn {{launcher}}",
+        "openSettings": "Mở cài đặt sandbox"
+      },
+      "states": {
+        "disabled": "Đã tắt lệnh",
+        "off": "Không cô lập",
+        "unsupported": "Không hỗ trợ",
+        "unchecked": "Chưa kiểm tra",
+        "unavailable": "Không khả dụng",
+        "passed": "Đạt kiểm tra cơ bản",
+        "checking": "Đang kiểm tra…"
+      },
+      "help": {
+        "disabled": "Bật lệnh để dùng sandbox.",
+        "off": "Lệnh chưa được cô lập. Chọn cách cô lập để bảo vệ máy chủ.",
+        "unsupported": "Hệ điều hành gateway không hỗ trợ cách này.",
+        "unchecked": "Chạy kiểm tra cấu hình sandbox đã lưu.",
+        "unsaved": "Lưu thay đổi rồi kiểm tra sandbox.",
+        "unavailable": "Không thể khởi chạy sandbox. Lệnh sẽ không chạy trong sandbox này.",
+        "passed": "Trình khởi chạy hoạt động, vùng làm việc tạm ghi được và tệp thử bên ngoài bị chặn.",
+        "checking": "Đang chạy kiểm tra sandbox có giới hạn thời gian…"
+      },
+      "reasons": {
+        "launcher_missing": "Gateway không tìm thấy {{launcher}}. Nếu đã cài, hãy nhập đường dẫn đầy đủ bên dưới. Nếu chưa, hãy liên hệ người duy trì gói hoặc quản trị viên.",
+        "path_not_absolute": "Nhập đường dẫn tuyệt đối, không phải tên lệnh.",
+        "not_executable": "Đường dẫn phải trỏ đến tệp thực thi.",
+        "agent_writable": "Agent có thể ghi vào đường dẫn này. Hãy nhờ người duy trì gói cung cấp vị trí cài đặt được bảo vệ.",
+        "unprotected_installation": "Người dùng không phải root có thể ghi vào trình khởi chạy hoặc thư mục cha. Nhờ quản trị viên cài ở vị trí được bảo vệ.",
+        "path_unavailable": "Không đọc được đường dẫn. Kiểm tra tệp và quyền truy cập trên gateway.",
+        "platform_unsupported": "Chọn cách cô lập được hệ điều hành gateway hỗ trợ.",
+        "probe_failed": "Kiểm tra thất bại. Kiểm tra cài đặt, hỗ trợ namespace của nhân và các mount bổ sung.",
+        "probe_timeout": "Hết thời gian. Kiểm tra cài đặt và giới hạn máy chủ rồi thử lại.",
+        "unknown": "Trình khởi chạy không khả dụng. Kiểm tra cài đặt và quyền truy cập."
+      }
+    },
     "runtimeConfig": {
       "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",
       "commandRuntime": {
@@ -1614,6 +1673,10 @@
       "marketplaceNpxRequired": "Cần Node.js có npx",
       "marketplaceInstalling": "Đang cài đặt",
       "marketplaceInstalled": "Đã cài đặt",
+      "marketplaceNameConflict": "Tên đã được sử dụng",
+      "marketplaceOriginUnknown": "Không rõ nguồn đã cài",
+      "marketplaceConflictHelp": "Kiểm tra kỹ năng cùng tên trong Đã cài trước khi xóa để dùng nguồn khác.",
+      "marketplaceInstallConflict": "Xung đột cài đặt. Chờ quá trình cài đặt hoàn tất rồi kiểm tra kỹ năng cùng tên trong Đã cài.",
       "marketplaceInstall": "Cài đặt",
       "marketplaceNoTrend": "Chưa có xu hướng",
       "marketplaceTrendLabel": "Xu hướng lượt cài đặt trong 8 tuần",
@@ -1858,8 +1921,6 @@
       "sessionInfo": "Chi tiết phiên"
     },
     "sessionInfo": {
-      "title": "Phiên",
-      "untitled": "Chủ đề chưa đặt tên",
       "automations": "Tự động hóa",
       "count": "{{count}}",
       "loading": "Đang tải tự động hóa...",
@@ -1884,8 +1945,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Nhập tin nhắn…",
-      "placeholderHero": "Mô tả điều bạn muốn làm",
+      "placeholder": "Nhập / để xem lệnh, @ để chọn cuộc trò chuyện hoặc ứng dụng, $ để chọn kỹ năng",
+      "placeholderCompact": "Nhập tin nhắn…",
       "placeholderOpening": "Đang mở chủ đề mới…",
       "inputAria": "Ô nhập tin nhắn",
       "goalStateStrip": "Mục tiêu: {{label}}",
@@ -1912,15 +1973,21 @@
       "reauthFallback": "Mô hình dự phòng đã xử lý phản hồi này.",
       "reauthSettings": "Mở cài đặt mô hình",
       "context": {
+          "loaded": "Đã tải",
+          "unloaded": "Chưa tải",
+          "expand": "Mở rộng ngữ cảnh",
+          "collapse": "Thu gọn ngữ cảnh",
+          "noFiles": "Chưa có ngữ cảnh được ghi nhận",
+          "estimatedNodeTokens": "Khoảng {{value}} token",
+          "openFile": "Mở tệp",
+          "history": "Lịch sử ngữ cảnh",
+          "playHistory": "Phát lịch sử ngữ cảnh",
         "tooltip": "Ngữ cảnh {{percent}}%",
         "detailsLabel": "Mở mức sử dụng ngữ cảnh",
         "panelTitle": "Mức sử dụng ngữ cảnh",
         "contextTitle": "Ngữ cảnh",
-        "recentRounds": "Các lượt gần đây",
-        "inputTrend": "Token đầu vào",
-        "input": "Token đầu vào",
-        "cacheHitRate": "Tỷ lệ hit KV cache",
-        "output": "Token đầu ra",
+        "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Thời gian tạo"
       },
       "queued": {
@@ -2148,8 +2215,7 @@
     "fileEditDiffTruncated": "Chỉ hiển thị một phần thay đổi. Mở tệp để xem nội dung đầy đủ.",
     "usage": {
       "context": "Ngữ cảnh gần nhất: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} yêu cầu mô hình",
-      "estimated": "Bao gồm mức sử dụng ước tính"
+      "requests": "{{count}} yêu cầu mô hình"
     },
     "activityThinkingFor": "Đang suy nghĩ trong {{duration}}",
     "activityThought": "Đã suy nghĩ",

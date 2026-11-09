@@ -142,7 +142,7 @@ class MSTeamsChannel(BaseChannel):
         self._conversation_refs: dict[str, ConversationRef] = self._load_refs()
         with self._refs_guard:
             if self._prune_conversation_refs():
-                self._save_refs_locked(prune=True)
+                self._save_refs_locked()
 
     async def start(self) -> None:
         """Start the Teams webhook listener."""
@@ -286,7 +286,7 @@ class MSTeamsChannel(BaseChannel):
             resp = await self._http.post(base_url, headers=headers, json=payload)
             resp.raise_for_status()
             self.logger.info("Message sent to {}", ref.conversation_id)
-            self._touch_conversation_ref(str(msg.chat_id), persist=True)
+            self._touch_conversation_ref(str(msg.chat_id))
         except Exception:
             self.logger.exception("Send failed")
             raise
@@ -736,7 +736,7 @@ class MSTeamsChannel(BaseChannel):
             if disk_ts > mem_ts:
                 self._conversation_refs[key] = disk_ref
 
-    def _touch_conversation_ref(self, chat_id: str, *, persist: bool = False) -> None:
+    def _touch_conversation_ref(self, chat_id: str) -> None:
         with self._refs_guard:
             ref = self._conversation_refs.get(str(chat_id))
             if not ref:
@@ -747,8 +747,7 @@ class MSTeamsChannel(BaseChannel):
             if min_interval > 0 and prev > 0 and now - prev < min_interval:
                 return
             ref.updated_at = now
-            if persist:
-                self._save_refs_locked()
+            self._save_refs_locked()
 
     def _write_json_atomically(self, path: Path, data: dict[str, Any]) -> None:
         payload = json.dumps(data, indent=2)
@@ -769,13 +768,12 @@ class MSTeamsChannel(BaseChannel):
                 with suppress(OSError):
                     os.unlink(tmp_path)
 
-    def _save_refs_locked(self, *, prune: bool = True) -> None:
+    def _save_refs_locked(self) -> None:
         """Persist conversation references (caller must hold _refs_guard)."""
         try:
             with self._refs_file_lock():
                 self._merge_refs_from_disk_locked()
-                if prune:
-                    self._prune_conversation_refs()
+                self._prune_conversation_refs()
                 refs_data = {
                     key: {
                         "service_url": ref.service_url,

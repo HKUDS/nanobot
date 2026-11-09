@@ -157,8 +157,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       {children}
       <Sheet open={!!selected} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
         <SheetContent ref={detailPanel} tabIndex={-1}
-          className="w-full gap-0 overflow-hidden border-l p-0 outline-none sm:w-[min(32rem,calc(100vw-1rem))] sm:max-w-none"
-          overlayClassName="bg-black/20 backdrop-blur-[8px]"
+          className="w-[calc(100vw-1rem)] gap-0 p-0 sm:w-[min(32rem,calc(100vw-1rem))] sm:max-w-none"
           closeButtonClassName="right-2 top-2 grid h-11 w-11 place-items-center rounded-full sm:right-3 sm:top-3 sm:h-9 sm:w-9"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
