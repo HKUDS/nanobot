@@ -224,27 +224,11 @@ class _DeferredTraceGroup(NamedTuple):
 
 @dataclass(slots=True)
 class TranscriptReplayStats:
-    """Non-sensitive replay diagnostics, including exceptional recovery reads.
-
-    Source totals count full decoded facts, including repeated reads. Page totals
-    exclude recovery; marker probes separately report SQLite's terminal JSON
-    inspection, which returns no full fact but can still examine its bytes. The
-    probe boundary compares its whole-record size plus decoded reads to the page
-    budget. Canonical messages and navigation scans are not bounded by that budget.
-    """
+    """Selected-source page diagnostics; canonical recovery reads are separate."""
 
     effective_limit: int = 0
     source_bytes: int = 0
     parsed_records: int = 0
-    page_source_bytes: int = 0
-    page_source_records: int = 0
-    recovery_source_bytes: int = 0
-    recovery_source_records: int = 0
-    recovery_budget_exceeded: bool = False
-    completion_marker_probes: int = 0
-    completion_marker_probe_bytes: int = 0
-    completion_probe_budget_exceeded: bool = False
-    canonical_messages: int = 0
     selected_bytes: int = 0
     selected_records: int = 0
     compacted_delta_records: int = 0
@@ -252,27 +236,6 @@ class TranscriptReplayStats:
     capped_by_bytes: bool = False
     capped_by_records: bool = False
     truncated_oversized_turn: bool = False
-
-
-def _update_completion_probe_budget(stats: TranscriptReplayStats) -> None:
-    if stats.completion_marker_probes:
-        stats.completion_probe_budget_exceeded = (
-            stats.parsed_records + stats.completion_marker_probes > _MAX_TRANSCRIPT_PAGE_RECORDS
-            or stats.source_bytes + stats.completion_marker_probe_bytes > _MAX_TRANSCRIPT_PAGE_BYTES
-        )
-
-
-def _account_recovery_read(stats: TranscriptReplayStats, source_bytes: int) -> None:
-    stats.parsed_records += 1
-    stats.source_bytes += source_bytes
-    stats.recovery_source_records += 1
-    stats.recovery_source_bytes += source_bytes
-    over_records = stats.parsed_records > _MAX_TRANSCRIPT_PAGE_RECORDS
-    over_bytes = stats.source_bytes > _MAX_TRANSCRIPT_PAGE_BYTES
-    stats.recovery_budget_exceeded |= over_records or over_bytes
-    stats.capped_by_records |= over_records
-    stats.capped_by_bytes |= over_bytes
-    _update_completion_probe_budget(stats)
 
 
 def _record_json_line(record: dict[str, Any]) -> str:
@@ -486,8 +449,6 @@ def _select_transcript_page(
         )
         stats.parsed_records += len(turn)
         stats.source_bytes += source_bytes
-        stats.page_source_records += len(turn)
-        stats.page_source_bytes += source_bytes
         if source_bytes > remaining_bytes or (len(turn) < end - start and len(turn) < remaining_records):
             stats.capped_by_bytes = True
         if not turn:
@@ -1934,7 +1895,6 @@ def build_webui_thread_response(
         if session_turns is None:
             if session_messages is None and session_messages_loader is not None:
                 session_messages = session_messages_loader()
-            replay_stats.canonical_messages = len(session_messages or [])
             session_turns = _session_backfill_turns(session_key, session_messages or [])
         return session_turns
 
@@ -1967,21 +1927,16 @@ def build_webui_thread_response(
                 incomplete = bool(lines and lines[-1].get("event") == "turn_end"
                                   and lines[-1].get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True)
             else:
-                incomplete, probe_bytes = history.incomplete_completion_marker(ordinal, ref.record_count - 1)
-                if probe_bytes:
-                    replay_stats.completion_marker_probes += 1
-                    replay_stats.completion_marker_probe_bytes += probe_bytes
-                    _update_completion_probe_budget(replay_stats)
+                incomplete = history.incomplete_completion_marker(ordinal, ref.record_count - 1)
             if incomplete and (position := history.unique_user_position(ordinal)) is not None:
                 identity = f"turn:{ordinal}:record:{position}"
                 user = next((record for record in lines if record.get(_WEBUI_REPLAY_IDENTITY_KEY) == identity), None)
                 if user is None:
-                    records, _, _, source_bytes = turn_record_page(
+                    records, _, _, _ = turn_record_page(
                         history, ordinal, start=position, end=position + 1, reverse=False,
                         max_records=1, max_bytes=_MAX_TRANSCRIPT_PAGE_BYTES, allow_oversized=True,
                     )
                     if records:
-                        _account_recovery_read(replay_stats, source_bytes)
                         user = records[0]
                 if user is not None:
                     session_turn = _find_unique_session_turn_by_user(load_session_turns(), user)
@@ -2111,16 +2066,14 @@ def _prompt_summary(
     }
 
 
-def _history_prompt_summaries(
-    history: HistoryReader, *, on_read: Callable[[int], None] | None = None,
-) -> _ChunkPromptView:
+def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
     result: list[PromptSummary] = []
     candidates: list[_BackfillCandidate] = []
     input_ids: set[str] = set()
     answers: dict[str, str] = {}
     response_inputs: dict[int, list[str]] = {}
     turns: dict[int, list[dict[str, Any]]] = {}
-    for ordinal, position, fact in history.navigation(on_read=on_read):
+    for ordinal, position, fact in history.navigation():
         record = record_from_fact(fact, history.key)
         record[_WEBUI_REPLAY_IDENTITY_KEY] = f"turn:{ordinal}:record:{position}"
         turns.setdefault(ordinal, []).append(record)
@@ -2178,9 +2131,8 @@ def _build_prompt_view(
     *,
     history: HistoryReader,
     session_turns_loader: Callable[[], list[_SessionBackfillTurn]] | None = None,
-    on_read: Callable[[int], None] | None = None,
 ) -> _PromptView:
-    chunk = _history_prompt_summaries(history, on_read=on_read)
+    chunk = _history_prompt_summaries(history)
     raw_prompts = list(chunk.prompts)
     candidates = list(chunk.candidates)
     session_turns = None
@@ -2301,7 +2253,6 @@ def _prompt_view_snapshot(
     history: HistoryReader,
     session_turns_loader: Callable[[], list[_SessionBackfillTurn]] | None = None,
     session_version_loader: Callable[[], tuple[str, int] | None] | None = None,
-    on_read: Callable[[int], None] | None = None,
 ) -> tuple[_PromptView, str | None]:
     path = history.storage_path
 
@@ -2317,7 +2268,7 @@ def _prompt_view_snapshot(
             if cached is not None and (not cached.needs_canonical or session_version_loader is not None):
                 _PROMPT_SNAPSHOTS.move_to_end(cache_key)
                 return cached, revision
-    view = _build_prompt_view(history=history, session_turns_loader=session_turns_loader, on_read=on_read)
+    view = _build_prompt_view(history=history, session_turns_loader=session_turns_loader)
     # A caller supplying only messages cannot validate canonical changes, so a
     # recovered view needs a version loader before it can be reused.
     if (view.needs_canonical and session_version_loader is None) or revision != read_revision():

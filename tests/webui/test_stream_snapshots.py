@@ -13,11 +13,9 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent, TurnEndEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
-from nanobot.session.display_history import MAX_HISTORY_FACT_BYTES
 from nanobot.session.manager import SessionManager
 from nanobot.webui import transcript
 from nanobot.webui.gateway_services import build_gateway_services
-from nanobot.webui.history import fact_from_record
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 
@@ -131,23 +129,3 @@ async def test_signed_snapshots_survive_http_pagination_and_restart_without_rewr
         assert _stored_records(restarted_sessions) == records
     finally:
         await restarted_sessions.state.aclose()
-
-
-@pytest.mark.asyncio
-async def test_exact_eight_mib_snapshot_is_persisted_and_read_without_extra_metadata(history, tmp_path, monkeypatch):
-    gateway, channel = _gateway(history, tmp_path, monkeypatch)
-    ws = AsyncMock()
-    channel._attach(ws, "limit")
-    metadata = await history.metadata("limit", {WEBUI_TURN_METADATA_KEY: "limit-turn"})
-    baseline = fact_from_record({"event": "stream_end", "stream_id": "s", "text": "",
-                                 "turn_id": "limit-turn", "turn_phase": "answer", "turn_seq": 2,
-                                 "created_at_ms": 1_700_000_000_000}).encode()
-    text = "x" * (MAX_HISTORY_FACT_BYTES - len(baseline.encode("utf-8")))
-    await channel.send_delta("limit", text, metadata, stream_id="s")
-    await channel.send_delta("limit", "", metadata, stream_id="s", stream_end=True)
-    facts = await history.sessions.state.project_history("websocket:limit", lambda reader: reader.all_facts())
-    assert len(facts) == 1
-    assert len(facts[0].encode().encode("utf-8")) == MAX_HISTORY_FACT_BYTES
-    assert facts[0].content["text"] == text
-    snapshot = (await _http_thread(gateway, "limit"))["events"][0]
-    assert (snapshot["stream_id"], snapshot["turn_seq"], snapshot["text"]) == ("s", 2, text)

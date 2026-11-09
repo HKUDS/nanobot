@@ -380,7 +380,8 @@ describe("durable run recovery", () => {
     else await act(async () => { mounted.result.current.refreshHistory(); });
     await act(async () => { finishLatest(response(latest)); });
     expect(webuiThreadCache.get(`websocket:${chatId}`)).toEqual(latest);
-    expect(mounted.result.current.history.error).toContain("waiting for missing earlier records");
+    expect(mounted.result.current.history.error).toBeNull();
+    expect(mounted.result.current.history.loadingOlder).toBe(true);
     expect(finishMissing).toBeTypeOf("function");
     expect(reconcile).not.toHaveBeenCalled();
     expect(fence).not.toHaveBeenCalled();

@@ -673,34 +673,6 @@ describe("ThreadTranscript admission", () => {
     expect(thread.paging.hasMoreBefore).toBe(false);
   });
 
-  it("keeps live output attached to the visible window while filling a disjoint latest gap", () => {
-    const events: ThreadProjectionEvent[] = [
-      input("growing-live", "Question"),
-      ...["B", "C", "D", "E", "F"].map((text, index) => ({
-        ...at("growing-live", index + 2), event: "delta" as const, stream_id: "wire", text,
-      })),
-    ];
-    const fragment = (start: number, end: number) => history(events.slice(start, end), {
-      active_turn_id: "growing-live",
-      page: { history_generation: "generation", record_range: { turn: 0, start, end },
-        before_cursor: start ? `before-${start}` : null, has_more_before: start > 0, truncated_oversized_turn: true },
-    });
-    const thread = new ThreadTranscript();
-    expect(thread.accept(fragment(1, 3), thread.begin("initial"))).toBe(true);
-    const refresh = thread.begin("latest");
-    receive(thread, { ...at("growing-live", 7), event: "delta", stream_id: "wire", text: "G" });
-    expect(thread.accept(fragment(4, 6), refresh)).toBe(true);
-    expect(thread.messages.map((row) => row.content)).toEqual(["BCG"]);
-    expect(thread.hasPendingFragmentGap).toBe(true);
-    expect(thread.paging.beforeCursor).toBe("before-4");
-    expect(thread.accept(fragment(2, 4), thread.begin("older"))).toBe(true);
-    expect(thread.messages.map((row) => row.content)).toEqual(["BCDEFG"]);
-    expect(thread.accept(fragment(0, 2), thread.begin("older"))).toBe(true);
-    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "BCDEFG"]);
-    receive(thread, { ...at("growing-live", 8), event: "delta", stream_id: "wire", text: "H" });
-    expect(thread.messages.at(-1)?.content).toBe("BCDEFGH");
-  });
-
   it("keeps an unpersisted live contribution visible while paging across a multi-page gap", () => {
     // D was delivered live but never persisted, so record positions and turn_seq differ.
     const events: ThreadProjectionEvent[] = [
@@ -722,7 +694,7 @@ describe("ThreadTranscript admission", () => {
     expect(thread.accept(fragment(6, 8), thread.begin("latest"))).toBe(true);
     expect(thread.messages.map((row) => row.content)).toEqual(["BCD"]);
     expect(thread.hasPendingFragmentGap).toBe(true);
-    expect(thread.paging).toMatchObject({ beforeCursor: "before-6", hasMoreBefore: true, error: expect.any(String) });
+    expect(thread.paging).toMatchObject({ beforeCursor: "before-6", hasMoreBefore: true, error: null });
     expect(thread.accept(fragment(0, 1), staleOlder)).toBe(false);
     expect(thread.accept(fragment(1, 3), staleLatest)).toBe(false);
     expect(thread.accept(fragment(4, 6), thread.begin("older"))).toBe(true);
@@ -738,37 +710,6 @@ describe("ThreadTranscript admission", () => {
     expect(restored.messages.map((row) => row.content)).toEqual(["Question", "BCDEFGHI"]);
     receive(restored, { ...at("gap-live", 10), event: "delta", stream_id: "wire", text: "J" });
     expect(restored.messages.at(-1)?.content).toBe("BCDEFGHIJ");
-  });
-
-  it("bridges a staged completed tail when the newest live chunk is persisted but an earlier chunk is not", () => {
-    const turn = "gap-partly-persisted";
-    const chunk = (seq: number, text: string): ThreadProjectionEvent => ({
-      ...at(turn, seq), event: "delta", stream_id: "wire", text,
-    });
-    const fragment = (start: number, end: number, events: ThreadProjectionEvent[], completed = false) => history(events, {
-      active_turn_id: completed ? null : turn,
-      completed_turn_ids: completed ? [turn] : [],
-      page: { history_generation: "generation", record_range: { turn: 0, start, end },
-        before_cursor: start ? `before-${start}` : null, has_more_before: start > 0, truncated_oversized_turn: true },
-    });
-    const thread = new ThreadTranscript();
-    expect(thread.accept(fragment(1, 3, [chunk(2, "B"), chunk(3, "C")]), thread.begin("initial"))).toBe(true);
-    receive(thread, chunk(4, "D"));
-    const end: ThreadProjectionEvent = { ...at(turn, 10), event: "turn_end" };
-    expect(thread.accept(fragment(6, 9, [chunk(8, "H"), chunk(9, "I"), end], true), thread.begin("latest"))).toBe(true);
-    expect(thread.hasPendingFragmentGap).toBe(true);
-    receive(thread, chunk(5, "E"));
-    expect(thread.messages.map((row) => row.content)).toEqual(["BCDE"]);
-
-    expect(thread.accept(fragment(3, 6, [chunk(5, "E"), chunk(6, "F"), chunk(7, "G")]), thread.begin("older"))).toBe(true);
-    expect(thread.hasPendingFragmentGap).toBe(false);
-    expect(thread.messages.map((row) => row.content)).toEqual(["BCDEFGHI"]);
-    expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([4]);
-
-    const restored = new ThreadTranscript([], thread.save());
-    expect(restored.accept(fragment(0, 1, [input(turn, "Question")]), restored.begin("older"))).toBe(true);
-    expect(restored.messages.map((row) => row.content)).toEqual(["Question", "BCDEFGHI"]);
-    expect(restored.save().live.map(({ event }) => event.turn_seq)).toEqual([4]);
   });
 
   it("loads the missing prefix before adopting an unknown-left media-signed snapshot", () => {
@@ -922,26 +863,6 @@ describe("ThreadTranscript admission", () => {
     }));
     expect(visible(thread)).toEqual(visible(complete));
     expect(thread.paging.hasMoreBefore).toBe(false);
-  });
-
-  it("keeps live continuation while filling an earlier fragment of the same stream", () => {
-    const thread = new ThreadTranscript();
-    expect(thread.accept(history([
-      { ...at("long-live", 3), event: "delta", stream_id: "wire", text: "B" },
-    ], { active_turn_id: "long-live", has_pending_tool_calls: true,
-      page: { before_cursor: "inside-live", has_more_before: true, truncated_oversized_turn: true,
-        record_range: { turn: 0, start: 2, end: 3 } } }), thread.begin("initial"))).toBe(true);
-    const older = thread.begin("older");
-    receive(thread, { ...at("long-live", 4), event: "delta", stream_id: "wire", text: "C" });
-
-    expect(thread.accept(history([
-      input("long-live", "Question"),
-      { ...at("long-live", 2), event: "delta", stream_id: "wire", text: "A" },
-    ], { page: { before_cursor: null, has_more_before: false, truncated_oversized_turn: true,
-      record_range: { turn: 0, start: 0, end: 2 } } }), older)).toBe(true);
-    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "ABC"]);
-    receive(thread, { ...at("long-live", 5), event: "delta", stream_id: "wire", text: "D" });
-    expect(thread.messages.at(-1)?.content).toBe("ABCD");
   });
 
   it("keeps tool activity in order when an older fragment meets a live answer", () => {

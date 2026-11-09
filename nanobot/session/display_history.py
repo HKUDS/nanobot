@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -198,16 +198,14 @@ class HistoryReader:
         ).fetchall()
         return int(positions[0][0]) if len(positions) == 1 else None
 
-    def incomplete_completion_marker(self, ordinal: int, position: int) -> tuple[bool, int]:
-        """Inspect just the terminal marker; no complete fact is returned or decoded."""
+    def incomplete_completion_marker(self, ordinal: int, position: int) -> bool:
+        """Inspect the terminal marker without decoding the full fact."""
         row = self._db.execute(
-            """SELECT kind, CASE WHEN kind=? THEN json_type(record, '$.content.transcript_incomplete') END,
-                      CASE WHEN kind=? THEN max(length(CAST(record AS BLOB)),
-                          coalesce(json_extract(record, '$.uncompressed_bytes'), 0)) ELSE 0 END
-               FROM history_entries WHERE session_key=? AND turn_ordinal=? AND position=?""",
-            (HistoryKind.COMPLETION, HistoryKind.COMPLETION, self.key, ordinal, position),
+            """SELECT json_type(record, '$.content.transcript_incomplete')
+               FROM history_entries WHERE session_key=? AND turn_ordinal=? AND position=? AND kind=?""",
+            (self.key, ordinal, position, HistoryKind.COMPLETION),
         ).fetchone()
-        return (bool(row and row[0] == HistoryKind.COMPLETION and row[1] == "true"), int(row[2]) if row else 0)
+        return bool(row and row[0] == "true")
 
     def has_navigation_answer(self, ordinal: int) -> bool:
         return self._db.execute(
@@ -216,18 +214,15 @@ class HistoryReader:
             (self.key, ordinal, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT, HistoryKind.ANSWER_FRAGMENT),
         ).fetchone() is not None
 
-    def navigation(self, *, on_read: Callable[[int], None] | None = None) -> Iterator[tuple[int, int, HistoryFact]]:
+    def navigation(self) -> Iterator[tuple[int, int, HistoryFact]]:
         """Read input/answer records only, never file diffs or tool result bodies."""
         kinds = (HistoryKind.INPUT, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT,
                  HistoryKind.ANSWER_FRAGMENT, HistoryKind.COMPLETION)
         for row in self._db.execute(
-            """SELECT turn_ordinal, position, record,
-                      max(length(CAST(record AS BLOB)), coalesce(json_extract(record, '$.uncompressed_bytes'), 0))
-               FROM history_entries WHERE session_key=? AND kind IN (?, ?, ?, ?, ?) ORDER BY turn_ordinal, position""",
+            """SELECT turn_ordinal, position, record FROM history_entries
+               WHERE session_key=? AND kind IN (?, ?, ?, ?, ?) ORDER BY turn_ordinal, position""",
             (self.key, *kinds),
         ):
-            if on_read is not None:
-                on_read(int(row[3]))
             yield int(row[0]), int(row[1]), HistoryFact.decode(row[2])
 
     def all_facts(self) -> list[HistoryFact]:

@@ -301,26 +301,11 @@ def test_oversized_incomplete_turn_recovers_once_across_all_fragments(history, m
         {"role": "user", "content": "unique question"},
         {"role": "assistant", "content": "complete canonical answer"},
     ]
-    decoded = []
-    original_decode = HistoryFact.decode
-
-    def track_decode(record):
-        decoded.append(record)
-        return original_decode(record)
-
-    monkeypatch.setattr(HistoryFact, "decode", track_decode)
-
     def read(**kwargs):
-        decoded.clear()
         stats = transcript.TranscriptReplayStats()
         page = history.build(key, session_messages=messages, stats=stats, **kwargs)
-        assert stats.page_source_records <= 4
-        assert stats.page_source_bytes <= transcript._MAX_TRANSCRIPT_PAGE_BYTES
-        assert stats.parsed_records == len(decoded)
-        assert stats.source_bytes == sum(max(len(record.encode("utf-8")), history_record_size(record)) for record in decoded)
-        assert stats.parsed_records == stats.page_source_records + stats.recovery_source_records
-        assert stats.source_bytes == stats.page_source_bytes + stats.recovery_source_bytes
-        assert stats.recovery_budget_exceeded == (stats.parsed_records > 4)
+        assert stats.parsed_records <= 4
+        assert stats.source_bytes <= transcript._MAX_TRANSCRIPT_PAGE_BYTES
         return page
 
     pages = [read(after=_legacy_cursor(0))]
@@ -363,26 +348,11 @@ def test_oversized_legacy_prompt_cursor_finds_backfilled_user_on_cold_page(histo
     prompts = history.prompts(key, session_messages_loader=lambda: messages)
     assert [prompt["preview"] for prompt in prompts] == ["restored question"]
     transcript._PROMPT_SNAPSHOTS.clear()
-    decoded = []
-    original_decode = HistoryFact.decode
-
-    def track_decode(record):
-        decoded.append(record)
-        return original_decode(record)
-
-    monkeypatch.setattr(HistoryFact, "decode", track_decode)
-
     def read(**kwargs):
-        decoded.clear()
         stats = transcript.TranscriptReplayStats()
         page = history.build(key, session_messages=messages, stats=stats, **kwargs)
-        assert stats.page_source_records <= 4
-        assert stats.page_source_bytes <= transcript._MAX_TRANSCRIPT_PAGE_BYTES
-        assert stats.parsed_records == len(decoded)
-        assert stats.source_bytes == sum(max(len(record.encode("utf-8")), history_record_size(record)) for record in decoded)
-        assert stats.parsed_records == stats.page_source_records + stats.recovery_source_records
-        assert stats.source_bytes == stats.page_source_bytes + stats.recovery_source_bytes
-        assert stats.recovery_budget_exceeded == (stats.parsed_records > 4)
+        assert stats.parsed_records <= 4
+        assert stats.source_bytes <= transcript._MAX_TRANSCRIPT_PAGE_BYTES
         return page
 
     page = read(after=prompts[0]["cursor"])
@@ -444,7 +414,7 @@ def test_legacy_fragment_does_not_backfill_when_user_is_in_another_slice(history
     assert [prompt["preview"] for prompt in prompts] == ["real user"]
 
 
-def test_recovery_reports_extra_reads_over_the_byte_budget(history, monkeypatch):
+def test_byte_limited_terminal_fragment_recovers_the_answer(history, monkeypatch):
     monkeypatch.setattr(transcript, "_MAX_TRANSCRIPT_PAGE_RECORDS", 100)
     monkeypatch.setattr(transcript, "_MAX_TRANSCRIPT_PAGE_BYTES", 500)
     key = "websocket:recovery-byte-budget"
@@ -459,11 +429,13 @@ def test_recovery_reports_extra_reads_over_the_byte_budget(history, monkeypatch)
     stats = transcript.TranscriptReplayStats()
     page = history.build(key, session_messages=messages, stats=stats)
     assert page["completed_turn_ids"] == ["t"]
-    assert stats.page_source_bytes <= 500
-    assert stats.recovery_source_records == 1
-    assert stats.source_bytes == stats.page_source_bytes + stats.recovery_source_bytes
-    assert stats.source_bytes > 500
-    assert stats.recovery_budget_exceeded and stats.capped_by_bytes
+    assert stats.source_bytes <= 500
+    pages = [page]
+    while pages[-1]["page"]["has_more_before"]:
+        pages.append(history.build(key, session_messages=messages, before=pages[-1]["page"]["before_cursor"]))
+    answers = [event["text"] for page in pages for event in page["events"]
+               if event["event"] == "message" and not event.get("kind")]
+    assert answers == ["answer"]
 
 
 def test_complete_single_user_fragment_keeps_normal_budget_without_loading_canonical(history, monkeypatch):
@@ -483,11 +455,8 @@ def test_complete_single_user_fragment_keeps_normal_budget_without_loading_canon
     stats = transcript.TranscriptReplayStats()
     page = history.build(key, after=_legacy_cursor(0), session_messages_loader=fail_if_loaded, stats=stats)
     assert page["page"]["record_range"] == {"turn": 0, "start": 0, "end": 3}
-    assert stats.parsed_records == stats.page_source_records == 3
-    assert stats.source_bytes == stats.page_source_bytes <= transcript._MAX_TRANSCRIPT_PAGE_BYTES
-    assert stats.recovery_source_records == 0
-    assert stats.completion_marker_probes == 1 and stats.completion_marker_probe_bytes > 0
-    assert stats.completion_probe_budget_exceeded
+    assert stats.parsed_records == 3
+    assert stats.source_bytes <= transcript._MAX_TRANSCRIPT_PAGE_BYTES
 
 
 def test_legacy_prompt_id_agrees_with_warm_and_cold_snapshots(history, monkeypatch):
@@ -506,18 +475,11 @@ def test_legacy_prompt_id_agrees_with_warm_and_cold_snapshots(history, monkeypat
 
     response = history.prompt_response(key, None, session_messages_loader=lambda: messages, session_version_loader=version)
     prompt = response["prompts"][0]
-    warm_stats = transcript.TranscriptReplayStats()
-    warm = history.build(key, after=prompt["cursor"], session_messages=messages,
-                         session_version_loader=version, stats=warm_stats)
+    warm = history.build(key, after=prompt["cursor"], session_messages=messages, session_version_loader=version)
     assert warm["events"][0]["projection_id"] == prompt["id"]
-    assert warm_stats.recovery_source_records == 0
     transcript._PROMPT_SNAPSHOTS.clear()
-    cold_stats = transcript.TranscriptReplayStats()
-    cold = history.build(key, after=prompt["cursor"], session_messages=messages,
-                         session_version_loader=version, stats=cold_stats)
+    cold = history.build(key, after=prompt["cursor"], session_messages=messages, session_version_loader=version)
     assert cold["events"] == warm["events"]
-    assert cold_stats.recovery_source_records > 0
-    assert cold_stats.recovery_budget_exceeded
 
 
 def test_legacy_backfill_does_not_make_an_incomplete_turn_physically_recoverable(history, monkeypatch):
@@ -533,9 +495,7 @@ def test_legacy_backfill_does_not_make_an_incomplete_turn_physically_recoverable
                 {"role": "assistant", "content": "partial answer"}]
     pages = [history.build(key, after=_legacy_cursor(0), session_messages=messages)]
     while pages[-1]["page"]["has_more_after"]:
-        stats = transcript.TranscriptReplayStats()
-        pages.append(history.build(key, after=pages[-1]["page"]["after_cursor"], session_messages=messages, stats=stats))
-        assert stats.recovery_source_records == 0
+        pages.append(history.build(key, after=pages[-1]["page"]["after_cursor"], session_messages=messages))
     events = [event for page in pages for event in page["events"]]
     assert [event["text"] for event in events if event["event"] == "user_message"] == ["restored question"]
     assert [event["text"] for event in events if event["event"] == "message" and not event.get("kind")] == ["partial answer"]
