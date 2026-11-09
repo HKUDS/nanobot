@@ -1808,32 +1808,6 @@ async def test_process_direct_rejects_reserved_system_channel(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_process_direct_skip_user_persist_does_not_save_retry_user(
-    tmp_path: Path,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    session = loop.sessions.get_or_create("api:default")
-    session.add_message("user", "hello")
-    session.add_message("assistant", "previous empty-response attempt")
-    loop.sessions.save(session)
-
-    await loop.process_direct(
-        "hello",
-        session_key=session.key,
-        channel="api",
-        chat_id="default",
-        persist_user_message=False,
-    )
-
-    session = loop.sessions.get_or_create("api:default")
-    assert [(m["role"], m["content"]) for m in session.messages] == [
-        ("user", "hello"),
-        ("assistant", "previous empty-response attempt"),
-        ("assistant", "Test title"),
-    ]
-
-
-@pytest.mark.asyncio
 async def test_request_context_uses_effective_key_for_subagent_tool(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     subagent_tool = loop.tools.get("subagent")

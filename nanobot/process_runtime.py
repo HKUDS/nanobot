@@ -103,11 +103,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         # it; poll() both reaps it and reports the real lifecycle state.
         self._owned_process: Any | None = None
 
-    def start_background(self, options: _StartOptionsT) -> ProcessResult:
-        """Start the configured command as a detached process."""
-        with self._lifecycle_lock():
-            return self._start_background(options)
-
     def _start_background(self, options: _StartOptionsT) -> ProcessResult:
         current = self.status()
         if current.running:
@@ -151,11 +146,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
         self._write_state(state)
         return ProcessResult(True, self._message("started_background"), self.status())
 
-    def stop(self, *, timeout_s: int = 20) -> ProcessResult:
-        """Stop the process recorded in this runtime's state file."""
-        with self._lifecycle_lock():
-            return self._stop(timeout_s=timeout_s)
-
     def _stop(self, *, timeout_s: int) -> ProcessResult:
         status = self.status()
         if not status.pid:
@@ -188,15 +178,6 @@ class ManagedProcessRuntime(Generic[_StartOptionsT]):
             return ProcessResult(True, self._message("stopped"), final_status)
         self._clear_state()
         return ProcessResult(True, self._message("stopped"), self.status(reason="stopped"))
-
-    def restart(self, options: _StartOptionsT, *, timeout_s: int = 20) -> ProcessResult:
-        """Restart the managed process."""
-        with self._lifecycle_lock():
-            stop_result = self._stop(timeout_s=timeout_s)
-            recoverable = {self._message("not_running"), self._message("state_stale")}
-            if not stop_result.ok and stop_result.message not in recoverable:
-                return stop_result
-            return self._start_background(options)
 
     def status(self, *, reason: str | None = None) -> ProcessStatus:
         """Return live status, clearing stale state when needed."""
