@@ -74,6 +74,16 @@ def main() -> None:
                 )
             compose_path.write_text(json.dumps(config), encoding="utf-8")
             try:
+                if label == "generated":
+                    retired = subprocess.run(
+                        [*compose, "run", "--rm", "--no-deps", "-T", "nanobot-cli", "serve", "--port", "8900"],
+                        capture_output=True, text=True, timeout=45,
+                    )
+                    output = retired.stdout + retired.stderr
+                    assert retired.returncode == 2, output
+                    assert "'nanobot serve' has been removed" in output, output
+                    assert not (data / "config.json").exists()
+                    print("PASS retired serve command: migration hint without Compose bootstrap")
                 onboard = run("run", "--rm", "--no-deps", "-T", "nanobot-cli", "onboard")
                 assert "Overwrite?" not in onboard
                 assert "Created config" in onboard

@@ -134,6 +134,23 @@ def main(
         _run_agent([], prog_name="nanobot")
 
 
+@app.command(
+    "serve",
+    hidden=True,
+    add_help_option=False,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def _retired_serve() -> None:
+    """Explain the removal without processing flags from old launch scripts."""
+    typer.echo(
+        "'nanobot serve' has been removed. No API server was started.\n"
+        "To chat in your browser, run 'nanobot webui'.\n"
+        "The old /v1 endpoints have no drop-in replacement.",
+        err=True,
+    )
+    raise typer.Exit(2)
+
+
 @app.command()
 def onboard(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),

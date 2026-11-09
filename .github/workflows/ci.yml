@@ -495,7 +495,7 @@ jobs:
       - name: Build image with default channel dependencies
         run: docker build -t nanobot:test .
 
-      - name: Verify first-boot WebUI and API
+      - name: Verify first-boot gateway and WebUI
         run: python scripts/docker_compose_smoke.py --image nanobot:test
 
       - name: Check out the real previous release for retained-volume acceptance

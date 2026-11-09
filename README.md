@@ -67,7 +67,7 @@ nanobot can:
 ## 💡 Why nanobot
 
 - **Persistent workflows**: keep saved conversations, long-term memory, and task results for later work.
-- **Chat-native reach**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, email, Mattermost, and Linear.
+- **Chat-native reach**: WebUI, Telegram, Feishu, Slack, Discord, Teams, email, Mattermost, and Linear.
 - **Model freedom**: OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
 - **Small core**: readable internals with MCP, memory, deployment, and automation built in.
 - **Own your stack**: inspect, customize, self-host, and extend without a giant platform.
