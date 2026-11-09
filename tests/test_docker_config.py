@@ -1,10 +1,12 @@
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.config.loader import load_config, resolve_config_env_vars
@@ -16,6 +18,13 @@ def _initialize(path: Path, web_token: str = "", api_key: str = "") -> subproces
         [sys.executable, "-m", "nanobot.cli.docker_bootstrap", str(path)],
         env=env, capture_output=True, text=True,
     )
+
+
+def test_render_blueprint_starts_gateway_through_entrypoint():
+    blueprint_path = Path(__file__).resolve().parents[1] / "render.yaml"
+    blueprint = yaml.safe_load(blueprint_path.read_text(encoding="utf-8"))
+    service = next(service for service in blueprint["services"] if service["name"] == "nanobot")
+    assert shlex.split(service["dockerCommand"]) == ["/usr/local/bin/entrypoint.sh", "gateway"]
 
 
 def test_first_boot_generates_valid_container_config(tmp_path):

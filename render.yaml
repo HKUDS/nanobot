@@ -4,15 +4,10 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    # Render's Docker Command REPLACES the Dockerfile CMD but keeps the
-    # ENTRYPOINT (entrypoint.sh), so pass only the command args here — otherwise
-    # the entrypoint path is reinjected as an argument and nanobot fails with
-    # "No such command /usr/local/bin/entrypoint.sh". When RENDER=true the
-    # entrypoint initializes render-config.json on the mounted disk at
-    # $HOME/.nanobot/config.json (so the runtime data_dir lands on the persistent
-    # disk), chowns the root-owned mount, drops to the non-root nanobot user, and
-    # appends the --config flag itself.
-    dockerCommand: gateway
+    # Render's Docker Command replaces the image startup command. The entrypoint
+    # prepares the mounted disk, drops privileges, initializes config.json from
+    # render-config.json if needed, and appends --config.
+    dockerCommand: /usr/local/bin/entrypoint.sh gateway
     # Deploy-to-Render templates should not auto-deploy on every repo push
     # (Render's recommendation); trigger deploys manually or via the Dashboard.
     autoDeploy: false
