@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import mimetypes
-import re
 import secrets
 from collections.abc import Callable
 from pathlib import Path
@@ -13,7 +12,7 @@ from websockets.http11 import Response
 from nanobot.channels.websocket.attachment_policy import IMAGE_MIME_ALLOWED, VIDEO_MIME_ALLOWED
 from nanobot.config.paths import get_media_dir
 from nanobot.security.workspace_access import WorkspaceScope
-from nanobot.utils.media_decode import UPLOADED_FILE_TAG
+from nanobot.utils.media_decode import uploaded_file_name
 from nanobot.webui.media_api import (
     serve_signed_media,
     sign_local_attachment,
@@ -97,8 +96,8 @@ class WebUIMediaGateway:
         media: list[dict[str, Any]] = []
         for raw in paths:
             path = Path(raw)
-            stored_file = re.fullmatch(r"[0-9a-f]{12}" + re.escape(UPLOADED_FILE_TAG) + r"(.+)", path.name) if raw not in local else None
-            name = stored_file.group(1) if stored_file else path.name
+            stored_file = uploaded_file_name(path.name) if raw not in local else None
+            name = stored_file or path.name
             mime = mimetypes.guess_type(name)[0]
             kind = "file" if stored_file else (
                 "video" if mime in VIDEO_MIME_ALLOWED else "image" if mime in IMAGE_MIME_ALLOWED else "file"

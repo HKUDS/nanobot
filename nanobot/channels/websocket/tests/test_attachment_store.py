@@ -35,6 +35,10 @@ async def test_binary_larger_than_websocket_limit_preserves_layout(tmp_path):
 
 @pytest.mark.parametrize("mime,filename,raw,pattern", [
     ("application/pdf", "../../report.pdf", b"pdf", r"[0-9a-f]{12}_file_.+\.pdf"),
+    ("application/pdf", "report", b"pdf", r"[0-9a-f]{12}_filedoc_pdf_report\.pdf"),
+    ("application/pdf", "report.dat", b"pdf", r"[0-9a-f]{12}_filedoc_pdf_report\.dat\.pdf"),
+    ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "report", b"sheet", r"[0-9a-f]{12}_filedoc_xlsx_report\.xlsx"),
+    ("application/vnd.openxmlformats-officedocument.presentationml.presentation", "report", b"slides", r"[0-9a-f]{12}_filedoc_pptx_report\.pptx"),
     ("video/webm", "ignored.webm", b"video", r"[0-9a-f]{12}\.webm"),
     ("text/markdown", "notes.md", b"notes", r"[0-9a-f]{12}_file_notes\.md"),
     ("text/plain", "settings.ini", b"[settings]", r"[0-9a-f]{12}_file_settings\.ini"),

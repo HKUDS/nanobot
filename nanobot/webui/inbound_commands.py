@@ -755,13 +755,12 @@ class WebUICommandRouter:
             return
         if local:
             metadata[INBOUND_META_LOCAL_MEDIA] = [item["path"] for item in local]
-        if trusted_webui:
-            metadata[INBOUND_META_FILE_MEDIA] = [
-                local[index]["path"] if is_local else str(uploaded[index].path)
-                for is_local, index in attachment_order
-                if (local[index]["kind"] != "image" if is_local else
-                    uploaded[index].size == 0 or uploaded[index].mime not in IMAGE_MIME_ALLOWED)
-            ]
+        metadata[INBOUND_META_FILE_MEDIA] = [
+            local[index]["path"] if is_local else str(uploaded[index].path)
+            for is_local, index in attachment_order
+            if (local[index]["kind"] != "image" if is_local else
+                uploaded[index].size == 0 or uploaded[index].mime not in IMAGE_MIME_ALLOWED)
+        ]
         if temporary_policy is not None:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True

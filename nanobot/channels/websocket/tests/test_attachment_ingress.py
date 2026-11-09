@@ -240,6 +240,30 @@ async def test_real_webui_uploads_arbitrary_files_and_empty_images(gateway, mime
         assert inbound.metadata["_file_media_paths"] == [str(path)]
 
 
+async def test_ordinary_websocket_upload_keeps_empty_image_as_file(gateway):
+    from nanobot.utils.document import reference_non_image_attachments
+
+    _, bus, http_url, ws_url = gateway
+    async with connect(ws_url) as ws, aiohttp.ClientSession() as http:
+        ready = await event(ws, "ready")
+        capability = ready["upload"]
+        headers = {"Authorization": f"Bearer {capability['token']}", "Content-Type": "image/png",
+                   "X-Attachment-Name": "empty.png"}
+        async with http.post(http_url + capability["path"], data=b"", headers=headers) as response:
+            assert response.status == 201, await response.text()
+            reference = (await response.json())["reference"]
+        await ws.send(json.dumps({"type": "message", "chat_id": ready["chat_id"], "content": "inspect",
+                                  "media": [{"reference": reference, "name": "empty.png"}]}))
+        inbound = await asyncio.wait_for(bus.consume_inbound(), 2)
+        path = Path(inbound.media[0])
+        assert path.read_bytes() == b""
+        content, images = reference_non_image_attachments(
+            inbound.content, inbound.media, file_paths=inbound.metadata.get("_file_media_paths"),
+        )
+        assert content == f"inspect\n\n[Attachment: {path}]"
+        assert images == []
+
+
 async def test_upload_without_declared_content_length_is_rejected(gateway):
     _, _, http_url, ws_url = gateway
     port = int(http_url.rsplit(":", 1)[1])

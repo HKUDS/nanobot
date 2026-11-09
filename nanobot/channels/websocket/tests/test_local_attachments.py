@@ -91,6 +91,49 @@ def test_generic_uploaded_files_keep_name_and_kind_on_replay(tmp_path):
         assert bytes(gateway.serve_signed_media(sig, payload).body) == expected
 
 
+@pytest.mark.parametrize("mime,name", [
+    ("application/pdf", "report"),
+    ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "report.dat"),
+])
+async def test_uploaded_document_without_matching_suffix_is_readable_and_keeps_name(tmp_path, mime, name):
+    from io import BytesIO
+
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.channels.websocket.attachment_store import AttachmentStore
+
+    data = BytesIO()
+    if mime == "application/pdf":
+        from pypdf import PdfWriter
+
+        pdf = PdfWriter()
+        pdf.add_blank_page(width=72, height=72)
+        pdf.write(data)
+        expected = "PDF has no extractable text"
+    else:
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("Report contents")
+        doc.save(data)
+        expected = "Report contents"
+    raw = data.getvalue()
+
+    async def chunks():
+        yield raw
+
+    media = tmp_path / "media"
+    store = AttachmentStore(media)
+    reference = await store.upload(chunks(), owner="owner", mime=mime, size=len(raw), filename=name)
+    path = store.commit([reference], owner="owner")[0]
+    result = await ReadFileTool(workspace=tmp_path).execute(path=path)
+    assert expected in result
+    gateway = WebUIMediaGateway(workspace_path=tmp_path, logger=Mock(), media_dir=lambda _: media)
+    attachment = gateway.augment_transcript_user_media([path], [], session_key="websocket:files")[0]
+    assert (attachment["name"], attachment["kind"]) == (name, "file")
+    sig, payload = attachment["url"].split("/")[-2:]
+    assert bytes(gateway.serve_signed_media(sig, payload).body) == raw
+
+
 def test_local_media_ranges_latest_contents_and_current_scope_without_staging(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
