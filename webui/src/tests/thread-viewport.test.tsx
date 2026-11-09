@@ -979,6 +979,89 @@ describe("ThreadViewport", () => {
       .not.toBeInTheDocument();
   });
 
+  it("keeps uncommanded scrolling user-owned through layout changes and a tail reversal", async () => {
+    const { scroller } = await renderPromptRailViewport();
+    expect(scroller.scrollTop).toBe(1_200);
+
+    act(() => {
+      scroller.scrollTop = 1_180;
+      fireEvent.scroll(scroller);
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_180);
+
+    act(() => {
+      scroller.scrollTop = 1_000;
+      fireEvent.scroll(scroller);
+      scroller.scrollTop = 1_100;
+      fireEvent.scroll(scroller);
+    });
+    // A partial return must not let later layout clamping resume follow.
+    act(() => {
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1_500 });
+      scroller.scrollTop = 900;
+      fireEvent.scroll(scroller);
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    act(() => {
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1_800 });
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(900);
+
+    act(() => {
+      scroller.scrollTop = 1_200;
+      fireEvent.scroll(scroller);
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_200);
+
+    act(() => {
+      scroller.scrollTop = 1_000;
+      fireEvent.scroll(scroller);
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_000);
+  });
+
+  it.each(["scroll-first", "layout-first"])("keeps the reading position through output and completion with %s delivery", async (ordering) => {
+    const threaded: UIMessage[] = [
+      { id: "u1", role: "user", content: "question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "answer", turnId: "turn-1", isStreaming: true, createdAt: 2 },
+    ];
+    const { container, rerender } = render(
+      <ThreadViewport messages={threaded} isStreaming activeTurnId="turn-1" composer={<div />} />,
+    );
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 1_900, 500, 1_400);
+    act(() => window.dispatchEvent(new Event("resize")));
+    await flushAnimationFrame();
+
+    act(() => {
+      scroller.scrollTop = 1_000;
+      if (ordering === "scroll-first") fireEvent.scroll(scroller);
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2_100 });
+      rerender(
+        <ThreadViewport messages={[threaded[0], { ...threaded[1], content: "answer with more output" }]} isStreaming activeTurnId="turn-1" composer={<div />} />,
+      );
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_000);
+
+    act(() => {
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2_300 });
+      rerender(
+        <ThreadViewport messages={[threaded[0], { ...threaded[1], content: "final answer", isStreaming: false }]} isStreaming={false} composer={<div />} />,
+      );
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_000);
+  });
+
   it("tracks the message content edge independently of trailing space and motion ownership", () => {
     const resizeObserver = stubResizeObserver();
     try {
@@ -1700,6 +1783,19 @@ describe("ThreadViewport", () => {
 
       expect(scroller.scrollTop).toBe(260);
       expect(replacement.getBoundingClientRect().top).toBe(120);
+
+      // ResizeObserver may arrive before the next native scroll event.
+      hitTarget = replacement;
+      scroller.scrollTop = 240;
+      anchorDocumentTop += 60;
+      scrollHeight += 60;
+      act(() => { observer?.callback([], observer); });
+      expect(scroller.scrollTop).toBe(240);
+      act(() => { fireEvent.scroll(scroller); });
+      anchorDocumentTop += 40;
+      scrollHeight += 40;
+      act(() => { observer?.callback([], observer); });
+      expect(scroller.scrollTop).toBe(280);
     } finally {
       hitTest.restore();
       resizeObserver.restore();
