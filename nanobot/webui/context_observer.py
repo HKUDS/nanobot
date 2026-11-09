@@ -72,15 +72,26 @@ def read_source(event: Mapping[str, Any]) -> SourceReceipt | None:
 
 @dataclass
 class _State:
+    # Prompt sources and reads belong to the compaction stage; system sources
+    # belong to the current turn's prompt and are replaced on each rebuild.
     graph: ContextGraph = field(default_factory=lambda: {"nodes": [], "edges": []})
+    reads: ContextGraph = field(default_factory=lambda: {"nodes": [], "edges": []})
+    system_graph: ContextGraph = field(default_factory=lambda: {"nodes": [], "edges": []})
+    system_turn_id: str | None = None
     calls: set[tuple[str | None, str]] = field(default_factory=set)
+
+    def request_graph(self, turn_id: object) -> ContextGraph:
+        graph = self.graph
+        if isinstance(turn_id, str) and turn_id and turn_id == self.system_turn_id:
+            graph = merge_graph(graph, self.system_graph)
+        return merge_graph(graph, self.reads, accumulate=True)
 
     def apply(self, event: Mapping[str, Any], turn_id: str | None = None) -> None:
         call_id = event.get("call_id")
         source = parse_source_receipt(event.get("context_source"))
         if not isinstance(call_id, str) or (turn_id, call_id) in self.calls or source is None:
             return
-        self.graph = merge_graph(self.graph, graph_from_sources([source]), accumulate=True)
+        self.reads = merge_graph(self.reads, graph_from_sources([source]), accumulate=True)
         self.calls.add((turn_id, call_id))
 
 
@@ -93,7 +104,10 @@ def _restore(history: HistoryReader, generation: str | None) -> _State:
     for turn in history.turns(reverse=True):
         for _, fact in reversed(history.read_entries(turn.ordinal)):
             boundary = fact.kind is HistoryKind.COMPACTION and fact.content.get("phase") == "succeeded"
-            graph = decode_graph(fact.content.get("context_graph")) if fact.kind is HistoryKind.MODEL_REQUEST else None
+            graph = (
+                decode_graph(fact.content.get("context_graph"))
+                if fact.kind is HistoryKind.MODEL_REQUEST or boundary else None
+            )
             if boundary or graph is not None:
                 if graph is not None:
                     state.graph = graph
@@ -154,15 +168,23 @@ class ContextGraphObserver:
 
     async def observe_prompt(
         self, chat_id: str, sources: tuple[PromptSource, ...], metadata: Mapping[str, Any], *, persistent: bool,
+        system_sources: tuple[PromptSource, ...] | None = None,
     ) -> None:
-        if not sources:
+        if not sources and system_sources is None:
             return
-        def project() -> ContextGraph:
-            receipts = [source_receipt(source.path, source.content, loaded=source.loaded) for source in sources]
-            return graph_from_sources(receipts)
+        def project() -> tuple[ContextGraph, ContextGraph | None]:
+            def graph_for(items: tuple[PromptSource, ...]) -> ContextGraph:
+                return graph_from_sources([
+                    source_receipt(source.path, source.content, loaded=source.loaded) for source in items
+                ])
+            return graph_for(sources), graph_for(system_sources) if system_sources is not None else None
         try:
-            graph = await asyncio.to_thread(project)
+            graph, system_graph = await asyncio.to_thread(project)
             state = await self._state(chat_id, metadata, persistent=persistent)
+            if system_graph is not None:
+                turn_id = metadata.get(WEBUI_TURN_METADATA_KEY)
+                state.system_graph = system_graph
+                state.system_turn_id = turn_id if isinstance(turn_id, str) else None
             state.graph = merge_graph(state.graph, graph)
         except Exception:
             logger.exception("Unable to observe prompt sources for context graph")
@@ -171,9 +193,16 @@ class ContextGraphObserver:
         self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
     ) -> ContextGraph:
         state = await self._state(chat_id, metadata, persistent=persistent)
-        return state.graph
+        return state.request_graph(metadata.get(WEBUI_TURN_METADATA_KEY))
 
-    async def reset(self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool) -> None:
+    async def reset(
+        self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
+    ) -> ContextGraph | None:
         state = await self._state(chat_id, metadata, persistent=persistent)
         state.graph = {"nodes": [], "edges": []}
+        state.reads = {"nodes": [], "edges": []}
         state.calls.clear()
+        turn_id = metadata.get(WEBUI_TURN_METADATA_KEY)
+        if isinstance(turn_id, str) and turn_id and state.system_turn_id == turn_id:
+            return state.request_graph(turn_id)
+        return None

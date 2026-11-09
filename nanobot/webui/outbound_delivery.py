@@ -127,12 +127,13 @@ class WebUIOutboundDelivery:
             except Exception:
                 logger.exception("Unable to restore context graph")
             return project_notification(msg.chat_id, event, msg.metadata, context_graph=graph)
+        baseline_graph: ContextGraph | None = None
         if event.phase == "succeeded":
             try:
-                await self._context_graph.reset(msg.chat_id, msg.metadata, persistent=persistent)
+                baseline_graph = await self._context_graph.reset(msg.chat_id, msg.metadata, persistent=persistent)
             except Exception:
                 logger.exception("Unable to reset context graph")
-        return project_notification(msg.chat_id, event, msg.metadata)
+        return project_notification(msg.chat_id, event, msg.metadata, context_graph=baseline_graph)
 
     async def initialize(self) -> None:
         await self._transcripts.initialize()
@@ -252,7 +253,7 @@ class WebUIOutboundDelivery:
         event = msg.event
         if isinstance(event, PromptSourcesEvent):
             await self._context_graph.observe_prompt(
-                msg.chat_id, event.sources, msg.metadata,
+                msg.chat_id, event.sources, msg.metadata, system_sources=event.system_sources,
                 persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),
             )
             return

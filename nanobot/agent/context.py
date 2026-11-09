@@ -10,7 +10,7 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools import sessions as session_tools
 from nanobot.apps.cli import utils as cli_app_utils
-from nanobot.context_sources import record_source
+from nanobot.context_sources import record_source, system_source_scope
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
@@ -275,16 +275,15 @@ class ContextBuilder:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
         with self.skills.snapshot():
+            with system_source_scope():
+                system_prompt = self.build_system_prompt(
+                    channel=channel,
+                    session_summary=transcript.session_summary,
+                    workspace=root,
+                    include_memory=include_memory,
+                )
             messages: list[dict[str, Any]] = [
-                {
-                    "role": "system",
-                    "content": self.build_system_prompt(
-                        channel=channel,
-                        session_summary=transcript.session_summary,
-                        workspace=root,
-                        include_memory=include_memory,
-                    ),
-                },
+                {"role": "system", "content": system_prompt},
                 *transcript.history,
             ]
             if transcript.current_message is None:

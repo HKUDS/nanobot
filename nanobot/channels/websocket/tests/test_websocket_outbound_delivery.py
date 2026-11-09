@@ -826,3 +826,134 @@ async def test_context_observer_orders_reads_requests_and_compaction(history, tm
     await channel.send(await message(ModelRequestEvent("reset", "run", 4, "started")))
     requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
     assert requests[-1]["context_graph"] == {"nodes": [], "edges": []}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["local", "native", "response"])
+async def test_compaction_keeps_system_sources_in_new_graph(history, tmp_path, mode) -> None:
+    from functools import partial
+
+    from nanobot.agent.context import ContextBuilder, TranscriptInput
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+    from nanobot.bus.outbound_events import ProgressEvent
+    from nanobot.events import EventSink, ModelRequestEvent
+    from nanobot.providers.base import GenerationSettings, LLMResponse
+    from nanobot.providers.compaction import NativeCompaction, ProviderCompactionEvents
+    from nanobot.providers.openai_responses.state import (
+        attach_responses_state,
+        build_responses_compaction_state,
+    )
+    from nanobot.utils.llm_runtime import LLMRuntime
+    from nanobot.webui.context_observer import ContextGraphObserver
+    from nanobot.webui.context_source_hook import ContextSourceHook
+
+    workspace = tmp_path / "prompt-workspace"
+    workspace.mkdir()
+    soul = workspace / "SOUL.md"
+    soul.write_text("Be precise. [Old](old.md)" if mode == "local" else "Be precise. [Guide](guide.md)", encoding="utf-8")
+    channel = _channel(history.sessions)
+    chat = "compacted-graph"
+    metadata = await history.metadata(chat, {"webui_turn_id": "turn"})
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), chat)
+
+    async def send(event):
+        await channel.send(OutboundMessage("websocket", chat, "", metadata=metadata, event=event))
+
+    def read_event(name, call_id):
+        return ProgressEvent(tool_events=[{
+            "name": "read_file", "phase": "end", "call_id": call_id,
+            "arguments": {"path": str(workspace / name)}, "result": "1| content",
+        }])
+
+    async def provider_call(**kwargs):
+        assert "Be precise" in kwargs["messages"][0]["content"]
+        response = LLMResponse(content="done")
+        if mode == "native":
+            compaction = ProviderCompactionEvents(kwargs["provider_context"].events)
+            event_id = await compaction.start("provider_native")
+            state = build_responses_compaction_state(provider="codex", model="test", output_items=[
+                {"type": "compaction", "encrypted_content": "synthetic"},
+            ])
+            assert state is not None
+            await compaction.accept(NativeCompaction(state, state, event_id), commit=None)
+            response.provider_compaction_applied = True
+            response.provider_compaction_state = state
+            response.provider_compaction_scope = "prior_context"
+            response.provider_compaction_event_id = event_id
+            async with asyncio.timeout(2):
+                while True:
+                    frame = json.loads(await connection.sent.get())
+                    if frame.get("event") == "context_compaction" and frame.get("phase") == "succeeded":
+                        break
+            graph = frame["context_graph"]
+            assert {"SOUL.md", "guide.md"} <= {node["name"] for node in graph["nodes"]}
+            assert "before.py" not in {node["name"] for node in graph["nodes"]}
+            replay = history.build(f"websocket:{chat}", include_model_requests=True)
+            boundary = next(row for row in replay["events"] if row.get("event") == "context_compaction")
+            assert boundary["context_graph"] == graph
+            observer = ContextGraphObserver(history.sessions)
+            assert await observer.snapshot(chat, metadata, persistent=True) == graph
+        elif mode == "local":
+            assert "Summary of earlier work" in kwargs["messages"][0]["content"]
+        else:
+            attach_responses_state(response, provider="codex", model="test", input_items=[], output_items=[
+                {"type": "compaction", "encrypted_content": "synthetic"},
+            ])
+        return response
+
+    provider = MagicMock()
+    provider.chat_stream_with_retry = provider_call
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    events = EventSink(send)
+
+    async def consolidate_history(_messages, _summary):
+        soul.write_text("Be precise. [Guide](guide.md)", encoding="utf-8")
+        return "Summary of earlier work"
+
+    try:
+        await send(read_event("before.py", "before"))
+        result = await AgentRunner().run(AgentRunSpec(
+            initial_messages=None, tools=tools,
+            runtime=LLMRuntime(provider=provider, model="test", generation=GenerationSettings(max_tokens=1000),
+                               context_window_tokens=8192 if mode == "local" else 128000),
+            max_iterations=2, max_tool_result_chars=10000, workspace=workspace,
+            transcript_input=TranscriptInput(
+                history=[{"role": "user", "content": "previous work " * 12000}] if mode == "local" else [],
+                current_message="hello",
+            ),
+            transcript_builder=partial(ContextBuilder(workspace).build_transcript, channel="websocket"),
+            consolidate_history=consolidate_history, hook=ContextSourceHook(events), events=events,
+        ))
+        assert result.final_content == "done"
+        records = history.read(f"websocket:{chat}")
+        boundary = next(row for row in records if row.get("event") == "context_compaction" and row.get("phase") == "succeeded")
+        if mode != "local":
+            started = next(row for row in records if row.get("event") == "model_request" and row.get("phase") == "started")
+            assert "before.py" in {node["name"] for node in started["context_graph"]["nodes"]}
+            boundary_names = {node["name"] for node in boundary["context_graph"]["nodes"]}
+            assert {"SOUL.md", "guide.md"} <= boundary_names
+            assert "before.py" not in boundary_names
+        completed = next(row for row in records if row.get("event") == "model_request" and row.get("phase") == "completed")
+        names = {node["name"] for node in completed["context_graph"]["nodes"]}
+        assert {"SOUL.md", "guide.md"} <= names
+        assert {"source": str(soul), "target": str(workspace / "guide.md")} in completed["context_graph"]["edges"]
+        if mode == "response":
+            assert records.index(completed) < records.index(boundary)
+        else:
+            assert records.index(boundary) < records.index(completed)
+            assert "before.py" not in names
+        assert "old.md" not in names
+
+        await send(read_event("after.py", "after"))
+        request = ModelRequestEvent("next", "run-next", 1, "started")
+        restored_channel = _channel(history.sessions)
+        await restored_channel.send(OutboundMessage("websocket", chat, "", metadata=metadata, event=request))
+        records = history.read(f"websocket:{chat}")
+        latest = next(row for row in reversed(records) if row.get("event") == "model_request")
+        names = {node["name"] for node in latest["context_graph"]["nodes"]}
+        assert {"SOUL.md", "guide.md", "after.py"} <= names
+        assert "before.py" not in names
+    finally:
+        await channel._cleanup_connection(cast(Any, connection))

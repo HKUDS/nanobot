@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -30,26 +30,56 @@ class PromptSource:
 @dataclass(frozen=True)
 class PromptSourcesEvent(AgentEvent):
     sources: tuple[PromptSource, ...]
+    # None means no rebuild; an empty tuple is a rebuilt prompt with no sources.
+    system_sources: tuple[PromptSource, ...] | None = None
 
 
-_sources: ContextVar[list[PromptSource] | None] = ContextVar("context_sources", default=None)
+@dataclass
+class SourceCapture:
+    sources: list[PromptSource] = field(default_factory=list)
+    system_sources: list[PromptSource] | None = None
+
+    def drain(self) -> PromptSourcesEvent:
+        event = PromptSourcesEvent(tuple(self.sources), None if self.system_sources is None else tuple(self.system_sources))
+        self.sources.clear()
+        self.system_sources = None
+        return event
+
+
+_sources: ContextVar[SourceCapture | None] = ContextVar("context_sources", default=None)
+_system_source: ContextVar[bool] = ContextVar("context_system_source", default=False)
 
 
 @contextmanager
-def capture_sources() -> Generator[list[PromptSource]]:
+def capture_sources() -> Generator[SourceCapture]:
     """Observe builder reads in one run, including its prompt worker tasks."""
-    sources: list[PromptSource] = []
-    token = _sources.set(sources)
+    capture = SourceCapture()
+    token = _sources.set(capture)
     try:
-        yield sources
+        yield capture
     finally:
         _sources.reset(token)
 
 
+@contextmanager
+def system_source_scope() -> Generator[None]:
+    """Capture a replacement snapshot of the system prompt's file sources."""
+    if (capture := _sources.get()) is not None:
+        # Compaction can rebuild the prompt before a request; keep the latest build.
+        capture.system_sources = []
+    token = _system_source.set(True)
+    try:
+        yield
+    finally:
+        _system_source.reset(token)
+
+
 def record_source(path: Path, content: str, *, loaded: bool = True) -> None:
-    if (sources := _sources.get()) is not None:
-        # Keep parsing and token estimation out of prompt construction.
-        sources.append(PromptSource(path, content, loaded))
+    if (capture := _sources.get()) is not None:
+        sources = capture.system_sources if _system_source.get() else capture.sources
+        if sources is not None:
+            # Keep parsing and token estimation out of prompt construction.
+            sources.append(PromptSource(path, content, loaded))
 
 
 def parse_source_receipt(value: object) -> SourceReceipt | None:

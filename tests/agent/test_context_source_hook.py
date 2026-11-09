@@ -46,7 +46,7 @@ async def test_prompt_scopes_isolate_parallel_runs_and_cleanup_after_cancel(tmp_
                 ))
             finally:
                 record_source(tmp_path / "after.md", "after")
-                assert [source.path.name for source in enclosing] == ["after.md"]
+                assert [source.path.name for source in enclosing.sources] == ["after.md"]
 
     cancelled = asyncio.create_task(run("first.md", blocked=True))
     try:

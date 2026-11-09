@@ -1542,6 +1542,8 @@ def _client_projection_event(
             "compaction_id": compaction_id,
             "phase": phase,
         }
+        if (graph := decode_graph(record.get("context_graph"))) is not None:
+            projected["context_graph"] = graph
         if (snapshot := decode_snapshot(record.get("context_snapshot"))) is not None:
             projected["context_snapshot"] = snapshot
         reason = record.get("reason")

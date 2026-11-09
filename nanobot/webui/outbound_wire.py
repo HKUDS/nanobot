@@ -111,6 +111,7 @@ class ModelRequestWirePayload(_ChatWirePayload):
 
 
 class ContextCompactionWirePayload(_ChatWirePayload):
+    context_graph: NotRequired[ContextGraph]
     context_snapshot: NotRequired[ContextSnapshot]
     event: Literal["context_compaction"]
     compaction_id: str
@@ -278,8 +279,11 @@ def project_notification(
             payload, persistence="turn_activity", deliver_offline=True, attach_turn_metadata=True,
         )
     if isinstance(event, ContextCompactionEvent):
+        compaction_payload = encode_context_compaction(chat_id, event)
+        if context_graph is not None:
+            compaction_payload["context_graph"] = context_graph
         return NotificationProjection(
-            encode_context_compaction(chat_id, event),
+            compaction_payload,
             persistence="transient" if event.phase == "started" else "turn_activity",
             deliver_offline=True,
             attach_turn_metadata=True,
