@@ -60,6 +60,8 @@ Before updating, stop any existing standalone API process through the launcher t
 
 Back up the configuration and data before updating. The old top-level `api` block is ignored on read and is omitted the next time nanobot saves the configuration. Session data and workspaces are not deleted or moved. If you must roll back, use the previous version and its matching deployment files, and recover the old service settings from your backup if necessary. Do not overwrite current configuration or conversations with a stale backup.
 
+To read old API conversations after updating, open the same configuration and workspace with [the Python SDK](./python-sdk.md#botsessions). Use `await bot.sessions.list()` to find keys such as `api:default` and `api:<session_id>`, then use `await bot.sessions.get(key)` to read their messages. If the old launcher used a separate API workspace, pass that workspace to `Nanobot.from_config(config_path, workspace=workspace)` instead of using the Gateway's workspace.
+
 ## Recover an interrupted update
 
 Refreshing restores saved progress, **not installation consent**. A staged update may ask you to review and confirm it again. A disconnected page cannot tell whether the worker stopped: do not start another installation while it reconnects. Closing the browser does not stop the managed update or its recovery.
