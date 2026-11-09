@@ -92,7 +92,6 @@ function fakeClient() {
       getRunState: lifecycle.getRunState.bind(lifecycle),
       getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
       restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
-      getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
       getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
       getGoalState: lifecycle.getGoalState.bind(lifecycle),
       hasUnsettledRun: lifecycle.hasUnsettledRun.bind(lifecycle),

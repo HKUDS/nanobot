@@ -295,7 +295,6 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     onRunCompletion = () => () => {};
     getRunState = () => runState(null);
     restorePendingRun = vi.fn();
-    getRunStartedAt = () => null;
     getRunTurnId = () => null;
     getUnsettledRunChatIds = () => [];
     getRunGeneration = () => 0;

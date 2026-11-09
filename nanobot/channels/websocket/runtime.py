@@ -374,9 +374,6 @@ class WebSocketChannel(BaseChannel):
             session_projection=gateway.session_projection,
         )
         self._commands = WebUICommandRouter(self, gateway, outbound=self._outbound)
-        self._webui_request_tasks = self._commands.request_tasks
-        self._webui_request_operations = self._commands.request_operations
-        self._webui_request_locks = self._commands.request_locks
 
 
     def webui_subscribers(self, chat_id: str) -> tuple[ServerConnection, ...]:

@@ -339,24 +339,15 @@ class LLMUsageStore:
         self,
         *,
         connection: sqlite3.Connection,
-        start_ms: int | None,
+        start_ms: int,
         end_ms: int,
-        group_by: tuple[str, ...] = (),
-        limit: int | None = None,
     ) -> list[sqlite3.Row]:
-        selected = f"{', '.join(group_by)}, " if group_by else ""
-        where = "started_at_ms < ?"
-        params: list[object] = [end_ms]
-        if start_ms is not None:
-            where = "started_at_ms >= ? AND started_at_ms < ?"
-            params = [start_ms, end_ms]
-        query = f"SELECT {selected}{_AGGREGATE_SQL} FROM llm_calls WHERE {where}"
-        if group_by:
-            query += f" GROUP BY {', '.join(group_by)} ORDER BY total_tokens DESC"
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(limit)
-        return list(connection.execute(query, params).fetchall())
+        query = (
+            f"SELECT provider, model, {_AGGREGATE_SQL} FROM llm_calls "
+            "WHERE started_at_ms >= ? AND started_at_ms < ? "
+            "GROUP BY provider, model ORDER BY total_tokens DESC LIMIT ?"
+        )
+        return list(connection.execute(query, (start_ms, end_ms, 50)).fetchall())
 
     def _daily_rows(
         self,
@@ -453,8 +444,6 @@ class LLMUsageStore:
                 connection=connection,
                 start_ms=last_30_start_ms,
                 end_ms=end_ms,
-                group_by=("provider", "model"),
-                limit=50,
             )
             providers_30d = [
                 {

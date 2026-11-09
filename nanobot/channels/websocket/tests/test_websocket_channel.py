@@ -421,7 +421,7 @@ async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tm
     assert (await preview(owner, str(outside)))["error"]["status"] == 403
     assert (await preview(owner, str(outside), probe=True))["result"] == {"available": False}
     assert (await preview(AsyncMock()))["error"]["status"] == 403
-    assert not channel._webui_request_operations
+    assert not channel._commands.request_operations
     assert {path for path in tmp_path.rglob("*") if path.is_file()} == disk_before
     assert sessions.list_sessions() == []
 
@@ -430,7 +430,7 @@ async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tm
     })
     assert (await preview(owner))["error"]["status"] == 404
     assert (await preview(owner, metadata=True))["error"]["status"] == 404
-    assert not channel._webui_request_operations
+    assert not channel._commands.request_operations
 
 
 @pytest.mark.asyncio
@@ -1220,7 +1220,7 @@ async def test_authenticated_webui_request_returns_correlated_success(bus: Magic
             "payload": {"provider": "openrouter", "apiKey": "secret"},
         },
     )
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     channel.gateway.http.dispatch_webui_mutation.assert_awaited_once_with(
         conn,
@@ -1281,7 +1281,7 @@ async def test_webui_mutations_preserve_request_and_response_order(bus: MagicMoc
     assert dispatch_order == ["settings.provider.update"]
 
     release_first.set()
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     assert dispatch_order == [
         "settings.provider.update",
@@ -1350,7 +1350,7 @@ async def test_webui_request_survives_disconnect_and_preserves_reconnect_order(
     await asyncio.sleep(0)
     assert dispatch_order == ["automation.run"]
 
-    pending = tuple(channel._webui_request_tasks.values())
+    pending = tuple(channel._commands.request_tasks.values())
     release.set()
     await asyncio.gather(*pending)
 
@@ -1361,7 +1361,7 @@ async def test_webui_request_survives_disconnect_and_preserves_reconnect_order(
         "request-queued",
         "request-next",
     ]
-    assert first_conn not in channel._webui_request_locks
+    assert first_conn not in channel._commands.request_locks
 
 
 @pytest.mark.asyncio
@@ -1381,9 +1381,9 @@ async def test_webui_request_replays_completed_result_after_reconnect(bus: Magic
     }
 
     await channel._dispatch_envelope(first_conn, "webui-client", envelope)
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
     await channel._dispatch_envelope(retry_conn, "webui-client", envelope)
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     channel.gateway.http.dispatch_webui_mutation.assert_awaited_once()
     assert json.loads(retry_conn.send.await_args.args[0]) == {
@@ -1416,7 +1416,7 @@ async def test_webui_request_rejects_request_id_reuse_with_different_payload(
             "payload": {"id": "job-a"},
         },
     )
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
     await channel._dispatch_envelope(
         retry_conn,
         "webui-client",
@@ -1449,7 +1449,7 @@ def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
     channel = _ch(bus)
     now = 1_000.0
     monkeypatch.setattr(websocket_module, "time", SimpleNamespace(monotonic=lambda: now))
-    operations = cast(dict[str, Any], channel._webui_request_operations)
+    operations = cast(dict[str, Any], channel._commands.request_operations)
     operations["pending"] = SimpleNamespace(completed_at=None)
     operations["expired"] = SimpleNamespace(
         completed_at=now - websocket_module._WEBUI_REQUEST_CACHE_TTL_S
@@ -1472,7 +1472,7 @@ def test_webui_request_cache_prunes_oldest_completed_at_capacity(
     channel = _ch(bus)
     now = 1_000.0
     monkeypatch.setattr(websocket_module, "time", SimpleNamespace(monotonic=lambda: now))
-    operations = cast(dict[str, Any], channel._webui_request_operations)
+    operations = cast(dict[str, Any], channel._commands.request_operations)
     operations["pending"] = SimpleNamespace(completed_at=None)
     for index in range(websocket_module._WEBUI_REQUEST_CACHE_MAX + 1):
         operations[f"completed-{index}"] = SimpleNamespace(
@@ -1507,7 +1507,7 @@ async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> N
             "payload": {},
         },
     )
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     assert json.loads(conn.send.await_args.args[0]) == {
         "event": "webui_response",
@@ -1570,7 +1570,7 @@ async def test_webui_persists_sidebar_state_larger_than_http_request_line(
     assert len(json.dumps(envelope).encode()) > 8_192
 
     await channel._dispatch_envelope(conn, "webui-client", envelope)
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     saved = json.loads((tmp_path / "webui" / "sidebar-state.json").read_text(encoding="utf-8"))
     assert saved["session_order"] == session_order
@@ -1624,7 +1624,7 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
     }
     try:
         await channel._dispatch_envelope(source, "webui-client", envelope)
-        await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+        await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
         event = json.loads(other_device.send.await_args.args[0])
         assert event["event"] == "sidebar_state_updated"
         assert event["state"]["archived_keys"] == ["websocket:b"]
