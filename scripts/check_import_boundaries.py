@@ -112,6 +112,11 @@ IMPORT_RULES = (
     ImportRule(
         "security-primitives",
         ("nanobot.security",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.execution", "nanobot.session"),
+    ),
+    ImportRule(
+        "resource-execution",
+        ("nanobot.execution",),
         (*_ADAPTERS, "nanobot.agent", "nanobot.session"),
     ),
     ImportRule(
