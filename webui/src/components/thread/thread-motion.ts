@@ -127,6 +127,8 @@ type ThreadMotionCamera = Pick<
   | "isFollowing"
   | "jumpTo"
   | "navigateTo"
+  | "observeScroll"
+  | "reset"
 >;
 
 interface ThreadMotionCoordinatorOptions {
@@ -173,8 +175,8 @@ export class ThreadMotionCoordinator {
   private measurementFrameId: number | null = null;
   private geometryDirty = false;
   private composerInputDuringTurn = false;
-  // A user leaving the live tail must first move beyond the near-bottom
-  // boundary, or explicitly reverse toward latest, before follow can resume.
+  // Only input toward latest may resume follow; layout can also return a
+  // reading position to the tail without the user scrolling forward.
   private resumeFollowArmed = false;
 
   constructor(options: ThreadMotionCoordinatorOptions) {
@@ -204,7 +206,7 @@ export class ThreadMotionCoordinator {
     const isNewTurn = this.turn.id !== turn.id;
     this.turn = turn;
     if (isNewTurn) {
-      this.camera.cancel();
+      this.camera.reset();
       this.composerInputDuringTurn = false;
       this.resumeFollowArmed = false;
       this.promptPositioned = turn.entry === "restored";
@@ -343,14 +345,13 @@ export class ThreadMotionCoordinator {
     return this.mode === "browsing-history";
   }
 
-  /**
-   * A scroll event reports geometry; it does not prove user intent. Explicit
-   * input handlers call takeUserControl() before the browser scrolls. Layout,
-   * sticky positioning, and camera writes therefore remain automatic even
-   * when the browser emits an intermediate scroll event for them. Proximity
-   * to a detached history page's bottom must not count as near the live tail.
-   */
+  private observeUserScroll(): void {
+    const delta = this.camera.observeScroll();
+    if (Math.abs(delta) > GEOMETRY_EPSILON_PX) this.handleUserScrollIntent(true, delta > 0);
+  }
+
   observeScroll(nearLiveTail: boolean): ThreadScrollOwner {
+    this.observeUserScroll();
     switch (this.mode) {
       case "navigating-latest":
         if (!this.camera.isFollowing()) {
@@ -367,13 +368,13 @@ export class ThreadMotionCoordinator {
           if (nearLiveTail) {
             this.resumeAutoFollow();
           } else {
-            this.resumeFollowArmed = true;
+            this.resumeFollowArmed = false;
           }
         }
         return "navigation";
       case "browsing-history":
         if (!nearLiveTail) {
-          this.resumeFollowArmed = true;
+          this.resumeFollowArmed = false;
           return "user";
         }
         if (!this.resumeFollowArmed) return "user";
@@ -391,7 +392,7 @@ export class ThreadMotionCoordinator {
       this.measurementFrameId = null;
     }
     this.geometryDirty = false;
-    this.camera.cancel();
+    this.camera.reset();
     this.turn = { id: null, promptId: null, hasOutput: false };
     this.composerInputDuringTurn = false;
     this.resumeFollowArmed = false;
@@ -462,6 +463,7 @@ export class ThreadMotionCoordinator {
       || (!this.isHistoryMode() && this.turn.id !== null && !this.promptPositioned);
     const geometry = this.measure(navigationPromptId ?? (needsPromptGeometry ? this.turn.promptId : null));
     if (!geometry) return;
+    this.observeUserScroll();
     this.onGeometry?.(geometry);
 
     if (this.mode === "navigating-history" && navigationPromptId !== null) {

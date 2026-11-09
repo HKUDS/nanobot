@@ -78,8 +78,6 @@ interface ThreadViewportProps {
 }
 
 const NEAR_BOTTOM_PX = 48;
-// Chromium keeps middle-click autoscroll latched when released within this dead zone.
-const MIDDLE_SCROLL_DEAD_ZONE_PX = 15;
 const PROMPT_TOP_INSET_PX = 48;
 const HISTORY_PREFETCH_MIN_PX = 160;
 const HISTORY_PREFETCH_MAX_PX = 480;
@@ -182,20 +180,6 @@ function isThreadDisclosureTarget(target: EventTarget | null): boolean {
     && target.closest("[data-thread-disclosure]") !== null;
 }
 
-function nestedMiddleScrollers(target: EventTarget | null, viewport: HTMLElement): HTMLElement[] | null {
-  if (!(target instanceof Element) || target.closest("a[href], area[href]")) return null;
-  const scrollers: HTMLElement[] = [];
-  let element: Element | null = target;
-  while (element && element !== viewport) {
-    if (element instanceof HTMLElement) {
-      const overflow = getComputedStyle(element).overflowY;
-      if (overflow === "auto" || overflow === "scroll") scrollers.push(element);
-    }
-    element = element.parentElement;
-  }
-  return element === viewport ? scrollers : null;
-}
-
 function isKeyboardControl(element: Element | null): boolean {
   return element instanceof HTMLElement
     && element.closest(
@@ -204,17 +188,6 @@ function isKeyboardControl(element: Element | null): boolean {
 }
 
 type ThreadScrollDirection = "backward" | "forward";
-
-interface MiddleScrollGesture {
-  pointerId: number;
-  originX: number;
-  originY: number;
-  direction: ThreadScrollDirection | null;
-  scrollers: HTMLElement[];
-  scrollTarget: HTMLElement | null;
-  released: boolean;
-  movedWhilePressed: boolean;
-}
 
 const KEYBOARD_SCROLL_DIRECTIONS: Readonly<
   Partial<Record<string, ThreadScrollDirection>>
@@ -381,7 +354,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const [showHistoryExhausted, setShowHistoryExhausted] = useState(false);
   const historySlotRef = useRef<HTMLDivElement | null>(null);
   const historyInputRef = useRef<"touch" | "other">("other");
-  const middleScrollRef = useRef<MiddleScrollGesture | null>(null);
   const historyTouchRef = useRef<{
     target: Node; lastY: number; startX: number; startY: number; pulling: boolean; horizontal: boolean;
   } | null>(null);
@@ -548,6 +520,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const content = messageContentRef.current;
     const anchor = historyScrollAnchorRef.current;
     if (!scroller || !content || !anchor) return false;
+    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    if (Math.abs(scroller.scrollTop - Math.min(anchor.scrollTop, maxScrollTop)) >= 0.5) {
+      return captureHistoryScrollAnchor();
+    }
     const element = Array.from(
       content.querySelectorAll<HTMLElement>("[data-thread-display-unit]"),
     ).find((candidate) => candidate.dataset.threadDisplayUnit === anchor.key);
@@ -562,12 +538,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       - (historySlotRef.current ? HISTORY_HOLD_PX : 0);
     const delta = nextOffset - anchor.offsetTop;
     if (Math.abs(delta) < 0.5) return true;
-    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const nextTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop + delta));
     threadMotionRef.current?.jumpTo(nextTop);
     anchor.scrollTop = scroller.scrollTop;
     return true;
-  }, []);
+  }, [captureHistoryScrollAnchor]);
 
   const resetHistoryHeader = useCallback(() => {
     setHistorySlotKey(null);
@@ -769,7 +744,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     lastConversationKeyRef.current = conversationKey;
     clearHistoryTouchTarget();
     historyTouchRef.current = null;
-    middleScrollRef.current = null;
     historyInputRef.current = "other";
     resetHistoryHeader();
     conversationHandoffAnimationRef.current?.cancel();
@@ -991,17 +965,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       if (el.scrollTop > 1) historySpringRef.current?.leaveBoundary();
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       const near = distance < NEAR_BOTTOM_PX;
-      const gesture = middleScrollRef.current;
-      const direction = gesture?.direction;
-      if (gesture?.scrollTarget === el && direction
-        && (direction === "backward" || threadMotionRef.current?.isAutoFollowPaused())) {
-        // Layout can return to the tail while native autoscroll is still
-        // moving upward, without another pointermove to renew user intent.
-        historyInputRef.current = "other";
-        threadMotionRef.current?.handleUserScrollIntent(
-          canScrollInDirection(el, direction), direction === "forward" && !historyWindow,
-        );
-      }
       // A detached history page's bottom is not the live tail.
       const owner = threadMotionRef.current?.observeScroll(near && !historyWindow) ?? "automatic";
       if (threadMotionRef.current?.snapshot().mode !== "navigating-latest") setNavigatingToBottom(false);
@@ -1085,59 +1048,12 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       handleDirectionalInput(directionFromDelta(event.deltaY));
     };
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.pointerType === "mouse") {
-        if (event.button === 1 && middleScrollRef.current?.released) {
-          middleScrollRef.current = null;
-          return;
-        }
-        const scrollers = event.button === 1 && !event.defaultPrevented ? nestedMiddleScrollers(event.target, el) : null;
-        middleScrollRef.current = scrollers
-          ? { pointerId: event.pointerId, originX: event.clientX, originY: event.clientY, direction: null, scrollers, scrollTarget: null, released: false, movedWhilePressed: false }
-          : null;
-      }
       if (
         event.button === 0
         && (event.target === el || isThreadDisclosureTarget(event.target))
       ) {
         yieldCameraToUser();
       }
-    };
-    const handlePointerMove = (event: PointerEvent) => {
-      const gesture = middleScrollRef.current;
-      if (!gesture || gesture.pointerId !== event.pointerId) return;
-      const deltaX = event.clientX - gesture.originX;
-      const deltaY = event.clientY - gesture.originY;
-      if (!gesture.released && (Math.abs(deltaX) > MIDDLE_SCROLL_DEAD_ZONE_PX || Math.abs(deltaY) > MIDDLE_SCROLL_DEAD_ZONE_PX)) {
-        gesture.movedWhilePressed = true;
-      }
-      const direction = Math.abs(deltaY) > MIDDLE_SCROLL_DEAD_ZONE_PX ? directionFromDelta(deltaY) : null;
-      gesture.direction = direction;
-      if (!direction) return;
-      // Native autoscroll selects a scrollport when movement starts, and keeps
-      // it even when a nested scrollport reaches a boundary or reverses.
-      gesture.scrollTarget ??= gesture.scrollers.find(
-        (scroller) => el.contains(scroller) && canScrollInDirection(scroller, direction),
-      ) ?? el;
-      // It also keeps running after a click is released, so a reversal after
-      // reaching the tail must yield the camera again.
-      if (gesture.scrollTarget === el
-        && (direction === "backward" || threadMotionRef.current?.isAutoFollowPaused())) {
-        historyInputRef.current = "other";
-        handleDirectionalInput(direction);
-      }
-    };
-    const handlePointerUp = (event: PointerEvent) => {
-      const gesture = middleScrollRef.current;
-      if (!gesture || gesture.pointerId !== event.pointerId) return;
-      if (event.button === 1 && !gesture.released && !gesture.movedWhilePressed) {
-        gesture.released = true;
-      } else {
-        middleScrollRef.current = null;
-      }
-    };
-    const cancelMiddleScroll = () => { middleScrollRef.current = null; };
-    const handleMiddleScrollKeyUp = (event: KeyboardEvent) => {
-      if (event.key === "Escape") cancelMiddleScroll();
     };
     const handleTouchCancel = () => {
       clearHistoryTouchTarget();
@@ -1247,11 +1163,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     el.addEventListener("touchcancel", handleTouchCancel, { passive: true });
     el.addEventListener("pointerdown", handlePointerDown);
     el.addEventListener("keydown", handleKeyDown);
-    document.addEventListener("pointermove", handlePointerMove);
-    document.addEventListener("pointerup", handlePointerUp);
-    document.addEventListener("pointercancel", cancelMiddleScroll);
-    document.addEventListener("keyup", handleMiddleScrollKeyUp);
-    window.addEventListener("blur", cancelMiddleScroll);
     return () => {
       clearHistoryTouchTarget();
       el.removeEventListener("scroll", handleScroll);
@@ -1262,11 +1173,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       el.removeEventListener("touchcancel", handleTouchCancel);
       el.removeEventListener("pointerdown", handlePointerDown);
       el.removeEventListener("keydown", handleKeyDown);
-      document.removeEventListener("pointermove", handlePointerMove);
-      document.removeEventListener("pointerup", handlePointerUp);
-      document.removeEventListener("pointercancel", cancelMiddleScroll);
-      document.removeEventListener("keyup", handleMiddleScrollKeyUp);
-      window.removeEventListener("blur", cancelMiddleScroll);
     };
   }, [
     captureHistoryScrollAnchor,

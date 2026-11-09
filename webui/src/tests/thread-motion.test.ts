@@ -37,6 +37,8 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
       cameraFollowing = false;
     }),
     dispose: vi.fn(),
+    observeScroll: vi.fn(() => 0),
+    reset: vi.fn(() => { cameraFollowing = false; }),
     jumpTo: vi.fn(),
     followTo: vi.fn(() => "settled" as const),
     isFollowing: vi.fn(() => cameraFollowing),
@@ -447,6 +449,7 @@ describe("ThreadMotionCoordinator", () => {
     expect(coordinator.observeScroll(false)).toBe("user");
     expect(coordinator.snapshot().mode).toBe("browsing-history");
 
+    coordinator.handleUserScrollIntent(true, true);
     expect(coordinator.observeScroll(true)).toBe("automatic");
     expect(coordinator.snapshot().mode).toBe("anchor-prompt");
   });
