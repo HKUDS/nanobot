@@ -499,7 +499,8 @@ class Config(BaseSettings):
     def _migrate_legacy_config(cls, value: Any) -> Any:
         if isinstance(value, dict) and "api" in value:
             # Old installations saved this block even if they never ran serve.
-            value = {key: item for key, item in value.items() if key != "api"}
+            legacy = cast(dict[object, object], value)
+            value = {key: item for key, item in legacy.items() if key != "api"}
         return migrate_legacy_proxy_config(value)
 
     @classmethod
