@@ -147,7 +147,7 @@ type ChatRequestFrame = Extract<Outbound, { type: "new_chat" | "new_temporary_ch
 
 interface PendingChatRequest extends PendingRequest<string> {
   frame: ChatRequestFrame & { request_id: string };
-  phase: "queued" | "sent" | "unknown";
+  phase: "queued" | "sent";
 }
 
 const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
@@ -254,7 +254,6 @@ export class NanobotClient {
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingChatRequest: PendingChatRequest | null = null;
-  private chatRequestIds = false;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
@@ -601,20 +600,14 @@ export class NanobotClient {
 
   private requestChat(frame: ChatRequestFrame, timeoutMs: number, name: string): Promise<string> {
     if (this.intentionallyClosed) return Promise.reject(new Error("socket closed"));
-    if (this.pendingChatRequest) {
-      return Promise.reject(new Error(this.pendingChatRequest.phase === "unknown"
-        ? "Previous chat request outcome is unknown; wait for its response or reconnect"
-        : "newChat already in flight"));
-    }
+    if (this.pendingChatRequest) return Promise.reject(new Error("newChat already in flight"));
     return new Promise<string>((resolve, reject) => {
       const pending: PendingChatRequest = {
         frame: { ...frame, request_id: crypto.randomUUID() },
         phase: "queued", resolve, reject,
         timer: setTimeout(() => {
           const sent = pending.phase === "sent";
-          // An older host cannot identify a late reply. Reserve its single wire slot.
-          if (sent && !this.chatRequestIds) pending.phase = "unknown";
-          else this.pendingChatRequest = null;
+          this.pendingChatRequest = null;
           reject(new Error(`${name} timed out${sent ? "; creation outcome is unknown" : " before sending"}`));
         }, timeoutMs),
       };
@@ -641,20 +634,6 @@ export class NanobotClient {
     this.pendingChatRequest = null;
     clearTimeout(pending.timer);
     pending.reject(new Error(detail));
-  }
-
-  private isLegacyChatError(event: Extract<InboundEvent, { event: "error" }>): boolean {
-    const pending = this.pendingChatRequest;
-    if (this.chatRequestIds || !pending || pending.phase === "queued" || event.chat_id || event.turn_id) return false;
-    switch (pending.frame.type) {
-      case "new_chat":
-        return event.detail === "workspace_scope_rejected";
-      case "new_temporary_chat":
-        return event.detail === "access_denied" || event.detail === "temporary_chat_unavailable";
-      case "fork_chat":
-        return ["invalid source_chat_id", "invalid before_user_index", "session_manager_unavailable",
-          "invalid fork source or index", "fork_chat_failed"].includes(event.detail ?? "");
-    }
   }
 
   transcribeAudio(
@@ -1035,9 +1014,6 @@ export class NanobotClient {
     }
 
     if (parsed.event === "ready") {
-      this.chatRequestIds = Array.isArray(parsed.capabilities)
-        && parsed.capabilities.includes("webui.chat-requests.v1");
-      if (this.chatRequestIds && this.pendingChatRequest?.phase === "unknown") this.pendingChatRequest = null;
       this.upload = uploadCapability(parsed.upload);
       this.readyChatId = parsed.chat_id;
       this.knownChats.add(parsed.chat_id);
@@ -1050,15 +1026,13 @@ export class NanobotClient {
     if (parsed.event === "attached") {
       const pending = this.pendingChatRequest;
       const known = this.knownChats.has(parsed.chat_id) || this.temporaryChatIds.has(parsed.chat_id);
-      const matches = pending && pending.phase !== "queued" && (parsed.request_id !== undefined
-        ? parsed.request_id === pending.frame.request_id
-        : !this.chatRequestIds && !known && (pending.frame.type === "new_temporary_chat") === (parsed.temporary === true));
+      const matches = pending?.phase === "sent" && parsed.request_id === pending.frame.request_id;
       if (matches) {
         clearTimeout(pending.timer);
         this.pendingChatRequest = null;
-        if (pending.phase !== "unknown") pending.resolve(parsed.chat_id);
+        pending.resolve(parsed.chat_id);
       }
-      if ((matches && pending.phase === "unknown") || (!matches && parsed.request_id !== undefined && !known)) {
+      if (!matches && parsed.request_id !== undefined && !known) {
         // A late success is not a new user selection; temporary resources need disposal.
         if (parsed.temporary) this.rawSend({ type: "discard_temporary_chat", chat_id: parsed.chat_id });
         return;
@@ -1111,10 +1085,6 @@ export class NanobotClient {
         chatId: parsed.chat_id,
         turnId: parsed.turn_id,
       });
-    }
-
-    if (parsed.event === "error" && this.isLegacyChatError(parsed)) {
-      this.rejectPendingChat([parsed.detail, parsed.reason].filter(Boolean).join(":") || "server error");
     }
 
     if (correlatedChatId) {
@@ -1186,7 +1156,6 @@ export class NanobotClient {
     this.socket = null;
     this.clearTemporaryChats();
     const willReconnect = !this.intentionallyClosed && this.shouldReconnect;
-    this.chatRequestIds = false;
     this.rejectPendingChat("socket closed");
     this.rejectAllTranscriptions("socket closed");
     if (!willReconnect) {

@@ -5633,10 +5633,10 @@ async def test_multiplex_legacy_still_works(bus: MagicMock, start_listener) -> N
         await server_task
 
 
-@pytest.mark.parametrize("request_id", [None, "Chat._:-" + "x" * 120], ids=["legacy", "correlated"])
+@pytest.mark.parametrize("request_id", [None, "Chat._:-" + "x" * 120], ids=["uncorrelated", "correlated"])
 @pytest.mark.parametrize("command_type", ["new_chat", "new_temporary_chat", "fork_chat"])
 @pytest.mark.asyncio
-async def test_chat_requests_advertise_and_echo_only_creation_responses(
+async def test_chat_requests_correlate_only_creation_responses(
     bus, tmp_path, start_listener, request_id, command_type,
 ) -> None:
     sessions = SessionManager(tmp_path)
@@ -5653,7 +5653,6 @@ async def test_chat_requests_advertise_and_echo_only_creation_responses(
         async with asyncio.timeout(5):
             ready = json.loads(await client.recv())
             assert ready["event"] == "ready"
-            assert "webui.chat-requests.v1" in ready["capabilities"]
             envelope = {"type": command_type, **request_fields}
             if command_type == "fork_chat":
                 envelope.update(source_chat_id="source", before_user_index=1)
@@ -5691,7 +5690,7 @@ async def test_chat_requests_advertise_and_echo_only_creation_responses(
     bus.publish_inbound.assert_not_awaited()
 
 
-@pytest.mark.parametrize("request_id", [None, "create-request"], ids=["legacy", "correlated"])
+@pytest.mark.parametrize("request_id", [None, "create-request"], ids=["uncorrelated", "correlated"])
 @pytest.mark.parametrize(("envelope", "trusted_webui", "detail"), [
     ({"type": "new_chat", "workspace_scope": {"access_mode": "invalid"}}, True,
      "workspace_scope_rejected"),

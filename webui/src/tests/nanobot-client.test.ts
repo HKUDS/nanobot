@@ -53,6 +53,12 @@ function lastSocket(): FakeSocket {
   return s;
 }
 
+function lastRequestId(socket: FakeSocket = lastSocket()): string {
+  const frame = JSON.parse(socket.sent.at(-1) ?? "{}");
+  if (typeof frame.request_id !== "string") throw new Error("Expected a request ID on the last sent frame");
+  return frame.request_id;
+}
+
 beforeEach(() => {
   FakeSocket.instances = [];
   vi.useFakeTimers();
@@ -100,7 +106,7 @@ describe("NanobotClient", () => {
       socket.fakeMessage({ event: "attached", chat_id: "existing" });
       await Promise.resolve();
       expect(resolved).not.toHaveBeenCalled();
-      socket.fakeMessage({ event: "attached", chat_id: "fresh" });
+      socket.fakeMessage({ event: "attached", chat_id: "fresh", request_id: lastRequestId(socket) });
       await creation;
       expect(resolved).toHaveBeenCalledWith("fresh");
       client.close();
@@ -112,7 +118,7 @@ describe("NanobotClient", () => {
     client.connect();
     const socket = lastSocket();
     socket.fakeOpen();
-    socket.fakeMessage({ event: "ready", chat_id: "default", capabilities: ["webui.chat-requests.v1", "future.optional"] });
+    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "webui" });
     const expired = expect(start(client, 100)).rejects.toThrow("outcome is unknown");
     const oldFrame = JSON.parse(socket.sent.at(-1)!);
     await vi.advanceTimersByTimeAsync(100);
@@ -125,7 +131,7 @@ describe("NanobotClient", () => {
     const temporary = type === "new_temporary_chat";
     socket.fakeMessage({ event: "attached", chat_id: "old", temporary, request_id: oldFrame.request_id });
     socket.fakeMessage({ event: "error", detail: "workspace_scope_rejected", request_id: oldFrame.request_id });
-    // A capable host must not silently fall back to uncorrelated responses.
+    // Ordinary attachment responses do not complete a creation request.
     socket.fakeMessage({ event: "attached", chat_id: "unrelated", temporary });
     socket.fakeMessage({ event: "error", detail: "fork_chat_failed" });
     await Promise.resolve();
@@ -140,49 +146,12 @@ describe("NanobotClient", () => {
     client.close();
   });
 
-  it.each(chatRequests)("reserves the legacy $type slot after a sent timeout", async ({ type, start }) => {
+  it("rejects a chat request for its own error response", async () => {
     const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     client.connect();
     const socket = lastSocket();
     socket.fakeOpen();
-    // Independent protocol-1 host fixture: no request IDs or optional capability.
-    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "legacy" });
-    const expired = expect(start(client, 100)).rejects.toThrow("outcome is unknown");
-    await vi.advanceTimersByTimeAsync(100);
-    await expired;
-    await expect(start(client, 1_000)).rejects.toThrow("outcome is unknown");
-    expect(socket.sent.filter((value) => JSON.parse(value).type === type)).toHaveLength(1);
-    const temporary = type === "new_temporary_chat";
-    socket.fakeMessage({ event: "attached", chat_id: "old", temporary });
-    if (temporary) {
-      expect(socket.sent.map((value) => JSON.parse(value))).toContainEqual({ type: "discard_temporary_chat", chat_id: "old" });
-    }
-    const creation = start(client, 1_000);
-    socket.fakeMessage({ event: "attached", chat_id: "fresh", temporary });
-    await expect(creation).resolves.toBe("fresh");
-    client.close();
-  });
-
-  it.each([undefined, ["future.optional"], "webui.chat-requests.v1", null])(
-    "uses legacy matching when capability metadata is absent or unsupported: %j", async (capabilities) => {
-      const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
-      client.connect();
-      const socket = lastSocket();
-      socket.fakeOpen();
-      socket.fakeMessage({ event: "ready", chat_id: "default", capabilities });
-      const creation = client.newChat();
-      socket.fakeMessage({ event: "attached", chat_id: "fresh" });
-      await expect(creation).resolves.toBe("fresh");
-      client.close();
-    },
-  );
-
-  it("only rejects a capable-host chat request for its own error response", async () => {
-    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
-    client.connect();
-    const socket = lastSocket();
-    socket.fakeOpen();
-    socket.fakeMessage({ event: "ready", chat_id: "default", capabilities: ["webui.chat-requests.v1"] });
+    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "webui" });
     const creation = client.newChat();
     const rejection = expect(creation).rejects.toThrow("workspace_scope_rejected:missing directory");
     const frame = JSON.parse(socket.sent.at(-1)!);
@@ -191,7 +160,7 @@ describe("NanobotClient", () => {
     client.close();
   });
 
-  it.each(chatRequests)("keeps unrelated chat errors out of a pending legacy $type", async ({ type, start }) => {
+  it.each(chatRequests)("keeps unrelated chat errors out of a pending $type", async ({ type, start }) => {
     const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     client.connect();
     const socket = lastSocket();
@@ -199,7 +168,7 @@ describe("NanobotClient", () => {
     const creation = start(client, 1_000);
     socket.fakeMessage({ event: "error", detail: "workspace_scope_rejected", chat_id: "another", turn_id: "turn" });
     socket.fakeMessage({ event: "error", detail: "invalid_sidebar_state" });
-    socket.fakeMessage({ event: "attached", chat_id: "fresh", temporary: type === "new_temporary_chat" });
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", temporary: type === "new_temporary_chat", request_id: lastRequestId(socket) });
     await expect(creation).resolves.toBe("fresh");
     client.close();
   });
@@ -217,27 +186,30 @@ describe("NanobotClient", () => {
     socket.fakeOpen();
     expect(socket.sent.map((value) => JSON.parse(value).type)).not.toContain("new_chat");
     const creation = client.newChat();
-    socket.fakeMessage({ event: "attached", chat_id: "fresh" });
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", request_id: lastRequestId(socket) });
     await expect(creation).resolves.toBe("fresh");
     client.close();
   });
 
-  it("renegotiates chat-request support on the replacement connection", async () => {
+  it("does not replay a sent chat request after reconnect and correlates the next request", async () => {
     const client = new NanobotClient({ url: "ws://test", onReauth: async () => "ws://refreshed",
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     client.connect();
     lastSocket().fakeOpen();
-    lastSocket().fakeMessage({ event: "ready", chat_id: "default", capabilities: ["webui.chat-requests.v1"] });
+    lastSocket().fakeMessage({ event: "ready", chat_id: "default", client_id: "webui" });
     const interrupted = expect(client.newChat()).rejects.toThrow("socket closed");
+    const interruptedRequestId = lastRequestId();
     lastSocket().close();
     await interrupted;
     await vi.advanceTimersByTimeAsync(500);
     const socket = lastSocket();
     expect(socket.url).toBe("ws://refreshed");
     socket.fakeOpen();
-    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "legacy" });
+    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "webui" });
+    expect(socket.sent.filter((value) => JSON.parse(value).type === "new_chat")).toHaveLength(0);
     const creation = client.newChat();
-    socket.fakeMessage({ event: "attached", chat_id: "fresh" });
+    expect(lastRequestId(socket)).not.toBe(interruptedRequestId);
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", request_id: lastRequestId(socket) });
     await expect(creation).resolves.toBe("fresh");
     expect(socket.sent.filter((value) => JSON.parse(value).type === "new_chat")).toHaveLength(1);
     client.close();
@@ -301,7 +273,7 @@ describe("NanobotClient", () => {
     await Promise.resolve();
     expect(client.status).toBe("open");
     expect(resolved).not.toHaveBeenCalled();
-    current.fakeMessage({ event: "attached", chat_id: "fresh" });
+    current.fakeMessage({ event: "attached", chat_id: "fresh", request_id: lastRequestId(current) });
     await creation;
     expect(resolved).toHaveBeenCalledWith("fresh");
     client.close();
@@ -371,7 +343,7 @@ describe("NanobotClient", () => {
     const socket = lastSocket();
     socket.fakeOpen();
     const created = client.newTemporaryChat();
-    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true });
+    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true, request_id: lastRequestId(socket) });
     await created;
     const notice = vi.fn();
     client.onTaskNotice(notice);
@@ -394,7 +366,7 @@ describe("NanobotClient", () => {
     const socket = lastSocket();
     socket.fakeOpen();
     const created = client.newTemporaryChat();
-    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true });
+    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true, request_id: lastRequestId(socket) });
     await created;
     for (let index = 0; index < 2_010; index++) {
       for (const chatId of ["regular", "temporary"]) {
@@ -710,7 +682,7 @@ describe("NanobotClient", () => {
     expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
       type: "new_temporary_chat", request_id: expect.any(String),
     });
-    lastSocket().fakeMessage({ event: "attached", chat_id: chatId, temporary: true });
+    lastSocket().fakeMessage({ event: "attached", chat_id: chatId, temporary: true, request_id: lastRequestId() });
     await expect(creation).resolves.toBe(chatId);
     lastSocket().sent = [];
     client.onChat(chatId, vi.fn());
@@ -753,6 +725,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({
       event: "attached",
       chat_id: "server-temporary-chat",
+      request_id: lastRequestId(),
       temporary: true,
     });
     await expect(creation).resolves.toBe("server-temporary-chat");
@@ -773,6 +746,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({
       event: "attached",
       chat_id: "temp-drop-a",
+      request_id: lastRequestId(),
       temporary: true,
     });
     await firstCreation;
@@ -780,6 +754,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({
       event: "attached",
       chat_id: "temp-drop-b",
+      request_id: lastRequestId(),
       temporary: true,
     });
     await secondCreation;
@@ -1931,6 +1906,7 @@ describe("NanobotClient", () => {
       event: "error",
       detail: "workspace_scope_rejected",
       reason: "project_path must be an existing directory",
+      request_id: lastRequestId(),
     });
 
     await expect(pendingChat).rejects.toThrow("workspace_scope_rejected");
@@ -2428,7 +2404,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeOpen();
     const promise = client.newChat(1_000);
     expect(lastSocket().sent.map((value) => JSON.parse(value))).toContainEqual({ type: "new_chat", request_id: expect.any(String) });
-    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
+    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id", request_id: lastRequestId() });
     await expect(promise).resolves.toBe("fresh-id");
   });
 
@@ -2451,7 +2427,7 @@ describe("NanobotClient", () => {
     expect(lastSocket().sent.map((value) => JSON.parse(value))).toContainEqual({
       type: "new_chat", workspace_scope: workspaceScope, request_id: expect.any(String),
     });
-    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
+    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id", request_id: lastRequestId() });
     await expect(promise).resolves.toBe("fresh-id");
 
     client.sendMessage("fresh-id", "hello", undefined, { workspaceScope });
@@ -2918,6 +2894,7 @@ describe("NanobotClient", () => {
       event: "error",
       detail: "workspace_scope_rejected",
       reason: "project_path must be an existing directory",
+      request_id: lastRequestId(),
     });
     await expect(pending).rejects.toThrow("workspace_scope_rejected");
   });

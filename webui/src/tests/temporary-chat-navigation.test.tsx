@@ -53,7 +53,7 @@ class TestSocket {
     this.sent.push(frame);
     if (frame.type === "new_temporary_chat") {
       const chatId = `00000000-0000-4000-8000-${String(++this.nextChat).padStart(12, "0")}`;
-      queueMicrotask(() => this.receive({ event: "attached", chat_id: chatId, temporary: true }));
+      queueMicrotask(() => this.receive({ event: "attached", chat_id: chatId, temporary: true, request_id: frame.request_id }));
     } else if (frame.type === "set_sidebar_state") {
       queueMicrotask(() => this.receive({ event: "sidebar_state_updated", state: frame.state }));
     } else if (frame.type === "webui_request" && frame.action === "temporary_chat.file_preview") {

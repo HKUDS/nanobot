@@ -810,14 +810,13 @@ class WebSocketChannel(BaseChannel):
             client_id = client_id[:128]
 
         default_chat_id = str(uuid.uuid4())
-        from nanobot.webui.client_contract import CHAT_REQUESTS_CAPABILITY, gateway_identity
+        from nanobot.webui.client_contract import gateway_identity
 
         try:
             await connection.send(
                 json.dumps(
                     {
                         "event": "ready",
-                        "capabilities": [CHAT_REQUESTS_CAPABILITY],
                         "chat_id": default_chat_id,
                         "client_id": client_id,
                         **({"upload": self._uploads.issue(connection)}

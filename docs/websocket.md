@@ -238,11 +238,11 @@ See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
 
 ### Chat-request correlation
 
-A host advertising `webui.chat-requests.v1` in the current connection's `ready.capabilities` echoes an optional `request_id` on `attached` and expected `error` responses to `new_chat`, `new_temporary_chat`, and `fork_chat`. IDs must match `[A-Za-z0-9._:-]{1,128}`; malformed IDs are rejected before creation. Requests without IDs retain their original response shape. WebUI protocol 1 is unchanged.
+WebUI and its gateway are released together. WebUI sends a `request_id` with every `new_chat`, `new_temporary_chat`, and `fork_chat`; the gateway echoes it on `attached` and expected `error` responses. IDs must match `[A-Za-z0-9._:-]{1,128}`; malformed IDs are rejected before creation. The shared WebSocket API also accepts requests without IDs for callers such as the TUI; those responses have no `request_id`.
 
 Clients must correlate tagged responses by ID, not by arrival order or the temporary-chat flag. Ordinary `attach` replies cannot complete a creation request. IDs provide correlation, not deduplication: a sent request that times out has an unknown outcome and must not be automatically replayed. Expired unsent requests must be removed before reconnecting.
 
-Without this capability, the WebUI allows one outstanding creation on the wire, excluding replies to known-chat attachments. A sent timeout reserves that slot until its response arrives or the connection ends; it cannot be reused for another request with an indistinguishable reply. Capabilities are reset on disconnect and read from each new connection. Late temporary-chat creation responses are discarded rather than selected.
+A timeout ends the client's pending request, allowing a new user-initiated request with a different ID. A late response cannot complete that newer request. Late temporary-chat creations are discarded rather than selected.
 
 ### Binary attachments (WebUI and TUI)
 
