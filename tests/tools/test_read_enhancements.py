@@ -110,7 +110,7 @@ class TestReadDedup:
                 return self.stream.seek(*args)
 
         monkeypatch.setattr(
-            "nanobot.agent.tools.filesystem.os.fdopen",
+            "nanobot.execution.files.os.fdopen",
             lambda *args, **kwargs: CountingStream(real_fdopen(*args, **kwargs)),
         )
         visible = {} if case == "not_visible" else {"read-1": first}
@@ -807,7 +807,7 @@ class TestBoundedTextReads:
                 return chunk
 
         monkeypatch.setattr(
-            "nanobot.agent.tools.filesystem.os.fdopen",
+            "nanobot.execution.files.os.fdopen",
             lambda *args, **kwargs: GrowingStream(real_fdopen(*args, **kwargs)),
         )
         result = await tool.execute(path=str(f))
@@ -886,7 +886,7 @@ class TestBoundedTextReads:
                 return chunk
 
         monkeypatch.setattr(
-            "nanobot.agent.tools.filesystem.os.fdopen",
+            "nanobot.execution.files.os.fdopen",
             lambda *args, **kwargs: ChangeAfterPrecheck(real_fdopen(*args, **kwargs)),
         )
         with file_state.file_read_context("read-2", lambda: {"read-1": first}):
@@ -932,7 +932,7 @@ class TestBoundedTextReads:
                 return chunk
 
         monkeypatch.setattr(
-            "nanobot.agent.tools.filesystem.os.fdopen",
+            "nanobot.execution.files.os.fdopen",
             lambda *args, **kwargs: ChangeAfterPrecheck(real_fdopen(*args, **kwargs)),
         )
         tracemalloc.start()
@@ -972,7 +972,7 @@ class TestBoundedTextReads:
                 return chunk
 
         monkeypatch.setattr(
-            "nanobot.agent.tools.filesystem.os.fdopen",
+            "nanobot.execution.files.os.fdopen",
             lambda *args, **kwargs: GrowingStream(real_fdopen(*args, **kwargs)),
         )
         with file_state.file_read_context("read-2", lambda: {"read-1": first}):
@@ -1013,7 +1013,7 @@ class TestBoundedTextReads:
         tool = ReadFileTool()
         try:
             with monkeypatch.context() as scoped:
-                scoped.setattr("nanobot.agent.tools.filesystem.os.open", open_replacement)
+                scoped.setattr("nanobot.execution.files.os.open", open_replacement)
                 result = await tool.execute(path=str(f))
         finally:
             try:

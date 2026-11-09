@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import fields
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
+
+import pytest
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.context import ToolContext
@@ -184,35 +185,25 @@ def test_loader_preserves_caller_supplied_tool(tmp_path):
     assert "read_file" not in registered
 
 
-def test_fs_tool_create_builds_from_context():
+@pytest.mark.parametrize(("restrict", "sandbox"), [(False, ""), (True, ""), (False, "bwrap")])
+async def test_fs_tool_create_uses_context_workspace_and_restrictions(tmp_path, restrict, sandbox):
     from nanobot.agent.tools.filesystem import ReadFileTool
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "inside.txt").write_text("inside", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("outside contents", encoding="utf-8")
     mock_config = MagicMock()
-    mock_config.restrict_to_workspace = False
-    mock_config.exec.sandbox = ""
-    ctx = ToolContext(config=mock_config, workspace="/tmp/test")
-    tool = ReadFileTool.create(ctx)
-    assert isinstance(tool, ReadFileTool)
-    assert tool._workspace == Path("/tmp/test")
-
-
-def test_fs_tool_create_respects_restrict_to_workspace():
-    from nanobot.agent.tools.filesystem import ReadFileTool
-    mock_config = MagicMock()
-    mock_config.restrict_to_workspace = True
-    mock_config.exec.sandbox = ""
-    ctx = ToolContext(config=mock_config, workspace="/tmp/test")
-    tool = ReadFileTool.create(ctx)
-    assert tool._allowed_dir == Path("/tmp/test")
-
-
-def test_fs_tool_create_respects_sandbox():
-    from nanobot.agent.tools.filesystem import ReadFileTool
-    mock_config = MagicMock()
-    mock_config.restrict_to_workspace = False
-    mock_config.exec.sandbox = "bwrap"
-    ctx = ToolContext(config=mock_config, workspace="/tmp/test")
-    tool = ReadFileTool.create(ctx)
-    assert tool._allowed_dir == Path("/tmp/test")
+    mock_config.restrict_to_workspace = restrict
+    mock_config.exec.sandbox = sandbox
+    tool = ReadFileTool.create(ToolContext(config=mock_config, workspace=str(workspace)))
+    assert "inside" in await tool.execute(path="inside.txt")
+    outside = await tool.execute(path="../outside.txt")
+    if restrict or sandbox:
+        assert outside.is_error
+        assert "outside contents" not in outside
+    else:
+        assert "outside contents" in outside
 
 
 async def test_message_tool_create():

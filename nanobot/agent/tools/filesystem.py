@@ -4,31 +4,35 @@ import codecs
 import difflib
 import hashlib
 import mimetypes
-import os
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates, current_file_states
 from nanobot.agent.tools.filesystem_config import FileToolsConfig
-from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.execution.files import NotRegularFileError, open_regular_file
-from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.execution.files import NotRegularFileError, ReadableFile, WorkspaceFiles, WritableFile
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
+def _plugin_skill_roots(workspace: Path, target: Path) -> tuple[Path, ...]:
+    from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
+
+    return enabled_agent_plugin_skill_dirs(workspace, requested_path=target)
+
+
 class _FsTool(Tool):
-    """Shared base for filesystem tools — common init and path resolution."""
+    """Wire file tools to workspace execution and call-local read receipts."""
 
     config_key = "file"
 
@@ -52,52 +56,37 @@ class _FsTool(Tool):
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
         extra_read_allowed_files: list[Path] | None = None,
+        *,
+        files: WorkspaceFiles | None = None,
     ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
-        # Legacy alias: extra_allowed_dirs is read-only. Write-capable tools
-        # must opt in via extra_write_allowed_dirs.
-        self._extra_read_allowed_dirs = [
-            *(extra_allowed_dirs or []),
-            *(extra_read_allowed_dirs or []),
-        ]
-        self._extra_read_allowed_files = list(extra_read_allowed_files or [])
-        self._extra_write_allowed_dirs = list(extra_write_allowed_dirs or [])
-        self._extra_write_allowed_files = list(extra_write_allowed_files or [])
-        self._restrict_to_workspace = (
-            bool(restrict_to_workspace)
-            if restrict_to_workspace is not None
-            else allowed_dir is not None
+        self._files = files if files is not None else WorkspaceFiles(
+            workspace=workspace,
+            allowed_dir=allowed_dir,
+            extra_allowed_dirs=extra_allowed_dirs,
+            extra_read_allowed_dirs=extra_read_allowed_dirs,
+            extra_write_allowed_dirs=extra_write_allowed_dirs,
+            extra_write_allowed_files=extra_write_allowed_files,
+            restrict_to_workspace=restrict_to_workspace,
+            sandbox_restricts_workspace=sandbox_restricts_workspace,
+            extra_read_allowed_files=extra_read_allowed_files,
+            builtin_skills=BUILTIN_SKILLS_DIR,
+            plugin_skill_roots=_plugin_skill_roots,
         )
-        self._sandbox_restricts_workspace = sandbox_restricts_workspace
-        # Explicit state is used by isolated runners like Dream/subagents.
-        # Main AgentLoop tools leave this unset and resolve state from the
-        # current async task, which keeps shared tool instances session-safe.
+        # Dream and isolated runners can supply their own receipt store.
         self._explicit_file_states = file_states
         self._fallback_file_states = FileStates()
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
-
-        agent_workspace = Path(ctx.workspace)
-        resolved_agent_workspace = agent_workspace.expanduser().resolve(strict=False)
-        restrict = (
-            ctx.config.restrict_to_workspace
-            or ctx.config.exec.sandbox
-        )
-        sandbox_restricts = bool(ctx.config.exec.sandbox)
-        allowed_dir = agent_workspace if restrict else None
-        # Agent-owned skills stay available from project scopes. History is a narrower
-        # capability: expose only the append-only log, not the surrounding memory directory.
         return cls(
-            workspace=agent_workspace,
-            allowed_dir=allowed_dir,
-            extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, resolved_agent_workspace / "skills"],
-            extra_read_allowed_files=[resolved_agent_workspace / "memory" / "history.jsonl"],
+            files=WorkspaceFiles.for_agent(
+                Path(ctx.workspace),
+                restrict_to_workspace=ctx.config.restrict_to_workspace,
+                sandbox_restricts_workspace=bool(ctx.config.exec.sandbox),
+                builtin_skills=BUILTIN_SKILLS_DIR,
+                plugin_skill_roots=_plugin_skill_roots,
+            ),
             file_states=ctx.file_state_store,
-            restrict_to_workspace=ctx.config.restrict_to_workspace,
-            sandbox_restricts_workspace=sandbox_restricts,
         )
 
     @property
@@ -106,134 +95,16 @@ class _FsTool(Tool):
             return self._explicit_file_states
         return current_file_states(self._fallback_file_states)
 
-    def _effective_allowed_root(self, access_allowed_root: Path | None) -> Path | None:
-        if self._allowed_dir is None or self._workspace is None:
-            return access_allowed_root
-        try:
-            allowed_dir = Path(self._allowed_dir).expanduser().resolve(strict=False)
-            workspace = Path(self._workspace).expanduser().resolve(strict=False)
-        except (OSError, RuntimeError, TypeError, ValueError):
-            return access_allowed_root if access_allowed_root is not None else self._allowed_dir
-        if allowed_dir == workspace:
-            return access_allowed_root
-        return allowed_dir
 
-    def _resolve_with_extra(
-        self,
-        path: str,
-        extra_allowed_dirs: list[Path] | None,
-        extra_allowed_files: list[Path] | None,
-        *,
-        include_media_dir: bool,
-        extra_files_require_allowed_root: bool = False,
-    ) -> Path:
-        access = current_tool_workspace(
-            self._workspace,
-            restrict_to_workspace=self._restrict_to_workspace,
-            sandbox_restricts_workspace=self._sandbox_restricts_workspace,
-        )
-        allowed_root = self._effective_allowed_root(access.allowed_root)
-        if extra_files_require_allowed_root and allowed_root is None:
-            extra_allowed_files = None
-        return resolve_workspace_path(
-            path,
-            access.project_path,
-            allowed_root,
-            extra_allowed_dirs,
-            extra_allowed_files,
-            include_media_dir=include_media_dir,
-        )
+class _WritableFsTool(_FsTool):
+    """Expose the same write target to execution and edit activity tracking."""
 
-    def _resolve_read(self, path: str) -> Path:
-        plugin_skill_dirs: list[Path] = []
-        if self._workspace is not None:
-            from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
+    def file_edit_target(self, path: str) -> WritableFile:
+        return self._files.edit_target(path)
 
-            try:
-                access = current_tool_workspace(
-                    self._workspace,
-                    restrict_to_workspace=self._restrict_to_workspace,
-                    sandbox_restricts_workspace=self._sandbox_restricts_workspace,
-                )
-                if self._effective_allowed_root(access.allowed_root) is not None:
-                    candidate = Path(path).expanduser()
-                    if not candidate.is_absolute() and access.project_path is not None:
-                        candidate = access.project_path / candidate
-                    plugin_skill_dirs = list(
-                        enabled_agent_plugin_skill_dirs(
-                            Path(self._workspace),
-                            requested_path=candidate.resolve(strict=False),
-                        )
-                    )
-            except (OSError, RuntimeError):
-                pass
-        return self._resolve_with_extra(
-            path,
-            [*self._extra_read_allowed_dirs, *plugin_skill_dirs],
-            self._extra_read_allowed_files,
-            include_media_dir=True,
-            extra_files_require_allowed_root=True,
-        )
-
-    def _resolve_write(self, path: str) -> Path:
-        return self._resolve_with_extra(
-            path,
-            self._extra_write_allowed_dirs,
-            self._extra_write_allowed_files,
-            include_media_dir=False,
-        )
-
-    def _resolve(self, path: str) -> Path:
-        return self._resolve_read(path)
-
-    def _display_workspace(self) -> Path | None:
-        return current_tool_workspace(self._workspace).project_path
-
-
-_BLOCKED_DEVICE_PATHS = frozenset({
-    "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
-    "/dev/stdin", "/dev/stdout", "/dev/stderr",
-    "/dev/tty", "/dev/console",
-    "/dev/fd/0", "/dev/fd/1", "/dev/fd/2",
-})
-
-
-def _is_blocked_device(path: str | Path) -> bool:
-    """Check if path is a blocked device that could hang or produce infinite output."""
-    import re
-    raw = str(path)
-
-    try:
-        resolved = str(Path(raw).resolve())
-    except (OSError, ValueError):
-        resolved = raw
-
-    if raw in _BLOCKED_DEVICE_PATHS or resolved in _BLOCKED_DEVICE_PATHS:
-        return True
-    if re.match(r"/proc/\d+/fd/[012]$", raw) or re.match(r"/proc/self/fd/[012]$", raw):
-        return True
-    if re.match(r"/proc/\d+/fd/[012]$", resolved) or re.match(r"/proc/self/fd/[012]$", resolved):
-        return True
-
-    if resolved.startswith("/dev/"):
-        return True
-    return False
-
-
-def _builtin_skill_read_path(path: str) -> Path | None:
-    from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
-
-    requested = Path(path)
-    if requested.is_absolute():
-        return None
-    parts = requested.parts
-    if len(parts) < 2 or parts[0] != "skills":
-        return None
-    root = BUILTIN_SKILLS_DIR.resolve()
-    candidate = (root / Path(*parts[1:])).resolve()
-    if candidate != root and root not in candidate.parents:
-        return None
-    return candidate if candidate.is_file() else None
+    @property
+    def file_edit_workspace(self) -> Path | None:
+        return self._files.display_workspace
 
 
 _LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
@@ -402,30 +273,21 @@ class ReadFileTool(_FsTool):
             if not path:
                 return ToolResult.error("Error reading file: Unknown path")
 
-            if _is_blocked_device(path):
-                return ToolResult.error(f"Error: Reading {path} is blocked (device path that could hang or produce infinite output).")
-
-            fp = self._resolve_read(path)
-            if not fp.exists():
-                fp = _builtin_skill_read_path(path) or fp
-            if _is_blocked_device(fp):
-                return ToolResult.error(f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output).")
-            if not fp.exists():
+            try:
+                source = self._files.read_file(path)
+            except FileNotFoundError:
                 return ToolResult.error(f"Error: File not found: {path}")
-            if not fp.is_file():
-                return ToolResult.error(f"Error: Not a file: {path}")
-
-            file_size = fp.stat().st_size
-            if file_size > self._MAX_FILE_SIZE_BYTES:
-                return self._file_too_large(file_size)
+            fp = source.path
+            if source.size > self._MAX_FILE_SIZE_BYTES:
+                return self._file_too_large(source.size)
 
             if fp.suffix.lower() == ".pdf":
-                return self._read_pdf(fp, pages)
+                return self._read_pdf(source, pages)
 
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
-                return self._read_office_doc(fp, offset, limit)
+                return self._read_office_doc(source, offset, limit)
 
-            with open_regular_file(fp) as (stream, opened_size):
+            with source.open() as (stream, opened_size):
                 if opened_size > self._MAX_FILE_SIZE_BYTES:
                     return self._file_too_large(opened_size)
 
@@ -443,7 +305,7 @@ class ReadFileTool(_FsTool):
                         bytes_read = len(first)
                         # Bound each read without preallocating from a size that
                         # may have become stale during the receipt check.
-                        remaining = os.fstat(stream.fileno()).st_size - bytes_read
+                        remaining = source.open_size(stream) - bytes_read
                         chunk_size = min(self._IMAGE_READ_CHUNK_SIZE, max(self._READ_CHUNK_SIZE, remaining))
                         while chunk := stream.read(min(
                             chunk_size, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
@@ -592,13 +454,12 @@ class ReadFileTool(_FsTool):
         )
         return result
 
-    def _read_pdf(self, fp: Path, pages: str | None) -> str:
-        from nanobot.utils.document import PdfPageRangeError, PdfSafetyError, extract_pdf_pages
+    def _read_pdf(self, source: ReadableFile, pages: str | None) -> str:
+        from nanobot.utils.document import PdfPageRangeError, PdfSafetyError
 
         try:
-            extraction = extract_pdf_pages(
-                fp,
-                pages=pages,
+            extraction = source.pdf_pages(
+                pages,
                 max_pages=self._MAX_PDF_PAGES,
                 max_chars=self._MAX_CHARS,
             )
@@ -610,7 +471,7 @@ class ReadFileTool(_FsTool):
             return ToolResult.error(f"Error reading PDF: {e}")
 
         if not extraction.text:
-            return f"(PDF has no extractable text: {fp})"
+            return f"(PDF has no extractable text: {source.path})"
 
         result = extraction.text
         if extraction.truncated:
@@ -629,17 +490,16 @@ class ReadFileTool(_FsTool):
 
     def _read_office_doc(
         self,
-        fp: Path,
+        file: ReadableFile,
         offset: int,
         limit: int | None,
     ) -> str:
-        from nanobot.utils.document import open_document_line_source
-
+        fp = file.path
         offset = max(1, offset)
         requested_limit = limit or self._DEFAULT_LIMIT
         source_iterator = None
         try:
-            source = open_document_line_source(fp)
+            source = file.document_lines()
             if source is None:
                 return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
             source_iterator = source.lines
@@ -715,7 +575,7 @@ class ReadFileTool(_FsTool):
         required=["path", "content"],
     )
 )
-class WriteFileTool(_FsTool):
+class WriteFileTool(_WritableFsTool):
     """Write content to a file."""
     _scopes = {"core", "subagent", "memory"}
 
@@ -737,11 +597,10 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown path")
             if content is None:
                 raise ValueError("Unknown content")
-            fp = self._resolve_write(path)
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8", newline="")
-            self._file_states.record_write(fp)
-            return f"Successfully wrote {len(content)} characters to {fp}"
+            target = self.file_edit_target(path)
+            target.write(content, create_parents=True)
+            self._file_states.record_write(target.path)
+            return f"Successfully wrote {len(content)} characters to {target.path}"
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
@@ -1030,7 +889,7 @@ def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], li
         required=["path", "old_text", "new_text"],
     )
 )
-class EditFileTool(_FsTool):
+class EditFileTool(_WritableFsTool):
     """Edit a file by replacing text with fallback matching."""
     _scopes = {"core", "subagent", "memory"}
 
@@ -1066,7 +925,7 @@ class EditFileTool(_FsTool):
         added, deleted = diff.added, diff.deleted
         action = "add" if created else "update"
         stats = f" (+{added}/-{deleted})" if added or deleted else ""
-        path = display_file_edit_path(resolved_path, self._display_workspace())
+        path = display_file_edit_path(resolved_path, self._files.display_workspace)
         text = f"Patch applied:\n- {action} {path}{stats}"
         return FileEditResult(text, {resolved_path: diff})
 
@@ -1090,36 +949,36 @@ class EditFileTool(_FsTool):
             if expected_replacements is not None and expected_replacements < 1:
                 return ToolResult.error("Error: expected_replacements must be >= 1.")
 
-            fp = self._resolve_write(path)
-            file_exists = fp.exists()
+            target = self.file_edit_target(path)
+            fp = target.path
+            file_exists = target.exists()
             if file_exists and old_text == new_text:
                 return ToolResult.error("Error: new_text must be different from old_text.")
 
             if not file_exists:
                 if old_text == "":
-                    fp.parent.mkdir(parents=True, exist_ok=True)
-                    fp.write_text(new_text, encoding="utf-8", newline="")
+                    target.write(new_text, create_parents=True)
                     self._file_states.record_write(fp)
-                    return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
-                return self._file_not_found_msg(path, fp)
+                    return self._format_summary(fp, "", new_text, created=True)
+                return self._file_not_found_msg(path, target)
 
             try:
-                fsize = fp.stat().st_size
+                fsize = target.size()
             except OSError:
                 fsize = 0
             if fsize > self._MAX_EDIT_FILE_SIZE:
                 return ToolResult.error(f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB.")
 
             if old_text == "":
-                raw = fp.read_bytes()
+                raw = target.read_bytes()
                 content = raw.decode("utf-8")
                 if content.strip():
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
-                fp.write_text(new_text, encoding="utf-8", newline="")
+                target.write(new_text)
                 self._file_states.record_write(fp)
-                return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
+                return self._format_summary(fp, content, new_text)
 
-            raw = fp.read_bytes()
+            raw = target.read_bytes()
             uses_crlf = b"\r\n" in raw
             content = raw.decode("utf-8").replace("\r\n", "\n")
             norm_old = old_text.replace("\r\n", "\n")
@@ -1212,7 +1071,7 @@ class EditFileTool(_FsTool):
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
 
-            fp.write_bytes(new_content.encode("utf-8"))
+            target.write(new_content)
             self._file_states.record_write(fp)
             return self._format_summary(fp, content, new_content)
         except PermissionError as e:
@@ -1220,13 +1079,10 @@ class EditFileTool(_FsTool):
         except Exception as e:
             return ToolResult.error(f"Error editing file: {e}")
 
-    def _file_not_found_msg(self, path: str, fp: Path) -> str:
-        parent = fp.parent
-        suggestions: list[str] = []
-        if parent.is_dir():
-            siblings = [f.name for f in parent.iterdir() if f.is_file()]
-            close = difflib.get_close_matches(fp.name, siblings, n=3, cutoff=0.6)
-            suggestions = [str(parent / c) for c in close]
+    def _file_not_found_msg(self, path: str, target: WritableFile) -> str:
+        siblings = self._files.sibling_files(target)
+        close = difflib.get_close_matches(target.path.name, siblings, n=3, cutoff=0.6)
+        suggestions = [str(target.path.parent / name) for name in close]
         parts = [f"Error: File not found: {path}"]
         if suggestions:
             parts.append("Did you mean: " + ", ".join(suggestions) + "?")
@@ -1304,32 +1160,21 @@ class ListDirTool(_FsTool):
         try:
             if path is None:
                 raise ValueError("Unknown path")
-            dp = self._resolve(path)
-            if not dp.exists():
-                return ToolResult.error(f"Error: Directory not found: {path}")
-            if not dp.is_dir():
-                return ToolResult.error(f"Error: Not a directory: {path}")
-
             cap = max_entries or self._DEFAULT_MAX
-            items: list[str] = []
-            total = 0
-
-            if recursive:
-                for item in sorted(dp.rglob("*")):
-                    rel = item.relative_to(dp)
-                    if any(p in self._IGNORE_DIRS for p in rel.parts):
-                        continue
-                    total += 1
-                    if len(items) < cap:
-                        items.append(f"{rel}/" if item.is_dir() else str(rel))
-            else:
-                for item in sorted(dp.iterdir()):
-                    if item.name in self._IGNORE_DIRS:
-                        continue
-                    total += 1
-                    if len(items) < cap:
-                        pfx = "📁 " if item.is_dir() else "📄 "
-                        items.append(f"{pfx}{item.name}")
+            try:
+                listing = self._files.list_directory(
+                    path, recursive=recursive, ignored=self._IGNORE_DIRS, limit=cap,
+                )
+            except FileNotFoundError:
+                return ToolResult.error(f"Error: Directory not found: {path}")
+            except NotADirectoryError:
+                return ToolResult.error(f"Error: Not a directory: {path}")
+            total = listing.total
+            items = [
+                (f"{item}/" if is_dir else str(item)) if recursive
+                else f"{'📁' if is_dir else '📄'} {item.name}"
+                for item, is_dir in listing.entries
+            ]
 
             if not items and total == 0:
                 return f"Directory {path} is empty"

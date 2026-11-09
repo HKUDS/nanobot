@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, cast
 
 from nanobot.agent.tools.base import ToolResult, tool_parameters
-from nanobot.agent.tools.filesystem import _FsTool  # pyright: ignore[reportPrivateUsage]
+from nanobot.agent.tools.filesystem import _WritableFsTool  # pyright: ignore[reportPrivateUsage]
 from nanobot.agent.tools.schema import (
     ArraySchema,
     BooleanSchema,
@@ -12,6 +11,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.execution.files import WritableFile, commit_file_edits
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 
 
@@ -72,7 +72,7 @@ def _append_text(content: str, addition: str) -> str:
         required=["edits"],
     )
 )
-class ApplyPatchTool(_FsTool):
+class ApplyPatchTool(_WritableFsTool):
     """Apply file edits by providing structured edit instructions."""
     _scopes = {"core", "subagent"}
 
@@ -98,9 +98,9 @@ class ApplyPatchTool(_FsTool):
             if not edits:
                 raise _PatchError("must provide edits")
 
-            writes: dict[Path, str] = {}
-            originals: dict[Path, str] = {}
-            actions: dict[Path, str] = {}
+            writes: dict[WritableFile, str] = {}
+            originals: dict[WritableFile, str] = {}
+            actions: dict[WritableFile, str] = {}
 
             for edit_value in edits:
                 if not isinstance(edit_value, dict):
@@ -113,7 +113,7 @@ class ApplyPatchTool(_FsTool):
                 action = edit.get("action")
                 if not isinstance(action, str):
                     raise _PatchError(f"action required for edit: {path}")
-                source = self._resolve_write(path)
+                source = self.file_edit_target(path)
 
                 if action == "add":
                     new_text = edit.get("new_text")
@@ -211,7 +211,7 @@ class ApplyPatchTool(_FsTool):
             summaries: list[str] = []
             for source, diff in diffs.items():
                 action_name = actions[source]
-                path = display_file_edit_path(source, self._display_workspace())
+                path = display_file_edit_path(source.path, self._files.display_workspace)
                 added, deleted = diff.added, diff.deleted
                 stats = f" (+{added}/-{deleted})" if added or deleted else ""
                 summaries.append(f"- {action_name} {path}{stats}")
@@ -219,27 +219,13 @@ class ApplyPatchTool(_FsTool):
             if dry_run:
                 return "Patch dry-run succeeded:\n" + "\n".join(summaries)
 
-            backups: dict[Path, bytes | None] = {}
-            for path in writes:
-                backups[path] = path.read_bytes() if path.exists() else None
-
-            try:
-                for path, content in writes.items():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(content, encoding="utf-8", newline="")
-            except Exception:
-                for path, data in backups.items():
-                    if data is None:
-                        if path.exists():
-                            path.unlink()
-                    else:
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(data)
-                raise
-
-            for path in writes:
-                self._file_states.record_write(path)
-            return FileEditResult("Patch applied:\n" + "\n".join(summaries), diffs)
+            commit_file_edits(writes)
+            for target in writes:
+                self._file_states.record_write(target.path)
+            return FileEditResult(
+                "Patch applied:\n" + "\n".join(summaries),
+                {target.path: diff for target, diff in diffs.items()},
+            )
         except PermissionError as exc:
             return ToolResult.error(f"Error: {exc}")
         except _PatchError as exc:

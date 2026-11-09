@@ -9,6 +9,27 @@ from nanobot.agent.tools.filesystem import (
 )
 
 
+async def test_exact_edit_grant_does_not_list_sibling_files(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "approved.txt"
+    (outside / "approved-secret.txt").write_text("private", encoding="utf-8")
+    tool = EditFileTool(
+        workspace=workspace, allowed_dir=workspace, extra_write_allowed_files=[target],
+    )
+
+    missing = await tool.execute(path=str(target), old_text="old", new_text="new")
+    assert "File not found" in missing
+    assert "approved-secret.txt" not in missing
+    assert not target.exists()
+
+    created = await tool.execute(path=str(target), old_text="", new_text="approved contents")
+    assert not getattr(created, "is_error", False)
+    assert target.read_text(encoding="utf-8") == "approved contents"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
 @pytest.mark.parametrize("operation", ["write", "edit_new", "edit_empty"])
@@ -396,7 +417,7 @@ class TestWorkspaceRestriction:
         media_file = media_dir / "photo.txt"
         media_file.write_text("shared media", encoding="utf-8")
 
-        monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
+        monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
         tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
         result = await tool.execute(path=str(media_file))
@@ -410,7 +431,7 @@ class TestWorkspaceRestriction:
         media_dir = tmp_path / "media"
         media_dir.mkdir()
 
-        monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
+        monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
         tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
         result = await tool.execute(path=str(media_dir / "hack.txt"), content="pwned")
