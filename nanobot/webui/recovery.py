@@ -140,8 +140,14 @@ class RecoveryCoordinator:
                 and state["status"] == "resuming"
                 and state["recovery_id"] == recovery_id
             )
-        if message.channel != "websocket":
+        from nanobot.session.session_messages import session_message_input
+
+        session_input = session_message_input(message)
+        if message.channel != "websocket" and not (
+            session_input is not None and message.session_key.startswith("websocket:")
+        ):
             return True
+        chat_id = message.session_key.split(":", 1)[1] if session_input is not None else message.chat_id
         session = await self.sessions.state.get(message.session_key)
         state = recovery_state_from_metadata(session.metadata)
         if state and state["status"] in {"resuming", "awaiting_user", "failed"}:
@@ -164,7 +170,7 @@ class RecoveryCoordinator:
                 reason="superseded",
             )
             await self.sessions.state.restore_interruption(session)
-            await self._publish(message.chat_id, recovered)
+            await self._publish(chat_id, recovered)
         return True
 
     async def turn_completed(

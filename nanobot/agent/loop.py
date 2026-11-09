@@ -41,9 +41,7 @@ from nanobot.agent.turn_delivery import (
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
-    INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_RUNTIME_CONTROL,
-    INBOUND_META_TURN_ID,
     INBOUND_META_USER_SHELL,
     RUNTIME_CONTROL_SESSION_DISCARD,
     InboundMessage,
@@ -85,6 +83,7 @@ from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
+from nanobot.session.message_metadata import input_history_metadata, persisted_message
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
@@ -99,10 +98,6 @@ from nanobot.session.recovery import (
     request_origin_from_metadata,
     restore_pending_interruption,
     restore_runtime_checkpoint,
-)
-from nanobot.session.session_messages import (
-    session_message_envelope,
-    session_message_public_metadata,
 )
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
@@ -702,21 +697,6 @@ class AgentLoop:
     def pending_local_trigger_ids_for_session(self, session_key: str) -> set[str]:
         return self._local_trigger_turns.pending_trigger_ids_for_session(session_key)
 
-    @staticmethod
-    def _input_history_extra(msg: InboundMessage) -> dict[str, Any]:
-        """Keep input admission separate from the run that eventually consumes it."""
-        extra: dict[str, Any] = {"timestamp": msg.timestamp.isoformat()}
-        envelope = session_message_envelope(msg.metadata)
-        if msg.channel == "system" and envelope and envelope["target_session_key"] == msg.session_key:
-            extra["session_message"] = session_message_public_metadata(envelope)
-        turn_id = msg.metadata.get(INBOUND_META_TURN_ID)
-        if isinstance(turn_id, str) and turn_id:
-            extra[INBOUND_META_TURN_ID] = turn_id
-        local_media = msg.metadata.get(INBOUND_META_LOCAL_MEDIA)
-        if isinstance(local_media, list) and local_media:
-            extra[INBOUND_META_LOCAL_MEDIA] = [path for path in cast(list[object], local_media) if isinstance(path, str)]
-        return extra
-
     async def _persist_user_message_early(
         self,
         msg: InboundMessage,
@@ -734,7 +714,7 @@ class AgentLoop:
         content_value = cast(object, msg.content)
         has_text = isinstance(content_value, str) and content_value.strip()
         if has_text or media_paths or runtime_context_blocks:
-            extra = self._input_history_extra(msg) | ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
+            extra = input_history_metadata(msg) | ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
             extra.update(kwargs)
             if HIDDEN_HISTORY_META in msg.metadata:
                 extra[HIDDEN_HISTORY_META] = msg.metadata[HIDDEN_HISTORY_META]
@@ -766,6 +746,11 @@ class AgentLoop:
             media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
             session_summary=ctx.pending_summary,
             runtime_context_blocks=ctx.runtime_context_blocks,
+            input_metadata=(
+                None
+                if turn_continuation.internal_continuation_inbound(ctx.msg.metadata)
+                else input_history_metadata(ctx.msg)
+            ),
         )
 
     async def _request_context_for_turn(self, ctx: TurnContext) -> RequestContext:
@@ -1110,7 +1095,7 @@ class AgentLoop:
                 )
                 row: dict[str, Any] = {
                     "role": "user", "content": user_content,
-                    "_meta": self._input_history_extra(pending_msg),
+                    "_meta": input_history_metadata(pending_msg),
                 }
                 if HIDDEN_HISTORY_META in pending_msg.metadata:
                     row[HIDDEN_HISTORY_META] = pending_msg.metadata[HIDDEN_HISTORY_META]
@@ -1121,9 +1106,10 @@ class AgentLoop:
                     else {}
                 )
                 if pending_msg.is_user_input:
+                    route = self.turn_delivery_factory.input_route(pending_msg, active_session_key or pending_msg.session_key)
                     scope = await self.runner.prepare_prompt(
                         self.workspace_scopes.for_turn,
-                        channel=pending_msg.channel,
+                        channel=route.channel,
                         message_metadata=_prompt_scope_metadata(metadata),
                         session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
                     )
@@ -1132,8 +1118,8 @@ class AgentLoop:
                     if scope != effective_scope:
                         return None
                     pending_request = RequestContext(
-                        channel=pending_msg.channel,
-                        chat_id=pending_msg.chat_id,
+                        channel=route.channel,
+                        chat_id=route.chat_id,
                         message_id=metadata.get("message_id"),
                         session_key=active_session_key,
                         session_generation=session.generation if session is not None else None,
@@ -2512,16 +2498,8 @@ class AgentLoop:
             if summary_checkpoint is not None and checkpoint_boundary == message_index:
                 session.commit_summary_checkpoint(summary_checkpoint.summary)
 
-            entry = dict(message)
+            entry = persisted_message(message)
             followup_id = entry.pop(PENDING_FOLLOWUP_ID_KEY, None)
-            internal_meta = cast(object, entry.pop("_meta", None))
-            runtime_context_meta = (
-                cast(dict[str, Any], internal_meta).get(
-                    RUNTIME_CONTEXT_MESSAGE_META
-                )
-                if isinstance(internal_meta, dict)
-                else None
-            )
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
@@ -2560,16 +2538,6 @@ class AgentLoop:
                     if not filtered:
                         continue
                     entry["content"] = filtered
-                if isinstance(runtime_context_meta, dict):
-                    entry[RUNTIME_CONTEXT_HISTORY_META] = runtime_context_meta
-                if isinstance(internal_meta, dict):
-                    for key in ("timestamp", INBOUND_META_TURN_ID):
-                        value = cast(dict[str, Any], internal_meta).get(key)
-                        if isinstance(value, str) and value:
-                            entry[key] = value
-                    session_message = cast(dict[str, Any], internal_meta).get("session_message")
-                    if isinstance(session_message, dict):
-                        entry["session_message"] = session_message
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "user" and isinstance(followup_id, str) and followup_id:

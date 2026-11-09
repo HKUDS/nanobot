@@ -28,6 +28,13 @@ class ModelRequestEvent(AgentEvent):
 
 
 @dataclass(frozen=True)
+class ResponseInputsEvent(AgentEvent):
+    """Identify the inputs being answered by the next model request."""
+
+    input_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ResponseSource:
     """Display-safe identity captured at the actual provider invocation."""
 

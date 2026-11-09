@@ -149,8 +149,9 @@ def test_recovered_prompt_identity_time_and_cursor_survive_pages(history, tmp_pa
 
 
 @pytest.mark.parametrize("second_recorded", [True, False])
+@pytest.mark.parametrize("grouped", [True, False])
 def test_cross_session_inputs_are_reconciled_by_identity_across_turns(
-    history, tmp_path, monkeypatch, second_recorded,
+    history, tmp_path, monkeypatch, second_recorded, grouped,
 ):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:cross-session-replay"
@@ -158,25 +159,27 @@ def test_cross_session_inputs_are_reconciled_by_identity_across_turns(
         {"message_id": f"message-{i}", "session": {"id": "handle_" + "1" * 32, "name": "luma"}}
         for i in range(2)
     ]
+    input_ids = [f"session-message:{source['message_id']}" for source in provenance]
     messages = [
-        {"role": "user", "content": "original question"},
+        {"role": "user", "content": "original question", "input_id": "user:original"},
         {"role": "assistant", "content": "original answer"},
     ]
-    history.append(key, {"event": "user", "text": "original question"})
+    history.append(key, {"event": "user", "text": "original question", "input_id": "user:original"})
     for i, source in enumerate(provenance):
-        messages.extend([
-            {"role": "user", "content": "same message", "session_message": source},
-            {"role": "assistant", "content": f"answer {i}"},
-        ])
+        messages.append({"role": "user", "content": "same message", "session_message": source, "input_id": input_ids[i]})
+        if not grouped or i == 1:
+            messages.append({"role": "assistant", "content": f"answer {i}"})
         if i == 0 or second_recorded:
-            history.append(key, {"event": "user", "text": "same message", "session_message": source})
-    history.append(key, {"event": "message", "text": "original answer"})
+            history.append(key, {"event": "user", "text": "same message", "session_message": source, "input_id": input_ids[i]})
+    history.append(key, {"event": "message", "text": "original answer", "response_input_ids": ["user:original"]})
+    assert [prompt["answerPreview"] for prompt in history.prompts(key)] == ["original answer"] + [""] * (2 if second_recorded else 1)
     history.append(key, {"event": "turn_end"})
-    for i in range(2):
-        history.append(key, {"event": "message", "text": f"answer {i}"})
+    for i in ([1] if grouped else range(2)):
+        history.append(key, {"event": "message", "text": f"answer {i}", "response_input_ids": input_ids if grouped else [input_ids[i]]})
         history.append(key, {"event": "turn_end"})
 
     def loader():
+        assert not second_recorded, "complete display history must not load model history"
         return messages
 
     page = history.build(key, limit=10, session_messages_loader=loader)
@@ -187,6 +190,12 @@ def test_cross_session_inputs_are_reconciled_by_identity_across_turns(
     ]
     prompts = history.prompts(key, session_messages_loader=loader)
     assert [prompt["id"] for prompt in prompts] == [user["projection_id"] for user in users]
+    assert [prompt["answerPreview"] for prompt in prompts] == ["original answer", "answer 1" if grouped else "answer 0", "answer 1"]
+    assert [prompt["inputId"] for prompt in prompts] == ["user:original", *input_ids]
+    revision = history.revision(key)
+    history.append(key, {"event": "user", "text": "same message", "session_message": provenance[0], "input_id": input_ids[0]})
+    assert history.revision(key) == revision
+    assert history.build(key, limit=10, session_messages_loader=loader) == page
     latest = history.build(key, limit=1, session_messages_loader=loader)
     assert [event["text"] for event in latest["events"] if event["event"] == "user_message"] == (
         [] if second_recorded else ["same message"]

@@ -298,6 +298,7 @@ class WebUIOutboundDelivery:
                 }
                 if event.provenance:
                     body["provenance"] = event.provenance
+                    body["input_id"] = f"session-message:{event.provenance['session_message']['message_id']}"
                 await self._fanout(recipients, body, label=" user_message ")
             return
         notification = await self._project_notification(msg)

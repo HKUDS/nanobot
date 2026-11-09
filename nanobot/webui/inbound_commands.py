@@ -246,6 +246,7 @@ class WebUICommandRouter:
         }
         if turn_id is not None:
             body["turn_id"] = turn_id
+            body["input_id"] = f"user:{turn_id}"
         if media:
             body["media_urls"] = media
         if cli_apps:

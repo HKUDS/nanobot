@@ -99,34 +99,40 @@ export function usePromptHistory(key: string | null, version: number, messages: 
 
   const indexed = useMemo(() => {
     const ids = new Set<string>();
+    const inputIds = new Set<string>();
     const turns = new Map<string, PromptAnchor | null>();
     for (const prompt of index?.prompts ?? []) {
       ids.add(prompt.id);
+      if (prompt.inputId) inputIds.add(prompt.inputId);
       if (prompt.turnId) turns.set(prompt.turnId, turns.has(prompt.turnId) ? null : prompt);
     }
-    return { ids, turns };
+    return { ids, inputIds, turns };
   }, [index]);
-  const localCache = useRef<{ index: typeof index; users: UIMessage[]; prompts: PromptAnchor[] }>();
+  const localCache = useRef<{ index: typeof index; users: UIMessage[]; responses: string; prompts: PromptAnchor[] }>();
   const prompts = useMemo(() => {
     if (!enabled) return userPromptAnchors(messages);
     if (!currentScope || index?.key !== key) return [];
     // Live rows can still have optimistic render ids after admission. Match the
     // host's unambiguous original transport id and content, not text alone.
     const users = messages.filter((message) => {
-      if (message.role !== "user" || indexed.ids.has(message.id)) return false;
+      if (message.role !== "user" || indexed.ids.has(message.id)
+        || (message.inputId && indexed.inputIds.has(message.inputId))) return false;
       const admitted = message.turnId ? indexed.turns.get(message.turnId) : null;
       return !admitted || admitted.preview !== message.content.trim().slice(0, 320);
     });
     if (!users.length) return index.prompts;
+    // Refresh consumed-input previews at response boundaries, not on every token.
+    const responses = JSON.stringify(messages.filter((message) => message.responseInputIds !== undefined)
+      .map((message) => [message.id, message.responseInputIds, message.isStreaming ? null : message.content.slice(0, 240)]));
     const cached = localCache.current;
-    if (cached?.index === index && users.length === cached.users.length
+    if (cached?.index === index && cached.responses === responses && users.length === cached.users.length
       && users.every((user, position) => user === cached.users[position])) return cached.prompts;
     const localIds = new Set(users.map((message) => message.id));
     const local = userPromptAnchors(messages).filter((prompt) => localIds.has(prompt.id));
     // Directory order is logical admission order. Unknown legacy times are zero,
     // not a reason to move an old prompt ahead of its preceding inputs.
     const merged = [...index.prompts, ...local].map((prompt, position) => ({ ...prompt, index: position }));
-    localCache.current = { index, users, prompts: merged };
+    localCache.current = { index, users, responses, prompts: merged };
     return merged;
   }, [currentScope, enabled, index, indexed, key, messages]);
 

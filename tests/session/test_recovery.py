@@ -20,6 +20,7 @@ from nanobot.session.recovery import (
     pending_followups,
     record_pending_followup,
 )
+from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 from nanobot.webui import history as history_module
 from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 
@@ -204,20 +205,21 @@ async def test_scan_loads_only_sessions_that_need_webui_recovery(
 
 
 @pytest.mark.asyncio
-async def test_live_turn_followup_survives_restart_until_it_is_committed(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cross_session", [False, True])
+async def test_live_turn_followup_survives_restart_until_it_is_committed(tmp_path: Path, cross_session: bool) -> None:
     sessions = SessionManager(tmp_path)
     session = sessions.get_or_create("websocket:chat")
     _persist(sessions, session)
-    followup_id = record_pending_followup(
-        session,
-        InboundMessage(
-            channel="websocket",
-            sender_id="user",
-            chat_id="chat",
-            content="also check the logs",
-            metadata={"webui": True},
-        ),
+    metadata = {SESSION_MESSAGE_METADATA_KEY: {
+        "message_id": "source-message", "created_at_ms": 1, "expect_reply": False,
+        "source_handle": "luma", "source_session_key": "websocket:source", "target_session_key": session.key,
+    }} if cross_session else {"webui": True}
+    message = InboundMessage(
+        channel="system" if cross_session else "websocket", sender_id="session" if cross_session else "user",
+        chat_id=session.key if cross_session else "chat", content="/stop" if cross_session else "also check the logs", metadata=metadata,
+        session_key_override=session.key, input_role="user" if cross_session else None,
     )
+    followup_id = record_pending_followup(session, message)
     assert followup_id is not None
     sessions.save(session)
 
@@ -225,9 +227,16 @@ async def test_live_turn_followup_survives_restart_until_it_is_committed(tmp_pat
     await coordinator.scan()
 
     queued = bus.inbound.get_nowait()
-    assert queued.content == "also check the logs"
+    assert (queued.channel, queued.content, queued.input_role, queued.timestamp) == (
+        message.channel, message.content, message.input_role, message.timestamp,
+    )
+    assert queued.session_key == session.key
+    assert queued.require_existing_session
+    if cross_session:
+        assert queued.metadata[SESSION_MESSAGE_METADATA_KEY] == metadata[SESSION_MESSAGE_METADATA_KEY]
     assert queued.metadata["_recovery_followup_id"] == followup_id
     restored = restarted.get_or_create("websocket:chat")
+    assert record_pending_followup(restored, queued) == followup_id
     assert len(pending_followups(restored)) == 1
 
     acknowledge_pending_followups(restored, [followup_id])

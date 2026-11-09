@@ -581,6 +581,7 @@ function appendAnswerText(
     ...(event.stream_id ? { streamId: event.stream_id } : {}),
     ...(event.source ? { source: event.source } : {}),
     ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+    ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
   };
   state.closedAssistantIds.delete(merged.id);
   state.activeAssistantId = merged.id;
@@ -918,6 +919,7 @@ export function projectThreadEvent(
     const turn = turnFieldsFromEvent(event, "user");
     const row: UIMessage = {
       id: projectionMessageId(event, options),
+      inputId: event.input_id,
       role: "user",
       content: event.text,
       createdAt: projectionCreatedAt(event, options),
@@ -985,11 +987,13 @@ export function projectThreadEvent(
         ...(event.stream_id ? { streamId: event.stream_id } : {}),
         ...(event.source ? { source: event.source } : {}),
         ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+        ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
         createdAt: projectionCreatedAt(event, options),
       }];
       options.effects?.bodyWrites.add(id);
       targetIndex = state.messages.length - 1;
-    } else if (targetIndex !== null && (typeof text === "string" || event.source || event.response_sources !== undefined)) {
+    } else if (targetIndex !== null && (typeof text === "string" || event.source
+      || event.response_sources !== undefined || event.response_input_ids !== undefined)) {
       const target = state.messages[targetIndex];
       state.messages = replaceMessageAt(state.messages, targetIndex, {
         ...target,
@@ -998,6 +1002,7 @@ export function projectThreadEvent(
         ...(event.stream_id ? { streamId: event.stream_id } : {}),
         ...(event.source ? { source: event.source } : {}),
         ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+        ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
       });
       if (typeof text === "string") options.effects?.bodyWrites.add(target.id);
     }
@@ -1101,6 +1106,7 @@ export function projectThreadEvent(
       ...(latencyMs !== undefined ? { latencyMs } : {}),
       ...(event.source ? { source: event.source } : {}),
       ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+      ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
       ...positionedTurnFields(
         options.sideChannel ? undefined : state.messages.find((message) => message.id === state.activeAssistantId),
         turnFieldsForProjection(state, event, "answer"),

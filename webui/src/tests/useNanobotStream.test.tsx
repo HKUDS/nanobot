@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
+import { userPromptAnchors } from "@/components/thread/promptNavigation";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
 import { composerUsageSnapshots } from "@/lib/model-request";
@@ -2556,16 +2557,18 @@ describe("useNanobotStream", () => {
     expect(result.current.runStartedAt).toBe(1_700_000_000);
   });
 
-  it("projects a cross-session input with its public handle exactly once", () => {
+  it("projects a cross-session input once without interrupting the answer being streamed", () => {
     const fake = fakeClient();
+    const original: UIMessage[] = [{ id: "original", inputId: "user:original", role: "user", content: "original", createdAt: 1 }];
     const { result } = renderHook(
-      () => useNanobotStream("chat-target", EMPTY_MESSAGES),
+      () => useNanobotStream("chat-target", original),
       { wrapper: wrap(fake.client) },
     );
     const event: InboundEvent = {
       event: "user_message",
       chat_id: "chat-target",
       text: "Please review this.",
+      input_id: "session-message:message-1",
       created_at_ms: 1_700_000_000_123,
       starts_turn: false,
       provenance: {
@@ -2580,18 +2583,29 @@ describe("useNanobotStream", () => {
     };
 
     act(() => {
+      fake.emit("chat-target", { event: "delta", chat_id: "chat-target", text: "Original",
+        stream_id: "original-answer", response_input_ids: ["user:original"] });
       fake.emit("chat-target", event);
       fake.emit("chat-target", event);
+      fake.emit("chat-target", { event: "delta", chat_id: "chat-target", text: " answer",
+        stream_id: "original-answer", response_input_ids: ["user:original"] });
+      fake.emit("chat-target", { event: "stream_end", chat_id: "chat-target", stream_id: "original-answer",
+        response_input_ids: ["user:original"], resuming: true });
     });
-
-    expect(result.current.messages).toEqual([expect.objectContaining({
+    expect(userPromptAnchors(result.current.messages).map((prompt) => prompt.answerPreview)).toEqual(["Original answer", ""]);
+    expect(result.current.messages.filter((row) => row.role === "assistant")).toHaveLength(1);
+    expect(result.current.messages.filter((row) => row.sessionMessage)).toEqual([expect.objectContaining({
       id: "session-message:message-1",
+      inputId: "session-message:message-1",
       role: "user",
       content: "Please review this.",
       createdAt: 1_700_000_000_123,
       sessionMessage: event.provenance?.session_message,
     })]);
     expect(result.current.isStreaming).toBe(true);
+    act(() => fake.emit("chat-target", { event: "message", chat_id: "chat-target", text: "Review answer",
+      response_input_ids: ["session-message:message-1"] }));
+    expect(userPromptAnchors(result.current.messages).map((prompt) => prompt.answerPreview)).toEqual(["Original answer", "Review answer"]);
   });
 
   it("marks only the optimistic turn named by a correlated rejection as failed", () => {

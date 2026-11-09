@@ -41,7 +41,7 @@ import type {
 } from "@/lib/types";
 
 type PendingStreamEvent =
-  | { kind: "delta"; text: string; turn: UIMessageTurnFields; streamId?: string; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"] }
+  | { kind: "delta"; text: string; turn: UIMessageTurnFields; streamId?: string; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"]; responseInputIds?: string[] }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields; streamId?: string };
 
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
@@ -118,6 +118,7 @@ function appendProjectedSessionInput(
 
   const row: UIMessage = {
     id: `session-message:${messageId}`,
+    inputId: event.input_id,
     role: "user",
     content: event.text,
     createdAt: typeof event.created_at_ms === "number"
@@ -343,7 +344,8 @@ export function useNanobotStream(
             || nextEvent.streamId !== event.streamId
             || (nextEvent.kind === "delta" && event.kind === "delta"
               && (nextEvent.source !== event.source
-                || JSON.stringify(nextEvent.responseSources) !== JSON.stringify(event.responseSources)))) break;
+                || JSON.stringify(nextEvent.responseSources) !== JSON.stringify(event.responseSources)
+                || JSON.stringify(nextEvent.responseInputIds) !== JSON.stringify(event.responseInputIds)))) break;
           chunks.push(nextEvent.text);
           if (nextEvent.turn.turnSeq !== undefined) members.push(nextEvent.turn.turnSeq);
           turn = { ...turn, ...nextEvent.turn };
@@ -360,6 +362,8 @@ export function useNanobotStream(
               turn_seq: turn.turnSeq,
               source: event.source,
               response_sources: event.responseSources,
+              response_input_ids: event.responseInputIds,
+              stream_id: event.streamId,
             }
           : {
               event: "reasoning_delta",
@@ -681,7 +685,6 @@ export function useNanobotStream(
       if (ev.event === "user_message") {
         if (ev.provenance?.session_message) {
           flushPendingStreamEvents();
-          closeActiveAssistantStream();
           clearActivitySegment();
           setMessages((prev) => {
             const next = appendProjectedSessionInput(prev, ev);
@@ -700,6 +703,7 @@ export function useNanobotStream(
           )) : prev;
           const row: UIMessage = {
               id: crypto.randomUUID(),
+              inputId: ev.input_id,
               role: "user",
               content: ev.text,
               ...(ev.turn_id ? { turnId: ev.turn_id } : {}),
@@ -754,6 +758,7 @@ export function useNanobotStream(
           streamId: ev.stream_id,
           source: ev.source,
           responseSources: ev.response_sources,
+          responseInputIds: ev.response_input_ids,
         });
         schedulePendingStreamFlush();
         return;
@@ -1004,6 +1009,7 @@ export function useNanobotStream(
           ...base,
           {
             id: userMessageId,
+            inputId: `user:${turnId}`,
             role: "user" as const,
             content: outboundContent,
             turnId,

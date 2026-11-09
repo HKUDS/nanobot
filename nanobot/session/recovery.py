@@ -11,6 +11,8 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage
 from nanobot.session.manager import Session
+from nanobot.session.message_metadata import persisted_message
+from nanobot.session.session_messages import session_message_envelope, session_message_input
 
 RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -66,7 +68,7 @@ class RecoveryAdmission(Protocol):
 
 def record_pending_followup(session: Session, message: InboundMessage) -> str | None:
     """Durably journal a WebUI follow-up before injecting it into a live turn."""
-    if message.channel != "websocket":
+    if message.channel != "websocket" and session_message_input(message) is None:
         return None
     try:
         metadata_value: object = json.loads(json.dumps(message.metadata))
@@ -136,9 +138,12 @@ def pending_followups(session: Session) -> list[InboundMessage]:
         timestamp = record.get("timestamp")
         # Older journals did not retain admission time; retain their existing recovery policy.
         received_at = datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else datetime.now()
+        envelope = session_message_envelope(metadata)
+        is_session_input = envelope is not None and envelope["target_session_key"] == session.key
         messages.append(
             InboundMessage(
-                channel="websocket",
+                channel="system" if is_session_input else "websocket",
+                input_role="user" if is_session_input else None,
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=content,
@@ -378,6 +383,7 @@ def restore_runtime_checkpoint(session: Session) -> bool:
             }
         )
 
+    restored = [persisted_message(message) for message in restored]
     overlap = 0
     # Cumulative checkpoints contain only the delta after accepted input. The
     # owner commits it and clears the checkpoint in one transaction, so none of

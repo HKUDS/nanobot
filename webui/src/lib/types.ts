@@ -120,6 +120,10 @@ export interface UIMessage {
   renderAs?: "text";
   /** Invocation-time snapshots, never resolved from today's model presets. */
   responseSources?: ResponseSource[];
+  /** Stable input identity, independent of its arrival or execution turn. */
+  inputId?: string;
+  /** Inputs actually consumed by this response. An empty list means no user input. */
+  responseInputIds?: string[];
   kind?: MessageKind;
   isStreaming?: boolean;
   createdAt: number;
@@ -1544,6 +1548,7 @@ export type InboundEvent =
       mcp_presets?: UIMcpPresetAttachment[];
       session_mentions?: SessionMention[];
       provenance?: { session_message?: UISessionMessage };
+      input_id?: string;
     } & InboundTurnMetadata)
   | ({
       event: "message";
@@ -1564,6 +1569,7 @@ export type InboundEvent =
       /** Lightweight provenance for proactive assistant messages. */
       source?: UIMessageSource;
       response_sources?: ResponseSource[];
+      response_input_ids?: string[];
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
@@ -1582,6 +1588,7 @@ export type InboundEvent =
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
       response_sources?: ResponseSource[];
+      response_input_ids?: string[];
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
@@ -1591,6 +1598,7 @@ export type InboundEvent =
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
       response_sources?: ResponseSource[];
+      response_input_ids?: string[];
       /** This answer segment ended, but the active agent turn will continue. */
       resuming?: boolean;
       /** The next answer segment continues this same assistant message. */
@@ -1766,6 +1774,7 @@ interface WebuiThreadPagePayload {
 
 export interface PromptSummary {
   id: string;
+  inputId?: string;
   preview: string;
   answerPreview: string;
   createdAt: number;

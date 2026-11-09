@@ -26,7 +26,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent
+from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent, ResponseInputsEvent
 from nanobot.llm_usage.context import (
     LLMUsageSource,
     bind_llm_usage_source,
@@ -176,6 +176,29 @@ class AgentRunner:
     ) -> None:
         """Append injected messages without rewriting the raw transcript."""
         messages.extend(injections)
+
+    @staticmethod
+    def _response_input_ids(messages: list[dict[str, Any]]) -> tuple[str, ...]:
+        """Consecutive inputs share an answer; tool rounds keep their input owner."""
+        identifiers: list[str] = []
+        found_input = False
+        for message in reversed(messages):
+            metadata = message.get("_meta") or {}
+            if "input_id" not in metadata:
+                if found_input:
+                    break
+                continue
+            found_input = True
+            if isinstance(input_id := metadata["input_id"], str) and input_id:
+                identifiers.append(input_id)
+        return tuple(reversed(identifiers))
+
+    @classmethod
+    def _with_response_inputs(cls, messages: list[dict[str, Any]], response: dict[str, Any]) -> dict[str, Any]:
+        input_ids = cls._response_input_ids(messages)
+        if not input_ids:
+            return response
+        return {**response, "_meta": {**response.get("_meta", {}), "response_input_ids": list(input_ids)}}
 
     async def _try_drain_injections(
         self,
@@ -454,6 +477,8 @@ class AgentRunner:
             if drained_before_request:
                 had_injections = True
             await end_length_segment(interrupted=drained_before_request)
+            if spec.events.accepts(ResponseInputsEvent):
+                await spec.events.emit(ResponseInputsEvent(self._response_input_ids(messages)))
             context = AgentHookContext(
                 iteration=iteration,
                 messages=messages,
@@ -513,6 +538,7 @@ class AgentRunner:
                     assistant_message,
                     response,
                 )
+                assistant_message = self._with_response_inputs(messages, assistant_message)
                 messages.append(assistant_message)
                 await self._emit_checkpoint(
                     spec,
@@ -669,14 +695,14 @@ class AgentRunner:
                         len(length_recovery_parts),
                         _MAX_LENGTH_RECOVERIES,
                     )
-                    messages.append(conversation_state.project_response_message(
+                    messages.append(self._with_response_inputs(messages, conversation_state.project_response_message(
                         build_assistant_message(
                             clean,
                             reasoning_content=response.reasoning_content,
                             thinking_blocks=response.thinking_blocks,
                         ),
                         response,
-                    ))
+                    )))
                     # The next input snapshot decides whether to continue this
                     # answer or close its stream before answering a new question.
                     pending_length_segment = (context, clean or "")
@@ -711,6 +737,7 @@ class AgentRunner:
                     assistant_message,
                     response,
                 )
+                assistant_message = self._with_response_inputs(messages, assistant_message)
                 messages.append(assistant_message)
                 await self._emit_checkpoint(
                     spec,
@@ -1506,9 +1533,9 @@ class AgentRunner:
         ):
             if messages[-1].get("content") == content:
                 return
-            messages[-1] = build_assistant_message(content)
+            messages[-1] = AgentRunner._with_response_inputs(messages, build_assistant_message(content))
             return
-        messages.append(build_assistant_message(content))
+        messages.append(AgentRunner._with_response_inputs(messages, build_assistant_message(content)))
 
     @staticmethod
     def _append_model_error_placeholder(messages: list[dict[str, Any]]) -> None:

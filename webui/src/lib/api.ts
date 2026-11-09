@@ -284,6 +284,9 @@ function hasValidProjectionMetadata(value: Record<string, unknown>): boolean {
       "user", "reasoning", "activity", "answer", "complete",
     ].includes(String(value.turn_phase)))
     && (value.turn_seq === undefined || typeof value.turn_seq === "number")
+    && (value.input_id === undefined || typeof value.input_id === "string")
+    && (value.response_input_ids === undefined || (Array.isArray(value.response_input_ids)
+      && value.response_input_ids.every((id: unknown) => typeof id === "string")))
     && (
       value.response_sources === undefined
       || (isRecordArray(value.response_sources) && value.response_sources.every((source) => (
@@ -536,10 +539,11 @@ export async function fetchPromptIndex(token: string, key: string, signal: Abort
   const prompts = body.prompts.map((item: unknown) => {
     if (!isRecord(item) || typeof item.id !== "string" || typeof item.preview !== "string"
       || typeof item.answerPreview !== "string" || typeof item.cursor !== "string" || typeof item.turnId !== "string"
+      || (item.inputId !== undefined && typeof item.inputId !== "string")
       || typeof item.createdAt !== "number" || !Number.isFinite(item.createdAt)) {
       throw new Error("Invalid prompt summary");
     }
-    return { id: item.id, preview: item.preview, answerPreview: item.answerPreview,
+    return { id: item.id, inputId: item.inputId, preview: item.preview, answerPreview: item.answerPreview,
       cursor: item.cursor, createdAt: item.createdAt, turnId: item.turnId };
   });
   return { prompts: [...(cached?.prompts.slice(0, replaceFrom) ?? []), ...prompts],
