@@ -82,9 +82,36 @@ def test_retired_provider_api_in_file_requires_explicit_migration(tmp_path, fiel
     with pytest.raises(ConfigLoadError, match="apiType setting was removed") as exc:
         load_config(path)
     assert exc.value.issues[0].location == "providers.openai"
-    assert "api.supportedApis" in str(exc.value)
+    assert "supportedApis" in str(exc.value)
     assert "fixture-secret" not in str(exc.value)
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_old_installation_defaults_load_without_changing_provider_api(tmp_path):
+    from nanobot.config.loader import load_config, save_config
+
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"providers": {
+        "openai": {"apiType": "auto", "apiKey": "fixture"},
+        "custom": {"apiType": "auto", "apiBase": "https://example.test/v1"},
+    }}), encoding="utf-8")
+    config = load_config(path)
+    assert config.providers.openai.api is None
+    assert config.providers.custom.api is None
+    save_config(config, path)
+    assert load_config(path).providers.custom.api_base == "https://example.test/v1"
+    assert "apiType" not in json.loads(path.read_text(encoding="utf-8"))["providers"]["openai"]
+
+
+@pytest.mark.parametrize("api", [None, {"supportedApis": ["chat_completions"]}])
+def test_current_provider_api_stays_authoritative_if_old_key_remains(api):
+    config = Config.model_validate({"providers": {"openai": {
+        "apiType": "responses", "api": api,
+    }}})
+    resolved = config.providers.openai.api
+    assert (resolved.to_capabilities().preferred_api if resolved else None) == (
+        "chat_completions" if api else None
+    )
 
 
 @pytest.mark.parametrize("field", ["API_TYPE", "APITYPE"])

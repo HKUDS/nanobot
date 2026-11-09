@@ -783,6 +783,17 @@ async def test_older_client_cannot_silently_save_retired_api_selector(tmp_path, 
     assert config_path.read_text(encoding="utf-8") == before
     refresh.assert_not_called()
 
+    response = await router.dispatch(None, _mutation_request(path, {
+        "provider": "openai",
+        field: "responses",
+        "api": {"supportedApis": ["chat_completions"]},
+    }), path)
+    assert response is not None
+    assert response.status_code == 200
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["providers"]["openai"]["api"]["supportedApis"] == ["chat_completions"]
+    refresh.assert_called_once()
+
 
 @pytest.mark.asyncio
 async def test_settings_get_mutation_route_is_method_not_allowed() -> None:

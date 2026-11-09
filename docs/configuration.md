@@ -1465,7 +1465,7 @@ In `config.json`, set `providers.<name>.api` for the built-in `custom` provider 
 
 ### Legacy OpenAI API selector migration
 
-Versions 0.4.0 and 0.4.1 can read and convert `providers.openai.apiType` (or `api_type`). Later releases reject the old setting so they do not silently change your request API. OpenAI connections, Responses, and Chat Completions are still supported.
+Versions 0.4.0 and 0.4.1 can convert `providers.openai.apiType` (or `api_type`). Later releases reject an explicit selection in the old field unless the current `api` object is already present. They ignore the old default `auto`, which was saved even for unused providers. OpenAI connections, Responses, and Chat Completions are still supported.
 
 Back up the configuration before upgrading. Update the existing configuration by hand:
 

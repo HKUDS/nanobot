@@ -269,15 +269,21 @@ class ProviderConfig(Base):
     @model_validator(mode="before")
     @classmethod
     def _reject_retired_api_selector(cls, value: object) -> object:
-        # Unknown fields are normally ignored. Do not silently switch an
-        # explicitly selected request API to Auto.
-        if isinstance(value, dict) and any(key in value for key in ("apiType", "api_type", "apitype")):
+        if not isinstance(value, dict):
+            return value
+        provider = cast(dict[object, object], value)
+        # Older releases wrote the default Auto to every provider. Auto is
+        # already the default, and a current declaration always takes priority.
+        if "api" not in provider and any(
+            key in provider and provider[key] != "auto"
+            for key in ("apiType", "api_type", "apitype")
+        ):
             raise PydanticCustomError(
                 "retired_provider_api_selector",
-                "The apiType setting was removed. Use api.supportedApis for an explicit selection, "
-                "or remove the old setting for Auto. See the OpenAI API selector migration in the configuration guide.",
+                "The apiType setting was removed. Replace it with an api object that declares supportedApis, "
+                "or remove it for Auto. See the OpenAI API selector migration in the configuration guide.",
             )
-        return value
+        return provider
 
     @field_validator("thinking_style")
     @classmethod

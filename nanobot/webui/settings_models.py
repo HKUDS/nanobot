@@ -130,8 +130,10 @@ _ENV_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 _PROVIDER_STRUCTURED_FIELDS = ("extra_headers", "extra_body", "extra_query")
 
 
-def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
-    if query_has_alias(query, "api_type", "apiType"):
+def _provider_config_updates(
+    query: QueryParams, *, ignore_retired_api_type: bool = False,
+) -> dict[str, Any]:
+    if not ignore_retired_api_type and query_has_alias(query, "api_type", "apiType"):
         raise WebUISettingsError(
             "This client sent the retired apiType setting. Update the client or use the WebUI "
             "served by the gateway to save the provider settings."
@@ -1640,7 +1642,11 @@ def update_provider_settings(
     if resolved_provider is None:
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
-    updates = _provider_config_updates(query)
+    # Keep the current declaration authoritative and preserve saves from old
+    # clients that also sent this irrelevant field for other providers.
+    updates = _provider_config_updates(
+        query, ignore_retired_api_type="api" in query or (not spec.is_oauth and spec.name != "openai"),
+    )
     if updates.get("use_proxy"):
         try:
             config.network.resolve_proxy(True)

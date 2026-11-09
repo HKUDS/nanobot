@@ -82,7 +82,7 @@ Retain legacy model JSONL, WebUI JSONL / segments and per-feature proxy migratio
 
 ### OpenAI API selector compatibility window
 
-v0.4.0 and v0.4.1 were the two releases with automatic conversion of `providers.openai.apiType` / `api_type`. The first release without that conversion must link to the [migration instructions](./configuration.md#legacy-openai-api-selector-migration) in its release notes. The new release rejects the old selector instead of silently changing the request API. Preserve current-format routing and settings; the 0.4.x history and proxy migration window is independent.
+v0.4.0 and v0.4.1 were the two releases with automatic conversion of `providers.openai.apiType` / `api_type`. The first release without that conversion must link to the [migration instructions](./configuration.md#legacy-openai-api-selector-migration) in its release notes. Reject explicit old selections without a current declaration; ignore the old default `auto` so untouched configurations still load. The 0.4.x history and proxy migration window is independent.
 
 ### TUI preflight without a release tag
 
