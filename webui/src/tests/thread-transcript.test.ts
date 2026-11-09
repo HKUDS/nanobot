@@ -641,7 +641,7 @@ describe("ThreadTranscript admission", () => {
     expect(saved.units.every((unit) => Array.from(unit.members.keys()).every((turn) => turn === "turn-window-3"))).toBe(true);
   });
 
-  it("keeps the cached window visible until a disjoint latest fragment joins it", () => {
+  it("refreshes a disjoint latest fragment and pages back across the gap after restoring the cache", () => {
     const events: ThreadProjectionEvent[] = [
       input("growing", "Question"),
       ...["B", "C", "D", "E", "F"].map((text, index) => ({
@@ -659,8 +659,8 @@ describe("ThreadTranscript admission", () => {
     const staleOlder = thread.begin("older");
     // A restored owner issues an initial read even though it has a cached window.
     expect(thread.accept(fragment(4, 6), thread.begin("initial"))).toBe(true);
-    expect(thread.messages.map((row) => row.content)).toEqual(["B", "C"]);
-    expect(thread.hasPendingFragmentGap).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["E", "F"]);
+    expect(thread.hasPendingFragmentGap).toBe(false);
     expect(thread.paging).toMatchObject({ beforeCursor: "before-4", hasMoreBefore: true });
     expect(thread.accept(fragment(0, 1), staleOlder)).toBe(false);
     expect(thread.paging.beforeCursor).toBe("before-4");

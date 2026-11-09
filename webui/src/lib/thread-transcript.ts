@@ -468,7 +468,9 @@ export class ThreadTranscript {
     const gap = pending ?? (read.kind !== "older" && incoming && priorEnd !== null && incoming.start > priorEnd
       ? { turn: incoming.turn, oldEnd: priorEnd, front: incoming.start } : null);
     const hasGap = !!gap && !!groupRange && groupRange.start > gap.oldEnd;
-    if (hasGap && joined && groupRange && gap) {
+    const replaceWindow = hasGap && !pending && this.live.length === 0
+      && Array.from(this.units).every((unit) => unit.received === 0);
+    if (hasGap && !replaceWindow && joined && groupRange && gap) {
       const page = body!.page!;
       if (!page.has_more_before || !page.before_cursor || page.before_cursor === read.before) {
         this.finishRead(read, "Could not bridge the missing history records");
@@ -642,7 +644,7 @@ export class ThreadTranscript {
       && this.byRow.get(row.id)!.introduced > read.revision);
     const appendedTurns = new Set(appendedInputs.map((row) => row.turnId!));
     const appendedInputUnits = new Set(appendedInputs.map((row) => this.byRow.get(row.id)!));
-    const reset = replacedHistory || (read.kind === "latest" && overlaps.size === 0
+    const reset = replacedHistory || replaceWindow || (read.kind === "latest" && overlaps.size === 0
       && !body?.page?.truncated_oversized_turn
       && protectedUnits.every((unit) => unit.introduced > read.revision
         && (appendedInputUnits.has(unit) || (unit.members.size > 0
