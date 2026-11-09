@@ -25,6 +25,7 @@ def selected(result):
         ("README.md", {"docker"}),
         ("Dockerfile", {"docker"}),
         ("entrypoint.sh", {"docker"}),
+        ("render.yaml", {"python"}),
         ("tests/test_docker_config.py", {"python", "docker"}),
         ("tests/test_docker_smoke.py", {"python", "docker"}),
         ("tests/test_docker.sh", {"docker"}),
