@@ -12,6 +12,8 @@ function cameraHarness(prefersReducedMotion = false) {
   const frames = new Map<number, FrameRequestCallback>();
   const viewport: ThreadCameraViewport = {
     scrollTop: 0,
+    scrollHeight: 1_000_000,
+    clientHeight: 500,
   };
   const scheduler: ThreadCameraScheduler = {
     request: vi.fn((callback) => {
@@ -113,6 +115,37 @@ describe("ThreadCameraController", () => {
     expect(viewport.scrollTop).toBe(220);
     expect(frames).toHaveLength(0);
     expect(camera.isFollowing()).toBe(false);
+  });
+
+  it("separates external movement from camera writes and layout clamping", () => {
+    const { camera, viewport } = cameraHarness();
+    viewport.scrollHeight = 2_000;
+    camera.jumpTo(1_500);
+    expect(camera.observeScroll()).toBe(0);
+    camera.jumpTo(900);
+    expect(camera.observeScroll()).toBe(0);
+    viewport.scrollTop = 880;
+    expect(camera.observeScroll()).toBe(-20);
+    viewport.scrollHeight = 1_000;
+    viewport.scrollTop = 500;
+    expect(camera.observeScroll()).toBe(0);
+    viewport.scrollHeight = 2_000;
+    expect(camera.observeScroll()).toBe(0);
+    viewport.scrollTop = 0;
+    expect(camera.observeScroll()).toBe(-500);
+  });
+
+  it("does not overwrite external movement before its scroll event arrives", () => {
+    const { camera, viewport, advance, frames } = cameraHarness();
+    camera.jumpTo(1_000);
+    camera.navigateTo(2_000);
+    advance(16);
+    const readingTop = viewport.scrollTop - 20;
+    viewport.scrollTop = readingTop;
+    advance(16);
+    expect(viewport.scrollTop).toBe(readingTop);
+    expect(frames).toHaveLength(0);
+    expect(camera.observeScroll()).toBe(-20);
   });
 
   it("eases explicit long-distance navigation across frames", () => {

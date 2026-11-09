@@ -520,6 +520,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const content = messageContentRef.current;
     const anchor = historyScrollAnchorRef.current;
     if (!scroller || !content || !anchor) return false;
+    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    if (Math.abs(scroller.scrollTop - Math.min(anchor.scrollTop, maxScrollTop)) >= 0.5) {
+      return captureHistoryScrollAnchor();
+    }
     const element = Array.from(
       content.querySelectorAll<HTMLElement>("[data-thread-display-unit]"),
     ).find((candidate) => candidate.dataset.threadDisplayUnit === anchor.key);
@@ -534,12 +538,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       - (historySlotRef.current ? HISTORY_HOLD_PX : 0);
     const delta = nextOffset - anchor.offsetTop;
     if (Math.abs(delta) < 0.5) return true;
-    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const nextTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop + delta));
     threadMotionRef.current?.jumpTo(nextTop);
     anchor.scrollTop = scroller.scrollTop;
     return true;
-  }, []);
+  }, [captureHistoryScrollAnchor]);
 
   const resetHistoryHeader = useCallback(() => {
     setHistorySlotKey(null);
