@@ -423,6 +423,9 @@ class AgentLoop:
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
         self._pending_queues: dict[str, asyncio.Queue[InboundMessage]] = {}
+        # Direct turns install no pending queue; this refcount keeps their
+        # sessions in the idle scan's active set until every turn ends.
+        self._direct_turns: dict[str, int] = {}
         self._preserve_inflight_turns_on_shutdown = False
         self._deferred_automation_turns: dict[str, list[InboundMessage]] = {}
         self._cron_turns = CronTurnCoordinator(
@@ -1394,7 +1397,7 @@ class AgentLoop:
                 await self.auto_compact.check_expired(
                     self.schedule_background,
                     self.runtime_for_session,
-                    active_session_keys=self._pending_queues.keys(),
+                    active_session_keys=self._pending_queues.keys() | self._direct_turns.keys(),
                 )
         except SessionOperationQueueFullError:
             logger.debug("Skipping idle archival while session storage is busy")
@@ -2662,6 +2665,11 @@ class AgentLoop:
         # Share the dispatch lock so direct calls serialize with bus turns.
         lock = self._get_session_lock(session_key)
         with self.bus.admission.activity():
+            # Register before awaiting the lock so the waiting turn also keeps
+            # the idle scan away; the refcount covers concurrent direct calls.
+            # Entering activity() can refuse a paused runtime, so register
+            # only after that check to keep the decrement paired.
+            self._direct_turns[session_key] = self._direct_turns.get(session_key, 0) + 1
             temporary_parent = False
             delivery: TurnDelivery | None = None
             try:
@@ -2710,6 +2718,11 @@ class AgentLoop:
                             if parent is not None and not parent.policy.persist:
                                 await self.sessions.state.delete(session_key, expected_generation=parent.generation)
             finally:
+                remaining = self._direct_turns.get(session_key, 0) - 1
+                if remaining > 0:
+                    self._direct_turns[session_key] = remaining
+                else:
+                    self._direct_turns.pop(session_key, None)
                 await self.runtime_event_publisher.run_status_changed(msg, session_key, "idle")
                 if delivery is not None:
                     self.runtime_event_publisher.clear_turn(session_key, run_id=delivery.run_id)
