@@ -234,7 +234,7 @@ async def test_cross_session_input_preserves_source_in_live_events_and_history(
         assert [row["session_message"] for row in stored_inputs] == [
             event.provenance["session_message"] for event in events
         ]
-        assert [row["input_id"] for row in stored_inputs] == [row["input_id"] for row in inputs]
+        assert [row["input_id"] for row in stored_inputs] == [row["input_id"] for row in inputs] == [event.input_id for event in events]
         assert [scope.metadata() for scope in observed_scopes] == [target_scope] * min(message_count, 2)
         assert all(scope.source_channel == "websocket" for scope in observed_scopes)
         response = next(call.args[0] for call in reversed(loop.bus.publish_outbound.await_args_list)

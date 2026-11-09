@@ -364,6 +364,7 @@ async def test_same_session_projects_one_turn_to_both_clients(bus: MagicMock) ->
                     "text": "hello from terminal A",
                     "starts_turn": True,
                     "turn_id": "turn-a",
+                    "input_id": "user:turn-a",
                     "active_turn_id": "turn-a",
                     "started_at": projected.raw["started_at"],
                 }

@@ -679,6 +679,7 @@ class WebuiTurnCoordinator:
             event=UserInputEvent(
                 content=event.content,
                 created_at_ms=envelope["created_at_ms"],
+                input_id=f"session-message:{envelope['message_id']}",
                 provenance={"session_message": public_metadata},
             ),
         ))

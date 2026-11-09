@@ -458,6 +458,7 @@ def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
             "entry_point": "cli-anything-drawio",
         }],
         RUNTIME_CONTEXT_HISTORY_META: marker,
+        "input_id": "user:cli-app",
     })
 
     model_history = session.get_history(max_messages=500)
@@ -466,7 +467,7 @@ def test_get_history_does_not_duplicate_persisted_cli_app_runtime_context():
         include_runtime_context=False,
     )
 
-    assert model_history == [{"role": "user", "content": content}]
+    assert model_history == [{"role": "user", "content": content, "_meta": {"input_id": "user:cli-app"}}]
     assert model_history[0]["content"].count("CLI App Attachment: @drawio") == 1
     assert public_history == [{"role": "user", "content": "please use @drawio"}]
 

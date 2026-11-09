@@ -183,7 +183,7 @@ class AgentRunner:
         identifiers: list[str] = []
         found_input = False
         for message in reversed(messages):
-            metadata = message.get("_meta") or {}
+            metadata: dict[str, Any] = message.get("_meta") or {}
             if "input_id" not in metadata:
                 if found_input:
                     break

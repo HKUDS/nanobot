@@ -117,7 +117,7 @@ def pending_followups(session: Session) -> list[InboundMessage]:
         sender_id = cast(object, record.get("sender_id"))
         chat_id = cast(object, record.get("chat_id"))
         content = cast(object, record.get("content"))
-        metadata = cast(object, record.get("metadata"))
+        metadata_value = cast(object, record.get("metadata"))
         if (
             not isinstance(followup_id, str)
             or not followup_id
@@ -127,8 +127,9 @@ def pending_followups(session: Session) -> list[InboundMessage]:
             or not chat_id
         ):
             continue
-        if not isinstance(content, str) or not isinstance(metadata, dict):
+        if not isinstance(content, str) or not isinstance(metadata_value, dict):
             continue
+        metadata = cast(dict[str, Any], metadata_value)
         media_value = cast(object, record.get("media"))
         media = (
             [item for item in cast(list[object], media_value) if isinstance(item, str)]
@@ -149,7 +150,7 @@ def pending_followups(session: Session) -> list[InboundMessage]:
                 content=content,
                 timestamp=received_at,
                 media=media,
-                metadata={**cast(dict[str, Any], metadata), PENDING_FOLLOWUP_ID_KEY: followup_id},
+                metadata={**metadata, PENDING_FOLLOWUP_ID_KEY: followup_id},
                 session_key_override=session.key,
                 require_existing_session=True,
             )

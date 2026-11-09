@@ -2498,6 +2498,7 @@ async def test_send_projects_external_user_input_to_existing_wire_event() -> Non
             event=UserInputEvent(
                 content="hello from another session",
                 created_at_ms=1234,
+                input_id="session-message:external-input",
                 provenance={"name": "luma"},
             ),
         )
@@ -2510,6 +2511,7 @@ async def test_send_projects_external_user_input_to_existing_wire_event() -> Non
         "text": "hello from another session",
         "created_at_ms": 1234,
         "starts_turn": False,
+        "input_id": "session-message:external-input",
         "provenance": {"name": "luma"},
     }
 
@@ -5424,6 +5426,7 @@ async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
         "text": "hello from A",
         "starts_turn": True,
         "turn_id": "turn-a",
+        "input_id": "user:turn-a",
         "active_turn_id": "turn-a",
         "started_at": pytest.approx(wth.websocket_turn_wall_started_at("shared-chat")),
     }
@@ -5433,6 +5436,7 @@ async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
         "text": "one more detail",
         "starts_turn": False,
         "turn_id": "steer-a",
+        "input_id": "user:steer-a",
         "active_turn_id": "turn-a",
         "started_at": pytest.approx(wth.websocket_turn_wall_started_at("shared-chat")),
     }
