@@ -586,17 +586,29 @@ describe("local attachment paths and video ingress", () => {
   });
 
   it.each([
+    [400, "Unsupported attachment MIME"],
     [404, "file not found"],
     [403, "file is outside the current workspace"],
-  ] as const)("retains pasted text on %s, showing only actionable errors", async (status, message) => {
-    const inspect = vi.fn().mockRejectedValue(Object.assign(new Error(message), { status }));
-    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} />);
-    const input = screen.getByLabelText(/message input/i);
-    fireEvent.paste(input, { clipboardData: { items: [], getData: () => "./missing.mp4" } });
+    [null, "gateway request timed out"],
+  ] as const)("silently retains pasted text when inspection fails (%s)", async (status, message) => {
+    let reject!: (error: Error) => void;
+    const inspect = vi.fn(() => new Promise<typeof local>((_, fail) => { reject = fail; }));
+    const onSend = vi.fn();
+    const path = "C:\\project\\example.py";
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Read OLD, please" } });
+    input.setSelectionRange(5, 8);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => path } });
+    expect(inspect).toHaveBeenCalledWith(path);
+    expect(input).toHaveValue(`Read ${path}, please`);
+    fireEvent.change(input, { target: { value: `Read ${path}, please quickly` } });
+    await act(async () => reject(Object.assign(new Error(message), { status })));
     await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
-    expect(input).toHaveValue("./missing.mp4");
-    if (status === 404) expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    else expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(input).toHaveValue(`Read ${path}, please quickly`);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith(`Read ${path}, please quickly`, undefined, undefined);
     for (const text of ["some pasted text", "look at ./missing.mp4 please", "https://host/clip.mp4", "const path = './clip.mp4'", "line one\n./clip.mp4"]) {
       fireEvent.paste(input, {
         clipboardData: {
@@ -616,6 +628,24 @@ describe("local attachment paths and video ingress", () => {
     expect(inspect).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
     expect(encodeImage).not.toHaveBeenCalled();
+  });
+
+  it("keeps the path as text when the local attachment quota is full", async () => {
+    const second = { ...local, path: "C:\\project\\second.mp4", name: "second.mp4" };
+    const inspect = vi.fn().mockResolvedValueOnce(local).mockResolvedValueOnce(second);
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
+    const input = screen.getByLabelText(/message input/i);
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => local.path } });
+    await screen.findByRole("button", { name: local.name });
+    fireEvent.paste(input, { clipboardData: { items: [], getData: () => second.path } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
+    expect(input).toHaveValue(second.path);
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSend.mock.calls[0][0]).toBe(second.path);
+    expect(onSend.mock.calls[0][1][0].media).toEqual({ path: local.path, name: local.name });
   });
 
   it("does not charge large local documents against a picked document's upload budget", async () => {
