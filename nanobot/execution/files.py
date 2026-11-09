@@ -6,7 +6,7 @@ import os
 import re
 import stat
 from collections.abc import Callable, Generator, Iterable
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
@@ -24,16 +24,18 @@ class NotRegularFileError(OSError):
 
 
 @contextmanager
-def _open_regular_file(resolved_path: Path) -> Generator[tuple[BinaryIO, int]]:
+def _open_regular_file(
+    resolved_path: Path | str, *, dir_fd: int | None = None,
+) -> Generator[tuple[BinaryIO, int]]:
     """Own one descriptor for the entire read and report its initial size.
 
-    Callers must resolve the path under the current access policy first.
+    Callers must supply an authorized path or a child of an authorized directory handle.
     Where supported, refuse a swapped-in final symlink and avoid waiting on
     a swapped-in FIFO. This does not protect ancestor path components.
     """
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-    with os.fdopen(os.open(resolved_path, flags), "rb") as stream:
+    with os.fdopen(os.open(resolved_path, flags, dir_fd=dir_fd), "rb") as stream:
         opened = os.fstat(stream.fileno())
         if not stat.S_ISREG(opened.st_mode):
             raise NotRegularFileError
@@ -184,6 +186,24 @@ class SearchEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class SearchBytes:
+    """A bounded read; no data means the regular file exceeds the size limit."""
+
+    data: bytes | None
+    modified: float
+
+
+def _supports_directory_handles() -> bool:
+    return (
+        os.open in os.supports_dir_fd
+        and os.stat in os.supports_dir_fd
+        and os.stat in os.supports_follow_symlinks
+        and hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class FileSearch:
     """An authorized search root; links are not recursive directories."""
 
@@ -223,19 +243,29 @@ class FileSearch:
 
     @contextmanager
     def _open_search_directory(self, directory: Path) -> Generator[int]:
+        relative = directory.relative_to(self.root)
+        if ".." in relative.parts:
+            raise ValueError("Expected a directory within the search root")
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         root_info = self.root.stat(follow_symlinks=False)
         fd = os.open(self.root, flags)
         try:
             if not os.path.samestat(root_info, os.fstat(fd)):
                 raise PermissionError("Search root changed")
-            for part in directory.relative_to(self.root).parts:
+            for part in relative.parts:
                 child = os.open(part, flags, dir_fd=fd)
                 os.close(fd)
                 fd = child
             yield fd
         finally:
             os.close(fd)
+
+    @staticmethod
+    def _directory_is_current(directory: Path, fd: int) -> bool:
+        return (
+            Path(os.path.realpath(directory, strict=True)) == directory
+            and os.path.samestat(os.fstat(fd), directory.stat(follow_symlinks=False))
+        )
 
     def modified_children(
         self, directory: Path, names: list[str], *, checkpoint: Callable[[], None],
@@ -247,14 +277,7 @@ class FileSearch:
             raise ValueError("Expected direct child names")
 
         # A small match set does not amortize opening and rechecking the directory.
-        if (
-            len(names) >= 4
-            and os.open in os.supports_dir_fd
-            and os.stat in os.supports_dir_fd
-            and os.stat in os.supports_follow_symlinks
-            and hasattr(os, "O_DIRECTORY")
-            and hasattr(os, "O_NOFOLLOW")
-        ):
+        if len(names) >= 4 and _supports_directory_handles():
             try:
                 with self._open_search_directory(directory) as fd:
                     times: list[float] = []
@@ -271,10 +294,7 @@ class FileSearch:
                             )
                     # An open directory survives a rename. Do not use its batch if
                     # the authorized path no longer points to that directory.
-                    if (
-                        Path(os.path.realpath(directory, strict=True)) == directory
-                        and os.path.samestat(os.fstat(fd), directory.stat(follow_symlinks=False))
-                    ):
+                    if self._directory_is_current(directory, fd):
                         return times
             except OSError:
                 pass  # Reauthorize each child if the directory could not be pinned.
@@ -287,6 +307,76 @@ class FileSearch:
 
     def read_file(self, path: Path) -> ReadableFile:
         return _regular_file(self._candidate(path), suffix=path.suffix.lower())
+
+    def _read_search_bytes(self, path: Path, limit: int, fd: int | None = None) -> SearchBytes | None:
+        if fd is None:
+            try:
+                file = self.read_file(path)
+            except OSError:
+                return None
+            size, modified = file.size, file.modified
+            opened_path = file.path
+        else:
+            try:
+                info = os.stat(path.name, dir_fd=fd, follow_symlinks=False)
+            except OSError:
+                return None
+            if stat.S_ISLNK(info.st_mode):
+                return self._read_search_bytes(path, limit)
+            if not stat.S_ISREG(info.st_mode):
+                return None
+            size, modified = info.st_size, info.st_mtime
+            opened_path = path.name
+        if size > limit:
+            return SearchBytes(None, modified)
+        with _open_regular_file(opened_path, dir_fd=fd) as (stream, opened_size):
+            if opened_size > limit:
+                return None
+            return SearchBytes(stream.read(limit + 1), modified)
+
+    @contextmanager
+    def search_bytes_reader(self) -> Generator[Callable[[Path, int], SearchBytes | None]]:
+        """Read consecutive files using one pinned parent; no handle leaves execution."""
+        if not self.is_directory or not _supports_directory_handles():
+            yield self._read_search_bytes
+            return
+
+        parent: Path | None = None
+        fd: int | None = None
+        attempted = False
+        with ExitStack() as handle:
+            def check_parent() -> None:
+                if parent is not None and fd is not None:
+                    try:
+                        if self._directory_is_current(parent, fd):
+                            return
+                    except OSError:
+                        pass
+                    raise PermissionError("Search directory changed during the scan; retry the search.")
+
+            def read(path: Path, limit: int) -> SearchBytes | None:
+                nonlocal parent, fd, attempted
+                if path.parent != parent:
+                    check_parent()
+                    handle.close()
+                    parent, fd, attempted = path.parent, None, False
+                    return self._read_search_bytes(path, limit)
+                if not attempted:
+                    attempted = True
+                    # Only open directories with multiple candidates. If the host
+                    # cannot pin this path, keep using per-file authorization.
+                    if parent is not None and parent.is_relative_to(self.root):
+                        try:
+                            _reject_device(parent, resolved=True)
+                            fd = handle.enter_context(self._open_search_directory(parent))
+                        except (OSError, ValueError):
+                            pass
+                if path.name in ("", ".", ".."):
+                    return self._read_search_bytes(path, limit)
+                return self._read_search_bytes(path, limit, fd)
+
+            yield read
+            check_parent()
 
 
 def _regular_file(target: Path, *, suffix: str | None = None) -> ReadableFile:

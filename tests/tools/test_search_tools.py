@@ -295,7 +295,7 @@ async def test_find_files_scan_keeps_event_loop_responsive(
 async def test_grep_authorizes_the_targets_of_links_found_during_traversal(tmp_path: Path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    inside = workspace / "inside.txt"
+    inside = workspace / "a.txt"
     inside.write_text("needle allowed", encoding="utf-8")
     outside = tmp_path / "outside.txt"
     outside.write_text("needle outside contents", encoding="utf-8")
@@ -310,6 +310,36 @@ async def test_grep_authorizes_the_targets_of_links_found_during_traversal(tmp_p
     assert "inside-link.txt" in result
     assert "needle allowed" in result
     assert "needle outside contents" not in result
+
+
+@pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="requires native directory handles")
+async def test_grep_discards_partial_results_when_a_pinned_directory_moves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = (tmp_path / "workspace").resolve()
+    directory = workspace / "src"
+    directory.mkdir(parents=True)
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (directory / name).write_text("needle inside\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "b.txt").write_text("needle outside\n", encoding="utf-8")
+    original = FileSearch._open_search_directory
+
+    @contextmanager
+    def replace_after_open(tree, path):
+        with original(tree, path) as fd:
+            if path == directory:
+                directory.rename(tmp_path / "moved")
+                directory.symlink_to(outside, target_is_directory=True)
+            yield fd
+
+    monkeypatch.setattr(FileSearch, "_open_search_directory", replace_after_open)
+    tool = GrepTool(workspace=workspace, allowed_dir=workspace)
+    # The first result is already buffered when the second file pins the parent.
+    # Even a page that stops early must not return the old directory's results.
+    result = await tool.execute(pattern="needle", head_limit=1)
+    assert result == "Error: Search directory changed during the scan; retry the search."
 
 
 async def test_exact_read_grant_does_not_authorize_a_directory_tree(tmp_path: Path):
