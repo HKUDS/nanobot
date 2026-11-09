@@ -641,7 +641,7 @@ describe("ThreadTranscript admission", () => {
     expect(saved.units.every((unit) => Array.from(unit.members.keys()).every((turn) => turn === "turn-window-3"))).toBe(true);
   });
 
-  it("refreshes a disjoint latest fragment and pages back across the gap after restoring the cache", () => {
+  it("keeps the cached window visible until a disjoint latest fragment joins it", () => {
     const events: ThreadProjectionEvent[] = [
       input("growing", "Question"),
       ...["B", "C", "D", "E", "F"].map((text, index) => ({
@@ -659,7 +659,8 @@ describe("ThreadTranscript admission", () => {
     const staleOlder = thread.begin("older");
     // A restored owner issues an initial read even though it has a cached window.
     expect(thread.accept(fragment(4, 6), thread.begin("initial"))).toBe(true);
-    expect(thread.messages.map((row) => row.content)).toEqual(["E", "F"]);
+    expect(thread.messages.map((row) => row.content)).toEqual(["B", "C"]);
+    expect(thread.hasPendingFragmentGap).toBe(true);
     expect(thread.paging).toMatchObject({ beforeCursor: "before-4", hasMoreBefore: true });
     expect(thread.accept(fragment(0, 1), staleOlder)).toBe(false);
     expect(thread.paging.beforeCursor).toBe("before-4");
@@ -672,7 +673,7 @@ describe("ThreadTranscript admission", () => {
     expect(thread.paging.hasMoreBefore).toBe(false);
   });
 
-  it("replays a safe live suffix over a disjoint latest fragment and through gap filling", () => {
+  it("keeps live output attached to the visible window while filling a disjoint latest gap", () => {
     const events: ThreadProjectionEvent[] = [
       input("growing-live", "Question"),
       ...["B", "C", "D", "E", "F"].map((text, index) => ({
@@ -689,7 +690,8 @@ describe("ThreadTranscript admission", () => {
     const refresh = thread.begin("latest");
     receive(thread, { ...at("growing-live", 7), event: "delta", stream_id: "wire", text: "G" });
     expect(thread.accept(fragment(4, 6), refresh)).toBe(true);
-    expect(thread.messages.map((row) => row.content)).toEqual(["EFG"]);
+    expect(thread.messages.map((row) => row.content)).toEqual(["BCG"]);
+    expect(thread.hasPendingFragmentGap).toBe(true);
     expect(thread.paging.beforeCursor).toBe("before-4");
     expect(thread.accept(fragment(2, 4), thread.begin("older"))).toBe(true);
     expect(thread.messages.map((row) => row.content)).toEqual(["BCDEFG"]);
@@ -988,24 +990,6 @@ describe("ThreadTranscript admission", () => {
     }
   });
 
-  it("does not replace unpersisted reasoning when a later snapshot disagrees with it", () => {
-    const thread = new ThreadTranscript();
-    const question = input("conflicting-snapshot", "Question");
-    const c: ThreadProjectionEvent = { ...at("conflicting-snapshot", 3), event: "reasoning_delta", text: "Live" };
-    const end: ThreadProjectionEvent = { ...at("conflicting-snapshot", 4), event: "reasoning_end", text: "Different" };
-    const e: ThreadProjectionEvent = { ...at("conflicting-snapshot", 5), event: "delta", stream_id: "wire", text: "Answer" };
-    const fragment = (events: ThreadProjectionEvent[], endPosition: number) => history(events, {
-      active_turn_id: "conflicting-snapshot",
-      page: { history_generation: "generation", record_range: { turn: 1, start: 0, end: endPosition },
-        before_cursor: "before-turn", has_more_before: true, truncated_oversized_turn: true },
-    });
-    expect(thread.accept(fragment([question], 1), thread.begin("initial"))).toBe(true);
-    receive(thread, c, e);
-    expect(thread.accept(fragment([question, end], 2), thread.begin("latest"))).toBe(true);
-    expect(thread.messages.at(-1)).toMatchObject({ content: "Answer", reasoning: "Live" });
-    expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([3, 5]);
-  });
-
   it("can project and restore temporary live output without retaining a raw journal", () => {
     const thread = new ThreadTranscript([], undefined, { recordLiveContributions: false });
     for (let seq = 1; seq <= 200; seq++) {
@@ -1210,7 +1194,6 @@ describe("ThreadTranscript admission", () => {
       { id: receivedId, content: "Received" },
     ]);
     expect(thread.paging.truncated).toBe(true);
-    expect(thread.lastAcceptanceCovered).toBe(false);
   });
 
   it("restores a fragmented turn when the gateway signs a live markdown image", () => {

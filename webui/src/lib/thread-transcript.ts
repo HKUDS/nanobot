@@ -171,7 +171,7 @@ export class ThreadTranscript {
   private live: LiveContribution[] = [];
   private historyGeneration: string | null = null;
   private pendingFragmentGap: PendingFragmentGap | null = null;
-  private lastAdmissionCovered = false;
+  fragmentCompletedTurnIds: string[] = [];
   private readonly recordLiveContributions: boolean;
   private revision = 0;
   private order = 0;
@@ -203,7 +203,6 @@ export class ThreadTranscript {
   get messages(): UIMessage[] { return this.projection.messages; }
   get modelRequests() { return this.projection.modelRequests; }
   get hasPendingFragmentGap(): boolean { return this.pendingFragmentGap !== null; }
-  get lastAcceptanceCovered(): boolean { return this.lastAdmissionCovered; }
 
   private installUnit(unit: Unit): void {
     this.order = Math.max(this.order, unit.order + 1);
@@ -433,7 +432,7 @@ export class ThreadTranscript {
   }
 
   accept(body: WebuiThreadPersistedPayload | null, read: ThreadRead): boolean {
-    this.lastAdmissionCovered = false;
+    this.fragmentCompletedTurnIds = [];
     if (read.kind === "older" && (read.lineage !== this.paging.lineage || read.before !== this.paging.beforeCursor)) return false;
     // An initial network read may have started just before its cached seed was installed.
     if (read.kind !== "older" && read.lineage !== this.paging.lineage
@@ -469,6 +468,22 @@ export class ThreadTranscript {
     const gap = pending ?? (read.kind !== "older" && incoming && priorEnd !== null && incoming.start > priorEnd
       ? { turn: incoming.turn, oldEnd: priorEnd, front: incoming.start } : null);
     const hasGap = !!gap && !!groupRange && groupRange.start > gap.oldEnd;
+    if (hasGap && joined && groupRange && gap) {
+      const page = body!.page!;
+      if (!page.has_more_before || !page.before_cursor || page.before_cursor === read.before) {
+        this.finishRead(read, "Could not bridge the missing history records");
+        return false;
+      }
+      this.fragments = joined.pages;
+      this.pendingFragmentGap = { ...gap, front: groupRange.start };
+      if (generation !== null) this.historyGeneration = generation;
+      this.paging = { ...this.paging, loading: false, loadingOlder: false,
+        error: "Newer history is waiting for missing earlier records", olderError: null,
+        beforeCursor: page.before_cursor, hasMoreBefore: true, truncated: true,
+        version: this.paging.version + (read.kind === "older" ? 0 : 1),
+        lineage: this.paging.lineage + (read.kind === "older" ? 0 : 1) };
+      return true;
+    }
     const candidate = new ThreadTranscript();
     let durableMembers: Members | null = null;
     const durableText = new Map<string, TextSource>();
@@ -578,57 +593,6 @@ export class ThreadTranscript {
       }
     }
 
-    // A disjoint window can replace the old durable projection only if every
-    // received contribution is exactly represented or replayable as a contiguous suffix.
-    let rebase = hasGap && !pending;
-    if (rebase) {
-      const covered = copyMembers(this.installed);
-      const ends = new Map<string, number>();
-      for (const event of body?.events ?? []) if (event.turn_id) {
-        if (event.turn_seq === undefined) { rebase = false; break; }
-        ends.set(event.turn_id, Math.max(ends.get(event.turn_id) ?? -1, event.turn_seq));
-      }
-      const orderedLive = [...this.live].sort((a, b) => (a.event.turn_seq ?? -1) - (b.event.turn_seq ?? -1));
-      for (const entry of orderedLive) {
-        const { event } = entry;
-        if (!event.turn_id || event.turn_seq === undefined) { rebase = false; break; }
-        const ranges = covered.get(event.turn_id) ?? [];
-        addRange(ranges, event.turn_seq);
-        covered.set(event.turn_id, ranges);
-        if (contains(durableMembers?.get(event.turn_id), event.turn_seq)) continue;
-        const end = ends.get(event.turn_id);
-        if (end === undefined || event.turn_seq !== end + 1
-          || !candidate.live.some((item) => item.event === event && item.revision === entry.revision)) {
-          rebase = false;
-          break;
-        }
-        ends.set(event.turn_id, event.turn_seq);
-      }
-      if (rebase) for (const unit of this.units) if (unit.received > 0 && !this.unitCovered(unit, candidate)) {
-        if (!unit.members.size || Array.from(unit.members).some(([turn, ranges]) => ranges.some(([first, last]) =>
-          !covered.get(turn)?.some(([a, b]) => a <= first && b >= last)))) {
-          rebase = false;
-          break;
-        }
-      }
-    }
-    if (hasGap && !rebase && joined && groupRange && gap) {
-      const page = body?.page;
-      if (!page?.has_more_before || !page.before_cursor
-        || (read.kind === "older" && page.before_cursor === read.before)) {
-        this.finishRead(read, "Could not bridge the missing history records");
-        return false;
-      }
-      this.fragments = joined.pages;
-      this.pendingFragmentGap = { ...gap, front: groupRange.start };
-      if (generation !== null) this.historyGeneration = generation;
-      this.paging = { ...this.paging, loading: false, loadingOlder: false,
-        error: "Newer history is waiting for missing earlier records", olderError: null,
-        beforeCursor: page.before_cursor, hasMoreBefore: true, truncated: true,
-        version: this.paging.version + (read.kind === "older" ? 0 : 1),
-        lineage: this.paging.lineage + (read.kind === "older" ? 0 : 1) };
-      return true;
-    }
     const overlaps = new Set(Array.from(this.units).filter((old) =>
       Array.from(candidate.units).some((unit) => sourcesOverlap(unit, old))));
     const firstOverlap = this.messages.findIndex((row) => overlaps.has(this.byRow.get(row.id)!));
@@ -637,7 +601,7 @@ export class ThreadTranscript {
       && Array.from(unit.rows).some((id) => windowRows.has(id)));
     const canonical = body ? persistedCanonicalRunState(body) : null;
     const completed = new Set(canonical?.completedTurnIds);
-    const protectedUnits = rebase ? [] : received.filter((unit) => {
+    const protectedUnits = received.filter((unit) => {
       const covered = this.unitCovered(unit, candidate);
       const replayed = !!joined && candidate.live.some(({ event }) => !!event.turn_id && event.turn_seq !== undefined
         && contains(unit.members.get(event.turn_id), event.turn_seq)
@@ -678,7 +642,7 @@ export class ThreadTranscript {
       && this.byRow.get(row.id)!.introduced > read.revision);
     const appendedTurns = new Set(appendedInputs.map((row) => row.turnId!));
     const appendedInputUnits = new Set(appendedInputs.map((row) => this.byRow.get(row.id)!));
-    const reset = replacedHistory || rebase || (read.kind === "latest" && overlaps.size === 0
+    const reset = replacedHistory || (read.kind === "latest" && overlaps.size === 0
       && !body?.page?.truncated_oversized_turn
       && protectedUnits.every((unit) => unit.introduced > read.revision
         && (appendedInputUnits.has(unit) || (unit.members.size > 0
@@ -934,7 +898,7 @@ export class ThreadTranscript {
         activeTurnId: body?.active_turn_id ?? null,
       }),
     };
-    this.lastAdmissionCovered = admitted.size === candidate.units.size;
+    if (joined && admitted.size === candidate.units.size) this.fragmentCompletedTurnIds = [...completed];
     return true;
   }
 

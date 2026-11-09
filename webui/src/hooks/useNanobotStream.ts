@@ -163,7 +163,6 @@ export function useNanobotStream(
   const [initialTranscript] = useState(() => createTranscript(initialMessages,
     chatId ? messageCache?.get(chatId) : undefined, historyKey, temporary));
   const transcriptRef = useRef(initialTranscript);
-  const deferredCanonicalRef = useRef<{ owner: ThreadTranscript; generation: number; canonical: ReturnType<typeof persistedCanonicalRunState> }>();
   const [historyState, setHistoryState] = useState(initialTranscript.paging);
   const publishHistory = useCallback(() => setHistoryState(transcriptRef.current.paging), []);
   const [refreshSeq, setRefreshSeq] = useState(0);
@@ -483,7 +482,6 @@ export function useNanobotStream(
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.
   useEffect(() => {
-    deferredCanonicalRef.current = undefined;
     transcriptRef.current = createTranscript(initialMessages, chatId ? messageCache?.get(chatId) : undefined, historyKey, temporary);
     setMessages(transcriptRef.current.messages);
     setMessageScope({ chatId, historyKey, client });
@@ -533,9 +531,9 @@ export function useNanobotStream(
       setRetryStatus(null);
     } else client.fenceCanonicalCompletedTurns(chatId, canonical.completedTurnIds);
   }, [chatId, client]);
-  const settleFragment = useCallback((canonical: ReturnType<typeof persistedCanonicalRunState>) => {
-    if (!chatId) return;
-    client.settleFragmentRunLifecycle(chatId, canonical.completedTurnIds);
+  const settleFragment = useCallback((owner: ThreadTranscript) => {
+    if (!chatId || !owner.fragmentCompletedTurnIds.length) return;
+    client.settleFragmentRunLifecycle(chatId, owner.fragmentCompletedTurnIds);
     if (!client.getRunState(chatId)?.active) setRetryStatus(null);
   }, [chatId, client]);
 
@@ -566,19 +564,9 @@ export function useNanobotStream(
         publishing = false;
       }
       if (chatId && canonical && (ownRead || !seed)) {
-        if (accepted && owner.hasPendingFragmentGap) {
-          deferredCanonicalRef.current = { owner, generation, canonical };
-        } else if (body?.page?.record_range) {
-          if (accepted && Array.isArray(body.completed_turn_ids)) {
-            if (owner.lastAcceptanceCovered) {
-              if (deferredCanonicalRef.current?.owner === owner) deferredCanonicalRef.current = undefined;
-              settleFragment(canonical);
-            } else {
-              deferredCanonicalRef.current = { owner, generation, canonical };
-            }
-          }
+        if (body?.page?.record_range) {
+          if (accepted) settleFragment(owner);
         } else if (ownRead && !owner.hasPendingFragmentGap) {
-          if (deferredCanonicalRef.current?.owner === owner) deferredCanonicalRef.current = undefined;
           reconcileCanonical(generation, canonical, accepted);
         }
       }
@@ -615,23 +603,11 @@ export function useNanobotStream(
       const body = await fetchWebuiThread(getToken(), historyKey, { before, limit: 120, signal: controller.signal });
       if (olderReadRef.current !== operation || transcriptRef.current !== owner) return;
       flushPendingStreamEvents();
-      const wasBridging = owner.hasPendingFragmentGap;
       const accepted = owner.accept(body, read);
       setMessages(owner.messages);
-      const deferred = deferredCanonicalRef.current;
-      if (accepted && !owner.hasPendingFragmentGap && owner.lastAcceptanceCovered) {
-        if (deferred?.owner === owner
-          && deferred.canonical.completedTurnIds.every((turn) => owner.projection.closedTurnIds.has(turn))) {
-          deferredCanonicalRef.current = undefined;
-          if (chatId && client.getRunGeneration(chatId) === deferred.generation) {
-            messageCache?.set(chatId, owner.save());
-            settleFragment(deferred.canonical);
-          } else {
-            setRefreshSeq((value) => value + 1);
-          }
-        } else if (wasBridging) {
-          setRefreshSeq((value) => value + 1);
-        }
+      if (accepted) {
+        if (chatId) messageCache?.set(chatId, owner.save());
+        settleFragment(owner);
       }
     } catch (error) {
       if (olderReadRef.current === operation && transcriptRef.current === owner) {

@@ -326,7 +326,7 @@ describe("durable run recovery", () => {
     close();
   });
 
-  it("lets the mounted transcript stage the reconnect fragment before settling its active stream", async () => {
+  it.each(["reconnect", "refresh"] as const)("keeps live delivery until the %s fragment joins the visible history", async (trigger) => {
     const chatId = "inactive";
     const turnId = "turn-old";
     const chunk = (seq: number, text: string) => ({
@@ -373,12 +373,17 @@ describe("durable run recovery", () => {
       turn_seq: 4, stream_id: "wire", text: "D" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(mounted.result.current.messages.at(-1)?.content).toBe("BCD");
+    const reconcile = vi.spyOn(client, "reconcileCanonicalCompletion");
+    const fence = vi.spyOn(client, "fenceCanonicalCompletedTurns");
 
-    await reopen();
+    if (trigger === "reconnect") await reopen();
+    else await act(async () => { mounted.result.current.refreshHistory(); });
     await act(async () => { finishLatest(response(latest)); });
     expect(webuiThreadCache.get(`websocket:${chatId}`)).toEqual(latest);
     expect(mounted.result.current.history.error).toContain("waiting for missing earlier records");
     expect(finishMissing).toBeTypeOf("function");
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(fence).not.toHaveBeenCalled();
     expect(client.getRunState(chatId).active).toBe(true);
     expect(mounted.result.current.isStreaming).toBe(true);
     act(() => sockets.at(-1)!.receive({ event: "delta", chat_id: chatId, turn_id: turnId,
@@ -399,59 +404,6 @@ describe("durable run recovery", () => {
     expect(client.getRunState(chatId).active).toBe(false);
     unsubscribe();
     mounted.unmount();
-    close();
-  });
-
-  it("does not fence live output until a staged latest fragment has bridged its history gap", async () => {
-    const chatId = "inactive";
-    const turnId = "turn-old";
-    const chunk = (seq: number, text: string) => ({
-      event: "delta" as const, chat_id: chatId, turn_id: turnId, turn_seq: seq,
-      stream_id: "wire", text, projection_id: `history-${seq}`,
-    });
-    const page = (start: number, end: number, events: WebuiThreadPersistedPayload["events"], completed = false): WebuiThreadPersistedPayload => ({
-      schemaVersion: 3, sessionKey: `websocket:${chatId}`, projection: "events", events,
-      has_pending_tool_calls: !completed, active_turn_id: completed ? null : turnId,
-      completed_turn_ids: completed ? [turnId] : [],
-      page: { history_generation: "generation", record_range: { turn: 0, start, end },
-        before_cursor: `before-${start}`, has_more_before: start > 0, truncated_oversized_turn: true },
-    });
-    const initial = page(1, 3, [chunk(2, "B"), chunk(3, "C")]);
-    const latest = page(6, 9, [chunk(8, "H"), chunk(9, "I"),
-      { event: "turn_end", chat_id: chatId, turn_id: turnId, turn_seq: 10, projection_id: "history-end" }], true);
-    const missing = page(3, 6, [chunk(5, "E"), chunk(6, "F"), chunk(7, "G")]);
-    let latestReads = 0;
-    let finishMissing!: (value: Response) => void;
-    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("before=")
-      ? new Promise<Response>((resolve) => { finishMissing = resolve; })
-      : Promise.resolve(response(latestReads++ ? latest : initial))));
-    const { client, sockets, running, close } = setup();
-    const wrapper = ({ children }: { children: ReactNode }) => <ClientProvider client={client} token="token">{children}</ClientProvider>;
-    const stream = renderHook(() => useNanobotStream(chatId, [], false, undefined, undefined, [], { key: `websocket:${chatId}` }), { wrapper });
-    const reconcile = vi.spyOn(client, "reconcileCanonicalCompletion");
-    const fence = vi.spyOn(client, "fenceCanonicalCompletedTurns");
-    await act(async () => { running(); });
-    await act(async () => {});
-    act(() => sockets.at(-1)!.receive({ event: "delta", chat_id: chatId, turn_id: turnId,
-      turn_seq: 4, stream_id: "wire", text: "D" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(stream.result.current.messages.at(-1)?.content).toBe("BCD");
-    reconcile.mockClear();
-    fence.mockClear();
-    await act(async () => { stream.result.current.refreshHistory(); });
-    await act(async () => {});
-    expect(stream.result.current.history.error).toContain("waiting for missing earlier records");
-    expect(finishMissing).toBeTypeOf("function");
-    expect(reconcile).not.toHaveBeenCalled();
-    expect(fence).not.toHaveBeenCalled();
-    act(() => sockets.at(-1)!.receive({ event: "delta", chat_id: chatId, turn_id: turnId,
-      turn_seq: 5, stream_id: "wire", text: "E" }));
-    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
-    expect(stream.result.current.messages.at(-1)?.content).toBe("BCDE");
-    await act(async () => { finishMissing(response(missing)); });
-    expect(stream.result.current.messages.at(-1)?.content).toBe("BCDEFGHI");
-    expect(client.getRunState(chatId)?.active).toBe(false);
-    stream.unmount();
     close();
   });
 
