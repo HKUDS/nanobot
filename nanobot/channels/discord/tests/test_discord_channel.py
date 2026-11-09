@@ -1850,6 +1850,6 @@ async def test_reset_discards_in_flight_compaction_notices() -> None:
     owner, client = _client_with_channel(target)
     await client.send_outbound(_compaction_message("Compressing context…", "started"))
 
-    await owner._reset_runtime_state(close_client=False)
+    await owner._reset_runtime_state()
 
     assert owner._compaction_notices == {}

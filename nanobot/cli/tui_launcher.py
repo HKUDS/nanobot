@@ -6,7 +6,6 @@ import os
 import platform
 import shutil
 import subprocess
-import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -19,7 +18,6 @@ from nanobot.bun import BunUnavailableError, bun_environment, ensure_bun
 from nanobot.cli.process_identity import named_executable
 from nanobot.cli.runtime_config import _model_display
 from nanobot.cli.webui_support import (
-    _gateway_health_ready,
     _gateway_health_url,
     _gateway_instance_command,
     _host_for_local_browser,
@@ -64,8 +62,6 @@ _TUI_RELEASE_LIMITS = {
 }
 # Keep in sync with TUI_DETACH_EXIT_CODE in tui/src/index.ts.
 _TUI_DETACH_EXIT_CODE = 90
-_GATEWAY_READY_TIMEOUT_S = 20.0
-_GATEWAY_READY_POLL_S = 0.1
 
 
 @dataclass(frozen=True)
@@ -134,7 +130,6 @@ def launch_tui(
             config,
             config_path=config_path,
             workspace_override=workspace_override,
-            wait_until_ready=False,
         )
         exit_code = process.wait()
         if exit_code == _TUI_DETACH_EXIT_CODE:
@@ -410,7 +405,6 @@ def _ensure_gateway(
     *,
     config_path: Path,
     workspace_override: str | None,
-    wait_until_ready: bool = True,
 ) -> _GatewayHandle:
     from nanobot.gateway import (
         GatewayClientLease,
@@ -427,39 +421,6 @@ def _ensure_gateway(
     lease = GatewayClientLease(runtime, kind="tui")
     lease.acquire()
     try:
-        def ready(status: object) -> bool:
-            management_ready = getattr(status, "ready", None)
-            if not isinstance(management_ready, bool):
-                management_ready = _gateway_health_ready(
-                    config.gateway.host,
-                    config.gateway.port,
-                )
-            return _webui_endpoint_reachable(base_url) and management_ready
-
-        def wait_for_ready(log_path: object) -> _GatewayHandle:
-            deadline = time.monotonic() + _GATEWAY_READY_TIMEOUT_S
-            while time.monotonic() < deadline:
-                current = runtime.status()
-                if not current.running:
-                    break
-                if current.port not in {None, config.gateway.port}:
-                    break
-                if ready(current):
-                    return _GatewayHandle(base_url=base_url, lease=lease)
-                time.sleep(_GATEWAY_READY_POLL_S)
-
-            current = runtime.status()
-            if current.running:
-                raise TuiUnavailableError(
-                    "local gateway process is running but its WebSocket/WebUI listener "
-                    "is unavailable; channel recovery did not restore it. "
-                    "Run `nanobot gateway status` and inspect logs at "
-                    f"{log_path}; if it remains degraded, run `nanobot gateway restart`."
-                )
-            raise TuiUnavailableError(
-                f"local gateway did not become ready; logs: {log_path}"
-            )
-
         status = runtime.status()
         if status.running:
             if status.port not in {None, config.gateway.port}:
@@ -467,11 +428,7 @@ def _ensure_gateway(
                     "the matching gateway instance is running on a different port; "
                     "restart it or use `nanobot agent --classic`"
                 )
-            if not wait_until_ready:
-                return _GatewayHandle(base_url=base_url, lease=lease)
-            if ready(status):
-                return _GatewayHandle(base_url=base_url, lease=lease)
-            return wait_for_ready(status.log_path)
+            return _GatewayHandle(base_url=base_url, lease=lease)
         elif _webui_endpoint_reachable(base_url):
             raise TuiUnavailableError(
                 "the configured gateway port belongs to a different nanobot instance; "
@@ -495,9 +452,7 @@ def _ensure_gateway(
                 "the matching gateway instance is running on a different port; "
                 "restart it or use `nanobot agent --classic`"
             )
-        if not wait_until_ready:
-            return _GatewayHandle(base_url=base_url, lease=lease)
-        return wait_for_ready(result.status.log_path)
+        return _GatewayHandle(base_url=base_url, lease=lease)
     except BaseException:
         lease.release(timeout_s=5)
         raise

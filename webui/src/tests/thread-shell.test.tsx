@@ -88,7 +88,6 @@ function makeClient() {
     },
     getRunState: lifecycle.getRunState.bind(lifecycle),
     restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
-    getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
     getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
     isRunCompleted: lifecycle.isRunCompleted.bind(lifecycle),
     finishRunLocally: vi.fn(lifecycle.finishRunLocally.bind(lifecycle)),
@@ -4195,7 +4194,7 @@ describe("ThreadShell", () => {
     act(() => client._emitSessionUpdate("visibility-complete-a", "thread"));
     await waitFor(() => expect(screen.getByText("completed while hidden")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
-    expect(client.getRunStartedAt("visibility-complete-a")).toBeNull();
+    expect(client.getRunState("visibility-complete-a").startedAt).toBeNull();
 
     rerender(view("visibility-complete-b"));
     await waitFor(() => expect(screen.getByText("other thread")).toBeInTheDocument());
@@ -4302,7 +4301,7 @@ describe("ThreadShell", () => {
       expect(screen.getByText("saved answer prefix")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
       expect(client.reconcileCanonicalCompletion).not.toHaveBeenCalled();
-      expect(client.getRunStartedAt(chatId)).toBe(1_700);
+      expect(client.getRunState(chatId).startedAt).toBe(1_700);
 
       const input = screen.getByRole("textbox", { name: "Message input" });
       fireEvent.change(input, { target: { value: "queued guidance" } });

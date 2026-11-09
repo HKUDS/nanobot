@@ -339,7 +339,7 @@ async def test_local_reference_inspection_send_recheck_and_no_staging(tmp_path, 
     assert local["kind"] == "video"
     assert channel.gateway.uploads.store._entries == {}
     assert not list(channel.gateway.uploads.store.media_dir.glob("*"))
-    assert channel._webui_request_operations == {}
+    assert channel._commands.request_operations == {}
 
     for invalid in ("missing.mp4", str(workspace), str(tmp_path / "outside.mp4")):
         failure = await inspect(invalid)

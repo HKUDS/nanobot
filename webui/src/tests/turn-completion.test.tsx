@@ -155,7 +155,7 @@ describe("completed turn event ordering", () => {
       });
       expect(result.current.isStreaming).toBe(false);
       expect(result.current.runStartedAt).toBeNull();
-      expect(client.getRunStartedAt(CHAT_ID)).toBeNull();
+      expect(client.getRunState(CHAT_ID).startedAt).toBeNull();
       expect(client.hasUnsettledRun(CHAT_ID)).toBe(false);
       expect(result.current.messages.some((message) => message.content === "additional context")).toBe(true);
 
