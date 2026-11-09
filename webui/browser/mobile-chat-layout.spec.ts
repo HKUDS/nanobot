@@ -1,4 +1,21 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function recordBottomButtonFrames(page: Page) {
+  await page.evaluate(() => {
+    (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames = [];
+    let start = 0;
+    const sample = () => {
+      (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames.push(
+        Boolean(document.querySelector('button[aria-label="Scroll to bottom"]')),
+      );
+      if (performance.now() - start < 300) requestAnimationFrame(sample);
+    };
+    document.querySelector('button[aria-label="Scroll to bottom"]')!.addEventListener("click", () => {
+      start = performance.now();
+      requestAnimationFrame(sample);
+    }, { once: true });
+  });
+}
 
 for (const { width, dark } of [{ width: 360, dark: false }, { width: 314, dark: true }, { width: 600, dark: false }]) {
   test.describe(`mobile transcript at ${width}px`, () => {
@@ -90,22 +107,48 @@ test("bottom button stays hidden throughout smooth navigation", async ({ page })
   await expect(button).toBeVisible();
   expect(await readableDistance()).toBeGreaterThan(0);
   await expect(button).toBeVisible();
-  await page.evaluate(() => {
-    (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames = [];
-    let start = 0;
-    const sample = () => {
-      (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames.push(
-        Boolean(document.querySelector('button[aria-label="Scroll to bottom"]')),
-      );
-      if (performance.now() - start < 300) requestAnimationFrame(sample);
-    };
-    document.querySelector('button[aria-label="Scroll to bottom"]')!.addEventListener("click", () => {
-      start = performance.now();
-      requestAnimationFrame(sample);
-    }, { once: true });
-  });
+  await recordBottomButtonFrames(page);
   await button.click();
   await expect(button).toBeHidden();
+  await expect.poll(() => scroller.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(1);
+  await page.waitForTimeout(320);
+  const frames = await page.evaluate(() => (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames);
+  expect(frames.length).toBeGreaterThan(1);
+  expect(frames).not.toContain(true);
+  await expect(button).toBeHidden();
+});
+
+test("bottom button stays hidden after focus scrolls a following thread", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+  await page.route("**/api/sessions/**", route => route.fulfill({ json: { prompts: [] } }));
+  await page.goto("/browser/fixture.html?case=rail&workbench=1&focus-links=1");
+  const scroller = page.locator(".thread-message-viewport");
+  const links = scroller.locator("a");
+  const button = page.getByRole("button", { name: "Scroll to bottom" });
+  await expect(links).toHaveCount(45);
+  await expect.poll(() => scroller.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(1);
+  await expect(button).toBeHidden();
+
+  const index = await scroller.evaluate(el => {
+    const top = el.getBoundingClientRect().top;
+    return [...el.querySelectorAll("a")].findIndex(link => {
+      const offset = link.getBoundingClientRect().top - top;
+      return offset > 48 && offset < 100;
+    });
+  });
+  expect(index).toBeGreaterThan(0);
+  await links.nth(index).focus();
+  const initialTop = await scroller.evaluate(el => el.scrollTop);
+  await page.keyboard.press("Shift+Tab");
+  await expect(links.nth(index - 1)).toBeFocused();
+  await expect(button).toBeVisible();
+  const distance = initialTop - await scroller.evaluate(el => el.scrollTop);
+  expect(distance).toBeGreaterThan(0);
+  expect(distance).toBeLessThan(48);
+
+  await recordBottomButtonFrames(page);
+  await button.click();
   await expect.poll(() => scroller.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(1);
   await page.waitForTimeout(320);
   const frames = await page.evaluate(() => (window as unknown as { bottomButtonFrames: boolean[] }).bottomButtonFrames);

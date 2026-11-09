@@ -44,6 +44,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "resume-follow": "current-automatic-mode",
   },
   "follow-latest": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
   },

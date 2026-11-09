@@ -599,6 +599,22 @@ describe("ThreadMotionCoordinator", () => {
     expect(coordinator.snapshot().mode).toBe("navigating-history");
   });
 
+  it("keeps explicit latest navigation in control when already following the tail", () => {
+    const { camera, coordinator, advanceFrame, setCameraFollowing } = motionHarness();
+    coordinator.resumeAutoFollow();
+    advanceFrame();
+
+    expect(coordinator.snapshot().mode).toBe("follow-latest");
+    expect(coordinator.navigateLatestTo(1_400)).toBe("started");
+    expect(coordinator.snapshot().mode).toBe("navigating-latest");
+    expect(coordinator.observeScroll(true)).toBe("navigation");
+    expect(camera.isFollowing()).toBe(true);
+
+    setCameraFollowing(false);
+    coordinator.cameraSettled();
+    expect(coordinator.snapshot().mode).toBe("follow-latest");
+  });
+
   it("retargets smooth latest navigation before resuming automatic follow", () => {
     const {
       camera,
