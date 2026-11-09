@@ -55,14 +55,22 @@ def encode_graph(value: object) -> object:
     return encoded if encoded is not None else value
 
 
+def _parts_mapping(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    parts = cast(dict[str, object], value)
+    return parts if parts.get("kind") == "context_graph_parts" else None
+
+
 def encode_graph_fields(content: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(content)
     if "context_graph" in result:
-        graph = result["context_graph"]
-        if isinstance(graph, dict) and graph.get("kind") == "context_graph_parts":
+        graph: object = result["context_graph"]
+        parts = _parts_mapping(graph)
+        if parts is not None:
             result["context_graph"] = {
                 "kind": "context_graph_parts",
-                **{key: encode_graph(graph.get(key)) for key in ("stage", "system", "reads")},
+                **{key: encode_graph(parts.get(key)) for key in ("stage", "system", "reads")},
             }
         else:
             result["context_graph"] = encode_graph(graph)
@@ -160,9 +168,10 @@ class GraphDecoder:
         return {"nodes": nodes, "edges": edges} if size <= logical_bytes else None
 
     def parts(self, value: object) -> ContextGraphParts | None:
-        if not isinstance(value, dict) or value.get("kind") != "context_graph_parts":
+        parts = _parts_mapping(value)
+        if parts is None:
             return None
-        stage, system, reads = (self.graph(value.get(key)) for key in ("stage", "system", "reads"))
+        stage, system, reads = (self.graph(parts.get(key)) for key in ("stage", "system", "reads"))
         if stage is None or system is None or reads is None:
             return None
         return {"kind": "context_graph_parts", "stage": stage, "system": system, "reads": reads}
@@ -196,8 +205,8 @@ class GraphDecoder:
                 graph = self.columns(json.loads(expanded), logical_size)
             except (ValueError, zlib.error, UnicodeDecodeError):
                 return None
-        elif value.get("kind") == "context_graph_parts":
-            parts = self.parts(value)
+        elif (raw_parts := _parts_mapping(cast(object, value))) is not None:
+            parts = self.parts(raw_parts)
             graph = self.inline(graph_from_parts(parts)) if parts is not None else None
         else:
             graph = self.inline(cast(object, value))
@@ -250,11 +259,9 @@ def expand_graph_fields(content: Mapping[str, Any]) -> dict[str, Any]:
 
 def graph_size_adjustment(content: Mapping[str, Any]) -> int:
     """Retain the original replay byte budget despite storage compression."""
-    graph = content.get("context_graph")
-    values = (
-        [graph.get(key) for key in ("stage", "system", "reads")]
-        if isinstance(graph, dict) and graph.get("kind") == "context_graph_parts" else [graph]
-    )
+    graph: object = content.get("context_graph")
+    parts = _parts_mapping(graph)
+    values: list[object] = [parts.get(key) for key in ("stage", "system", "reads")] if parts is not None else [graph]
     snapshot = content.get("context_snapshot")
     if isinstance(snapshot, dict):
         values.append(cast(dict[str, object], snapshot).get("graph"))

@@ -69,6 +69,16 @@ def capture_sources() -> Generator[SourceCapture]:
 
 
 @contextmanager
+def without_source_capture() -> Generator[None]:
+    """Keep independently scheduled runs from inheriting their parent's capture."""
+    token = _sources.set(None)
+    try:
+        yield
+    finally:
+        _sources.reset(token)
+
+
+@contextmanager
 def system_source_scope() -> Generator[None]:
     """Capture a replacement snapshot of the system prompt's file sources."""
     if (capture := _sources.get()) is not None:

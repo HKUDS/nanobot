@@ -71,7 +71,7 @@ class _State:
     calls: set[tuple[str | None, str]] = field(default_factory=set)
 
     def request_parts(self, turn_id: object) -> ContextGraphParts:
-        system = (
+        system: ContextGraph = (
             self.system_graph if isinstance(turn_id, str) and turn_id and turn_id == self.system_turn_id
             else {"nodes": [], "edges": []}
         )
