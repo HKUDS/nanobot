@@ -136,6 +136,7 @@ def open_document_line_source(
     path: str | Path,
     *,
     pages: str | None = None,
+    suffix: str | None = None,
 ) -> DocumentLineSource | None:
     """Open a document as an incremental stream of extracted lines.
 
@@ -145,8 +146,9 @@ def open_document_line_source(
     blank separators) have ``searchable=False`` so range reads can retain them
     without making grep match synthetic text.
     """
+    # Format can come from a displayed name; all I/O uses the supplied path.
     path = Path(path)
-    ext = path.suffix.lower()
+    ext = (path.suffix if suffix is None else suffix).lower()
     if ext not in {".pdf", ".docx", ".xlsx", ".pptx"}:
         return None
     if error := _extraction_path_error(path):
@@ -241,54 +243,55 @@ def _open_xlsx_line_source(path: Path) -> DocumentLineSource:
         from openpyxl import load_workbook
     except ImportError as e:
         raise DocumentExtractionError("openpyxl not installed") from e
-    try:
-        workbook = load_workbook(path, read_only=True, data_only=True)
-    except Exception as e:
-        raise DocumentExtractionError(f"failed to open XLSX: {e!s}") from e
-
     def iter_lines() -> Iterator[LocatedDocumentLine]:
-        extracted_line = 0
-        wrote_document_content = False
-        try:
-            for worksheet in workbook.worksheets:
-                sheet_name = worksheet.title
-                # Producer-supplied dimensions can omit cells that are present in the XML.
-                worksheet.reset_dimensions()
-                wrote_header = False
-                for row_index, row in enumerate(worksheet.iter_rows(values_only=True), 1):
-                    cells = [str(cell) if cell is not None else "" for cell in row]
-                    row_text = "\t".join(cells)
-                    if not row_text.strip():
-                        continue
-                    column_starts: list[int] = []
-                    offset = 0
-                    for cell in cells:
-                        column_starts.append(offset)
-                        offset += len(cell) + 1
-                    if not wrote_header:
-                        if wrote_document_content:
+        # Let openpyxl parse the authorized file even if its real name has no suffix.
+        with path.open("rb") as source:
+            try:
+                workbook = load_workbook(source, read_only=True, data_only=True)
+            except Exception as e:
+                raise DocumentExtractionError(f"failed to open XLSX: {e!s}") from e
+            extracted_line = 0
+            wrote_document_content = False
+            try:
+                for worksheet in workbook.worksheets:
+                    sheet_name = worksheet.title
+                    # Producer-supplied dimensions can omit cells that are present in the XML.
+                    worksheet.reset_dimensions()
+                    wrote_header = False
+                    for row_index, row in enumerate(worksheet.iter_rows(values_only=True), 1):
+                        cells = [str(cell) if cell is not None else "" for cell in row]
+                        row_text = "\t".join(cells)
+                        if not row_text.strip():
+                            continue
+                        column_starts: list[int] = []
+                        offset = 0
+                        for cell in cells:
+                            column_starts.append(offset)
+                            offset += len(cell) + 1
+                        if not wrote_header:
+                            if wrote_document_content:
+                                extracted_line += 1
+                                yield LocatedDocumentLine(
+                                    "", extracted_line, "", searchable=False
+                                )
                             extracted_line += 1
                             yield LocatedDocumentLine(
-                                "", extracted_line, "", searchable=False
+                                f"--- Sheet: {sheet_name} ---",
+                                extracted_line,
+                                "",
+                                searchable=False,
                             )
+                            wrote_header = True
+                            wrote_document_content = True
                         extracted_line += 1
                         yield LocatedDocumentLine(
-                            f"--- Sheet: {sheet_name} ---",
+                            row_text,
                             extracted_line,
-                            "",
-                            searchable=False,
+                            f"sheet={sheet_name!r},row={row_index}",
+                            column_starts=tuple(column_starts),
                         )
-                        wrote_header = True
-                        wrote_document_content = True
-                    extracted_line += 1
-                    yield LocatedDocumentLine(
-                        row_text,
-                        extracted_line,
-                        f"sheet={sheet_name!r},row={row_index}",
-                        column_starts=tuple(column_starts),
-                    )
-        finally:
-            workbook.close()
+            finally:
+                workbook.close()
 
     return DocumentLineSource(iter_lines())
 

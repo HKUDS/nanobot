@@ -634,7 +634,7 @@ class GrepTool(_SearchTool):
 
     @staticmethod
     def _open_source(source: ReadableFile, pages: str | None, max_bytes: int) -> DocumentLineSource | None:
-        if source.path.suffix.lower() in _DOCUMENT_EXTENSIONS:
+        if source.suffix in _DOCUMENT_EXTENSIONS:
             return source.document_lines(pages=pages)
         with source.open() as (file, size):
             if size > max_bytes:
@@ -770,7 +770,7 @@ class GrepTool(_SearchTool):
                     skipped_large += 1
                     continue
                 source_iterator: Iterator[LocatedDocumentLine] | None = None
-                is_document = file.path.suffix.lower() in _DOCUMENT_EXTENSIONS
+                is_document = file.suffix in _DOCUMENT_EXTENSIONS
                 try:
                     source = self._open_source(file, pages, max_file_bytes)
                     if source is None:
