@@ -5,7 +5,6 @@ import difflib
 import hashlib
 import mimetypes
 import os
-import stat
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +21,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.execution.files import NotRegularFileError, open_regular_file
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
@@ -425,17 +425,9 @@ class ReadFileTool(_FsTool):
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
                 return self._read_office_doc(fp, offset, limit)
 
-            # Keep one open file description for detection, hashing, and decoding.
-            # Nonblocking/no-follow flags also avoid opening a swapped-in FIFO or
-            # final symlink on platforms that support them.
-            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-            flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-            with os.fdopen(os.open(fp, flags), "rb") as stream:
-                opened = os.fstat(stream.fileno())
-                if not stat.S_ISREG(opened.st_mode):
-                    return ToolResult.error(f"Error: Not a file: {path}")
-                if opened.st_size > self._MAX_FILE_SIZE_BYTES:
-                    return self._file_too_large(opened.st_size)
+            with open_regular_file(fp) as (stream, opened_size):
+                if opened_size > self._MAX_FILE_SIZE_BYTES:
+                    return self._file_too_large(opened_size)
 
                 check_previous = not force
                 while True:
@@ -485,6 +477,8 @@ class ReadFileTool(_FsTool):
                     # type while the previous receipt was being checked.
                     stream.seek(0)
                     check_previous = False
+        except NotRegularFileError:
+            return ToolResult.error(f"Error: Not a file: {path}")
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
