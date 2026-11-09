@@ -190,6 +190,10 @@ async def test_cross_session_input_preserves_source_in_live_events_and_history(
                 while len(accepted) < index + 1:
                     await asyncio.sleep(0)
             await asyncio.wait_for(started.wait(), 3)
+            if index:
+                async with asyncio.timeout(3):
+                    while loop._pending_queues[target_key].empty():
+                        await asyncio.sleep(0)
         release.set()
         await asyncio.wait_for(
             asyncio.gather(*loop._active_tasks[target_key]), 5,
@@ -209,7 +213,76 @@ async def test_cross_session_input_preserves_source_in_live_events_and_history(
         inputs = [record for record in records if record.get("event") == "user"]
         assert [record["text"] for record in inputs] == [f"Review {i}" for i in range(message_count)]
         assert all(record["session_message"]["session"] == provenance for record in inputs)
+        session = await loop.sessions.state.get(target_key)
+        stored_inputs = [row for row in session.messages if row.get("role") == "user"]
+        assert [row["session_message"] for row in stored_inputs] == [
+            event.provenance["session_message"] for event in events
+        ]
         loop.provider.chat_stream_with_retry.assert_awaited()
+    finally:
+        release.set()
+        disconnect()
+        disconnect_accepted()
+        run.cancel()
+        await asyncio.gather(run, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_queued_cross_session_input_keeps_identity_in_independent_turn(loop: AgentLoop) -> None:
+    source_key, target_key = "websocket:source", "websocket:target"
+    await loop.sessions.state.get(source_key)
+    await loop.sessions.state.get(target_key)
+    await loop.sessions.state.mutate_metadata(target_key, lambda metadata: metadata.update(webui=True))
+    handles = SessionHandleResolver(loop.sessions)
+    destination = await handles.ahandle_for_session(target_key)
+    assert destination is not None
+    tool = SendSessionMessageTool(sessions=loop.sessions, bus=loop.bus)
+    coordinator = WebuiTurnCoordinator(
+        bus=loop.bus, sessions=loop.sessions,
+        schedule_background=lambda coro: coro.close(),
+    )
+    disconnect = coordinator.subscribe()
+    accepted = []
+    disconnect_accepted = loop.bus.subscribe(accepted.append, UserInputAccepted)
+    loop.bus.publish_outbound = AsyncMock()
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def respond(**kwargs):
+        calls.append(kwargs["messages"])
+        if len(calls) == 1:
+            started.set()
+            await release.wait()
+        return LLMResponse(content=f"Answer {len(calls)}", tool_calls=[], usage=None)
+
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    run = asyncio.create_task(loop.run())
+    try:
+        await loop.bus.publish_inbound(InboundMessage(
+            channel="websocket", sender_id="user", chat_id="target", content="Original question",
+            metadata={"webui": True, "webui_turn_id": "original"},
+        ))
+        await asyncio.wait_for(started.wait(), 3)
+        with request_context(RequestContext(
+            channel="websocket", chat_id="source", session_key=source_key,
+        )):
+            await tool.execute(to=destination.name, content="Review", expect_reply=False)
+        async with asyncio.timeout(3):
+            while len(accepted) < 2 or loop._pending_queues[target_key].empty():
+                await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*loop._active_tasks[target_key]), 5)
+
+        assert len(calls) == 2
+        session = await loop.sessions.state.get(target_key)
+        stored = [row for row in session.messages if row.get("role") == "user"]
+        assert [public_history_message(row)["content"] for row in stored] == ["Original question", "Review"]
+        records = await loop.sessions.state.project_history(
+            target_key,
+            lambda history: [record_from_fact(fact, target_key) for fact in history.all_facts()],
+        )
+        displayed = next(row for row in records if row.get("session_message"))
+        assert stored[1]["session_message"] == displayed["session_message"]
     finally:
         release.set()
         disconnect()

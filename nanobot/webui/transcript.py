@@ -1938,6 +1938,7 @@ class _BackfillCandidate(NamedTuple):
 class _ChunkPromptView(NamedTuple):
     prompts: tuple[PromptSummary, ...]
     candidates: tuple[_BackfillCandidate, ...]
+    session_message_ids: frozenset[str]
 
 
 class _PromptView(NamedTuple):
@@ -1971,6 +1972,7 @@ def _prompt_summary(record: dict[str, Any], ordinal: int, answer: str) -> Prompt
 def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
     result: list[PromptSummary] = []
     candidates: list[_BackfillCandidate] = []
+    session_message_ids: set[str] = set()
     turns: dict[int, list[dict[str, Any]]] = {}
     for ordinal, position, fact in history.navigation():
         record = record_from_fact(fact, history.key)
@@ -1990,6 +1992,7 @@ def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
             provenance = normalize_session_message_ui_metadata(record.get("session_message"))
             if provenance:
                 message_id = str(provenance["message_id"])
+                session_message_ids.add(message_id)
                 if message_id in seen_messages:
                     continue
                 seen_messages.add(message_id)
@@ -2006,7 +2009,7 @@ def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
                     if answer:
                         break
             result.append(_prompt_summary(record, ordinal, answer))
-    return _ChunkPromptView(tuple(result), tuple(candidates))
+    return _ChunkPromptView(tuple(result), tuple(candidates), frozenset(session_message_ids))
 
 
 def _build_prompt_view(
@@ -2044,6 +2047,9 @@ def _build_prompt_view(
         if candidate.has_user:
             continue
         user = dict(session_turns[match].user_event)
+        provenance = normalize_session_message_ui_metadata(user.get("session_message"))
+        if provenance and provenance["message_id"] in chunk.session_message_ids:
+            continue
         summary = _prompt_summary(user, candidate.ordinal, candidate.answer_preview)
         entries.append((candidate.ordinal, summary, user))
     prompts: list[PromptSummary] = []

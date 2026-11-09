@@ -100,6 +100,10 @@ from nanobot.session.recovery import (
     restore_pending_interruption,
     restore_runtime_checkpoint,
 )
+from nanobot.session.session_messages import (
+    session_message_envelope,
+    session_message_public_metadata,
+)
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.session.summary import (
@@ -702,6 +706,9 @@ class AgentLoop:
     def _input_history_extra(msg: InboundMessage) -> dict[str, Any]:
         """Keep input admission separate from the run that eventually consumes it."""
         extra: dict[str, Any] = {"timestamp": msg.timestamp.isoformat()}
+        envelope = session_message_envelope(msg.metadata)
+        if msg.channel == "system" and envelope and envelope["target_session_key"] == msg.session_key:
+            extra["session_message"] = session_message_public_metadata(envelope)
         turn_id = msg.metadata.get(INBOUND_META_TURN_ID)
         if isinstance(turn_id, str) and turn_id:
             extra[INBOUND_META_TURN_ID] = turn_id
@@ -2560,6 +2567,9 @@ class AgentLoop:
                         value = cast(dict[str, Any], internal_meta).get(key)
                         if isinstance(value, str) and value:
                             entry[key] = value
+                    session_message = cast(dict[str, Any], internal_meta).get("session_message")
+                    if isinstance(session_message, dict):
+                        entry["session_message"] = session_message
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
             if role == "user" and isinstance(followup_id, str) and followup_id:

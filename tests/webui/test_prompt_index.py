@@ -148,6 +148,51 @@ def test_recovered_prompt_identity_time_and_cursor_survive_pages(history, tmp_pa
     assert history.prompts(key, session_messages_loader=loader) == index
 
 
+@pytest.mark.parametrize("second_recorded", [True, False])
+def test_cross_session_inputs_are_reconciled_by_identity_across_turns(
+    history, tmp_path, monkeypatch, second_recorded,
+):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:cross-session-replay"
+    provenance = [
+        {"message_id": f"message-{i}", "session": {"id": "handle_" + "1" * 32, "name": "luma"}}
+        for i in range(2)
+    ]
+    messages = [
+        {"role": "user", "content": "original question"},
+        {"role": "assistant", "content": "original answer"},
+    ]
+    history.append(key, {"event": "user", "text": "original question"})
+    for i, source in enumerate(provenance):
+        messages.extend([
+            {"role": "user", "content": "same message", "session_message": source},
+            {"role": "assistant", "content": f"answer {i}"},
+        ])
+        if i == 0 or second_recorded:
+            history.append(key, {"event": "user", "text": "same message", "session_message": source})
+    history.append(key, {"event": "message", "text": "original answer"})
+    history.append(key, {"event": "turn_end"})
+    for i in range(2):
+        history.append(key, {"event": "message", "text": f"answer {i}"})
+        history.append(key, {"event": "turn_end"})
+
+    def loader():
+        return messages
+
+    page = history.build(key, limit=10, session_messages_loader=loader)
+    users = [event for event in page["events"] if event["event"] == "user_message"]
+    assert [user["text"] for user in users] == ["original question", "same message", "same message"]
+    assert [user["provenance"]["session_message"]["message_id"] for user in users[1:]] == [
+        "message-0", "message-1",
+    ]
+    prompts = history.prompts(key, session_messages_loader=loader)
+    assert [prompt["id"] for prompt in prompts] == [user["projection_id"] for user in users]
+    latest = history.build(key, limit=1, session_messages_loader=loader)
+    assert [event["text"] for event in latest["events"] if event["event"] == "user_message"] == (
+        [] if second_recorded else ["same message"]
+    )
+
+
 @pytest.mark.asyncio
 async def test_recovered_public_index_and_page_validators_include_canonical_timestamp(history, tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)

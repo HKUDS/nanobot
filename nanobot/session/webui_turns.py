@@ -42,10 +42,9 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
-from nanobot.session.session_handles import session_handle_for_name
 from nanobot.session.session_messages import (
-    SessionMessageEnvelope,
     session_message_envelope,
+    session_message_public_metadata,
 )
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.utils.helpers import strip_think, truncate_text
@@ -83,19 +82,6 @@ class _WebsocketTurn:
 # All in-flight lifecycle owners per chat, in admission order. The three maps
 # above remain the latest-owner projection consumed by the HTTP API.
 _WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
-
-
-def _session_message_public_metadata(
-    envelope: SessionMessageEnvelope,
-) -> dict[str, Any]:
-    source = session_handle_for_name(
-        envelope["source_session_key"],
-        envelope["source_handle"],
-    )
-    return {
-        "message_id": envelope["message_id"],
-        "session": source.public_payload(),
-    }
 
 
 def _validated_llm_runtime(value: object) -> LLMRuntime | None:
@@ -672,7 +658,7 @@ class WebuiTurnCoordinator:
         )
         if metadata is None or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
             return
-        public_metadata = _session_message_public_metadata(envelope)
+        public_metadata = session_message_public_metadata(envelope)
         try:
             await append_session_message_input(
                 session_key,

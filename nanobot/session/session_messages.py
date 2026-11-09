@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping
 from typing import Any, TypedDict, cast
 
-from nanobot.session.session_handles import normalize_session_handle
+from nanobot.session.session_handles import normalize_session_handle, session_handle_for_name
 
 SESSION_MESSAGE_METADATA_KEY = "_session_message"
 
@@ -65,6 +65,12 @@ def session_message_envelope(
         "source_session_key": source_session_key,
         "target_session_key": target_session_key,
     }
+
+
+def session_message_public_metadata(envelope: SessionMessageEnvelope) -> dict[str, Any]:
+    """Return stable provenance without private routing identifiers."""
+    source = session_handle_for_name(envelope["source_session_key"], envelope["source_handle"])
+    return {"message_id": envelope["message_id"], "session": source.public_payload()}
 
 
 def _session_key(value: object) -> str | None:
