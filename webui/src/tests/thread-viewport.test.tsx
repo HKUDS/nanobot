@@ -201,6 +201,14 @@ function getScroller(container: HTMLElement): HTMLElement {
   return scroller;
 }
 
+function mockMessageEnd(scroller: HTMLElement) {
+  const rows = scroller.querySelectorAll<HTMLElement>(".thread-message-row");
+  const row = rows[rows.length - 1];
+  scroller.getBoundingClientRect = () => ({ bottom: scroller.clientHeight } as DOMRect);
+  row.getBoundingClientRect = () => ({ height: 100, bottom: scroller.scrollHeight - scroller.scrollTop } as DOMRect);
+  act(() => window.dispatchEvent(new Event("resize")));
+}
+
 async function renderPromptRailViewport({
   scrollTo,
   messages: promptMessages = makePromptExchangeMessages(5),
@@ -922,6 +930,7 @@ describe("ThreadViewport", () => {
     await flushAnimationFrame();
     followTo.mockClear();
 
+    mockMessageEnd(scroller);
     act(() => {
       fireEvent.wheel(scroller, { deltaY: -24 });
       scroller.scrollTop = 1_380;
@@ -970,6 +979,43 @@ describe("ThreadViewport", () => {
       .not.toBeInTheDocument();
   });
 
+  it("tracks the message content edge independently of trailing space and motion ownership", () => {
+    const resizeObserver = stubResizeObserver();
+    try {
+      const { container } = render(<ThreadViewport messages={messages} isStreaming={false} composer={<div>composer</div>} />);
+      const scroller = getScroller(container);
+      const content = scroller.firstElementChild as HTMLElement;
+      const row = scroller.querySelector<HTMLElement>(".thread-message-row:last-child")!;
+      const gap = scroller.querySelector<HTMLElement>(".thread-message-end-gap")!;
+      let contentBottom = 565;
+      scroller.getBoundingClientRect = () => ({ bottom: 600 } as DOMRect);
+      gap.getBoundingClientRect = () => ({ height: 36 } as DOMRect);
+      row.getBoundingClientRect = () => ({ bottom: contentBottom, height: 100 } as DOMRect);
+      act(() => window.dispatchEvent(new Event("resize")));
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 1000 },
+        clientHeight: { configurable: true, value: 600 },
+        scrollTop: { configurable: true, writable: true, value: 300 },
+      });
+      act(() => { scroller.dispatchEvent(new Event("scroll")); });
+      expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+      contentBottom = 564;
+      act(() => { scroller.dispatchEvent(new Event("scroll")); });
+      expect(screen.queryByRole("button", { name: "Scroll to bottom" })).not.toBeInTheDocument();
+      contentBottom = 570;
+      const observer = resizeObserver.observers.find((item) => item.elements.includes(content))!;
+      act(() => { observer.callback([], observer); });
+      expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+      vi.spyOn(ThreadMotionCoordinator.prototype, "navigateLatestTo").mockReturnValue("started");
+      fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+      expect(screen.queryByRole("button", { name: "Scroll to bottom" })).not.toBeInTheDocument();
+      fireEvent.wheel(scroller, { deltaY: -20 });
+      expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+    } finally {
+      resizeObserver.restore();
+    }
+  });
+
   it("keeps the scroll-to-bottom button above a growing composer", async () => {
     const resizeObserver = stubResizeObserver();
 
@@ -988,6 +1034,7 @@ describe("ThreadViewport", () => {
         scrollTop: { configurable: true, value: 0 },
       });
 
+      mockMessageEnd(scroller);
       act(() => {
         dispatchUserScroll(scroller);
       });
@@ -1046,6 +1093,7 @@ describe("ThreadViewport", () => {
       scrollTop: { configurable: true, writable: true, value: 0 },
     });
 
+    mockMessageEnd(scroller);
     act(() => {
       dispatchUserScroll(scroller);
     });
@@ -2379,6 +2427,7 @@ describe("ThreadViewport", () => {
         clientHeight: { configurable: true, value: 600 },
         scrollTop: { configurable: true, writable: true, value: 300 },
       });
+      mockMessageEnd(scroller);
       act(() => {
         dispatchUserScroll(scroller);
       });
