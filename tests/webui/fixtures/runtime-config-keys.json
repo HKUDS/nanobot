@@ -38,7 +38,5 @@
   "network.proxy",
   "tools.web.use_proxy",
   "tools.web.user_agent",
-  "tools.image_generation.save_dir",
-  "api.host",
-  "api.timeout"
+  "tools.image_generation.save_dir"
 ]

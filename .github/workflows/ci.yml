@@ -553,7 +553,7 @@ jobs:
           from pathlib import Path
 
           config = json.loads(Path(os.environ["RUNNER_TEMP"], "bwrap-compose.json").read_text())
-          for service_name in ("nanobot-gateway", "nanobot-api", "nanobot-cli"):
+          for service_name in ("nanobot-gateway", "nanobot-cli"):
               service = config["services"][service_name]
               assert {"CHOWN", "SETGID", "SETUID", "SYS_ADMIN"} <= set(service["cap_add"])
               assert "no-new-privileges:true" in service["security_opt"]

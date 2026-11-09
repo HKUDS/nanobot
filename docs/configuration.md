@@ -255,7 +255,7 @@ Install the optional package in the same Python environment that runs nanobot:
 nanobot plugins enable langfuse
 ```
 
-Set Langfuse credentials before starting `nanobot agent`, `nanobot gateway`, or `nanobot serve`:
+Set Langfuse credentials before starting `nanobot agent` or `nanobot gateway`:
 
 ```bash
 export LANGFUSE_SECRET_KEY="sk-lf-..."

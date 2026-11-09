@@ -4,7 +4,6 @@ import pytest
 
 from nanobot.config.errors import ConfigLoadError
 from nanobot.config.loader import load_config, resolve_config_env_vars
-from nanobot.config.schema import ApiConfig
 
 
 def test_load_config_missing_file_uses_defaults(tmp_path) -> None:
@@ -173,14 +172,20 @@ def test_load_config_malformed_legacy_sections_use_structured_error(
     assert "tools" in str(error)
 
 
-@pytest.mark.parametrize("host", ["0.0.0.0", "::"])
-def test_api_config_requires_key_for_wildcard_hosts(host: str) -> None:
-    with pytest.raises(ValueError, match="api_key is not set"):
-        ApiConfig(host=host)
 
+def test_loads_pre_removal_config_without_the_retired_service_secret(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "config.json"
+    monkeypatch.delenv("REMOVED_SERVE_TOKEN", raising=False)
+    legacy = json.dumps({
+        "api": {"host": "0.0.0.0", "port": 8900, "apiKey": "${REMOVED_SERVE_TOKEN}"},
+        "gateway": {"port": 18791},
+        "providers": {"custom": {"apiBase": "http://model:8000/v1"}},
+    })
+    config_path.write_text(legacy, encoding="utf-8")
 
-def test_api_config_allows_wildcard_host_with_key() -> None:
-    config = ApiConfig(host="0.0.0.0", api_key="secret")
+    from nanobot.config.loader import resolve_config_env_vars
 
-    assert config.host == "0.0.0.0"
-    assert config.api_key == "secret"
+    config = resolve_config_env_vars(load_config(config_path), config_path=config_path)
+    assert config.gateway.port == 18791
+    assert config.providers.custom.api_base == "http://model:8000/v1"
+    assert config_path.read_text(encoding="utf-8") == legacy

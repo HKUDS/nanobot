@@ -11,7 +11,6 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
-from nanobot.api.runtime import ApiRuntime, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
@@ -48,7 +47,6 @@ from nanobot.webui.settings_api import (
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
-    update_api_settings,
     update_image_generation_settings,
     update_model_call_order,
     update_model_configuration,
@@ -122,9 +120,6 @@ _MODEL_ROUTES = {
 
 _CAPABILITY_ROUTES = {
     "/api/settings/web-search/update": "web-search-update",
-    "/api/settings/api-service": "api-status",
-    "/api/settings/api-service/start": "api-start",
-    "/api/settings/api-service/stop": "api-stop",
     "/api/settings/image-generation/update": "image-update",
     "/api/settings/transcription/update": "transcription-update",
     "/api/settings/network-safety/update": "network-update",
@@ -183,8 +178,6 @@ _SETTINGS_MUTATION_PATHS = frozenset({
     "/api/settings/provider/oauth-login/complete",
     "/api/settings/provider/oauth-logout",
     "/api/settings/web-search/update",
-    "/api/settings/api-service/start",
-    "/api/settings/api-service/stop",
     "/api/settings/image-generation/update",
     "/api/settings/transcription/update",
     "/api/settings/network-safety/update",
@@ -334,7 +327,6 @@ class WebUISettingsRouter:
             request,
             needs_local_browser=(
                 action in {
-                    "api-start",
                     "runtime-config-update",
                     "features-enable",
                     "channel-configure",
@@ -534,12 +526,9 @@ class WebUISettingsRouter:
     ) -> capability_domain.CapabilitySettingsOperations:
         return capability_domain.CapabilitySettingsOperations(
             update_web_search=update_web_search_settings,
-            update_api=update_api_settings,
             update_image=update_image_generation_settings,
             update_transcription=update_transcription_settings,
             update_network=update_network_safety_settings,
-            nanobot_features_action=nanobot_features_action,
-            api_runtime=self._api_runtime,
             reload_image=self._reload_image_generation_runtime,
         )
 
@@ -632,9 +621,6 @@ class WebUISettingsRouter:
 
     def _parse_mcp_settings_query(self, request: WsRequest) -> QueryParams:
         return self._query(request)
-
-    def _api_runtime(self) -> ApiRuntime:
-        return ApiRuntime(paths=api_runtime_paths(self.settings.config.path))
 
     def _save_channel_config_values(
         self,

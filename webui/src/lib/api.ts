@@ -1,7 +1,6 @@
 import { isContextGraph, isContextInspection } from "@/lib/context-graph";
 import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
-  ApiServicePayload,
   AutomationChatsPayload,
   AutomationChatUpdate,
   AutomationsPayload,
@@ -1009,33 +1008,6 @@ export async function fetchNanobotFeatures(
     undefined,
     API_READ_TIMEOUT_MS,
   );
-}
-
-export async function fetchApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
-  return request<ApiServicePayload>(`${base}/api/settings/api-service`, token);
-}
-
-export async function startApiService(
-  transport: WebUIMutationTransport,
-  values: { host: string; port: number; timeout: number; apiKey?: string },
-): Promise<ApiServicePayload> {
-  return mutation<ApiServicePayload>(
-    transport,
-    "settings.api_service.start",
-    {
-      host: values.host,
-      port: values.port,
-      timeout: values.timeout,
-      ...(values.apiKey !== undefined ? { api_key: values.apiKey } : {}),
-    },
-    PACKAGE_MUTATION_TIMEOUT_MS,
-  );
-}
-
-export async function stopApiService(
-  transport: WebUIMutationTransport,
-): Promise<ApiServicePayload> {
-  return mutation<ApiServicePayload>(transport, "settings.api_service.stop");
 }
 
 export async function enableNanobotFeature(

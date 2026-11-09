@@ -974,19 +974,16 @@ async def test_runtime_config_route_authentication_validation_and_restart(tmp_pa
     assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
 
 
-async def test_runtime_settings_only_save_without_refreshing_or_rebinding(tmp_path, monkeypatch):
+async def test_runtime_settings_only_save_without_refreshing_or_rebinding(tmp_path):
     refresh = MagicMock()
-    runtime = MagicMock()
-    monkeypatch.setattr(WebUISettingsRouter, "_api_runtime", lambda _self: runtime)
     router = _router(config_path=tmp_path / "config.json", refresh_runtime_config=refresh)
     path = "/api/settings/runtime-config/update"
     response = await router.dispatch(None, _mutation_request(path, {
-        "values": {"agents.defaults.dream.enabled": False, "api.timeout": 45},
+        "values": {"agents.defaults.dream.enabled": False, "gateway.port": 19001},
     }), path)
     assert response.status_code == 200
     assert json.loads(response.body)["requires_restart"]
     refresh.assert_not_called()
-    runtime.restart.assert_not_called()
 
 
 async def test_reverting_runtime_switch_clears_restart_but_preserves_other_changes(tmp_path):
@@ -1015,7 +1012,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
     router = _router(config_path=tmp_path / "config.json")
     config = router.settings.config.load()
     original_reader = config.tools.web.fetch.use_jina_reader
-    original_timeout = config.api.timeout
+    original_port = config.gateway.port
     path = "/api/settings/web-search/update"
     first = await router.dispatch(None, _mutation_request(path, {
         "provider": "duckduckgo", "use_jina_reader": not original_reader,
@@ -1025,7 +1022,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
 
     runtime_path = "/api/settings/runtime-config/update"
     changed = await router.dispatch(None, _mutation_request(runtime_path, {
-        "values": {"api.timeout": original_timeout + 1},
+        "values": {"gateway.port": original_port + 1},
     }), runtime_path)
     assert changed.status_code == 200
     assert set(json.loads(changed.body)["restart_required_sections"]) == {"browser", "runtime"}
@@ -1038,7 +1035,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
     refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
     assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
     reverted = await router.dispatch(None, _mutation_request(runtime_path, {
-        "values": {"api.timeout": original_timeout},
+        "values": {"gateway.port": original_port},
     }), runtime_path)
     assert reverted.status_code == 200
     assert json.loads(reverted.body)["restart_required_sections"] == []

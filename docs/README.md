@@ -49,7 +49,6 @@ Pick the row that matches what you want to accomplish next:
 | Run nanobot continuously | [Deployment](./deployment.md) |
 | Run separate bots or workspaces | [Multiple Instances](./multiple-instances.md) |
 | Call nanobot from Python | [Python SDK](./python-sdk.md) |
-| Expose an OpenAI-compatible endpoint | [OpenAI-Compatible API](./openai-api.md) |
 
 For shorter, outcome-focused walkthroughs, browse the [task guide index](./guides/README.md).
 
@@ -76,7 +75,6 @@ Use reference pages to look up an exact option after you know what you are tryin
 | Chat channel prerequisites and manual JSON | [Chat Apps](./chat-apps.md) |
 | WebSocket authentication and wire protocol | [WebSocket](./websocket.md) |
 | Python SDK classes, events, sessions, and hooks | [Python SDK](./python-sdk.md) |
-| OpenAI-compatible HTTP routes and payloads | [OpenAI-Compatible API](./openai-api.md) |
 | Runtime self-inspection and tuning | [My Tool](./my-tool.md) |
 
 Configuration examples are usually snippets to merge into `~/.nanobot/config.json`, not complete replacement files. The docs use camelCase because nanobot writes config that way. Keep real API keys, bot tokens, and passwords out of issues and public logs.

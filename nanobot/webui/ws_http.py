@@ -212,8 +212,6 @@ _WEBUI_MUTATION_PATHS = {
     "settings.provider.oauth_complete": "/api/settings/provider/oauth-login/complete",
     "settings.provider.oauth_logout": "/api/settings/provider/oauth-logout",
     "settings.web_search.update": "/api/settings/web-search/update",
-    "settings.api_service.start": "/api/settings/api-service/start",
-    "settings.api_service.stop": "/api/settings/api-service/stop",
     "settings.image_generation.update": "/api/settings/image-generation/update",
     "settings.transcription.update": "/api/settings/transcription/update",
     "settings.runtime_config.update": "/api/settings/runtime-config/update",

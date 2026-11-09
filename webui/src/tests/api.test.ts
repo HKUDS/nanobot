@@ -17,7 +17,6 @@ import {
   fetchAutomations,
   fetchAutomationChats,
   fetchAutomationRunResult,
-  fetchApiService,
   fetchCliApps,
   fetchInstalledCliApps,
   fetchMcpOAuthStatus,
@@ -27,6 +26,7 @@ import {
   fetchProviderModels,
   fetchPromptIndex,
   fetchSessionAutomations,
+  fetchSettings,
   fetchSettingsUsage,
   fetchSidebarState,
   fetchSkillDetail,
@@ -50,9 +50,7 @@ import {
   runMcpPresetAction,
   saveCustomMcpServer,
   searchMarketplaceSkills,
-  startApiService,
   startMcpOAuth,
-  stopApiService,
   cancelChannelConnect,
   pollChannelConnect,
   startChannelConnect,
@@ -781,7 +779,7 @@ describe("webui API helpers", () => {
       }),
     );
 
-    await expect(fetchApiService("tok")).rejects.toMatchObject({
+    await expect(fetchSettings("tok")).rejects.toMatchObject({
       status: 200,
       message: "Gateway returned WebUI HTML instead of JSON. Restart nanobot gateway and try again.",
     });
@@ -1097,41 +1095,6 @@ describe("webui API helpers", () => {
     expect(requestMutation).toHaveBeenLastCalledWith(
       "settings.feature.disable",
       { name: "matrix" },
-      20_000,
-    );
-  });
-
-  it("manages the API service capability", async () => {
-    await fetchApiService("tok");
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/api-service",
-      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
-    );
-
-    await startApiService(
-      mutationTransport,
-      { host: "127.0.0.1", port: 8900, timeout: 120 },
-    );
-    expect(requestMutation).toHaveBeenLastCalledWith(
-      "settings.api_service.start",
-      { host: "127.0.0.1", port: 8900, timeout: 120 },
-      150_000,
-    );
-
-    await startApiService(
-      mutationTransport,
-      { host: "0.0.0.0", port: 8900, timeout: 120, apiKey: "secret-token" },
-    );
-    expect(requestMutation).toHaveBeenLastCalledWith(
-      "settings.api_service.start",
-      { host: "0.0.0.0", port: 8900, timeout: 120, api_key: "secret-token" },
-      150_000,
-    );
-
-    await stopApiService(mutationTransport);
-    expect(requestMutation).toHaveBeenLastCalledWith(
-      "settings.api_service.stop",
-      {},
       20_000,
     );
   });

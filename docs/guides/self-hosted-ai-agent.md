@@ -25,7 +25,7 @@ Self-hosting keeps the agent runtime and its state on your machine. A hosted mod
 
 ## Confirm the result
 
-Send a message through the interface you intend to use. Check that it replies, then confirm the chosen gateway or service stays running after you close the setup terminal. Browser, chat channels, and automations use the gateway; the optional OpenAI-compatible API has its own [service setup](./openai-compatible-agent-api.md).
+Send a message through the interface you intend to use. Check that it replies, then confirm the chosen gateway or service stays running after you close the setup terminal. Browser, chat channels, and automations use the gateway.
 
 ## Production notes
 
@@ -37,7 +37,6 @@ Send a message through the interface you intend to use. Check that it replies, t
 ## Security notes
 
 - Bind local-only services to `127.0.0.1` unless you intentionally expose them.
-- Set an API key before binding the OpenAI-compatible API to a public interface.
 - Prefer pairing for DM-capable chat apps, and keep any static `allowFrom` allowlists strict.
 - Enable `tools.restrictToWorkspace`; on Linux, use the bubblewrap sandbox for shell execution.
 
@@ -53,4 +52,3 @@ Send a message through the interface you intend to use. Check that it replies, t
 - [Multiple Instances](../multiple-instances.md)
 - [Configuration](../configuration.md)
 - [Chat Apps](../chat-apps.md)
-- [OpenAI-Compatible API](../openai-api.md)

@@ -467,15 +467,10 @@ export function SettingsPage({
               onRestart={showSidebar ? undefined : restartViaSettingsSurface}
               isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.runtime}
-              apiService={systemState.apiService}
-              apiServiceLoading={systemState.apiServiceLoading}
-              apiServiceAction={systemState.apiServiceAction}
-              apiServiceError={systemState.apiServiceError}
               langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
               capabilitiesLoading={systemState.nanobotFeaturesLoading}
               capabilityAction={systemState.nanobotFeatureAction}
               capabilityError={systemState.nanobotFeaturesError}
-              onApiServiceAction={systemActions.handleApiServiceAction}
               onInstallCapability={(name) => void systemActions.installCapabilities([name])}
             />
           </div>

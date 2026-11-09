@@ -154,13 +154,3 @@ def test_saved_file_lives_under_media_dir(tmp_path) -> None:
     result = save_base64_data_url(_data_url(b"ok"), tmp_path)
     assert result is not None
     assert result.startswith(str(tmp_path))
-
-
-def test_legacy_symbols_reexported_from_api_server() -> None:
-    """Existing tests import ``_save_base64_data_url`` / ``_FileSizeExceeded``
-    from ``nanobot.api.server`` — keep the aliases working."""
-    from nanobot.api import server
-
-    assert server._save_base64_data_url is save_base64_data_url
-    assert server._FileSizeExceeded is FileSizeExceeded
-    assert server.MAX_FILE_SIZE == MAX_FILE_SIZE
