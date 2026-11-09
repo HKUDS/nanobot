@@ -81,6 +81,46 @@ describe("merged waiting messages", () => {
     ]);
   });
 
+  it("edits and remounts queued generic and empty local attachments without losing them", async () => {
+    const local = { path: "/project/empty", name: "empty", size: 0, mime: "application/octet-stream", kind: "file" as const, url: "" };
+    const binary = { dataUrl: "data:application/octet-stream;base64,AP+A", kind: "file", name: " 未知 " };
+    const empty = { dataUrl: "data:application/octet-stream;base64,", kind: "file", name: "empty.png" };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+      { id: "files", text: "", images: [binary, empty, { local, kind: "file" }] },
+    ]));
+    const draftStore = new ComposerDraftStore();
+    const onSend = vi.fn();
+    const props = { onSend, pendingQueueKey: "chat-a", draftKey: "chat-a", draftStore, allowAnyFileAttachments: true };
+    const view = render(<ThreadComposer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+    expect(screen.getAllByTestId("composer-chip")).toHaveLength(3);
+    view.unmount();
+    render(<ThreadComposer {...props} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("", [
+      expect.objectContaining({ media: { data_url: binary.dataUrl, name: binary.name }, preview: expect.objectContaining({ kind: "file" }) }),
+      expect.objectContaining({ media: { data_url: empty.dataUrl, name: empty.name }, preview: expect.objectContaining({ kind: "file" }) }),
+      expect.objectContaining({ media: { path: local.path, name: local.name } }),
+    ], undefined);
+  });
+
+  it("retains a queued any-file draft when switched to an older host, then sends after an upgrade", () => {
+    const attachment = { dataUrl: "data:application/octet-stream;base64,", kind: "file", name: "empty" };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{ id: "files", text: "", images: [attachment] }]));
+    const onSend = vi.fn();
+    const view = render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" />);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Upgrade the host to attach this file");
+    expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("empty");
+    view.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" allowAnyFileAttachments />);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledWith("", [expect.objectContaining({
+      media: { data_url: attachment.dataUrl, name: attachment.name },
+    })]);
+  });
+
   it("preserves merged text longer than the former per-entry storage truncation across remounts", () => {
     const onSend = vi.fn();
     const first = render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming />);

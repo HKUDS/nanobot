@@ -594,6 +594,7 @@ export function SettingsPage({
           <div className="settings-stack">
             <AutomationsSettings
               token={token}
+              allowAnyFileAttachments={webuiCapabilities.includes("webui.attachments.any-file.v1")}
               payload={systemState.automations}
               titleOverrides={titleOverrides}
               sessions={sessions}

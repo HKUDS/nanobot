@@ -66,6 +66,7 @@ export function AutomationsSettings({
   titleOverrides = EMPTY_TITLE_OVERRIDES,
   sessions = EMPTY_SESSIONS,
   settingsSnapshot = null,
+  allowAnyFileAttachments = false,
   onFilterChange, onAction,
   onRequestEdit, onRequestDelete, onStartChat, onManageModels,
   returnToDetailJob = null, onReturnToDetailHandled,
@@ -76,6 +77,7 @@ export function AutomationsSettings({
   titleOverrides?: Record<string, string>;
   sessions?: ChatSummary[];
   settingsSnapshot?: SettingsPayload | null;
+  allowAnyFileAttachments?: boolean;
   loading: boolean;
   filter: AutomationFilter;
   actionKey: string | null;
@@ -242,6 +244,7 @@ export function AutomationsSettings({
           >
             <ThreadComposer
               onSend={startAutomationChat}
+              allowAnyFileAttachments={allowAnyFileAttachments}
               inputAriaLabel={tx("settings.automations.createInput", "Describe an automation")}
               placeholder={tx(
                 "settings.automations.createPrompt",

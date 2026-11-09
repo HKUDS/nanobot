@@ -12,7 +12,7 @@ export function isLocalAttachment(value: unknown): value is LocalAttachment {
   const row = value as Record<string, unknown>;
   return typeof row.path === "string" && row.path.length > 0 && row.path.length <= 4096
     && typeof row.name === "string" && typeof row.mime === "string"
-    && typeof row.size === "number" && Number.isSafeInteger(row.size) && row.size > 0
+    && typeof row.size === "number" && Number.isSafeInteger(row.size) && row.size >= 0
     && typeof row.kind === "string" && ["image", "video", "file"].includes(row.kind)
     && typeof row.url === "string" && (row.url === "" || row.url.startsWith("/api/media/"));
 }
@@ -24,7 +24,7 @@ export type AttachmentReference =
   | { path: string; name?: string; reference?: never };
 
 /** Recognize only a standalone pasted path, never search prose/code for one. */
-export function pastedFilePath(text: string): string | null {
+export function pastedFilePath(text: string, { allowBareNames = false } = {}): string | null {
   let value = text.trim();
   if (!value || /[\r\n\0]/.test(value)) return null;
   const quoted = (value.startsWith('"') && value.endsWith('"'))
@@ -34,7 +34,7 @@ export function pastedFilePath(text: string): string | null {
     || /^[a-z]:[\\/]fakepath[\\/]/i.test(value)) return null;
   if (/^(?:[a-z]:[\\/]|\/|\\\\|\.{1,2}[\\/]|~[\\/])/i.test(value)) return value;
   // Bare relative names and relative directory paths; whitespace needs quotes.
-  return (quoted || !/\s/.test(value)) && /(?:[\\/]|\.[\w-]+$)/u.test(value)
+  return (quoted || !/\s/.test(value)) && (allowBareNames || /(?:[\\/]|\.[\w-]+$)/u.test(value))
     ? value : null;
 }
 /** One in-flight paste owns only its original text range, not the whole composer. */
@@ -105,7 +105,7 @@ export async function uploadAttachments(
     url.username = "";
     url.password = "";
     const match = /^data:([^;,]+);base64,([\s\S]*)$/.exec(draft.data_url);
-    if (!match?.[1] || !match[2]) throw new Error("Invalid attachment preview");
+    if (!match?.[1] || match[2] === undefined) throw new Error("Invalid attachment preview");
     const raw = atob(match[2]);
     const bytes = Uint8Array.from(raw, (character) => character.charCodeAt(0));
     const response = await fetch(url, {

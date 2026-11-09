@@ -126,7 +126,7 @@ def file_preview_availability_payload(
 def resolve_file_path(
     raw_path: str | None, *, scope: WorkspaceScope, literal: bool = False,
 ) -> Path:
-    path = (raw_path or "").strip() if literal else _clean_preview_path(raw_path)
+    path = (raw_path or "") if literal else _clean_preview_path(raw_path)
     if not path:
         raise WebUIFilePreviewError(400, "missing path")
     if len(path) > 4096:

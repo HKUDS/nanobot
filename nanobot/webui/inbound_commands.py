@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
-from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
+from nanobot.bus.events import INBOUND_META_FILE_MEDIA, INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
+from nanobot.channels.websocket.attachment_policy import IMAGE_MIME_ALLOWED, validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
 from nanobot.command.builtin import USER_SHELL_COMMAND
@@ -755,6 +755,13 @@ class WebUICommandRouter:
             return
         if local:
             metadata[INBOUND_META_LOCAL_MEDIA] = [item["path"] for item in local]
+        if trusted_webui:
+            metadata[INBOUND_META_FILE_MEDIA] = [
+                local[index]["path"] if is_local else str(uploaded[index].path)
+                for is_local, index in attachment_order
+                if (local[index]["kind"] != "image" if is_local else
+                    uploaded[index].size == 0 or uploaded[index].mime not in IMAGE_MIME_ALLOWED)
+            ]
         if temporary_policy is not None:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True

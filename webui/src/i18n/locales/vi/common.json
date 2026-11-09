@@ -2121,6 +2121,7 @@
       "textTooLarge": "Nội dung tin nhắn quá lớn (tối đa {{max}})",
       "imageRejected": {
         "unsupported_type": "Loại tệp không được hỗ trợ",
+        "host_upgrade_required": "Hãy cập nhật máy chủ để đính kèm tệp này.",
         "empty_file": "Không thể đính kèm tệp trống",
         "too_many_attachments": "Tối đa {{max}} tệp đính kèm mỗi tin nhắn",
         "too_many_videos": "Tối đa 1 video mỗi tin nhắn",

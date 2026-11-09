@@ -2668,6 +2668,31 @@ describe("binary attachment transport", () => {
     } finally { client.close(); vi.unstubAllGlobals(); }
   });
 
+  it("uploads a zero-byte data URL and sends its named reference over WebSocket", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ reference: "empty-ref" }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    try {
+      client.connect();
+      const socket = lastSocket(); socket.fakeOpen();
+      socket.fakeMessage({ event: "ready", chat_id: "chat", client_id: "test",
+        upload: { path: "/api/attachments", token: "cap" } });
+      const delivery = client.sendAttachments("chat", "", [
+        { data_url: "data:application/octet-stream;base64,", name: "空 文件" },
+      ], { turnId: "empty-file" });
+      await vi.waitFor(() => expect(socket.sent.some((frame) => frame.includes("empty-ref"))).toBe(true));
+      const [, request] = fetchMock.mock.calls[0];
+      expect(request.headers["Content-Type"]).toBe("application/octet-stream");
+      expect(request.headers["X-Attachment-Name"]).toBe(encodeURIComponent("空 文件"));
+      expect(request.body.size).toBe(0);
+      const frame = JSON.parse(socket.sent.find((value) => value.includes("empty-ref"))!);
+      expect(frame.media).toEqual([{ reference: "empty-ref", name: "空 文件" }]);
+      socket.fakeMessage({ event: "message_accepted", chat_id: "chat", turn_id: "empty-file" });
+      await delivery;
+    } finally { client.close(); vi.unstubAllGlobals(); }
+  });
+
   it("uploads >1 MiB as HTTP bytes and waits for a small WS reference ACK", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ reference: "opaque-ref" }, { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);

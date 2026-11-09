@@ -23,36 +23,20 @@ IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
 VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
     "video/mp4", "video/webm", "video/quicktime",
 })
-DOCUMENT_MIME_ALLOWED: frozenset[str] = frozenset({
-    "application/json",
-    "application/pdf",
-    "application/toml",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/x-yaml",
-    "application/xhtml+xml",
-    "application/xml",
-    "application/yaml",
-    "text/csv", "text/html", "text/markdown", "text/plain", "text/xml", "text/yaml",
-})
-UPLOAD_MIME_ALLOWED = IMAGE_MIME_ALLOWED | VIDEO_MIME_ALLOWED | DOCUMENT_MIME_ALLOWED
 
 
 def validate_attachment_batch(
     mimes: list[str], *, limits: AttachmentIngressLimits,
 ) -> None:
-    """Apply shared format and count limits without imposing an upload budget."""
+    """Apply count limits without imposing an upload budget on local files."""
     videos = sum(mime in VIDEO_MIME_ALLOWED for mime in mimes)
     if videos > MAX_VIDEOS_PER_MESSAGE or len(mimes) - videos > limits.max_count:
         raise ValueError("Too many attachments")
-    if any(mime not in UPLOAD_MIME_ALLOWED for mime in mimes):
-        raise ValueError("Unsupported attachment MIME")
 
 
 def validate_upload_size(mime: str, size: int, *, limits: AttachmentIngressLimits) -> None:
-    if isinstance(size, bool) or size <= 0:
-        raise ValueError("Empty files cannot be uploaded")
+    if isinstance(size, bool) or size < 0:
+        raise ValueError("Invalid attachment size")
     limit = MAX_VIDEO_BYTES if mime in VIDEO_MIME_ALLOWED else limits.max_file_bytes
     if size > limit:
         maximum = f"{limit / (1024 * 1024):g} MiB" if limit >= 1024 * 1024 else f"{limit:,} bytes"

@@ -54,6 +54,19 @@ describe("composer draft storage", () => {
     expect(new ComposerDraftStore().get(key, true)?.attachments).toEqual([last, first]);
   });
 
+  it("persists an empty local attachment while rejecting invalid saved sizes", () => {
+    const empty = { path: "/project/empty", name: "empty", size: 0, mime: "application/octet-stream", kind: "file" as const, url: "" };
+    const store = new ComposerDraftStore();
+    const attachmentOnly = { text: "", quotedContext: null, sessionMentions: [], attachments: [empty] };
+    store.set(key, attachmentOnly, true);
+    expect(new ComposerDraftStore().get(key, true)).toEqual(attachmentOnly);
+
+    localStorage.setItem(storageKey, JSON.stringify({
+      ...attachmentOnly, attachments: [empty, { ...empty, size: -1 }, { ...empty, size: 0.5 }],
+    }));
+    expect(new ComposerDraftStore().get(key, true)?.attachments).toEqual([empty]);
+  });
+
   it("reads local references already saved in v1 drafts", () => {
     const local = { path: "/project/previous.png", name: "previous.png", size: 8, mime: "image/png", kind: "image", url: "" };
     localStorage.setItem(storageKey, JSON.stringify({ text: "previous draft", quotedContext: null, sessionMentions: [], localAttachments: [local] }));

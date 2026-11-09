@@ -2122,6 +2122,7 @@
       "textTooLarge": "El texto del mensaje es demasiado grande (máximo {{max}})",
       "imageRejected": {
         "unsupported_type": "Tipo de archivo no compatible",
+        "host_upgrade_required": "Actualiza el host para adjuntar este archivo.",
         "empty_file": "No se pueden adjuntar archivos vacíos",
         "too_many_attachments": "Máximo {{max}} adjuntos por mensaje",
         "too_many_videos": "Máximo 1 vídeo por mensaje",

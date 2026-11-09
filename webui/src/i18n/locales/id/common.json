@@ -2121,6 +2121,7 @@
       "textTooLarge": "Teks pesan terlalu besar (maksimum {{max}})",
       "imageRejected": {
         "unsupported_type": "Tipe file tidak didukung",
+        "host_upgrade_required": "Perbarui host untuk melampirkan file ini.",
         "empty_file": "File kosong tidak dapat dilampirkan",
         "too_many_attachments": "Maksimal {{max}} lampiran per pesan",
         "too_many_videos": "Maksimal 1 video per pesan",

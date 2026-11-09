@@ -92,13 +92,14 @@ import {
 } from "@/components/thread/ModelPresetBadge";
 import type { ComposerUsageControl } from "@/components/thread/ComposerUsagePopover";
 import {
-  ACCEPT_ATTR,
-  acceptedAttachmentKind,
+  attachmentKindForFile,
+  LEGACY_ACCEPT_ATTR,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
   MAX_VIDEO_BYTES,
   MAX_VIDEOS_PER_MESSAGE,
+  supportsLegacyAttachment,
   useAttachedImages,
   type AttachedImage,
   type AttachmentError,
@@ -274,6 +275,7 @@ interface ThreadComposerProps {
   persistDraft?: boolean;
   transcriptionProvider?: string | null;
   ingressLimits?: WebUIIngressLimits | null;
+  allowAnyFileAttachments?: boolean;
   quotedContext?: string | null;
   focusRequest?: number;
   onQuotedContextChange?: (text: string | null) => void;
@@ -822,6 +824,7 @@ export function ThreadComposer({
   persistDraft = false,
   transcriptionProvider = null,
   ingressLimits = null,
+  allowAnyFileAttachments = false,
   quotedContext = null,
   focusRequest = 0,
   onQuotedContextChange,
@@ -863,15 +866,15 @@ export function ThreadComposer({
   const formatRejection = useCallback(
     (reason: Exclude<AttachmentError, "too_large">): string => {
       const key = `thread.composer.imageRejected.${reason}`;
-      const fallback = reason === "too_many_videos"
+      const fallback = reason === "host_upgrade_required"
+        ? "Upgrade the host to attach this file."
+        : reason === "too_many_videos"
         ? "Max 1 video per message"
         : reason === "too_many_attachments"
         ? `Max ${maxAttachments} attachments per message`
-        : reason === "empty_file"
-          ? "Empty files cannot be attached"
-          : reason === "total_too_large"
-            ? "Attachments are too large together — remove some or use smaller files"
-            : "Unsupported file type";
+        : reason === "total_too_large"
+          ? "Attachments are too large together — remove some or use smaller files"
+          : "Attachment could not be read";
       return t(key, { max: maxAttachments, defaultValue: fallback });
     },
     [maxAttachments, t],
@@ -897,6 +900,10 @@ export function ThreadComposer({
       return textTooLargeMessage();
     }
     const attachments = prompt.images ?? [];
+    if (!allowAnyFileAttachments && attachments.some((item) =>
+      !supportsLegacyAttachment(item, item.local?.size ?? queuedUploadBytes(item)))) {
+      return formatRejection("host_upgrade_required");
+    }
     const videos = attachments.filter((item) => item.kind === "video").length;
     if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
     if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
@@ -912,7 +919,7 @@ export function ThreadComposer({
       return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
     }
     return null;
-  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
+  }, [allowAnyFileAttachments, formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
 
   const {
     snapshot: queueSnapshot,
@@ -1018,7 +1025,7 @@ export function ThreadComposer({
   }, [placeholder, resolvedPlaceholder, compactControls, readingTextSize, customReadingTextSize]);
 
   const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
-    useAttachedImages({ ingressLimits });
+    useAttachedImages({ ingressLimits, allowAnyFile: allowAnyFileAttachments });
   const encoding = encodingFiles || pathInspection !== null;
   const restoredDraftAttachments = useRef(false);
   const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.attachments.length);
@@ -1039,7 +1046,7 @@ export function ThreadComposer({
       if (rejected.length > 0) {
         const { reason, file } = rejected[0];
         setInlineError(reason === "too_large"
-          ? formatUploadTooLarge(file.size, acceptedAttachmentKind(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
+          ? formatUploadTooLarge(file.size, attachmentKindForFile(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
           : formatRejection(reason));
       } else {
         setInlineError(null);
@@ -1312,7 +1319,7 @@ export function ThreadComposer({
     onAttachmentPaste(event);
     if (event.defaultPrevented || interactionDisabled || isUserShell || !onInspectAttachment) return;
     const raw = event.clipboardData.getData("text/plain");
-    const path = pastedFilePath(raw);
+    const path = pastedFilePath(raw, { allowBareNames: true });
     if (!path) return;
     event.preventDefault();
     const { start, end } = rawSelection();
@@ -1327,9 +1334,11 @@ export function ThreadComposer({
       if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
       setPathInspection(null);
       if (error instanceof Error && "status" in error && error.status === 404) return;
+      if (!allowAnyFileAttachments && error instanceof Error && "status" in error && error.status === 400
+        && (error.message === "Unsupported attachment MIME" || error.message === "Empty files cannot be attached")) return;
       setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
     });
-  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+  }, [allowAnyFileAttachments, interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
 
   useLayoutEffect(() => {
     if (!pathInspection) return;
@@ -2489,7 +2498,7 @@ export function ThreadComposer({
             <input
               ref={fileInputRef}
               type="file"
-              accept={ACCEPT_ATTR}
+              accept={allowAnyFileAttachments ? undefined : LEGACY_ACCEPT_ATTR}
               multiple
               hidden
               onChange={onFilePick}

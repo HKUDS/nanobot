@@ -2342,6 +2342,7 @@
       "textTooLarge": "Message text is too large (max {{max}})",
       "imageRejected": {
         "unsupported_type": "Unsupported file type",
+        "host_upgrade_required": "Upgrade the host to attach this file.",
         "empty_file": "Empty files cannot be attached",
         "too_many_attachments": "Max {{max}} attachments per message",
         "too_many_videos": "Max 1 video per message",

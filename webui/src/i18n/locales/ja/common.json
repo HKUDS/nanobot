@@ -2121,6 +2121,7 @@
       "textTooLarge": "メッセージ本文が大きすぎます（最大 {{max}}）",
       "imageRejected": {
         "unsupported_type": "対応していないファイル形式です",
+        "host_upgrade_required": "このファイルを添付するにはホストを更新してください。",
         "empty_file": "空のファイルは添付できません",
         "too_many_attachments": "1 メッセージにつき最大 {{max}} 件までです",
         "too_many_videos": "1 メッセージにつき動画は 1 件までです",

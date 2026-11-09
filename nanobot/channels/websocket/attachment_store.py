@@ -15,11 +15,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nanobot.channels.websocket.attachment_policy import (
-    DOCUMENT_MIME_ALLOWED,
+    IMAGE_MIME_ALLOWED,
     MAX_VIDEOS_PER_MESSAGE,
     UPLOAD_IDLE_TIMEOUT_SECONDS,
-    UPLOAD_MIME_ALLOWED,
     UPLOAD_TIMEOUT_SECONDS,
+    VIDEO_MIME_ALLOWED,
     AttachmentIngressLimits,
     validate_upload_batch,
     validate_upload_size,
@@ -92,12 +92,12 @@ class AttachmentStore:
         self.prune()
         if not owner:
             raise AttachmentUploadError("Missing authenticated owner")
-        if mime not in UPLOAD_MIME_ALLOWED:
-            raise AttachmentUploadError("Unsupported attachment MIME")
         try:
             validate_upload_size(mime, size, limits=self.limits)
         except ValueError as exc:
             raise AttachmentUploadError(str(exc)) from exc
+        if size == 0:
+            mime = "application/octet-stream"
         if self._active + len(self._entries) >= self.max_pending:
             raise AttachmentUploadError("Too many pending attachments")
         if self._reserved_bytes + size > self.max_pending_bytes:
@@ -110,9 +110,11 @@ class AttachmentStore:
         marker_created = False
         try:
             self.media_dir.mkdir(parents=True, exist_ok=True)
+            is_media = size > 0 and mime in (IMAGE_MIME_ALLOWED | VIDEO_MIME_ALLOWED)
             path = media_destination(
                 self.media_dir, mime,
-                filename=filename if mime in DOCUMENT_MIME_ALLOWED else None,
+                filename=None if is_media else filename,
+                preserve_filename=not is_media,
             )
             self._journal.mkdir(parents=True, exist_ok=True)
             (self._journal / path.name).touch(exist_ok=False)

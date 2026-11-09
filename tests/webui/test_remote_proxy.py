@@ -308,6 +308,13 @@ async def test_binary_http_upload_uses_a_live_local_capability(remote):
         owner = next(iter(remote.services.uploads._tokens))
         paths = remote.services.uploads.store.resolve([response.json()["reference"]], owner=owner)
         assert Path(paths[0]).read_bytes() == raw
+        empty = await remote.client.post(remote.proxy.origin + capability["path"], content=b"", headers={
+            **headers, "Content-Type": "application/octet-stream", "X-Attachment-Name": "empty.py",
+        })
+        assert empty.status_code == 201, empty.text
+        empty_path = Path(remote.services.uploads.store.resolve([empty.json()["reference"]], owner=owner)[0])
+        assert empty_path.name.endswith("_file_empty.py")
+        assert empty_path.read_bytes() == b""
         assert (await remote.client.post(remote.proxy.origin + "/api/attachments", content=raw,
             headers={**headers, "Authorization": "Bearer " + issued["api_token"]})).status_code == 401
         assert (await remote.client.post(remote.proxy.origin + "/api/fixture", content=b"write",

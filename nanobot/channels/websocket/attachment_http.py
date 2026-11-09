@@ -42,9 +42,11 @@ class AttachmentHTTP:
         else:
             authorization = request.headers.get("Authorization", "")
             owner = authorization.removeprefix("Bearer ")
+            content_length = request.content_length
             if not authorization.startswith("Bearer ") or owner not in self._tokens:
                 response = web.json_response({"error": "unauthorized"}, status=401)
-            elif request.headers.get("Content-Encoding") or request.headers.get("Transfer-Encoding"):
+            elif (request.headers.get("Content-Encoding") or request.headers.get("Transfer-Encoding")
+                  or content_length is None):
                 response = web.json_response({"error": "unsupported_framing"}, status=400)
             elif request.headers.get("Expect", "").lower() not in {"", "100-continue"}:
                 response = web.json_response({"error": "unsupported_expectation"}, status=417)
@@ -60,7 +62,7 @@ class AttachmentHTTP:
                     reference = await self.store.upload(
                         body(), owner=owner,
                         mime=request.headers.get("Content-Type", ""),
-                        size=request.content_length or 0,
+                        size=content_length,
                         filename=unquote(request.headers.get("X-Attachment-Name", "")),
                     )
                     if owner not in self._tokens:

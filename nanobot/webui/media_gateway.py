@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import mimetypes
+import re
 import secrets
 from collections.abc import Callable
 from pathlib import Path
@@ -8,10 +10,11 @@ from typing import Any
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from nanobot.channels.websocket.attachment_policy import IMAGE_MIME_ALLOWED, VIDEO_MIME_ALLOWED
 from nanobot.config.paths import get_media_dir
 from nanobot.security.workspace_access import WorkspaceScope
+from nanobot.utils.media_decode import UPLOADED_FILE_TAG
 from nanobot.webui.media_api import (
-    media_attachment_kind,
     serve_signed_media,
     sign_local_attachment,
     sign_media_path,
@@ -94,14 +97,21 @@ class WebUIMediaGateway:
         media: list[dict[str, Any]] = []
         for raw in paths:
             path = Path(raw)
+            stored_file = re.fullmatch(r"[0-9a-f]{12}" + re.escape(UPLOADED_FILE_TAG) + r"(.+)", path.name) if raw not in local else None
+            name = stored_file.group(1) if stored_file else path.name
+            mime = mimetypes.guess_type(name)[0]
+            kind = "file" if stored_file else (
+                "video" if mime in VIDEO_MIME_ALLOWED else "image" if mime in IMAGE_MIME_ALLOWED else "file"
+            )
             try:
                 if not path.is_file():
                     url = ""
-                elif raw in local:
-                    url = self.local_attachment_url(raw, session_key=session_key)
                 else:
-                    url = sign_media_path(path, secret=self.secret, media_dir=self._media_dir) or ""
+                    if not path.stat().st_size:
+                        kind = "file"
+                    url = (self.local_attachment_url(raw, session_key=session_key) if raw in local else
+                           sign_media_path(path, secret=self.secret, media_dir=self._media_dir) or "")
             except OSError:
                 url = ""
-            media.append({"kind": media_attachment_kind(path.name), "name": path.name, "url": url})
+            media.append({"kind": kind, "name": name, "url": url})
         return media

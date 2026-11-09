@@ -1,3 +1,4 @@
+import os
 from unittest.mock import Mock
 
 import pytest
@@ -31,7 +32,35 @@ def test_local_supported_formats_do_not_consume_upload_byte_limits(tmp_path, nam
     assert inspect_local_attachment(name, scope=default_workspace_scope(tmp_path, True), limits=limits)["size"] == size
 
 
-def test_reject_missing_directory_outside_empty_and_unreadable(tmp_path, monkeypatch):
+@pytest.mark.parametrize("name,body,kind", [
+    ("script.py", b"print(1)", "file"),
+    ("archive.tar.gz", b"\x00\xff", "file"),
+    ("README", b"", "file"),
+    ("empty.png", b"", "file"),
+    ("graphic.svg", b"<svg/>", "file"),
+])
+def test_inspect_any_local_file_without_copying(tmp_path, name, body, kind):
+    source = tmp_path / name
+    source.write_bytes(body)
+    result = inspect_local_attachment(name, scope=default_workspace_scope(tmp_path, True), limits=AttachmentIngressLimits())
+    assert result["path"] == str(source)
+    assert result["name"] == name
+    assert result["size"] == len(body)
+    assert result["kind"] == kind
+    assert source.read_bytes() == body
+    assert list(tmp_path.iterdir()) == [source]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not support trailing spaces in file names")
+def test_literal_local_path_preserves_trailing_spaces(tmp_path):
+    source = tmp_path / "file "
+    source.write_bytes(b"body")
+    result = inspect_local_attachment(str(source), scope=default_workspace_scope(tmp_path, True), limits=AttachmentIngressLimits())
+    assert result["path"] == str(source)
+    assert result["name"] == source.name
+
+
+def test_reject_missing_directory_outside_and_unreadable(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
     source = tmp_path / "outside.mp4"
@@ -43,11 +72,23 @@ def test_reject_missing_directory_outside_empty_and_unreadable(tmp_path, monkeyp
         assert error.value.status == status
     video = workspace / "large.mp4"
     video.touch()
-    with pytest.raises(WebUIFilePreviewError, match="[Ee]mpty"):
-        inspect_local_attachment(str(video), scope=scope, limits=AttachmentIngressLimits())
     monkeypatch.setattr("nanobot.webui.attachments.os.open", Mock(side_effect=PermissionError))
     with pytest.raises(WebUIFilePreviewError, match="readable"):
         inspect_local_attachment(str(video), scope=scope, limits=AttachmentIngressLimits())
+
+
+def test_generic_uploaded_files_keep_name_and_kind_on_replay(tmp_path):
+    media = tmp_path / "media"
+    media.mkdir()
+    paths = [media / "0123456789ab_file_script.py", media / "0123456789cd_file_empty.png"]
+    paths[0].write_bytes(b"print(1)")
+    paths[1].write_bytes(b"")
+    gateway = WebUIMediaGateway(workspace_path=tmp_path, logger=Mock(), media_dir=lambda _: media)
+    attachments = gateway.augment_transcript_user_media([str(path) for path in paths], [], session_key="websocket:files")
+    assert [(item["name"], item["kind"]) for item in attachments] == [("script.py", "file"), ("empty.png", "file")]
+    for attachment, expected in zip(attachments, [b"print(1)", b""], strict=True):
+        sig, payload = attachment["url"].split("/")[-2:]
+        assert bytes(gateway.serve_signed_media(sig, payload).body) == expected
 
 
 def test_local_media_ranges_latest_contents_and_current_scope_without_staging(tmp_path):

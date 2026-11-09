@@ -2121,6 +2121,7 @@
       "textTooLarge": "메시지 텍스트가 너무 큽니다(최대 {{max}})",
       "imageRejected": {
         "unsupported_type": "지원하지 않는 파일 형식입니다",
+        "host_upgrade_required": "이 파일을 첨부하려면 호스트를 업데이트하세요.",
         "empty_file": "빈 파일은 첨부할 수 없습니다",
         "too_many_attachments": "메시지당 최대 {{max}}개까지 가능합니다",
         "too_many_videos": "메시지당 동영상은 최대 1개까지 가능합니다",

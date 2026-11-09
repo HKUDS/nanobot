@@ -6,6 +6,8 @@ import stat
 from typing import Literal, TypedDict
 
 from nanobot.channels.websocket.attachment_policy import (
+    IMAGE_MIME_ALLOWED,
+    VIDEO_MIME_ALLOWED,
     AttachmentIngressLimits,
     validate_attachment_batch,
 )
@@ -47,12 +49,13 @@ def inspect_local_attachment(
         raise WebUIFilePreviewError(403, "file is not readable") from exc
     except OSError as exc:
         raise WebUIFilePreviewError(404, "file is unavailable") from exc
-    if info.st_size == 0:
-        raise WebUIFilePreviewError(400, "Empty files cannot be attached")
-    mime = _MIME_BY_SUFFIX.get(resolved.suffix.lower()) or mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+    mime = (_MIME_BY_SUFFIX.get(resolved.suffix.lower()) or mimetypes.guess_type(resolved.name)[0] or
+            "application/octet-stream") if info.st_size else "application/octet-stream"
     try:
         validate_attachment_batch([mime], limits=limits)
     except ValueError as exc:
         raise WebUIFilePreviewError(400, str(exc)) from exc
-    kind = "video" if mime.startswith("video/") else "image" if mime.startswith("image/") else "file"
+    kind: Literal["image", "video", "file"] = "file"
+    if info.st_size:
+        kind = "video" if mime in VIDEO_MIME_ALLOWED else "image" if mime in IMAGE_MIME_ALLOWED else "file"
     return {"path": str(resolved), "name": resolved.name, "size": info.st_size, "mime": mime, "kind": kind}
