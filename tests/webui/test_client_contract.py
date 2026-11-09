@@ -22,6 +22,14 @@ def test_current_producer_remains_acceptable_to_initial_client():
     assert "webui.attachments.binary.v1" in contract["capabilities"]
 
 
+def test_chat_requests_are_optional_without_changing_protocol_one():
+    contract = webui_contract()
+    assert contract["min_protocol"] == contract["max_protocol"] == 1
+    assert "webui.chat-requests.v1" in contract["capabilities"]
+    contract["capabilities"].remove("webui.chat-requests.v1")
+    assert assess_webui_contract(contract)["status"] == "compatible"
+
+
 @pytest.mark.parametrize("version", ["0.0.1", "9.99.0", "0.3.5.dev17", "custom-build"])
 def test_independently_released_hosts_share_a_protocol(version):
     report = assess_webui_contract({**webui_contract(), "version": version})

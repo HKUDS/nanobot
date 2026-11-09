@@ -89,6 +89,8 @@ Open **Settings → About** to check for updates automatically. Startup, reconne
 
 The sidebar is the topic switcher. Each topic keeps its own history, title, workspace selection, and linked automations. Use a new topic when you want a separate context; use fork when you want to continue from an existing point without changing the original thread.
 
+If creating or forking a topic times out, it may already have succeeded; it is not automatically retried. With an older host, you may need to wait for its response or reconnect before creating another topic. Reconnecting ends temporary chats.
+
 Drag topics within a sidebar group to reorder them. **Rename** edits a topic title in place; a failed save keeps the draft for retry.
 
 Use **Select** in a topic's action menu to archive or delete several topics with one confirmation. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics from the default list while keeping their conversations. Use **Show archived** to find them again; selecting only archived topics offers **Unarchive**.

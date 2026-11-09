@@ -143,8 +143,11 @@ class WebUIMutationError extends Error {
   }
 }
 
+type ChatRequestFrame = Extract<Outbound, { type: "new_chat" | "new_temporary_chat" | "fork_chat" }>;
+
 interface PendingChatRequest extends PendingRequest<string> {
-  temporary: boolean;
+  frame: ChatRequestFrame & { request_id: string };
+  phase: "queued" | "sent" | "unknown";
 }
 
 const SYSTEM_COMMAND_TURN_PREFIX = "webui-system:";
@@ -165,8 +168,8 @@ export interface NanobotClientOptions {
   reconnect?: boolean;
   /** Maximum UTF-8 bytes accepted for one websocket message. */
   maxFrameBytes?: number;
-  /** Called when a connection drops so the app can refresh its token. */
-  onReauth?: () => Promise<string | null>;
+  /** Refresh authentication; discard side effects when the connection's signal aborts. */
+  onReauth?: (signal: AbortSignal) => Promise<string | null>;
   socketFactory?: (url: string) => WebSocket;
   maxBackoffMs?: number;
 }
@@ -250,12 +253,14 @@ export class NanobotClient {
   /** Last tracked application frame written, for conservative transport-error attribution. */
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
-  private pendingNewChat: PendingChatRequest | null = null;
+  private pendingChatRequest: PendingChatRequest | null = null;
+  private chatRequestIds = false;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
+  private reconnectController: AbortController | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly shouldReconnect: boolean;
   private readonly maxBackoffMs: number;
@@ -458,7 +463,7 @@ export class NanobotClient {
     if (
       ev.detail === "workspace_scope_rejected"
       && ev.chat_id === undefined
-      && this.pendingNewChat
+      && this.pendingChatRequest
     ) return null;
     return this.runs.soleSentTurn(this.lastSocketMessageSend, ev.chat_id);
   }
@@ -550,33 +555,27 @@ export class NanobotClient {
 
   connect(): void {
     if (this.socket && this.socket.readyState < WS_CLOSING) return;
+    this.cancelReconnect();
     this.intentionallyClosed = false;
     this.setStatus("connecting");
     const sock = this.socketFactory(this.currentUrl);
     this.socket = sock;
-    sock.onopen = () => this.handleOpen();
-    sock.onmessage = (ev) => this.handleMessage(ev);
-    sock.onerror = () => this.setStatus("error");
-    sock.onclose = (ev) => this.handleClose(ev);
+    sock.onopen = () => { if (this.socket === sock) this.handleOpen(); };
+    sock.onmessage = (ev) => { if (this.socket === sock) this.handleMessage(ev); };
+    sock.onerror = () => { if (this.socket === sock) this.setStatus("error"); };
+    sock.onclose = (ev) => { if (this.socket === sock) this.handleClose(ev); };
   }
 
   close(): void {
-    this.upload = null;
-    this.receipts.close();
     this.intentionallyClosed = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
     const sock = this.socket;
-    this.socket = null;
+    // Settle connection-owned work now, not in a possibly delayed close callback.
+    this.handleClose();
     try {
       sock?.close();
     } catch {
-      // ignore
+      // Local cleanup has already completed.
     }
-    this.clearTemporaryChats();
-    this.setStatus("closed");
   }
 
   discardTemporaryChat(chatId: string): void {
@@ -589,35 +588,73 @@ export class NanobotClient {
 
   /** Ask the server to provision a new chat_id; resolves with the assigned id. */
   newChat(timeoutMs: number = 5_000, workspaceScope?: WorkspaceScopePayload | null): Promise<string> {
-    if (this.pendingNewChat) {
-      return Promise.reject(new Error("newChat already in flight"));
-    }
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingNewChat = null;
-        reject(new Error("newChat timed out"));
-      }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer, temporary: false };
-      this.queueSend({
-        type: "new_chat",
-        ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
-      });
-    });
+    return this.requestChat({
+      type: "new_chat",
+      ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
+    }, timeoutMs, "newChat");
   }
 
   /** Ask the WebUI gateway to create a connection-owned non-persistent chat. */
   newTemporaryChat(timeoutMs: number = 5_000): Promise<string> {
-    if (this.pendingNewChat) {
-      return Promise.reject(new Error("newChat already in flight"));
+    return this.requestChat({ type: "new_temporary_chat" }, timeoutMs, "newTemporaryChat");
+  }
+
+  private requestChat(frame: ChatRequestFrame, timeoutMs: number, name: string): Promise<string> {
+    if (this.intentionallyClosed) return Promise.reject(new Error("socket closed"));
+    if (this.pendingChatRequest) {
+      return Promise.reject(new Error(this.pendingChatRequest.phase === "unknown"
+        ? "Previous chat request outcome is unknown; wait for its response or reconnect"
+        : "newChat already in flight"));
     }
     return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingNewChat = null;
-        reject(new Error("newTemporaryChat timed out"));
-      }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer, temporary: true };
-      this.queueSend({ type: "new_temporary_chat" });
+      const pending: PendingChatRequest = {
+        frame: { ...frame, request_id: crypto.randomUUID() },
+        phase: "queued", resolve, reject,
+        timer: setTimeout(() => {
+          const sent = pending.phase === "sent";
+          // An older host cannot identify a late reply. Reserve its single wire slot.
+          if (sent && !this.chatRequestIds) pending.phase = "unknown";
+          else this.pendingChatRequest = null;
+          reject(new Error(`${name} timed out${sent ? "; creation outcome is unknown" : " before sending"}`));
+        }, timeoutMs),
+      };
+      this.pendingChatRequest = pending;
+      this.sendPendingChat();
     });
+  }
+
+  private sendPendingChat(): void {
+    const pending = this.pendingChatRequest;
+    if (!pending || pending.phase !== "queued" || this.socket?.readyState !== WS_OPEN) return;
+    try {
+      this.socket.send(JSON.stringify(pending.frame));
+      pending.phase = "sent";
+      this.lastSocketMessageSend = null;
+    } catch {
+      this.rejectPendingChat("Could not send chat request");
+    }
+  }
+
+  private rejectPendingChat(detail: string): void {
+    const pending = this.pendingChatRequest;
+    if (!pending) return;
+    this.pendingChatRequest = null;
+    clearTimeout(pending.timer);
+    pending.reject(new Error(detail));
+  }
+
+  private isLegacyChatError(event: Extract<InboundEvent, { event: "error" }>): boolean {
+    const pending = this.pendingChatRequest;
+    if (this.chatRequestIds || !pending || pending.phase === "queued" || event.chat_id || event.turn_id) return false;
+    switch (pending.frame.type) {
+      case "new_chat":
+        return event.detail === "workspace_scope_rejected";
+      case "new_temporary_chat":
+        return event.detail === "access_denied" || event.detail === "temporary_chat_unavailable";
+      case "fork_chat":
+        return ["invalid source_chat_id", "invalid before_user_index", "session_manager_unavailable",
+          "invalid fork source or index", "fork_chat_failed"].includes(event.detail ?? "");
+    }
   }
 
   transcribeAudio(
@@ -710,22 +747,12 @@ export class NanobotClient {
     title?: string,
     timeoutMs: number = 5_000,
   ): Promise<string> {
-    if (this.pendingNewChat) {
-      return Promise.reject(new Error("newChat already in flight"));
-    }
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingNewChat = null;
-        reject(new Error("forkChat timed out"));
-      }, timeoutMs);
-      this.pendingNewChat = { resolve, reject, timer, temporary: false };
-      this.queueSend({
-        type: "fork_chat",
-        source_chat_id: sourceChatId,
-        before_user_index: beforeUserIndex,
-        ...(title?.trim() ? { title: title.trim() } : {}),
-      });
-    });
+    return this.requestChat({
+      type: "fork_chat",
+      source_chat_id: sourceChatId,
+      before_user_index: beforeUserIndex,
+      ...(title?.trim() ? { title: title.trim() } : {}),
+    }, timeoutMs, "forkChat");
   }
 
   attach(chatId: string): void {
@@ -891,6 +918,7 @@ export class NanobotClient {
     }
     const queued = this.sendQueue.splice(0);
     for (const frame of queued) this.rawSend(frame);
+    this.sendPendingChat();
   }
 
   private handleMessage(ev: MessageEvent): void {
@@ -926,6 +954,17 @@ export class NanobotClient {
           : 500;
         const message = parsed.error?.message || "WebUI mutation failed";
         pending.reject(new WebUIMutationError(status, message));
+      }
+      return;
+    }
+
+    if (parsed.event === "error" && parsed.request_id !== undefined) {
+      const pending = this.pendingChatRequest;
+      if (pending && pending.phase !== "queued" && pending.frame.request_id === parsed.request_id) {
+        this.rejectPendingChat([parsed.detail, parsed.reason].filter(Boolean).join(":") || "server error");
+        if (parsed.detail === "workspace_scope_rejected") {
+          this.emitError({ kind: "workspace_scope_rejected", reason: parsed.reason });
+        }
       }
       return;
     }
@@ -996,6 +1035,9 @@ export class NanobotClient {
     }
 
     if (parsed.event === "ready") {
+      this.chatRequestIds = Array.isArray(parsed.capabilities)
+        && parsed.capabilities.includes("webui.chat-requests.v1");
+      if (this.chatRequestIds && this.pendingChatRequest?.phase === "unknown") this.pendingChatRequest = null;
       this.upload = uploadCapability(parsed.upload);
       this.readyChatId = parsed.chat_id;
       this.knownChats.add(parsed.chat_id);
@@ -1006,18 +1048,25 @@ export class NanobotClient {
     }
 
     if (parsed.event === "attached") {
+      const pending = this.pendingChatRequest;
+      const known = this.knownChats.has(parsed.chat_id) || this.temporaryChatIds.has(parsed.chat_id);
+      const matches = pending && pending.phase !== "queued" && (parsed.request_id !== undefined
+        ? parsed.request_id === pending.frame.request_id
+        : !this.chatRequestIds && !known && (pending.frame.type === "new_temporary_chat") === (parsed.temporary === true));
+      if (matches) {
+        clearTimeout(pending.timer);
+        this.pendingChatRequest = null;
+        if (pending.phase !== "unknown") pending.resolve(parsed.chat_id);
+      }
+      if ((matches && pending.phase === "unknown") || (!matches && parsed.request_id !== undefined && !known)) {
+        // A late success is not a new user selection; temporary resources need disposal.
+        if (parsed.temporary) this.rawSend({ type: "discard_temporary_chat", chat_id: parsed.chat_id });
+        return;
+      }
       if (parsed.temporary === true) {
         this.temporaryChatIds.add(parsed.chat_id);
       } else {
         this.knownChats.add(parsed.chat_id);
-      }
-      if (
-        this.pendingNewChat
-        && this.pendingNewChat.temporary === (parsed.temporary === true)
-      ) {
-        clearTimeout(this.pendingNewChat.timer);
-        this.pendingNewChat.resolve(parsed.chat_id);
-        this.pendingNewChat = null;
       }
       this.dispatch(parsed.chat_id, parsed);
       return;
@@ -1062,19 +1111,10 @@ export class NanobotClient {
         chatId: parsed.chat_id,
         turnId: parsed.turn_id,
       });
-      if (this.pendingNewChat) {
-        clearTimeout(this.pendingNewChat.timer);
-        this.pendingNewChat.reject(new Error(`workspace_scope_rejected:${parsed.reason || ""}`));
-        this.pendingNewChat = null;
-      }
     }
 
-    if (parsed.event === "error" && this.pendingNewChat) {
-      clearTimeout(this.pendingNewChat.timer);
-      const detail = typeof parsed.detail === "string" ? parsed.detail : "server error";
-      const reason = typeof parsed.reason === "string" && parsed.reason ? `:${parsed.reason}` : "";
-      this.pendingNewChat.reject(new Error(`${detail}${reason}`));
-      this.pendingNewChat = null;
+    if (parsed.event === "error" && this.isLegacyChatError(parsed)) {
+      this.rejectPendingChat([parsed.detail, parsed.reason].filter(Boolean).join(":") || "server error");
     }
 
     if (correlatedChatId) {
@@ -1140,16 +1180,14 @@ export class NanobotClient {
   }
 
   private handleClose(event?: { code?: number }): void {
+    this.cancelReconnect();
     this.upload = null;
     this.receipts.close();
     this.socket = null;
     this.clearTemporaryChats();
     const willReconnect = !this.intentionallyClosed && this.shouldReconnect;
-    if (this.pendingNewChat) {
-      clearTimeout(this.pendingNewChat.timer);
-      this.pendingNewChat.reject(new Error("socket closed"));
-      this.pendingNewChat = null;
-    }
+    this.chatRequestIds = false;
+    this.rejectPendingChat("socket closed");
     this.rejectAllTranscriptions("socket closed");
     if (!willReconnect) {
       for (const pending of this.pendingWebUIRequests.values()) {
@@ -1252,20 +1290,32 @@ export class NanobotClient {
     pending.reject(new Error(detail));
   }
 
+  private cancelReconnect(): void {
+    this.reconnectController?.abort();
+    this.reconnectController = null;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
   private scheduleReconnect(): void {
+    const controller = new AbortController();
+    this.reconnectController = controller;
     this.setStatus("reconnecting");
     const attempt = this.reconnectAttempts++;
     const delay = Math.min(500 * 2 ** attempt, this.maxBackoffMs);
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
+      if (controller.signal.aborted) return;
+      let refreshed: string | null = null;
       if (this.options.onReauth) {
         try {
-          const refreshed = await this.options.onReauth();
-          if (refreshed) this.currentUrl = refreshed;
+          refreshed = await this.options.onReauth(controller.signal);
         } catch {
           // fall through to retry with current URL
         }
       }
+      if (controller.signal.aborted) return;
+      if (refreshed) this.currentUrl = refreshed;
       this.connect();
     }, delay);
   }

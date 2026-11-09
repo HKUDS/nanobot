@@ -64,6 +64,249 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  const chatRequests = [
+    { type: "new_chat", start: (client: NanobotClient, timeout: number) => client.newChat(timeout) },
+    { type: "new_temporary_chat", start: (client: NanobotClient, timeout: number) => client.newTemporaryChat(timeout) },
+    { type: "fork_chat", start: (client: NanobotClient, timeout: number) => client.forkChat("source", 1, undefined, timeout) },
+  ];
+
+  it.each(chatRequests)("does not send an expired queued $type after reconnect", async ({ type, start }) => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().close();
+    const expired = expect(start(client, 100)).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(100);
+    await expired;
+    await vi.advanceTimersByTimeAsync(400);
+    const socket = lastSocket();
+    socket.fakeOpen();
+    expect(socket.sent.map((frame) => JSON.parse(frame).type)).not.toContain(type);
+    client.close();
+  });
+
+  it.each(chatRequests.filter(({ type }) => type !== "new_temporary_chat"))(
+    "does not confuse a reconnect attachment with $type", async ({ start }) => {
+      const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+      client.connect();
+      lastSocket().fakeOpen();
+      client.attach("existing");
+      lastSocket().close();
+      const resolved = vi.fn();
+      const creation = start(client, 5_000).then(resolved);
+      await vi.advanceTimersByTimeAsync(500);
+      const socket = lastSocket();
+      socket.fakeOpen();
+      socket.fakeMessage({ event: "attached", chat_id: "existing" });
+      await Promise.resolve();
+      expect(resolved).not.toHaveBeenCalled();
+      socket.fakeMessage({ event: "attached", chat_id: "fresh" });
+      await creation;
+      expect(resolved).toHaveBeenCalledWith("fresh");
+      client.close();
+    },
+  );
+
+  it.each(chatRequests)("matches $type replies by ID and ignores late successes and errors", async ({ type, start }) => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "ready", chat_id: "default", capabilities: ["webui.chat-requests.v1", "future.optional"] });
+    const expired = expect(start(client, 100)).rejects.toThrow("outcome is unknown");
+    const oldFrame = JSON.parse(socket.sent.at(-1)!);
+    await vi.advanceTimersByTimeAsync(100);
+    await expired;
+    const resolved = vi.fn();
+    const rejected = vi.fn();
+    const creation = start(client, 1_000).then(resolved, rejected);
+    const frame = JSON.parse(socket.sent.at(-1)!);
+    expect(frame.request_id).not.toBe(oldFrame.request_id);
+    const temporary = type === "new_temporary_chat";
+    socket.fakeMessage({ event: "attached", chat_id: "old", temporary, request_id: oldFrame.request_id });
+    socket.fakeMessage({ event: "error", detail: "workspace_scope_rejected", request_id: oldFrame.request_id });
+    // A capable host must not silently fall back to uncorrelated responses.
+    socket.fakeMessage({ event: "attached", chat_id: "unrelated", temporary });
+    socket.fakeMessage({ event: "error", detail: "fork_chat_failed" });
+    await Promise.resolve();
+    expect(resolved).not.toHaveBeenCalled();
+    expect(rejected).not.toHaveBeenCalled();
+    if (temporary) {
+      expect(socket.sent.map((value) => JSON.parse(value))).toContainEqual({ type: "discard_temporary_chat", chat_id: "old" });
+    }
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", temporary, request_id: frame.request_id });
+    await creation;
+    expect(resolved).toHaveBeenCalledWith("fresh");
+    client.close();
+  });
+
+  it.each(chatRequests)("reserves the legacy $type slot after a sent timeout", async ({ type, start }) => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    // Independent protocol-1 host fixture: no request IDs or optional capability.
+    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "legacy" });
+    const expired = expect(start(client, 100)).rejects.toThrow("outcome is unknown");
+    await vi.advanceTimersByTimeAsync(100);
+    await expired;
+    await expect(start(client, 1_000)).rejects.toThrow("outcome is unknown");
+    expect(socket.sent.filter((value) => JSON.parse(value).type === type)).toHaveLength(1);
+    const temporary = type === "new_temporary_chat";
+    socket.fakeMessage({ event: "attached", chat_id: "old", temporary });
+    if (temporary) {
+      expect(socket.sent.map((value) => JSON.parse(value))).toContainEqual({ type: "discard_temporary_chat", chat_id: "old" });
+    }
+    const creation = start(client, 1_000);
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", temporary });
+    await expect(creation).resolves.toBe("fresh");
+    client.close();
+  });
+
+  it.each([undefined, ["future.optional"], "webui.chat-requests.v1", null])(
+    "uses legacy matching when capability metadata is absent or unsupported: %j", async (capabilities) => {
+      const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+      client.connect();
+      const socket = lastSocket();
+      socket.fakeOpen();
+      socket.fakeMessage({ event: "ready", chat_id: "default", capabilities });
+      const creation = client.newChat();
+      socket.fakeMessage({ event: "attached", chat_id: "fresh" });
+      await expect(creation).resolves.toBe("fresh");
+      client.close();
+    },
+  );
+
+  it("only rejects a capable-host chat request for its own error response", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "ready", chat_id: "default", capabilities: ["webui.chat-requests.v1"] });
+    const creation = client.newChat();
+    const rejection = expect(creation).rejects.toThrow("workspace_scope_rejected:missing directory");
+    const frame = JSON.parse(socket.sent.at(-1)!);
+    socket.fakeMessage({ event: "error", detail: "workspace_scope_rejected", reason: "missing directory", request_id: frame.request_id });
+    await rejection;
+    client.close();
+  });
+
+  it.each(chatRequests)("keeps unrelated chat errors out of a pending legacy $type", async ({ type, start }) => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const creation = start(client, 1_000);
+    socket.fakeMessage({ event: "error", detail: "workspace_scope_rejected", chat_id: "another", turn_id: "turn" });
+    socket.fakeMessage({ event: "error", detail: "invalid_sidebar_state" });
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", temporary: type === "new_temporary_chat" });
+    await expect(creation).resolves.toBe("fresh");
+    client.close();
+  });
+
+  it("settles queued chat requests on explicit close without waiting for a close event", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const previous = lastSocket();
+    previous.close = () => { previous.readyState = FakeSocket.CLOSING; };
+    const closed = expect(client.newChat()).rejects.toThrow("socket closed");
+    client.close();
+    await closed;
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    expect(socket.sent.map((value) => JSON.parse(value).type)).not.toContain("new_chat");
+    const creation = client.newChat();
+    socket.fakeMessage({ event: "attached", chat_id: "fresh" });
+    await expect(creation).resolves.toBe("fresh");
+    client.close();
+  });
+
+  it("renegotiates chat-request support on the replacement connection", async () => {
+    const client = new NanobotClient({ url: "ws://test", onReauth: async () => "ws://refreshed",
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "ready", chat_id: "default", capabilities: ["webui.chat-requests.v1"] });
+    const interrupted = expect(client.newChat()).rejects.toThrow("socket closed");
+    lastSocket().close();
+    await interrupted;
+    await vi.advanceTimersByTimeAsync(500);
+    const socket = lastSocket();
+    expect(socket.url).toBe("ws://refreshed");
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "legacy" });
+    const creation = client.newChat();
+    socket.fakeMessage({ event: "attached", chat_id: "fresh" });
+    await expect(creation).resolves.toBe("fresh");
+    expect(socket.sent.filter((value) => JSON.parse(value).type === "new_chat")).toHaveLength(1);
+    client.close();
+  });
+
+  it("does not reconnect when closed while reauthentication is pending", async () => {
+    let finishAuth!: (url: string) => void;
+    const onReauth = vi.fn(() => new Promise<string>((resolve) => { finishAuth = resolve; }));
+    const client = new NanobotClient({ url: "ws://test", onReauth,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(onReauth).toHaveBeenCalledOnce();
+    client.close();
+    finishAuth("ws://refreshed");
+    await Promise.resolve();
+    expect(client.status).toBe("closed");
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  it("ignores reauthentication from before an explicit close and reconnect", async () => {
+    let finishAuth!: (url: string) => void;
+    const client = new NanobotClient({ url: "ws://old",
+      onReauth: () => new Promise<string>((resolve) => { finishAuth = resolve; }),
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(500);
+    client.close();
+    client.updateUrl("ws://replacement");
+    client.connect();
+    lastSocket().fakeOpen();
+    finishAuth("ws://stale-auth");
+    await Promise.resolve();
+    client.close();
+    client.connect();
+    expect(lastSocket().url).toBe("ws://replacement");
+    client.close();
+  });
+
+  it("ignores late callbacks from a replaced socket", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const previous = lastSocket();
+    previous.fakeOpen();
+    // Browser close() returns before its queued close event is delivered.
+    previous.close = () => { previous.readyState = FakeSocket.CLOSING; };
+    client.close();
+    client.connect();
+    const current = lastSocket();
+    current.fakeOpen();
+    const resolved = vi.fn();
+    const creation = client.newChat().then(resolved);
+    previous.fakeOpen();
+    previous.fakeMessage({ event: "attached", chat_id: "stale" });
+    previous.onerror?.();
+    previous.onclose?.();
+    await Promise.resolve();
+    expect(client.status).toBe("open");
+    expect(resolved).not.toHaveBeenCalled();
+    current.fakeMessage({ event: "attached", chat_id: "fresh" });
+    await creation;
+    expect(resolved).toHaveBeenCalledWith("fresh");
+    client.close();
+  });
+
   it("notifies ready consumers after server ready frames, including reconnects", async () => {
     const client = new NanobotClient({ url: "ws://test?token=fixture-token", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     const ready = vi.fn();
@@ -465,7 +708,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeOpen();
     const creation = client.newTemporaryChat();
     expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
-      type: "new_temporary_chat",
+      type: "new_temporary_chat", request_id: expect.any(String),
     });
     lastSocket().fakeMessage({ event: "attached", chat_id: chatId, temporary: true });
     await expect(creation).resolves.toBe(chatId);
@@ -2184,7 +2427,7 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     const promise = client.newChat(1_000);
-    expect(lastSocket().sent).toContain(JSON.stringify({ type: "new_chat" }));
+    expect(lastSocket().sent.map((value) => JSON.parse(value))).toContainEqual({ type: "new_chat", request_id: expect.any(String) });
     lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
     await expect(promise).resolves.toBe("fresh-id");
   });
@@ -2205,9 +2448,9 @@ describe("NanobotClient", () => {
     lastSocket().fakeOpen();
 
     const promise = client.newChat(1_000, workspaceScope);
-    expect(lastSocket().sent).toContain(
-      JSON.stringify({ type: "new_chat", workspace_scope: workspaceScope }),
-    );
+    expect(lastSocket().sent.map((value) => JSON.parse(value))).toContainEqual({
+      type: "new_chat", workspace_scope: workspaceScope, request_id: expect.any(String),
+    });
     lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
     await expect(promise).resolves.toBe("fresh-id");
 

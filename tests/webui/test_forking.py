@@ -16,10 +16,12 @@ import nanobot.webui.forking as forking
         ({"source_chat_id": "source", "before_user_index": -1}, "invalid before_user_index"),
     ],
 )
+@pytest.mark.parametrize("request_id", [None, "fork-request"])
 @pytest.mark.asyncio
 async def test_fork_handler_rejects_invalid_protocol_input(
     envelope: dict[str, object],
     detail: str,
+    request_id: str | None,
 ) -> None:
     connection = object()
     channel = SimpleNamespace(
@@ -27,34 +29,41 @@ async def test_fork_handler_rejects_invalid_protocol_input(
         gateway=SimpleNamespace(session_manager=MagicMock()),
     )
 
-    await forking.handle_webui_fork_chat(channel, connection, envelope)
+    request_fields = {"request_id": request_id} if request_id is not None else {}
+    await forking.handle_webui_fork_chat(channel, connection, envelope, **request_fields)
 
-    channel.send_webui_protocol_error.assert_awaited_once_with(connection, detail)
+    channel.send_webui_protocol_error.assert_awaited_once_with(connection, detail, **request_fields)
 
 
+@pytest.mark.parametrize("request_id", [None, "fork-request"])
 @pytest.mark.asyncio
-async def test_fork_handler_reports_unavailable_session_manager() -> None:
+async def test_fork_handler_reports_unavailable_session_manager(request_id: str | None) -> None:
     connection = object()
     channel = SimpleNamespace(
         send_webui_protocol_error=AsyncMock(),
         gateway=SimpleNamespace(session_manager=None),
     )
 
+    request_fields = {"request_id": request_id} if request_id is not None else {}
     await forking.handle_webui_fork_chat(
         channel,
         connection,
         {"source_chat_id": "source", "before_user_index": 0},
+        **request_fields,
     )
 
     channel.send_webui_protocol_error.assert_awaited_once_with(
         connection,
         "session_manager_unavailable",
+        **request_fields,
     )
 
 
+@pytest.mark.parametrize("request_id", [None, "fork-request"])
 @pytest.mark.asyncio
 async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_errors(
     monkeypatch: pytest.MonkeyPatch,
+    request_id: str | None,
 ) -> None:
     connection = object()
     channel = SimpleNamespace(
@@ -66,10 +75,12 @@ async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_e
     envelope = {"source_chat_id": "source", "before_user_index": 0}
     monkeypatch.setattr(forking, "create_webui_chat_fork", AsyncMock(return_value=None))
 
-    await forking.handle_webui_fork_chat(channel, connection, envelope)
+    request_fields = {"request_id": request_id} if request_id is not None else {}
+    await forking.handle_webui_fork_chat(channel, connection, envelope, **request_fields)
     channel.send_webui_protocol_error.assert_awaited_once_with(
         connection,
         "invalid fork source or index",
+        **request_fields,
     )
 
     channel.send_webui_protocol_error.reset_mock()
@@ -78,10 +89,12 @@ async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_e
         "create_webui_chat_fork",
         AsyncMock(side_effect=RuntimeError("broken transcript")),
     )
-    await forking.handle_webui_fork_chat(channel, connection, envelope)
+    await forking.handle_webui_fork_chat(channel, connection, envelope, **request_fields)
 
     warning.assert_called_once_with("fork_chat failed: {}", ANY)
-    channel.send_webui_protocol_error.assert_awaited_once_with(connection, "fork_chat_failed")
+    channel.send_webui_protocol_error.assert_awaited_once_with(
+        connection, "fork_chat_failed", **request_fields,
+    )
 
 
 @pytest.mark.parametrize("with_display", [False, True])

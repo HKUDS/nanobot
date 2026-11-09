@@ -6,7 +6,7 @@ import type { Window as HappyWindow } from "happy-dom";
 import i18n from "@/i18n";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import { useSessions } from "@/hooks/useSessions";
-import type { RunState } from "@/lib/nanobot-client";
+import type { NanobotClientOptions, RunState } from "@/lib/nanobot-client";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
@@ -19,6 +19,7 @@ import type {
 (window as unknown as HappyWindow).happyDOM.settings.disableIframePageLoading = true;
 
 const connectSpy = vi.fn();
+let clientOptions: NanobotClientOptions | undefined;
 const refreshSpy = vi.fn();
 const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
@@ -255,6 +256,7 @@ vi.mock("@/lib/bootstrap", () => ({
 vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/nanobot-client")>();
   class MockClient {
+    constructor(options: NanobotClientOptions) { clientOptions = options; }
     onTaskNotice = () => () => {};
     status = "idle" as const;
     defaultChatId = mockDefaultChatId;
@@ -336,6 +338,7 @@ describe("App layout", () => {
     vi.mocked(useSessions).mockImplementation(defaultUseSessions);
     clearReloadCache();
     connectSpy.mockClear();
+    clientOptions = undefined;
     updateUrlSpy.mockClear();
     refreshSpy.mockReset();
     createChatSpy.mockClear();
@@ -4475,6 +4478,28 @@ describe("App layout", () => {
     expect(within(sidebar).getByRole("button", { name: "Settings" })).toBeInTheDocument();
 
     expect(within(sidebar).getByText("Existing chat")).toBeInTheDocument();
+  });
+
+  it("does not apply a bootstrap refresh after its reconnect is cancelled", async () => {
+    const { unmount } = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    let complete!: (boot: Awaited<ReturnType<typeof fetchBootstrap>>) => void;
+    vi.mocked(fetchBootstrap).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    vi.mocked(deriveWsUrl).mockImplementation((_path, token) => `ws://test?token=${token}`);
+    const controller = new AbortController();
+    const refresh = clientOptions!.onReauth!(controller.signal);
+    controller.abort();
+    await act(async () => {
+      complete({ token: "stale", api_token: "stale-api", ws_path: "/" });
+      await expect(refresh).resolves.toBeNull();
+    });
+    expect(updateUrlSpy).not.toHaveBeenCalled();
+    vi.mocked(fetchBootstrap).mockResolvedValueOnce({ token: "fresh", api_token: "fresh-api", ws_path: "/" });
+    await act(async () => {
+      await expect(clientOptions!.onReauth!(new AbortController().signal)).resolves.toBe("ws://test?token=fresh");
+    });
+    expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=fresh");
+    unmount();
   });
 
   it("refreshes the bootstrap token before REST settings auth expires", async () => {
