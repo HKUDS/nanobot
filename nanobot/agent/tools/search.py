@@ -18,7 +18,7 @@ from typing import Any, Iterable, Iterator, TypeVar
 from nanobot.agent.tools._search_content import ContentPage, MatchTooLargeError
 from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
-from nanobot.execution.files import FileSearch, NotRegularFileError, ReadableFile
+from nanobot.execution.files import FileSearch, NotRegularFileError
 from nanobot.utils.document import (
     DocumentLineSource,
     LocatedDocumentLine,
@@ -28,6 +28,7 @@ from nanobot.utils.document import (
 _DEFAULT_HEAD_LIMIT = 250
 _DEFAULT_FILE_HEAD_LIMIT = 200
 _DOCUMENT_EXTENSIONS = frozenset({".pdf", ".docx", ".xlsx", ".pptx"})
+_NON_TEXT_BYTES = re.compile(rb"[\x01-\x08\x0e-\x1f]")
 T = TypeVar("T")
 _TYPE_GLOB_MAP = {
     "py": ("*.py", "*.pyi"),
@@ -120,11 +121,19 @@ def _match_glob(rel_path: str, name: str, pattern: str) -> bool:
     return any(_match_path_glob(rel_path, name, item) for item in _glob_patterns(pattern))
 
 
+@lru_cache(maxsize=128)
+def _glob_path_parts(pattern: str) -> tuple[str, ...]:
+    return PurePosixPath(pattern).parts
+
+
 def _match_path_glob(rel_path: str, name: str, normalized: str) -> bool:
     if not normalized:
         return False
     if "/" in normalized:
-        pattern_parts = PurePosixPath(normalized).parts
+        pattern_parts = _glob_path_parts(normalized)
+        if len(pattern_parts) == 2 and pattern_parts[0] == "**" and pattern_parts[1] != "**":
+            # Any directory prefix is allowed, so only the basename matters.
+            return rel_path != "." and fnmatch.fnmatchcase(name, pattern_parts[1])
         path_parts = PurePosixPath(rel_path).parts
         matched = [True] + [False] * len(path_parts)
         for part in pattern_parts:
@@ -146,8 +155,7 @@ def _is_binary(raw: bytes) -> bool:
     sample = raw[:4096]
     if not sample:
         return False
-    non_text = sum(byte < 9 or 13 < byte < 32 for byte in sample)
-    return (non_text / len(sample)) > 0.2
+    return len(_NON_TEXT_BYTES.findall(sample)) / len(sample) > 0.2
 
 
 def _paginate(items: list[T], limit: int | None, offset: int) -> tuple[list[T], bool]:
@@ -674,13 +682,7 @@ class GrepTool(_SearchTool):
         }
 
     @staticmethod
-    def _open_source(source: ReadableFile, pages: str | None, max_bytes: int) -> DocumentLineSource | None:
-        if source.suffix in _DOCUMENT_EXTENSIONS:
-            return source.document_lines(pages=pages)
-        with source.open() as (file, size):
-            if size > max_bytes:
-                return None
-            raw = file.read(max_bytes + 1)
+    def _text_source(raw: bytes, max_bytes: int) -> DocumentLineSource | None:
         if len(raw) > max_bytes or _is_binary(raw):
             return None
         try:
@@ -794,72 +796,89 @@ class GrepTool(_SearchTool):
                 self._MAX_FILE_BYTES if tree.is_directory else self._MAX_EXPLICIT_FILE_BYTES
             )
 
-            for file_path in self._iter_files(tree, budget):
-                rel_path = file_path.relative_to(root).as_posix()
-                if glob and not _match_glob(rel_path, file_path.name, glob):
-                    continue
-                if not _matches_type(file_path.name, type):
-                    continue
-                display_path = self._display_path(file_path, root)
-
-                try:
-                    file = tree.read_file(file_path)
-                except OSError:
-                    skipped_binary += 1
-                    continue
-                if file.size > max_file_bytes:
-                    skipped_large += 1
-                    continue
-                source_iterator: Iterator[LocatedDocumentLine] | None = None
-                is_document = file.suffix in _DOCUMENT_EXTENSIONS
-                try:
-                    source = self._open_source(file, pages, max_file_bytes)
-                    if source is None:
-                        skipped_binary += 1
+            workspace = self._files.display_workspace
+            with tree.search_bytes_reader() as read_bytes:
+                for file_path in self._iter_files(tree, budget):
+                    rel_path = file_path.relative_to(root).as_posix()
+                    if glob and not _match_glob(rel_path, file_path.name, glob):
                         continue
-                    source_iterator = source.lines
-                    if source.continuation:
-                        document_continuations.append(
-                            f"({display_path}: continue PDF search with {source.continuation})"
-                        )
-                    source_lines = checked_lines(source_iterator)
+                    if not _matches_type(file_path.name, type):
+                        continue
+                    display_path = rel_path
+                    if workspace is not None and workspace != root:
+                        with suppress(ValueError):
+                            display_path = file_path.relative_to(workspace).as_posix()
 
-                    file_had_match = False
-                    if output_mode == "content":
-                        content_page.scan(display_path, source_lines, regex, context_before, context_after)
-                    else:
-                        for line in source_lines:
-                            if not line.searchable or regex.search(line.text) is None:
+                    source_iterator: Iterator[LocatedDocumentLine] | None = None
+                    is_document = file_path.suffix.lower() in _DOCUMENT_EXTENSIONS
+                    try:
+                        if is_document:
+                            try:
+                                file = tree.read_file(file_path)
+                            except OSError:
+                                skipped_binary += 1
                                 continue
-                            file_had_match = True
-                            if output_mode == "count":
-                                counts[display_path] = counts.get(display_path, 0) + 1
+                            if file.size > max_file_bytes:
+                                skipped_large += 1
                                 continue
-                            break
-                except (_SearchCancelledError, _SearchBudgetExceededError, MatchTooLargeError):
-                    raise
-                except Exception as e:
-                    if not is_document:
-                        raise
-                    if not tree.is_directory:
-                        if isinstance(e, PdfPageRangeError):
-                            return ToolResult.error(
-                                f"Error: Invalid PDF page range '{pages}': {e!s}."
+                            mtime = file.modified
+                            source = file.document_lines(pages=pages)
+                        else:
+                            contents = read_bytes(file_path, max_file_bytes)
+                            if contents is None:
+                                skipped_binary += 1
+                                continue
+                            if contents.data is None:
+                                skipped_large += 1
+                                continue
+                            mtime = contents.modified
+                            source = self._text_source(contents.data, max_file_bytes)
+                        if source is None:
+                            skipped_binary += 1
+                            continue
+                        source_iterator = source.lines
+                        if source.continuation:
+                            document_continuations.append(
+                                f"({display_path}: continue PDF search with {source.continuation})"
                             )
-                        return ToolResult.error(
-                            f"Error searching document {display_path}: {e!s}"
-                        )
-                    skipped_binary += 1
-                    document_errors.append(f"{display_path}: {e!s}")
-                    continue
-                finally:
-                    close = getattr(source_iterator, "close", None)
-                    if close is not None:
-                        close()
-                if file_had_match:
-                    file_mtimes[display_path] = file.modified
-                if content_page.stopped:
-                    break
+                        source_lines = checked_lines(source_iterator)
+
+                        file_had_match = False
+                        if output_mode == "content":
+                            content_page.scan(display_path, source_lines, regex, context_before, context_after)
+                        else:
+                            for line in source_lines:
+                                if not line.searchable or regex.search(line.text) is None:
+                                    continue
+                                file_had_match = True
+                                if output_mode == "count":
+                                    counts[display_path] = counts.get(display_path, 0) + 1
+                                    continue
+                                break
+                    except (_SearchCancelledError, _SearchBudgetExceededError, MatchTooLargeError):
+                        raise
+                    except Exception as e:
+                        if not is_document:
+                            raise
+                        if not tree.is_directory:
+                            if isinstance(e, PdfPageRangeError):
+                                return ToolResult.error(
+                                    f"Error: Invalid PDF page range '{pages}': {e!s}."
+                                )
+                            return ToolResult.error(
+                                f"Error searching document {display_path}: {e!s}"
+                            )
+                        skipped_binary += 1
+                        document_errors.append(f"{display_path}: {e!s}")
+                        continue
+                    finally:
+                        close = getattr(source_iterator, "close", None)
+                        if close is not None:
+                            close()
+                    if file_had_match:
+                        file_mtimes[display_path] = mtime
+                    if content_page.stopped:
+                        break
 
             no_matches = f"No matches found for pattern '{pattern}' in {path}"
             notes: list[str] = []
