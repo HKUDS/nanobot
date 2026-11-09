@@ -341,6 +341,45 @@ test("synthetic HTTP-first cumulative text suppresses delayed covered chunks but
   backend.healthy();
 });
 
+test("compaction keeps active system files in the context graph through live delivery and replay", async ({ page }) => {
+  const { backend } = await openFixture(page);
+  const base = closedTurn("before-graph", "Previous question", "Previous answer.");
+  await backend.release(await backend.read(), history(base));
+  const question = input(TURN, "Question requiring compaction");
+  const system = { path: "/SOUL.md", name: "SOUL.md", state: "loaded" as const, tokens: 40 };
+  const guide = { path: "/guide.md", name: "guide.md", state: "discovered" as const, tokens: 0 };
+  const previous = { path: "/before.py", name: "before.py", state: "loaded" as const, tokens: 100 };
+  const systemGraph = { nodes: [system, guide], edges: [{ source: system.path, target: guide.path }] };
+  const started: ThreadProjectionEvent = { ...at(TURN, 1, "activity"), event: "model_request",
+    run_id: "run", request_id: "active", sequence: 1, phase: "started",
+    context_graph: { nodes: [system, guide, previous], edges: systemGraph.edges } };
+  const compact: ThreadProjectionEvent = { ...at(TURN, 2, "activity"), event: "context_compaction",
+    compaction_id: "active", phase: "succeeded", context_graph: systemGraph };
+  await backend.send(question);
+  await backend.send(started);
+  await page.getByTestId("composer-context-usage").click();
+  const sidebar = page.getByTestId("context-sidebar");
+  await expect(sidebar.getByRole("button", { name: "before.py", exact: true })).toBeVisible();
+  await backend.send(compact);
+  await expect(sidebar.getByRole("button", { name: "SOUL.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "guide.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "before.py", exact: true })).toHaveCount(0);
+
+  const replay = history([...base, question, started, compact], { active: TURN });
+  backend.refreshThread();
+  await backend.release(await backend.read(A, null, 1), replay);
+  await expect(sidebar.getByRole("button", { name: "SOUL.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "before.py", exact: true })).toHaveCount(0);
+  await page.reload();
+  await backend.ready();
+  await backend.release(await backend.read(A, null, 2), replay);
+  if (!await sidebar.isVisible()) await page.getByTestId("composer-context-usage").click();
+  await expect(sidebar.getByRole("button", { name: "SOUL.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "guide.md", exact: true })).toBeVisible();
+  await expect(sidebar.getByRole("button", { name: "before.py", exact: true })).toHaveCount(0);
+  backend.healthy();
+});
+
 test("the open context sidebar keeps its slot through hydration and empty conversation transitions", async ({ page }) => {
   const { backend } = await openFixture(page);
   await page.emulateMedia({ reducedMotion: "no-preference" });

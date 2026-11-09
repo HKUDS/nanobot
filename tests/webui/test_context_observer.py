@@ -6,7 +6,7 @@ import pytest
 from nanobot.agent.hook import AgentHookContext
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.context_graph import graph_from_sources
+from nanobot.context_graph import graph_from_parts, graph_from_sources
 from nanobot.context_sources import PromptSource
 from nanobot.events import EventSink
 from nanobot.file_references import REFERENCE_PARSERS, source_receipt
@@ -164,3 +164,40 @@ async def test_prompt_rebuild_deduplicates_files_and_compaction_refreshes_source
     assert await observer.snapshot("chat", {}, persistent=False) == graph_from_sources([
         source_receipt(refreshed.path, refreshed.content),
     ])
+
+
+async def test_compaction_reuses_only_the_active_turns_system_sources(tmp_path):
+    observer = ContextGraphObserver(None)
+    first = {"webui_turn_id": "first"}
+    second = {"webui_turn_id": "second"}
+    soul = tmp_path / "SOUL.md"
+    await observer.observe_prompt("chat", (), first, persistent=False,
+                                  system_sources=(PromptSource(soul, "[Old](old.md)"),))
+    await observer.snapshot("chat", first, persistent=False)
+    parts = await observer.reset("chat", first, persistent=False)
+    assert parts is not None
+    assert {node["name"] for node in graph_from_parts(parts)["nodes"]} == {"SOUL.md", "old.md"}
+
+    await observer.observe_prompt("chat", (), second, persistent=False,
+                                  system_sources=(PromptSource(soul, "[New](new.md)"),))
+    graph = await observer.snapshot("chat", second, persistent=False)
+    assert {node["name"] for node in graph["nodes"]} == {"SOUL.md", "new.md"}
+    parts = await observer.reset("chat", second, persistent=False)
+    assert parts is not None
+    assert {node["name"] for node in graph_from_parts(parts)["nodes"]} == {"SOUL.md", "new.md"}
+    assert await observer.snapshot("other-chat", second, persistent=False) == EMPTY
+
+
+async def test_reading_a_system_file_adds_its_read_tokens_once(tmp_path):
+    observer = ContextGraphObserver(None)
+    metadata = {"webui_turn_id": "turn"}
+    path = tmp_path / "SOUL.md"
+    prompt = "Be precise in all responses."
+    await observer.observe_prompt("chat", (), metadata, persistent=False,
+                                  system_sources=(PromptSource(path, prompt),))
+    event = read_event(path, "1| Additional instructions", call_id="read")
+    await observer.observe_tools("chat", [event, event], metadata, persistent=False)
+    expected = source_receipt(path, prompt)["tokens"] + event["context_source"]["tokens"]
+    first = await observer.snapshot("chat", metadata, persistent=False)
+    assert first["nodes"][0]["tokens"] == expected
+    assert await observer.snapshot("chat", metadata, persistent=False) == first

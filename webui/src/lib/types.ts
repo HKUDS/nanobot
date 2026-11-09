@@ -1588,7 +1588,7 @@ export type InboundEvent =
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
   | (Exclude<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata)
-  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection })
+  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection; context_graph?: ContextGraph })
   | ({
       event: "file_edit";
       chat_id: string;

@@ -11,7 +11,13 @@ from typing import Any, cast
 
 from loguru import logger
 
-from nanobot.context_graph import ContextGraph, ContextNode, graph_from_sources
+from nanobot.context_graph import (
+    ContextGraph,
+    ContextGraphParts,
+    graph_from_parts,
+    graph_from_sources,
+    merge_graph,
+)
 from nanobot.context_sources import PromptSource, SourceReceipt, parse_source_receipt
 from nanobot.file_references import source_receipt
 from nanobot.session.display_history import (
@@ -19,26 +25,10 @@ from nanobot.session.display_history import (
     HistoryKind,
     HistoryReader,
 )
-from nanobot.session.history_graph import decode_graph
+from nanobot.session.history_graph import decode_graph, decode_graph_parts
 from nanobot.session.manager import SessionManager
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 from nanobot.webui.session_identity import webui_session_key
-
-
-def merge_graph(target: ContextGraph, incoming: ContextGraph, *, accumulate: bool = False) -> ContextGraph:
-    nodes: dict[str, ContextNode] = {node["path"]: node.copy() for node in target["nodes"]}
-    for node in incoming["nodes"]:
-        previous = nodes.get(node["path"])
-        if previous is None:
-            nodes[node["path"]] = node.copy()
-        elif node["state"] == "loaded":
-            previous["name"] = node["name"]
-            previous["state"] = "loaded"
-            previous["tokens"] = (previous["tokens"] + node["tokens"] if accumulate
-                                  else max(previous["tokens"], node["tokens"]))
-    edges = {(edge["source"], edge["target"]): edge for edge in target["edges"]}
-    edges.update({(edge["source"], edge["target"]): edge for edge in incoming["edges"]})
-    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
 
 
 def read_source(event: Mapping[str, Any]) -> SourceReceipt | None:
@@ -72,15 +62,27 @@ def read_source(event: Mapping[str, Any]) -> SourceReceipt | None:
 
 @dataclass
 class _State:
+    # Prompt sources and reads belong to the compaction stage; system sources
+    # belong to the current turn's prompt and are replaced on each rebuild.
     graph: ContextGraph = field(default_factory=lambda: {"nodes": [], "edges": []})
+    reads: ContextGraph = field(default_factory=lambda: {"nodes": [], "edges": []})
+    system_graph: ContextGraph = field(default_factory=lambda: {"nodes": [], "edges": []})
+    system_turn_id: str | None = None
     calls: set[tuple[str | None, str]] = field(default_factory=set)
+
+    def request_parts(self, turn_id: object) -> ContextGraphParts:
+        system: ContextGraph = (
+            self.system_graph if isinstance(turn_id, str) and turn_id and turn_id == self.system_turn_id
+            else {"nodes": [], "edges": []}
+        )
+        return {"kind": "context_graph_parts", "stage": self.graph, "system": system, "reads": self.reads}
 
     def apply(self, event: Mapping[str, Any], turn_id: str | None = None) -> None:
         call_id = event.get("call_id")
         source = parse_source_receipt(event.get("context_source"))
         if not isinstance(call_id, str) or (turn_id, call_id) in self.calls or source is None:
             return
-        self.graph = merge_graph(self.graph, graph_from_sources([source]), accumulate=True)
+        self.reads = merge_graph(self.reads, graph_from_sources([source]), accumulate=True)
         self.calls.add((turn_id, call_id))
 
 
@@ -93,9 +95,16 @@ def _restore(history: HistoryReader, generation: str | None) -> _State:
     for turn in history.turns(reverse=True):
         for _, fact in reversed(history.read_entries(turn.ordinal)):
             boundary = fact.kind is HistoryKind.COMPACTION and fact.content.get("phase") == "succeeded"
-            graph = decode_graph(fact.content.get("context_graph")) if fact.kind is HistoryKind.MODEL_REQUEST else None
-            if boundary or graph is not None:
-                if graph is not None:
+            value = fact.content.get("context_graph")
+            parts = decode_graph_parts(value) if fact.kind is HistoryKind.MODEL_REQUEST or boundary else None
+            graph = decode_graph(value) if parts is None and (fact.kind is HistoryKind.MODEL_REQUEST or boundary) else None
+            if boundary or parts is not None or graph is not None:
+                if parts is not None:
+                    state.graph = parts["stage"]
+                    state.system_graph = parts["system"]
+                    state.system_turn_id = fact.turn_id
+                    state.reads = parts["reads"]
+                elif graph is not None:
                     state.graph = graph
                 for event, turn_id in reversed(pending):
                     state.apply(event, turn_id)
@@ -154,26 +163,46 @@ class ContextGraphObserver:
 
     async def observe_prompt(
         self, chat_id: str, sources: tuple[PromptSource, ...], metadata: Mapping[str, Any], *, persistent: bool,
+        system_sources: tuple[PromptSource, ...] | None = None,
     ) -> None:
-        if not sources:
+        if not sources and system_sources is None:
             return
-        def project() -> ContextGraph:
-            receipts = [source_receipt(source.path, source.content, loaded=source.loaded) for source in sources]
-            return graph_from_sources(receipts)
+        def project() -> tuple[ContextGraph, ContextGraph | None]:
+            def graph_for(items: tuple[PromptSource, ...]) -> ContextGraph:
+                return graph_from_sources([
+                    source_receipt(source.path, source.content, loaded=source.loaded) for source in items
+                ])
+            return graph_for(sources), graph_for(system_sources) if system_sources is not None else None
         try:
-            graph = await asyncio.to_thread(project)
+            graph, system_graph = await asyncio.to_thread(project)
             state = await self._state(chat_id, metadata, persistent=persistent)
+            if system_graph is not None:
+                turn_id = metadata.get(WEBUI_TURN_METADATA_KEY)
+                state.system_graph = system_graph
+                state.system_turn_id = turn_id if isinstance(turn_id, str) else None
             state.graph = merge_graph(state.graph, graph)
         except Exception:
             logger.exception("Unable to observe prompt sources for context graph")
 
+    async def snapshot_parts(
+        self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
+    ) -> ContextGraphParts:
+        state = await self._state(chat_id, metadata, persistent=persistent)
+        return state.request_parts(metadata.get(WEBUI_TURN_METADATA_KEY))
+
     async def snapshot(
         self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
     ) -> ContextGraph:
-        state = await self._state(chat_id, metadata, persistent=persistent)
-        return state.graph
+        return graph_from_parts(await self.snapshot_parts(chat_id, metadata, persistent=persistent))
 
-    async def reset(self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool) -> None:
+    async def reset(
+        self, chat_id: str, metadata: Mapping[str, Any], *, persistent: bool,
+    ) -> ContextGraphParts | None:
         state = await self._state(chat_id, metadata, persistent=persistent)
         state.graph = {"nodes": [], "edges": []}
+        state.reads = {"nodes": [], "edges": []}
         state.calls.clear()
+        turn_id = metadata.get(WEBUI_TURN_METADATA_KEY)
+        if isinstance(turn_id, str) and turn_id and state.system_turn_id == turn_id:
+            return state.request_parts(turn_id)
+        return None

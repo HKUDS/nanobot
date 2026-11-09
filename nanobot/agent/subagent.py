@@ -38,6 +38,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, SubagentTaskChanged
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.context_sources import without_source_capture
 from nanobot.events import AgentEvent, EventSink
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
 from nanobot.providers.base import LLMProvider, ToolCallRequest
@@ -597,7 +598,8 @@ class SubagentManager:
         )
         self._tasks[task_id] = record
         self._publish_status(status)
-        execution = asyncio.create_task(self._run_subagent(record))
+        with without_source_capture():
+            execution = asyncio.create_task(self._run_subagent(record))
         self._running_tasks[task_id] = execution
         execution.add_done_callback(partial(self._task_done, record))
         logger.info("Started subagent [{}]: {}", task_id,

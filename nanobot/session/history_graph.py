@@ -13,8 +13,10 @@ from typing import Any, cast
 from nanobot.context_graph import (
     ContextEdge,
     ContextGraph,
+    ContextGraphParts,
     ContextNode,
     ContextSnapshot,
+    graph_from_parts,
     parse_context_graph,
 )
 
@@ -53,10 +55,25 @@ def encode_graph(value: object) -> object:
     return encoded if encoded is not None else value
 
 
+def _parts_mapping(value: object) -> dict[str, object] | None:
+    if not isinstance(value, dict):
+        return None
+    parts = cast(dict[str, object], value)
+    return parts if parts.get("kind") == "context_graph_parts" else None
+
+
 def encode_graph_fields(content: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(content)
     if "context_graph" in result:
-        result["context_graph"] = encode_graph(result["context_graph"])
+        graph: object = result["context_graph"]
+        parts = _parts_mapping(graph)
+        if parts is not None:
+            result["context_graph"] = {
+                "kind": "context_graph_parts",
+                **{key: encode_graph(parts.get(key)) for key in ("stage", "system", "reads")},
+            }
+        else:
+            result["context_graph"] = encode_graph(graph)
     snapshot = result.get("context_snapshot")
     if isinstance(snapshot, dict) and "graph" in snapshot:
         snapshot = cast(dict[str, Any], snapshot)
@@ -150,6 +167,15 @@ class GraphDecoder:
         size += sum(self.sizes[id(node)] for node in nodes) + sum(self.sizes[id(edge)] for edge in edges)
         return {"nodes": nodes, "edges": edges} if size <= logical_bytes else None
 
+    def parts(self, value: object) -> ContextGraphParts | None:
+        parts = _parts_mapping(value)
+        if parts is None:
+            return None
+        stage, system, reads = (self.graph(parts.get(key)) for key in ("stage", "system", "reads"))
+        if stage is None or system is None or reads is None:
+            return None
+        return {"kind": "context_graph_parts", "stage": stage, "system": system, "reads": reads}
+
     def graph(self, value: object) -> ContextGraph | None:
         if isinstance(value, str):
             key = value
@@ -179,6 +205,9 @@ class GraphDecoder:
                 graph = self.columns(json.loads(expanded), logical_size)
             except (ValueError, zlib.error, UnicodeDecodeError):
                 return None
+        elif (raw_parts := _parts_mapping(cast(object, value))) is not None:
+            parts = self.parts(raw_parts)
+            graph = self.inline(graph_from_parts(parts)) if parts is not None else None
         else:
             graph = self.inline(cast(object, value))
         self.graphs[key] = graph
@@ -199,6 +228,10 @@ def graph_decoding() -> Generator[None]:
 
 def decode_graph(value: object) -> ContextGraph | None:
     return (_decoder.get() or GraphDecoder()).graph(value)
+
+
+def decode_graph_parts(value: object) -> ContextGraphParts | None:
+    return (_decoder.get() or GraphDecoder()).parts(value)
 
 
 def decode_snapshot(value: object) -> ContextSnapshot | None:
@@ -226,7 +259,9 @@ def expand_graph_fields(content: Mapping[str, Any]) -> dict[str, Any]:
 
 def graph_size_adjustment(content: Mapping[str, Any]) -> int:
     """Retain the original replay byte budget despite storage compression."""
-    values = [content.get("context_graph")]
+    graph: object = content.get("context_graph")
+    parts = _parts_mapping(graph)
+    values: list[object] = [parts.get(key) for key in ("stage", "system", "reads")] if parts is not None else [graph]
     snapshot = content.get("context_snapshot")
     if isinstance(snapshot, dict):
         values.append(cast(dict[str, object], snapshot).get("graph"))

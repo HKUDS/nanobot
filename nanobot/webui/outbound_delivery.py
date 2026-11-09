@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 
@@ -25,7 +25,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import SubagentTaskChanged
-from nanobot.context_graph import ContextGraph
+from nanobot.context_graph import ContextGraph, ContextGraphParts, graph_from_parts
 from nanobot.context_sources import PromptSourcesEvent
 from nanobot.events import ModelRequestEvent
 from nanobot.pairing.events import PairingChanged
@@ -120,19 +120,22 @@ class WebUIOutboundDelivery:
         if not isinstance(event, ModelRequestEvent | ContextCompactionEvent):
             return project_notification(msg.chat_id, event, msg.metadata)
         persistent = self._temporary_chats.should_persist_transcript(msg.chat_id)
-        if isinstance(event, ModelRequestEvent):
-            graph: ContextGraph = {"nodes": [], "edges": []}
-            try:
-                graph = await self._context_graph.snapshot(msg.chat_id, msg.metadata, persistent=persistent)
-            except Exception:
-                logger.exception("Unable to restore context graph")
-            return project_notification(msg.chat_id, event, msg.metadata, context_graph=graph)
-        if event.phase == "succeeded":
-            try:
-                await self._context_graph.reset(msg.chat_id, msg.metadata, persistent=persistent)
-            except Exception:
-                logger.exception("Unable to reset context graph")
-        return project_notification(msg.chat_id, event, msg.metadata)
+        parts: ContextGraphParts | None = None
+        graph: ContextGraph | None = None
+        try:
+            if isinstance(event, ModelRequestEvent):
+                parts = await self._context_graph.snapshot_parts(msg.chat_id, msg.metadata, persistent=persistent)
+            elif event.phase == "succeeded":
+                parts = await self._context_graph.reset(msg.chat_id, msg.metadata, persistent=persistent)
+            if parts is not None:
+                graph = graph_from_parts(parts)
+        except Exception:
+            logger.exception("Unable to observe context graph")
+        if graph is None and isinstance(event, ModelRequestEvent):
+            graph = {"nodes": [], "edges": []}
+        notification = project_notification(msg.chat_id, event, msg.metadata, context_graph=graph)
+        assert notification is not None
+        return replace(notification, context_graph_parts=parts)
 
     async def initialize(self) -> None:
         await self._transcripts.initialize()
@@ -219,6 +222,7 @@ class WebUIOutboundDelivery:
 
         for msg in messages:
             progress = msg.event if isinstance(msg.event, ProgressEvent) else None
+            parts: ContextGraphParts | None = None
             if progress is not None:
                 body = await self._message_payload(msg, progress)
                 persistent, label = True, " "
@@ -226,6 +230,7 @@ class WebUIOutboundDelivery:
                 notification = await self._project_notification(msg)
                 assert notification is not None
                 body = dict(notification.payload)
+                parts = notification.context_graph_parts
                 persistent = notification.persistence == "turn_activity"
                 label = f" {body['event']} "
             if persistent:
@@ -244,7 +249,10 @@ class WebUIOutboundDelivery:
             recipients = self._transport.webui_recipients(ChatAudience(msg.chat_id))
             frames.append((recipients, raw, label))
             if persistent:
-                records.append({**body, "text": msg.content} if progress is not None else body)
+                record = {**body, "text": msg.content} if progress is not None else dict(body)
+                if parts is not None:
+                    record["context_graph"] = parts
+                records.append(record)
             byte_count += size
         await flush()
 
@@ -252,7 +260,7 @@ class WebUIOutboundDelivery:
         event = msg.event
         if isinstance(event, PromptSourcesEvent):
             await self._context_graph.observe_prompt(
-                msg.chat_id, event.sources, msg.metadata,
+                msg.chat_id, event.sources, msg.metadata, system_sources=event.system_sources,
                 persistent=self._temporary_chats.should_persist_transcript(msg.chat_id),
             )
             return
@@ -298,6 +306,7 @@ class WebUIOutboundDelivery:
                 await self._send_payload(
                     msg.chat_id, notification.payload, persistence=notification.persistence,
                     metadata=msg.metadata if notification.attach_turn_metadata else None,
+                    context_graph_parts=notification.context_graph_parts,
                 )
             return
         if isinstance(event, GoalStateSyncEvent):
@@ -559,11 +568,15 @@ class WebUIOutboundDelivery:
         persistence: WebUIWirePersistence,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
+        context_graph_parts: ContextGraphParts | None = None,
     ) -> None:
         recipients = self._transport.webui_recipients(ChatAudience(chat_id))
         body: dict[str, Any] = dict(payload)
         if persistence == "turn_activity":
-            await self._persist_turn_transcript_event(chat_id, body, metadata=metadata, phase="activity")
+            await self._persist_turn_transcript_event(
+                chat_id, body, metadata=metadata, phase="activity",
+                transcript_overrides={"context_graph": context_graph_parts} if context_graph_parts is not None else None,
+            )
         elif persistence == "turn_complete":
             prior_failure = (
                 (metadata or {}).get("webui") is True

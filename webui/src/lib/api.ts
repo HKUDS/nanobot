@@ -385,6 +385,7 @@ function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet
       if (value.text !== undefined && typeof value.text !== "string") break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
+      if (value.context_graph !== undefined && !validatedGraphs.has(value.context_graph) && !isContextGraph(value.context_graph)) break;
       if (value.context_snapshot !== undefined && !isContextInspection(value.context_snapshot, (graph): graph is ContextGraph => validatedGraphs.has(graph) || isContextGraph(graph))) break;
       if (typeof value.compaction_id !== "string" || !value.compaction_id
         || !isCompactionPhase(value.phase)

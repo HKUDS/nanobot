@@ -11,7 +11,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.context_graph import ContextGraph, ContextSnapshot
+from nanobot.context_graph import ContextGraph, ContextGraphParts, ContextSnapshot
 from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
@@ -111,6 +111,7 @@ class ModelRequestWirePayload(_ChatWirePayload):
 
 
 class ContextCompactionWirePayload(_ChatWirePayload):
+    context_graph: NotRequired[ContextGraph]
     context_snapshot: NotRequired[ContextSnapshot]
     event: Literal["context_compaction"]
     compaction_id: str
@@ -253,6 +254,7 @@ class NotificationProjection:
     persistence: WebUIWirePersistence = "transient"
     deliver_offline: bool = False
     attach_turn_metadata: bool = False
+    context_graph_parts: ContextGraphParts | None = None
 
 
 def project_notification(
@@ -278,8 +280,11 @@ def project_notification(
             payload, persistence="turn_activity", deliver_offline=True, attach_turn_metadata=True,
         )
     if isinstance(event, ContextCompactionEvent):
+        compaction_payload = encode_context_compaction(chat_id, event)
+        if context_graph is not None:
+            compaction_payload["context_graph"] = context_graph
         return NotificationProjection(
-            encode_context_compaction(chat_id, event),
+            compaction_payload,
             persistence="transient" if event.phase == "started" else "turn_activity",
             deliver_offline=True,
             attach_turn_metadata=True,

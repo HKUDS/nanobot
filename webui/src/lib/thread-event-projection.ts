@@ -1050,7 +1050,7 @@ export function projectThreadEvent(
           id, graph: event.context_snapshot.graph,
           estimatedTokens: event.context_snapshot.estimated_tokens,
           contextWindowTokens: event.context_snapshot.context_window_tokens,
-        } } : {}),
+        } } : event.context_graph ? { contextSnapshot: { id, graph: event.context_graph } } : {}),
         ...(!options.persisted ? { announce: true } : {}),
       },
       ...positionedTurnFields(state.messages[existing], turnFieldsForProjection(state, event, "activity"), options),
