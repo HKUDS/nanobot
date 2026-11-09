@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import re
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -19,6 +21,7 @@ from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
+from nanobot.execution.files import FileSearch
 from nanobot.providers.base import GenerationSettings
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -126,6 +129,109 @@ async def test_find_files_supports_modified_sort_and_pagination(tmp_path: Path) 
 
     assert result.splitlines()[0] == "src/b.py"
     assert "pagination: limit=1, offset=1" in result
+
+
+async def test_find_files_modified_order_uses_only_authorized_link_timestamps(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for name, timestamp in (("target.txt", 20), ("z.txt", 20), ("other.txt", 10)):
+        path = workspace / name
+        path.write_text("ordinary\n", encoding="utf-8")
+        os.utime(path, (timestamp, timestamp))
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside\n", encoding="utf-8")
+    os.utime(outside, (30, 30))
+    try:
+        (workspace / "alias.txt").symlink_to(workspace / "target.txt")
+        (workspace / "private.txt").symlink_to(outside)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable")
+
+    tool = FindFilesTool(workspace=workspace, allowed_dir=workspace)
+    result = await tool.execute(sort="modified", head_limit=0)
+    assert result.splitlines() == ["alias.txt", "target.txt", "z.txt", "other.txt", "private.txt"]
+    sparse = await tool.execute(sort="modified", glob="{alias,private}.txt", head_limit=0)
+    assert sparse.splitlines() == ["alias.txt", "private.txt"]
+
+
+@pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="requires native directory handles")
+async def test_find_files_discards_timestamps_when_open_directory_is_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    parent = workspace / "parent"
+    directory = parent / "src"
+    directory.mkdir(parents=True)
+    for name in ("a.txt", "b.txt", "c.txt", "d.txt"):
+        file = directory / name
+        file.write_text("inside\n", encoding="utf-8")
+        os.utime(file, (30, 30))
+    stable = workspace / "stable.txt"
+    stable.write_text("inside\n", encoding="utf-8")
+    os.utime(stable, (20, 20))
+
+    outside = tmp_path / "outside"
+    (outside / "src").mkdir(parents=True)
+    sentinel = outside / "src" / "a.txt"
+    sentinel.write_text("outside\n", encoding="utf-8")
+    os.utime(sentinel, (40, 40))
+    original = FileSearch._open_search_directory
+
+    @contextmanager
+    def replace_after_open(tree, path):
+        with original(tree, path) as fd:
+            if path == directory:
+                parent.rename(workspace / "moved")
+                parent.symlink_to(outside, target_is_directory=True)
+            yield fd
+
+    monkeypatch.setattr(FileSearch, "_open_search_directory", replace_after_open)
+    tool = FindFilesTool(workspace=workspace, allowed_dir=workspace)
+    result = await tool.execute(sort="modified", head_limit=0)
+    assert result.splitlines() == [
+        "stable.txt", "parent/src/a.txt", "parent/src/b.txt", "parent/src/c.txt", "parent/src/d.txt",
+    ]
+
+
+@pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="requires native directory handles")
+async def test_find_files_modified_cancellation_closes_directory_handle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for i in range(4):
+        (tmp_path / f"{i}.txt").write_text("ordinary\n", encoding="utf-8")
+    opened = threading.Event()
+    resume = threading.Event()
+    closed = threading.Event()
+    original = FileSearch._open_search_directory
+
+    @contextmanager
+    def pause_after_open(tree, path):
+        fd = None
+        try:
+            with original(tree, path) as fd:
+                opened.set()
+                if not resume.wait(timeout=3):
+                    raise TimeoutError("scan was not released")
+                yield fd
+        finally:
+            if fd is not None:
+                try:
+                    os.fstat(fd)
+                except OSError as exc:
+                    if exc.errno == errno.EBADF:
+                        closed.set()
+
+    monkeypatch.setattr(FileSearch, "_open_search_directory", pause_after_open)
+    tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
+    task = asyncio.create_task(tool.execute(sort="modified"))
+    try:
+        assert await asyncio.to_thread(opened.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        resume.set()
+    assert await asyncio.to_thread(closed.wait, 2)
 
 
 @pytest.mark.asyncio
@@ -283,16 +389,18 @@ async def test_find_files_path_limit_stops_after_pagination_lookahead(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("sort", ["path", "modified"])
 async def test_find_files_path_budget_counts_directories(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    sort: str,
 ) -> None:
     (tmp_path / "one").mkdir()
     (tmp_path / "two").mkdir()
     monkeypatch.setattr(FindFilesTool, "_MAX_SCAN_PATHS", 1)
     tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
 
-    result = await tool.execute(path=".")
+    result = await tool.execute(path=".", sort=sort)
 
     assert result.startswith("Error: find_files scan exceeded 1 paths")
 

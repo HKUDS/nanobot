@@ -8,6 +8,7 @@ import heapq
 import re
 import threading
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
@@ -319,6 +320,27 @@ class FindFilesTool(_SearchTool):
             is_dir=is_dir,
         )
 
+    def _directory_entries(
+        self,
+        tree: FileSearch,
+        directory: Path,
+        root: Path,
+        budget: _SearchBudget,
+    ) -> Iterator[_FindFilesEntry]:
+        budget.checkpoint()
+        try:
+            for raw_entry in tree.entries(directory):
+                budget.visit_path()
+                is_dir = raw_entry.is_directory
+                if raw_entry.is_directory_link or (is_dir and self._ignore_directory(raw_entry.name)):
+                    continue
+                yield self._entry(directory / raw_entry.name, root, is_dir=is_dir)
+        except OSError:
+            # os.walk silently skips directories that cannot be listed. Preserve
+            # that behavior while still allowing cancellation and budget errors
+            # to propagate from the explicit checkpoints above.
+            pass
+
     def _push_directory_entries(
         self,
         tree: FileSearch,
@@ -328,22 +350,10 @@ class FindFilesTool(_SearchTool):
         sequence: int,
         budget: _SearchBudget,
     ) -> int:
-        budget.checkpoint()
-        try:
-            for raw_entry in tree.entries(directory):
-                budget.visit_path()
-                is_dir = raw_entry.is_directory
-                if raw_entry.is_directory_link or (is_dir and self._ignore_directory(raw_entry.name)):
-                    continue
-                entry = self._entry(directory / raw_entry.name, root, is_dir=is_dir)
-                sort_path = entry.display_path + ("/" if is_dir else "")
-                heapq.heappush(frontier, (sort_path, sequence, entry))
-                sequence += 1
-        except OSError:
-            # os.walk silently skips directories that cannot be listed. Preserve
-            # that behavior while still allowing cancellation and budget errors
-            # to propagate from the explicit checkpoints above.
-            pass
+        for entry in self._directory_entries(tree, directory, root, budget):
+            sort_path = entry.display_path + ("/" if entry.is_dir else "")
+            heapq.heappush(frontier, (sort_path, sequence, entry))
+            sequence += 1
         return sequence
 
     def _iter_paths(
@@ -381,6 +391,44 @@ class FindFilesTool(_SearchTool):
                 )
             else:
                 yield entry
+
+    def _iter_modified(
+        self,
+        tree: FileSearch,
+        *,
+        include_dirs: bool,
+        matches: Callable[[_FindFilesEntry], bool],
+        budget: _SearchBudget,
+    ) -> Iterator[tuple[str, float]]:
+        budget.checkpoint()
+        root = tree.root
+        if not tree.is_directory or include_dirs:
+            if not tree.is_directory:
+                budget.visit_path()
+            entry = self._entry(root, root if tree.is_directory else root.parent, is_dir=tree.is_directory)
+            if matches(entry):
+                yield entry.display_path + ("/" if entry.is_dir else ""), tree.modified(root)
+        if not tree.is_directory:
+            return
+
+        # Modified order needs a full scan; only the final selection needs a heap.
+        pending = [root]
+        while pending:
+            directory = pending.pop()
+            selected: list[_FindFilesEntry] = []
+            for entry in self._directory_entries(tree, directory, root, budget):
+                if entry.is_dir:
+                    pending.append(entry.path)
+                    if not include_dirs:
+                        continue
+                if matches(entry):
+                    selected.append(entry)
+            if selected:
+                times = tree.modified_children(
+                    directory, [entry.name for entry in selected], checkpoint=budget.checkpoint,
+                )
+                for entry, mtime in zip(selected, times, strict=True):
+                    yield entry.display_path + ("/" if entry.is_dir else ""), mtime
 
     @staticmethod
     def _matches_entry(
@@ -473,44 +521,37 @@ class FindFilesTool(_SearchTool):
             max_paths=self._MAX_SCAN_PATHS,
         )
 
-        def matching_entries() -> Iterator[tuple[str, float]]:
+        def matches_entry(entry: _FindFilesEntry) -> bool:
+            return self._matches_entry(entry, query=query, glob=glob, file_type=file_type)
+
+        def matching_paths() -> Iterator[tuple[str, float]]:
             for entry in self._iter_paths(
                 tree,
                 include_dirs=include_dirs,
                 budget=budget,
             ):
-                if not self._matches_entry(
-                    entry,
-                    query=query,
-                    glob=glob,
-                    file_type=file_type,
-                ):
-                    continue
-                mtime = 0.0
-                if sort == "modified":
-                    try:
-                        mtime = tree.modified(entry.path)
-                    except OSError:
-                        pass
-                suffix = "/" if entry.is_dir else ""
-                yield entry.display_path + suffix, mtime
+                if matches_entry(entry):
+                    yield entry.display_path + ("/" if entry.is_dir else ""), 0.0
 
         matches: list[tuple[str, float]]
         try:
             if sort == "modified":
+                by_modified = self._iter_modified(
+                    tree, include_dirs=include_dirs, matches=matches_entry, budget=budget,
+                )
                 if limit is None:
-                    matches = sorted(matching_entries(), key=lambda item: (-item[1], item[0]))
+                    matches = sorted(by_modified, key=lambda item: (-item[1], item[0]))
                 else:
                     selection_size = offset + limit + 1
                     matches = heapq.nsmallest(
                         selection_size,
-                        matching_entries(),
+                        by_modified,
                         key=lambda item: (-item[1], item[0]),
                     )
             else:
                 selection_size = None if limit is None else offset + limit + 1
                 matches = []
-                for match in matching_entries():
+                for match in matching_paths():
                     matches.append(match)
                     if selection_size is not None and len(matches) >= selection_size:
                         break

@@ -216,7 +216,74 @@ class FileSearch:
         return self._authorize_read(path)
 
     def modified(self, path: Path) -> float:
-        return self._candidate(path).stat().st_mtime
+        try:
+            return self._candidate(path).stat().st_mtime
+        except OSError:
+            return 0.0
+
+    @contextmanager
+    def _open_search_directory(self, directory: Path) -> Generator[int]:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        root_info = self.root.stat(follow_symlinks=False)
+        fd = os.open(self.root, flags)
+        try:
+            if not os.path.samestat(root_info, os.fstat(fd)):
+                raise PermissionError("Search root changed")
+            for part in directory.relative_to(self.root).parts:
+                child = os.open(part, flags, dir_fd=fd)
+                os.close(fd)
+                fd = child
+            yield fd
+        finally:
+            os.close(fd)
+
+    def modified_children(
+        self, directory: Path, names: list[str], *, checkpoint: Callable[[], None],
+    ) -> list[float]:
+        """Get timestamps for direct children without transferring the directory handle."""
+        if not self.is_directory or not directory.is_relative_to(self.root) or ".." in directory.parts:
+            raise ValueError("Expected a directory within the search root")
+        if any(not name or name in (".", "..") or os.path.basename(name) != name for name in names):
+            raise ValueError("Expected direct child names")
+
+        # A small match set does not amortize opening and rechecking the directory.
+        if (
+            len(names) >= 4
+            and os.open in os.supports_dir_fd
+            and os.stat in os.supports_dir_fd
+            and os.stat in os.supports_follow_symlinks
+            and hasattr(os, "O_DIRECTORY")
+            and hasattr(os, "O_NOFOLLOW")
+        ):
+            try:
+                with self._open_search_directory(directory) as fd:
+                    times: list[float] = []
+                    for name in names:
+                        checkpoint()
+                        try:
+                            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                        except OSError:
+                            times.append(0.0)
+                        else:
+                            times.append(
+                                self.modified(directory / name) if stat.S_ISLNK(info.st_mode)
+                                else info.st_mtime
+                            )
+                    # An open directory survives a rename. Do not use its batch if
+                    # the authorized path no longer points to that directory.
+                    if (
+                        Path(os.path.realpath(directory, strict=True)) == directory
+                        and os.path.samestat(os.fstat(fd), directory.stat(follow_symlinks=False))
+                    ):
+                        return times
+            except OSError:
+                pass  # Reauthorize each child if the directory could not be pinned.
+
+        times = []
+        for name in names:
+            checkpoint()
+            times.append(self.modified(directory / name))
+        return times
 
     def read_file(self, path: Path) -> ReadableFile:
         return _regular_file(self._candidate(path), suffix=path.suffix.lower())
