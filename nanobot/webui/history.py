@@ -36,7 +36,7 @@ _MESSAGE_KINDS = {
     "tool_hint": HistoryKind.TOOL_ACTIVITY,
 }
 _CONTENT_FIELDS = frozenset({
-    "text", "media_paths", "media_info", "media", "media_urls", "reply_to", "agent_ui", "cli_apps", "mcp_presets", "session_mentions",
+    "text", "media_paths", "media", "media_urls", "reply_to", "agent_ui", "cli_apps", "mcp_presets", "session_mentions",
     "session_message", INBOUND_META_LOCAL_MEDIA, "tool_events", "edits", "source", "response_sources", "resuming",
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",

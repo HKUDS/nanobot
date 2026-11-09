@@ -40,9 +40,12 @@ export type RestoredReadyImage = RestoredReadyAttachment;
  *
  * Callers localize these via the ``composer.imageRejected.*`` i18n table. */
 export type AttachmentError =
+  | "unsupported_type"
+  | "empty_file"
   | "too_many_attachments" // non-video per-message cap reached before enqueue
   | "too_many_videos"      // video slot is already occupied
   | "total_too_large"    // decoded attachments exceed the business-policy total
+  | "magic_mismatch"     // bytes lack a supported image signature
   | "decode_failed"      // Worker couldn't decode / re-encode
   | "too_large"          // even after normalization we exceed the budget
   | "io";                // file read failed at the browser layer
@@ -58,7 +61,7 @@ const VIDEO_MIME_BY_EXTENSION = new Map([
   [".mp4", "video/mp4"], [".webm", "video/webm"], [".mov", "video/quicktime"],
 ]);
 
-/** Formats handled by the image encoder rather than the generic file path. */
+/** MIME whitelist — mirrors the server's and the ``<input accept>`` attr. */
 const ACCEPTED_IMAGE_MIMES: ReadonlySet<string> = new Set([
   "image/png",
   "image/jpeg",
@@ -88,19 +91,27 @@ const DOCUMENT_MIME_BY_EXTENSION: ReadonlyMap<string, string> = new Map([
 
 const ACCEPTED_DOCUMENT_MIMES: ReadonlySet<string> = new Set(DOCUMENT_MIME_BY_EXTENSION.values());
 
+export const ACCEPT_ATTR = [
+  ...ACCEPTED_IMAGE_MIMES,
+  ...ACCEPTED_DOCUMENT_MIMES,
+  ...DOCUMENT_MIME_BY_EXTENSION.keys(),
+  ...VIDEO_MIME_BY_EXTENSION.values(),
+  ...VIDEO_MIME_BY_EXTENSION.keys(),
+].join(",");
+
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
   return dot < 0 ? "" : name.slice(dot).toLowerCase();
 }
 
 function mimeForFile(file: File): string {
-  if (file.size === 0) return "application/octet-stream";
   const byName = DOCUMENT_MIME_BY_EXTENSION.get(extensionOf(file.name))
     ?? VIDEO_MIME_BY_EXTENSION.get(extensionOf(file.name));
   if (byName) return byName;
-  if (ACCEPTED_DOCUMENT_MIMES.has(file.type)
-    || [...VIDEO_MIME_BY_EXTENSION.values()].includes(file.type)) return file.type;
-  return "application/octet-stream";
+  if (!file.type || file.type === "application/octet-stream") {
+    return "application/octet-stream";
+  }
+  return file.type;
 }
 
 function positiveLimit(value: number | null | undefined, fallback: number): number {
@@ -109,12 +120,14 @@ function positiveLimit(value: number | null | undefined, fallback: number): numb
     : fallback;
 }
 
-export function attachmentKindForFile(file: File): AttachmentKind {
-  if (file.size === 0) return "file";
-  if (VIDEO_MIME_BY_EXTENSION.has(extensionOf(file.name))) return "video";
+export function acceptedAttachmentKind(file: File): AttachmentKind | null {
+  if (VIDEO_MIME_BY_EXTENSION.has(extensionOf(file.name))
+    || [...VIDEO_MIME_BY_EXTENSION.values()].includes(file.type)) return "video";
   if (DOCUMENT_MIME_BY_EXTENSION.has(extensionOf(file.name))) return "file";
-  if ([...VIDEO_MIME_BY_EXTENSION.values()].includes(file.type)) return "video";
-  return ACCEPTED_IMAGE_MIMES.has(file.type) ? "image" : "file";
+  if (ACCEPTED_IMAGE_MIMES.has(file.type)) return "image";
+  const mime = mimeForFile(file);
+  if (ACCEPTED_DOCUMENT_MIMES.has(mime)) return "file";
+  return null;
 }
 
 function dataUrlMime(dataUrl: string): string {
@@ -163,7 +176,7 @@ function bufferToBase64(buf: ArrayBuffer): string {
   return btoa(binary);
 }
 
-async function encodeFile(file: File, maxFileBytes: number, mime = mimeForFile(file)): Promise<{
+async function encodeFile(file: File, maxFileBytes: number): Promise<{
   ok: true;
   dataUrl: string;
   bytes: number;
@@ -176,7 +189,7 @@ async function encodeFile(file: File, maxFileBytes: number, mime = mimeForFile(f
     const buffer = await file.arrayBuffer();
     return {
       ok: true,
-      dataUrl: `data:${mime};base64,${bufferToBase64(buffer)}`,
+      dataUrl: `data:${mimeForFile(file)};base64,${bufferToBase64(buffer)}`,
       bytes: file.size,
     };
   } catch {
@@ -184,8 +197,11 @@ async function encodeFile(file: File, maxFileBytes: number, mime = mimeForFile(f
   }
 }
 
-function mapEncodeFailure(reason: Exclude<EncodeFailure["reason"], "invalid_mime" | "magic_mismatch">): AttachmentError {
+function mapEncodeFailure(reason: EncodeFailure["reason"]): AttachmentError {
   switch (reason) {
+    case "invalid_mime":
+    case "magic_mismatch":
+      return "magic_mismatch";
     case "too_large_after_normalize":
       return "too_large";
     case "io":
@@ -196,36 +212,11 @@ function mapEncodeFailure(reason: Exclude<EncodeFailure["reason"], "invalid_mime
   }
 }
 
-async function encodeAttachment(file: File, kind: AttachmentKind, maxFileBytes: number): Promise<{
-  ok: true;
-  kind: AttachmentKind;
-  dataUrl: string;
-  bytes: number;
-  normalized: boolean;
-} | {
-  ok: false;
-  reason: AttachmentError;
-}> {
-  if (kind === "image") {
-    const result = await encodeImage(file);
-    if (result.ok) return { ...result, kind };
-    if (result.reason !== "magic_mismatch" && result.reason !== "invalid_mime") {
-      return { ok: false, reason: mapEncodeFailure(result.reason) };
-    }
-    // A non-image claiming an image MIME is still a file; keep its original bytes.
-    kind = "file";
-    const fallback = await encodeFile(file, maxFileBytes, "application/octet-stream");
-    return fallback.ok ? { ...fallback, kind, normalized: false } : fallback;
-  }
-  const result = await encodeFile(file, kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
-  return result.ok ? { ...result, kind, normalized: false } : result;
-}
-
 export interface UseAttachedImagesApi {
   images: AttachedAttachment[];
   /** Enqueue new files. Returns the list of rejected files so the caller can
-   * surface inline errors. Files rejected for limits are *not* added to
-   * ``images`` — only recoverable read/encoding failures show
+   * surface inline errors. Files rejected client-side (wrong MIME, limit) are
+   * *not* added to ``images`` — only recoverable read/encoding failures show
    * up as error chips. Restoring an existing draft preserves overflow so users
    * can remove files themselves; send validation still enforces ingress limits. */
   enqueue: (files: Iterable<File>, options?: { restoringDraft: boolean }) => {
@@ -294,7 +285,15 @@ export function useAttachedImages({
       );
 
       for (const file of files) {
-        const kind = attachmentKindForFile(file);
+        const kind = acceptedAttachmentKind(file);
+        if (!kind) {
+          rejected.push({ file, reason: "unsupported_type" });
+          continue;
+        }
+        if (file.size === 0) {
+          rejected.push({ file, reason: "empty_file" });
+          continue;
+        }
         if (!restoringDraft && kind !== "image" && file.size > (kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes)) {
           rejected.push({ file, reason: "too_large" });
           continue;
@@ -327,26 +326,25 @@ export function useAttachedImages({
         // Fire the Worker after the commit so chips render first (good INP).
         for (const entry of toAdd) {
           queueMicrotask(() => {
-            encodeAttachment(entry.file, entry.kind, maxFileBytes).then(
+            const work = entry.kind === "image"
+              ? encodeImage(entry.file)
+              : encodeFile(entry.file, entry.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
+            work.then(
               (result) => {
                 if (result.ok) {
-                  if (entry.kind === "image" && result.kind === "file" && entry.previewUrl) {
-                    try {
-                      URL.revokeObjectURL(entry.previewUrl);
-                    } catch {
-                      // Preview revocation is best-effort, as on removal.
-                    }
-                  }
                   setEntry(entry.id, {
-                    kind: result.kind,
-                    ...(result.kind === "file" ? { previewUrl: undefined } : {}),
                     status: "ready",
                     dataUrl: result.dataUrl,
                     encodedBytes: result.bytes,
-                    normalized: result.normalized,
+                    normalized: "normalized" in result ? result.normalized : false,
                   });
                 } else {
-                  setEntry(entry.id, { status: "error", error: result.reason });
+                  setEntry(entry.id, {
+                    status: "error",
+                    error: entry.kind === "image"
+                      ? mapEncodeFailure(result.reason as EncodeFailure["reason"])
+                      : result.reason as AttachmentError,
+                  });
                 }
               },
               () => {
@@ -430,6 +428,7 @@ export function useAttachedImages({
       }
       if (!img.dataUrl) return [];
       const file = dataUrlToFile(img.dataUrl, img.name);
+      if (!acceptedAttachmentKind(file)) return [];
       const kind = img.kind ?? kindFromDataUrl(img.dataUrl);
       return [{
         id: uuid(), kind, file, status: "ready", dataUrl: img.dataUrl, encodedBytes: file.size,

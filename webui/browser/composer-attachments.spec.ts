@@ -118,12 +118,11 @@ test("shows a readable error card and allows removal of a corrupt image", async 
   const input = page.getByRole("textbox");
   const draft = "Keep this draft while checking the attachment.";
   await input.fill(draft);
-  const broken = Buffer.alloc(6 * 1024 * 1024 + 1);
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(broken);
+  const broken = Buffer.from("not a PNG image");
   await page.locator('input[type="file"]').setInputFiles({ name: "broken.png", mimeType: "image/png", buffer: broken });
   const chip = page.getByTestId("composer-chip");
   await expect(chip.getByRole("button", { name: "broken.png", exact: true })).toHaveText("PNG");
-  await expect(chip.getByText("Couldn't decode this image", { exact: true })).toBeVisible();
+  await expect(chip.getByText("File doesn't look like a real image", { exact: true })).toBeVisible();
   await expectAttachmentDetails(page, chip, "broken.png");
   await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
   await input.press("Enter");

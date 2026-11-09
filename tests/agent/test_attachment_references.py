@@ -86,23 +86,6 @@ async def test_document_attachment_is_referenced_and_read_on_demand(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,body", [
-    ("empty.png", b""),
-    ("generic.bin", b"\x89PNG\r\n\x1a\nnot-an-image"),
-])
-async def test_webui_generic_attachment_is_a_reference_not_a_vision_block(tmp_path: Path, name: str, body: bytes) -> None:
-    source = tmp_path / name
-    source.write_bytes(body)
-    loop = _make_loop(tmp_path)
-    msg = InboundMessage(channel="websocket", sender_id="u", chat_id="c", content="inspect",
-                         media=[str(source)], metadata={"_file_media_paths": [str(source)]})
-    ctx = _turn_context(loop, msg)
-    await loop._restore_turn(ctx)
-    assert ctx.msg.content == f"inspect\n\n[Attachment: {source}]"
-    assert ctx.msg.media == []
-
-
-@pytest.mark.asyncio
 async def test_document_reference_survives_session_reload(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -134,17 +117,13 @@ async def test_document_reference_survives_session_reload(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,body,channel", [
-    ("followup.txt", b"Do not inject this file body", "cli"),
-    ("followup.png", b"", "websocket"),
-])
 async def test_pending_document_attachment_keeps_body_out_of_prompt(
-    tmp_path: Path, name: str, body: bytes, channel: str,
+    tmp_path: Path,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    doc_path = tmp_path / name
-    doc_path.write_bytes(body)
+    doc_path = tmp_path / "followup.txt"
+    doc_path.write_text("Do not inject this file body", encoding="utf-8")
     captured_messages: list[list[dict]] = []
     call_count = 0
 
@@ -161,12 +140,11 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
     pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
     await pending_queue.put(
         InboundMessage(
-            channel=channel,
+            channel="cli",
             sender_id="u",
             chat_id="c",
             content="check this",
             media=[str(doc_path)],
-            metadata={"_file_media_paths": [str(doc_path)]} if channel == "websocket" else {},
         )
     )
 
@@ -177,7 +155,7 @@ async def test_pending_document_attachment_keeps_body_out_of_prompt(
             current_message=None,
         ),
         runtime=runtime,
-        request_context=RequestContext(channel=channel, chat_id="c", runtime=runtime),
+        request_context=RequestContext(channel="cli", chat_id="c", runtime=runtime),
         pending_queue=pending_queue,
     )
 

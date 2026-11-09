@@ -14,12 +14,6 @@ from nanobot.utils.helpers import safe_filename
 
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 MAX_FILE_SIZE = DEFAULT_MAX_BYTES
-_DOCUMENT_MIME_EXTENSIONS = {
-    "application/pdf": ".pdf",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-}
 
 _MIME_EXTENSION_OVERRIDES = {
     # Python's ``mimetypes`` maps browser-recorded audio/webm to ``.weba`` and
@@ -35,8 +29,11 @@ _MIME_EXTENSION_OVERRIDES = {
     "audio/vnd.wave": ".wav",
     "video/webm": ".webm",
     "application/json": ".json",
-    **_DOCUMENT_MIME_EXTENSIONS,
+    "application/pdf": ".pdf",
     "application/toml": ".toml",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "application/x-yaml": ".yaml",
     "application/xhtml+xml": ".html",
     "application/xml": ".xml",
@@ -92,28 +89,10 @@ def save_base64_data_url(
     return str(dest)
 
 
-def media_destination(
-    media_dir: Path, mime_type: str, *, filename: str | None = None, preserve_filename: bool = False,
-) -> Path:
+def media_destination(media_dir: Path, mime_type: str, *, filename: str | None = None) -> Path:
     """Choose the shared media layout for binary and data-URL ingress."""
     ext = _MIME_EXTENSION_OVERRIDES.get(mime_type) or mimetypes.guess_extension(mime_type) or ".bin"
     base = safe_filename(filename or "")
-    if preserve_filename and base:
-        base = "".join("_" if ord(char) < 32 or ord(char) == 127 else char for char in base).rstrip(" .")
-        if base:
-            # Document readers dispatch by extension, even when the uploaded name does not match the MIME.
-            document_ext = _DOCUMENT_MIME_EXTENSIONS.get(mime_type, "")
-            format_ext = document_ext if Path(base).suffix.lower() != document_ext else ""
-            suffix = Path(base).suffix
-            suffix_bytes = suffix.encode("utf-8")
-            if len(suffix_bytes) > 120:
-                suffix = ""
-                suffix_bytes = b""
-            stem = base[:-len(suffix)] if suffix else base
-            stem_bytes = stem.encode("utf-8")[:255 - 13 - len(suffix_bytes) - len(format_ext)]
-            name = stem_bytes.decode("utf-8", errors="ignore").rstrip(" .") + suffix
-            if name:
-                return media_dir / f"{uuid.uuid4().hex[:12]}_{name}{format_ext}"
     stem = Path(base).stem[:80] if base else ""
     # Leave room for the 12-character ID, separator, and extension.
     max_stem_bytes = 255 - 13 - len(ext.encode("utf-8"))

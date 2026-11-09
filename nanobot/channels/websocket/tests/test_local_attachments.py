@@ -1,4 +1,3 @@
-import os
 from unittest.mock import Mock
 
 import pytest
@@ -32,35 +31,7 @@ def test_local_supported_formats_do_not_consume_upload_byte_limits(tmp_path, nam
     assert inspect_local_attachment(name, scope=default_workspace_scope(tmp_path, True), limits=limits)["size"] == size
 
 
-@pytest.mark.parametrize("name,body,kind", [
-    ("script.py", b"print(1)", "file"),
-    ("archive.tar.gz", b"\x00\xff", "file"),
-    ("README", b"", "file"),
-    ("empty.png", b"", "file"),
-    ("graphic.svg", b"<svg/>", "file"),
-])
-def test_inspect_any_local_file_without_copying(tmp_path, name, body, kind):
-    source = tmp_path / name
-    source.write_bytes(body)
-    result = inspect_local_attachment(name, scope=default_workspace_scope(tmp_path, True), limits=AttachmentIngressLimits())
-    assert result["path"] == str(source)
-    assert result["name"] == name
-    assert result["size"] == len(body)
-    assert result["kind"] == kind
-    assert source.read_bytes() == body
-    assert [path for path in tmp_path.rglob("*") if path.is_file()] == [source]
-
-
-@pytest.mark.skipif(os.name == "nt", reason="Windows does not support trailing spaces in file names")
-def test_literal_local_path_preserves_trailing_spaces(tmp_path):
-    source = tmp_path / "file "
-    source.write_bytes(b"body")
-    result = inspect_local_attachment(str(source), scope=default_workspace_scope(tmp_path, True), limits=AttachmentIngressLimits())
-    assert result["path"] == str(source)
-    assert result["name"] == source.name
-
-
-def test_reject_missing_directory_outside_and_unreadable(tmp_path, monkeypatch):
+def test_reject_missing_directory_outside_empty_and_unreadable(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
     source = tmp_path / "outside.mp4"
@@ -72,63 +43,11 @@ def test_reject_missing_directory_outside_and_unreadable(tmp_path, monkeypatch):
         assert error.value.status == status
     video = workspace / "large.mp4"
     video.touch()
+    with pytest.raises(WebUIFilePreviewError, match="[Ee]mpty"):
+        inspect_local_attachment(str(video), scope=scope, limits=AttachmentIngressLimits())
     monkeypatch.setattr("nanobot.webui.attachments.os.open", Mock(side_effect=PermissionError))
     with pytest.raises(WebUIFilePreviewError, match="readable"):
         inspect_local_attachment(str(video), scope=scope, limits=AttachmentIngressLimits())
-
-
-@pytest.mark.parametrize("mime,name", [
-    ("application/pdf", "report"),
-    ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "report.dat"),
-])
-async def test_uploaded_document_without_matching_suffix_is_readable_and_keeps_name(tmp_path, history, mime, name):
-    from io import BytesIO
-
-    from nanobot.agent.tools.filesystem import ReadFileTool
-    from nanobot.channels.websocket.attachment_store import AttachmentStore
-    from nanobot.webui.transcript import WebUITranscriptRecorder
-
-    data = BytesIO()
-    if mime == "application/pdf":
-        from pypdf import PdfWriter
-
-        pdf = PdfWriter()
-        pdf.add_blank_page(width=72, height=72)
-        pdf.write(data)
-        expected = "PDF has no extractable text"
-    else:
-        from docx import Document
-
-        doc = Document()
-        doc.add_paragraph("Report contents")
-        doc.save(data)
-        expected = "Report contents"
-    raw = data.getvalue()
-
-    async def chunks():
-        yield raw
-
-    media = tmp_path / "media"
-    store = AttachmentStore(media)
-    reference = await store.upload(chunks(), owner="owner", mime=mime, size=len(raw), filename=name)
-    path = store.commit([reference], owner="owner")[0]
-    result = await ReadFileTool(workspace=tmp_path).execute(path=path)
-    assert expected in result
-    gateway = WebUIMediaGateway(workspace_path=tmp_path, logger=Mock(), media_dir=lambda _: media)
-    assert await WebUITranscriptRecorder(history.sessions).append_user_message(
-        "files", "read", media_paths=[path], media_info=[{"name": name, "kind": "file"}],
-        metadata=await history.metadata("files"),
-    )
-    response = history.build(
-        "websocket:files", session_messages=[],
-        augment_user_media=lambda paths, local: gateway.augment_transcript_user_media(
-            paths, local, session_key="websocket:files",
-        ),
-    )
-    attachment = response["events"][0]["media_urls"][0]
-    assert (attachment["name"], attachment["kind"]) == (name, "file")
-    sig, payload = attachment["url"].split("/")[-2:]
-    assert bytes(gateway.serve_signed_media(sig, payload).body) == raw
 
 
 def test_local_media_ranges_latest_contents_and_current_scope_without_staging(tmp_path):
@@ -216,13 +135,9 @@ async def test_mixed_media_replay_keeps_uploaded_cache_and_borrowed_freshness(tm
         response = build_session_thread_response(session, augment_user_media=augment)
     else:
         assert await WebUITranscriptRecorder(history.sessions).append_user_message(
-            "cache", "look", media_paths=paths, media_info=[{"name": "source.bin", "kind": "file"}, {}],
-            metadata=await history.metadata("cache", metadata),
+            "cache", "look", media_paths=paths, metadata=await history.metadata("cache", metadata),
         )
         response = history.build("websocket:cache", session_messages=[], augment_user_media=augment)
-        assert [(item["name"], item["kind"]) for item in response["events"][0]["media_urls"]] == [
-            ("source.bin", "file"), ("borrowed.png", "image"),
-        ]
     urls = response["events"][0]["media_urls"]
     scope = default_workspace_scope(tmp_path, True)
     borrowed.write_bytes(b"updated")
@@ -232,10 +147,6 @@ async def test_mixed_media_replay_keeps_uploaded_cache_and_borrowed_freshness(tm
         assert bytes(served.body) == expected
         assert served.headers["Cache-Control"] == cache
     assert sorted(path.name for path in media.iterdir()) == ["borrowed.png", "upload.png"]
-    if not canonical:
-        borrowed.write_bytes(b"")
-        refreshed = history.build("websocket:cache", session_messages=[], augment_user_media=augment)
-        assert refreshed["events"][0]["media_urls"][1]["kind"] == "file"
 
 
 @pytest.mark.parametrize("role", ["assistant", "user"])

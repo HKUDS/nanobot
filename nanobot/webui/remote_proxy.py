@@ -369,7 +369,7 @@ class RemoteProxy:
         if request.headers.get("Content-Encoding") or request.headers.get("Transfer-Encoding"):
             raise web.HTTPBadRequest(text="Unsupported attachment framing")
         size = request.content_length
-        if size is None or not 0 <= size <= _MAX_BYTES:
+        if size is None or not 0 < size <= _MAX_BYTES:
             raise web.HTTPBadRequest(text="Invalid attachment size")
         headers = self._headers(request)
         headers["Authorization"] = "Bearer " + grant.remote

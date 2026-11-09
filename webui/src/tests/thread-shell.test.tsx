@@ -484,17 +484,6 @@ describe("ThreadShell", () => {
     );
   });
 
-  it.each([false, true])("accepts arbitrary attachments in the %s session composer", async (existingSession) => {
-    const client = makeClient();
-    const view = render(wrap(client, <ThreadShell
-      session={existingSession ? session("any-files") : null} title="Attachments" onToggleSidebar={() => {}} />));
-    const picker = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const file = new File(["custom bytes"], "custom");
-    expect(picker).not.toHaveAttribute("accept");
-    fireEvent.change(picker, { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "custom" })).toBeInTheDocument());
-  });
-
   it("publishes received and live body text to local search without search-driven reads", async () => {
     const client = makeClient();
     const cache = new ThreadMessageCache(() => false);

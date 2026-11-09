@@ -6,6 +6,7 @@ import pytest
 
 from nanobot.channels.websocket.attachment_policy import AttachmentIngressLimits
 from nanobot.channels.websocket.attachment_store import AttachmentStore, AttachmentUploadError
+from nanobot.utils.media_decode import save_base64_data_url
 
 
 async def chunks(raw: bytes):
@@ -33,35 +34,24 @@ async def test_binary_larger_than_websocket_limit_preserves_layout(tmp_path):
         store.resolve([ref], owner="owner")
 
 
-@pytest.mark.parametrize("mime,filename,raw,suffix", [
-    ("application/pdf", "../../report.pdf", b"pdf", "report.pdf"),
-    ("application/pdf", "report.dat", b"pdf", "report.dat.pdf"),
-    ("video/webm", "ignored.webm", b"video", ".webm"),
-    ("text/x-python", "script.py", b"print(1)", "script.py"),
-    ("application/octet-stream", "archive.tar.gz", b"\x00\xff", "archive.tar.gz"),
-    ("application/octet-stream", "README", b"", "README"),
-    ("application/octet-stream", ".gitignore", b"*.pyc", ".gitignore"),
-    ("image/png", "empty.png", b"", "empty.png"),
+@pytest.mark.parametrize("mime,filename,pattern", [
+    ("application/pdf", "../../report.pdf", r"[0-9a-f]{12}_.+\.pdf"),
+    ("video/webm", "ignored.webm", r"[0-9a-f]{12}\.webm"),
+    ("text/markdown", "notes.md", r"[0-9a-f]{12}_notes\.md"),
 ])
-async def test_upload_preserves_generic_filename_and_bytes(tmp_path, mime, filename, raw, suffix):
+async def test_document_and_video_layout_matches_legacy(tmp_path, mime, filename, pattern):
     store = AttachmentStore(tmp_path)
-    ref = await upload(store, raw, mime=mime, filename=filename)
-    path = Path(store.commit([ref], owner="owner")[0])
+    ref = await upload(store, mime=mime, filename=filename)
+    path = Path(store.resolve([ref], owner="owner")[0])
     assert path.parent == tmp_path
-    assert path.name.endswith(suffix)
-    assert path.read_bytes() == raw
-
-
-async def test_long_and_unsafe_filenames_stay_within_media_directory(tmp_path):
-    store = AttachmentStore(tmp_path)
-    name = "../" + "测" * 200 + "\x00.py"
-    ref = await upload(store, mime="text/x-python", filename=name)
-    path = Path(store.commit([ref], owner="owner")[0])
-    assert path.parent == tmp_path
-    assert len(path.name.encode("utf-8")) <= 255
-    assert path.name.endswith(".py")
-    assert "\x00" not in path.name
-    assert path.read_bytes() == b"attachment"
+    assert re.fullmatch(pattern, path.name)
+    import base64
+    legacy = save_base64_data_url(
+        f"data:{mime};base64," + base64.b64encode(b"attachment").decode(), tmp_path,
+        filename=filename if mime != "video/webm" else None,
+    )
+    assert legacy is not None
+    assert path.name[12:] == Path(legacy).name[12:]
 
 
 async def test_ownership_invalid_and_duplicate_refs_are_atomic(tmp_path):
@@ -90,9 +80,9 @@ async def test_reject_metadata_before_reading_body(tmp_path):
         pytest.fail("Rejected request body was read")
         yield b""
 
-    for owner, mime, size in [("", "image/png", 1), ("owner", "image/png", -1),
-                              ("owner", "image/png", True),
-                              ("owner", "image/png", 7 * 1024 * 1024)]:
+    for owner, mime, size in [("", "image/png", 1), ("owner", "text/javascript", 1),
+                              ("owner", "image/png", 7 * 1024 * 1024),
+                              ("owner", "image/png", 0)]:
         with pytest.raises(AttachmentUploadError):
             await store.upload(unread(), owner=owner, mime=mime, size=size)
     assert not [path for path in tmp_path.rglob("*") if path.is_file()]

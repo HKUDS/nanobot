@@ -2120,9 +2120,12 @@
       "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
       "textTooLarge": "メッセージ本文が大きすぎます（最大 {{max}}）",
       "imageRejected": {
+        "unsupported_type": "対応していないファイル形式です",
+        "empty_file": "空のファイルは添付できません",
         "too_many_attachments": "1 メッセージにつき最大 {{max}} 件までです",
         "too_many_videos": "1 メッセージにつき動画は 1 件までです",
         "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
+        "magic_mismatch": "画像ファイルではないようです",
         "decode_failed": "この画像をデコードできません",
         "too_large": "ファイルサイズ {{size}} はアップロード上限 {{max}} を超えています",
         "total_too_large": "添付ファイルの合計サイズが大きすぎます。いくつか削除するか、より小さいファイルを使用してください",

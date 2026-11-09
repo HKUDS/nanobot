@@ -92,7 +92,8 @@ import {
 } from "@/components/thread/ModelPresetBadge";
 import type { ComposerUsageControl } from "@/components/thread/ComposerUsagePopover";
 import {
-  attachmentKindForFile,
+  ACCEPT_ATTR,
+  acceptedAttachmentKind,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_ATTACHMENT_BYTES,
   MAX_TOTAL_ATTACHMENT_BYTES,
@@ -866,9 +867,11 @@ export function ThreadComposer({
         ? "Max 1 video per message"
         : reason === "too_many_attachments"
         ? `Max ${maxAttachments} attachments per message`
-        : reason === "total_too_large"
-          ? "Attachments are too large together — remove some or use smaller files"
-          : "Attachment could not be read";
+        : reason === "empty_file"
+          ? "Empty files cannot be attached"
+          : reason === "total_too_large"
+            ? "Attachments are too large together — remove some or use smaller files"
+            : "Unsupported file type";
       return t(key, { max: maxAttachments, defaultValue: fallback });
     },
     [maxAttachments, t],
@@ -1036,7 +1039,7 @@ export function ThreadComposer({
       if (rejected.length > 0) {
         const { reason, file } = rejected[0];
         setInlineError(reason === "too_large"
-          ? formatUploadTooLarge(file.size, attachmentKindForFile(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
+          ? formatUploadTooLarge(file.size, acceptedAttachmentKind(file) === "video" ? MAX_VIDEO_BYTES : maxFileBytes)
           : formatRejection(reason));
       } else {
         setInlineError(null);
@@ -1309,7 +1312,7 @@ export function ThreadComposer({
     onAttachmentPaste(event);
     if (event.defaultPrevented || interactionDisabled || isUserShell || !onInspectAttachment) return;
     const raw = event.clipboardData.getData("text/plain");
-    const path = pastedFilePath(raw, { allowBareNames: true });
+    const path = pastedFilePath(raw);
     if (!path) return;
     event.preventDefault();
     const { start, end } = rawSelection();
@@ -1320,13 +1323,12 @@ export function ThreadComposer({
     void onInspectAttachment(path).then((attachment) => {
       if (generation !== pathCheckGeneration.current) return;
       setPathInspection((current) => current?.generation === generation ? { ...current, attachment } : current);
-    }).catch((error: unknown) => {
+    }).catch(() => {
       if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
+      // Attachment recognition is optional; the pasted text is already in the draft.
       setPathInspection(null);
-      if (error instanceof Error && "status" in error && error.status === 404) return;
-      setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
     });
-  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   useLayoutEffect(() => {
     if (!pathInspection) return;
@@ -1338,16 +1340,12 @@ export function ThreadComposer({
     // Let the native IME commit before removing the confirmed path from its text.
     if (!pathInspection.attachment || mentionInput.isComposing) return;
     const edited = pathInspection.range.replace("", rawSelection().start);
-    if (edited) {
-      const rejection = addLocal(pathInspection.attachment);
-      if (rejection) setInlineError(formatRejection(rejection));
-      else {
-        replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
-        setInlineError(null);
-      }
+    if (edited && !addLocal(pathInspection.attachment)) {
+      replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
+      setInlineError(null);
     }
     setPathInspection(null);
-  }, [addLocal, formatRejection, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
+  }, [addLocal, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   const draftText = composerMentionText(mentionInput.segments).raw;
   const sessionDragInsertion = sessionDragPreview
@@ -2486,6 +2484,7 @@ export function ThreadComposer({
             <input
               ref={fileInputRef}
               type="file"
+              accept={ACCEPT_ATTR}
               multiple
               hidden
               onChange={onFilePick}

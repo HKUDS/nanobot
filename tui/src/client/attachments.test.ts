@@ -9,16 +9,13 @@ test("recognizes whole paths across native platforms without consuming prose, co
     ['"C:\\project\\my clip.mp4"', "C:\\project\\my clip.mp4"],
     ["'./clips/my clip.webm'", "./clips/my clip.webm"],
     ["/tmp/my clip.mov", "/tmp/my clip.mov"], ["clips/clip.mp4", "clips/clip.mp4"],
-    ["clip.mp4", "clip.mp4"], ["./README", "./README"],
+    ["clip.mp4", "clip.mp4"],
     ['"C:\\project\\O\'Reilly.png"', "C:\\project\\O'Reilly.png"],
     ["/tmp/O'Reilly.png", "/tmp/O'Reilly.png"],
     ['"O\'Reilly notes.pdf"', "O'Reilly notes.pdf"],
   ]) expect(pastedFilePath(text!)).toBe(path!)
   for (const text of ["please read ./file.txt", "const p = './file.txt'", "https://host/clip.mp4",
-    "C:\\fakepath\\clip.mp4", "line\n./clip.mp4", "`./clip.mp4`", "README"]) expect(pastedFilePath(text)).toBeNull()
-  expect(pastedFilePath("README", { allowBareNames: true })).toBe("README")
-  expect(pastedFilePath("'my file'", { allowBareNames: true })).toBe("my file")
-  expect(pastedFilePath("some pasted text", { allowBareNames: true })).toBeNull()
+    "C:\\fakepath\\clip.mp4", "line\n./clip.mp4", "`./clip.mp4`"]) expect(pastedFilePath(text)).toBeNull()
 })
 
 test("local paths send zero HTTP bodies; mixed batches upload only the required bytes", async () => {
@@ -36,20 +33,4 @@ test("local paths send zero HTTP bodies; mixed batches upload only the required 
   expect(requests).toHaveLength(1)
   expect(requests[0]?.url).toBe("http://localhost:1234/api/attachments")
   expect(await requests[0]?.body.text()).toBe("x")
-})
-
-test("empty generic previews upload zero bytes while malformed data URLs remain invalid", async () => {
-  const requests: { body: Blob; headers: Record<string, string> }[] = []
-  globalThis.fetch = (async (_url, init) => {
-    requests.push({ body: init?.body as Blob, headers: init?.headers as Record<string, string> })
-    return Response.json({ reference: "empty-token" })
-  }) as typeof fetch
-  const capability = { path: "/api/attachments", token: "capability" }
-  expect(await uploadAttachments([{ data_url: "data:application/octet-stream;base64,", name: "空 文件" }],
-    capability, "ws://localhost:1234", () => true)).toEqual([{ reference: "empty-token", name: "空 文件" }])
-  expect(requests[0]?.body.size).toBe(0)
-  expect(requests[0]?.headers["X-Attachment-Name"]).toBe(encodeURIComponent("空 文件"))
-  await expect(uploadAttachments([{ data_url: "data:;base64,", name: "bad" }],
-    capability, "ws://localhost:1234", () => true)).rejects.toThrow("Invalid attachment preview")
-  expect(requests).toHaveLength(1)
 })

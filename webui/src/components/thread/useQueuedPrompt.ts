@@ -110,8 +110,8 @@ function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | nul
         return [{
           dataUrl: candidate.dataUrl,
           kind,
-          ...(typeof candidate.name === "string" && candidate.name.length > 0
-            ? { name: candidate.name }
+          ...(typeof candidate.name === "string" && candidate.name.trim()
+            ? { name: candidate.name.trim() }
             : {}),
         }];
       })

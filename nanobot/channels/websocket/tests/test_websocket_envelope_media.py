@@ -363,35 +363,6 @@ async def test_local_reference_inspection_send_recheck_and_no_staging(tmp_path, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,body", [("script.py", b"print(1)"), ("empty.png", b"")])
-async def test_local_any_file_is_referenced_without_staging(tmp_path, monkeypatch, name, body):
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
-    workspace = tmp_path / "project"
-    workspace.mkdir()
-    source = workspace / name
-    source.write_bytes(body)
-    channel = _make_channel(workspace=workspace, restricted=True)
-    conn = AsyncMock()
-    channel._webui_connections.add(conn)
-    await channel._dispatch_envelope(conn, "client", {
-        "type": "webui_request", "request_id": "inspect-any", "action": "attachment.inspect",
-        "payload": {"chat_id": "any-local", "path": str(source)},
-    })
-    inspected = json.loads(conn.send.await_args.args[0])
-    assert inspected["ok"] is True
-    assert inspected["result"]["kind"] == "file"
-    await channel._dispatch_envelope(conn, "client", {
-        "type": "message", "chat_id": "any-local", "content": "inspect", "webui": True,
-        "turn_id": "any-local-turn", "media": [{"path": str(source)}],
-    })
-    kwargs = channel._handle_message.await_args.kwargs
-    assert kwargs["media"] == [str(source)]
-    assert kwargs["metadata"]["_file_media_paths"] == [str(source)]
-    assert source.read_bytes() == body
-    assert not list(channel.gateway.uploads.store.media_dir.glob("*"))
-
-
-@pytest.mark.asyncio
 async def test_mixed_local_and_uploaded_video_limit_keeps_upload_for_retry(tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
     source = tmp_path / "local.webm"

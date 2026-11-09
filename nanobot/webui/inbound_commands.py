@@ -13,17 +13,9 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import (
-    INBOUND_META_FILE_MEDIA,
-    INBOUND_META_LOCAL_MEDIA,
-    INBOUND_META_USER_SHELL,
-)
-from nanobot.channels.websocket.attachment_policy import (
-    IMAGE_MIME_ALLOWED,
-    VIDEO_MIME_ALLOWED,
-    validate_attachment_batch,
-)
-from nanobot.channels.websocket.attachment_store import AttachmentUploadError, attachment_display_name
+from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
+from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
+from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
 from nanobot.command.builtin import USER_SHELL_COMMAND
 from nanobot.runtime_context import (
@@ -45,6 +37,7 @@ from nanobot.session.webui_turns import (
     websocket_turn_id,
     websocket_turn_wall_started_at,
 )
+from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.attachments import inspect_local_attachment
 from nanobot.webui.cli_apps_api import normalize_cli_app_mentions
@@ -640,7 +633,7 @@ class WebUICommandRouter:
                     attachment_order.append((False, len(references)))
                     references.append(reference)
                 name = attachment.get("name")
-                media_names.append((attachment_display_name(name) or None) if isinstance(name, str) else None)
+                media_names.append((safe_filename(name) or None) if isinstance(name, str) else None)
         except AttachmentUploadError as exc:
             await self._transport.webui_send_event(
                 connection, "error", detail="attachment_rejected", reason=str(exc),
@@ -762,20 +755,6 @@ class WebUICommandRouter:
             return
         if local:
             metadata[INBOUND_META_LOCAL_MEDIA] = [item["path"] for item in local]
-        media_info: list[dict[str, str]] = []
-        for (is_local, index), name in zip(attachment_order, media_names, strict=True):
-            if is_local:
-                media_info.append({})
-                continue
-            mime = uploaded[index].mime
-            name = name or uploaded[index].name
-            kind = "image" if mime in IMAGE_MIME_ALLOWED else "video" if mime in VIDEO_MIME_ALLOWED else "file"
-            media_info.append({"kind": kind, **({"name": name} if name else {})})
-        metadata[INBOUND_META_FILE_MEDIA] = [
-            local[index]["path"] if is_local else str(uploaded[index].path)
-            for is_local, index in attachment_order
-            if (local[index]["kind"] != "image" if is_local else uploaded[index].mime not in IMAGE_MIME_ALLOWED)
-        ]
         if temporary_policy is not None:
             self._temporary_chats.register_media(connection, chat_id, [str(item.path) for item in uploaded])
         is_webui = metadata.get("webui") is True
@@ -842,7 +821,6 @@ class WebUICommandRouter:
                     content,
                     metadata=metadata,
                     media_paths=media_paths or None,
-                    media_info=media_info if any(media_info) else None,
                     cli_apps=cli_apps or None,
                     mcp_presets=mcp_presets or None,
                     session_mentions=session_mentions or None,
@@ -909,10 +887,9 @@ class WebUICommandRouter:
             media_paths, local_paths=[item["path"] for item in local],
             session_key=webui_session_key(chat_id),
         ) if is_webui else []
-        for attachment, name, info in zip(media, media_names, media_info, strict=False):
+        for attachment, name in zip(media, media_names, strict=False):
             if name:
                 attachment["name"] = name
-            attachment.update(info)
         if is_webui and not restart_control:
             if session_created:
                 await self._outbound.session_updated(chat_id, scope="metadata")

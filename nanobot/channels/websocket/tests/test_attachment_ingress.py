@@ -210,90 +210,6 @@ async def test_real_listener_large_binary_and_reference_delivery(gateway, mime, 
         assert path.exists()
 
 
-@pytest.mark.parametrize("mime,name,body,include_name", [
-    ("text/x-python", "script.py", b"print(1)", True),
-    ("image/svg+xml", "graphic.svg", b"<svg/>", False),
-    ("application/octet-stream", "archive.tar.gz", b"\x00\xff", True),
-    ("image/png", "empty.png", b"", True),
-])
-async def test_real_webui_uploads_arbitrary_files_and_empty_images(gateway, mime, name, body, include_name):
-    channel, bus, http_url, _ = gateway
-    token = channel.gateway.tokens.issue_token(60, audience="webui")
-    ws_url = http_url.replace("http://", "ws://") + "/ws?token=" + token
-    async with connect(ws_url) as ws, aiohttp.ClientSession() as http:
-        ready = await event(ws, "ready")
-        capability = ready["upload"]
-        headers = {"Authorization": f"Bearer {capability['token']}", "Content-Type": mime,
-                   "X-Attachment-Name": name}
-        async with http.post(http_url + capability["path"], data=body, headers=headers) as response:
-            assert response.status == 201, await response.text()
-            reference = (await response.json())["reference"]
-        attachment = {"reference": reference, **({"name": name} if include_name else {})}
-        await ws.send(json.dumps({"type": "message", "chat_id": ready["chat_id"], "content": "inspect",
-                                  "webui": True, "turn_id": "any-file", "media": [attachment]}))
-        accepted = await event(ws, "message_accepted")
-        assert accepted["media_urls"][0]["kind"] == "file"
-        assert accepted["media_urls"][0]["name"] == name
-        inbound = await asyncio.wait_for(bus.consume_inbound(), 2)
-        path = Path(inbound.media[0])
-        assert path.read_bytes() == body
-        assert path.name.endswith("_" + name)
-        assert inbound.metadata["_file_media_paths"] == [str(path)]
-        api_token = channel.gateway.tokens.issue_api_token(60)
-        async with http.get(
-            f"{http_url}/api/sessions/websocket:{ready['chat_id']}/webui-thread",
-            headers={"Authorization": f"Bearer {api_token}"},
-        ) as response:
-            assert response.status == 200, await response.text()
-            thread = await response.json()
-        user = next(item for item in thread["events"] if item["event"] == "user_message")
-        replayed = user["media_urls"][0]
-        assert (replayed["name"], replayed["kind"]) == (name, "file")
-        async with http.get(http_url + replayed["url"]) as response:
-            assert response.status == 200
-            assert await response.read() == body
-
-
-async def test_ordinary_websocket_upload_keeps_empty_image_as_file(gateway):
-    from nanobot.utils.document import reference_non_image_attachments
-
-    _, bus, http_url, ws_url = gateway
-    async with connect(ws_url) as ws, aiohttp.ClientSession() as http:
-        ready = await event(ws, "ready")
-        capability = ready["upload"]
-        headers = {"Authorization": f"Bearer {capability['token']}", "Content-Type": "image/png",
-                   "X-Attachment-Name": "empty.png"}
-        async with http.post(http_url + capability["path"], data=b"", headers=headers) as response:
-            assert response.status == 201, await response.text()
-            reference = (await response.json())["reference"]
-        await ws.send(json.dumps({"type": "message", "chat_id": ready["chat_id"], "content": "inspect",
-                                  "media": [{"reference": reference, "name": "empty.png"}]}))
-        inbound = await asyncio.wait_for(bus.consume_inbound(), 2)
-        path = Path(inbound.media[0])
-        assert path.read_bytes() == b""
-        content, images = reference_non_image_attachments(
-            inbound.content, inbound.media, file_paths=inbound.metadata.get("_file_media_paths"),
-        )
-        assert content == f"inspect\n\n[Attachment: {path}]"
-        assert images == []
-
-
-async def test_upload_without_declared_content_length_is_rejected(gateway):
-    _, _, http_url, ws_url = gateway
-    port = int(http_url.rsplit(":", 1)[1])
-    async with connect(ws_url) as ws:
-        capability = (await event(ws, "ready"))["upload"]
-        reader, writer = await asyncio.open_connection("127.0.0.1", port)
-        try:
-            writer.write((f"POST {capability['path']} HTTP/1.1\r\nHost: localhost\r\n"
-                          f"Authorization: Bearer {capability['token']}\r\n\r\n").encode())
-            await writer.drain()
-            assert b"HTTP/1.1 400" in await asyncio.wait_for(reader.read(), 3)
-        finally:
-            writer.close()
-            await writer.wait_closed()
-
-
 async def test_capability_is_required_owner_scoped_and_revoked(gateway):
     channel, _, http_url, ws_url = gateway
     async with aiohttp.ClientSession() as http:
@@ -340,9 +256,9 @@ async def test_inline_payload_rejected_and_failed_validation_keeps_upload(gatewa
 
 
 @pytest.mark.parametrize("mime,body", [
-    ("image/png", b"x" * (6 * 1024 * 1024 + 1)),
-    ("application/octet-stream", b"x" * (6 * 1024 * 1024 + 1)),
-], ids=["image", "generic-file"])
+    ("image/svg+xml", b"<svg/>"), ("text/javascript", b"alert(1)"),
+    ("image/png", b""), ("image/png", b"x" * (6 * 1024 * 1024 + 1)),
+], ids=["svg", "javascript", "empty", "oversized"])
 async def test_http_policy_rejection_does_not_leave_files(gateway, mime, body):
     channel, _, http_url, ws_url = gateway
     async with connect(ws_url) as ws, aiohttp.ClientSession() as http:

@@ -41,7 +41,6 @@ from nanobot.agent.turn_delivery import (
 from nanobot.agent.turn_delivery import TurnRoute as TurnRoute
 from nanobot.agent.turn_hooks import AgentTurnHookSpec, build_agent_turn_hook
 from nanobot.bus.events import (
-    INBOUND_META_FILE_MEDIA,
     INBOUND_META_LOCAL_MEDIA,
     INBOUND_META_RUNTIME_CONTROL,
     INBOUND_META_TURN_ID,
@@ -1096,7 +1095,6 @@ class AgentLoop:
                     content, image_paths = reference_non_image_attachments(
                         content,
                         image_paths,
-                        file_paths=pending_msg.metadata.get(INBOUND_META_FILE_MEDIA),
                     )
                     image_paths = image_paths or None
                 user_content = self.context.build_user_content(
@@ -2060,7 +2058,6 @@ class AgentLoop:
             new_content, image_paths = reference_non_image_attachments(
                 msg.content,
                 msg.media,
-                file_paths=msg.metadata.get(INBOUND_META_FILE_MEDIA),
             )
             ctx.msg = dataclasses.replace(msg, content=new_content, media=image_paths)
             msg = ctx.msg

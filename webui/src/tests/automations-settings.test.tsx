@@ -536,20 +536,6 @@ describe("Automation task list and detail sheet", () => {
     await waitFor(() => expect(composer).toHaveValue(""));
   });
 
-  it("passes arbitrary attachments from the automation composer to the new chat", async () => {
-    const user = userEvent.setup();
-    const onStartChat = vi.fn().mockResolvedValue(true);
-    const view = render(<Harness payload={{ jobs: [] }} onStartChat={onStartChat} settingsSnapshot={modelSettings} />);
-    const picker = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
-    expect(picker).not.toHaveAttribute("accept");
-    await user.upload(picker, new File([], "task.py", { type: "text/x-python" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-    expect(onStartChat).toHaveBeenCalledWith("", [expect.objectContaining({
-      media: { data_url: "data:application/octet-stream;base64,", name: "task.py" },
-    })], { intent: "create_automation" }, "fast");
-  });
-
   it("uses the shared click picker and creates the chat with the selected model preset", async () => {
     const user = userEvent.setup();
     const onStartChat = vi.fn().mockResolvedValue(true);

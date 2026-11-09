@@ -691,22 +691,20 @@ def _canonical_local_media_path(path: str) -> str:
 
 
 def reference_non_image_attachments(
-    content: str, media: list[str], *, file_paths: list[str] | None = None,
+    content: str, media: list[str],
 ) -> tuple[str, list[str]]:
     """Reference non-image attachments without reading file content.
 
-    Image paths are preserved for downstream vision-block construction unless
-    trusted ingress explicitly classified them as files. Non-image paths are
-    appended as ``[Attachment: path]`` references so the
+    Image paths are preserved for downstream vision-block construction.
+    Non-image paths are appended as ``[Attachment: path]`` references so the
     model can inspect them on demand with ``read_file`` or pass the original
     path to another tool that needs exact file bytes.
     """
     image_paths: list[str] = []
     attachment_refs: list[str] = []
-    files = {_canonical_local_media_path(path) for path in file_paths or []}
     for path in media:
         path = _canonical_local_media_path(path)
-        if path not in files and is_image_file(path):
+        if is_image_file(path):
             image_paths.append(path)
         else:
             attachment_refs.append(f"[Attachment: {path}]")

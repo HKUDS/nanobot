@@ -2120,9 +2120,12 @@
       "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",
       "textTooLarge": "Nội dung tin nhắn quá lớn (tối đa {{max}})",
       "imageRejected": {
+        "unsupported_type": "Loại tệp không được hỗ trợ",
+        "empty_file": "Không thể đính kèm tệp trống",
         "too_many_attachments": "Tối đa {{max}} tệp đính kèm mỗi tin nhắn",
         "too_many_videos": "Tối đa 1 video mỗi tin nhắn",
         "too_many_images": "Tối đa {{max}} ảnh mỗi tin nhắn",
+        "magic_mismatch": "Tệp này không phải là một ảnh thực",
         "decode_failed": "Không thể giải mã ảnh này",
         "too_large": "Tệp có dung lượng {{size}}, vượt giới hạn tải lên {{max}}",
         "total_too_large": "Tổng dung lượng tệp đính kèm quá lớn — hãy xóa bớt hoặc dùng tệp nhỏ hơn",

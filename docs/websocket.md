@@ -247,7 +247,7 @@ The gateway advertises `webui.attachments.binary.v1`. WebUI protocol 1 and the t
 
 3. Retain the draft and local preview until `message_accepted` confirms the turn. A connection close before confirmation means delivery is uncertain, not that the draft should be discarded. Reconnect obtains a new upload capability; old uncommitted references cannot be used by the new connection. A repeated accepted `(chat_id, turn_id)` is acknowledged without another dispatch within the gateway's bounded ten-minute in-memory retry window.
 
-The upload path accepts any file type, including empty files. Existing file/count/total limits still apply independently of `maxMessageBytes`. Uploads time out after five minutes, or after 30 seconds without receiving more data. Uploads are not resumable, so a retry sends the whole file.
+The upload path accepts the existing image, document, and video MIME whitelist. Existing file/count/total limits still apply independently of `maxMessageBytes`. Uploads time out after five minutes, or after 30 seconds without receiving more data. Uploads are not resumable, so a retry sends the whole file.
 
 Update WebUI and TUI together with the gateway. Existing messages and attachments remain available without a history migration. Clients must use HTTP uploads; `media.data_url` message uploads are no longer accepted. Local previews and the separate audio transcription protocol are unchanged.
 
