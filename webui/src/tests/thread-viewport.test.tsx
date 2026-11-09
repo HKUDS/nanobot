@@ -979,6 +979,145 @@ describe("ThreadViewport", () => {
       .not.toBeInTheDocument();
   });
 
+  it("keeps middle-button scrolling user-owned through a return to the tail and reversal", async () => {
+    const { scroller } = await renderPromptRailViewport();
+    const message = scroller.querySelector<HTMLElement>(".thread-message-row")!;
+    expect(scroller.scrollTop).toBe(1_200);
+
+    act(() => {
+      fireEvent.pointerDown(message, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 295 });
+      fireEvent.pointerUp(document, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 295 });
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 180 });
+      scroller.scrollTop = 900;
+      fireEvent.scroll(scroller);
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(900);
+
+    // Streaming layout can shrink back to the tail while autoscroll is still
+    // moving upward, without delivering another pointermove event.
+    act(() => {
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1_500 });
+      fireEvent.scroll(scroller);
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1_800 });
+      scroller.scrollTop = 700;
+      fireEvent.scroll(scroller);
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(700);
+
+    act(() => {
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 420 });
+      scroller.scrollTop = 1_200;
+      fireEvent.scroll(scroller);
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_200);
+
+    act(() => {
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 180 });
+      scroller.scrollTop = 1_000;
+      fireEvent.scroll(scroller);
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_000);
+  });
+
+  it("keeps the middle-scroll reading position while output grows and the turn completes", async () => {
+    const threaded: UIMessage[] = [
+      { id: "u1", role: "user", content: "question", turnId: "turn-1", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "answer", turnId: "turn-1", isStreaming: true, createdAt: 2 },
+    ];
+    const { container, rerender } = render(
+      <ThreadViewport messages={threaded} isStreaming activeTurnId="turn-1" composer={<div />} />,
+    );
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 1_900, 500, 1_400);
+    act(() => window.dispatchEvent(new Event("resize")));
+    await flushAnimationFrame();
+
+    act(() => {
+      const message = scroller.querySelector<HTMLElement>(".thread-message-row")!;
+      fireEvent.pointerDown(message, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerUp(document, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 180 });
+      scroller.scrollTop = 1_000;
+      fireEvent.scroll(scroller);
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2_100 });
+      rerender(
+        <ThreadViewport messages={[threaded[0], { ...threaded[1], content: "answer with more output" }]} isStreaming activeTurnId="turn-1" composer={<div />} />,
+      );
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_000);
+
+    act(() => {
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2_300 });
+      rerender(
+        <ThreadViewport messages={[threaded[0], { ...threaded[1], content: "final answer", isStreaming: false }]} isStreaming={false} composer={<div />} />,
+      );
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_000);
+  });
+
+  it("yields to middle scrolling started at a nested scrollport boundary", async () => {
+    const { scroller } = await renderPromptRailViewport();
+    const message = scroller.querySelector<HTMLElement>(".thread-message-row")!;
+    const nested = document.createElement("div");
+    nested.style.overflowY = "auto";
+    mockScrollGeometry(nested, 1_000, 200, 0);
+    message.append(nested);
+
+    act(() => {
+      fireEvent.pointerDown(nested, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerUp(document, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 180 });
+      scroller.scrollTop = 900;
+      fireEvent.scroll(scroller);
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(900);
+  });
+
+  it("continues following after a cancelled middle click, a link, or a nested scrollport", async () => {
+    const { scroller } = await renderPromptRailViewport();
+    const message = scroller.querySelector<HTMLElement>(".thread-message-row")!;
+    const link = document.createElement("a");
+    link.href = "https://example.com/";
+    const label = document.createElement("span");
+    link.append(label);
+    const nested = document.createElement("div");
+    nested.style.overflowY = "auto";
+    mockScrollGeometry(nested, 1_000, 200, 400);
+    message.append(link, nested);
+
+    act(() => {
+      fireEvent.pointerDown(message, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 295 });
+      fireEvent.pointerUp(document, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 295 });
+      fireEvent.pointerUp(document, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 180 });
+      fireEvent.pointerDown(label, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerUp(document, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 180 });
+      fireEvent.pointerDown(nested, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerUp(document, { pointerType: "mouse", pointerId: 1, button: 1, clientY: 300 });
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 180 });
+      nested.scrollTop = 0;
+      fireEvent.pointerMove(document, { pointerType: "mouse", pointerId: 1, clientY: 150 });
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 2_000 });
+      window.dispatchEvent(new Event("resize"));
+    });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_400);
+  });
+
   it("tracks the message content edge independently of trailing space and motion ownership", () => {
     const resizeObserver = stubResizeObserver();
     try {
