@@ -539,7 +539,7 @@ describe("Automation task list and detail sheet", () => {
   it("passes arbitrary attachments from the automation composer to the new chat", async () => {
     const user = userEvent.setup();
     const onStartChat = vi.fn().mockResolvedValue(true);
-    const view = render(<Harness payload={{ jobs: [] }} onStartChat={onStartChat} settingsSnapshot={modelSettings} allowAnyFileAttachments />);
+    const view = render(<Harness payload={{ jobs: [] }} onStartChat={onStartChat} settingsSnapshot={modelSettings} />);
     const picker = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
     expect(picker).not.toHaveAttribute("accept");
     await user.upload(picker, new File([], "task.py", { type: "text/x-python" }));

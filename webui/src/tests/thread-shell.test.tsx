@@ -484,24 +484,15 @@ describe("ThreadShell", () => {
     );
   });
 
-  it.each([false, true])("negotiates arbitrary attachments for the %s session composer", async (existingSession) => {
+  it.each([false, true])("accepts arbitrary attachments in the %s session composer", async (existingSession) => {
     const client = makeClient();
-    const shell = (capabilities: string[]) => wrap(client, <ThreadShell
-      session={existingSession ? session("any-files") : null} title="Attachments" onToggleSidebar={() => {}} />,
-    null, "tok", capabilities);
-    const view = render(shell(["webui.core.v1"]));
+    const view = render(wrap(client, <ThreadShell
+      session={existingSession ? session("any-files") : null} title="Attachments" onToggleSidebar={() => {}} />));
     const picker = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const file = new File(["custom bytes"], "custom");
-    expect(picker).toHaveAttribute("accept", expect.stringContaining("application/pdf"));
-    fireEvent.change(picker, { target: { files: [file] } });
-    expect(screen.getByText("Upgrade the host to attach this file.")).toBeInTheDocument();
-    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
-
-    view.rerender(shell(["webui.core.v1", "webui.attachments.any-file.v1"]));
     expect(picker).not.toHaveAttribute("accept");
     fireEvent.change(picker, { target: { files: [file] } });
     await waitFor(() => expect(screen.getByRole("button", { name: "custom" })).toBeInTheDocument());
-    expect(screen.queryByText("Upgrade the host to attach this file.")).not.toBeInTheDocument();
   });
 
   it("publishes received and live body text to local search without search-driven reads", async () => {

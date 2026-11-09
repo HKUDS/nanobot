@@ -40,7 +40,6 @@ export type RestoredReadyImage = RestoredReadyAttachment;
  *
  * Callers localize these via the ``composer.imageRejected.*`` i18n table. */
 export type AttachmentError =
-  | "host_upgrade_required"
   | "too_many_attachments" // non-video per-message cap reached before enqueue
   | "too_many_videos"      // video slot is already occupied
   | "total_too_large"    // decoded attachments exceed the business-policy total
@@ -88,20 +87,6 @@ const DOCUMENT_MIME_BY_EXTENSION: ReadonlyMap<string, string> = new Map([
 ]);
 
 const ACCEPTED_DOCUMENT_MIMES: ReadonlySet<string> = new Set(DOCUMENT_MIME_BY_EXTENSION.values());
-const LEGACY_SERVER_MIMES: ReadonlySet<string> = new Set([
-  ...ACCEPTED_IMAGE_MIMES,
-  ...ACCEPTED_DOCUMENT_MIMES,
-  ...VIDEO_MIME_BY_EXTENSION.values(),
-  "application/x-yaml", "application/xhtml+xml", "text/xml", "text/yaml",
-]);
-
-export const LEGACY_ACCEPT_ATTR = [
-  ...ACCEPTED_IMAGE_MIMES,
-  ...ACCEPTED_DOCUMENT_MIMES,
-  ...DOCUMENT_MIME_BY_EXTENSION.keys(),
-  ...VIDEO_MIME_BY_EXTENSION.values(),
-  ...VIDEO_MIME_BY_EXTENSION.keys(),
-].join(",");
 
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -124,23 +109,12 @@ function positiveLimit(value: number | null | undefined, fallback: number): numb
     : fallback;
 }
 
-function legacyAttachmentKind(file: Pick<File, "name" | "size" | "type">): AttachmentKind | null {
-  if (file.size === 0) return null;
+export function attachmentKindForFile(file: File): AttachmentKind {
+  if (file.size === 0) return "file";
   if (VIDEO_MIME_BY_EXTENSION.has(extensionOf(file.name))) return "video";
   if (DOCUMENT_MIME_BY_EXTENSION.has(extensionOf(file.name))) return "file";
   if ([...VIDEO_MIME_BY_EXTENSION.values()].includes(file.type)) return "video";
-  if (ACCEPTED_IMAGE_MIMES.has(file.type)) return "image";
-  return ACCEPTED_DOCUMENT_MIMES.has(file.type) ? "file" : null;
-}
-
-export function attachmentKindForFile(file: File): AttachmentKind {
-  return legacyAttachmentKind(file) ?? "file";
-}
-
-/** The old gateway validates the MIME actually sent, not the original filename. */
-export function supportsLegacyAttachment(attachment: RestoredReadyAttachment, size: number): boolean {
-  const mime = attachment.local?.mime ?? (attachment.dataUrl ? dataUrlMime(attachment.dataUrl) : "");
-  return size > 0 && LEGACY_SERVER_MIMES.has(mime);
+  return ACCEPTED_IMAGE_MIMES.has(file.type) ? "image" : "file";
 }
 
 function dataUrlMime(dataUrl: string): string {
@@ -222,7 +196,7 @@ function mapEncodeFailure(reason: Exclude<EncodeFailure["reason"], "invalid_mime
   }
 }
 
-async function encodeAttachment(file: File, kind: AttachmentKind, maxFileBytes: number, allowAnyFile: boolean): Promise<{
+async function encodeAttachment(file: File, kind: AttachmentKind, maxFileBytes: number): Promise<{
   ok: true;
   kind: AttachmentKind;
   dataUrl: string;
@@ -238,7 +212,6 @@ async function encodeAttachment(file: File, kind: AttachmentKind, maxFileBytes: 
     if (result.reason !== "magic_mismatch" && result.reason !== "invalid_mime") {
       return { ok: false, reason: mapEncodeFailure(result.reason) };
     }
-    if (!allowAnyFile) return { ok: false, reason: "host_upgrade_required" };
     // A non-image claiming an image MIME is still a file; keep its original bytes.
     kind = "file";
     const fallback = await encodeFile(file, maxFileBytes, "application/octet-stream");
@@ -251,8 +224,8 @@ async function encodeAttachment(file: File, kind: AttachmentKind, maxFileBytes: 
 export interface UseAttachedImagesApi {
   images: AttachedAttachment[];
   /** Enqueue new files. Returns the list of rejected files so the caller can
-   * surface inline errors. Files rejected for host compatibility or limits are
-   * *not* added to ``images`` — only recoverable read/encoding failures show
+   * surface inline errors. Files rejected for limits are *not* added to
+   * ``images`` — only recoverable read/encoding failures show
    * up as error chips. Restoring an existing draft preserves overflow so users
    * can remove files themselves; send validation still enforces ingress limits. */
   enqueue: (files: Iterable<File>, options?: { restoringDraft: boolean }) => {
@@ -274,12 +247,10 @@ export interface UseAttachedImagesApi {
 
 interface UseAttachedImagesOptions {
   ingressLimits?: WebUIIngressLimits | null;
-  allowAnyFile?: boolean;
 }
 
 export function useAttachedImages({
   ingressLimits = null,
-  allowAnyFile = false,
 }: UseAttachedImagesOptions = {}): UseAttachedImagesApi {
   const [images, setImages] = useState<AttachedAttachment[]>([]);
   const maxAttachments = positiveLimit(
@@ -323,10 +294,6 @@ export function useAttachedImages({
       );
 
       for (const file of files) {
-        if (!allowAnyFile && !restoringDraft && !legacyAttachmentKind(file)) {
-          rejected.push({ file, reason: "host_upgrade_required" });
-          continue;
-        }
         const kind = attachmentKindForFile(file);
         if (!restoringDraft && kind !== "image" && file.size > (kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes)) {
           rejected.push({ file, reason: "too_large" });
@@ -360,7 +327,7 @@ export function useAttachedImages({
         // Fire the Worker after the commit so chips render first (good INP).
         for (const entry of toAdd) {
           queueMicrotask(() => {
-            encodeAttachment(entry.file, entry.kind, maxFileBytes, allowAnyFile || restoringDraft).then(
+            encodeAttachment(entry.file, entry.kind, maxFileBytes).then(
               (result) => {
                 if (result.ok) {
                   if (entry.kind === "image" && result.kind === "file" && entry.previewUrl) {
@@ -394,7 +361,7 @@ export function useAttachedImages({
       }
       return { rejected };
     },
-    [allowAnyFile, maxAttachments, maxFileBytes, maxTotalBytes, setEntry],
+    [maxAttachments, maxFileBytes, maxTotalBytes, setEntry],
   );
 
   const addLocal = useCallback((local: LocalAttachment, { restoringDraft = false } = {}): AttachmentCountError | null => {

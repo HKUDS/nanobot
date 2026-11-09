@@ -221,7 +221,7 @@ describe("ThreadComposer — attachments", () => {
     const empty = new File([], "empty.png", { type: "image/png" });
     const store = new ComposerDraftStore();
     const onSend = vi.fn();
-    const composer = () => <ThreadComposer onSend={onSend} draftKey="any-files" draftStore={store} allowAnyFileAttachments />;
+    const composer = () => <ThreadComposer onSend={onSend} draftKey="any-files" draftStore={store} />;
     const view = render(composer());
     const picker = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
 
@@ -253,7 +253,7 @@ describe("ThreadComposer — attachments", () => {
     const mislabeled = new File(["not an image"], "not-really.png", { type: "image/png" });
     encodeImage.mockResolvedValueOnce({ id: "stub", ok: false, reason: "magic_mismatch" });
     const onSend = vi.fn();
-    const view = render(<ThreadComposer onSend={onSend} allowAnyFileAttachments />);
+    const view = render(<ThreadComposer onSend={onSend} />);
     fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [empty, mislabeled] } });
     await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
     expect(encodeImage).toHaveBeenCalledTimes(1);
@@ -267,54 +267,6 @@ describe("ThreadComposer — attachments", () => {
         preview: expect.objectContaining({ kind: "file" }),
       }),
     ], undefined);
-  });
-
-  it.each([
-    ["picker", "unknown"], ["picker", "empty"],
-    ["paste", "unknown"], ["paste", "empty"],
-    ["drop", "unknown"], ["drop", "empty"],
-  ] as const)("asks to upgrade an older host for %s: %s files, while retaining supported uploads", async (source, kind) => {
-    const onSend = vi.fn();
-    const view = render(<ThreadComposer onSend={onSend} />);
-    const input = screen.getByLabelText(/message input/i);
-    const form = input.closest("form")!;
-    const picker = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
-    const files = [kind === "empty" ? new File([], "empty.pdf", { type: "application/pdf" }) : new File(["bytes"], "unknown.data")];
-    expect(picker).toHaveAttribute("accept", expect.stringContaining("application/pdf"));
-    fireEvent.change(input, { target: { value: "keep text" } });
-    if (source === "picker") fireEvent.change(picker, { target: { files } });
-    else if (source === "paste") fireEvent.paste(input, { clipboardData: {
-      items: files.map((file) => ({ kind: "file", getAsFile: () => file })), getData: () => "",
-    } });
-    else fireEvent.drop(form, { dataTransfer: { files, types: ["Files"], items: [], dropEffect: "copy" } });
-    expect(screen.getByRole("alert")).toHaveTextContent("Upgrade the host to attach this file");
-    expect(input).toHaveValue("keep text");
-    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
-
-    fireEvent.change(picker, { target: { files: [pdfFile()] } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("keep text", [expect.objectContaining({
-      media: { data_url: expect.stringMatching(/^data:application\/pdf;base64,/), name: "report.pdf" },
-    })], undefined);
-  });
-
-  it("keeps a staged generic attachment when the host loses the capability", async () => {
-    const onSend = vi.fn();
-    const view = render(<ThreadComposer onSend={onSend} allowAnyFileAttachments />);
-    const file = new File(["bytes"], "attachment");
-    fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
-    view.rerender(<ThreadComposer onSend={onSend} />);
-    fireEvent.keyDown(screen.getByLabelText(/message input/i), { key: "Enter" });
-    expect(screen.getByRole("alert")).toHaveTextContent("Upgrade the host to attach this file");
-    expect(screen.getByRole("button", { name: file.name })).toBeInTheDocument();
-    expect(onSend).not.toHaveBeenCalled();
-    view.rerender(<ThreadComposer onSend={onSend} allowAnyFileAttachments />);
-    fireEvent.keyDown(screen.getByLabelText(/message input/i), { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("", [expect.objectContaining({
-      media: { data_url: `data:application/octet-stream;base64,${btoa("bytes")}`, name: file.name },
-    })], undefined);
   });
 
   it("rejects an oversized document before adding a chip", async () => {
@@ -393,7 +345,7 @@ describe("ThreadComposer — attachments", () => {
       new File(["56"], "second", { type: "application/x-other" }),
     ];
     const onSend = vi.fn();
-    const view = render(<ThreadComposer onSend={onSend} allowAnyFileAttachments ingressLimits={ingressLimits({ maxFileBytes: 5, maxTotalBytes: 5 })} />);
+    const view = render(<ThreadComposer onSend={onSend} ingressLimits={ingressLimits({ maxFileBytes: 5, maxTotalBytes: 5 })} />);
     fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files } });
     expect(screen.getByRole("alert")).toHaveTextContent("Attachments are too large together");
     await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
@@ -403,7 +355,7 @@ describe("ThreadComposer — attachments", () => {
   });
 
   it("counts empty files toward the attachment quota", async () => {
-    const view = render(<ThreadComposer onSend={vi.fn()} allowAnyFileAttachments ingressLimits={ingressLimits({ maxCount: 1 })} />);
+    const view = render(<ThreadComposer onSend={vi.fn()} ingressLimits={ingressLimits({ maxCount: 1 })} />);
     fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: {
       files: [new File([], "empty.mp4", { type: "video/mp4" }), new File(["second"], "second")],
     } });
@@ -432,7 +384,7 @@ describe("ThreadComposer — attachments", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("continues to accept supported documents from paste and drop on older hosts", async () => {
+  it("accepts documents from paste and drop", async () => {
     const pasted = pdfFile("pasted.pdf");
     const dropped = pdfFile("dropped.pdf");
     const onSend = vi.fn();
@@ -455,7 +407,7 @@ describe("ThreadComposer — attachments", () => {
     const dropped = new File([new Uint8Array([0, 255, 1])], "archive.unknown");
     const onSend = vi.fn();
 
-    render(<ThreadComposer onSend={onSend} allowAnyFileAttachments />);
+    render(<ThreadComposer onSend={onSend} />);
 
     const textarea = screen.getByLabelText(/message input/i);
     const form = textarea.closest("form")!;
@@ -539,18 +491,6 @@ describe("ThreadComposer — attachments", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
-  it("blocks a mislabeled image on older hosts and explains the upgrade", async () => {
-    const file = new File(["not an image"], "bad.png", { type: "image/png" });
-    encodeImage.mockResolvedValueOnce({ id: "stub", ok: false, reason: "magic_mismatch" });
-    const onSend = vi.fn();
-    const view = render(<ThreadComposer onSend={onSend} />);
-    fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [file] } });
-    await waitFor(() => expect(screen.getByTestId("composer-chip")).toHaveTextContent("Upgrade the host to attach this file"));
-    fireEvent.change(screen.getByLabelText(/message input/i), { target: { value: "keep" } });
-    fireEvent.keyDown(screen.getByLabelText(/message input/i), { key: "Enter" });
-    expect(onSend).not.toHaveBeenCalled();
-  });
-
   it("surfaces an inline error when encoding fails", async () => {
     const file = pngFile("bad.png");
     encodeImage.mockResolvedValueOnce({
@@ -619,7 +559,7 @@ describe("local attachment paths and video ingress", () => {
     const empty = { path: "/project/README", name: "README", size: 0, mime: "application/octet-stream", kind: "file" as const, url: "" };
     const inspect = vi.fn().mockResolvedValue(empty);
     const onSend = vi.fn();
-    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} allowAnyFileAttachments />);
+    render(<ThreadComposer onSend={onSend} onInspectAttachment={inspect} />);
     const input = screen.getByLabelText(/message input/i);
     fireEvent.paste(input, { clipboardData: { items: [], getData: () => "README" } });
     await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
@@ -628,17 +568,6 @@ describe("local attachment paths and video ingress", () => {
     expect(screen.getByRole("button", { name: "README" })).toBeInTheDocument();
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onSend.mock.calls[0][1][0].media).toEqual({ path: empty.path, name: empty.name });
-  });
-
-  it.each(["Unsupported attachment MIME", "Empty files cannot be attached"])("leaves an older host's unrecognized path as text without an error: %s", async (message) => {
-    const inspect = vi.fn().mockRejectedValue(Object.assign(new Error(message), { status: 400 }));
-    render(<ThreadComposer onSend={vi.fn()} onInspectAttachment={inspect} />);
-    const input = screen.getByLabelText(/message input/i);
-    fireEvent.paste(input, { clipboardData: { items: [], getData: () => "./unknown" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled());
-    expect(input).toHaveValue("./unknown");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("composer-chip")).not.toBeInTheDocument();
   });
 
   it("confirms a large pasted video path and sends only the borrowed reference", async () => {

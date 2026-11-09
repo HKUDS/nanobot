@@ -13,8 +13,15 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_FILE_MEDIA, INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
-from nanobot.channels.websocket.attachment_policy import IMAGE_MIME_ALLOWED, validate_attachment_batch
+from nanobot.bus.events import (
+    INBOUND_META_FILE_MEDIA,
+    INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_USER_SHELL,
+)
+from nanobot.channels.websocket.attachment_policy import (
+    IMAGE_MIME_ALLOWED,
+    validate_attachment_batch,
+)
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
 from nanobot.command.builtin import USER_SHELL_COMMAND

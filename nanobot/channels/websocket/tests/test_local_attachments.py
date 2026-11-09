@@ -48,7 +48,7 @@ def test_inspect_any_local_file_without_copying(tmp_path, name, body, kind):
     assert result["size"] == len(body)
     assert result["kind"] == kind
     assert source.read_bytes() == body
-    assert list(tmp_path.iterdir()) == [source]
+    assert [path for path in tmp_path.rglob("*") if path.is_file()] == [source]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not support trailing spaces in file names")

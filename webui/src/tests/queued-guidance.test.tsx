@@ -90,7 +90,7 @@ describe("merged waiting messages", () => {
     ]));
     const draftStore = new ComposerDraftStore();
     const onSend = vi.fn();
-    const props = { onSend, pendingQueueKey: "chat-a", draftKey: "chat-a", draftStore, allowAnyFileAttachments: true };
+    const props = { onSend, pendingQueueKey: "chat-a", draftKey: "chat-a", draftStore };
     const view = render(<ThreadComposer {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     expect(screen.getAllByTestId("composer-chip")).toHaveLength(3);
@@ -103,22 +103,6 @@ describe("merged waiting messages", () => {
       expect.objectContaining({ media: { data_url: empty.dataUrl, name: empty.name }, preview: expect.objectContaining({ kind: "file" }) }),
       expect.objectContaining({ media: { path: local.path, name: local.name } }),
     ], undefined);
-  });
-
-  it("retains a queued any-file draft when switched to an older host, then sends after an upgrade", () => {
-    const attachment = { dataUrl: "data:application/octet-stream;base64,", kind: "file", name: "empty" };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{ id: "files", text: "", images: [attachment] }]));
-    const onSend = vi.fn();
-    const view = render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" />);
-    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
-    expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Upgrade the host to attach this file");
-    expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("empty");
-    view.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" allowAnyFileAttachments />);
-    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
-    expect(onSend).toHaveBeenCalledWith("", [expect.objectContaining({
-      media: { data_url: attachment.dataUrl, name: attachment.name },
-    })]);
   });
 
   it("preserves merged text longer than the former per-entry storage truncation across remounts", () => {

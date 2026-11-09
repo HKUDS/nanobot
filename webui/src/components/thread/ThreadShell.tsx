@@ -1403,7 +1403,6 @@ export function ThreadShell({
           skills={skills}
           onStop={stop}
           onInspectAttachment={inspectAttachment}
-          allowAnyFileAttachments={webuiCapabilities.includes("webui.attachments.any-file.v1")}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           onFavoriteWorkspaceProject={favoriteWorkspaceProject}
@@ -1457,7 +1456,6 @@ export function ThreadShell({
           skills={skills}
           surfaceRef={setComposerSurface}
           onInspectAttachment={inspectAttachment}
-          allowAnyFileAttachments={webuiCapabilities.includes("webui.attachments.any-file.v1")}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
           onFavoriteWorkspaceProject={favoriteWorkspaceProject}
