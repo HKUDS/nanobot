@@ -36,6 +36,10 @@ from nanobot.session.history_graph import (
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.session_messages import (
+    session_message_envelope,
+    session_message_public_metadata,
+)
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.webui.history import (
@@ -46,7 +50,7 @@ from nanobot.webui.history import (
 )
 from nanobot.webui.metadata import WEBUI_MESSAGE_SOURCE_METADATA_KEY, WEBUI_TURN_METADATA_KEY
 from nanobot.webui.outbound_wire import project_tool_events
-from nanobot.webui.session_identity import webui_chat_id, webui_session_key
+from nanobot.webui.session_identity import webui_session_key
 
 WEBUI_TRANSCRIPT_SCHEMA_VERSION = 3
 WEBUI_FORK_MARKER_EVENT = "fork_marker"
@@ -487,22 +491,6 @@ def append_transcript_object(
     sessions.append_history(session_key, [fact_from_record(_record_for_append(obj))])
 
 
-async def append_session_message_input(
-    session_key: str, *, sessions: SessionManager, content: str, created_at_ms: int,
-    session_message: Mapping[str, Any],
-) -> None:
-    chat_id = _chat_id_from_session_key(session_key)
-    if chat_id is None:
-        return
-    event = build_user_transcript_event(chat_id, content)
-    if event is None:
-        return
-    event.update(created_at_ms=created_at_ms, session_message=dict(session_message),
-                 input_id=f"session-message:{session_message['message_id']}")
-    await sessions.state.append_history(session_key, [fact_from_record(event)],
-                                         expected_generation=None)
-
-
 def normalize_webui_turn_id(value: Any) -> str:
     if isinstance(value, str):
         candidate = value.strip()
@@ -583,7 +571,10 @@ class WebUITranscriptRecorder:
         mcp_presets: list[dict[str, Any]] | None = None,
         session_mentions: Sequence[Mapping[str, Any]] | None = None,
     ) -> bool:
-        if text.strip() == "/stop" and not media_paths:
+        envelope = session_message_envelope(metadata)
+        if envelope is not None and envelope["target_session_key"] != webui_session_key(chat_id):
+            envelope = None
+        if text.strip() == "/stop" and not media_paths and envelope is None:
             return False
         event = build_user_transcript_event(
             chat_id,
@@ -596,6 +587,12 @@ class WebUITranscriptRecorder:
         )
         if event is None:
             return False
+        if envelope is not None:
+            event.update(
+                created_at_ms=envelope["created_at_ms"],
+                session_message=session_message_public_metadata(envelope),
+                input_id=f"session-message:{envelope['message_id']}",
+            )
         return await self.prepare_and_append(chat_id, event, metadata=metadata, phase="user")
 
     async def append(
@@ -651,13 +648,6 @@ class WebUITranscriptRecorder:
         event.update(turn_id=turn_id, turn_phase=phase, turn_seq=self._next_turn_seq(chat_id, turn_id))
         if phase == "complete":
             self._turn_sequences.pop((chat_id, turn_id), None)
-
-
-def _chat_id_from_session_key(session_key: str) -> str | None:
-    chat_id = webui_chat_id(session_key)
-    if chat_id is None:
-        return None
-    return chat_id.strip() or None
 
 
 def normalize_session_mentions_metadata(raw: object) -> list[dict[str, str]]:

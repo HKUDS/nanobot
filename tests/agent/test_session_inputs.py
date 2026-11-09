@@ -229,6 +229,7 @@ async def test_cross_session_input_preserves_source_in_live_events_and_history(
         inputs = [record for record in records if record.get("event") == "user"]
         assert [record["text"] for record in inputs] == [f"Review {i}" for i in range(message_count)]
         assert all(record["session_message"]["session"] == provenance for record in inputs)
+        assert [record["created_at_ms"] for record in inputs] == [event.created_at_ms for event in events]
         session = await loop.sessions.state.get(target_key)
         stored_inputs = [row for row in session.messages if row.get("role") == "user"]
         assert [row["session_message"] for row in stored_inputs] == [
@@ -352,3 +353,27 @@ async def test_busy_cross_session_input_uses_target_scope_and_keeps_its_answer(l
         disconnect_accepted()
         run.cancel()
         await asyncio.gather(run, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expect_reply", [True, False])
+@pytest.mark.parametrize("disabled", [True, False])
+async def test_session_message_source_context_independent_of_tool_policy(
+    loop: AgentLoop, expect_reply: bool, disabled: bool,
+) -> None:
+    from nanobot.session.manager import SessionPolicy
+
+    session = loop.sessions.get_or_create("telegram:target")
+    loop.sessions.save(session)
+    await loop.sessions.state.set_policy(
+        "telegram:target",
+        SessionPolicy(disabled_tools=frozenset({"send_session_message"}) if disabled else frozenset()),
+    )
+    msg = _message("Please review this")
+    msg.metadata[SESSION_MESSAGE_METADATA_KEY]["expect_reply"] = expect_reply
+    await loop._process_message(msg)
+    messages = loop.provider.chat_stream_with_retry.await_args.kwargs["messages"]
+    content = next(row["content"] for row in reversed(messages) if row.get("role") == "user")
+    assert content.startswith("Please review this")
+    assert content.count("Message from @luma.") == 1
+    assert ("Reply with send_session_message." in content) is expect_reply

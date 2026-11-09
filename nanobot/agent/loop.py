@@ -645,7 +645,9 @@ class AgentLoop:
     ) -> None:
         from nanobot.agent.tools.context import ToolContext
         from nanobot.agent.tools.loader import ToolLoader
+        from nanobot.agent.tools.session_messages import session_message_runtime_context
 
+        self.register_runtime_context_provider(session_message_runtime_context)
         runtime_control = AgentRuntimeControl(self)
         self.register_runtime_context_provider(runtime_control.workspace_context)
         self.register_runtime_context_provider(

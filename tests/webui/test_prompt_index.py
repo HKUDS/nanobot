@@ -385,3 +385,26 @@ def test_indexed_backfill_preserves_unique_in_suffix_matching(history, tmp_path,
     assert [user["text"] for user in users] == (["question 2"] if with_anchor else [])
     if with_anchor:
         assert users[0]["projection_id"] == prompts[-1]["id"]
+
+
+def test_recover_multiple_missing_inputs_for_one_answer_across_pages(history, tmp_path, monkeypatch):
+    """A grouped answer can stand for multiple inputs absent from display history."""
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:missing-grouped-inputs"
+    ids = ["session-message:first", "session-message:second"]
+    messages = [
+        {"role": "user", "content": "first", "input_id": ids[0]},
+        {"role": "user", "content": "second", "input_id": ids[1]},
+        {"role": "assistant", "content": "shared answer"},
+    ]
+    history.append(key, {"event": "message", "text": "shared answer", "response_input_ids": ids})
+    history.append(key, {"event": "turn_end"})
+    def loader():
+        return messages
+
+    page = history.build(key, limit=1, session_messages_loader=loader)
+    users = [event for event in page["events"] if event["event"] == "user_message"]
+    assert [event["text"] for event in users] == ["first", "second"]
+    prompts = history.prompts(key, session_messages_loader=loader)
+    assert [prompt["inputId"] for prompt in prompts] == ids
+    assert [prompt["id"] for prompt in prompts] == [event["projection_id"] for event in users]
