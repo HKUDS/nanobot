@@ -120,6 +120,12 @@ IMPORT_RULES = (
         (*_ADAPTERS, "nanobot.agent", "nanobot.session"),
     ),
     ImportRule(
+        "file-tool-execution",
+        ("nanobot.agent.tools.filesystem", "nanobot.agent.tools.apply_patch",
+         "nanobot.agent.tools.search", "nanobot.utils.file_edit_events"),
+        ("nanobot.security", "nanobot.agent.tools.path_utils", "os", "shutil", "glob"),
+    ),
+    ImportRule(
         "websocket-transport",
         ("nanobot.channels.websocket.runtime",),
         (

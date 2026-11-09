@@ -4,13 +4,13 @@ Consult this document when changing path access, outbound HTTP/MCP, or shell exe
 
 ## Workspace Restriction
 
-Filesystem tools (`read_file`, `write_file`, `edit_file`, `list_dir`, `apply_patch`) resolve paths through the workspace path resolver (`agent/tools/filesystem.py` / `agent/tools/path_utils.py`), which enforces that the resolved path must lie under the active workspace when workspace restriction is enabled. The media upload directory is always an internal extra read root while restricted.
+Filesystem tools and native file search use scoped operations in `nanobot/execution/files.py`. Those operations apply `nanobot/security/workspace_policy.py` to the effective request workspace before opening a file, listing a directory, or writing a patch. Edit activity snapshots use the same authorized write target, not a path from tool arguments. The media upload directory is an internal extra read root while restricted. These are application-level checks, not OS confinement against a process that can concurrently replace ancestor directories.
 
 Additional filesystem roots must be capability-specific. `extra_allowed_dirs` is a legacy read-only alias. Use `extra_read_allowed_dirs` for read-only roots, `extra_write_allowed_dirs` only when a write-capable tool is intentionally allowed to modify an extra directory, and exact file allowlists when a tool may modify only specific files.
 
 Shell execution (`ExecTool`, `agent/tools/shell.py`) also respects `restrict_to_workspace` as an application-level guard: if enabled and `working_dir` is outside the workspace, the command is rejected before execution, and command text is checked for obvious workspace escapes. This is not process-level isolation; use an exec sandbox backend for that.
 
-**Rule**: Any new path-handling logic must go through the workspace path resolver or perform an equivalent containment check with explicit read/write capability semantics.
+**Rule**: File tool adapters should request a scoped file operation; do not add direct path authorization or filesystem effects in those adapters. When traversing a directory, authorize discovered file targets before reading them. Subprocess-backed search follows the shell rules below.
 
 ## SSRF Protection
 

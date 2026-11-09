@@ -5,9 +5,11 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from itertools import groupby, islice
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast, runtime_checkable
 
 from rapidfuzz.distance import Indel, Opcode, Opcodes
+
+from nanobot.execution.files import FileSnapshot, WritableFile
 
 TRACKED_FILE_EDIT_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 _MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
@@ -16,32 +18,25 @@ _MAX_DIFF_LINE_CHARS = 1200
 _DIFF_CONTEXT_LINES = 3
 
 
-@dataclass(slots=True)
-class FileSnapshot:
-    path: Path
-    exists: bool
-    text: str | None
-    unreadable: bool = False
-    binary: bool = False
-    oversized: bool = False
+@runtime_checkable
+class FileEditSource(Protocol):
+    def file_edit_target(self, path: str) -> WritableFile: ...
 
     @property
-    def countable(self) -> bool:
-        return (
-            self.text is not None
-            and not self.binary
-            and not self.oversized
-            and not self.unreadable
-        )
+    def file_edit_workspace(self) -> Path | None: ...
 
 
 @dataclass(slots=True)
 class FileEditTracker:
     call_id: str
     tool: str
-    path: Path
+    target: WritableFile
     display_path: str
     before: FileSnapshot
+
+    @property
+    def path(self) -> Path:
+        return self.target.path
 
 
 @dataclass(slots=True)
@@ -162,23 +157,6 @@ def display_file_edit_path(path: Path, workspace: Path | None) -> str:
     return path.as_posix()
 
 
-def read_file_snapshot(path: Path, *, max_bytes: int = _MAX_SNAPSHOT_BYTES) -> FileSnapshot:
-    try:
-        if not path.exists() or not path.is_file():
-            return FileSnapshot(path=path, exists=False, text="")
-        size = path.stat().st_size
-        if size > max_bytes:
-            return FileSnapshot(path=path, exists=True, text=None, oversized=True)
-        raw = path.read_bytes()
-    except OSError:
-        return FileSnapshot(path=path, exists=path.exists(), text=None, unreadable=True)
-    if b"\x00" in raw:
-        return FileSnapshot(path=path, exists=True, text=None, binary=True)
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return FileSnapshot(path=path, exists=True, text=None, binary=True)
-    return FileSnapshot(path=path, exists=True, text=text.replace("\r\n", "\n"))
 
 
 def build_unified_diff_payload(
@@ -330,105 +308,43 @@ def prepare_file_edit_trackers(
 ) -> list[FileEditTracker]:
     if not isinstance(params, dict) or not is_file_edit_tool(tool_name):
         return []
-    paths = resolve_file_edit_paths(tool_name, tool, workspace, params)
-    display_workspace = _display_workspace(tool, workspace)
+    if not isinstance(tool, FileEditSource):
+        return []
+    display_workspace = tool.file_edit_workspace or workspace
     trackers: list[FileEditTracker] = []
     seen: set[Path] = set()
-    for path in paths:
+    for raw_path in _file_edit_paths(tool_name, params):
         try:
-            resolved = path.resolve()
-        except Exception:
-            resolved = path
-        if resolved in seen:
+            target = tool.file_edit_target(raw_path)
+        except (OSError, RuntimeError, ValueError):
             continue
-        seen.add(resolved)
-        before = read_file_snapshot(path)
+        if target.path in seen:
+            continue
+        seen.add(target.path)
         trackers.append(FileEditTracker(
             call_id=str(call_id or ""),
             tool=tool_name,
-            path=path,
-            display_path=display_file_edit_path(path, display_workspace),
-            before=before,
+            target=target,
+            display_path=display_file_edit_path(target.path, display_workspace),
+            before=target.snapshot(_MAX_SNAPSHOT_BYTES),
         ))
     return trackers
 
 
-def resolve_file_edit_paths(
-    tool_name: str,
-    tool: Any,
-    workspace: Path | None,
-    params: dict[str, Any] | None,
-) -> list[Path]:
-    if not isinstance(params, dict):
-        return []
-    if tool_name == "apply_patch":
-        return _resolve_apply_patch_paths(tool, workspace, params)
-    if tool_name not in {"write_file", "edit_file"}:
-        return []
-    path = _resolve_single_path(tool, workspace, params.get("path"))
-    return [path] if path is not None else []
-
-
-def _resolve_apply_patch_paths(
-    tool: Any,
-    workspace: Path | None,
-    params: dict[str, Any],
-) -> list[Path]:
-    if params.get("dry_run") is True:
-        return []
+def _file_edit_paths(tool_name: str, params: dict[str, Any]) -> Iterator[str]:
+    if tool_name != "apply_patch":
+        path = params.get("path")
+        if isinstance(path, str) and path.strip():
+            yield path
+        return
     edits = params.get("edits")
-    if not isinstance(edits, list):
-        return []
-    patch_edits = cast(list[Any], edits)
-    paths: list[Path] = []
-    seen: set[Path] = set()
-    for edit in patch_edits:
-        if not isinstance(edit, dict):
-            continue
-        raw_path = cast(dict[str, Any], edit).get("path")
-        if not isinstance(raw_path, str):
-            continue
-        raw_path = raw_path.strip()
-        if not raw_path or "\0" in raw_path:
-            continue
-        path = _resolve_single_path(tool, workspace, raw_path)
-        if path is not None and path not in seen:
-            seen.add(path)
-            paths.append(path)
-    return paths
-
-
-def _resolve_single_path(tool: Any, workspace: Path | None, raw_path: Any) -> Path | None:
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        return None
-    for resolver_name in ("_resolve_write", "_resolve"):
-        resolver = getattr(tool, resolver_name, None)
-        if callable(resolver):
-            try:
-                resolved = resolver(raw_path)
-                if isinstance(resolved, Path):
-                    return resolved
-                if resolved:
-                    return Path(cast(str, resolved))
-            except Exception:
-                return None
-    if workspace is None:
-        return Path(raw_path).expanduser().resolve()
-    return (workspace / raw_path).expanduser().resolve()
-
-
-def _display_workspace(tool: Any, fallback: Path | None) -> Path | None:
-    resolver = getattr(tool, "_display_workspace", None)
-    if callable(resolver):
-        try:
-            value = resolver()
-        except Exception:
-            return fallback
-        if isinstance(value, Path):
-            return value
-        if value:
-            return Path(cast(str, value))
-    return fallback
+    if params.get("dry_run") is True or not isinstance(edits, list):
+        return
+    for edit in cast(list[object], edits):
+        if isinstance(edit, dict):
+            path = cast(dict[str, object], edit).get("path")
+            if isinstance(path, str) and (path := path.strip()) and "\0" not in path:
+                yield path
 
 
 def build_file_edit_start_event(tracker: FileEditTracker) -> dict[str, Any]:
@@ -447,7 +363,7 @@ def build_file_edit_end_event(
     *,
     diff: FileDiff | None = None,
 ) -> dict[str, Any]:
-    after = read_file_snapshot(tracker.path)
+    after = tracker.target.snapshot(_MAX_SNAPSHOT_BYTES)
     diff_payload: dict[str, Any] | None = None
     if (
         tracker.before.countable and after.countable

@@ -15,7 +15,6 @@ from nanobot.utils.file_edit_events import (
     build_file_edit_start_event,
     build_unified_diff_payload,
     prepare_file_edit_trackers,
-    read_file_snapshot,
 )
 
 
@@ -245,7 +244,7 @@ def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:
         params={"path": "data.bin", "old_text": "before", "new_text": "after"},
     )
     [tracker] = trackers
-    assert not read_file_snapshot(target).countable
+    assert not tracker.before.countable
     target.write_bytes(b"\x00\x01after")
     event = build_file_edit_end_event(tracker)
     assert event["binary"] is True
@@ -370,4 +369,18 @@ def test_untracked_tools_do_not_prepare_file_edit_trackers(tmp_path: Path) -> No
         tool=None,
         workspace=tmp_path,
         params={"path": "created-by-shell.txt"},
+    ) == []
+
+
+def test_edit_progress_does_not_snapshot_a_denied_target(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (tmp_path / "outside.txt").write_text("private", encoding="utf-8")
+    tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
+    assert prepare_file_edit_trackers(
+        call_id="denied",
+        tool_name="write_file",
+        tool=tool,
+        workspace=workspace,
+        params={"path": "../outside.txt", "content": "new"},
     ) == []

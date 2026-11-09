@@ -186,6 +186,47 @@ async def test_find_files_scan_keeps_event_loop_responsive(
     assert await asyncio.wait_for(task, timeout=0.5) == "match.txt"
 
 
+async def test_grep_authorizes_the_targets_of_links_found_during_traversal(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    inside = workspace / "inside.txt"
+    inside.write_text("needle allowed", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("needle outside contents", encoding="utf-8")
+    try:
+        (workspace / "inside-link.txt").symlink_to(inside)
+        (workspace / "outside-link.txt").symlink_to(outside)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable")
+
+    tool = GrepTool(workspace=workspace, allowed_dir=workspace)
+    result = await tool.execute(pattern="needle", fixed_strings=True)
+    assert "inside-link.txt" in result
+    assert "needle allowed" in result
+    assert "needle outside contents" not in result
+
+
+async def test_exact_read_grant_does_not_authorize_a_directory_tree(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    grant = tmp_path / "history.jsonl"
+    options = {
+        "workspace": workspace,
+        "allowed_dir": workspace,
+        "extra_read_allowed_files": [grant],
+    }
+    grant.write_text("needle history", encoding="utf-8")
+    grep = GrepTool(**options)
+    assert "needle history" in await grep.execute(pattern="needle", path=str(grant))
+
+    grant.unlink()
+    grant.mkdir()
+    (grant / "private.txt").write_text("needle private", encoding="utf-8")
+    result = await grep.execute(pattern="needle", path=str(grant))
+    assert "outside allowed directory" in result
+    assert "needle private" not in result
+
+
 @pytest.mark.asyncio
 async def test_find_files_cancellation_stops_worker_scan(
     tmp_path: Path,
@@ -226,12 +267,12 @@ async def test_find_files_path_limit_stops_after_pagination_lookahead(
     tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
     visited: list[str] = []
 
-    def ordered_iter_paths(root: Path, *, include_dirs: bool, budget):
+    def ordered_iter_paths(tree, *, include_dirs: bool, budget):
         del include_dirs
         for path in paths:
             budget.checkpoint()
             visited.append(path.name)
-            yield tool._entry(path, root, is_dir=False)
+            yield tool._entry(path, tree.root, is_dir=False)
 
     monkeypatch.setattr(tool, "_iter_paths", ordered_iter_paths)
     result = await tool.execute(path=".", head_limit=1)
@@ -982,13 +1023,13 @@ async def test_grep_scan_yields_and_cancellation_stops_worker(tmp_path, monkeypa
     tool = GrepTool(workspace=tmp_path)
     started, stopped = threading.Event(), threading.Event()
 
-    def blocking_iter_files(root, budget):
+    def blocking_iter_files(tree, budget):
         started.set()
         try:
             if not budget.cancelled.wait(timeout=2):
                 raise TimeoutError("worker did not receive cancellation")
             budget.checkpoint()
-            yield root / "unreachable.txt"
+            yield tree.root / "unreachable.txt"
         finally:
             stopped.set()
 
@@ -1061,7 +1102,7 @@ async def test_grep_closes_document_stream_and_preserves_locators(tmp_path, monk
             closed.append(True)
 
     monkeypatch.setattr(
-        "nanobot.agent.tools.search.open_document_line_source",
+        "nanobot.utils.document.open_document_line_source",
         lambda *_args, **_kwargs: DocumentLineSource(document_lines(), "pages=2-3"),
     )
     result = await GrepTool(workspace=tmp_path).execute(
