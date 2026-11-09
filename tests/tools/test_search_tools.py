@@ -484,6 +484,37 @@ async def test_grep_searches_pdf_with_page_locator(tmp_path: Path) -> None:
     assert "pdf needle" in result
 
 
+@pytest.mark.parametrize(("suffix", "locator"), [
+    (".pdf", "[page=1,line=1]"),
+    (".xlsx", "[sheet='Sheet',row=1,cell=A1]"),
+])
+async def test_grep_uses_document_link_name_for_format(tmp_path: Path, suffix: str, locator: str) -> None:
+    target = tmp_path / "stored-content"
+    link = tmp_path / f"manual{suffix}"
+    if suffix == ".pdf":
+        import fitz
+
+        with fitz.open() as document:
+            document.new_page().insert_text((72, 72), "document needle")
+            document.save(target)
+    else:
+        from openpyxl import Workbook
+
+        workbook = Workbook()
+        workbook["Sheet"]["A1"] = "document needle"
+        workbook.save(target)
+        workbook.close()
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable")
+
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+    result = await tool.execute(pattern="document needle", path=".", glob=f"*{suffix}", fixed_strings=True)
+    assert f"{link.name}:2 {locator}" in result
+    assert "document needle" in result
+
+
 @pytest.mark.asyncio
 async def test_grep_searches_xlsx_beyond_attachment_preview_limit(
     tmp_path: Path,

@@ -73,6 +73,7 @@ class ReadableFile:
     path: Path
     size: int
     modified: float
+    suffix: str
 
     def open(self) -> AbstractContextManager[tuple[BinaryIO, int]]:
         return _open_regular_file(self.path)
@@ -89,7 +90,7 @@ class ReadableFile:
     def document_lines(self, *, pages: str | None = None) -> DocumentLineSource | None:
         from nanobot.utils.document import open_document_line_source
 
-        return open_document_line_source(self.path, pages=pages)
+        return open_document_line_source(self.path, pages=pages, suffix=self.suffix)
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,15 +219,15 @@ class FileSearch:
         return self._candidate(path).stat().st_mtime
 
     def read_file(self, path: Path) -> ReadableFile:
-        return _regular_file(self._candidate(path))
+        return _regular_file(self._candidate(path), suffix=path.suffix.lower())
 
 
-def _regular_file(target: Path) -> ReadableFile:
+def _regular_file(target: Path, *, suffix: str | None = None) -> ReadableFile:
     _reject_device(target, resolved=True)
     info = target.stat()
     if not stat.S_ISREG(info.st_mode):
         raise NotRegularFileError
-    return ReadableFile(target, info.st_size, info.st_mtime)
+    return ReadableFile(target, info.st_size, info.st_mtime, target.suffix.lower() if suffix is None else suffix)
 
 
 class WorkspaceFiles:
@@ -305,7 +306,7 @@ class WorkspaceFiles:
         )
         return access.project_path, self._allowed_root(access.allowed_root)
 
-    def _read_path(self, path: str | Path, *, directory: bool = False) -> Path:
+    def _read_path(self, path: str | Path) -> Path:
         workspace, root = self._roots()
         extra_roots: list[Path] = []
         if root is not None:
@@ -320,7 +321,7 @@ class WorkspaceFiles:
             workspace=workspace,
             allowed_root=root,
             extra_allowed_roots=extra_roots,
-            extra_allowed_files=self._read_files if root is not None and not directory else (),
+            extra_allowed_files=self._read_files if root is not None else (),
         )
 
     def edit_target(self, path: str) -> WritableFile:
@@ -352,7 +353,7 @@ class WorkspaceFiles:
     def list_directory(
         self, path: str, *, recursive: bool, ignored: set[str], limit: int,
     ) -> DirectoryListing:
-        directory = self._read_path(path, directory=True)
+        directory = self._read_path(path)
         if not directory.exists():
             raise FileNotFoundError(path)
         if not directory.is_dir():
@@ -379,7 +380,7 @@ class WorkspaceFiles:
     def sibling_files(self, target: WritableFile) -> list[str]:
         """Suggest names only when the caller can read the directory itself."""
         try:
-            parent = self._read_path(target.path.parent, directory=True)
+            parent = self._read_path(target.path.parent)
         except PermissionError:
             return []
         return [item.name for item in parent.iterdir() if item.is_file()] if parent.is_dir() else []
@@ -389,7 +390,4 @@ class WorkspaceFiles:
         mode = target.stat().st_mode
         if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
             raise NotRegularFileError
-        is_directory = stat.S_ISDIR(mode)
-        if is_directory:
-            target = self._read_path(path, directory=True)
-        return FileSearch(target, is_directory, self._read_path)
+        return FileSearch(target, stat.S_ISDIR(mode), self._read_path)
