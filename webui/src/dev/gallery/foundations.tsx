@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SidebarPanel } from "@/components/ui/sidebar-panel";
 import { Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import { HoverHint, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, Tr
 import { Disclosure } from "@/components/ui/disclosure";
 import { ExpandableText } from "@/components/ui/expandable-text";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
+import { LoadingRing } from "@/components/ui/loading-ring";
 import { ImageViewport } from "@/components/ui/image-viewport";
 import { Sample, type ComponentExample } from "./example";
 import { useGalleryTranslation } from "./i18n";
@@ -28,7 +30,7 @@ function Buttons() {
   return <div className="space-y-6">
     <Sample label={t("controls.button.variants")}>
       <div className="flex flex-wrap items-center gap-3">
-        {(["default", "secondary", "outline", "ghost", "destructive", "link"] as const).map((variant) =>
+        {(["default", "accent", "secondary", "outline", "ghost", "destructive", "link"] as const).map((variant) =>
           <Button key={variant} variant={variant} onClick={() => setClicks((value) => value + 1)}>{variant}</Button>)}
         <Button variant="icon" size="icon" aria-label={t("controls.button.add")} onClick={() => setClicks((value) => value + 1)}><Plus className="h-4 w-4" /></Button>
       </div>
@@ -249,7 +251,23 @@ function ImageViewports() {
 }
 
 const base = "webui/src/components/ui/";
+function Sidebars() {
+  const { t } = useGalleryTranslation();
+  const [open, setOpen] = useState(true);
+  return <div className="space-y-3">
+    <Button onClick={() => setOpen(!open)}>{t("controls.sidebarPanel.toggle")}</Button>
+    <div className="thread-preview-layout relative h-64 overflow-hidden rounded-xl border">
+      <SidebarPanel open={open} width={320} header={<span>{t("controls.sidebarPanel.title")}</span>}>
+        <p className="p-4 text-sm">{t("controls.sidebarPanel.content")}</p>
+      </SidebarPanel>
+    </div>
+  </div>;
+}
+
 export const foundationExamples: ComponentExample[] = [
+  { title: "controls.sidebarPanel.title", files: ["sidebar-panel"], Preview: Sidebars,
+    description: "controls.sidebarPanel.description", options: "controls.sidebarPanel.options",
+    code: '<SidebarPanel width={320} header={<span>Details</span>}>{children}</SidebarPanel>' },
   { title: "controls.button.title", files: ["button"], Preview: Buttons,
     description: "controls.button.description",
     options: "controls.button.options",
@@ -302,6 +320,13 @@ export const foundationExamples: ComponentExample[] = [
   { title: "controls.imageViewport.title", files: ["image-viewport"], Preview: ImageViewports,
     description: "controls.imageViewport.description", options: "controls.imageViewport.options",
     code: '<div className="flex h-80 flex-col"><ImageViewport src={url} alt={label} className="flex-1" /></div>' },
+  { title: "controls.loadingRing.title", files: ["loading-ring"],
+    Preview: () => <div className="flex items-center gap-6 text-muted-foreground">
+      <LoadingRing className="h-3 w-3" />
+      <LoadingRing track={false} strokeWidth="1.5" strokeDasharray="12 50.8" className="h-6 w-6" />
+    </div>,
+    description: "controls.loadingRing.description", options: "controls.loadingRing.options",
+    code: '<LoadingRing className="h-3 w-3 text-muted-foreground" />\n<LoadingRing track={false} strokeWidth="1.5" strokeDasharray="12 50.8" className="h-6 w-6" />' },
   { title: "controls.streaming.title", files: ["streaming-label-sheen"], Preview: StreamingLabels,
     description: "controls.streaming.description", options: "controls.streaming.options",
     code: '<StreamingLabelSheen active={running}>Working…</StreamingLabelSheen>' },

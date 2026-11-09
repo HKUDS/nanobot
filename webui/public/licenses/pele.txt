@@ -1,4 +1,4 @@
-Pele 1.6.0 — https://github.com/obsidianmd/pele
+Pele 1.9.0 — https://github.com/obsidianmd/pele
 
 MIT License
 

@@ -1,5 +1,3 @@
-"""Input boundaries for Responses trigger compaction."""
-
 from __future__ import annotations
 
 import json

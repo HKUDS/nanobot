@@ -43,6 +43,7 @@ describe("Mermaid message fences", () => {
     const tree = view.container.querySelector(".markdown-content");
     expect(runtime.request).not.toHaveBeenCalled();
     expect(view.container).toHaveTextContent("开始 --> 完成");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     view.rerender(<MessageBubble message={{ ...message, isStreaming: false }} />);
     await waitFor(() => expect(jobs).toHaveLength(1));
     expect(jobs[0].input.source).toBe(code);

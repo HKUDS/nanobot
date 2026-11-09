@@ -1,5 +1,3 @@
-"""End-to-end tests for the embedded webui's HTTP routes on the WebSocket channel."""
-
 import asyncio
 import json
 import random
@@ -38,6 +36,7 @@ _PORT = 29900
 @pytest.fixture(autouse=True)
 def _isolate_runtime_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
 
 class _MatrixChannel(BaseChannel):
@@ -276,11 +275,9 @@ async def test_sessions_list_requires_bearer_token(
     channel = _ch(bus, session_manager=sm, port=29902)
     server_task = asyncio.create_task(channel.start())
     try:
-        # Unauthenticated → 401.
         deny = await _http_get("http://127.0.0.1:29902/api/sessions")
         assert deny.status_code == 401
 
-        # Directly mint an API token for route-level auth checks.
         token = channel.gateway.tokens.issue_api_token(300)
         auth = {"Authorization": f"Bearer {token}"}
 
@@ -288,7 +285,6 @@ async def test_sessions_list_requires_bearer_token(
         assert listing.status_code == 200
         keys = [s["key"] for s in listing.json()["sessions"]]
         assert "websocket:abc" in keys
-        # Server stays an opaque source: filesystem paths must not leak to the wire.
         assert all("path" not in s for s in listing.json()["sessions"])
 
     finally:
@@ -297,23 +293,23 @@ async def test_sessions_list_requires_bearer_token(
 
 
 @pytest.mark.asyncio
-async def test_sessions_list_and_thread_restore_transcript_without_canonical_file(
+async def test_sessions_list_and_thread_restore_display_without_model_messages(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sm = SessionManager(tmp_path / "workspace")
-    from nanobot.webui.transcript import append_transcript_object
+    sm = history.sessions
+
 
     key = "websocket:restored-history"
-    append_transcript_object(
+    history.append(
         key,
         {"event": "user", "chat_id": "restored-history", "text": "original question"},
     )
-    append_transcript_object(
+    history.append(
         key,
         {"event": "message", "chat_id": "restored-history", "text": "original answer"},
     )
-    assert sm.read_session_snapshot(key) is None
+    assert sm.read_session_snapshot(key).messages == []
 
     port = _free_port()
     channel = _ch(bus, session_manager=sm, port=port)
@@ -344,7 +340,7 @@ async def test_sessions_list_and_thread_restore_transcript_without_canonical_fil
             "original question",
             "original answer",
         ]
-        assert sm.read_session_snapshot(key) is None
+        assert sm.read_session_snapshot(key).messages == []
     finally:
         await channel.stop()
         await server_task
@@ -884,6 +880,53 @@ async def test_webui_skills_marketplace_routes_search_and_install(
 
 
 @pytest.mark.asyncio
+async def test_webui_skill_source_identity_reaches_public_reads_and_mutations(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / "skills" / "agent-browser"
+    directory.mkdir(parents=True)
+    content = "---\nname: agent-browser\n---\nKeep my local skill.\n"
+    (directory / "SKILL.md").write_text(content, encoding="utf-8")
+    (directory / ".nanobot-origin.json").write_text(json.dumps({
+        "provider": "skills_sh", "source": "vercel-labs/agent-browser", "skill_id": "agent-browser",
+    }), encoding="utf-8")
+
+    def respond(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"skills": [
+            {"skillId": "agent-browser", "source": "vercel-labs/agent-browser"},
+            {"skillId": "agent-browser", "source": "101-skills/superpowers"},
+        ]})
+
+    monkeypatch.setattr("nanobot.webui.skills_marketplace._skills_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(respond),
+    ))
+    port = _free_port()
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), workspace_path=tmp_path, port=port)
+    server_task = asyncio.create_task(channel.start())
+    try:
+        headers = {"Authorization": f"Bearer {channel.gateway.tokens.issue_api_token(300)}"}
+        for endpoint in ("search?q=agent-browser&provider=skills_sh", "trending?provider=skills_sh"):
+            response = await _http_get(f"http://127.0.0.1:{port}/api/webui/skills/{endpoint}", headers=headers)
+            assert response.status_code == 200
+            assert [row["installation_status"] for row in response.json()["skills"]] == ["installed", "conflict"]
+        # Old callers send no provider or new status fields; the host still enforces identity.
+        wrong = await _webui_mutate(channel, "skill.install", {
+            "source": "101-skills/superpowers", "skill": "agent-browser",
+        }, headers=headers)
+        assert wrong.status_code == 409
+        same = await _webui_mutate(channel, "skill.install", {
+            "source": "vercel-labs/agent-browser", "skill": "agent-browser",
+        }, headers=headers)
+        assert same.status_code == 200
+        assert same.json()["last_action"]["already_installed"] is True
+        assert any(skill["name"] == "agent-browser" for skill in same.json()["skills"])
+        assert (directory / "SKILL.md").read_text(encoding="utf-8") == content
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_webui_skill_install_rejects_overlapping_requests(
     bus: MagicMock,
     tmp_path: Path,
@@ -1230,11 +1273,11 @@ async def test_pairing_routes_require_token_and_approve_or_deny(
     monkeypatch.setattr("nanobot.webui.settings_routes.list_pending", lambda: list(pending))
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.approve_code",
-        lambda code: approved.append(code) or ("feishu", "ou_123") if code == "ABCD-EFGH" else None,
+        lambda code, **_kwargs: approved.append(code) or ("feishu", "ou_123") if code == "ABCD-EFGH" else None,
     )
     monkeypatch.setattr(
         "nanobot.webui.settings_routes.deny_code",
-        lambda code: denied.append(code) or code == "ABCD-EFGH",
+        lambda code, **_kwargs: denied.append(code) or code == "ABCD-EFGH",
     )
 
     channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
@@ -1289,6 +1332,28 @@ async def test_pairing_routes_require_token_and_approve_or_deny(
     )
     assert missing_code.status_code == 400
     assert "Missing pairing code" in missing_code.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "deny"])
+async def test_pairing_mutation_publishes_committed_snapshot(action, tmp_path, monkeypatch):
+    from nanobot.bus.queue import MessageBus
+    from nanobot.pairing import store
+    from nanobot.pairing.events import PairingChanged
+
+    monkeypatch.setattr(store, "_store_path", lambda: tmp_path / "pairing.json")
+    code = store.generate_code("telegram", "alice")
+    bus = MessageBus()
+    snapshots = []
+    bus.subscribe(lambda _event: snapshots.append(store.list_pending()), PairingChanged)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    result = await _webui_mutate(channel, f"settings.pairing.{action}", {"code": code})
+    await bus.drain()
+    assert result.status_code == 200 and snapshots == [[]]
+    assert store.is_approved("telegram", "alice") == (action == "approve")
+    missing = await _webui_mutate(channel, f"settings.pairing.{action}", {"code": code})
+    await bus.drain()
+    assert missing.status_code == 404 and snapshots == [[]]
 
 
 @pytest.mark.asyncio
@@ -1408,12 +1473,33 @@ async def test_nanobot_feature_channel_action_can_apply_without_restart(
 
 
 @pytest.mark.asyncio
-async def test_nanobot_feature_install_only_does_not_start_channel(
+@pytest.mark.parametrize("installed_now", [True, False])
+async def test_nanobot_feature_install_only_tracks_pending_restart_without_starting_channel(
     bus: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    installed_now: bool,
 ) -> None:
     runtime_calls: list[tuple[str, str, str | None]] = []
+
+    def features_payload(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "features": [{
+                "name": name,
+                "type": "channel",
+                "enabled": False,
+                "installed": True,
+                "ready": False,
+                "status": "not_enabled",
+                "requires_restart": True,
+            } for name in ("whatsapp", "email")],
+            "enabled_count": 0,
+        }
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.nanobot_features_payload",
+        features_payload,
+    )
 
     def feature_action(
         action: str,
@@ -1425,18 +1511,7 @@ async def test_nanobot_feature_install_only_does_not_start_channel(
         assert action == "enable"
         assert query == {"name": ["whatsapp"], "install_only": ["true"]}
         assert allow_install is True
-        return {
-            "features": [{
-                "name": "whatsapp",
-                "type": "channel",
-                "enabled": False,
-                "installed": True,
-                "ready": False,
-                "status": "not_enabled",
-            }],
-            "enabled_count": 0,
-            "requires_restart": False,
-        }
+        return {**features_payload(), "requires_restart": installed_now}
 
     async def channel_feature_action(
         action: str,
@@ -1465,7 +1540,26 @@ async def test_nanobot_feature_install_only_does_not_start_channel(
 
     assert response.status_code == 200
     assert runtime_calls == []
-    assert response.json()["features"][0]["enabled"] is False
+    features = response.json()["features"]
+    assert features[0]["enabled"] is False
+    assert [feature["restart_pending"] for feature in features] == [installed_now, False]
+
+    refreshed = await _http_get(
+        f"http://127.0.0.1:{channel.config.port}/api/settings/nanobot-features",
+        headers={"Authorization": f"Bearer {channel.gateway.tokens.issue_api_token(300)}"},
+    )
+    assert refreshed.status_code == 200
+    assert [feature["restart_pending"] for feature in refreshed.json()["features"]] == [
+        installed_now, False,
+    ]
+
+    restarted = _ch(bus, session_manager=SessionManager(tmp_path), port=_free_port())
+    after_restart = await _http_get(
+        f"http://127.0.0.1:{restarted.config.port}/api/settings/nanobot-features",
+        headers={"Authorization": f"Bearer {restarted.gateway.tokens.issue_api_token(300)}"},
+    )
+    assert after_restart.status_code == 200
+    assert all(not feature["restart_pending"] for feature in after_restart.json()["features"])
 
 
 @pytest.mark.asyncio
@@ -1496,6 +1590,34 @@ async def test_channel_connect_runtime_import_error_is_not_reported_as_unsupport
 
     assert response.status_code == 500
     assert "failed to start fake connection" in response.text
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_connect_reports_libmagic_failure(
+    bus: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from nanobot.channels.whatsapp import runtime as whatsapp
+    from nanobot.channels.whatsapp.manifest import PLUGIN
+
+    monkeypatch.setattr(
+        "nanobot.webui.settings_routes.load_channel_plugin", lambda _name: PLUGIN,
+    )
+
+    def missing_libmagic():
+        raise whatsapp.WhatsAppDependencyError("WhatsApp could not load libmagic.")
+
+    monkeypatch.setattr(whatsapp, "_load_neonize", missing_libmagic)
+    channel = _ch(bus, session_manager=_seed_session(tmp_path), port=_free_port())
+    response = await _webui_mutate(
+        channel,
+        "settings.channel.connect.start",
+        {"channel": "whatsapp", "force": True},
+    )
+
+    assert response.status_code == 400
+    assert "WhatsApp could not load libmagic" in response.text
 
 
 @pytest.mark.asyncio
@@ -2307,8 +2429,6 @@ async def test_mcp_presets_routes_require_token_and_return_payload(
 async def test_sessions_list_only_returns_websocket_sessions_by_default(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Seed a realistic multi-channel disk state: CLI, Slack, Lark and
-    # websocket sessions all live in the same ``sessions/`` directory.
     sm = _seed_many(
         tmp_path,
         [
@@ -2340,8 +2460,6 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         assert listing.status_code == 200
         sessions = listing.json()["sessions"]
         keys = {s["key"] for s in sessions}
-        # Only websocket-channel sessions are part of the webui surface; CLI /
-        # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
         rows = {row["key"]: row for row in sessions}
         handles = {
@@ -2358,6 +2476,7 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
             project.resolve()
         )
         assert rows["websocket:beta"]["workspace_scope"]["access_mode"] == "restricted"
+        assert all(row["project_locked"] is True for row in sessions)
         assert all(not any(key.startswith("_") for key in row) for row in sessions)
     finally:
         await channel.stop()
@@ -2370,6 +2489,8 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:sidebar")
+    await sm.state.fork("websocket:sidebar", "websocket:old", 0)
+    sm.get_or_create("websocket:draft")
     channel = _ch(bus, session_manager=sm, port=29911)
     server_task = asyncio.create_task(channel.start())
     try:
@@ -2386,7 +2507,7 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
 
         payload = {
             "pinned_keys": ["websocket:sidebar"],
-            "archived_keys": ["websocket:old"],
+            "archived_keys": ["websocket:old", "websocket:draft"],
             "session_order": ["websocket:old", "websocket:sidebar"],
             "title_overrides": {"websocket:sidebar": "Pinned work"},
             "view": {"density": "compact", "show_archived": True},
@@ -2399,36 +2520,42 @@ async def test_webui_sidebar_state_routes_are_config_dir_scoped(
         assert updated.status_code == 200
         body = updated.json()
         assert body["pinned_keys"] == ["websocket:sidebar"]
+        assert body["archived_keys"] == ["websocket:old"]
+        assert await sm.state.archived_keys() == ["websocket:old"]
         assert body["session_order"] == ["websocket:old", "websocket:sidebar"]
         assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
         assert body["view"]["density"] == "compact"
 
         state_path = tmp_path / "webui" / "sidebar-state.json"
         assert state_path.is_file()
-        assert json.loads(state_path.read_text(encoding="utf-8"))["pinned_keys"] == [
-            "websocket:sidebar"
-        ]
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        assert persisted["pinned_keys"] == ["websocket:sidebar"]
+        assert "archived_keys" not in persisted
+        read_back = await _http_get("http://127.0.0.1:29911/api/webui/sidebar-state", headers=auth)
+        assert read_back.json()["archived_keys"] == ["websocket:old"]
     finally:
         await channel.stop()
         await server_task
 
 
 @pytest.mark.asyncio
-async def test_session_delete_removes_file(
+async def test_session_delete_removes_canonical_and_display_history(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sm = _seed_session(tmp_path, key="websocket:doomed")
-    from nanobot.webui.transcript import append_transcript_object
+    sm = history.sessions
+    draft = sm.get_or_create("websocket:doomed")
+    draft.add_message("user", "canonical")
+    sm.save(draft)
 
-    append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
+
+    history.append("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     try:
         session_key = "websocket:doomed"
         assert sm.read_session_snapshot(session_key) is not None
-        webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
-        assert webui_path.is_file()
+        assert history.read(session_key)[0]["text"] == "x"
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -2437,28 +2564,27 @@ async def test_session_delete_removes_file(
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert sm.read_session_snapshot(session_key) is None
-        assert not webui_path.exists()
+        assert history.read(session_key) == []
     finally:
         await channel.stop()
         await server_task
 
 
 @pytest.mark.asyncio
-async def test_session_delete_removes_transcript_without_canonical_file(
+async def test_session_delete_removes_display_without_model_messages(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sm = SessionManager(tmp_path / "workspace")
-    from nanobot.webui.transcript import append_transcript_object
+    sm = history.sessions
+
 
     key = "websocket:transcript-only"
-    append_transcript_object(
+    history.append(
         key,
         {"event": "user", "chat_id": "transcript-only", "text": "recover me"},
     )
-    assert sm.read_session_snapshot(key) is None
-    webui_path = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
-    assert webui_path.is_file()
+    assert sm.read_session_snapshot(key).messages == []
+    assert history.read(key)[0]["text"] == "recover me"
 
     channel = _ch(bus, session_manager=sm, port=_free_port())
     server_task = asyncio.create_task(channel.start())
@@ -2471,7 +2597,8 @@ async def test_session_delete_removes_transcript_without_canonical_file(
 
         assert response.status_code == 200
         assert response.json()["deleted"] is True
-        assert not webui_path.exists()
+        assert sm.read_session_snapshot(key) is None
+        assert history.read(key) == []
     finally:
         await channel.stop()
         await server_task
@@ -2486,6 +2613,7 @@ async def test_session_delete_removes_unpersisted_new_chat(
     project.mkdir()
     channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=_free_port())
     connection = AsyncMock()
+    channel._webui_connections.add(connection)
     connection.remote_address = ("127.0.0.1", 50123)
     connection.request.headers = {"Host": "localhost"}
 
@@ -2636,6 +2764,7 @@ async def test_remote_new_chat_accepts_server_project_path_and_full_access(
     other_project.mkdir()
     channel = _ch(bus, workspace_path=tmp_path, port=_free_port())
     connection = AsyncMock()
+    channel._webui_connections.add(connection)
     connection.remote_address = ("192.168.1.5", 50123)
     connection.request = _FakeReq(
         {
@@ -3211,10 +3340,10 @@ async def test_session_delete_action_accepts_websocket_keys(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_resigns_assistant_media_urls(
+async def test_webui_thread_resigns_assistant_media_urls(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     media_root = tmp_path / "media"
@@ -3228,11 +3357,11 @@ async def test_webui_thread_resigns_assistant_media_urls(
 
     monkeypatch.setattr("nanobot.webui.media_gateway.get_media_dir", fake_media_dir)
 
-    append_transcript_object(
+    history.append(
         "websocket:video-replay",
         {"event": "user", "chat_id": "video-replay", "text": "make a video"},
     )
-    append_transcript_object(
+    history.append(
         "websocket:video-replay",
         {
             "event": "message",
@@ -3243,7 +3372,7 @@ async def test_webui_thread_resigns_assistant_media_urls(
         },
     )
 
-    channel = _ch(bus, port=29914)
+    channel = _ch(bus, port=29914, session_manager=history.sessions)
     server_task = asyncio.create_task(channel.start())
     try:
         token = channel.gateway.tokens.issue_api_token(300)
@@ -3311,10 +3440,10 @@ async def test_sessions_list_negotiates_gzip_across_repeated_headers(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_complete_transcript_skips_session_history_read(
+async def test_webui_thread_complete_transcript_skips_session_history_read(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:fast-thread"
@@ -3324,7 +3453,7 @@ async def test_webui_thread_complete_transcript_skips_session_history_read(
         {"event": "message", "chat_id": "fast-thread", "text": "hello back"},
         {"event": "turn_end", "chat_id": "fast-thread"},
     ):
-        append_transcript_object(key, event)
+        history.append(key, event)
 
     read_session_file = MagicMock(
         side_effect=AssertionError("complete transcripts must not read canonical history")
@@ -3361,14 +3490,14 @@ async def test_webui_thread_complete_transcript_skips_session_history_read(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_negotiates_gzip_for_large_payloads(
+async def test_webui_thread_negotiates_gzip_for_large_payloads(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    sm = SessionManager(tmp_path)
-    append_transcript_object(
+    sm = history.sessions
+    history.append(
         "websocket:gzip-thread",
         {
             "event": "user",
@@ -3421,10 +3550,10 @@ async def test_webui_thread_negotiates_gzip_for_large_payloads(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_revalidates_and_loads_large_trace_details(
+async def test_webui_thread_revalidates_and_loads_large_trace_details(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:revalidated-thread"
@@ -3441,7 +3570,7 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
         {"event": "message", "chat_id": "revalidated-thread", "text": "done"},
         {"event": "turn_end", "chat_id": "revalidated-thread"},
     ):
-        append_transcript_object(key, event)
+        history.append(key, event)
     port = _free_port()
     channel = _ch(bus, session_manager=sm, workspace_path=tmp_path, port=port)
     server_task = asyncio.create_task(channel.start())
@@ -3481,7 +3610,7 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
         assert detail.json()["message_id"] == trace_event["projection_id"]
         assert detail.json()["events"][0]["text"] == trace
 
-        append_transcript_object(
+        history.append(
             key,
             {"event": "user", "chat_id": "revalidated-thread", "text": "again"},
         )
@@ -3497,15 +3626,15 @@ async def test_webui_thread_revalidates_and_loads_large_trace_details(
 
 
 @pytest.mark.asyncio
-async def test_webui_thread_omits_validator_when_transcript_changes_during_replay(
+async def test_webui_thread_omits_validator_when_transcript_changes_during_replay(history,
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nanobot.webui.transcript import append_transcript_object
+
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:changing-thread"
     sm = _seed_session(tmp_path, key=key)
-    append_transcript_object(
+    history.append(
         key,
         {"event": "user", "chat_id": "changing-thread", "text": "hello"},
     )
@@ -3579,8 +3708,6 @@ async def test_session_delete_rejects_invalid_key(
     channel = _ch(bus, session_manager=sm, port=29904)
     server_task = asyncio.create_task(channel.start())
     try:
-        # Invalid characters in the key -> regex match fails -> 404
-        # (route doesn't match, falls through to channel 404).
         resp = await _webui_mutate(
             channel,
             "session.delete",
@@ -3604,15 +3731,12 @@ async def test_static_serves_index_when_dist_present(
     channel = _ch(bus, session_manager=sm, static_dist_path=dist, port=29905)
     server_task = asyncio.create_task(channel.start())
     try:
-        # Bare ``GET /`` is a browser opening the app: it must return the SPA
-        # index.html, not the WS-upgrade handler's 401/426.
         root = await _http_get("http://127.0.0.1:29905/")
         assert root.status_code == 200
         assert "nbweb" in root.text
         asset = await _http_get("http://127.0.0.1:29905/favicon.svg")
         assert asset.status_code == 200
         assert "<svg" in asset.text
-        # Unknown SPA route falls back to index.html.
         spa = await _http_get("http://127.0.0.1:29905/sessions/abc")
         assert spa.status_code == 200
         assert "nbweb" in spa.text
@@ -3657,7 +3781,6 @@ async def test_unknown_route_returns_404(bus: MagicMock) -> None:
 async def test_api_token_pool_purges_expired(bus: MagicMock, tmp_path: Path) -> None:
     sm = _seed_session(tmp_path)
     channel = _ch(bus, session_manager=sm, port=29908)
-    # Don't start a server — directly inject and validate.
     import time as _time
     channel.gateway.tokens.api_tokens["expired"] = _time.monotonic() - 1
     channel.gateway.tokens.api_tokens["live"] = _time.monotonic() + 60
@@ -4017,7 +4140,6 @@ def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
 
 
 def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
-    """When only token (not token_issue_secret) is set, bootstrap accepts it."""
     channel = _ch(bus, host="0.0.0.0", token="static-tok")
     resp = channel.gateway.http._handle_bootstrap(
         _REMOTE, _FakeReq({"Authorization": "Bearer static-tok"})
@@ -4196,7 +4318,6 @@ def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
 
 
 def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
-    """When secret is set, even localhost must provide it (reverse-proxy safety)."""
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
     resp = channel.gateway.http._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401

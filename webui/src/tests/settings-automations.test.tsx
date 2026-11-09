@@ -42,7 +42,7 @@ describe("automation channel identity", () => {
       ["ja", "メール"],
       ["es", "Correo electrónico"],
     ]) {
-      await act(() => i18n.changeLanguage(locale));
+      await act(async () => { await i18n.changeLanguage(locale); });
       expect(detail.getByText(name)).toBeVisible();
       expect(detail.queryByText("Email")).not.toBeInTheDocument();
     }

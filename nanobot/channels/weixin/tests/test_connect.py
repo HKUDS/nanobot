@@ -57,17 +57,17 @@ async def test_weixin_connect_store_saves_confirmed_qr_login(
     started = await store.start()
     assert started["status"] == "pending"
     assert started["qr_url"] == "https://qr.example/1"
+    assert store.has_pending_work is True
 
     completed = await store.poll(started["session_id"])
     assert completed["status"] == "succeeded"
     assert completed["account"] == "wx-user"
+    assert store.has_pending_work is False
 
     saved = json.loads((state_dir / "account.json").read_text())
     assert saved["token"] == "wx-token"
     assert saved["base_url"] == "https://weixin.example"
 
-    # Token and base_url must also be persisted to config.json so the
-    # post-connect enable step does not overwrite them with empty defaults.
     config_data = json.loads(config_path.read_text(encoding="utf-8"))
     weixin_cfg = config_data.get("channels", {}).get("weixin", {})
     assert weixin_cfg.get("token") == "wx-token"
@@ -83,7 +83,6 @@ async def test_weixin_connect_persists_credentials_without_channels_config(
     """When config.json has no channels key at all, connect must still write
     the obtained token and base_url back to config.json."""
     config_path = tmp_path / "config.json"
-    # config.json with NO channels key — the bug scenario
     config_path.write_text(
         json.dumps({"agents": {"defaults": {"model": "test"}}}),
         encoding="utf-8",
@@ -177,9 +176,11 @@ async def test_weixin_reconnect_keeps_existing_account_until_scan_succeeds(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("shutdown", [False, True])
 async def test_weixin_cancel_wins_over_inflight_confirmation(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    shutdown: bool,
 ) -> None:
     state_dir = tmp_path / "weixin-state"
     config_path = tmp_path / "config.json"
@@ -214,15 +215,20 @@ async def test_weixin_cancel_wins_over_inflight_confirmation(
 
     store = WeixinConnectStore()
     started = await store.handle("start", {})
+    assert store.has_pending_work is True
     query = {"session_id": [started["session_id"]]}
     poll_task = asyncio.create_task(store.handle("poll", query))
     await asyncio.wait_for(poll_started.wait(), timeout=5)
 
-    cancelled = await store.handle("cancel", query)
+    if shutdown:
+        await store.close()
+    else:
+        cancelled = await store.handle("cancel", query)
+        assert cancelled["status"] == "cancelled"
     release_poll.set()
     completed = await poll_task
 
-    assert cancelled["status"] == "cancelled"
+    assert store.has_pending_work is False
     assert completed["status"] == "cancelled"
     assert not (state_dir / "account.json").exists()
 

@@ -1,5 +1,3 @@
-"""Native Linear Agent channel runtime."""
-
 from __future__ import annotations
 
 import asyncio
@@ -196,6 +194,9 @@ class LinearChannel(BaseChannel):
             {"type": "response", "body": body},
             key="response",
         )
+
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        return msg
 
     async def _attachment_markdown(self, msg: OutboundMessage) -> list[str]:
         client = self._client
@@ -609,7 +610,6 @@ def _prompt_text(
 
 
 def _issue_context(session: dict[str, Any]) -> str:
-    """Include issue identity even when pairing prevented the initial turn."""
     issue = _optional_object(session.get("issue"))
     fields: dict[str, str] = {}
     for key, limit in (("id", 200), ("identifier", 200), ("title", 500),

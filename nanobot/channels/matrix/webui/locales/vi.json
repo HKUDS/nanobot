@@ -28,8 +28,12 @@
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
-          "allowlist": "Danh sách cho phép"
+          "allowlist": "Danh sách cho phép",
+          "listen": "Lắng nghe (trả lời khi được nhắc)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Ngoại lệ quy tắc theo phòng (JSON)"
       },
       "allowFrom": {
         "label": "Người dùng được phép"
@@ -67,6 +71,13 @@
           "false": "Tắt"
         }
       },
+      "replyToMessage": {
+        "label": "Trả lời trích dẫn",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
       "streaming": {
         "label": "Truyền phát",
         "choices": {
@@ -74,9 +85,8 @@
           "false": "Tắt"
         }
       },
-      "proxy": {
-        "label": "Proxy mạng",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Dùng proxy"
       }
     }
   }

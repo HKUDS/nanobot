@@ -356,7 +356,6 @@ async def test_message_tool_allows_ws_explicit_when_matches_context(tmp_path) ->
 
 @pytest.mark.asyncio
 async def test_message_tool_cli_context_may_target_other_ws_chat(tmp_path) -> None:
-    """Cron / CLI handlers keep non-websocket defaults; explicit websocket + uuid remains valid."""
     sent: list[OutboundMessage] = []
 
     async def _send(msg: OutboundMessage) -> None:

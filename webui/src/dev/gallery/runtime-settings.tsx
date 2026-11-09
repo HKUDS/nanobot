@@ -9,6 +9,8 @@ import { AutomationRunDialogView, type AutomationRunResult } from "@/components/
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DEFAULT_LOCAL_PREFS } from "@/lib/local-preferences";
+import type { ThemePreference } from "@/hooks/useTheme";
+import type { UpdateChannel } from "@/lib/api";
 import type { AutomationChatsPayload, SessionAutomationJob } from "@/lib/types";
 import { StatePicker, type ComponentExample } from "./example";
 import { useGalleryTranslation } from "./i18n";
@@ -68,23 +70,31 @@ function ChatBindingPreview() {
 
 function AboutPreview() {
   const { t } = useGalleryTranslation();
-  const [mode, setMode] = useState<"ready" | "checking" | "up-to-date" | "update" | "error">("ready");
-  const [selectedLink, setSelectedLink] = useState(false);
+  const [mode, setMode] = useState<"ready" | "checking" | "up-to-date" | "update" | "preview" | "error">("ready");
+  const [notice, setNotice] = useState<"updateRequested" | "selectedLink" | null>(null);
+  const [channel, setChannel] = useState<UpdateChannel>("stable");
   const result: VersionCheckState = mode === "up-to-date" ? { type: mode }
     : mode === "update" ? { type: mode, latestVersion: "0.3.6", pypiUrl: "https://pypi.org/project/nanobot-ai/" }
+      : mode === "preview" ? { type: "update", latestVersion: "0.3.7.dev2026101501",
+        releaseUrl: "https://github.com/HKUDS/nanobot/releases" }
       : mode === "error" ? { type: mode, message: t("controls.about.error") } : null;
-  return <><StatePicker label={t("controls.about.state")} value={mode} options={["ready", "checking", "up-to-date", "update", "error"]} onChange={setMode} />
+  return <><StatePicker label={t("controls.about.state")} value={mode} options={["ready", "checking", "up-to-date", "update", "preview", "error"]} onChange={setMode} />
     <AboutSettingsView reportIssueUrl="https://github.com/HKUDS/nanobot/issues/new?template=bug_report.yml"
       versionCheck={<VersionCheckRowView currentVersion="0.3.5" currentCommit="abcdef1234567890" checking={mode === "checking"}
-        result={result} onCheck={() => setMode("update")} />}
-      starLink={<StarLinkView onActivate={() => setSelectedLink(true)} />} />
-    {selectedLink ? <p role="status" className="mt-4 text-xs text-muted-foreground">{t("controls.about.selectedLink")}</p> : null}</>;
+        result={result} onCheck={() => setMode("update")}
+        releaseStatus={{ channel, revision: 0, currentVersion: "0.3.5", state: "current" }}
+        canChangeChannel onChangeChannel={async (value) => {
+          setChannel(value);
+        }}
+        onRequestUpdate={mode === "preview" ? () => setNotice("updateRequested") : undefined} />}
+      starLink={<StarLinkView onActivate={() => setNotice("selectedLink")} />} />
+    {notice ? <p role="status" className="mt-4 text-xs text-muted-foreground">{t(`controls.about.${notice}`)}</p> : null}</>;
 }
 
 function AppearancePreview() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<ThemePreference>("system");
   const [preferences, setPreferences] = useState(DEFAULT_LOCAL_PREFS);
-  return <><AppearanceSettingsView theme={theme} onToggleTheme={() => setTheme((current) => current === "light" ? "dark" : "light")}
+  return <><AppearanceSettingsView themePreference={theme} onChangeTheme={setTheme}
     localPrefs={preferences} onChangeLocalPrefs={setPreferences} />
     <pre role="status" className="mt-4 overflow-auto rounded-control bg-muted p-4 text-xs">{JSON.stringify({ theme, ...preferences }, null, 2)}</pre></>;
 }
@@ -118,7 +128,7 @@ export const runtimeSettingsExamples: ComponentExample[] = [
   { title: "controls.appearance.title", files: ["webui/src/components/settings/overview/AppearanceSettingsView.tsx"], Preview: AppearancePreview,
     description: "controls.appearance.description",
     options: "controls.appearance.options",
-    code: '<AppearanceSettingsView theme={theme} onToggleTheme={toggleTheme} localPrefs={preferences} onChangeLocalPrefs={setPreferences} onChangeBrowserNotifications={changeNotifications} />' },
+    code: '<AppearanceSettingsView themePreference={preference} onChangeTheme={setTheme} localPrefs={preferences} onChangeLocalPrefs={setPreferences} />' },
   { title: "controls.starInvitation.title", files: ["webui/src/components/StarPromptView.tsx"], Preview: StarInvitationPreview,
     description: "controls.starInvitation.description",
     options: "controls.starInvitation.options",

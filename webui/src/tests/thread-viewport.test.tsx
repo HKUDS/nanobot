@@ -12,6 +12,7 @@ import {
 } from "@/components/thread/ThreadViewport";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadMotionCoordinator } from "@/components/thread/thread-motion";
+import type { PromptHistoryNavigation } from "@/hooks/usePromptHistory";
 import type { UIMessage } from "@/lib/types";
 
 const messages: UIMessage[] = [
@@ -198,6 +199,14 @@ function getScroller(container: HTMLElement): HTMLElement {
   const scroller = container.querySelector<HTMLElement>(".thread-viewport-scrollbar");
   if (!scroller) throw new Error("thread scrollport not found");
   return scroller;
+}
+
+function mockMessageEnd(scroller: HTMLElement) {
+  const rows = scroller.querySelectorAll<HTMLElement>(".thread-message-row");
+  const row = rows[rows.length - 1];
+  scroller.getBoundingClientRect = () => ({ bottom: scroller.clientHeight } as DOMRect);
+  row.getBoundingClientRect = () => ({ height: 100, bottom: scroller.scrollHeight - scroller.scrollTop } as DOMRect);
+  act(() => window.dispatchEvent(new Event("resize")));
 }
 
 async function renderPromptRailViewport({
@@ -921,6 +930,7 @@ describe("ThreadViewport", () => {
     await flushAnimationFrame();
     followTo.mockClear();
 
+    mockMessageEnd(scroller);
     act(() => {
       fireEvent.wheel(scroller, { deltaY: -24 });
       scroller.scrollTop = 1_380;
@@ -969,6 +979,43 @@ describe("ThreadViewport", () => {
       .not.toBeInTheDocument();
   });
 
+  it("tracks the message content edge independently of trailing space and motion ownership", () => {
+    const resizeObserver = stubResizeObserver();
+    try {
+      const { container } = render(<ThreadViewport messages={messages} isStreaming={false} composer={<div>composer</div>} />);
+      const scroller = getScroller(container);
+      const content = scroller.firstElementChild as HTMLElement;
+      const row = scroller.querySelector<HTMLElement>(".thread-message-row:last-child")!;
+      const gap = scroller.querySelector<HTMLElement>(".thread-message-end-gap")!;
+      let contentBottom = 565;
+      scroller.getBoundingClientRect = () => ({ bottom: 600 } as DOMRect);
+      gap.getBoundingClientRect = () => ({ height: 36 } as DOMRect);
+      row.getBoundingClientRect = () => ({ bottom: contentBottom, height: 100 } as DOMRect);
+      act(() => window.dispatchEvent(new Event("resize")));
+      Object.defineProperties(scroller, {
+        scrollHeight: { configurable: true, value: 1000 },
+        clientHeight: { configurable: true, value: 600 },
+        scrollTop: { configurable: true, writable: true, value: 300 },
+      });
+      act(() => { scroller.dispatchEvent(new Event("scroll")); });
+      expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+      contentBottom = 564;
+      act(() => { scroller.dispatchEvent(new Event("scroll")); });
+      expect(screen.queryByRole("button", { name: "Scroll to bottom" })).not.toBeInTheDocument();
+      contentBottom = 570;
+      const observer = resizeObserver.observers.find((item) => item.elements.includes(content))!;
+      act(() => { observer.callback([], observer); });
+      expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+      vi.spyOn(ThreadMotionCoordinator.prototype, "navigateLatestTo").mockReturnValue("started");
+      fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+      expect(screen.queryByRole("button", { name: "Scroll to bottom" })).not.toBeInTheDocument();
+      fireEvent.wheel(scroller, { deltaY: -20 });
+      expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
+    } finally {
+      resizeObserver.restore();
+    }
+  });
+
   it("keeps the scroll-to-bottom button above a growing composer", async () => {
     const resizeObserver = stubResizeObserver();
 
@@ -987,6 +1034,7 @@ describe("ThreadViewport", () => {
         scrollTop: { configurable: true, value: 0 },
       });
 
+      mockMessageEnd(scroller);
       act(() => {
         dispatchUserScroll(scroller);
       });
@@ -1045,6 +1093,7 @@ describe("ThreadViewport", () => {
       scrollTop: { configurable: true, writable: true, value: 0 },
     });
 
+    mockMessageEnd(scroller);
     act(() => {
       dispatchUserScroll(scroller);
     });
@@ -2028,6 +2077,56 @@ describe("ThreadViewport", () => {
     await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
   });
 
+  it.each(["wheel", "touch", "keyboard"] as const)("loads newer history after one %s input reaches the page bottom", async (input) => {
+    const history = makePromptExchangeMessages(5);
+    const newer = vi.fn();
+    const navigation: PromptHistoryNavigation = {
+      prompts: [], window: { messages: history, userMessageOffset: 0,
+        hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
+      target: null, operation: null, loading: false, error: null,
+      jump: vi.fn(), older: vi.fn(), newer, cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), updateMessages: vi.fn(),
+    };
+    const view = render(<ThreadViewport messages={messages} isStreaming={false} composer={<div />} navigation={navigation} />);
+    await flushAnimationFrame();
+    const scroller = view.getByTestId("thread-message-region");
+    mockScrollGeometry(scroller, 2000, 500, 100);
+
+    const forward = () => {
+      if (input === "wheel") fireEvent.wheel(scroller, { deltaY: 10000 });
+      if (input === "keyboard") fireEvent.keyDown(scroller, { key: "End" });
+      if (input === "touch") {
+        fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 400 }] });
+        fireEvent.touchMove(scroller, { touches: [{ clientX: 100, clientY: 200 }] });
+        fireEvent.touchEnd(scroller);
+      }
+    };
+    // A large input can cross the entire prefetch range in one native scroll.
+    forward();
+    expect(newer).not.toHaveBeenCalled();
+    act(() => {
+      scroller.scrollTop = 1500;
+      fireEvent.scroll(scroller);
+    });
+    expect(newer).toHaveBeenCalledOnce();
+
+    // Appending a page must preserve the reader's position, not follow its tail.
+    mockScrollGeometry(scroller, 2800, 500, 1500);
+    view.rerender(<ThreadViewport messages={messages} isStreaming={false} composer={<div />}
+      navigation={{ ...navigation, window: { ...navigation.window!, messages: makePromptExchangeMessages(10) } }} />);
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1500);
+
+    // At the existing page boundary, forward input cannot produce a scroll event.
+    mockScrollGeometry(scroller, 2800, 500, 2300);
+    forward();
+    expect(newer).toHaveBeenCalledTimes(2);
+    mockScrollGeometry(scroller, 3600, 500, 2300);
+    view.rerender(<ThreadViewport messages={messages} isStreaming={false} composer={<div />}
+      navigation={{ ...navigation, window: { ...navigation.window!, messages: makePromptExchangeMessages(15) } }} />);
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(2300);
+  });
+
   it("includes the selected prompt when one server turn exceeds the local render window", async () => {
     const history: UIMessage[] = [{ id: "old-user", role: "user", content: "Large old turn", createdAt: 1 },
       ...Array.from({ length: INITIAL_HISTORY_WINDOW + 10 }, (_, index): UIMessage => ({
@@ -2328,6 +2427,7 @@ describe("ThreadViewport", () => {
         clientHeight: { configurable: true, value: 600 },
         scrollTop: { configurable: true, writable: true, value: 300 },
       });
+      mockMessageEnd(scroller);
       act(() => {
         dispatchUserScroll(scroller);
       });

@@ -24,7 +24,7 @@ describe("ContextPanel", () => {
     setup = undefined
   })
 
-  test("omits explanatory copy when no compacted summary exists", async () => {
+  test("renders replay statistics when no compacted summary exists", async () => {
     setup = await createTestRenderer({ width: 80, height: 18, screenMode: "alternate-screen" })
     const panel = new ContextPanel(setup.renderer, {
       text: "#FFFFFF",
@@ -37,7 +37,5 @@ describe("ContextPanel", () => {
 
     const frame = setup.captureCharFrame()
     expect(frame).toContain("~950 tokens  8 replay  0 archived")
-    expect(frame).not.toContain("Agent context")
-    expect(frame).not.toContain("no compacted summary")
   })
 })

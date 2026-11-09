@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import base64
 import mimetypes
-import re
 import uuid
 from pathlib import Path
 
@@ -16,7 +15,6 @@ from nanobot.utils.helpers import safe_filename
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 MAX_FILE_SIZE = DEFAULT_MAX_BYTES
 
-_DATA_URL_RE = re.compile(r"^data:([^;,]+)(?:;[^,]*)*;base64,(.+)$", re.DOTALL)
 _MIME_EXTENSION_OVERRIDES = {
     # Python's ``mimetypes`` maps browser-recorded audio/webm to ``.weba`` and
     # audio/ogg to ``.oga`` on macOS. Some transcription APIs validate by the
@@ -69,10 +67,14 @@ def save_base64_data_url(
     base64 payload itself is malformed. Raises :class:`FileSizeExceeded`
     when the decoded payload is larger than ``max_bytes`` (default 10 MB).
     """
-    m = _DATA_URL_RE.match(data_url)
-    if not m:
+    # Parse delimiters directly so malformed MIME parameters cannot trigger regex backtracking.
+    header, separator, b64_payload = data_url.partition(",")
+    if not separator or header[:5].lower() != "data:" or header[-7:].lower() != ";base64":
         return None
-    mime_type, b64_payload = m.group(1).strip().lower(), m.group(2)
+    mime_type = header[5:-7].partition(";")[0]
+    if not mime_type:
+        return None
+    mime_type = mime_type.strip().lower()
     try:
         raw = base64.b64decode(b64_payload, validate=True)
     except Exception:

@@ -1,5 +1,3 @@
-"""Runtime path helpers derived from the active config context."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -45,7 +43,7 @@ def get_logs_dir() -> Path:
 
 
 def get_webui_dir() -> Path:
-    """Return the directory for WebUI JSONL transcripts and legacy JSON snapshots."""
+    """Return WebUI state and legacy display-history import/backup storage."""
     return get_runtime_subdir("webui")
 
 

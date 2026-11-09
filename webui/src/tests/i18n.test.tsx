@@ -434,6 +434,15 @@ describe("webui i18n", () => {
       expect(notice?.textContent).toBe(copy[phase]);
       expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
     }
+    for (const reason of ["idle", "context_pressure", "manual", "provider_native"] as const) {
+      for (const phase of ["started", "succeeded", "failed", "cancelled"] as const) {
+        rerender(<ContextCompactionNotice compaction={{ id: "compact-1", reason, phase, announce: true }} />);
+        const notice = container.querySelector("[data-context-compaction]");
+        expect(copy.reasons[reason][phase]).toBeTruthy();
+        expect(notice?.textContent).toBe(copy.reasons[reason][phase]);
+        expect(notice).toHaveAttribute("aria-busy", String(phase === "started"));
+      }
+    }
     for (const compactReply of ["empty", "failed"] as const) {
       rerender(<MessageBubble message={{
         id: "reply", role: "assistant", content: "original command reply",
@@ -469,12 +478,32 @@ describe("webui i18n", () => {
     }
   });
 
-  it("defaults to English until the user chooses another language", () => {
+  it("follows the browser until the user chooses another language", () => {
     localStorage.removeItem(LOCALE_STORAGE_KEY);
-    expect(resolveInitialLocale()).toBe("en");
+    vi.stubGlobal("navigator", { languages: ["zh-CN"], language: "zh-CN" });
+    try {
+      expect(resolveInitialLocale()).toBe("zh-CN");
+      localStorage.setItem(LOCALE_STORAGE_KEY, "fr");
+      expect(resolveInitialLocale()).toBe("fr");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
-    localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
-    expect(resolveInitialLocale()).toBe("zh-CN");
+  it("falls back to English for an unsupported browser language", () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    vi.stubGlobal("navigator", { languages: ["de-DE"], language: "de-DE" });
+    try {
+      expect(resolveInitialLocale()).toBe("en");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("persists an explicit selection even when it matches the current language", async () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    await setAppLanguage("en");
+    expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("en");
   });
 
   it("lists each language by its native name", async () => {
@@ -499,7 +528,7 @@ describe("webui i18n", () => {
     );
 
     expect(
-      screen.getByPlaceholderText("Type your message…"),
+      screen.getByPlaceholderText("Type / for commands, @ for chats or apps, $ for skills"),
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");
 
@@ -510,7 +539,7 @@ describe("webui i18n", () => {
       expect(document.documentElement.lang).toBe("zh-CN");
     });
     expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
-    expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("输入 / 查看命令，@ 引用会话或应用，$ 选择技能")).toBeInTheDocument();
   });
 
   it("updates the composer aria label when the language changes", async () => {

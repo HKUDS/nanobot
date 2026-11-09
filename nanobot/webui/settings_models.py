@@ -41,6 +41,7 @@ from nanobot.providers.oauth_model_catalog import (
     invalidate_oauth_model_catalog,
 )
 from nanobot.providers.registry import (
+    KIMI_K3_MODELS,
     PROVIDERS,
     ProviderModelSpec,
     ProviderSpec,
@@ -49,6 +50,7 @@ from nanobot.providers.registry import (
 )
 from nanobot.providers.request_overrides import isolate_request_overrides
 from nanobot.providers.routing import resolve_automatic_model_api, resolve_model_api
+from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.webui import request_settings
 from nanobot.webui.settings_contracts import (
     QueryParams,
@@ -134,7 +136,6 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
     string_fields = (
         ("api_key", "apiKey"),
         ("api_base", "apiBase"),
-        ("proxy", "proxy"),
         ("thinking_style", "thinkingStyle"),
         ("region", "region"),
         ("profile", "profile"),
@@ -144,6 +145,9 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
         if query_has_alias(query, snake, camel):
             value = (query_first_alias(query, snake, camel) or "").strip()
             updates[snake] = value or None
+
+    if query_has_alias(query, "use_proxy", "useProxy"):
+        updates["use_proxy"] = parse_bool(query_first_alias(query, "use_proxy", "useProxy") or "", "use_proxy")
 
     for snake, camel in (
         ("extra_headers", "extraHeaders"),
@@ -174,19 +178,11 @@ def mask_secret_hint(secret: str | None) -> str | None:
 def _resolve_env_placeholders(value: str | None) -> str | None:
     if not value:
         return None
-    missing = False
 
     def replace(match: re.Match[str]) -> str:
-        nonlocal missing
-        env_value = os.environ.get(match.group(1))
-        if env_value is None:
-            missing = True
-            return ""
-        return env_value
+        return os.environ.get(match.group(1), "")
 
     resolved = _ENV_REF_RE.sub(replace, value).strip()
-    if missing and not resolved:
-        return None
     return resolved or None
 
 
@@ -347,9 +343,9 @@ def _provider_advanced_field_names(name: str, spec: Any) -> list[str]:
     if spec.backend in {"openai_compat", "anthropic", "bedrock", "openai_codex", "xai_grok"}:
         fields.append("extra_body")
     if spec.backend in {"openai_compat", "anthropic"}:
-        fields.extend(("extra_query", "proxy"))
-    if spec.name in _OAUTH_PROXY_PROVIDERS and "proxy" not in fields:
-        fields.append("proxy")
+        fields.extend(("extra_query", "use_proxy"))
+    if spec.name in _OAUTH_PROXY_PROVIDERS and "use_proxy" not in fields:
+        fields.append("use_proxy")
     if spec.backend == "bedrock":
         fields.extend(("region", "profile"))
     if find_by_name(name) is None:
@@ -397,7 +393,7 @@ def _provider_settings_row(
         "thinking_style": provider_config.thinking_style,
         "region": getattr(provider_config, "region", None),
         "profile": getattr(provider_config, "profile", None),
-        "proxy": provider_config.proxy,
+        "use_proxy": provider_config.use_proxy,
     }
     if oauth_status is not None:
         row["oauth_account"] = oauth_status["account"]
@@ -411,7 +407,6 @@ def _provider_settings_rows(
     selected_provider: str | None,
     oauth_status: OAuthStatusReader,
 ) -> list[dict[str, Any]]:
-    """Return one Settings row per provider family while preserving legacy configs."""
     aliases: dict[str, list[Any]] = {}
     for spec in PROVIDERS:
         if spec.settings_alias_for:
@@ -529,7 +524,6 @@ def _model_shutdown_date(row: object) -> date | None:
 
 
 def _model_catalog_row_active(row: object, *, on: date | None = None) -> bool:
-    """True when a provider catalog row should stay in the advisory model list."""
     shutdown = _model_shutdown_date(row)
     if shutdown is None:
         return True
@@ -694,7 +688,7 @@ def provider_models_payload(
             "model_count": len(rows),
         }
     if catalog_kind == "hybrid":
-        proxy = _resolve_env_placeholders(provider_config.proxy)
+        proxy = config.network.resolve_proxy(provider_config.use_proxy)
         catalog = get_oauth_model_catalog(
             spec.name, proxy=proxy, refresh=query_first(query, "refresh") == "1",
         )
@@ -757,11 +751,13 @@ def provider_models_payload(
         models_url = f"{api_base.rstrip('/')}/v1/models"
 
     try:
+        proxy = config.network.resolve_proxy(provider_config.use_proxy)
         response = http_get(
             models_url,
             headers=headers,
             timeout=10.0,
             follow_redirects=False,
+            **({"proxy": proxy, "trust_env": False} if proxy else {}),
         )
         response.raise_for_status()
         rows = _extract_model_rows(response.json(), spec=spec)
@@ -830,7 +826,6 @@ def _model_configuration_slug(label: str) -> str:
 
 
 def _model_configuration_name(value: str) -> str:
-    """Validate a user-facing preset name without inventing a second identity."""
     name = value.strip()
     if not name:
         raise WebUISettingsError("configuration name is required")
@@ -857,7 +852,6 @@ def _model_configuration_name_exists(
 
 
 def _rename_model_configuration(config: Config, old_name: str, new_name: str) -> bool:
-    """Rename one preset and every config reference to it."""
     if old_name == new_name:
         return False
     if _model_configuration_name_exists(config, new_name, exclude=old_name):
@@ -918,7 +912,6 @@ def _provider_display_name_exists(
 
 
 def _unique_model_configuration_name(config: Config, label: str) -> str:
-    """Return a stable, unused preset name for a migrated model configuration."""
     try:
         base = _model_configuration_slug(label)
     except WebUISettingsError:
@@ -1017,7 +1010,7 @@ def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
         return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
     model_lower = (model or "").lower()
-    if model_lower.rsplit("/", 1)[-1] == "kimi-k3":
+    if model_lower.rsplit("/", 1)[-1] in KIMI_K3_MODELS:
         return ["", "low", "high", "max"]
 
     implicit = getattr(spec, "implicit_reasoning_models", ())
@@ -1601,10 +1594,15 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
     if len(display_name) > 80:
         raise WebUISettingsError("provider name must be 80 characters or fewer")
     updates = _provider_config_updates(query)
+    if updates.get("use_proxy"):
+        try:
+            config.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     allowed = {
         "api_key",
         "api_base",
-        "proxy",
+        "use_proxy",
         "extra_headers",
         "extra_body",
         "extra_query",
@@ -1642,6 +1640,11 @@ def update_provider_settings(
         raise WebUISettingsError("unknown provider")
     spec, provider_key, provider_config = resolved_provider
     updates = _provider_config_updates(query)
+    if updates.get("use_proxy"):
+        try:
+            config.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     if not spec.is_oauth and spec.name != "openai":
         updates.pop("api_type", None)
     try:
@@ -1651,10 +1654,10 @@ def update_provider_settings(
     if spec.is_oauth:
         if spec.name not in _OAUTH_PROXY_PROVIDERS:
             raise WebUISettingsError("unknown provider")
-        unsupported = set(updates) - {"proxy", "extra_body"}
+        unsupported = set(updates) - {"use_proxy", "extra_body"}
         if unsupported:
             raise WebUISettingsError(
-                "OAuth provider only supports proxy and extra_body settings"
+                "OAuth provider only supports use_proxy and extra_body settings"
             )
     else:
         allowed = {
@@ -1713,7 +1716,6 @@ def login_oauth_provider(
     *,
     oauth_flows: WebUIOAuthFlowRegistry,
     config_path: Path | None,
-    settings_payload: SettingsPayloadBuilder,
 ) -> dict[str, Any]:
     provider_name = (query_first(query, "provider") or "").strip()
     if not provider_name:
@@ -1724,15 +1726,13 @@ def login_oauth_provider(
 
     if spec.name == "openai_codex":
         try:
-            from nanobot.providers.openai_codex_oauth import start_openai_codex_oauth_login
+            from nanobot.providers.openai_codex_oauth import OpenAICodexOAuthLoginFlow
         except ImportError:
             raise WebUISettingsError(OAUTH_CLI_KIT_MISSING_MESSAGE, status=500) from None
 
         try:
-            proxy = resolve_config_env_vars(
-                config,
-                config_path=config_path,
-            ).providers.openai_codex.proxy or None
+            resolved_config = resolve_config_env_vars(config, config_path=config_path)
+            proxy = resolved_config.network.resolve_proxy(resolved_config.providers.openai_codex.use_proxy)
         except ValueError as exc:
             raise WebUISettingsError(str(exc), status=400) from exc
         remote_browser_value = query_first(query, "remote_browser")
@@ -1741,19 +1741,21 @@ def login_oauth_provider(
             if remote_browser_value is not None
             else False
         )
+        flow = OpenAICodexOAuthLoginFlow(
+            proxy=proxy,
+            timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
+            open_browser=not remote_browser,
+        )
+        flow_id = secrets.token_urlsafe(24)
         try:
-            flow = start_openai_codex_oauth_login(
-                proxy=proxy,
-                timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
-                open_browser=not remote_browser,
-            )
+            oauth_flows.register(spec.name, flow_id, flow)
+            flow.start()
         except Exception as exc:
+            oauth_flows.remove(spec.name, flow_id, flow)
             raise WebUISettingsError(
                 f"OpenAI Codex OAuth login failed: {exc}",
                 status=502,
             ) from exc
-        flow_id = secrets.token_urlsafe(24)
-        oauth_flows.register(spec.name, flow_id, flow)
         return {
             "status": "authorization_required",
             "provider": spec.name,
@@ -1776,8 +1778,8 @@ def login_oauth_provider(
         flow_id = secrets.token_urlsafe(24)
         # Own the flow before network I/O, so logout/replacement also cancels a
         # login that is still waiting for GitHub to return its device prompt.
-        oauth_flows.register(spec.name, flow_id, copilot_flow)
         try:
+            oauth_flows.register(spec.name, flow_id, copilot_flow)
             copilot_flow.start()
         except Exception:
             oauth_flows.remove(spec.name, flow_id, copilot_flow)
@@ -1793,24 +1795,27 @@ def login_oauth_provider(
         }
 
     if spec.name == "xai_grok":
-        from nanobot.providers.xai_oauth import start_xai_oauth_login
+        from nanobot.providers.xai_oauth import create_xai_oauth_login
 
         try:
-            proxy = resolve_config_env_vars(
-                config,
-                config_path=config_path,
-            ).providers.xai_grok.proxy or None
+            resolved_config = resolve_config_env_vars(config, config_path=config_path)
+            proxy = resolved_config.network.resolve_proxy(resolved_config.providers.xai_grok.use_proxy)
         except ValueError as exc:
             raise WebUISettingsError(str(exc), status=400) from exc
         try:
-            flow = start_xai_oauth_login(
+            flow = create_xai_oauth_login(
                 proxy=proxy,
                 timeout_s=_WEBUI_OAUTH_TIMEOUT_S,
             )
         except Exception as exc:
             raise WebUISettingsError(f"xAI OAuth login failed: {exc}", status=502) from exc
         flow_id = secrets.token_urlsafe(24)
-        oauth_flows.register(spec.name, flow_id, flow)
+        try:
+            oauth_flows.register(spec.name, flow_id, flow)
+            flow.start()
+        except Exception as exc:
+            oauth_flows.remove(spec.name, flow_id, flow)
+            raise WebUISettingsError(f"xAI OAuth login failed: {exc}", status=502) from exc
         return {
             "status": "authorization_required",
             "provider": spec.name,
@@ -1850,25 +1855,14 @@ def complete_oauth_provider(
 
     try:
         if spec.name == "openai_codex":
-            from nanobot.providers.openai_codex_oauth import (
-                OpenAICodexOAuthInputError,
-                complete_openai_codex_oauth_login,
-            )
+            from nanobot.providers.openai_codex_oauth import OpenAICodexOAuthInputError
 
             try:
-                token = complete_openai_codex_oauth_login(flow, authorization_response)
+                token = flow.complete(authorization_response)
             except OpenAICodexOAuthInputError as exc:
                 raise WebUISettingsError(str(exc), status=400) from exc
-        elif spec.name == "github_copilot":
-            from nanobot.providers.github_copilot_oauth import GitHubCopilotOAuthFlow
-
-            if not isinstance(flow, GitHubCopilotOAuthFlow):
-                raise WebUISettingsError("Invalid GitHub sign-in session. Start again.")
-            token = flow.complete()
         else:
-            from nanobot.providers.xai_oauth import complete_xai_oauth_login
-
-            token = complete_xai_oauth_login(flow, authorization_response)
+            token = flow.complete(authorization_response)
     except WebUISettingsError:
         raise
     except Exception as exc:
@@ -1941,12 +1935,28 @@ def logout_oauth_provider(
 class ModelSettingsHandler:
     """Handle model/provider commands after transport authentication and decoding."""
 
-    def __init__(self, settings: WebUISettingsServices, logger: Any) -> None:
+    def __init__(
+        self, settings: WebUISettingsServices, logger: Any, admission: RuntimeAdmission,
+    ) -> None:
         self.settings = settings
         self.logger = logger
+        self._admission = admission
+        self._remove_pending_work: Callable[[], None] | None = None
+        self._close_task: asyncio.Task[None] | None = None
+
+    async def close(self) -> None:
+        """Keep the registry owned even if its shutdown awaiter is cancelled."""
+        if self._close_task is None or self._close_task.done():
+            self._close_task = asyncio.create_task(asyncio.to_thread(self.settings.oauth_flows.close))
+            self._close_task.add_done_callback(
+                lambda task: task.exception() if not task.cancelled() else None,
+            )
+        await asyncio.shield(self._close_task)
+        if self._remove_pending_work is not None:
+            self._remove_pending_work()
+            self._remove_pending_work = None
 
     def _refresh_runtime_config(self) -> None:
-        """Make a successful model-settings mutation visible to live clients now."""
         if self.settings.refresh_runtime_config is not None:
             self.settings.refresh_runtime_config()
 
@@ -1956,6 +1966,12 @@ class ModelSettingsHandler:
         request: SettingsRequest,
         operations: ModelSettingsOperations,
     ) -> SettingsRouteResult:
+        if action in {"oauth-login", "oauth-complete", "oauth-logout"}:
+            self._admission.check()
+            if self._remove_pending_work is None:
+                self._remove_pending_work = self._admission.register_pending_work(
+                    lambda: self.settings.oauth_flows.has_pending_work,
+                )
         try:
             if action == "agent-update":
                 payload = await asyncio.to_thread(

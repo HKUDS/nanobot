@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export const INLINE_TOKEN_HIGHLIGHT_COLOR = "var(--inline-token-highlight)";
+export const INLINE_REFERENCE_HIGHLIGHT_COLOR = "var(--inline-reference-highlight)";
 
 export function InlineTokenHighlight({
   children,

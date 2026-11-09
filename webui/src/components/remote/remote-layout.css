@@ -1,4 +1,3 @@
-/* Remote dialogs share typography and action sizing without changing app-wide controls. */
 .remote-dialog {
   min-inline-size: 0;
   max-block-size: min(85dvh, calc(100dvh - 2rem));
@@ -46,7 +45,6 @@
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-/* Keep secondary actions readable when translations need a second line. */
 .remote-pair-alternatives {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

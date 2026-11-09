@@ -102,9 +102,9 @@ html.dark .startup-shell { --startup-fill: hsl(0 0% 72% / .2); --startup-surface
 .startup-welcome { display: flex; min-height: 0; align-items: center; justify-content: center; }
 .startup-welcome-line { display: flex; width: 100%; max-width: 704px; height: 36.72px; align-items: center; justify-content: center; }
 .startup-welcome-line .startup-block { width: 60%; height: 24px; }
-.startup-composer { container: startup-composer / inline-size; width: 100%; max-width: 928px; margin: 0 auto; }
-.startup-composer-surface { overflow: hidden; border-radius: 28px; background: hsl(0 0% 96.1% / .8); }
-html.dark .startup-composer-surface { background: hsl(0 0% 22%); }
+.startup-composer { container: startup-composer / inline-size; width: 100%; max-width: 928px; margin: 0 auto; --composer-footer-inset: 0.75rem; --composer-action-size: 2rem; --composer-action-margin: 0px; }
+.startup-composer-surface { overflow: hidden; border-radius: 28px; background: hsl(0 0% 100%); box-shadow: inset 0 0 0 1px hsl(40 8% 90.5% / .75), 0 4px 18px -8px hsl(240 10% 16% / .12); }
+html.dark .startup-composer-surface { background: hsl(0 0% 22%); box-shadow: inset 0 0 0 1px hsl(0 0% 28% / .75), 0 4px 18px -8px hsl(240 12% 3% / .12); }
 .startup-composer-input { display: flex; align-items: start; height: 78px; padding: 27px 16px 8px; }
 .startup-composer-input .startup-block { width: 45%; height: 14px; margin-top: 5px; }
 .startup-composer-footer { display: flex; align-items: center; gap: 6px; padding: 0 12px 14px; }
@@ -115,7 +115,11 @@ html.dark .startup-composer-surface { background: hsl(0 0% 22%); }
 .startup-workspace { width: 112px; }
 .startup-access { width: 88px; }
 .startup-model { width: 88px; }
-.startup-mobile-model, .startup-workspace-row { display: none; }
+.startup-workspace-row { display: flex; align-items: center; height: 28px; margin-top: 4px; padding: 0 8px; padding-inline-start: calc(var(--composer-footer-inset) + var(--composer-action-margin) + (var(--composer-action-size) - 0.875rem) / 2 - 0.5rem); }
+@media (pointer: coarse) {
+  .startup-composer { --composer-action-size: 2.75rem; }
+  .startup-workspace-row { height: 44px; }
+}
 .startup-chat-spacer { min-height: 0; }
 @container startup-chat (width > 1152px) { .startup-chat-header { position: absolute; inset: 0 0 auto; height: 44px; } }
 .startup-shell[data-existing-chat="true"] .startup-header-title { display: block; width: 96px; height: 12px; }
@@ -128,8 +132,10 @@ html.dark .startup-composer-surface { background: hsl(0 0% 22%); }
   .startup-welcome { align-items: end; padding-bottom: 32px; }
   .startup-welcome-line { height: 60px; }
   .startup-welcome-line .startup-block { height: 36px; }
+  .startup-composer { --composer-footer-inset: 1rem; }
   .startup-composer-input { padding-inline: 20px; }
   .startup-composer-footer { padding-inline: 16px; }
+  .startup-workspace-row { padding-inline-end: 12px; }
   .startup-page { max-width: 824px; padding: 32px 16px; }
   .startup-title { height: 35px; }
   .startup-toolbar { flex-direction: row; align-items: center; }
@@ -164,14 +170,10 @@ html.dark .startup-composer-surface { background: hsl(0 0% 22%); }
   .startup-shell[data-startup-surface="apps"] .startup-catalog { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 40px; }
 }
 @container startup-composer (max-width: 512px) {
+  .startup-workspace-row { --composer-footer-inset: 0.5rem; --composer-action-size: 2.25rem; --composer-action-margin: 0.25rem; }
   .startup-composer-input { height: 52px; padding: 12px 16px 8px; }
   .startup-composer-footer { gap: 4px; padding: 0 8px 8px; }
   .startup-composer-primary, .startup-composer-actions { gap: 4px; height: 44px; }
   .startup-attach, .startup-send { flex-basis: 36px; height: 36px; margin: 4px; }
-  .startup-workspace, .startup-access, .startup-model { display: none; }
-  .startup-mobile-model { display: block; width: 80px; }
-  .startup-workspace-row { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 6px 12px; background: hsl(0 0% 96.1% / .45); }
-  .startup-workspace-row .startup-block { width: 112px; }
-  .startup-workspace-row .startup-block + .startup-block { width: 88px; }
-  html.dark .startup-workspace-row { background: hsl(0 0% 100% / .045); }
+  .startup-access { flex: 0 1 88px; }
 }

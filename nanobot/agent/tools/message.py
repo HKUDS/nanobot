@@ -1,5 +1,3 @@
-"""Message tool for sending messages to users."""
-
 # pyright: reportIncompatibleMethodOverride=false
 
 from collections.abc import Awaitable, Callable, Generator
@@ -124,7 +122,6 @@ class MessageTool(Tool):
         )
 
     def _resolve_media(self, media: list[str]) -> list[str]:
-        """Resolve local media attachments and enforce workspace restriction when enabled."""
         resolved: list[str] = []
         access = current_tool_workspace(
             self._workspace,
@@ -150,7 +147,7 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         buttons: Any = None,
         **kwargs: Any,
-    ) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
+    ) -> str:
         from nanobot.utils.helpers import strip_think
 
         content = strip_think(content)

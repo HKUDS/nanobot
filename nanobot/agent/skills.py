@@ -1,5 +1,3 @@
-"""Skills loader for agent capabilities."""
-
 import json
 import os
 import re
@@ -23,6 +21,7 @@ from nanobot.agent.skill_metadata import (
 from nanobot.agent.skill_metadata import (
     valid_skill_metadata as valid_skill_metadata,
 )
+from nanobot.context_sources import record_source
 from nanobot.runtime_context import RuntimeContextBlock
 
 _SKILL_REFERENCE = re.compile(r"(?<![\w$])\$([A-Za-z0-9_-]+)")
@@ -65,7 +64,6 @@ class SkillsLoader:
             self._snapshot.reset(token)
 
     def _skill_aliases(self) -> dict[str, str]:
-        """Return compatibility aliases owned by installed CLI Apps."""
         from nanobot.apps.cli import CliAppManager
 
         snapshot = self._snapshot.get()
@@ -169,7 +167,7 @@ class SkillsLoader:
         with self.snapshot():
             return self._load_skill(name)
 
-    def _load_skill(self, name: str) -> str | None:
+    def _load_skill(self, name: str, *, for_context: bool = False) -> str | None:
         skills = self.list_skills(filter_unavailable=False)
         available = {skill["name"] for skill in skills}
         resolved = name if name in available else self._skill_aliases().get(name, name)
@@ -178,10 +176,14 @@ class SkillsLoader:
             return None
         snapshot = self._snapshot.get()
         if snapshot is not None and resolved in snapshot.documents:
-            return snapshot.documents[resolved]
-        content = Path(entry["path"]).read_text(encoding="utf-8")
-        if snapshot is not None:
-            snapshot.documents[resolved] = content
+            content = snapshot.documents[resolved]
+        else:
+            content = Path(entry["path"]).read_text(encoding="utf-8")
+            if snapshot is not None:
+                snapshot.documents[resolved] = content
+        if for_context:
+            content = self._strip_frontmatter(content)
+            record_source(Path(entry["path"]), content)
         return content
 
     def load_skills_for_context(self, skill_names: list[str]) -> str:
@@ -194,11 +196,12 @@ class SkillsLoader:
         Returns:
             Formatted skills content.
         """
-        parts = [
-            f"### Skill: {name}\n\n{self._strip_frontmatter(markdown)}"
-            for name in skill_names
-            if (markdown := self.load_skill(name))
-        ]
+        with self.snapshot():
+            parts = [
+                f"### Skill: {name}\n\n{content}"
+                for name in skill_names
+                if (content := self._load_skill(name, for_context=True))
+            ]
         return "\n\n---\n\n".join(parts)
 
     def get_explicitly_invoked_skills(self, text: str) -> list[str]:
@@ -300,6 +303,7 @@ class SkillsLoader:
             lines = [f"### {label} (`{display_root}`)"]
             for entry in entries:
                 skill_name = entry["name"]
+                record_source(Path(entry["path"]), "", loaded=False)
                 desc = self.get_skill_description(skill_name)
                 relative_path = Path(entry["path"]).relative_to(root).as_posix()
                 lines.append(f"- **{skill_name}** — {desc}  `{relative_path}`")
@@ -319,7 +323,6 @@ class SkillsLoader:
         return bins, env
 
     def _get_missing_requirements(self, skill_meta: dict[str, Any]) -> str:
-        """Get a description of missing requirements."""
         required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return ", ".join(
             [f"CLI: {command_name}" for command_name in required_bins if not self._binary_available(command_name)]
@@ -351,7 +354,6 @@ class SkillsLoader:
         return name  # Fallback to skill name
 
     def _strip_frontmatter(self, content: str) -> str:
-        """Remove YAML frontmatter from markdown content."""
         if not content.startswith("---"):
             return content
         match = _STRIP_SKILL_FRONTMATTER.match(content)
@@ -360,10 +362,6 @@ class SkillsLoader:
         return content
 
     def _parse_nanobot_metadata(self, raw: object) -> dict[str, Any]:
-        """Extract nanobot/openclaw metadata from a frontmatter field.
-
-        ``raw`` may be a dict (already parsed by yaml.safe_load) or a JSON str.
-        """
         if isinstance(raw, dict):
             data = cast(dict[str, Any], raw)
         elif isinstance(raw, str):
@@ -380,7 +378,6 @@ class SkillsLoader:
         return cast(dict[str, Any], payload) if isinstance(payload, dict) else {}
 
     def _check_requirements(self, skill_meta: dict[str, Any]) -> bool:
-        """Check if skill requirements are met (bins, env vars)."""
         required_bins, required_env_vars = self._requirement_lists(skill_meta)
         return all(self._binary_available(cmd) for cmd in required_bins) and all(
             os.environ.get(var) for var in required_env_vars
@@ -396,7 +393,6 @@ class SkillsLoader:
         return available
 
     def _get_skill_meta(self, name: str) -> dict[str, Any]:
-        """Get nanobot metadata for a skill (cached in frontmatter)."""
         raw_meta = self.get_skill_metadata(name) or {}
         return self._parse_nanobot_metadata(raw_meta.get("metadata"))
 

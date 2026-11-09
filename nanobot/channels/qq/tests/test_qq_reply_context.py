@@ -16,8 +16,6 @@ from nanobot.channels.qq.runtime import (
     extract_quoted_content,
 )
 
-# --- Real payload shapes ----------------------------------------------------
-
 # C2C message quoting the bot.  A plain message has no `ref_msg_idx` and no
 # `msg_elements`; both appear only when the user quotes something.
 C2C_QUOTING_BOT = {
@@ -60,7 +58,6 @@ GROUP_QUOTING_USER = {
     ],
 }
 
-# Control group: a plain message.  Same key set, but no quote links.
 PLAIN_MESSAGE = {
     "id": "ROBOT1.0_DBiKWe9lNhRwiQwghzMwQssT-SFcYlBDrD9xdX4A1hFupGIiqoLgkdtaAy.MKGwqGdR9Jb8mCS5DnjCudEwIjP9OC35zpbTlRPq8A8ILhi0!",
     "content": "接下来我要发几条测试消息，你忽略就行",
@@ -74,9 +71,6 @@ PLAIN_MESSAGE = {
 }
 
 
-# --- extract_quoted_content -------------------------------------------------
-
-
 def test_extracts_c2c_quoted_message():
     assert extract_quoted_content(C2C_QUOTING_BOT) == "查完了，两处都没有叫 reference 的东西。"
 
@@ -86,12 +80,10 @@ def test_extracts_group_quoted_message():
 
 
 def test_plain_message_has_no_quoted_content():
-    """The control group: no ref_msg_idx, so nothing to surface."""
     assert extract_quoted_content(PLAIN_MESSAGE) is None
 
 
 def test_picks_element_matching_ref_idx_not_the_first():
-    """Elements are matched by index, so extra elements cannot shadow the quote."""
     payload = {
         "message_scene": {"ext": ["ref_msg_idx=wanted"]},
         "msg_elements": [
@@ -103,7 +95,6 @@ def test_picks_element_matching_ref_idx_not_the_first():
 
 
 def test_ref_idx_without_matching_element_returns_none():
-    """Degradation: the quote is announced but the original is not attached."""
     payload = {
         "message_scene": {"ext": ["ref_msg_idx=missing"]},
         "msg_elements": [{"content": "something", "msg_idx": "other"}],
@@ -148,23 +139,15 @@ def test_quoted_content_is_truncated():
     ],
 )
 def test_malformed_payloads_return_none(payload):
-    """Unexpected shapes must degrade, never raise."""
     assert extract_quoted_content(payload) is None
 
 
-# --- _flatten_scene_ext -----------------------------------------------------
-
-
 def test_flatten_scene_ext_splits_on_first_equals_only():
-    """Values (e.g. base64 indexes) may themselves contain '='."""
     assert _flatten_scene_ext({"ext": ["a=b=c", "plain", "k=v"]}) == {"a": "b=c", "k": "v"}
 
 
 def test_flatten_scene_ext_ignores_non_string_entries():
     assert _flatten_scene_ext({"ext": [123, None, "k=v"]}) == {"k": "v"}
-
-
-# --- _quoted_content_for ----------------------------------------------------
 
 
 class _FakeMessage:
@@ -177,7 +160,6 @@ class _FakeMessage:
 
 
 def test_quoted_content_prefers_fields_on_the_message_object(monkeypatch):
-    """A botpy that parses these fields makes the payload hook redundant."""
     message = _FakeMessage(
         "whatever",
         message_scene=C2C_QUOTING_BOT["message_scene"],
@@ -207,7 +189,6 @@ def test_quoted_content_is_none_for_unknown_message():
 
 
 # --- End-to-end: capture -> lookup -> content ------------------------------
-#
 # These exercise the real botpy message classes, so they are skipped wherever
 # the optional QQ dependency is absent (same gate as the other QQ test modules).
 
@@ -253,7 +234,6 @@ def captured():
 
 @requires_botpy
 def test_capture_hook_keeps_payload_from_real_botpy_class(captured):
-    """botpy drops these fields, so the constructor hook is the only way in."""
     from botpy import message as botpy_message
 
     qq_runtime._install_qq_payload_capture()
@@ -335,7 +315,6 @@ async def test_group_quote_is_prefixed_onto_content(captured):
 @pytest.mark.asyncio
 @requires_botpy
 async def test_plain_message_content_is_unchanged(captured):
-    """Control group: no quote link, so the message must reach the agent as-is."""
     channel = QQChannel(
         QQConfig(app_id="app", secret="secret", allow_from=["user1"]), MessageBus()
     )
@@ -350,7 +329,6 @@ async def test_plain_message_content_is_unchanged(captured):
 @pytest.mark.asyncio
 @requires_botpy
 async def test_quote_without_text_is_not_dropped(captured):
-    """A quote-only message carries meaning, so it must survive the empty-content gate."""
     channel = QQChannel(
         QQConfig(app_id="app", secret="secret", allow_from=["user1"]), MessageBus()
     )

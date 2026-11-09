@@ -15,9 +15,9 @@ import type {
 } from "./types";
 import { createHostWebSocket } from "./runtime";
 import { ClientRunLedger } from "./client-run-ledger";
-import type { CanonicalRunSnapshot, RunEffect, RunObservation } from "./client-run-ledger";
+import type { CanonicalRunSnapshot, RunEffect, RunObservation, RunState } from "./client-run-ledger";
 
-export type { CanonicalRunSnapshot } from "./client-run-ledger";
+export type { CanonicalRunSnapshot, RunState } from "./client-run-ledger";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -57,7 +57,6 @@ function wsInboundDebugEnabled(): boolean {
   }
 }
 
-/** Shorten streaming text fields so logging stays usable for huge deltas. */
 function summarizeInboundWsPayload(ev: InboundEvent): unknown {
   const kind = (ev as { event?: string }).event;
   if (kind === "ready") return { ...ev, upload: "[redacted]" };
@@ -87,7 +86,8 @@ type SessionUpdateHandler = (
   workspaceScope?: WorkspaceScopePayload,
 ) => void;
 type SidebarStateUpdateHandler = (state: SidebarStatePayload) => void;
-type RunStatusHandler = (chatId: string, startedAt: number | null) => void;
+type PairingChangeHandler = () => void;
+type RunStatusHandler = (chatId: string, state: RunState) => void;
 
 /** Structured errors surfaced to the UI.
  *
@@ -167,9 +167,7 @@ export interface NanobotClientOptions {
   maxFrameBytes?: number;
   /** Called when a connection drops so the app can refresh its token. */
   onReauth?: () => Promise<string | null>;
-  /** Inject a custom WebSocket factory (used by unit tests). */
   socketFactory?: (url: string) => WebSocket;
-  /** Delay-cap for reconnect backoff (ms). */
   maxBackoffMs?: number;
 }
 
@@ -181,6 +179,9 @@ function runObservation(event: InboundEvent): RunObservation | null {
     case "message_accepted":
     case "user_message": {
       const activeTurnId = event.active_turn_id ?? (event.starts_turn ? event.turn_id : undefined);
+      if (event.event === "user_message" && event.provenance?.session_message && !activeTurnId) {
+        return { ...base, kind: "activity" };
+      }
       return {
         ...base,
         kind: event.event === "message_accepted" ? "admission" : "input",
@@ -193,6 +194,22 @@ function runObservation(event: InboundEvent): RunObservation | null {
       return { ...base, kind: "completed" };
     case "error":
       return { ...base, kind: "rejection" };
+    case "delta":
+    case "reasoning_delta":
+      return { ...base, kind: event.text ? "activity" : "progress" };
+    case "stream_end":
+      return { ...base, kind: "activity" };
+    case "retry_status":
+      return { ...base, kind: event.state === "recovered" || event.state === "cleared" ? "progress" : "activity" };
+    case "recovery_state":
+      // Supersession resolves the old recovery, not the new user turn that caused it.
+      return event.status === "recovered" && event.reason === "superseded"
+        ? { ...base, kind: "progress" }
+        : { ...base, kind: "recovery", active: event.status === "resuming" };
+    case "attached":
+      return event.recovery_state && event.recovery_state.status !== "recovered"
+        ? { ...base, kind: "recovery", active: event.recovery_state.status === "resuming" }
+        : { ...base, kind: "progress" };
     case "message":
       return { ...base, kind: "message" };
     default:
@@ -219,25 +236,24 @@ export class NanobotClient {
   private runCompletionHandlers = new Set<RunCompletionHandler>();
   private errorHandlers = new Set<ErrorHandler>();
   private taskNoticeHandlers = new Set<(notice: TaskNotice) => void>();
+  private pairingChangeHandlers = new Set<PairingChangeHandler>();
+  private readyHandlers = new Set<() => void>();
   private chatHandlers = new Map<string, Set<EventHandler>>();
   private transcriptHandlers = new Map<string, { handler: EventHandler }>();
   /** Inbound frames received while the transcript owner is absent, regardless of observers. */
   private pendingInboundByChat = new Map<string, InboundEvent[]>();
   private static readonly PENDING_INBOUND_MAX = 2000;
-  // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
   /** Temporary chats are connection-owned and intentionally not reattached. */
   private temporaryChatIds = new Set<string>();
   private readonly runs = new ClientRunLedger();
   /** Last tracked application frame written, for conservative transport-error attribution. */
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
-  /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
   private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
   private pendingWebUIRequests = new Map<string, PendingWebUIRequest>();
-  // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -298,6 +314,16 @@ export class NanobotClient {
     };
   }
 
+  onPairingChange(handler: PairingChangeHandler): Unsubscribe {
+    this.pairingChangeHandlers.add(handler);
+    return () => { this.pairingChangeHandlers.delete(handler); };
+  }
+
+  onReady(handler: () => void): Unsubscribe {
+    this.readyHandlers.add(handler);
+    return () => { this.readyHandlers.delete(handler); };
+  }
+
   onSidebarStateUpdate(handler: SidebarStateUpdateHandler): Unsubscribe {
     this.sidebarStateUpdateHandlers.add(handler);
     return () => {
@@ -307,8 +333,8 @@ export class NanobotClient {
 
   onRunStatus(handler: RunStatusHandler): Unsubscribe {
     this.runStatusHandlers.add(handler);
-    for (const { chatId, startedAt } of this.runs.activeClocks()) {
-      handler(chatId, startedAt);
+    for (const { chatId, state } of this.runs.states()) {
+      handler(chatId, state);
     }
     return () => {
       this.runStatusHandlers.delete(handler);
@@ -321,7 +347,6 @@ export class NanobotClient {
     return () => { this.taskNoticeHandlers.delete(handler); };
   }
 
-  /** Subscribe to transport-level faults (see :type:`StreamError`). */
   onError(handler: ErrorHandler): Unsubscribe {
     this.errorHandlers.add(handler);
     return () => {
@@ -329,9 +354,13 @@ export class NanobotClient {
     };
   }
 
-  /** Last ``goal_status`` ``started_at`` (unix sec) for *chatId*, if the turn is running. */
-  getRunStartedAt(chatId: string): number | null {
-    return this.runs.view(chatId).startedAt;
+  getRunState(chatId: string): RunState {
+    return this.runs.view(chatId);
+  }
+
+  /** Restore pending history only within its original lifecycle generation. */
+  restorePendingRun(chatId: string, generation: number, turnId: string | null): void {
+    this.applyRunEffects(this.runs.transition({ kind: "restore-pending", chatId, generation, turnId }));
   }
 
   /** Canonical lifecycle turn currently owning the run, retained after completion. */
@@ -428,7 +457,7 @@ export class NanobotClient {
     for (const effect of effects) {
       switch (effect.kind) {
         case "run-status":
-          this.emitRunStatus(effect.chatId, effect.startedAt);
+          this.emitRunStatus(effect.chatId, effect.state);
           break;
         case "completion":
           for (const handler of this.runCompletionHandlers) handler(effect.chatId);
@@ -703,6 +732,10 @@ export class NanobotClient {
     const turnId = options?.turnId ?? crypto.randomUUID();
     const stillConnected = () => this.socket === socket
       && socket?.readyState === WS_OPEN && this.upload === capability;
+    this.applyRunEffects(this.runs.transition({
+      kind: "submit", chatId, turnId,
+      role: options?.startsNewRun === false ? "supplement" : "candidate-owner",
+    }));
     try {
       const references = await uploadAttachments(media, capability,
         typeof window !== "undefined" ? window.location.href : this.currentUrl,
@@ -714,8 +747,27 @@ export class NanobotClient {
         }
       });
     } catch (error) {
+      this.applyRunEffects(this.runs.transition({ kind: "reject", chatId, turnId }));
       this.emitError({ kind: "turn_rejected", chatId, turnId, detail: "attachment_rejected",
         reason: error instanceof Error ? error.message : "Attachment send failed" });
+      throw error;
+    }
+  }
+
+  async sendUserShellCommand(
+    chatId: string, content: string, options?: Parameters<NanobotClient["sendMessage"]>[3],
+  ): Promise<void> {
+    const turnId = options?.turnId ?? crypto.randomUUID();
+    try {
+      await this.receipts.wait(turnId, () => {
+        if (!this.sendMessage(chatId, content, undefined, { ...options, turnId, userShell: true, startsNewRun: false })) {
+          throw new Error("Shell command was not sent; draft retained");
+        }
+      });
+    } catch (error) {
+      this.applyRunEffects(this.runs.transition({ kind: "reject", chatId, turnId }));
+      this.emitError({ kind: "turn_rejected", chatId, turnId, detail: "message_rejected",
+        reason: error instanceof Error ? error.message : "Shell command send failed" });
       throw error;
     }
   }
@@ -730,12 +782,14 @@ export class NanobotClient {
       sessionMentions?: SessionMention[];
       quotedContext?: string;
       intent?: "create_automation";
+      userShell?: boolean;
       workspaceScope?: WorkspaceScopePayload | null;
       turnId?: string;
       /** False for side-channel or injected messages that do not own a lifecycle. */
       startsNewRun?: boolean;
     },
   ): boolean {
+    if (options?.userShell && this.socket?.readyState !== WS_OPEN) return false;
     const temporary = this.temporaryChatIds.has(chatId);
     if (!temporary) this.knownChats.add(chatId);
     const frame: Outbound = {
@@ -750,6 +804,7 @@ export class NanobotClient {
         : {}),
       ...(options?.quotedContext?.trim() ? { quoted_context: options.quotedContext.trim() } : {}),
       ...(options?.intent === "create_automation" ? { intent: options.intent } : {}),
+      ...(options?.userShell ? { user_shell: true } : {}),
       ...(options?.workspaceScope ? { workspace_scope: options.workspaceScope } : {}),
       ...(options?.turnId ? { turn_id: options.turnId } : {}),
       webui: true,
@@ -773,6 +828,7 @@ export class NanobotClient {
         role: options.startsNewRun === false ? "supplement" : "candidate-owner",
       }));
     }
+    if (options?.userShell) return this.rawSend(frame);
     this.queueSend(frame);
     return true;
   }
@@ -804,7 +860,6 @@ export class NanobotClient {
     return this.requestMutation<SidebarStatePayload>("sidebar.update", { state });
   }
 
-  // -- internals ---------------------------------------------------------
 
   private setStatus(status: ConnectionStatus): void {
     if (this.status_ === status) return;
@@ -815,14 +870,12 @@ export class NanobotClient {
   private handleOpen(): void {
     this.setStatus("open");
     this.reconnectAttempts = 0;
-    // Re-attach every known chat_id so deliveries continue routing after a drop.
     for (const chatId of this.knownChats) {
       this.rawSend({ type: "attach", chat_id: chatId });
     }
     for (const pending of this.pendingWebUIRequests.values()) {
       this.rawSendSerialized(pending.serializedFrame);
     }
-    // Flush anything queued during reconnect.
     const queued = this.sendQueue.splice(0);
     for (const frame of queued) this.rawSend(frame);
   }
@@ -933,6 +986,9 @@ export class NanobotClient {
       this.upload = uploadCapability(parsed.upload);
       this.readyChatId = parsed.chat_id;
       this.knownChats.add(parsed.chat_id);
+      for (const handler of this.readyHandlers) {
+        try { handler(); } catch { /* One listener must not block another ready consumer. */ }
+      }
       return;
     }
 
@@ -951,6 +1007,13 @@ export class NanobotClient {
         this.pendingNewChat = null;
       }
       this.dispatch(parsed.chat_id, parsed);
+      return;
+    }
+
+    if (parsed.event === "pairing_changed") {
+      for (const handler of this.pairingChangeHandlers) {
+        try { handler(); } catch { /* One listener must not block another pairing refresh. */ }
+      }
       return;
     }
 
@@ -1037,9 +1100,9 @@ export class NanobotClient {
     }
   }
 
-  private emitRunStatus(chatId: string, startedAt: number | null): void {
+  private emitRunStatus(chatId: string, state: RunState): void {
     for (const handler of this.runStatusHandlers) {
-      handler(chatId, startedAt);
+      handler(chatId, state);
     }
   }
 
@@ -1179,7 +1242,6 @@ export class NanobotClient {
   private scheduleReconnect(): void {
     this.setStatus("reconnecting");
     const attempt = this.reconnectAttempts++;
-    // Exponential backoff: 0.5s, 1s, 2s, 4s, capped.
     const delay = Math.min(500 * 2 ** attempt, this.maxBackoffMs);
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
@@ -1229,8 +1291,8 @@ export class NanobotClient {
     return new TextEncoder().encode(JSON.stringify(frame)).byteLength <= this.maxFrameBytes;
   }
 
-  private rawSend(frame: Outbound): void {
-    if (!this.socket) return;
+  private rawSend(frame: Outbound): boolean {
+    if (!this.socket) return false;
     try {
       this.socket.send(JSON.stringify(frame));
       this.lastSocketMessageSend = null;
@@ -1241,9 +1303,11 @@ export class NanobotClient {
           this.lastSocketMessageSend = ref;
         }
       }
+      return true;
     } catch {
-      // Send failure will materialize as a close; queue the frame for retry.
-      this.sendQueue.push(frame);
+      // Shell commands require a new explicit submission, never reconnect replay.
+      if (frame.type !== "message" || !frame.user_shell) this.sendQueue.push(frame);
+      return false;
     }
   }
 

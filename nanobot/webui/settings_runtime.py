@@ -1,15 +1,15 @@
-"""Explicit non-channel runtime configuration exposed by the settings UI."""
-
 from __future__ import annotations
 
 import ipaddress
 import math
 import re
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from nanobot.config.errors import ConfigLoadError
+from nanobot.config.loader import resolve_config_env_vars
 from nanobot.config.schema import Config
 from nanobot.security.network import is_loopback_host
 from nanobot.webui.settings_contracts import WebUISettingsError
@@ -20,6 +20,7 @@ RUNTIME_CONFIG_PATHS = (
     "agents.defaults.timezone",
     "agents.defaults.timezone_mode",
     "agents.defaults.unified_session",
+    "agents.defaults.session_ttl_minutes",
     "agents.defaults.max_tool_iterations",
     "agents.defaults.max_concurrent_subagents",
     "agents.defaults.max_tool_result_chars",
@@ -34,6 +35,7 @@ RUNTIME_CONFIG_PATHS = (
     "tools.exec.path_prepend",
     "tools.exec.path_append",
     "tools.exec.sandbox",
+    "tools.exec.sandbox_launcher",
     "tools.exec.sandbox_ro_binds",
     "tools.exec.sandbox_rw_binds",
     "tools.exec.allowed_env_keys",
@@ -51,7 +53,8 @@ RUNTIME_CONFIG_PATHS = (
     "tools.max_session_messages_per_minute",
     "tools.webui_allow_remote_package_install",
     "tools.web.enable",
-    "tools.web.proxy",
+    "network.proxy",
+    "tools.web.use_proxy",
     "tools.web.user_agent",
     "tools.image_generation.save_dir",
     "api.host",
@@ -152,6 +155,23 @@ def update_runtime_config(
             raise WebUISettingsError("Set an API key in System before using a network bind address.")
     if "tools.exec.sandbox" in values and validated.tools.exec.sandbox not in {"", "bwrap", "seatbelt"}:
         raise WebUISettingsError("tools.exec.sandbox: choose no sandbox, bwrap, or seatbelt")
+    if {"tools.exec.sandbox_launcher", "tools.exec.sandbox_rw_binds"} & values.keys() and validated.tools.exec.sandbox_launcher:
+        from nanobot.agent.tools.sandbox_launcher import (
+            SandboxLauncherError,
+            resolve_sandbox_launcher,
+        )
+
+        try:
+            exec_config = resolve_config_env_vars(validated.tools.exec)
+            workspace = Path(resolve_config_env_vars(str(validated.workspace_path))).expanduser()
+            resolve_sandbox_launcher(
+                exec_config.sandbox, exec_config.sandbox_launcher,
+                writable_roots=(workspace, *map(Path, exec_config.sandbox_rw_binds)),
+            )
+        except ConfigLoadError:
+            raise WebUISettingsError("sandbox_launcher_path_unavailable") from None
+        except SandboxLauncherError as exc:
+            raise WebUISettingsError(f"sandbox_launcher_{exc.reason}") from None
     if "tools.ssrf_whitelist" in values:
         for cidr in validated.tools.ssrf_whitelist:
             try:
@@ -160,18 +180,24 @@ def update_runtime_config(
                 raise WebUISettingsError("tools.ssrf_whitelist: enter valid IP addresses or CIDR ranges") from None
     for path in ("tools.exec.allow_patterns", "tools.exec.deny_patterns"):
         if path in values:
-            patterns = cast(list[str], values[path])  # Schema validation above guarantees list[str].
+            patterns = cast(list[str], values[path])
             for pattern in patterns:
                 try:
                     re.compile(pattern)
                 except re.error:
                     raise WebUISettingsError(f"{path}: invalid regular expression") from None
+    if values.get("tools.web.use_proxy") is True:
+        try:
+            validated.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     before = runtime_config_payload(config)
     after = runtime_config_payload(validated)
     if before == after:
         return False
     config.agents = validated.agents
     config.tools = validated.tools
+    config.network = validated.network
     config.gateway = validated.gateway
     config.api = validated.api
     return True

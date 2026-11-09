@@ -1,5 +1,3 @@
-"""Email setup validation owned by the channel package."""
-
 import imaplib
 import smtplib
 import ssl

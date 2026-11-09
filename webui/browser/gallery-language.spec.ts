@@ -45,6 +45,40 @@ for (const locale of locales) {
   });
 }
 
+for (const key of ["Enter", "Space"]) {
+  test(`reselecting the detected language with ${key} saves it`, async ({ page }) => {
+    await page.goto("/gallery.html");
+    expect(await page.evaluate(() => localStorage.getItem("nanobot.locale"))).toBeNull();
+    const switcher = page.locator(".gallery-header").getByRole("combobox");
+    await switcher.focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press(key);
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("nanobot.locale"))).toBe("en");
+    await page.reload();
+    await expect(switcher).toHaveText("English");
+  });
+}
+
+test.describe("touch language selection", () => {
+  test.use({ hasTouch: true });
+
+  test("reselecting the detected language saves it", async ({ page }) => {
+    await page.goto("/gallery.html");
+    await page.locator(".gallery-header").getByRole("combobox").tap();
+    await page.getByRole("option", { name: "English", exact: true }).tap();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("nanobot.locale"))).toBe("en");
+  });
+});
+
+test("typing a space in the language picker does not save a preference", async ({ page }) => {
+  await page.goto("/gallery.html");
+  const switcher = page.locator(".gallery-header").getByRole("combobox");
+  await switcher.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("e ");
+  expect(await page.evaluate(() => localStorage.getItem("nanobot.locale"))).toBeNull();
+});
+
 test("gallery localizes an existing error and retries in the selected language", async ({ page }) => {
   await page.route("**/__nanobot_components", (route) => route.fulfill({ status: 503, body: "unavailable" }));
   await page.goto("/gallery.html");

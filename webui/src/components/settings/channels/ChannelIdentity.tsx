@@ -47,6 +47,7 @@ export function channelSetup(
   ): ChannelConfigField => ({
     ...localizeField(field.key),
     section: field.section,
+    control: field.control,
   });
   const presentation: ChannelSetupPresentation = {
     ...definition,

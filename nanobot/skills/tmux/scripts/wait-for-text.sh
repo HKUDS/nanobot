@@ -59,7 +59,6 @@ if ! command -v tmux >/dev/null 2>&1; then
   exit 1
 fi
 
-# End time in epoch seconds (integer, good enough for polling)
 start_epoch=$(date +%s)
 deadline=$((start_epoch + timeout))
 

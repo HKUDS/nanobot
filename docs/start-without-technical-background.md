@@ -102,13 +102,13 @@ If the installer finishes without opening the browser and `nanobot` is available
 nanobot webui
 ```
 
-If the terminal cannot find `nanobot`, take the exact command printed by the installer and replace its final arguments with `webui`. That command may begin with `uv tool run`, `pipx run`, or the full path to nanobot's private Python environment.
+If the terminal cannot find `nanobot`, take the exact command printed by the installer and replace its final arguments with `webui`. It uses the Python executable from the persistent installation, not a temporary tool environment.
 
 On SSH, a computer without a desktop, an existing configuration, or an older nanobot release, the installer may open the terminal wizard instead. Choose **Quick Start** there and follow its prompts.
 
 ## 5. Get the First Reply
 
-Leave the WebUI terminal open. If the browser did not open automatically, copy the complete login link printed in that terminal, including everything after `#`, into your browser. The bare `http://127.0.0.1:8765` address does not sign a new browser in. Keep the login link private: it contains a credential.
+Wait for the startup summary. If the browser did not open automatically, copy the complete login link printed in that terminal, including everything after `#`, into your browser. The bare `http://127.0.0.1:8765` address does not sign a new browser in. Keep the login link private: it contains a credential. Fresh official-installer environments keep running in the background; if the launcher remains attached, leave that terminal open.
 
 Send this message:
 
@@ -137,7 +137,7 @@ You can also follow the steps yourself using the controls and guides below. Add 
 
 Repository docs show the current development version. If your stable package does not yet show **Channels**, use the [Chat Apps guide](./chat-apps.md) or update to a release that includes it.
 
-Some runtime changes ask you to restart nanobot. Use the restart action shown by the WebUI, or return to the terminal, press `Ctrl+C`, and run `nanobot webui` again.
+Some runtime changes ask you to restart nanobot. Use the restart action shown by the WebUI or `nanobot gateway restart` for a background gateway. For an attached on-demand launcher, press `Ctrl+C` and run `nanobot webui` again.
 
 For a chat platform's account, bot, token, or permission prerequisites, use the [Chat Apps guide](./chat-apps.md). For local models and provider-specific recipes, use the [Provider Cookbook](./provider-cookbook.md).
 
@@ -166,7 +166,7 @@ nanobot agent -m "Hello!"
 | `nanobot: command not found` | Reuse the exact nanobot command printed by the installer; it points to the isolated environment that contains the package |
 | `401`, unauthorized, or invalid API key | The key is wrong, expired, or belongs to a different provider |
 | Model not found | The model ID is misspelled or unavailable to your provider account |
-| Browser does not open | Copy the complete login link printed by the launcher, including the fragment after `#`, and keep the terminal running |
+| Browser does not open | Copy the complete login link printed by the launcher, including the fragment after `#`; keep the terminal open if the launcher is attached |
 | Browser opens but messages fail | Test `nanobot agent -m "Hello!"` to separate a model problem from a WebUI problem |
 | A change was saved but nothing changed | Restart nanobot so the running process reloads the config |
 
@@ -182,4 +182,4 @@ Run:
 nanobot webui
 ```
 
-Leave that launcher open while you use nanobot. Pressing `Ctrl+C` disconnects it; the shared gateway stops when it was the last local WebUI or TUI client. After the normal foreground start and model setup work, use `nanobot gateway --background` when you want the gateway to stay online with no clients; then manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`.
+A fresh official-installer environment starts a background gateway and returns control to the terminal. Closing the browser does not stop it. Manage it with `nanobot gateway status`, `logs`, `restart`, and `stop`; use the exact commands printed for your instance. Other installation methods keep their attached on-demand launch: leave that launcher open, or explicitly use `nanobot webui --detach` after setup. The last attached client stops an on-demand gateway, not a background gateway. See [updates and recovery](./updating.md) for the matching installation method.

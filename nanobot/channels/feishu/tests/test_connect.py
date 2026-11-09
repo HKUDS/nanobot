@@ -11,8 +11,10 @@ from nanobot.channels.feishu.connect import FeishuConnectStore
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("shutdown", [False, True])
 async def test_feishu_cancel_wins_over_inflight_confirmation(
     monkeypatch: pytest.MonkeyPatch,
+    shutdown: bool,
 ) -> None:
     poll_started = threading.Event()
     release_poll = threading.Event()
@@ -52,15 +54,20 @@ async def test_feishu_cancel_wins_over_inflight_confirmation(
 
     store = FeishuConnectStore()
     started = await store.handle("start", {})
+    assert store.has_pending_work is True
     query = {"session_id": [started["session_id"]]}
     poll_task = asyncio.create_task(store.handle("poll", query))
     assert await asyncio.to_thread(poll_started.wait, 5)
 
-    cancelled = await store.handle("cancel", query)
+    if shutdown:
+        await store.close()
+    else:
+        cancelled = await store.handle("cancel", query)
+        assert cancelled["status"] == "cancelled"
     release_poll.set()
     completed = await poll_task
 
-    assert cancelled["status"] == "cancelled"
+    assert store.has_pending_work is False
     assert completed["status"] == "cancelled"
     assert saved_results == []
 

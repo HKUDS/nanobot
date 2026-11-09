@@ -1,9 +1,8 @@
-"""Tests for MCP HTTP probe guard (prevents event-loop crash on unreachable servers)."""
 from __future__ import annotations
 
 import asyncio
 import socket
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from urllib.request import getproxies_environment
 
 import httpx
@@ -27,13 +26,8 @@ def _clear_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nanobot.security.network.getproxies", getproxies_environment)
 
 
-# ---------------------------------------------------------------------------
-# _probe_http_url unit tests
-# ---------------------------------------------------------------------------
-
 @pytest.mark.asyncio
 async def test_probe_returns_true_for_open_port(tmp_path):
-    """Start a trivial TCP server, probe should return True."""
     async def _close_connection(_reader, writer):
         writer.close()
         await writer.wait_closed()
@@ -60,7 +54,6 @@ async def test_probe_returns_true_for_open_port(tmp_path):
 async def test_probe_returns_false_when_validated_target_refuses_connection(
     monkeypatch: pytest.MonkeyPatch, url: str, expected_port: int,
 ):
-    """Connection refusal on a validated address must fail on the selected port."""
     attempts: list[tuple[str, int]] = []
 
     monkeypatch.setattr(
@@ -79,7 +72,8 @@ async def test_probe_returns_false_when_validated_target_refuses_connection(
 
 
 @pytest.mark.asyncio
-async def test_probe_rejects_public_name_resolving_to_loopback():
+@pytest.mark.parametrize("proxy", [None, "http://shared-proxy.example:8080"])
+async def test_probe_rejects_public_name_resolving_to_loopback(proxy):
     def _resolver(hostname, port, family=0, type_=0):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
 
@@ -87,7 +81,7 @@ async def test_probe_rejects_public_name_resolving_to_loopback():
         patch("nanobot.security.network.socket.getaddrinfo", _resolver),
         patch("nanobot.agent.tools.mcp.asyncio.open_connection") as open_connection,
     ):
-        assert await _probe_http_url("http://example.com:8765/mcp") is False
+        assert await _probe_http_url("http://example.com:8765/mcp", proxy=proxy) is False
     open_connection.assert_not_called()
 
 
@@ -140,27 +134,13 @@ async def test_probe_tries_next_validated_ip_when_first_is_unreachable(monkeypat
     ]
 
 
-# ---------------------------------------------------------------------------
-# connect_mcp_servers skips unreachable HTTP servers
-# ---------------------------------------------------------------------------
-
 def _make_http_cfg(url: str, transport: str = "streamableHttp"):
-    cfg = MagicMock()
-    cfg.type = transport
-    cfg.url = url
-    cfg.command = None
-    cfg.args = []
-    cfg.env = {}
-    cfg.headers = None
-    cfg.tool_timeout = 30
-    cfg.enabled_tools = ["*"]
-    return cfg
+    return MCPServerConfig(type=transport, url=url)
 
 
 @pytest.mark.asyncio
 async def test_connect_skips_unreachable_streamable_http():
-    """Unreachable streamableHttp server should be skipped with a warning, no crash."""
-    async def _unreachable(_url: str) -> bool:
+    async def _unreachable(_url: str, *, proxy: str | None = None) -> bool:
         return False
 
     registry = ToolRegistry()
@@ -173,8 +153,7 @@ async def test_connect_skips_unreachable_streamable_http():
 
 @pytest.mark.asyncio
 async def test_connect_skips_unreachable_sse():
-    """Unreachable SSE server should be skipped with a warning, no crash."""
-    async def _unreachable(_url: str) -> bool:
+    async def _unreachable(_url: str, *, proxy: str | None = None) -> bool:
         return False
 
     registry = ToolRegistry()
@@ -189,8 +168,7 @@ async def test_connect_skips_unreachable_sse():
 async def test_connect_isolates_streamable_http_status_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A reachable endpoint returning HTTP 530 must not poison the event loop."""
-    async def _reachable(_url: str) -> bool:
+    async def _reachable(_url: str, *, proxy: str | None = None) -> bool:
         return True
 
     def _return_http_530(request: httpx.Request) -> httpx.Response:
@@ -239,7 +217,6 @@ async def test_connect_isolates_streamable_http_status_failure(
 
 @pytest.mark.asyncio
 async def test_probe_not_called_for_stdio():
-    """stdio transport should not be probed — it spawns a local process."""
     called = False
     original_probe = _probe_http_url
 
@@ -249,16 +226,22 @@ async def test_probe_not_called_for_stdio():
         return await original_probe(url, **kw)
 
     with patch("nanobot.agent.tools.mcp._probe_http_url", _spy_probe):
-        cfg = MagicMock()
-        cfg.type = "stdio"
-        cfg.url = None
-        cfg.command = "nonexistent-command-xyz"
-        cfg.args = []
-        cfg.env = None
-        cfg.headers = None
-        cfg.tool_timeout = 30
-        cfg.enabled_tools = ["*"]
+        cfg = MCPServerConfig(type="stdio", command="nonexistent-command-xyz")
         registry = ToolRegistry()
         await connect_mcp_servers({"s": cfg}, registry)
 
     assert not called, "probe should not be called for stdio transport"
+
+
+@pytest.mark.asyncio
+async def test_explicit_proxy_skips_direct_probe_even_when_no_proxy_env_matches(monkeypatch):
+    monkeypatch.setenv("NO_PROXY", "mcp.example.com")
+    monkeypatch.setattr(
+        "nanobot.agent.tools.mcp.resolve_url_target",
+        lambda _url: (True, "", ("93.184.216.34",)),
+    )
+    with patch("nanobot.agent.tools.mcp.asyncio.open_connection") as open_connection:
+        assert await _probe_http_url(
+            "https://mcp.example.com/mcp", proxy="http://shared-proxy.example:8080"
+        ) is True
+    open_connection.assert_not_called()

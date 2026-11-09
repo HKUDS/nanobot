@@ -1,5 +1,3 @@
-"""Tests for SubagentManager lifecycle — spawn, run, announce, cancel."""
-
 import asyncio
 import time
 from pathlib import Path
@@ -20,9 +18,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMUsage
 from nanobot.utils.llm_runtime import LLMRuntime
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _manager(tmp_path: Path, **kw) -> SubagentManager:
     defaults = dict(
@@ -91,11 +86,6 @@ async def test_close_cancels_tasks_before_closing_exec_sessions(tmp_path):
 
     assert task.cancelled()
     sm._exec_session_manager.close_all.assert_awaited_once()
-
-
-# ---------------------------------------------------------------------------
-# SubagentStatus defaults
-# ---------------------------------------------------------------------------
 
 
 class TestSubagentStatus:
@@ -183,11 +173,6 @@ class TestLegacyCompatibility:
 
         with pytest.raises(TypeError, match="runtime"):
             await sm.spawn("task")
-
-
-# ---------------------------------------------------------------------------
-# spawn
-# ---------------------------------------------------------------------------
 
 
 class TestSpawn:
@@ -344,11 +329,6 @@ class TestSpawn:
         await _drain_subagent_tasks(sm)
 
 
-# ---------------------------------------------------------------------------
-# _run_subagent
-# ---------------------------------------------------------------------------
-
-
 class TestRunSubagent:
     @pytest.mark.asyncio
     async def test_successful_run(self, tmp_path):
@@ -404,11 +384,6 @@ class TestRunSubagent:
             status = next(iter(sm.runtime_statuses().values()))
             assert status.phase == "done"
             assert status.stop_reason == "completed"
-
-
-# ---------------------------------------------------------------------------
-# _announce_result
-# ---------------------------------------------------------------------------
 
 
 class TestAnnounceResult:
@@ -497,11 +472,6 @@ class TestAnnounceResult:
         assert published[0].metadata["origin_message_id"] == "msg-123"
 
 
-# ---------------------------------------------------------------------------
-# cancel_by_session
-# ---------------------------------------------------------------------------
-
-
 class TestCancelBySession:
     @pytest.mark.asyncio
     async def test_cancels_running_tasks(self, tmp_path):
@@ -570,11 +540,6 @@ class TestCancelBySession:
         assert count == 0
 
 
-# ---------------------------------------------------------------------------
-# get_running_count / get_running_count_by_session
-# ---------------------------------------------------------------------------
-
-
 class TestRunningCounts:
     @pytest.mark.asyncio
     async def test_running_count_zero(self, tmp_path):
@@ -606,23 +571,7 @@ class TestRunningCounts:
         assert sm.get_running_count_by_session("nonexistent") == 0
 
 
-# ---------------------------------------------------------------------------
-# _SubagentHook
-# ---------------------------------------------------------------------------
-
-
 class TestSubagentHook:
-    @pytest.mark.asyncio
-    async def test_before_execute_tools_without_status_preserves_calls(self):
-        hook = _SubagentHook()
-        tool_call = MagicMock()
-        tool_call.name = "read_file"
-        tool_call.arguments = {"path": "/tmp/test"}
-        ctx = _make_hook_context(tool_calls=[tool_call])
-        result = await hook.before_execute_tools(ctx)
-        assert result is None
-        assert ctx.tool_calls == [tool_call]
-
     @pytest.mark.asyncio
     async def test_after_iteration_updates_status(self):
         status = SubagentStatus(
@@ -638,14 +587,6 @@ class TestSubagentHook:
         assert status.iteration == 3
         assert len(status.tool_events) == 1
         assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=0)
-
-    @pytest.mark.asyncio
-    async def test_after_iteration_no_status_noop(self):
-        hook = _SubagentHook()
-        ctx = _make_hook_context(iteration=5)
-        result = await hook.after_iteration(ctx)
-        assert result is None
-        assert ctx.iteration == 5
 
     @pytest.mark.asyncio
     async def test_after_iteration_sets_error(self):

@@ -1,6 +1,3 @@
-"""Tests for AgentRunner error handling: tool errors, LLM errors,
-session message isolation, and tool result preservation."""
-
 from __future__ import annotations
 
 import json
@@ -74,7 +71,8 @@ async def test_tool_execution_does_not_duplicate_existing_error_hint():
         execute=AsyncMock(return_value=ToolResult.error("Error: boom" + error_hint)),
     )
 
-    results, events = await execute_tool_calls(
+    settled = []
+    await execute_tool_calls(
         tools,
         [ToolCallRequest(id="call_1", name="list_dir", arguments={})],
         concurrent=False,
@@ -82,11 +80,13 @@ async def test_tool_execution_does_not_duplicate_existing_error_hint():
         workspace_violation_counts={},
         hook=AgentHook(),
         context=AgentHookContext(iteration=0, messages=[]),
+        on_settled=AsyncMock(side_effect=settled.extend),
     )
 
-    assert results == ["Error: boom" + error_hint]
-    assert results[0].count(error_hint) == 1
-    assert events[0]["status"] == "error"
+    [completed] = settled
+    assert completed.result == "Error: boom" + error_hint
+    assert completed.result.count(error_hint) == 1
+    assert completed.event["status"] == "error"
 
 
 @pytest.mark.asyncio
@@ -183,7 +183,6 @@ async def test_runner_ignores_tool_calls_when_finish_reason_blocks_execution(
     finish_reason: str,
     expected_stop_reason: str,
 ):
-    """Provider/gateway-injected tool calls under terminal block reasons must not run."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -401,12 +400,10 @@ async def test_runner_preserves_tool_error_results_in_messages():
     ))
 
     assert result.stop_reason == "max_iterations"
-    # Both tool results must be in messages even though tc2 returned an error.
     tool_msgs = [m for m in result.messages if m.get("role") == "tool"]
     assert len(tool_msgs) == 2
     assert tool_msgs[0]["tool_call_id"] == "tc1"
     assert tool_msgs[1]["tool_call_id"] == "tc2"
-    # The assistant message with tool_calls must precede the tool results.
     asst_tc_idx = next(
         i for i, m in enumerate(result.messages)
         if m.get("role") == "assistant" and m.get("tool_calls")
@@ -431,8 +428,6 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
     from nanobot.utils.runtime import LENGTH_RECOVERY_PROMPT
 
     provider = MagicMock(spec=LLMProvider)
-    # First call: truncated (length) with blank content and a dropped tool call.
-    # Second call: normal completion so the loop can terminate.
     provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="",
@@ -454,8 +449,6 @@ async def test_length_finish_with_blank_content_routes_to_length_recovery():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    # The runner must have injected a length-recovery prompt and continued,
-    # rather than exhausting empty-response retries into a generic apology.
     user_msgs = [m.get("content") or "" for m in result.messages if m.get("role") == "user"]
     assert any(LENGTH_RECOVERY_PROMPT in c for c in user_msgs), (
         "expected a length-recovery message to be appended for a "

@@ -1,5 +1,3 @@
-"""Regression tests for QQ inbound attachment download SSRF protection."""
-
 from __future__ import annotations
 
 import asyncio
@@ -94,7 +92,6 @@ async def test_inbound_download_blocks_ssrf_target(url: str) -> None:
 
 @pytest.mark.asyncio
 async def test_inbound_validation_does_not_run_dns_on_the_event_loop(monkeypatch):
-    """The URL guard uses blocking getaddrinfo; keep it off the gateway loop."""
     loop_thread = threading.get_ident()
     validation_threads = []
 
@@ -118,7 +115,6 @@ async def test_inbound_download_does_not_follow_redirects(
     monkeypatch: pytest.MonkeyPatch,
     status: int,
 ) -> None:
-    """A redirect on an inbound attachment download must be rejected, not followed."""
     monkeypatch.setattr("nanobot.channels.qq.runtime.validate_url_target", lambda _url: (True, ""))
     channel = _make_channel()
     fake_http = _FakeDownloadHttp(status=status)
@@ -143,7 +139,6 @@ async def test_inbound_download_saves_successful_attachment(
     monkeypatch: pytest.MonkeyPatch,
     url: str,
 ) -> None:
-    """A valid 200 response still follows the normal atomic media write path."""
     validated_urls: list[str] = []
 
     def validate(target: str) -> tuple[bool, str]:

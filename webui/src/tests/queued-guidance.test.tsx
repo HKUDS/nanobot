@@ -67,6 +67,20 @@ describe("merged waiting messages", () => {
     });
   });
 
+  it.each(["video", "file"] as const)("sends a restored large local %s and a browser upload without spending local bytes", (kind) => {
+    const local = { path: `C:\\project\\large.${kind === "video" ? "mp4" : "pdf"}`, name: "large reference", kind, size: 64 * 1024 * 1024 + 1, mime: kind === "video" ? "video/mp4" : "application/pdf", url: "/api/media/sig/local" };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
+      { id: "first", text: "read references", images: [{ local, kind }, DOCUMENT] },
+    ]));
+    const onSend = vi.fn();
+    render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" ingressLimits={limits({ max_file_bytes: 5, max_total_bytes: 5 })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledWith("read references", [
+      expect.objectContaining({ media: { path: local.path, name: local.name } }),
+      expect.objectContaining({ media: { data_url: DOCUMENT.dataUrl, name: DOCUMENT.name } }),
+    ]);
+  });
+
   it("preserves merged text longer than the former per-entry storage truncation across remounts", () => {
     const onSend = vi.fn();
     const first = render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming />);
@@ -118,7 +132,7 @@ describe("merged waiting messages", () => {
       enter(String(index + 1));
     }
     expect(screen.getByLabelText("Message input")).toHaveValue("2");
-    expect(screen.getByTestId("composer-chip")).toHaveTextContent("second.png");
+    expect(within(screen.getByTestId("composer-chip")).getByRole("img", { name: "second.png" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("first.png");
     expect(screen.getByText(error, { exact: false })).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
@@ -155,7 +169,7 @@ describe("merged waiting messages", () => {
     render(<ThreadComposer {...props} />);
     await waitFor(() => expect(screen.queryByLabelText("Encoding…")).not.toBeInTheDocument());
     expect(screen.getAllByTestId("composer-chip")).toHaveLength(2);
-    expect(draftStore.get("chat-a")?.files.map((file) => file.name)).toEqual(["first.png", "second.txt"]);
+    expect(draftStore.get("chat-a")?.attachments.map((file) => file.name)).toEqual(["first.png", "second.txt"]);
   });
 
   it("retains a merged rejected send after leaving the topic during upload", async () => {
@@ -183,6 +197,8 @@ describe("merged waiting messages", () => {
     view.unmount();
     render(<ThreadComposer {...props} />);
     expect(screen.getByRole("button", { name: "Send now" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(1);
     await act(async () => { accept(true); });
     expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
@@ -215,14 +231,16 @@ describe("merged waiting messages", () => {
     expect(onQuotedContextChange).toHaveBeenLastCalledWith("new selection");
   });
 
-  it("auto-sends attachment-only guidance after completion", async () => {
+  it("keeps restored attachment-only guidance manual after historical completion", () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify([
       { id: "first", text: "", images: [PNG], autoAfterTurnId: "turn-a" },
       { id: "second", text: "", images: [DOCUMENT], autoAfterTurnId: "turn-a" },
     ]));
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />);
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledWith("", [
       expect.objectContaining({ media: expect.objectContaining({ name: "first.png" }) }),
       expect.objectContaining({ media: expect.objectContaining({ name: "second.txt" }) }),
@@ -267,8 +285,8 @@ describe("merged waiting messages", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("retains the whole message after a rejected immediate send", () => {
-    const onSend = vi.fn(() => false);
+  it("retains a rejected message until an explicit Enter retries the whole message", () => {
+    const onSend = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
     const view = render(<ThreadComposer onSend={onSend} isStreaming activeTurnId="turn-a" pendingQueueKey="chat-a" />);
     enter("1"); enter("2");
     fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
@@ -276,6 +294,12 @@ describe("merged waiting messages", () => {
     expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("1 2");
     view.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["turn-a"]} />);
     expect(onSend).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter", repeat: true });
+    expect(onSend).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByLabelText("Message input"), { key: "Enter" });
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenLastCalledWith("1\n2");
+    expect(screen.queryByRole("group", { name: "Waiting to send" })).not.toBeInTheDocument();
   });
 
   it("does not automatically re-arm stopped content when another input is appended", () => {
@@ -289,5 +313,48 @@ describe("merged waiting messages", () => {
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(onSend).toHaveBeenCalledWith("stopped\nnew input");
+  });
+});
+
+
+describe("waiting-message execution authorization", () => {
+  it.each([undefined, "earlier-page"])("retains an earlier page's completed-turn draft for manual confirmation (page=%s)", (autoSendPageId) => {
+    const target = mention("alpha");
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
+      id: "queued-prompt-1792147773397-1", text: "old instruction @alpha", images: [PNG, DOCUMENT],
+      quotedContext: "original quote", sessionMentions: [target], autoAfterTurnId: "old-turn", autoSendPageId,
+    }]));
+    const onSend = vi.fn();
+    const view = render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["old-turn"]} />);
+    expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("old instruction @alpha");
+    expect(onSend).not.toHaveBeenCalled();
+    view.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="new-turn" completedTurnIds={["old-turn"]} />);
+    view.rerender(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" completedTurnIds={["old-turn", "new-turn"]} />);
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledWith("old instruction @alpha", [
+      expect.objectContaining({ media: { data_url: PNG.dataUrl, name: PNG.name } }),
+      expect.objectContaining({ media: { data_url: DOCUMENT.dataUrl, name: DOCUMENT.name } }),
+    ], { quotedContext: "original quote", sessionMentions: [target] });
+  });
+
+  it.each([
+    { event: "pagehide", leaveTopic: true },
+    { event: "freeze", leaveTopic: false },
+  ])("revokes automatic delivery on $event while retaining the waiting message", ({ event, leaveTopic }) => {
+    const onSend = vi.fn();
+    const first = render(<ThreadComposer onSend={onSend} pendingQueueKey="chat-a" isStreaming activeTurnId="turn-a" />);
+    enter("confirm after returning");
+    if (leaveTopic) first.unmount();
+    act(() => (event === "pagehide" ? window : document).dispatchEvent(new Event(event)));
+    const props = { onSend, pendingQueueKey: "chat-a", completedTurnIds: ["turn-a"] };
+    if (leaveTopic) render(<ThreadComposer {...props} />);
+    else first.rerender(<ThreadComposer {...props} />);
+    expect(screen.getByRole("group", { name: "Waiting to send" })).toHaveTextContent("confirm after returning");
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(onSend).toHaveBeenCalledWith("confirm after returning");
   });
 });

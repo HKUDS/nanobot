@@ -11,7 +11,6 @@ export async function copyWithSystemClipboard(text: string): Promise<void> {
       child.stdin.end()
       if (await child.exited === 0) return
     } catch {
-      // Try the next platform clipboard provider.
     }
   }
   throw new Error("no clipboard provider available")

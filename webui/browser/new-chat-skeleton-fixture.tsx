@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import type { WorkspaceScopePayload } from "@/lib/types";
 import { StartupSkeleton } from "@/components/StartupSkeleton";
 import { settings } from "@/dev/gallery/settings";
 import "@/components/startup-skeleton.css";
@@ -7,6 +9,7 @@ const noop = () => {};
 
 export function NewChatSkeletonFixture() {
   const params = new URLSearchParams(location.search);
+  const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScopePayload>({ project_path: "/workspace", access_mode: "full" });
   const sidebarExpanded = !params.has("collapsed");
   const sidebarWidth = Number(params.get("sidebarWidth") ?? 272);
   const dark = params.has("dark");
@@ -17,9 +20,9 @@ export function NewChatSkeletonFixture() {
       <main className="thread-workspace relative flex min-w-0 flex-1 flex-col overflow-hidden">
         <ThreadShell session={null} title="nanobot" onToggleSidebar={noop} theme={dark ? "dark" : "light"}
           hideSidebarToggleForHostChrome onTemporaryChatEnabledChange={noop} settingsSnapshot={settings}
-          workspaceScope={{ project_path: "/workspace", access_mode: "full" }}
+          workspaceScope={workspaceScope}
           workspaceDefaultScope={{ project_path: "/workspace", access_mode: "full" }}
-          workspaceControls={{ can_change_project: true, can_browse_directories: true }} onWorkspaceScopeChange={noop} />
+          workspaceControls={{ can_change_project: true, can_browse_directories: true }} onWorkspaceScopeChange={setWorkspaceScope} />
       </main>
     </>}
   </div>;

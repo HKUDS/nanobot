@@ -115,7 +115,6 @@ def test_compaction_notice_webui_contract_and_config_round_trip(existing_key, tm
     })
     key = f"channels.{name}.showCompactionNotices"
     manager = ChannelManager.__new__(ChannelManager)
-    # The generic settings route must preserve false, true and a return to inheritance.
     for submitted, expected in [("false", False), ("true", True), ("", None), (None, None)]:
         save_channel_config_values(
             config, name, {key: submitted}, load_channel_plugin=load_channel_plugin,
@@ -129,7 +128,6 @@ def test_compaction_notice_webui_contract_and_config_round_trip(existing_key, tm
         assert instance.config.get("showCompactionNotices") is expected
         assert "show_compaction_notices" not in instance.config
         if expected is None:
-            # Inheritance is persisted as absence, also readable by older QQ versions.
             assert "showCompactionNotices" not in instance.config
         assert manager._resolve_bool_override(
             instance.config, "show_compaction_notices", True,

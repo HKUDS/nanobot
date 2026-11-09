@@ -8,25 +8,27 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowRight, ChevronDown, Eye, EyeOff, Moon, ShieldCheck, Sun, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Eye, EyeOff } from "lucide-react";
+import { ThemeToggleIcon } from "@/components/icons/ThemeToggleIcon";
 import { Trans, useTranslation } from "react-i18next";
-import { channelUiPresentation } from "@/channel-plugins/registry";
+import { ChannelPairing } from "@/components/pairing/ChannelPairing";
 import { StarPrompt } from "@/components/StarPrompt";
 import { Sidebar } from "@/components/Sidebar";
 import { RemoteInstances } from "@/components/remote/RemoteInstances";
 import { useRemoteConnections } from "@/components/remote/remote-context";
-import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
+import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnectionsPage";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
-import type { SidebarDeleteItem } from "@/components/ChatList";
+import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
+import type { SidebarDeleteDecision, SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
-import type { SettingsExitGuard } from "@/components/settings/contracts";
+import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import {
   MAX_WORKBENCH_PANES,
@@ -53,14 +55,11 @@ import { useReconnectRuns } from "@/hooks/useReconnectRuns";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
 import { useSidebarState } from "@/hooks/useSidebarState";
 import { useSkills } from "@/hooks/useSkills";
-import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAppViewport } from "@/hooks/useAppViewport";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { useReadingTypography } from "@/hooks/useReadingTypography";
-import { logoFallbackUrls } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import {
   BootstrapAuthRequiredError,
@@ -78,11 +77,12 @@ import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/compone
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
+import { useVersionCheck } from "@/providers/VersionCheckProvider";
+import { useUpdateFlow } from "@/providers/UpdateFlowProvider";
 import type {
   BootstrapResponse,
   ChatSummary,
   RuntimeSurface,
-  PairingRequestInfo,
   SessionAutomationJob,
   SettingsPayload,
   WorkspaceScopePayload,
@@ -91,12 +91,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Disclosure } from "@/components/ui/disclosure";
-import {
-  fetchPairingRequests,
-  fetchSettings,
-  fetchWorkspaces,
-  runPairingAction,
-} from "@/lib/api";
+import { fetchSettings, fetchWorkspaces } from "@/lib/api";
 import {
   createRuntimeHost,
   isNativeRuntime,
@@ -140,14 +135,12 @@ const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-const PAIRING_POLL_INTERVAL_MS = 5_000;
-const PAIRING_IDLE_POLL_INTERVAL_MS = 15_000;
-const PAIRING_DISMISS_SNOOZE_MS = 30_000;
 type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
   settingsSection: SettingsSectionKey;
+  settingsFocus?: SettingsFocusTarget;
   temporary?: boolean;
 };
 const loadThreadShell = () => import("@/components/thread/ThreadShell");
@@ -202,6 +195,11 @@ function defaultShellRoute(): ShellRoute {
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
   if (section === "apps" || section === "automations" || section === "skills" || section === "channels") return section;
   return "settings";
+}
+
+function changesSettingsSurface(current: ShellRoute, next: ShellRoute): boolean {
+  return current.view !== "chat" && current.view !== "remote" &&
+    (current.view !== next.view || current.settingsSection !== next.settingsSection);
 }
 
 function fallbackRestartHash(hash: string): boolean {
@@ -262,11 +260,13 @@ function readShellRoute(): ShellRoute {
   const temporary = Boolean(returnChat && "temporary" in returnChat && returnChat.temporary === true);
 
   if (path === "/settings") {
+    const focus = params.get("focus");
     return {
       view: shellViewForSettingsSection(settingsSection),
       activeKey,
       temporary,
       settingsSection,
+      settingsFocus: settingsSection === "advanced" && (focus === "sandbox" || focus === "sandbox-launcher") ? focus : undefined,
     };
   }
   if (path === "/apps") {
@@ -327,6 +327,7 @@ function shellRouteHash(route: ShellRoute): string {
   const params = new URLSearchParams();
   if (route.view === "settings" && route.settingsSection !== "overview") {
     params.set("section", route.settingsSection);
+    if (route.settingsSection === "advanced" && route.settingsFocus) params.set("focus", route.settingsFocus);
   }
   const query = params.toString();
   return `#/${route.view}${query ? `?${query}` : ""}`;
@@ -593,343 +594,6 @@ function HostChrome({
   );
 }
 
-function PairingCodePopup({
-  requests,
-  total,
-  busyCode,
-  error,
-  onApprove,
-  onDismiss,
-}: {
-  requests: PairingRequestInfo[];
-  total: number;
-  busyCode: string | null;
-  error: string | null;
-  onApprove: (code: string) => void;
-  onDismiss: (request: PairingRequestInfo) => void;
-}) {
-  const { t } = useTranslation();
-  const [value, setValue] = useState("");
-  const attemptedCode = useRef<string | null>(null);
-  const normalizedCode = normalizePairingCode(value);
-  const matchedRequest = useMemo(
-    () => requests.find((request) => request.code === normalizedCode) ?? null,
-    [normalizedCode, requests],
-  );
-  // Keep delivered and legacy requests usable even when another bot cannot reply.
-  const firstRequest = requests.find((request) => (
-    !request.delivery_status || request.delivery_status === "sent"
-  )) ?? requests[0] ?? null;
-  const displayRequest = matchedRequest ?? firstRequest;
-  const deliveryBlocked = displayRequest?.delivery_status === "failed"
-    || displayRequest?.delivery_status === "sending";
-  const expires = formatPairingExpiry(displayRequest?.expires_in_seconds);
-  const isCompleteCode = normalizedCode.length === 9;
-  const showNoMatch = isCompleteCode && !matchedRequest && !busyCode;
-
-  useEffect(() => {
-    if (!matchedRequest || busyCode || attemptedCode.current === matchedRequest.code) return;
-    attemptedCode.current = matchedRequest.code;
-    onApprove(matchedRequest.code);
-  }, [busyCode, matchedRequest, onApprove]);
-
-  useEffect(() => {
-    if (!requests.length) {
-      setValue("");
-      attemptedCode.current = null;
-    }
-  }, [requests.length]);
-
-  if (!firstRequest) return null;
-
-  const codeInput = (
-    <PairingCodeSlots
-      value={value}
-      disabled={Boolean(busyCode)}
-      matched={Boolean(matchedRequest)}
-      invalid={showNoMatch}
-      ariaLabel={t("app.pairing.code", { defaultValue: "Pairing code" })}
-      onChange={(next) => {
-        attemptedCode.current = null;
-        setValue(formatPairingCodeInput(next));
-      }}
-    />
-  );
-
-  return (
-    <div
-      role="dialog"
-      aria-live="polite"
-      aria-label={t("app.pairing.title", { defaultValue: "Pair a chat user" })}
-      className={cn(
-        "fixed right-4 top-[calc(0.75rem+env(safe-area-inset-top))] z-[70]",
-        "w-[min(calc(100vw-2rem),24rem)] rounded-modal",
-        floatingSurfaceElevationClassName,
-        "p-4",
-        "animate-in fade-in-0 slide-in-from-top-2 duration-200",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <PairingChannelBadge channel={displayRequest.channel} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[15px] font-semibold tracking-[-0.01em]">
-                {t("app.pairing.title", { defaultValue: "Pair a chat user" })}
-              </p>
-              <p
-                className="mt-1 text-pretty text-[13px] leading-5 text-muted-foreground"
-                role={displayRequest.delivery_status === "failed" ? "alert" : undefined}
-              >
-                {displayRequest.delivery_status === "failed" ? t("app.pairing.deliveryFailed", {
-                  defaultValue: "Couldn't send the pairing code. Check this bot's send-message permissions and gateway logs, then send it another private message to retry.",
-                }) : displayRequest.delivery_status === "sending" ? t("app.pairing.deliverySending", {
-                  defaultValue: "Sending a pairing code to your chat. If it doesn't arrive, send the bot another private message to retry.",
-                }) : t("app.pairing.description", {
-                  defaultValue: "Enter the pairing code shown in the chat.",
-                })}
-              </p>
-            </div>
-            <button
-              type="button"
-              aria-label={t("common.close", { defaultValue: "Close" })}
-              onClick={() => onDismiss(displayRequest)}
-              className="rounded-full p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-
-          {deliveryBlocked ? (
-            <details className="mt-3 text-[12.5px] text-muted-foreground">
-              <summary className="cursor-pointer">
-                {t("app.pairing.haveCode", { defaultValue: "Already received a code?" })}
-              </summary>
-              {codeInput}
-            </details>
-          ) : (
-            <>
-              <label className="mt-4 block text-[12.5px] font-medium text-foreground">
-                {t("app.pairing.code", { defaultValue: "Pairing code" })}
-              </label>
-              {codeInput}
-            </>
-          )}
-
-          {!deliveryBlocked || total > 1 ? (
-            <div className="mt-3 flex items-center justify-between gap-3 text-[12.5px] text-muted-foreground">
-              <span>
-                {matchedRequest && busyCode === matchedRequest.code
-                  ? t("app.pairing.matched", {
-                      defaultValue: "Matched {{channel}}. Connecting...",
-                      channel: channelLabel(matchedRequest.channel),
-                    })
-                  : deliveryBlocked ? null : t("app.pairing.expiresInline", {
-                      defaultValue: "Code expires {{expires}}.",
-                      expires,
-                    })}
-              </span>
-              {total > 1 ? (
-                <span className="shrink-0">
-                  {t("app.pairing.queueCount", {
-                    defaultValue: "{{count}} pending",
-                    count: total,
-                  })}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-
-          {showNoMatch ? (
-            <p className="mt-2 text-[12px] leading-5 text-destructive">
-              {t("app.pairing.noMatch", {
-                defaultValue: "No pending request matches this code.",
-              })}
-            </p>
-          ) : null}
-
-          {error ? (
-            <div className="mt-2 space-y-2">
-              <p role="alert" className="text-[12px] leading-5 text-destructive">{error}</p>
-              {matchedRequest ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={Boolean(busyCode)}
-                  onClick={() => onApprove(matchedRequest.code)}
-                >
-                  {t("common.retry", { defaultValue: "Retry" })}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PairingChannelBadge({ channel }: { channel: string }) {
-  const presentation = pairingChannelPresentation(channel);
-  const initials = presentation.initials;
-  const color = presentation.color;
-  const logoUrls = useMemo(
-    () => logoFallbackUrls(presentation?.logoUrl),
-    [presentation?.logoUrl],
-  );
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
-
-  return (
-    <div
-      className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl border bg-background shadow-sm"
-      style={{
-        borderColor: `${color}30`,
-        boxShadow: `inset 0 0 0 1px ${color}14, 0 1px 2px rgba(15,23,42,0.06)`,
-      }}
-      aria-hidden
-    >
-      {logoUrl ? (
-        <img
-          src={logoUrl}
-          alt=""
-          decoding="async"
-          loading="lazy"
-          className="h-6 w-6 object-contain"
-          onLoad={onLogoLoad}
-          onError={onLogoError}
-        />
-      ) : presentation ? (
-        <span className="text-[11px] font-bold tracking-[-0.02em]" style={{ color }}>
-          {initials}
-        </span>
-      ) : (
-        <ShieldCheck className="h-5 w-5" style={{ color }} />
-      )}
-    </div>
-  );
-}
-
-function PairingCodeSlots({
-  value,
-  disabled,
-  matched,
-  invalid,
-  ariaLabel,
-  onChange,
-}: {
-  value: string;
-  disabled: boolean;
-  matched: boolean;
-  invalid: boolean;
-  ariaLabel: string;
-  onChange: (value: string) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [focused, setFocused] = useState(false);
-  const compact = compactPairingCode(value);
-  const activeIndex = Math.min(compact.length, 7);
-  const slots = Array.from({ length: 8 }, (_, index) => compact[index] ?? "");
-  const renderSlot = (char: string, index: number) => {
-    const highlighted = focused && index === activeIndex && !matched && !invalid;
-    return (
-      <div
-        key={index}
-        className={cn(
-          "grid h-10 w-7 place-items-center rounded-xl border",
-          "bg-background/80 font-mono text-[16px] font-semibold uppercase",
-          "text-foreground shadow-[0_1px_1px_rgba(15,23,42,0.04)] transition",
-          matched
-            ? "border-emerald-500/45 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            : invalid
-              ? "border-destructive/55 bg-destructive/5 text-destructive"
-              : highlighted
-                ? "border-foreground/30 bg-background text-foreground"
-                : char
-                  ? "border-border/80 bg-background text-foreground"
-                  : "border-border/55 bg-muted/35 text-muted-foreground",
-        )}
-      >
-        {char || " "}
-      </div>
-    );
-  };
-
-  return (
-    <div
-      className={cn(
-        "relative mt-2 rounded-2xl border border-transparent p-1",
-        "transition duration-150",
-        focused && !disabled ? "border-ring/20 bg-muted/35" : "bg-transparent",
-      )}
-      onClick={() => inputRef.current?.focus()}
-    >
-      <input
-        ref={inputRef}
-        value={value}
-        aria-label={ariaLabel}
-        inputMode="text"
-        autoCapitalize="characters"
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        maxLength={9}
-        disabled={disabled}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        onChange={(event) => onChange(event.target.value)}
-        className="absolute inset-0 z-10 h-full w-full cursor-text opacity-0 disabled:cursor-default"
-      />
-      <div className="pointer-events-none flex items-center gap-1.5">
-        {slots.slice(0, 4).map((char, index) => renderSlot(char, index))}
-        <div className="mx-0.5 h-px w-2.5 rounded-full bg-muted-foreground/35" />
-        {slots.slice(4).map((char, index) => renderSlot(char, index + 4))}
-      </div>
-    </div>
-  );
-}
-
-function compactPairingCode(raw: string): string {
-  return raw.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase();
-}
-
-function formatPairingCodeInput(raw: string): string {
-  const compact = compactPairingCode(raw);
-  if (compact.length <= 4) return compact;
-  return `${compact.slice(0, 4)}-${compact.slice(4)}`;
-}
-
-function normalizePairingCode(raw: string): string {
-  return formatPairingCodeInput(raw);
-}
-
-function pairingChannelKey(channel: string): string {
-  const raw = channel.trim().toLowerCase();
-  if (!raw) return "";
-  return raw.split(/[.:]/)[0] ?? raw;
-}
-
-function channelLabel(channel: string): string {
-  return pairingChannelPresentation(channel).label;
-}
-
-function pairingChannelPresentation(channel: string) {
-  const key = pairingChannelKey(channel);
-  const plugin = channelUiPresentation(key);
-  return {
-    label: plugin?.displayName ?? channel,
-    initials: plugin?.initials ?? channel.slice(0, 2).toUpperCase(),
-    color: plugin?.color ?? "#10B981",
-    logoUrl: plugin?.logoUrl,
-  };
-}
-
-function formatPairingExpiry(seconds: number | null | undefined): string {
-  if (seconds == null) return "soon";
-  if (seconds <= 0) return "expired";
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.ceil(seconds / 60)} min`;
-}
-
 function resolveRuntimeSurface(
   surface: RuntimeSurface | null | undefined,
   fallback: RuntimeSurface,
@@ -1139,6 +803,7 @@ export default function App() {
       modelName={state.modelName}
       ingressLimits={state.ingressLimits}
       webuiCapabilities={state.webuiCapabilities}
+      allowUpdateFlow={state.runtimeSurface !== "native"}
     >
       <BrowserNotifications client={state.client} />
       <RemoteInstances><Shell
@@ -1164,9 +829,11 @@ function Shell({
 }) {
   const { t, i18n } = useTranslation();
   const remoteConnections = useRemoteConnections();
+  const versionCheck = useVersionCheck();
+  const updateFlow = useUpdateFlow();
   const localActive = remoteConnections?.localActive !== false;
   const managingConnections = remoteConnections?.managing === true && !remoteConnections?.activeHostId;
-  const { theme, toggle } = useTheme();
+  const { theme, preference: themePreference, toggle, setTheme } = useTheme();
   const managementMain = useRef<HTMLElement>(null);
   const reportManagementSurface = remoteConnections?.reportManagementSurface;
   useEffect(() => {
@@ -1226,6 +893,7 @@ function Shell({
   const [temporaryChatEnabled, setTemporaryChatEnabled] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
+  const [settingsFocus, setSettingsFocus] = useState<SettingsFocusTarget | undefined>(initialRouteRef.current.settingsFocus);
   const [hostSidebarOpen, setHostSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
@@ -1253,6 +921,7 @@ function Shell({
   const [pendingDelete, setPendingDelete] = useState<{
     items: SidebarDeleteItem[];
     automations?: SessionAutomationJob[];
+    onDecision?: SidebarDeleteDecision;
   } | null>(null);
   const [pendingTabRename, setPendingTabRename] = useState<{
     key: string;
@@ -1266,21 +935,10 @@ function Shell({
   const restartStartedAtRef = useRef(0);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [pairingRequests, setPairingRequests] = useState<PairingRequestInfo[]>([]);
-  const [pairingBusyCode, setPairingBusyCode] = useState<string | null>(null);
-  const [pairingError, setPairingError] = useState<string | null>(null);
-  const pairingRefreshRef = useRef<Promise<number> | null>(null);
-  const [snoozedPairingCodes, setSnoozedPairingCodes] = useState<Map<string, {
-    until: number;
-    deliveryStatus: PairingRequestInfo["delivery_status"];
-  }>>(
-    () => new Map(),
-  );
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
   const [updatedChatIds, setUpdatedChatIds] = useState<Set<string>>(readSessionUpdateChatIds);
   const [workspaces, setWorkspaces] = useState<WorkspacesPayload | null>(null);
   const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
-  const pageVisible = usePageVisibility();
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const settingsRefreshGenerationRef = useRef(0);
@@ -1295,6 +953,7 @@ function Shell({
   const currentShellRouteRef = useRef<ShellRoute>({ view, activeKey, settingsSection: settingsInitialSection });
   currentShellRouteRef.current = {
     view, activeKey, settingsSection: settingsInitialSection,
+    settingsFocus,
     temporary: Boolean(activeKey && temporarySessions[activeKey]),
   };
   const registerSettingsExitGuard = useCallback((guard: SettingsExitGuard | null) => {
@@ -1347,46 +1006,52 @@ function Shell({
     retainedTemporaryChatIdsRef.current = retained;
   }, [temporaryChatIds, threadMessageCache, filePreviewStore, draftStore]);
 
+  const commitNavigation = useCallback((route: ShellRoute, options?: { replace?: boolean }) => {
+    // The visible sidebar always belongs to its existing host. Navigation
+    // dismisses global management without switching to a different host.
+    if (remoteConnectionsRef.current?.managing) remoteConnectionsRef.current.closeManagement();
+    setActiveKey(route.activeKey);
+    setView(route.view);
+    setSettingsInitialSection(route.settingsSection);
+    setSettingsFocus(route.settingsFocus);
+    writeShellRoute({
+      ...route,
+      temporary: route.temporary || Boolean(route.activeKey && temporarySessionsRef.current[route.activeKey]),
+    }, options?.replace);
+  }, []);
   const navigate = useCallback(
     (route: ShellRoute, options?: { replace?: boolean }) => {
-      const leave = () => {
-        // The visible sidebar always belongs to its existing host. Navigation
-        // dismisses global management without switching to a different host.
-        if (remoteConnectionsRef.current?.managing) remoteConnectionsRef.current.closeManagement();
-        setActiveKey(route.activeKey);
-        setView(route.view);
-        setSettingsInitialSection(route.settingsSection);
-        writeShellRoute({
-          ...route,
-          temporary: route.temporary || Boolean(route.activeKey && temporarySessionsRef.current[route.activeKey]),
-        }, options?.replace);
-      };
-      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
-        settingsExitGuardRef.current(leave);
+      const leave = () => commitNavigation(route, options);
+      const current = currentShellRouteRef.current;
+      if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
+        settingsExitGuardRef.current(leave, { promptRestart: current.view !== route.view });
       } else leave();
     },
-    [],
+    [commitNavigation],
   );
 
   useEffect(() => {
     const applyRoute = () => {
       const route = readShellRoute();
       if (route.view === "remote") setMobileSidebarOpen(false);
-      if (currentShellRouteRef.current.view === "settings" && route.view !== "settings" && settingsExitGuardRef.current) {
-        writeShellRoute(currentShellRouteRef.current, true);
+      const current = currentShellRouteRef.current;
+      if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
+        writeShellRoute(current, true);
         settingsExitGuardRef.current(() => {
           setActiveKey(route.activeKey);
           setView(route.view);
           setSettingsInitialSection(route.settingsSection);
+          setSettingsFocus(route.settingsFocus);
           writeShellRoute(route, true);
           setWorkspaceError(null);
           if (route.view === "chat" && !route.activeKey) setDraftWorkspaceScope(null);
-        });
+        }, { promptRestart: current.view !== route.view });
         return;
       }
       setActiveKey(route.activeKey);
       setView(route.view);
       setSettingsInitialSection(route.settingsSection);
+      setSettingsFocus(route.settingsFocus);
       setWorkspaceError(null);
       if (route.view === "chat" && !route.activeKey) {
         setDraftWorkspaceScope(null);
@@ -1458,61 +1123,7 @@ function Shell({
     writeSessionUpdateChatIds(updatedChatIds);
   }, [updatedChatIds]);
 
-  const refreshPairingRequests = useCallback((): Promise<number> => {
-    if (pairingRefreshRef.current) return pairingRefreshRef.current;
-
-    const request = (async () => {
-      try {
-        const payload = await fetchPairingRequests(getToken());
-        const requests = Array.isArray(payload.requests) ? payload.requests : [];
-        setPairingRequests(requests);
-        setSnoozedPairingCodes((current) => {
-          if (current.size === 0) return current;
-          const activeRequests = new Map(requests.map((request) => [request.code, request]));
-          const now = Date.now();
-          const next = new Map(
-            Array.from(current).filter(
-              ([code, snooze]) => activeRequests.has(code)
-                && snooze.until > now
-                && activeRequests.get(code)?.delivery_status === snooze.deliveryStatus,
-            ),
-          );
-          return next.size === current.size ? current : next;
-        });
-        return requests.length;
-      } catch {
-        // Pairing is an opportunistic WebUI affordance. The slash command path
-        // remains available if this polling request fails.
-        return 0;
-      }
-    })();
-    const clearRequest = () => {
-      if (pairingRefreshRef.current === request) pairingRefreshRef.current = null;
-    };
-    pairingRefreshRef.current = request;
-    void request.then(clearRequest, clearRequest);
-    return request;
-  }, [getToken]);
-
-  useEffect(() => {
-    if (!pageVisible) return undefined;
-
-    let disposed = false;
-    let timer: number | null = null;
-    const poll = async () => {
-      const requestCount = await refreshPairingRequests();
-      if (disposed) return;
-      timer = window.setTimeout(
-        () => void poll(),
-        requestCount > 0 ? PAIRING_POLL_INTERVAL_MS : PAIRING_IDLE_POLL_INTERVAL_MS,
-      );
-    };
-    void poll();
-    return () => {
-      disposed = true;
-      if (timer !== null) window.clearTimeout(timer);
-    };
-  }, [pageVisible, refreshPairingRequests]);
+  useEffect(() => client.onReady(() => invalidateToolsCatalog(client)), [client]);
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
@@ -2038,24 +1649,27 @@ function Shell({
     [pendingProjectRename, updateSidebarState],
   );
 
-  const onToggleArchive = useCallback(
-    (key: string) => {
+  const onArchiveMany = useCallback(
+    (keys: string[], archive: boolean) => {
+      const persistedKeys = new Set(sessions
+        .filter((session) => session.projectLocked !== false)
+        .map((session) => session.key));
+      const selected = new Set(keys.filter((key) => persistedKeys.has(key)));
+      if (selected.size === 0) return;
       void updateSidebarState((current) => {
         const archived = new Set(current.archived_keys);
-        const pinned = current.pinned_keys.filter((item) => item !== key);
-        if (archived.has(key)) {
-          archived.delete(key);
-        } else {
-          archived.add(key);
+        for (const key of selected) {
+          if (archive) archived.add(key);
+          else archived.delete(key);
         }
         return {
           ...current,
-          pinned_keys: pinned,
+          pinned_keys: current.pinned_keys.filter((key) => !selected.has(key)),
           archived_keys: Array.from(archived),
         };
       });
-      if (activeKey === key && !sidebarState.archived_keys.includes(key)) {
-        const archived = new Set([...sidebarState.archived_keys, key]);
+      if (archive && activeKey && selected.has(activeKey)) {
+        const archived = new Set([...sidebarState.archived_keys, ...selected]);
         const next = topicSessions.find((session) => !archived.has(session.key));
         navigate({
           view: "chat",
@@ -2064,8 +1678,12 @@ function Shell({
         });
       }
     },
-    [activeKey, navigate, sidebarState.archived_keys, topicSessions, updateSidebarState],
+    [activeKey, navigate, sessions, sidebarState.archived_keys, topicSessions, updateSidebarState],
   );
+
+  const onToggleArchive = useCallback((key: string) => {
+    onArchiveMany([key], !sidebarState.archived_keys.includes(key));
+  }, [onArchiveMany, sidebarState.archived_keys]);
 
   const onToggleArchived = useCallback(() => {
     void updateSidebarState((current) => ({
@@ -2154,6 +1772,11 @@ function Shell({
   const onOpenModelSettings = useCallback(() => {
     onOpenSettings("models");
   }, [onOpenSettings]);
+  const onOpenSandboxSettings = useCallback((target: SettingsFocusTarget) => {
+    setSessionSearchOpen(false);
+    navigate({ view: "settings", activeKey, settingsSection: "advanced", settingsFocus: target });
+    setMobileSidebarOpen(false);
+  }, [activeKey, navigate]);
 
   const onOpenApps = useCallback(() => {
     setSessionSearchOpen(false);
@@ -2195,13 +1818,12 @@ function Shell({
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
-      navigate({
-        view: shellViewForSettingsSection(section),
-        activeKey,
-        settingsSection: section,
-      });
+      const route = { view: shellViewForSettingsSection(section), activeKey, settingsSection: section };
+      // The page has completed or retained its outgoing drafts for in-page transitions.
+      if (currentShellRouteRef.current.view === route.view) commitNavigation(route);
+      else navigate(route);
     },
-    [activeKey, navigate],
+    [activeKey, commitNavigation, navigate],
   );
 
   const onBackToChat = useCallback(() => {
@@ -2242,8 +1864,8 @@ function Shell({
   }, [client, onModelNameChange]);
 
   useEffect(() => {
-    return client.onRunStatus((chatId, startedAt) => {
-      if (startedAt != null) {
+    return client.onRunStatus((chatId, state) => {
+      if (state.active) {
         const nextRunning = new Set(runningChatIdsRef.current);
         nextRunning.add(chatId);
         runningChatIdsRef.current = nextRunning;
@@ -2357,6 +1979,7 @@ function Shell({
 
   const onConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
+    pendingDelete.onDecision?.(true);
     const items = pendingDelete.items;
     const deletingKeys = new Set(items.map((item) => item.key));
     const hasAutomations = (pendingDelete.automations?.length ?? 0) > 0;
@@ -2410,7 +2033,7 @@ function Shell({
     }
   }, [pendingDelete, deleteChat, activeKey, activeTabState, navigate, topicSessions, filePreviewStore, draftStore]);
 
-  const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[]) => {
+  const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
     const uniqueItems = Array.from(new Map(items.map((item) => [item.key, item])).values());
     if (uniqueItems.length === 0) return;
     const automationResults = await Promise.allSettled(
@@ -2419,57 +2042,21 @@ function Shell({
     const automations = automationResults.flatMap((result) => (
       result.status === "fulfilled" ? result.value : []
     ));
-    setPendingDelete({ items: uniqueItems, automations });
+    let decision = onDecision;
+    setPendingDelete({
+      items: uniqueItems,
+      automations,
+      onDecision: (confirmed) => {
+        const notify = decision;
+        decision = undefined;
+        notify?.(confirmed);
+      },
+    });
   }, [getSessionAutomations]);
 
-  const onRequestDelete = useCallback((key: string, label: string) => {
-    void onRequestDeleteMany([{ key, label }]);
+  const onRequestDelete = useCallback((key: string, label: string, onDecision?: SidebarDeleteDecision) => {
+    void onRequestDeleteMany([{ key, label }], onDecision);
   }, [onRequestDeleteMany]);
-
-  const visiblePairingRequests = useMemo(
-    () => {
-      const now = Date.now();
-      return pairingRequests.filter((request) => {
-        const snooze = snoozedPairingCodes.get(request.code);
-        return !snooze || snooze.until <= now;
-      });
-    },
-    [pairingRequests, snoozedPairingCodes],
-  );
-
-  const onPairingAction = useCallback(
-    async (action: "approve" | "deny", code: string) => {
-      setPairingBusyCode(code);
-      setPairingError(null);
-      try {
-        const payload = await runPairingAction(client, action, code);
-        setPairingRequests(Array.isArray(payload.requests) ? payload.requests : []);
-        setSnoozedPairingCodes((current) => {
-          if (!current.has(code)) return current;
-          const next = new Map(current);
-          next.delete(code);
-          return next;
-        });
-      } catch (e) {
-        setPairingError((e as Error).message);
-        void refreshPairingRequests();
-      } finally {
-        setPairingBusyCode(null);
-      }
-    },
-    [client, refreshPairingRequests],
-  );
-
-  const onDismissPairingRequest = useCallback((request: PairingRequestInfo) => {
-    setSnoozedPairingCodes((current) => {
-      const next = new Map(current);
-      next.set(request.code, {
-        until: Date.now() + PAIRING_DISMISS_SNOOZE_MS,
-        deliveryStatus: request.delivery_status,
-      });
-      return next;
-    });
-  }, []);
 
   const titleForSession = useCallback((session: ChatSummary) => (
     sidebarState.title_overrides[session.key]
@@ -2607,6 +2194,7 @@ function Shell({
           chatId: session.chatId,
           title: titleForSession(session),
           handle: session.handle,
+          projectLocked: session.projectLocked !== false,
         }));
       return [presentation.rowKey, {
         tabKey: orderedTab.tabKey,
@@ -2761,6 +2349,7 @@ function Shell({
     onTogglePin,
     onRequestRename,
     onToggleArchive,
+    onArchiveMany,
     onRequestRenameTab,
     paneGroups: sidebarPaneGroups,
     onSelectPane: onSelectSidebarPane,
@@ -2772,6 +2361,12 @@ function Shell({
     onRequestRenameProject,
     onNewChatInProject,
     onOpenSettings,
+    onOpenUpdates: () => onOpenSettings("about"),
+    availableUpdate: localActive && !isNativeRuntime(effectiveRuntimeSurface)
+      && versionCheck.result?.type === "update" && versionCheck.result.latestVersion !== versionCheck.dismissedVersion
+      ? { version: versionCheck.result.latestVersion, onDismiss: versionCheck.dismiss, onRequestUpdate: updateFlow.open,
+        installationMethod: updateFlow.pending ? null : versionCheck.installationMethod }
+      : undefined,
     onOpenApps,
     onOpenAutomations,
     onOpenChannels,
@@ -2826,11 +2421,7 @@ function Shell({
                   onClick={toggle}
                   className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
                 >
-                  {theme === "dark" ? (
-                    <Sun className="h-4 w-4" />
-                  ) : (
-                    <Moon className="h-4 w-4" />
-                  )}
+                  <ThemeToggleIcon theme={theme} />
                 </Button>
               )
             }
@@ -2841,7 +2432,6 @@ function Shell({
             "relative flex h-full w-full overflow-hidden",
           )}
         >
-          {/* Host sidebar: in normal flow, so the thread area width stays honest. */}
           {showMainSidebar ? (
             <aside
               data-testid="host-sidebar-flow"
@@ -2856,6 +2446,7 @@ function Shell({
               }}
             >
               <div
+                data-theme-surface
                 className={cn(
                   "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
                   showHostChrome
@@ -2925,11 +2516,13 @@ function Shell({
                 activeKey={activeKey}
                 loading={loading}
                 titleOverrides={sidebarState.title_overrides}
+                messageCache={threadMessageCache}
                 onSelect={onSelectSearchResult}
               />
             </Suspense>
           ) : null}
         <main ref={managementMain}
+          data-theme-surface
           aria-hidden={managingConnections && remoteConnections?.embeddedManagement || undefined}
           {...(managingConnections && remoteConnections?.embeddedManagement ? { inert: "" } : {})}
           className={cn(
@@ -2985,6 +2578,7 @@ function Shell({
                           <ThreadShell
                             session={activeSession}
                             sessions={sessions}
+                            titleOverrides={sidebarState.title_overrides}
                             title={headerTitle}
                             temporary={temporaryChatRequested}
                             temporaryChatIds={temporaryChatIds}
@@ -2996,7 +2590,6 @@ function Shell({
                               !activeKey ? onTemporaryChatEnabledChange : undefined
                             }
                             onToggleSidebar={toggleSidebar}
-                            onNewChat={onNewChat}
                             onCreateChat={
                               temporaryChatEnabled ? onCreateTemporaryChat : onCreateChat
                             }
@@ -3017,6 +2610,7 @@ function Shell({
                             settingsSnapshot={settingsSnapshot}
                             settingsLoading={settingsLoading}
                             onOpenModelSettings={onOpenModelSettings}
+                            onOpenSandboxSettings={onOpenSandboxSettings}
                             skills={skills}
                           />
                         );
@@ -3035,13 +2629,13 @@ function Shell({
                         <ThreadShell
                           session={paneSession}
                           sessions={sessions}
+                          titleOverrides={sidebarState.title_overrides}
                           title={pane.title}
                           temporaryChatIds={temporaryChatIds}
                           messageCache={threadMessageCache}
                           filePreviewStore={filePreviewStore}
                           draftStore={draftStore}
                           onToggleSidebar={toggleSidebar}
-                          onNewChat={onNewChat}
                           onCreateChat={onCreateChat}
                           pendingFirstMessage={pendingAutomationMessage}
                           onPendingFirstMessageConsumed={onPendingAutomationMessageConsumed}
@@ -3060,6 +2654,7 @@ function Shell({
                           composerPortalTarget={context.composerPortalTarget}
                           navigationFrame={context.navigationFrame}
                           composerActive={context.active}
+                          multiplePanes={context.multiplePanes}
                           composerInputAriaLabel={t("workbench.composerAria", {
                             title: pane.title,
                           })}
@@ -3082,6 +2677,7 @@ function Shell({
                           settingsSnapshot={settingsSnapshot}
                           settingsLoading={settingsLoading}
                           onOpenModelSettings={onOpenModelSettings}
+                          onOpenSandboxSettings={onOpenSandboxSettings}
                           skills={skills}
                         />
                       );
@@ -3092,19 +2688,20 @@ function Shell({
             </div>}
             {view !== "chat" && (
               <div className="absolute inset-0 flex flex-col">
-                {view === "remote" ? <RemoteConnectionsPage
+                {view === "remote" ? <LazyRemoteConnectionsPage
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}
                 /> : <Suspense fallback={<StartupShell embedded surface={view} sidebarExpanded={hostSidebarOpen} />}>
                   <SettingsView
                     registerExitGuard={registerSettingsExitGuard}
-                    theme={theme}
+                    themePreference={themePreference}
                     initialSection={settingsInitialSection}
+                    focusTarget={settingsFocus}
                     initialSettings={settingsSnapshot}
                     showSidebar={view === "settings"}
                     mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
-                    onToggleTheme={toggle}
+                    onChangeTheme={setTheme}
                     onBackToChat={onBackToChat}
                     onModelNameChange={onModelNameChange}
                     onSettingsChange={setSettingsSnapshot}
@@ -3126,7 +2723,7 @@ function Shell({
             )}
           </div>
           {managingConnections && !remoteConnections?.embeddedManagement && <div className="absolute inset-0 flex flex-col">
-            <RemoteConnectionsPage
+            <LazyRemoteConnectionsPage
               mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
               hostChromeInset={showHostChrome}
               onBackToChat={() => remoteConnections?.closeManagement()}
@@ -3142,7 +2739,10 @@ function Shell({
               title={pendingDelete.items[0]?.label ?? ""}
               count={pendingDelete.items.length}
               automations={pendingDelete.automations}
-              onCancel={() => setPendingDelete(null)}
+              onCancel={() => {
+                pendingDelete.onDecision?.(false);
+                setPendingDelete(null);
+              }}
               onConfirm={onConfirmDelete}
             />
           </Suspense>
@@ -3186,14 +2786,7 @@ function Shell({
             </div>
           </div>
         ) : null}
-        <PairingCodePopup
-          requests={visiblePairingRequests}
-          total={visiblePairingRequests.length}
-          busyCode={pairingBusyCode}
-          error={pairingError}
-          onApprove={(code) => void onPairingAction("approve", code)}
-          onDismiss={onDismissPairingRequest}
-        />
+        <ChannelPairing />
       </div>
     </ThemeProvider>
   );

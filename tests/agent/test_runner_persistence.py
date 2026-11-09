@@ -1,5 +1,3 @@
-"""Tests for tool result persistence: large results, pruning, temp files, cleanup."""
-
 from __future__ import annotations
 
 import os
@@ -189,7 +187,6 @@ def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
 
 
 async def test_read_file_result_is_not_offloaded(tmp_path):
-    """read_file must not trigger generic offloading (prevents persist->read->persist loops)."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -225,17 +222,13 @@ async def test_read_file_result_is_not_offloaded(tmp_path):
 
     assert result.final_content == "done"
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
-    # read_file result must NOT be offloaded to a file
     assert "[tool output persisted]" not in tool_message["content"]
-    # read_file manages its own size; generic truncation must NOT apply
     assert len(tool_message["content"]) == 20_000
-    # no file should have been written for this read_file call
     offload_dir = tmp_path / ".nanobot" / "tool-results"
     assert not any(offload_dir.rglob("call_rf.txt")) if offload_dir.exists() else True
 
 
 async def test_processed_tool_result_is_stable_for_persistence_and_replay(tmp_path):
-    """The content sent after a tool call must survive the session round trip unchanged."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.runner import AgentRunner
     from nanobot.session.manager import Session

@@ -11,11 +11,11 @@ const fonts: DiagramInput["fonts"] = {
 const source = 'flowchart LR\n A["`**粗体** _italic_ 中文 😀`"] --> B[Result]';
 let base: string;
 
-async function peleSvg(text: string): Promise<string> {
+async function peleSvg(text: string, measurer: ReturnType<typeof canvasTextMeasurer> = { width: (text) => text.length * 7 }): Promise<string> {
   await load(detectType(text));
   return render(text, {
     fontFamily: fonts.sans, fontFamilyMono: fonts.mono, fontSize: fonts.size,
-    measurer: { width: (text) => text.length * 7 }, links: false, images: false,
+    measurer, links: false, images: false,
     responsive: false, maxWidth: 600, maxEdges: 500,
   }).svg;
 }
@@ -68,10 +68,50 @@ describe("Pele image-only output", () => {
   });
 
   it.each([
+    'flowchart LR\n A["H<sub>2</sub>O x<sup>2</sup> <u>under</u> <b><i><code>List<T></code></i></b> <kbd>key</kbd> <samp>sample</samp> <tt>type</tt>"] --> B',
+    'sequenceDiagram\n Alice->>Bob: H<sub>2</sub>O x<sup>2</sup> <u>under</u> <b><i><code>List<T></code></i></b> <kbd>key</kbd> <samp>sample</samp> <tt>type</tt>',
+    'stateDiagram-v2\n state "H<sub>2</sub>O x<sup>2</sup> <u>under</u> <b><i><code>List<T></code></i></b> <kbd>key</kbd> <samp>sample</samp> <tt>type</tt>" as Active\n [*] --> Active',
+  ])("retains measured subscript, superscript, underline and monospace runs: %s", async (text) => {
+    const image = diagramImageTemplate(await peleSvg(text), fonts);
+    const document = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${image.content}</svg>`, "image/svg+xml");
+    expect(document.querySelector('tspan[baseline-shift="sub"][font-size="smaller"]')?.textContent).toBe("2");
+    expect(document.querySelector('tspan[baseline-shift="super"][font-size="smaller"]')?.textContent).toBe("2");
+    expect(document.querySelector('tspan[text-decoration="underline"]')?.textContent).toBe("under");
+    const mono = Array.from(document.querySelectorAll('tspan[font-family="var(--_fm)"]'));
+    expect(mono.map((span) => span.textContent)).toEqual(["List<T>", "key", "sample", "type"]);
+    expect(mono[0].getAttribute("font-weight")).toBe("var(--_w)");
+    expect(mono[0].getAttribute("font-style")).toBe("italic");
+  });
+
+  it("preserves generic type text without interpreting it as markup", async () => {
+    const image = diagramImageTemplate(await peleSvg('flowchart LR\n A["List<T>"] --> B["Map<K, V>"]'), fonts);
+    expect(image.content).toContain("List&lt;T&gt;");
+    expect(image.content).toContain("Map&lt;K, V&gt;");
+  });
+
+  it("wraps Chinese labels without spaces while preserving the full text", async () => {
+    const label = "接收用户请求并检查工作区权限保留中文长标签以及多语言自动换行";
+    const image = diagramImageTemplate(await peleSvg(`%%{init: {"flowchart":{"wrappingWidth":100}}}%%\nflowchart TD\n A["${label}"] --> B[完成]`), fonts);
+    const document = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${image.content}</svg>`, "image/svg+xml");
+    const lines = Array.from(document.querySelector('g[data-id="A"] text')!.querySelectorAll("tspan"), (span) => span.textContent ?? "");
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.join("")).toBe(label);
+    for (const line of lines) expect(line.length * 7).toBeLessThanOrEqual(100);
+  });
+
+  it.each([
     "font-family:fantasy", "letter-spacing:4px", "word-spacing:1em",
-    "font-size:2em", "font-size:201px", "font-weight:600", "font-style:oblique",
-  ])("rejects unmeasured author typography: %s", async (authorStyle) => {
-    reject(await peleSvg(`flowchart LR\n A[Label] --> B\n style A ${authorStyle}`), "unsupported");
+    "font-size:2em", "font-size:smaller", "font-size:larger", "font-size:83.33%",
+    "font-size:201px", "font-weight:600", "font-style:oblique",
+  ])("rejects unmeasured author typography even alongside measured subscript: %s", async (authorStyle) => {
+    reject(await peleSvg(`flowchart LR\n A["H<sub>2</sub>O"] --> B\n style A ${authorStyle}`), "unsupported");
+  });
+
+  it("does not promote author HTML attributes, scripts or resources into the image", async () => {
+    const image = diagramImageTemplate(await peleSvg('flowchart LR\n A["<sub style=font-size:999em onclick=alert(1)>safe</sub> <u><script>alert(2)</script><img src=https://bad.test/i onerror=alert(3)><foreignObject><b>foreign</b></foreignObject></u>"] --> B\n click A "https://bad.test/click"'), fonts);
+    expect(image.content).toContain('baseline-shift="sub" font-size="smaller">safe</tspan>');
+    expect(image.content).toContain("&lt;foreignObject&gt;");
+    expect(image.content).not.toMatch(/<(?:script|image|foreignObject|a)\b|onclick|onerror|999em|bad\.test/i);
   });
 
   it("preserves and resolves local marker/clip references and monospace attributes", () => {
@@ -122,17 +162,36 @@ describe("Pele image-only output", () => {
 });
 
 describe("canvas-only typography", () => {
-  it("uses the exact sans/mono size, bold and italic flags", () => {
+  it("uses the exact sans/mono size and shrinks sub/sup once without changing underline width", () => {
     const context = canvasFixture();
     const measurer = canvasTextMeasurer(fonts);
     for (const [flags, expected] of [
       [0, `18px ${fonts.sans}`], [1, `bold 18px ${fonts.sans}`],
       [2, `italic 18px ${fonts.sans}`], [4, `18px ${fonts.mono}`],
       [7, `italic bold 18px ${fonts.mono}`],
+      [8, `15px ${fonts.sans}`], [16, `15px ${fonts.sans}`],
+      [32, `18px ${fonts.sans}`], [47, `italic bold 15px ${fonts.mono}`],
+      [55, `italic bold 15px ${fonts.mono}`],
     ] as const) {
       expect(measurer.width("中文 emoji 😀", 18, flags)).toBe(77);
       expect(context.font).toBe(expected);
     }
+  });
+
+  it("measures actual engine mixed styles at their effective numeric author size", async () => {
+    const context = canvasFixture();
+    const measured: { text: string; font: string }[] = [];
+    context.measureText.mockImplementation((text) => {
+      measured.push({ text, font: context.font });
+      return { width: text.length * 7 };
+    });
+    const svg = await peleSvg('flowchart LR\n A["plain <sub><b><i><u><code>sub</code></u></i></b></sub> <sup><b><i><u><kbd>sup</kbd></u></i></b></sup> <u>under</u>"]\n style A font-size:18px', canvasTextMeasurer(fonts));
+    expect(diagramImageTemplate(svg, fonts).content).toContain("font-size:18px");
+    expect(measured).toEqual(expect.arrayContaining([
+      { text: "sub", font: `italic bold 15px ${fonts.mono}` },
+      { text: "sup", font: `italic bold 15px ${fonts.mono}` },
+      { text: "under", font: `18px ${fonts.sans}` },
+    ]));
   });
 
   it("fails explicitly without OffscreenCanvas rather than using approximate metrics", () => {
@@ -165,11 +224,15 @@ describe("single-input Worker protocol", () => {
   }
 
   it("loads the actual engine, announces sync work, and returns only an image template", async () => {
-    const replies = await run('---\ntitle: Supported frontmatter\nconfig:\n  links: true\n  images: true\n---\n%%{init: {"flowchart":{"wrappingWidth":120}}}%%\nflowchart LR\n A["<b>中文</b>"] --> B\n click A "https://bad.test/"\n');
+    const replies = await run('---\ntitle: Supported frontmatter\nconfig:\n  links: true\n  images: true\n---\n%%{init: {"flowchart":{"wrappingWidth":120}}}%%\nflowchart LR\n A["<b>中文</b> H<sub>2</sub>O x<sup>2</sup> <u>under</u> <code>List<T></code>"] --> B\n click A "https://bad.test/"\n');
     expect(replies.map((reply) => reply.kind)).toEqual(["started", "image"]);
     const image = replies[1];
     if (image.kind !== "image") throw new Error("Image missing");
     expect(image.template.content).toContain("Supported frontmatter");
+    expect(image.template.content).toContain('baseline-shift="sub" font-size="smaller"');
+    expect(image.template.content).toContain('baseline-shift="super" font-size="smaller"');
+    expect(image.template.content).toContain('text-decoration="underline"');
+    expect(image.template.content).toContain("List&lt;T&gt;");
     expect(image.template.content).not.toMatch(/<a\b|href=|<image\b/);
   });
 

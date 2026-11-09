@@ -139,6 +139,7 @@ def _test_app(
         config: Config,
         *,
         port: int | None = None,
+        verbose: bool = False,
         webui_bundle_mode: str | None = None,
         unconfigured_provider_error: str | None = None,
         gateway_instance: GatewayInstance | None = None,

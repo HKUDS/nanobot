@@ -51,13 +51,13 @@ def test_warm_index_reads_only_matching_session_bodies(tmp_path: Path, monkeypat
     assert reader.search("zebra", 5)
 
     calls: list[str] = []
-    original = manager.read_session_file
+    original = manager.project_session_messages
 
-    def counted_read(key: str):
+    def counted_read(key: str, project):
         calls.append(key)
-        return original(key)
+        return original(key, project)
 
-    monkeypatch.setattr(manager, "read_session_file", counted_read)
+    monkeypatch.setattr(manager, "project_session_messages", counted_read)
     # A fresh tool/reader instance reuses the durable cache too.
     reader = SessionHistoryReader(manager)
     matches = reader.search("zebra", 5)
@@ -127,6 +127,27 @@ def test_corrupt_cache_is_rebuilt_without_changing_history(tmp_path: Path) -> No
     assert matches[0]["messages"][0]["content"] == "canonical needle"
     with sqlite3.connect(manager.sessions_dir / _INDEX_FILENAME) as connection:
         assert connection.execute("PRAGMA quick_check").fetchone() == ("ok",)
+
+
+def test_legacy_whole_session_cache_is_rebuilt_as_message_rows(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    session = _save(manager, "sdk:target", "canonical needle")
+    session.add_message("assistant", "another needle")
+    manager.save(session)
+    with sqlite3.connect(manager.sessions_dir / _INDEX_FILENAME) as connection:
+        connection.execute("CREATE TABLE search_manifest (session_key TEXT PRIMARY KEY, signature TEXT NOT NULL)")
+        connection.execute("CREATE VIRTUAL TABLE session_search USING fts5(content, tokenize = 'trigram')")
+        connection.execute("INSERT INTO search_manifest VALUES ('sdk:target', 'legacy')")
+        connection.execute("INSERT INTO session_search VALUES ('obsolete content')")
+        connection.execute("PRAGMA user_version = 1")
+
+    matches = SessionHistoryReader(manager).search("needle", 5)
+    assert [match["session_key"] for match in matches] == ["sdk:target"]
+    assert [message["content"] for message in matches[0]["messages"]] == [
+        "canonical needle", "another needle",
+    ]
+    with sqlite3.connect(manager.sessions_dir / _INDEX_FILENAME) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM session_search").fetchone() == (2,)
 
 
 def test_save_during_sqlite_query_is_checked_without_blocking_writer(tmp_path: Path, monkeypatch) -> None:

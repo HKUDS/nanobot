@@ -1,13 +1,12 @@
-"""Route and publish the user-visible lifecycle of an agent turn."""
-
 from __future__ import annotations
 
 import dataclasses
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 from nanobot.bus.delivery import DeliveryRequest
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -29,11 +28,13 @@ from nanobot.events import (
     ResponseSourceEvent,
 )
 from nanobot.providers.base import LLMUsage
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.keys import (
     UNIFIED_SESSION_KEY,
     is_internal_session,
     last_channel_from_metadata,
 )
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import strip_think
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ class TurnRoute:
 
 
 TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
+TurnRouteAdmission = Callable[[TurnRoute, str, str], Awaitable[TurnRoute]]
 
 
 def _bind_events(
@@ -94,10 +96,12 @@ class TurnDeliveryFactory:
         self,
         bus: MessageBus,
         route_policy: TurnRoutePolicy | None = None,
+        route_admission: TurnRouteAdmission | None = None,
     ) -> None:
         self.bus = bus
         self.runtime_event_publisher = RuntimeEventPublisher(bus)
         self.route_policy = route_policy
+        self.route_admission = route_admission
 
     def create(
         self,
@@ -117,6 +121,7 @@ class TurnDeliveryFactory:
             input_message=msg,
             session_key=session_key,
             route=route,
+            route_admission=self.route_admission,
             enable_stream=enable_stream,
         )
 
@@ -138,6 +143,7 @@ class TurnDeliveryFactory:
         self,
         session_key: str,
         session_metadata: dict[str, Any],
+        *, generation: str,
     ) -> EventSink:
         """Bind idle notifications to one route without acquiring a turn owner."""
         if is_internal_session(session_key):
@@ -151,7 +157,9 @@ class TurnDeliveryFactory:
                 return EventSink()
             if not isinstance(metadata, dict):
                 return EventSink()
-            metadata = cast(dict[str, Any], metadata)
+            metadata = dict(cast(dict[str, Any], metadata))
+            if isinstance(saved_generation := saved_route.get("generation"), str):
+                metadata[HISTORY_GENERATION_METADATA_KEY] = saved_generation
         else:
             # Older sessions have no route snapshot. Only direct clients have a
             # session key that is also an unambiguous delivery address.
@@ -165,7 +173,8 @@ class TurnDeliveryFactory:
             channel, chat_id = route
             metadata = {}
         metadata = deepcopy(metadata)
-
+        if channel == "websocket":
+            metadata.setdefault(HISTORY_GENERATION_METADATA_KEY, generation)
         return _bind_events(self.bus, TurnRoute(channel, chat_id, metadata), session_key)
 
     @staticmethod
@@ -196,7 +205,9 @@ class TurnDelivery:
     input_message: InboundMessage
     session_key: str
     route: TurnRoute
+    route_admission: TurnRouteAdmission | None = None
     enable_stream: bool = False
+    run_id: str = field(init=False)
     delivery_message: InboundMessage = field(init=False)
     lifecycle_message: InboundMessage = field(init=False)
     _stream_base_id: str | None = field(init=False, default=None)
@@ -204,6 +215,7 @@ class TurnDelivery:
     _stream_open: bool = field(init=False, default=False)
     events: EventSink = field(init=False)
     _routed_events: EventSink = field(init=False)
+    completed: bool = field(init=False, default=False)
     _stop_reason: str | None = field(init=False, default=None)
     _failure_error_kind: str | None = field(init=False, default=None)
     _retry_status: RetryStatusEvent | None = field(init=False, default=None)
@@ -214,6 +226,7 @@ class TurnDelivery:
     _stream_source_unknown: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
+        self.run_id = uuid4().hex
         self._routed_events = _bind_events(self.bus, self.route, self.session_key)
         self.events = EventSink(self._publish_event, self._routed_events.accepts)
         self.delivery_message = dataclasses.replace(
@@ -232,10 +245,26 @@ class TurnDelivery:
     def streaming(self) -> bool:
         return self._stream_base_id is not None
 
-    def bind_session_generation(self, generation: str) -> None:
-        """Attach the admitted session identity to all later lifecycle events."""
+    async def bind_session_generation(self, generation: str) -> None:
+        """Admit the destination before publishing any durable turn facts."""
+        previous = self.delivery_message.session_generation
+        metadata = dict(self.route.metadata)
+        stored_generation = metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        if self.route.channel == "websocket" and (stored_generation is None or stored_generation == previous):
+            metadata[HISTORY_GENERATION_METADATA_KEY] = generation
+        route = dataclasses.replace(self.route, metadata=metadata)
+        if self.route_admission is not None:
+            route = await self.route_admission(route, self.session_key, generation)
+        self.route = route
+        self.delivery_message.metadata = dict(route.metadata)
         self.delivery_message.session_generation = generation
         self.lifecycle_message.session_generation = generation
+        if HISTORY_GENERATION_METADATA_KEY in route.metadata:
+            for message in (self.lifecycle_message, self.input_message):
+                message.metadata[HISTORY_GENERATION_METADATA_KEY] = route.metadata[
+                    HISTORY_GENERATION_METADATA_KEY
+                ]
+        self._routed_events = _bind_events(self.bus, self.route, self.session_key)
 
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
@@ -248,6 +277,8 @@ class TurnDelivery:
             "chat_id": self.route.chat_id,
             "metadata": notification_metadata(self.route.channel, self.route.metadata),
         }
+        if generation := self.route.metadata.get(HISTORY_GENERATION_METADATA_KEY):
+            session_metadata["_compaction_route"]["generation"] = generation
 
     async def started(self) -> None:
         if self.route.publish_lifecycle:
@@ -272,15 +303,16 @@ class TurnDelivery:
                 self.delivery_message,
                 self.session_key,
                 runtime,
+                run_id=self.run_id,
             )
             return
-        self.runtime_event_publisher.record_turn_runtime(self.session_key, runtime)
+        self.runtime_event_publisher.record_turn_runtime(self.session_key, runtime, run_id=self.run_id)
 
     def record_latency(self, latency_ms: int | None) -> None:
-        self.runtime_event_publisher.record_turn_latency(self.session_key, latency_ms)
+        self.runtime_event_publisher.record_turn_latency(self.session_key, latency_ms, run_id=self.run_id)
 
     def record_usage(self, round_usages: list[LLMUsage]) -> None:
-        self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages)
+        self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages, run_id=self.run_id)
 
     def record_stop_reason(
         self,
@@ -331,6 +363,9 @@ class TurnDelivery:
         if response is not None:
             completed_channel = response.channel
             completed_chat_id = response.chat_id
+            generation = self.route.metadata.get(HISTORY_GENERATION_METADATA_KEY)
+            if generation is not None and (response.channel, response.chat_id) == (self.route.channel, self.route.chat_id):
+                response = dataclasses.replace(response, metadata={**response.metadata, HISTORY_GENERATION_METADATA_KEY: generation})
             if (
                 self._response_source is not None
                 and self._response_content is not None
@@ -360,11 +395,9 @@ class TurnDelivery:
             )
         if publish_completion:
             outcome, failure_kind = _turn_outcome(stop_reason)
-            await self.runtime_event_publisher.turn_completed(
+            await self._publish_completion(
                 channel=completed_channel,
                 chat_id=completed_chat_id,
-                session_key=self.session_key,
-                metadata=self.lifecycle_message.metadata,
                 outcome=outcome,
                 failure_kind=failure_kind,
                 failure_error_kind=(self._failure_error_kind or (
@@ -374,6 +407,9 @@ class TurnDelivery:
                     self._retry_status.attempt if failure_kind == "model" and self._retry_status else None
                 ),
             )
+
+    async def cancelled(self) -> None:
+        await self._publish_completion(outcome="cancelled")
 
     async def fail(self, *, publish_completion: bool) -> None:
         await self.bus.publish_outbound(
@@ -385,14 +421,31 @@ class TurnDelivery:
             )
         )
         if publish_completion:
+            await self._publish_completion(outcome="failed", failure_kind="internal")
+
+    async def _publish_completion(
+        self, *, outcome: str, channel: str | None = None, chat_id: str | None = None,
+        failure_kind: str | None = None, failure_error_kind: str | None = None,
+        failure_attempts: int | None = None,
+    ) -> None:
+        if self.completed:
+            return
+
+        async def publish() -> None:
             await self.runtime_event_publisher.turn_completed(
-                channel=self.lifecycle_message.channel,
-                chat_id=self.lifecycle_message.chat_id,
+                channel=channel if channel is not None else self.lifecycle_message.channel,
+                chat_id=chat_id if chat_id is not None else self.lifecycle_message.chat_id,
                 session_key=self.session_key,
                 metadata=self.lifecycle_message.metadata,
-                outcome="failed",
-                failure_kind="internal",
+                outcome=outcome,
+                failure_kind=failure_kind,
+                failure_error_kind=failure_error_kind,
+                failure_attempts=failure_attempts,
+                run_id=self.run_id,
             )
+            self.completed = True
+
+        await shield_and_drain(publish())
 
     async def idle(self) -> None:
         await self.runtime_event_publisher.run_status_changed(
@@ -400,7 +453,7 @@ class TurnDelivery:
             self.session_key,
             "idle",
         )
-        self.runtime_event_publisher.clear_turn(self.session_key)
+        self.runtime_event_publisher.clear_turn(self.session_key, run_id=self.run_id)
 
     def _stream_id(self) -> str:
         assert self._stream_base_id is not None

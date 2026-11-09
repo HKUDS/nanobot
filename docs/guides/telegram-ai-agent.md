@@ -28,12 +28,12 @@ Open **Channels → Telegram**:
 
 1. If Telegram support is not installed, turn on its switch and confirm the installation.
 2. Paste the token from BotFather.
-3. If the gateway cannot reach Telegram directly, expand **Advanced** and enter an HTTP or SOCKS proxy such as `http://127.0.0.1:7890`.
+3. If the gateway cannot reach Telegram directly, set an address such as `http://127.0.0.1:7890` in **Settings → Advanced → Shared proxy**, then enable **Use proxy** in Telegram's advanced options.
 4. Save and enable Telegram. For a first private setup, leave the sender allowlist empty: new senders must pair before they can use the agent. Do not set it to `*`.
 
 The configuration badge appears as soon as a bot token is saved. A connection check is separate: if Telegram is temporarily unreachable, the saved configuration remains valid and the bot can continue working in environments where the gateway has network access.
 
-Saved tokens and proxy URLs are masked. A proxy entered here is used both for the connection check and for normal Telegram traffic.
+Saved tokens and proxy URLs are masked. **Use proxy** applies the shared address to both the connection check and normal Telegram traffic.
 
 ## Manual setup
 
@@ -50,17 +50,18 @@ Then merge this snippet into `~/.nanobot/config.json`:
 
 ```json
 {
+  "network": { "proxy": "http://127.0.0.1:7890" },
   "channels": {
     "telegram": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "proxy": "http://127.0.0.1:7890"
+      "useProxy": true
     }
   }
 }
 ```
 
-Omit `proxy` when the gateway can reach Telegram directly.
+Leave `useProxy` off when the gateway can reach Telegram directly.
 
 Omitting `allowFrom` enables pairing-only mode. The first DM from a new user gets a pairing code instead of agent access.
 
@@ -109,7 +110,7 @@ Send the message again after approval. Confirm that your private chat now receiv
 ## Troubleshooting
 
 - If the channel is not listed, run `nanobot plugins enable telegram` again in the same Python environment.
-- If the WebUI shows a saved configuration but the live check cannot reach Telegram, the token is still saved. Confirm the gateway can reach `api.telegram.org`, or open **Advanced → Network proxy** and enter a proxy.
+- If the WebUI shows a saved configuration but the live check cannot reach Telegram, the token is still saved. Confirm the gateway can reach `api.telegram.org`, or configure **Settings → Advanced → Shared proxy** and turn on Telegram's **Use proxy** switch.
 - If Telegram rejects the token, copy the current token from BotFather or regenerate it.
 - If messages do not arrive, check the Telegram runtime status in **Channels** and the logs of the running gateway. Confirm it is enabled and can reach Telegram; do not start a second gateway to diagnose the first.
 - If a first DM returns a pairing code, that is expected. Approve the code before testing normal agent replies.

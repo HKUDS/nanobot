@@ -216,6 +216,32 @@ function catalogFeature(
   };
 }
 
+function configuredEmailFeature(overrides: Partial<NanobotFeatureInfo> = {}): NanobotFeatureInfo {
+  return {
+    ...catalogFeature("email", true),
+    display_name: "Email",
+    webui: "webui/index.ts",
+    config_values: {
+      "channels.email.consentGranted": "true",
+      "channels.email.imapHost": "imap.example.com",
+      "channels.email.imapUsername": "bot@example.com",
+      "channels.email.smtpHost": "smtp.example.com",
+      "channels.email.smtpUsername": "bot@example.com",
+    },
+    configured_fields: [
+      "channels.email.consentGranted",
+      "channels.email.imapHost",
+      "channels.email.imapUsername",
+      "channels.email.imapPassword",
+      "channels.email.smtpHost",
+      "channels.email.smtpUsername",
+      "channels.email.smtpPassword",
+    ],
+    setup: channelSetupContract("email"),
+    ...overrides,
+  };
+}
+
 describe("Settings channels", () => {
   installSettingsViewTestHooks();
 
@@ -430,7 +456,8 @@ describe("Settings channels", () => {
     expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("requires a restart before enabling newly installed channel support", async () => {
+  it("replaces the installed channel switch with an in-row restart action", async () => {
+    const restart = vi.fn();
     const whatsappFeature = {
       name: "whatsapp",
       display_name: "WhatsApp",
@@ -464,7 +491,7 @@ describe("Settings channels", () => {
       finishInstall = resolve;
     }));
     const installedPayload = {
-      features: [{ ...whatsappFeature, installed: true }, weixinFeature],
+      features: [{ ...whatsappFeature, installed: true, restart_pending: true }, weixinFeature],
       enabled_count: 0,
       requires_restart: true,
       last_action: {
@@ -474,7 +501,7 @@ describe("Settings channels", () => {
       },
     };
 
-    renderSettingsView({ initialSection: "channels" });
+    renderSettingsView({ initialSection: "channels", onRestart: restart });
 
     requestMutationMock.mockResolvedValueOnce({ status: "pending", session_id: "test-link" });
     expect(screen.queryByRole("switch", { name: "WhatsApp channel" })).not.toBeInTheDocument();
@@ -494,13 +521,56 @@ describe("Settings channels", () => {
     );
     finishInstall(installedPayload);
     expect(requestMutationMock).not.toHaveBeenCalledWith("settings.channel.connect.start", expect.anything(), expect.anything());
-    expect(await screen.findByText("Restart nanobot to apply updated channel support.")).toBeInTheDocument();
-    const installedGroup = await screen.findByRole("region", { name: "Requires dependencies" });
-    expect(within(installedGroup).getByRole("switch", { name: "WhatsApp channel" })).toBeDisabled();
+    const restartButton = await within(installationGroup).findByRole("button", { name: "Restart nanobot" });
+    const blockedInstallHint = within(installationGroup).getByRole("group", { name: "Install WeChat" });
+    expect(secondInstall).toBeDisabled();
+    await act(async () => { blockedInstallHint.focus(); });
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Restart nanobot before installing another channel.");
+    await userEvent.setup().keyboard("{Enter}");
+    fireEvent.click(secondInstall);
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    expect(restartButton).toBeEnabled();
+    await act(async () => { restartButton.focus(); });
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Restart nanobot to apply updated channel support.");
+    expect(screen.queryByRole("switch", { name: "WhatsApp channel" })).not.toBeInTheDocument();
+    expect(restart).not.toHaveBeenCalled();
+    fireEvent.click(restartButton);
+    expect(restart).toHaveBeenCalledTimes(1);
     expect(requestMutationMock.mock.calls.map(([action]) => action)).toEqual([
       "settings.feature.enable",
     ]);
+  });
 
+  it("keeps a refreshed pending restart on its channel and restores switches after restart", async () => {
+    let restartPending = true;
+    const installed = { ...uninstalledConnectFeature("whatsapp"), installed: true };
+    const other = { ...catalogFeature("Existing", false), requires_restart: true };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") {
+        return jsonResponse({ ...settingsPayload(), requires_restart: restartPending });
+      }
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({
+          features: [{ ...installed, restart_pending: restartPending }, other, uninstalledConnectFeature("weixin")],
+          enabled_count: 0,
+          requires_restart: restartPending,
+        });
+      }
+      return jsonResponse({});
+    }));
+    renderSettingsView({ initialSection: "channels" });
+
+    const installationGroup = await screen.findByRole("region", { name: "Requires dependencies" });
+    expect(await within(installationGroup).findByRole("button", { name: "Restart nanobot" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Existing channel" })).toBeDisabled();
+
+    restartPending = false;
+    await act(async () => { fireEvent(window, new Event("focus")); });
+    expect(await screen.findByRole("switch", { name: "WhatsApp channel" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "WhatsApp channel" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Existing channel" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Install WeChat" })).toBeEnabled();
   });
 
   it.each([
@@ -673,6 +743,7 @@ describe("Settings channels", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Install WhatsApp" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent("Package install failed");
+      expect(screen.getByRole("button", { name: "Install WhatsApp" })).toBeEnabled();
       expect(consoleError).toHaveBeenCalledWith(
         "nanobot feature action failed",
         expect.objectContaining({
@@ -1411,7 +1482,7 @@ describe("Settings channels", () => {
     expect(within(behavior).getByRole("radio", { name: "All messages" })).toBeChecked();
 
     fireEvent.click(advanced);
-    expect(advanced).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(advanced).toHaveAttribute("aria-expanded", "false"));
     expect(behavior).not.toBeVisible();
     advanced.focus();
     await userEvent.setup().keyboard("[Space]");
@@ -1689,8 +1760,8 @@ describe("Settings channels", () => {
     expect(notGranted).toHaveAttribute("aria-invalid", "true");
     expect(granted).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText("Required to complete setup.")).toBeInTheDocument();
-    expect(requestMutationMock.mock.calls.some(([action]) => (
-      action === "settings.channel.validate" || action === "settings.channel.configure"
+    expect(requestMutationMock.mock.calls.some(([action, args]) => (
+      action === "settings.channel.validate" || (action === "settings.channel.configure" && args.enable === true)
     ))).toBe(false);
 
     fireEvent.click(granted);
@@ -1723,7 +1794,7 @@ describe("Settings channels", () => {
     );
   });
 
-  it("autosaves Email edits and waits for the save before closing", async () => {
+  it("commits Email edits on blur and waits for the save before closing", async () => {
     let resolveConfigure: ((value: Record<string, unknown>) => void) | undefined;
     const configureResult = new Promise<Record<string, unknown>>((resolve) => {
       resolveConfigure = resolve;
@@ -1737,38 +1808,7 @@ describe("Settings channels", () => {
         if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [], installed_count: 0 });
         if (url === "/api/settings/nanobot-features") {
           return jsonResponse({
-            features: [{
-              name: "email",
-              display_name: "Email",
-              webui: "webui/index.ts",
-              type: "channel",
-              enabled: true,
-              configured: true,
-              installed: true,
-              ready: true,
-              running: true,
-              runtime_status: "running",
-              status: "enabled",
-              install_supported: true,
-              requires_restart: false,
-              config_values: {
-                "channels.email.consentGranted": "true",
-                "channels.email.imapHost": "imap.example.com",
-                "channels.email.imapUsername": "bot@example.com",
-                "channels.email.smtpHost": "smtp.example.com",
-                "channels.email.smtpUsername": "bot@example.com",
-              },
-              configured_fields: [
-                "channels.email.consentGranted",
-                "channels.email.imapHost",
-                "channels.email.imapUsername",
-                "channels.email.imapPassword",
-                "channels.email.smtpHost",
-                "channels.email.smtpUsername",
-                "channels.email.smtpPassword",
-              ],
-              setup: channelSetupContract("email"),
-            }],
+            features: [configuredEmailFeature({ running: true, runtime_status: "running" })],
             enabled_count: 1,
           });
         }
@@ -1790,6 +1830,7 @@ describe("Settings channels", () => {
     fireEvent.change(screen.getByLabelText("IMAP host"), {
       target: { value: "imap.changed.example.com" },
     });
+    fireEvent.blur(screen.getByLabelText("IMAP host"));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.configure",
@@ -1811,6 +1852,75 @@ describe("Settings channels", () => {
       await configureResult;
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("keeps focused Email advanced edits unsaved when an earlier blur save completes", async () => {
+    const user = userEvent.setup();
+    let resolveConfigure: ((value: Record<string, unknown>) => void) | undefined;
+    const configureResult = new Promise<Record<string, unknown>>((resolve) => {
+      resolveConfigure = resolve;
+    });
+    const emailFeature = configuredEmailFeature();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({ features: [emailFeature], enabled_count: 1 });
+      }
+      return jsonResponse({});
+    }));
+    requestMutationMock
+      .mockResolvedValue({ name: "email", saved: true, saved_keys: ["channels.email.trustedAuthservIds"] })
+      .mockReturnValueOnce(configureResult);
+
+    renderSettingsView({ initialSection: "channels" });
+    await user.click(await screen.findByRole("button", { name: "View Email settings" }));
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
+    const fromAddress = screen.getByRole("textbox", { name: "From address" });
+    const trustedServices = screen.getByRole("textbox", { name: "Trusted authentication services" });
+
+    await user.type(fromAddress, "changed@example.com");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    await user.click(trustedServices);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(1));
+    expect(requestMutationMock).toHaveBeenNthCalledWith(
+      1,
+      "settings.channel.configure",
+      {
+        name: "email",
+        values: expect.objectContaining({ "channels.email.fromAddress": "changed@example.com" }),
+      },
+      150_000,
+    );
+    expect(requestMutationMock.mock.calls[0][1].values).not.toHaveProperty("channels.email.trustedAuthservIds");
+    expect(screen.getByText("Saving")).toBeVisible();
+
+    await user.type(trustedServices, "mx.receiver.example");
+    expect(trustedServices).toHaveFocus();
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveConfigure?.({ name: "email", saved: true, saved_keys: ["channels.email.fromAddress"] });
+      await configureResult;
+    });
+
+    expect(trustedServices).toHaveFocus();
+    expect(trustedServices).toHaveValue("mx.receiver.example");
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+
+    await user.tab();
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledTimes(2));
+    expect(requestMutationMock).toHaveBeenNthCalledWith(
+      2,
+      "settings.channel.configure",
+      {
+        name: "email",
+        values: expect.objectContaining({
+          "channels.email.fromAddress": "changed@example.com",
+          "channels.email.trustedAuthservIds": "mx.receiver.example",
+        }),
+      },
+      150_000,
+    );
   });
 
   it("prefills saved channel config without exposing secrets", async () => {
@@ -2114,18 +2224,81 @@ describe("Settings channels", () => {
     renderSettingsView({ initialSection: "channels" });
     fireEvent.click(await screen.findByRole("button", { name: "View QQ settings" }));
 
-    expect(await screen.findByRole("img", { name: "QQ login QR code" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "QQ binding QR code" })).toBeInTheDocument();
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.connect.start", { channel: "qq" }, 150_000,
     );
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.channel.connect.poll", { channel: "qq", session_id: "qq-1" }, 150_000,
     ));
-    expect(await screen.findByText("QQ is connected.")).toBeInTheDocument();
-    expect(screen.getByText(/previous App Secret stops working/)).toBeInTheDocument();
+    expect(await screen.findByText("Configured")).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rebinding may interrupt other apps/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByLabelText("App ID")).toHaveValue("1024");
     expect(screen.getByLabelText("Acknowledgement message")).toHaveValue("⏳ Processing...");
+  });
+
+  it("keeps saved QQ setup distinct from a running connection when reopening settings", async () => {
+    const qqFeature: NanobotFeatureInfo = {
+      ...catalogFeature("qq", false),
+      display_name: "QQ",
+      webui: "webui/index.tsx",
+      configured: true,
+      runtime_status: "stopped",
+      config_values: { "channels.qq.appId": "1024" },
+      configured_fields: ["channels.qq.appId", "channels.qq.secret"],
+      setup: channelSetupContract("qq"),
+    };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/nanobot-features") {
+        return jsonResponse({ features: [qqFeature], enabled_count: 0 });
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    }));
+
+    renderSettingsView({ initialSection: "channels" });
+    fireEvent.click(await screen.findByRole("button", { name: "View QQ settings" }));
+    expect(await screen.findByText("Configured")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("Not running")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).queryByText("Running")).not.toBeInTheDocument();
+    expect(screen.getByText("1024")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rebind bot" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "QQ binding QR code" })).not.toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Enter credentials manually" }));
+    expect(screen.getByRole("group", { name: "Manual credentials" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Access" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Behavior" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Advanced" })).toBeInTheDocument();
+    expect(screen.getByLabelText("App ID")).toHaveValue("1024");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "View QQ settings" }));
+    const rebind = await screen.findByRole("button", { name: "Rebind bot" });
+    expect(screen.queryByText(/Rebinding may interrupt other apps/)).not.toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    rebind.focus();
+    fireEvent.click(rebind);
+    const confirmation = await screen.findByRole("alertdialog", { name: "Rebind bot" });
+    expect(confirmation).toHaveTextContent("Rebinding may interrupt other apps using this QQ bot. If the App Secret is reset, the old secret becomes invalid and those apps need the new secret.");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(screen.queryByText(/Rebinding may interrupt other apps/)).not.toBeInTheDocument();
+    expect(rebind).toHaveFocus();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+
+    requestMutationMock.mockResolvedValue({ status: "pending", session_id: "qq-rebind", qr_url: "https://example.com/qq-rebind" });
+    fireEvent.click(rebind);
+    fireEvent.click(within(await screen.findByRole("alertdialog", { name: "Rebind bot" }))
+      .getByRole("button", { name: "Rebind bot" }));
+    expect(await screen.findByRole("img", { name: "QQ binding QR code" })).toBeInTheDocument();
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    expect(requestMutationMock).toHaveBeenCalledWith("settings.channel.connect.start", { channel: "qq" }, 150_000);
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
   it("keeps the WebUI websocket channel enabled without opening a setup dialog", async () => {

@@ -106,7 +106,6 @@ def test_launcher_passes_the_canonical_model_preset_to_the_tui(
     monkeypatch.setattr("nanobot.cli.tui_launcher.resolve_tui_command", lambda: ["nanobot-tui"])
     def ensure_gateway(*args: object, **kwargs: object) -> SimpleNamespace:
         assert events == ["spawned"]
-        assert kwargs["wait_until_ready"] is False
         return SimpleNamespace(
             base_url="http://127.0.0.1:8765",
             lease=FakeLease(),
@@ -244,18 +243,6 @@ def test_launcher_keeps_the_tui_alive_while_an_existing_gateway_recovers(
             "launcher must not probe readiness for a live recovering gateway"
         ),
     )
-    monkeypatch.setattr(
-        tui_launcher,
-        "time",
-        SimpleNamespace(
-            monotonic=lambda: pytest.fail(
-                "launcher must not wait for a live gateway to recover"
-            ),
-            sleep=lambda _seconds: pytest.fail(
-                "launcher must not sleep for gateway recovery"
-            ),
-        ),
-    )
 
     result = launch_tui(
         config,
@@ -356,13 +343,16 @@ def test_source_checkout_does_not_fall_back_to_a_release_tui_without_bun(
         "nanobot.cli.tui_launcher._source_checkout_tui_dir",
         lambda: source_dir,
     )
-    monkeypatch.setattr("nanobot.cli.tui_launcher.shutil.which", lambda _name: None)
+    def unavailable():
+        raise tui_launcher.BunUnavailableError("Bun download failed")
+
+    monkeypatch.setattr(tui_launcher, "ensure_bun", unavailable)
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher._download_release_tui",
         lambda _asset: pytest.fail("a source checkout must not download a release TUI"),
     )
 
-    with pytest.raises(TuiUnavailableError, match="source checkout requires Bun"):
+    with pytest.raises(TuiUnavailableError, match="Bun download failed"):
         resolve_tui_command()
 
 
@@ -539,6 +529,7 @@ def test_source_checkout_refreshes_locked_tui_dependencies(
     source_dir.mkdir()
     (source_dir / "node_modules" / "@opentui" / "core").mkdir(parents=True)
     bun = str(tmp_path / "bun")
+    Path(bun).write_bytes(b"runtime")
 
     def install(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert command == [bun, "install", "--frozen-lockfile"]
@@ -563,13 +554,15 @@ def test_source_checkout_fails_when_locked_dependencies_cannot_be_refreshed(
 ) -> None:
     source_dir = tmp_path / "tui"
     source_dir.mkdir()
+    bun = tmp_path / "bun"
+    bun.write_bytes(b"runtime")
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher.subprocess.run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args, 1, "", "lockfile mismatch"),
     )
 
     with pytest.raises(TuiUnavailableError, match="lockfile mismatch"):
-        _resolve_source_tui_command(source_dir, "bun")
+        _resolve_source_tui_command(source_dir, str(bun))
 
 
 def test_release_tui_is_verified_and_cached(
@@ -762,11 +755,6 @@ def test_gateway_reuses_the_matching_managed_instance(
             raise AssertionError(f"unowned gateway stopped with timeout {timeout_s}")
 
     monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
-    monkeypatch.setattr("nanobot.cli.tui_launcher._webui_endpoint_reachable", lambda _url: True)
-    monkeypatch.setattr(
-        "nanobot.cli.tui_launcher._gateway_health_ready",
-        lambda *_args, **_kwargs: True,
-    )
 
     gateway = _ensure_gateway(
         config,
@@ -803,115 +791,16 @@ def test_gateway_reuse_returns_a_degraded_live_gateway_without_waiting(
         "nanobot.cli.tui_launcher._webui_endpoint_reachable",
         lambda _url: pytest.fail("non-blocking reuse must not probe readiness"),
     )
-    monkeypatch.setattr(
-        tui_launcher,
-        "time",
-        SimpleNamespace(
-            monotonic=lambda: pytest.fail(
-                "non-blocking reuse must not enter the readiness wait"
-            ),
-            sleep=lambda _seconds: pytest.fail("non-blocking reuse must not sleep"),
-        ),
-    )
-
     gateway = _ensure_gateway(
         config,
         config_path=tmp_path / "config.json",
         workspace_override=None,
-        wait_until_ready=False,
     )
 
     assert gateway.base_url == "http://127.0.0.1:8765"
     assert gateway.lease is not None
     assert status_calls == 1
     gateway.lease.release(wait_for_stop=False)
-
-
-def test_gateway_reuse_waits_for_a_live_gateway_to_recover_its_webui_listener(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    config = Config()
-    endpoint_results = iter((False, False, True))
-
-    class FakeRuntime:
-        def __init__(self, *, paths: object) -> None:
-            self.paths = paths
-
-        def status(self) -> SimpleNamespace:
-            return SimpleNamespace(
-                running=True,
-                port=config.gateway.port,
-                log_path=tmp_path / "gateway.log",
-            )
-
-    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
-    monkeypatch.setattr(
-        "nanobot.cli.tui_launcher._webui_endpoint_reachable",
-        lambda _url: next(endpoint_results),
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.tui_launcher._gateway_health_ready",
-        lambda *_args, **_kwargs: True,
-    )
-    clock = iter((0.0, 0.0, 0.1))
-    sleeps: list[float] = []
-    monkeypatch.setattr(
-        tui_launcher,
-        "time",
-        SimpleNamespace(monotonic=lambda: next(clock), sleep=sleeps.append),
-    )
-
-    gateway = _ensure_gateway(
-        config,
-        config_path=tmp_path / "config.json",
-        workspace_override=None,
-    )
-
-    assert gateway.base_url == "http://127.0.0.1:8765"
-    assert gateway.lease is not None
-    assert sleeps == [tui_launcher._GATEWAY_READY_POLL_S]
-    gateway.lease.release(wait_for_stop=False)
-
-
-def test_gateway_reuse_with_explicit_wait_rejects_a_live_but_unready_gateway(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    config = Config()
-
-    class FakeRuntime:
-        def __init__(self, *, paths: object) -> None:
-            self.paths = paths
-
-        def status(self) -> SimpleNamespace:
-            return SimpleNamespace(
-                running=True,
-                port=config.gateway.port,
-                log_path=tmp_path / "gateway.log",
-            )
-
-    monkeypatch.setattr("nanobot.gateway.GatewayRuntime", FakeRuntime)
-    monkeypatch.setattr(
-        "nanobot.cli.tui_launcher._webui_endpoint_reachable",
-        lambda _url: False,
-    )
-    clock = iter((0.0, tui_launcher._GATEWAY_READY_TIMEOUT_S))
-    monkeypatch.setattr(
-        tui_launcher,
-        "time",
-        SimpleNamespace(
-            monotonic=lambda: next(clock),
-            sleep=lambda _seconds: pytest.fail("expired readiness wait must not sleep"),
-        ),
-    )
-
-    with pytest.raises(TuiUnavailableError, match="process is running.*listener is unavailable"):
-        _ensure_gateway(
-            config,
-            config_path=tmp_path / "config.json",
-            workspace_override=None,
-        )
 
 
 def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
@@ -959,10 +848,6 @@ def test_gateway_started_for_tui_stops_when_its_last_lease_exits(
     monkeypatch.setattr(
         "nanobot.cli.tui_launcher._webui_endpoint_reachable",
         lambda _url: started,
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.tui_launcher._gateway_health_ready",
-        lambda *_args, **_kwargs: started,
     )
 
     gateway = _ensure_gateway(

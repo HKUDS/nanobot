@@ -58,6 +58,7 @@ For shorter, outcome-focused walkthroughs, browse the [task guide index](./guide
 | Need | Read |
 |---|---|
 | Commands and flags | [CLI Reference](./cli-reference.md) |
+| Update an installation or recover an interrupted update | [Updating nanobot](./updating.md) |
 | In-chat slash commands | [In-Chat Commands](./chat-commands.md) |
 | Config, workspace, gateway, sessions, tools, and memory in plain language | [Concepts](./concepts.md) |
 | Provider/model matching and selection | [Providers and Models](./providers.md) |
@@ -90,5 +91,7 @@ These pages explain implementation and extension points. You do not need them to
 | Set up a development environment | [Development](./development.md) and [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | Add a channel package | [Channel Package Guide](./channel-package-guide.md) |
 | Build the WebUI source | [WebUI Development](../webui/README.md) |
+| Change update APIs, execution or recovery | [Update protocol](./update-protocol.md) |
+| Prepare and publish a release | [Release checklist](./releasing.md) |
 
 If a command or screen no longer matches these docs, please [open an issue](https://github.com/HKUDS/nanobot/issues) with your nanobot version, operating system, and the page that needs correction.

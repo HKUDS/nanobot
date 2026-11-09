@@ -27,7 +27,6 @@ from nanobot.pairing.store import approve_code, generate_code
 def test_upgrade_preserves_existing_installation_and_pairing(tmp_path: Path) -> None:
     path = tmp_path / "state.sqlite3"
     original = _installation()
-    # Schema immediately before member access and authorization-generation tracking.
     with sqlite3.connect(path) as connection:
         connection.execute("""CREATE TABLE installations (
             organization_id TEXT PRIMARY KEY, oauth_client_id TEXT NOT NULL,
@@ -55,7 +54,6 @@ def test_upgrade_preserves_existing_installation_and_pairing(tmp_path: Path) -> 
     assert reopened.installation("org-1") == original
     assert not member_allowed(config, reopened, "org-1", "user-1")
     with sqlite3.connect(path) as connection:
-        # Additive migration retains the old reader's columns and token values.
         row = connection.execute(
             "SELECT access_token, refresh_token, authorized_at FROM installations "
             "WHERE organization_id = ?", ("org-1",),
@@ -73,7 +71,6 @@ def test_member_choice_overrides_legacy_and_survives_restart(tmp_path: Path, leg
     state.save_installation(_installation())
     assert member_allowed(config, state, "org-1", "user-1") is (legacy != "none")
     state.set_member_access(config.client_id, "org-1", "user-1", allowed=False)
-    # A new legacy approval must not resurrect an explicit off switch.
     approve_code(generate_code("linear", "user-1"))
     reopened = LinearStateStore(state.path)
     assert not member_allowed(config, reopened, "org-1", "user-1")
@@ -134,7 +131,6 @@ def test_reauthorize_keeps_choices_but_remove_and_reconnect_uses_legacy_fallback
     state.set_member_access(config.client_id, "org-1", "user-1", allowed=allowed)
     state.set_member_access(config.client_id, "org-2", "user-1", allowed=not allowed)
 
-    # Reauthorization updates tokens without duplicating the workspace or resetting choices.
     renewed = replace(first, access_token="renewed", refresh_token="renewed-refresh")
     state.save_installation(renewed)
     reopened = LinearStateStore(state.path)
@@ -142,7 +138,6 @@ def test_reauthorize_keeps_choices_but_remove_and_reconnect_uses_legacy_fallback
     assert member_allowed(config, reopened, "org-1", "user-1") is allowed
     assert member_allowed(config, reopened, "org-2", "user-1") is not allowed
 
-    # Deliberately removing a workspace clears only its explicit choices, not pairing.
     reopened.delete_installation("org-1")
     assert not member_allowed(config, reopened, "org-1", "user-1")
     reopened.save_installation(renewed)

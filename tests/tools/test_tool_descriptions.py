@@ -65,7 +65,8 @@ def test_exec_tool_descriptions_are_concise() -> None:
     assert ListExecSessionsTool().description == "List active exec sessions."
 
     exec_parameters = ExecTool().parameters["properties"]
-    assert "omit to wait for exit" in exec_parameters["yield_time_ms"]["description"]
+    assert "default 1000" in exec_parameters["yield_time_ms"]["description"]
+    assert "execution continues" in exec_parameters["yield_time_ms"]["description"]
     runtime_description = exec_parameters["max_runtime"]["description"].lower()
     assert "hard" in runtime_description
     assert "seconds" in runtime_description
@@ -83,7 +84,7 @@ def test_exec_tool_descriptions_are_concise() -> None:
         "until_exit",
         "timeout_ms",
     }
-    assert session_parameters["until_exit"]["description"] == "Wait for the process to exit."
+    assert "within timeout_ms" in session_parameters["until_exit"]["description"]
     assert "wait_for" in session_parameters["timeout_ms"]["description"]
     assert "until_exit" in session_parameters["timeout_ms"]["description"]
 

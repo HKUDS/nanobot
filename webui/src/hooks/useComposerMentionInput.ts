@@ -19,7 +19,7 @@ export function useComposerMentionInput({
 }) {
   const text = useMemo(() => composerMentionText(segments), [segments]);
   const textRef = useRef(text);
-  const pendingSelection = useRef<{ start: number; end: number } | null>(null);
+  const pendingSelection = useRef<{ start: number; end: number; preserveFocus?: boolean } | null>(null);
   const history = useRef<{ undo: Snapshot[]; redo: Snapshot[] }>({ undo: [], redo: [] });
   const lastEdit = useRef({ type: "", at: 0, cursor: -1 });
   const composing = useRef(false);
@@ -42,10 +42,10 @@ export function useComposerMentionInput({
     return selection;
   }, [inputRef]);
 
-  const selectRaw = useCallback((start: number, end = start) => {
+  const selectRaw = useCallback((start: number, end = start, preserveFocus = false) => {
     const el = inputRef.current;
-    // Focus first: removing a queued prompt's edit button can reset a blurred selection.
-    el?.focus();
+    // Focus first for user actions; passive attachment confirmation keeps the active control.
+    if (!preserveFocus) el?.focus();
     el?.setSelectionRange(
       mentionTextOffset(textRef.current, start, "toDisplay", "start"),
       mentionTextOffset(textRef.current, end, "toDisplay", "end"),
@@ -74,13 +74,13 @@ export function useComposerMentionInput({
     }
     textRef.current = text;
     if (!composing.current && pendingSelection.current) {
-      const { start, end } = pendingSelection.current;
-      selectRaw(start, end);
+      const { start, end, preserveFocus } = pendingSelection.current;
+      selectRaw(start, end, preserveFocus);
       pendingSelection.current = null;
     }
   });
 
-  const apply = useCallback((value: string, cursor: number, type = "", selection = rawSelection()) => {
+  const apply = useCallback((value: string, cursor: number, type = "", selection = rawSelection(), preserveFocus = false) => {
     const previous = textRef.current;
     if (value !== previous.raw) {
       const now = Date.now();
@@ -93,9 +93,13 @@ export function useComposerMentionInput({
       history.current.redo = [];
       lastEdit.current = { type, at: now, cursor };
     }
-    pendingSelection.current = value === previous.raw ? null : { start: cursor, end: cursor };
+    pendingSelection.current = value === previous.raw ? null : { start: cursor, end: cursor, preserveFocus };
     onEdit(value, cursor);
   }, [onEdit, rawSelection]);
+
+  const replace = useCallback((value: string, cursor: number, { preserveFocus = false } = {}) => {
+    apply(value, cursor, "", undefined, preserveFocus);
+  }, [apply]);
 
   const beforeSelection = useRef<{ start: number; end: number; raw: { start: number; end: number } } | null>(null);
   const captureSelection = useCallback(() => {
@@ -170,7 +174,7 @@ export function useComposerMentionInput({
     ),
     isComposing: compositionValue !== null,
     rawSelection,
-    replace: apply,
+    replace,
     onChange,
     onKeyDown,
     onCopy: (event: ClipboardEvent<HTMLTextAreaElement>) => copy(event, false),

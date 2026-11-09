@@ -141,7 +141,6 @@ export default function MermaidBlock({ source }: { source: string }) {
     {showSource ? <CodeBlock language="mermaid" code={source} chrome="none" highlight={false} showLineNumbers={source.includes("\n")} />
       : image ? <div className="flex justify-center p-3"><img src={image.url} alt={image.label || t("diagram.title")} width={image.width} height={image.height} className="max-h-[28rem] max-w-full object-contain" /></div>
       : <div className="px-3 py-2" style={{ minHeight: height.current || undefined }}>
-        <p className="m-0 py-1 text-xs text-muted-foreground" role="status">{t("diagram.preparing")}</p>
         {!height.current && <CodeBlock language="mermaid" code={source} chrome="none" highlight={false} />}
       </div>}
   </div>;

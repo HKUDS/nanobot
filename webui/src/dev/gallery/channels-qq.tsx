@@ -5,7 +5,7 @@ import type { ChannelConnectPayload } from "@/lib/types";
 import { StatePicker, type ComponentExample } from "./example";
 import { useGalleryTranslation } from "./i18n";
 
-const connectStates = ["idle", "starting", "pending", "succeeded", "expired", "failed", "cancelled", "error"] as const;
+const connectStates = ["idle", "starting", "pending", "retrying", "succeeded", "expired", "failed", "cancelled", "error"] as const;
 type ConnectState = typeof connectStates[number];
 
 function QQConnectionPreview() {
@@ -13,7 +13,8 @@ function QQConnectionPreview() {
   const [state, setState] = useState<ConnectState>("pending");
   const connect: ChannelConnectPayload | null = state === "idle" || state === "starting" || state === "error"
     ? null
-    : { session_id: "gallery-qq", status: state, qr_url: "https://example.invalid/qq-authorization" };
+    : { session_id: "gallery-qq", status: state === "retrying" ? "pending" : state,
+      retrying: state === "retrying", qr_url: "https://example.invalid/qq-authorization" };
   return <>
     <StatePicker label={t("previews.channelConnect.state", { channel: "QQ" })} value={state} options={connectStates} onChange={setState} />
     <QQConnectFlowView connect={connect} busy={state === "starting"} autoStart={state === "starting"}

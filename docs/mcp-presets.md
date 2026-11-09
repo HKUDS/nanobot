@@ -2,6 +2,8 @@
 
 Open **Apps → MCP** to find a service, configure its connection, and select **Connect**. Presets save MCP server configuration; the gateway discovers and runs the tools. Each service still requires its own account access and permissions. The tables below list all built-in presets.
 
+For a remote HTTP/SSE service that needs a proxy, first set the shared address in **Settings → Advanced → Shared proxy**, then turn on **Use proxy** in its connection dialog before selecting **Connect**. The gateway uses that route for MCP requests and authorization. The browser's sign-in page still uses your browser's own network settings. Local stdio servers keep their own networking configuration.
+
 ## Hosted services
 
 Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the credential listed below and add it to the required HTTP header or URL parameter. Paste the token itself into the credential field.
@@ -23,7 +25,6 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 | Airtable | Browser OAuth | [Official guide](https://support.airtable.com/articles/9897799762-using-the-airtable-mcp-server) |
 | Miro | Browser OAuth | [Official guide](https://developers.miro.com/docs/connecting-to-miro-mcp) |
 | Whimsical | Browser OAuth | [Official guide](https://whimsical.com/learn/integrations/mcp) |
-| Figma (remote) | Browser OAuth | [Official guide](https://developers.figma.com/docs/figma-mcp-server/) |
 | Supabase (remote) | Browser OAuth | [Official guide](https://supabase.com/docs/guides/ai-tools/mcp) |
 | Neon | Browser OAuth | [Official guide](https://neon.com/docs/ai/neon-mcp-server) |
 | Vercel | Browser OAuth | [Official guide](https://vercel.com/docs/agent-resources/vercel-mcp) |
@@ -121,7 +122,7 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 
 Datadog uses the MCP endpoint for your Datadog site and a Personal or Service Access Token. DigitalOcean publishes separate endpoints for its services; copy the endpoint for the service you need. Metabase requires an instance with MCP enabled. Copy Sigma's URL from **Profile → Integrations** and Descript's URL from **Settings → Descript MCP**.
 
-Figma uses the desktop app's local MCP endpoint, and Supabase starts a local server in read-only mode. Their **(remote)** variants use browser sign-in. GitHub uses Docker; **GitHub (remote)** uses a personal access token. Changes to credentials retain the connection's tool selection, timeout, and other saved settings.
+Figma uses the desktop app's local MCP endpoint. Supabase starts a local server in read-only mode; **Supabase (remote)** uses browser sign-in. GitHub uses Docker; **GitHub (remote)** uses a personal access token. Changes to credentials retain the connection's tool selection, timeout, and other saved settings.
 
 ## Local servers
 

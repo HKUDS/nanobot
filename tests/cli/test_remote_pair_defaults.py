@@ -1,5 +1,3 @@
-"""Server pairing suggests a real login account, never blindly trusts SUDO_USER."""
-
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import Mock

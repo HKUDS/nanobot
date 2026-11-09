@@ -93,6 +93,7 @@ async def test_dispatch_cancellation_restores_checkpoint():
     )
 
     loop.sessions.get_or_create = MagicMock(return_value=session)
+    loop.sessions.state.read = AsyncMock(return_value=session)
     loop.sessions.save = MagicMock()
 
     async def _cancel(*_args, **_kwargs):
@@ -112,13 +113,12 @@ async def test_dispatch_cancellation_restores_checkpoint():
     )
     assert checkpoint_key not in session.metadata, \
         "Checkpoint metadata should be cleared after restore"
-    assert loop.sessions.state.restore_interruption.await_count == 1, \
+    assert loop.sessions.state.finish_turn.await_count == 1, \
         "Session should be persisted so the restored state survives process restart"
 
 
 @pytest.mark.asyncio
 async def test_dispatch_cancellation_keeps_checkpoint_for_gateway_shutdown(tmp_path: Path) -> None:
-    """Gateway shutdown preserves the checkpoint; an explicit stop restores it."""
     loop = _make_loop(tmp_path)
     loop.preserve_inflight_turns_on_shutdown()
     checkpoint_key = RUNTIME_CHECKPOINT_KEY

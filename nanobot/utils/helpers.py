@@ -1,16 +1,10 @@
-"""Utility functions for nanobot."""
-
 from __future__ import annotations
 
 import base64
-import errno
 import json
-import os
 import re
 import shutil
 import time
-import uuid
-from collections.abc import Iterable
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +13,8 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
 from loguru import logger
 
+from nanobot.utils.atomic_file import atomic_write_lines as atomic_write_lines
+from nanobot.utils.atomic_file import atomic_write_text as atomic_write_text
 from nanobot.utils.file_io import ensure_dir as ensure_dir
 from nanobot.utils.file_io import write_text_atomic as _write_text_atomic
 from nanobot.utils.token_encoding import get_token_encoding as _get_token_encoding
@@ -132,7 +128,6 @@ def _estimate_tools_tokens(
     *,
     leading_separator: bool,
 ) -> int:
-    """Estimate stable tool definition tokens without re-encoding every loop."""
     # ToolRegistry keeps the returned definitions list alive until the registry changes.
     tools_id = id(tools)
     fingerprint = tuple(id(tool) for tool in tools)
@@ -198,10 +193,8 @@ def strip_think(text: str) -> str:
     tokens mid-text would silently rewrite any message where a user or the
     assistant discusses the tokens themselves.
     """
-    # Every supported control tag contains '<'; ordinary text only needs trimming.
     if "<" not in text:
         return text.strip()
-    # Well-formed blocks first.
     text = re.sub(rf"<(?P<tag>{_THINKING_TAG})>[\s\S]*?</(?P=tag)>", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>[\s\S]*$", "", text)
     # Self-closing `<thinking/>` is an empty marker, not user-visible text.
@@ -214,7 +207,6 @@ def strip_think(text: str) -> str:
     # Unicode regex mode it matches CJK characters too, which would defeat
     # the primary fix for `<think广场…` leaks.
     text = re.sub(rf"<{_THINKING_TAG}(?![A-Za-z0-9_\-:>/])", "", text)
-    # Edge-only orphan closing tags (start or end of text).
     text = re.sub(rf"^\s*</{_THINKING_TAG}>\s*", "", text)
     text = re.sub(rf"\s*</{_THINKING_TAG}>\s*$", "", text)
     # Edge-only channel markers (harmony / Gemma 4 variant leaks).
@@ -441,7 +433,6 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
 
 
 def _truncate_text_to_utf8_bytes(text: str, max_bytes: int) -> str:
-    """Return the longest code-point prefix within a UTF-8 byte budget."""
     if max_bytes <= 0:
         return ""
     encoded = text.encode("utf-8")
@@ -552,67 +543,6 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
     siblings.sort(key=_bucket_mtime, reverse=True)
     for path in siblings[keep:]:
         shutil.rmtree(path, ignore_errors=True)
-
-
-def atomic_write_text(path: Path, content: str) -> None:
-    """Create parent directories and durably replace *path* with UTF-8 text."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-        _fsync_directory_after_replace(path.parent)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
-
-
-def atomic_write_lines(path: Path, lines: Iterable[str], *, fsync: bool = True) -> None:
-    """Atomically replace *path* with already-serialized record lines.
-
-    Each item is one record. A trailing newline is added when the item does
-    not already end with one. The bytes are written to a uniquely named temp
-    file in the same directory, then published with ``os.replace``.
-
-    ``fsync=True`` (the default) flushes and fsyncs the file before the
-    replace, then fsyncs the parent directory. ``fsync=False`` skips both,
-    which session saves use when the caller does not ask for durability.
-    Directory fsync suppresses ``PermissionError`` (Windows cannot open a
-    directory this way) and ``EINVAL`` (filesystems that reject directory
-    fsync). Any other directory fsync error propagates. The temp file is
-    removed on every ``BaseException``.
-    """
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        with open(tmp, "x", encoding="utf-8") as handle:
-            for line in lines:
-                handle.write(line if line.endswith("\n") else f"{line}\n")
-            if fsync:
-                handle.flush()
-                os.fsync(handle.fileno())
-        os.replace(tmp, path)
-        if fsync:
-            _fsync_directory_after_replace(path.parent)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
-
-
-def _fsync_directory_after_replace(directory: Path) -> None:
-    """Fsync *directory* after a replace, ignoring unsupported platforms."""
-    with suppress(PermissionError):
-        fd = os.open(str(directory), os.O_RDONLY)
-        try:
-            try:
-                os.fsync(fd)
-            except OSError as exc:
-                if exc.errno != errno.EINVAL:
-                    raise
-        finally:
-            os.close(fd)
 
 
 def maybe_persist_tool_result(
@@ -769,11 +699,6 @@ def _estimate_prompt_tokens_with_source(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> tuple[int, str]:
-    """Estimate prompt tokens and identify the counter used.
-
-    Counts all fields that providers send to the LLM: content, tool_calls,
-    reasoning_content, tool_call_id, name, plus per-message framing overhead.
-    """
     parts: list[str] = []
     for msg in messages:
         content = msg.get("content")
@@ -982,7 +907,6 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
 
-    # Initialize git for memory version control
     try:
         from nanobot.utils.gitstore import GitStore
 

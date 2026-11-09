@@ -1,8 +1,7 @@
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { MessageBlockMenuActions, MessageBubble, MessageCopyButton } from "@/components/MessageBubble";
-import { MessageLinksMenu, useMessageWebLinks } from "@/components/MessageLinksMenu";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import {
   AgentActivityCluster,
@@ -395,7 +394,6 @@ interface ThreadDisplayUnitProps {
 
 interface MessageBlockMenuProps {
   mobileActions: boolean;
-  messageRoot: RefObject<HTMLElement>;
   message: UIMessage;
   isTurnStreaming: boolean;
   contextBlockKey: string;
@@ -414,7 +412,6 @@ interface MessageBlockMenuProps {
 
 function MessageBlockMenu({
   mobileActions,
-  messageRoot,
   message,
   isTurnStreaming,
   contextBlockKey,
@@ -428,9 +425,6 @@ function MessageBlockMenu({
   const { t } = useTranslation();
   const contentRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const links = useMessageWebLinks(messageRoot, open);
-  const [linksShown, setLinksShown] = useState(false);
-  useEffect(() => { if (!open) setLinksShown(false); }, [open]);
   const [triggerHeight, setTriggerHeight] = useState(28);
   useLayoutEffect(() => {
     const trigger = triggerRef.current;
@@ -451,16 +445,12 @@ function MessageBlockMenu({
   // Re-evaluated when this message becomes active, including after an overnight idle.
   const shortTime = mobileActions ? "" : formatMessageHoverTime(timestamp);
   const fullTime = shortTime ? fmtDateTime(timestamp) : "";
-  const actions = linksShown && links.length > 0 ? <MessageLinksMenu links={links}
-    expanded={mobileActions}
-    onBack={() => { setLinksShown(false); contentRef.current?.focus({ preventScroll: true }); }}
-    onClose={() => onOpenChange(false)} /> : <MessageBlockMenuActions
+  const actions = <MessageBlockMenuActions
     message={message}
     isTurnStreaming={isTurnStreaming}
     onForkFromHere={onForkFromHere ? () => { if (mobileActions) onOpenChange(false); onForkFromHere(); } : undefined}
     activity={activity}
     sheet={mobileActions}
-    onViewLinks={links.length > 0 ? () => setLinksShown(true) : undefined}
   />;
   if (mobileActions) {
     return <div data-message-mobile-actions className={cn("mt-1 flex items-center", message.role === "user" ? "me-2 justify-end" : "-ms-2")}>
@@ -476,7 +466,7 @@ function MessageBlockMenu({
           data-message-block-menu data-message-mobile-sheet data-message-context-menu-block={contextBlockKey}
           className="gap-2 p-4 pt-5 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none"
           onCloseAutoFocus={(event) => { if (activity?.expanded) event.preventDefault(); }}>
-          <DialogTitle className="px-2 pb-2 pe-10 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
+          <DialogTitle className="px-2 pb-2 text-sm font-medium text-muted-foreground">{label}</DialogTitle>
           {actions}
         </DialogContent>
       </Dialog>
@@ -612,7 +602,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   useEffect(() => {
     const element = elementRef.current;
     if (!element || !deferOffscreenRender || interacted || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(([entry]) => {
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
       if (!entry) return;
       if (!entry.isIntersecting) {
         const height = element.getBoundingClientRect().height;
@@ -664,7 +655,6 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   const blockMenu = unit.type === "message" && contextBlockKey !== undefined ? (
     <MessageBlockMenu
       mobileActions={mobileActions}
-      messageRoot={elementRef}
       message={unit.message}
       isTurnStreaming={isTurnStreaming}
       contextBlockKey={contextBlockKey}

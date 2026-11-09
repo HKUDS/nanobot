@@ -110,7 +110,6 @@ def test_auto_routing_retains_same_connection_settings_but_new_connection_accept
         "name": ["primary"], "provider": ["auto"], "model": ["tenant_a/new"],
     }, oauth_status=_oauth_status)
     assert config.model_presets["primary"].extra_headers == {"X-Token": "private"}
-    # A stale form must not restore the old connection's redacted credential.
     with pytest.raises(WebUISettingsError):
         update_model_configuration(config.model_copy(deep=True), {
             "name": ["primary"], "provider": ["tenant_b"],

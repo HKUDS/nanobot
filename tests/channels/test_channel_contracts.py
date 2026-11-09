@@ -1,5 +1,3 @@
-"""Shared contract tests for self-contained channel packages."""
-
 from __future__ import annotations
 
 import subprocess

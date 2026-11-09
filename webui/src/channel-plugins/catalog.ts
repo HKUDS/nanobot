@@ -44,6 +44,7 @@ type ChannelCatalogSetupPresentation = {
 export type ChannelFieldPresentation = {
   key: string;
   section?: string;
+  control?: "switch";
 };
 
 export type ChannelFieldSection =
@@ -87,6 +88,7 @@ export type ChannelConfigField = {
   kind?: "string" | "secret" | "int" | "bool" | "list" | "enum" | string;
   section?: string;
   defaultValue?: string;
+  control?: "switch";
   options?: ChannelConfigOption[];
 };
 

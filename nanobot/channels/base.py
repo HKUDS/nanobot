@@ -1,15 +1,17 @@
-"""Base channel interface for chat platforms."""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
+from nanobot.config.network import NetworkConfig
 from nanobot.pairing import (
     PAIRING_CODE_META_KEY,
     format_pairing_reply,
@@ -17,6 +19,8 @@ from nanobot.pairing import (
     is_approved,
     record_delivery,
 )
+from nanobot.pairing.events import PairingChanged
+from nanobot.utils.tool_hints import format_tool_event_hints
 
 
 class BaseChannel(ABC):
@@ -29,20 +33,27 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
+    # Opt-in construction capability, not a channel configuration field.
+    uses_shared_proxy: bool = False
     send_progress: bool = True
     send_tool_hints: bool = True
+    tool_hint_max_length: int = 40
     show_reasoning: bool = True
     show_compaction_notices: bool = False
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         """
         Initialize the channel.
 
         Args:
             config: Channel-specific configuration.
             bus: The message bus for communication.
+            network: Instance-scoped shared network settings.
         """
         self.config = config
+        self.network = network if network is not None else NetworkConfig()
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
@@ -106,6 +117,45 @@ class BaseChannel(ABC):
         A normal return confirms this adapter completed, not a recipient read receipt.
         """
         pass
+
+    def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
+        """Opt in to sending adjacent, unscheduled envelopes together.
+
+        The synchronous predicate must preserve channel-owned event, turn and
+        generation boundaries. Returning True requires implementing ``send_batch``.
+        """
+        return False
+
+    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
+        """Send an ordered batch approved by ``can_batch_send``.
+
+        The manager does not retry a batch: a failure may follow partial delivery.
+        Like ``send``, returning confirms completion of the adapter's work.
+        """
+        raise NotImplementedError("Channels opting into batching must implement send_batch")
+
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        """Project tool activity once before delivery; override for native UI.
+
+        Keep the core event unchanged and reuse the returned envelope throughout
+        retries, including adapters that track already-sent multipart messages.
+        """
+        event = msg.event
+        if isinstance(event, ProgressEvent) and event.tool_hint and event.tool_events:
+            return replace(msg, content=format_tool_event_hints(
+                event.tool_events, max_length=self.tool_hint_max_length,
+            ))
+        return msg
+
+    @property
+    def has_pending_delivery(self) -> bool:
+        """Whether delivery outlives an awaited ``send``/streaming call.
+
+        The manager already accounts for awaited sends and retries. Channels
+        that enqueue their own writes must expose that work here, including
+        transport cleanup, before a gateway can be considered idle.
+        """
+        return False
 
     def progress_transport_defaults(self) -> tuple[bool, bool] | None:
         """Return channel-owned defaults for progress and tool-hint messages.
@@ -258,6 +308,9 @@ class BaseChannel(ABC):
             return True
         return False
 
+    def _pairing_changed(self) -> None:
+        self.bus.publish_nowait(PairingChanged())
+
     async def _handle_message(
         self,
         sender_id: str,
@@ -270,8 +323,12 @@ class BaseChannel(ABC):
         authorization_id: str | None = None,
         require_existing_session: bool = False,
         session_generation: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Handle a message after checking its authorization subject.
+
+        Return True only after the inbound bus accepts the message. Return False
+        for a denied message, including when a pairing reply was sent. Delivery
+        errors propagate; callers must not acknowledge on an exception.
 
         ``sender_id`` is the identity recorded on the inbound message.  Channels
         where access is scoped to another entity (for example, a group or room)
@@ -282,15 +339,15 @@ class BaseChannel(ABC):
         if not self.is_allowed(permission_id):
             if is_dm:
                 try:
-                    code = generate_code(self.name, str(sender_id))
+                    code = generate_code(self.name, str(sender_id), on_change=self._pairing_changed)
                 except OSError:
                     # Transient pairing-store I/O failure: skip the pairing
                     # reply for this message rather than crash the handler.
                     self.logger.warning(
                         "Pairing store unavailable; dropping DM from {}", sender_id
                     )
-                    return
-                record_delivery(code, "sending")
+                    return False
+                record_delivery(code, "sending", on_change=self._pairing_changed)
                 try:
                     await self.send(
                         OutboundMessage(
@@ -301,9 +358,9 @@ class BaseChannel(ABC):
                         )
                     )
                 except Exception:
-                    record_delivery(code, "failed")
+                    record_delivery(code, "failed", on_change=self._pairing_changed)
                     raise
-                record_delivery(code, "sent")
+                record_delivery(code, "sent", on_change=self._pairing_changed)
                 self.logger.info(
                     "Sent pairing code {} to sender {} in chat {}",
                     code, sender_id, chat_id,
@@ -314,7 +371,7 @@ class BaseChannel(ABC):
                     "Add them to allowFrom list in config to grant access.",
                     sender_id,
                 )
-            return
+            return False
 
         meta = metadata or {}
         if self.supports_streaming:
@@ -333,6 +390,7 @@ class BaseChannel(ABC):
         )
 
         await self.bus.publish_inbound(msg)
+        return True
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:

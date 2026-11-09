@@ -1,5 +1,3 @@
-"""Opt-in pytest phase timings for CI artifacts (including xdist workers)."""
-
 from __future__ import annotations
 
 import json

@@ -148,16 +148,24 @@ If you need a known-good snippet instead of diagnosis, use [`provider-cookbook.m
 | Local model connection refused | Ollama, vLLM, LM Studio, or another local server is not running, or `apiBase` points to the wrong port. |
 | Bedrock validation error | Check AWS region, credentials, model access, model ID, and whether the model supports Converse. |
 | OAuth provider fails | Run the matching login command: `openai-codex`, `xai-grok`, or `github-copilot`, normally with `--set-main`. |
-| Codex OAuth needs a proxy | Set `providers.openaiCodex.proxy` before running the login command. The proxy applies to login, token refresh, and Codex API requests. |
+| Codex OAuth needs a proxy | Set the address in **Settings → Advanced → Shared proxy** and enable **Use proxy** for OpenAI Codex before login. In `config.json`, use `network.proxy` and `providers.openaiCodex.useProxy: true`. This applies to login, token refresh, and Codex API requests. |
 | Codex login runs on a remote/headless machine | In the WebUI, open ChatGPT in your local browser; when the localhost callback page cannot load, copy the full `http://localhost:1455/auth/callback?...` URL from the address bar and paste it into the WebUI dialog. From the CLI, open the printed URL locally and paste the same callback URL back into the terminal. |
 | Codex login runs in Docker | Start the container with `docker run -it` so the OAuth flow has an interactive terminal. |
 | Codex says a model is not supported with a ChatGPT account | Use provider `openai_codex` with a Codex model such as `openai-codex/gpt-5.6-sol`. Do not use the direct-API `openai/...` prefix with Codex OAuth. |
 | Config says `providers.openai_codex` conflicts with the built-in provider | Under `providers`, keep only the canonical `openaiCodex` settings key and remove a duplicate `openai_codex` key. A model preset's `provider` value remains `openai_codex`. |
-| xAI OAuth needs a proxy | Set `providers.xaiGrok.proxy` before login. It applies to OAuth discovery, token exchange/refresh, and Grok subscription requests. |
+| xAI OAuth needs a proxy | Set `network.proxy` and `providers.xaiGrok.useProxy: true` before login, or use the shared address and provider switch in Settings. This applies to OAuth discovery, token exchange/refresh, and Grok subscription requests. |
 | xAI login runs on a remote/headless machine | In the WebUI, finish sign-in in your local browser; if the loopback redirect cannot reach the server, copy the final URL from the address bar into the WebUI dialog. From the CLI, run `nanobot provider login xai-grok` interactively, open the printed URL elsewhere, and paste the final callback URL or authorization code when prompted. |
 | xAI returns 403 or subscription access denied | Confirm the signed-in account has an eligible X Premium / Grok subscription, then run `nanobot provider login xai-grok` again. This provider does not use an xAI API key or X Developer OAuth. |
 | xAI returns 400 `invalid-argument` | Read the bounded `Response body` appended to the provider error. Hosted `x_search` is sent only when xAI's model catalog advertises `supportsBackendSearch`; the model ID `grok-4.5` itself is valid. |
 | xAI model or X Search stops working after an upstream release | The integration follows Grok Build's public OAuth/proxy client contract. Update nanobot if xAI changes that contract. |
+
+### Codex certificate verification errors
+
+Codex model requests fail if the server certificate is untrusted, expired, or does not match the hostname. nanobot does not retry these requests with certificate verification disabled. This also applies when WebSocket falls back to HTTP.
+
+Check the gateway machine's clock and the certificate chain used by your network or proxy. If your organization requires a private CA, obtain its trusted PEM bundle from your administrator and set `SSL_CERT_FILE` in the gateway process environment before restarting. `SSL_CERT_DIR` is also supported for an OpenSSL-compatible certificate directory. For model requests, these CA settings work with or without the explicit Codex proxy; they do not change the selected proxy route. Never trust a certificate supplied by an unknown error page or disable certificate verification.
+
+These model-request CA settings do not change OAuth login or model-catalog transport configuration. If those operations fail through a TLS-inspecting proxy, use an administrator-approved route that preserves the service's trusted certificate chain. Repeated sign-in does not repair a certificate error. Existing chats and credentials are not deleted by this failure.
 
 ### Local Token Estimation
 

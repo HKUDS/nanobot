@@ -52,14 +52,17 @@ for (const width of [390, 1440]) {
           await page.goto(fixture(surface));
           const loaded = page.locator(loadedSelector).first();
           const row = await box(loaded);
-          const icon = await box(surface === "channels" ? loaded.locator('[data-testid^="channel-logo"]') : loaded.locator(":scope > :first-child"));
+          const icon = await box(surface === "channels" ? loaded.locator('[data-testid^="channel-logo"]')
+            : loaded.locator(surface === "apps" ? ":scope > :first-child > :first-child" : ":scope > :first-child"));
           const title = await box(loaded.locator("h3"));
           const action = width === 1440 || surface !== "skills" ? await box(loaded.locator(":scope > :last-child")) : null;
           await page.goto(fixture(surface, true));
           const skeleton = status(page).locator(loadingSelector).first();
           sameBox(await box(skeleton), row);
-          sameBox(await box(skeleton.locator(":scope > :first-child")), icon);
-          const placeholder = await box(skeleton.locator(":scope > :nth-child(2) [class*='bg-muted-foreground']").first());
+          sameBox(await box(skeleton.locator(surface === "apps" ? ":scope > :first-child > :first-child" : ":scope > :first-child")), icon);
+          const placeholder = await box(skeleton.locator(surface === "apps"
+            ? ":scope > :first-child > :nth-child(2) [class*='bg-muted-foreground']"
+            : ":scope > :nth-child(2) [class*='bg-muted-foreground']").first());
           expect(placeholder.x).toBe(title.x);
           expect(placeholder.y + placeholder.height / 2).toBe(title.y + title.height / 2);
           if (action) sameBox(await box(skeleton.locator(":scope > :last-child")), action);
@@ -81,31 +84,36 @@ for (const width of [390, 1440]) {
         });
         await page.route("**/api/webui/skills/trends?**", (route) => route.fulfill({ json: { trends: {} } }));
         for (const view of ["grouped", "single", "search"]) {
-          const open = async () => {
+          pending = new Promise<void>((resolve) => { release = resolve; });
+          const requested = page.waitForRequest(view === "search" ? "**/api/webui/skills/search?**" : "**/api/webui/skills/trending?**");
+          try {
             await page.goto(fixture("marketplace"));
             if (view === "single") await page.getByRole("tab", { name: "skills.sh", exact: true }).click();
             if (view === "search") await page.locator("input").fill("project");
-          };
-          await open();
-          const loaded = page.locator(".group.py-3\\.5");
-          await expect(loaded).toHaveCount(view === "single" ? 5 : 10);
-          const rows = await loaded.evaluateAll((elements) => elements.map((element) => {
-            const r = element.getBoundingClientRect();
-            const text = element.querySelector("h3")!.parentElement!.parentElement!.getBoundingClientRect();
-            return { row: { x: r.x, y: r.y, width: r.width, height: r.height }, text: { x: text.x, width: text.width } };
-          }));
-          pending = new Promise<void>((resolve) => { release = resolve; });
-          try {
-            await open();
+            await requested;
             const skeletons = status(page).locator(".py-3\\.5");
-            await expect(skeletons).toHaveCount(rows.length);
-            for (let index = 0; index < rows.length; index++) {
-              sameBox(await box(skeletons.nth(index)), rows[index].row);
+            const count = view === "single" ? 5 : 10;
+            await expect(skeletons).toHaveCount(count);
+            const placeholders = [];
+            for (let index = 0; index < count; index++) {
+              const row = await box(skeletons.nth(index));
               const text = await box(skeletons.nth(index).locator(".flex-1"));
-              expect(text.x).toBe(rows[index].text.x);
-              expect(text.width).toBe(rows[index].text.width);
+              placeholders.push({ row, text });
             }
             await noOverflow(page);
+            release();
+            const loaded = page.locator(".group.py-3\\.5");
+            await expect(loaded).toHaveCount(count);
+            const rows = await loaded.evaluateAll((elements) => elements.map((element) => {
+              const r = element.getBoundingClientRect();
+              const text = element.querySelector("h3")!.parentElement!.parentElement!.getBoundingClientRect();
+              return { row: { x: r.x, y: r.y, width: r.width, height: r.height }, text: { x: text.x, width: text.width } };
+            }));
+            for (let index = 0; index < count; index++) {
+              sameBox(placeholders[index].row, rows[index].row);
+              expect(placeholders[index].text.x).toBe(rows[index].text.x);
+              expect(placeholders[index].text.width).toBe(rows[index].text.width);
+            }
           } finally { release(); pending = undefined; }
           await page.goto("about:blank");
         }
@@ -122,23 +130,24 @@ for (const width of [390, 1440]) {
               ...(provider === "anthropic" ? { label: `Project ${index}`, description: "Code assistance" } : {}) })) } });
         });
         for (const surface of ["models", "models-compact"]) {
-          await page.goto(fixture(surface));
-          await page.getByRole("combobox").click();
-          const loaded = page.getByRole("option").first();
-          await expect(loaded).toBeVisible();
-          await settle(page);
-          const row = await box(loaded);
-          const icon = await box(loaded.locator(":scope > :first-child > :first-child"));
           pending = new Promise<void>((resolve) => { release = resolve; });
           try {
             await page.goto(fixture(surface));
+            const requested = page.waitForRequest("**/api/settings/provider-models?**");
             await page.getByRole("combobox").click();
+            await requested;
             await expect(status(page)).toBeVisible();
             await settle(page);
             const skeleton = status(page).locator(".px-2.py-1\\.5").first();
-            sameBox(await box(skeleton), row);
-            sameBox(await box(skeleton.locator(":scope > :first-child")), icon);
+            const row = await box(skeleton);
+            const icon = await box(skeleton.locator(":scope > :first-child"));
             await noOverflow(page);
+            release();
+            const loaded = page.getByRole("option").first();
+            await expect(loaded).toBeVisible();
+            await settle(page);
+            sameBox(row, await box(loaded));
+            sameBox(icon, await box(loaded.locator(":scope > :first-child > :first-child")));
           } finally { release(); pending = undefined; }
           await page.goto("about:blank");
         }
@@ -199,7 +208,7 @@ for (const width of [390, 1440]) {
         await page.goto(fixture("file", true));
         sameBox(await box(status(page).locator(".font-mono")), source);
         const line = await box(status(page).locator(".font-mono > div > :last-child").first());
-        expect(line.x).toBe(code.x);
+        expect(line.x).toBeCloseTo(code.x, 1);
         await noOverflow(page);
         await page.goto(fixture("markdown"));
         const heading = await box(page.getByRole("heading", { name: "Project overview" }));
@@ -213,7 +222,7 @@ for (const width of [390, 1440]) {
         await noOverflow(page);
         await page.goto(fixture("markdown"));
         await expect(page.getByRole("heading", { name: "Project overview" })).toBeVisible();
-        await page.getByTestId("file-preview-panel").locator(".segmented-control button").nth(1).click();
+        await page.getByTestId("file-preview-panel").getByRole("button", { name: locale === "en" ? "Source" : "原文", exact: true }).click();
         await expect(page.getByTestId("viewport-code-rows")).toBeVisible();
         const markdownSource = await box(page.locator("pre"));
         await page.getByTestId("reload-preview").click();

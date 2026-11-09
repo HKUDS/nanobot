@@ -96,7 +96,6 @@ function stat(edit: FileEditEvent): string {
   return `+${added} -${deleted}`
 }
 
-/** Full-screen, read-only projection of file-edit events owned by the session. */
 export class DiffViewer {
   readonly root: BoxRenderable
   private readonly header: TextRenderable

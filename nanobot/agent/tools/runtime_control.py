@@ -1,5 +1,3 @@
-"""Explicit runtime state boundary used by :class:`MyTool`."""
-
 from __future__ import annotations
 
 import json
@@ -282,8 +280,7 @@ def _snapshot_model_presets(
 def _snapshot_web_config(config: WebToolsConfig) -> dict[str, object]:
     return {
         "enable": config.enable,
-        # Proxy URLs may embed credentials. Presence is enough for diagnosis.
-        "proxy": "<configured>" if config.proxy else config.proxy,
+        "use_proxy": config.use_proxy,
         "user_agent": config.user_agent,
         "search": {
             "provider": config.search.provider,

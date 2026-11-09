@@ -28,8 +28,12 @@
         "choices": {
           "mention": "メンションのみ",
           "open": "全メッセージ",
-          "allowlist": "許可リスト"
+          "allowlist": "許可リスト",
+          "listen": "リッスン（メンションで返信）"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "部屋ごとのルール例外（JSON）"
       },
       "allowFrom": {
         "label": "許可ユーザー"
@@ -67,6 +71,13 @@
           "false": "オフ"
         }
       },
+      "replyToMessage": {
+        "label": "引用返信",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
       "streaming": {
         "label": "ストリーミング",
         "choices": {
@@ -74,9 +85,8 @@
           "false": "オフ"
         }
       },
-      "proxy": {
-        "label": "ネットワークプロキシ",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "プロキシを使う"
       }
     }
   }

@@ -1,5 +1,3 @@
-"""Track file reads whose original results may still be in model context."""
-
 from __future__ import annotations
 
 import hashlib
@@ -38,16 +36,9 @@ def file_read_context(
 class ReadState:
     offset: int
     limit: int | None
-    content_hash: str | None
+    content_hash: str
     call_id: str | None
-    result_hash: str | None
-
-
-def _hash_file(p: str) -> str | None:
-    try:
-        return hashlib.sha256(Path(p).read_bytes()).hexdigest()
-    except OSError:
-        return None
+    result_hash: str
 
 
 class FileStates:
@@ -60,7 +51,7 @@ class FileStates:
 
     def record_read(
         self, path: str | Path, offset: int = 1, limit: int | None = None, *,
-        content_hash: str | None = None, result: str | None = None,
+        content_hash: str, result: str,
     ) -> None:
         """Record the file snapshot and complete result of a successful text read."""
         p = str(Path(path).resolve())
@@ -68,33 +59,31 @@ class FileStates:
         self._state[p] = ReadState(
             offset=offset,
             limit=limit,
-            content_hash=content_hash if content_hash is not None else _hash_file(p),
+            content_hash=content_hash,
             call_id=context.call_id if context is not None else None,
-            result_hash=hashlib.sha256(result.encode("utf-8")).hexdigest() if result else None,
+            result_hash=hashlib.sha256(result.encode("utf-8")).hexdigest(),
         )
 
     def record_write(self, path: str | Path) -> None:
         """Invalidate a prior read after a write; a write summary is not file content."""
         self._state.pop(str(Path(path).resolve()), None)
 
-    def is_unchanged(
-        self, path: str | Path, offset: int = 1, limit: int | None = None, *,
-        content_hash: str | None = None,
-    ) -> bool:
-        """Check both file identity and the original result in the actual model input."""
+    def visible_read_hash(
+        self, path: str | Path, offset: int = 1, limit: int | None = None,
+    ) -> str | None:
+        """Return a matching receipt's hash only while its result is in the model input."""
         p = str(Path(path).resolve())
         entry = self._state.get(p)
         context = _current_file_read.get()
-        if entry is None or context is None or not entry.call_id or not entry.result_hash:
-            return False
+        if entry is None or context is None or not entry.call_id:
+            return None
         if entry.offset != offset or entry.limit != limit:
-            return False
+            return None
         result = context.tool_results().get(entry.call_id)
         if result is None or hashlib.sha256(result.encode("utf-8")).hexdigest() != entry.result_hash:
             self._state.pop(p, None)
-            return False
-        current_hash = content_hash if content_hash is not None else _hash_file(p)
-        return current_hash is not None and current_hash == entry.content_hash
+            return None
+        return entry.content_hash
 
     def get(self, path: str | Path) -> ReadState | None:
         """Return the raw ReadState entry for a path, or None."""

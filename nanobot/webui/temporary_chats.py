@@ -1,5 +1,3 @@
-"""Connection-owned Temporary Chat behavior for the WebUI."""
-
 from __future__ import annotations
 
 import uuid
@@ -13,7 +11,7 @@ from nanobot.bus.events import (
     InboundMessage,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.command.builtin import register_builtin_commands
+from nanobot.command.application import register_builtin_commands
 from nanobot.command.router import CommandRouter
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.session.manager import SessionManager

@@ -4,7 +4,9 @@ import asyncio
 
 import pytest
 
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
+from nanobot.runtime_admission import RuntimeAdmission, RuntimeBusyError, RuntimeMaintenanceError
 from nanobot.webui.mcp_oauth_api import (
     McpOAuthError,
     McpOAuthManager,
@@ -45,18 +47,23 @@ def _config() -> MCPServerConfig:
 async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    manager = McpOAuthManager()
+    manager = McpOAuthManager(RuntimeAdmission())
     connection = _Connection()
     received: dict[str, object] = {}
     reload_calls = 0
+    cfg = _config()
+    cfg.use_proxy = True
+    network_config = NetworkConfig(proxy="http://proxy-a.example:8080")
 
     monkeypatch.setattr(
         "nanobot.webui.mcp_oauth_api.validate_url_target",
         lambda _url: (True, ""),
     )
 
-    async def connect(servers, _registry, *, oauth_handlers):
+    async def connect(servers, _registry, *, oauth_handlers, network):
         assert set(servers) == {"xmind"}
+        received["cfg"] = servers["xmind"]
+        received["network"] = network
         handlers = oauth_handlers["xmind"]
         await handlers.redirect_handler(
             "https://accounts.example.com/authorize?client_id=test&state=state-123"
@@ -85,13 +92,20 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
 
     started = await manager.start(
         "xmind",
-        _config(),
+        cfg,
         "https://agent.example.com/auth/mcp/callback",
         reload_mcp=reload_mcp,
+        network=network_config,
     )
 
     assert started["status"] == "authorization_required"
     assert started["authorization_url"].startswith("https://accounts.example.com/authorize?")
+    cfg.use_proxy = False
+    network_config.proxy = "http://proxy-b.example:8080"
+    assert received["cfg"] is not cfg
+    assert received["cfg"].use_proxy is True
+    assert received["network"] is not network_config
+    assert received["network"].proxy == "http://proxy-a.example:8080"
     manager.submit_callback(state="state-123", code="oauth-code", error=None)
     with pytest.raises(McpOAuthError, match="expired"):
         manager.submit_callback(state="state-123", code="replayed-code", error=None)
@@ -116,6 +130,7 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
     assert first["hot_reload"]["failed"] == ["notion"]
     assert received["callback"] == ("oauth-code", "state-123")
     assert reload_calls == 2
+    await manager.close()
     assert connection.closed is True
 
 
@@ -123,7 +138,8 @@ async def test_browser_flow_retries_current_server_and_ignores_unrelated_reload_
 async def test_browser_flow_activates_tools_before_probe_cleanup_completes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    manager = McpOAuthManager()
+    admission = RuntimeAdmission()
+    manager = McpOAuthManager(admission)
     connection = _BlockingConnection()
     reload_started = asyncio.Event()
 
@@ -132,7 +148,7 @@ async def test_browser_flow_activates_tools_before_probe_cleanup_completes(
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["linear"]
         await handlers.redirect_handler(
             "https://accounts.example.com/authorize?client_id=test&state=blocked-close"
@@ -159,27 +175,92 @@ async def test_browser_flow_activates_tools_before_probe_cleanup_completes(
     )
     manager.submit_callback(state="blocked-close", code="oauth-code", error=None)
 
+    shutdown = None
     try:
         await asyncio.wait_for(reload_started.wait(), timeout=0.5)
         await asyncio.wait_for(connection.close_started.wait(), timeout=0.5)
         result = await manager.status(started["flow_id"])
         assert result["status"] == "connected"
         assert connection.closed is False
+        with pytest.raises(RuntimeBusyError), admission.pause_if_idle(lambda: False):
+            pytest.fail("MCP transport cleanup is still running")
+        shutdown = asyncio.create_task(manager.close())
+        await asyncio.wait({shutdown}, timeout=0.01)
+        assert not shutdown.done(), "Shutdown must join the in-flight transport cleanup"
     finally:
         connection.allow_close.set()
+        if shutdown is not None:
+            await shutdown
 
     for _ in range(10):
         await asyncio.sleep(0)
         if connection.closed:
             break
     assert connection.closed is True
+    await manager.close()
+    with admission.pause_if_idle(lambda: False):
+        pass
+
+
+@pytest.mark.parametrize("expire", [False, True])
+@pytest.mark.asyncio
+async def test_browser_flow_remains_busy_through_cancelled_or_expired_cleanup(
+    monkeypatch: pytest.MonkeyPatch, expire: bool,
+) -> None:
+    admission = RuntimeAdmission()
+    manager = McpOAuthManager(admission)
+    cleanup_started = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.validate_url_target", lambda _: (True, ""))
+    if expire:
+        monkeypatch.setattr("nanobot.webui.mcp_oauth_api._FLOW_TTL_S", 0)
+
+    async def connect(_servers, _registry, *, oauth_handlers, network):
+        handlers = oauth_handlers["linear"]
+        await handlers.redirect_handler("https://accounts.example.com/auth?state=pending")
+        try:
+            await handlers.callback_handler()
+        finally:
+            cleanup_started.set()
+            await allow_cleanup.wait()
+        return {}
+
+    monkeypatch.setattr("nanobot.webui.mcp_oauth_api.connect_mcp_servers", connect)
+    started = await manager.start(
+        "linear", _config(), "https://agent.example.com/auth/mcp/callback",
+        reload_mcp=lambda: asyncio.sleep(0, result={"ok": True}),
+    )
+    with pytest.raises(RuntimeBusyError), admission.pause_if_idle(lambda: False):
+        pytest.fail("The browser response does not finish authorization")
+    if expire:
+        with pytest.raises(McpOAuthError, match="expired"):
+            await manager.status(started["flow_id"])
+        await asyncio.wait_for(cleanup_started.wait(), timeout=0.5)
+
+    shutdown = asyncio.create_task(manager.close())
+    try:
+        await asyncio.wait_for(cleanup_started.wait(), timeout=0.5)
+        await asyncio.wait({shutdown}, timeout=0.01)
+        assert not shutdown.done()
+        with pytest.raises(RuntimeBusyError), admission.pause_if_idle(lambda: False):
+            pytest.fail("An expired or cancelled flow still owns its cleanup")
+    finally:
+        allow_cleanup.set()
+        await shutdown
+
+    with admission.pause_if_idle(lambda: False):
+        with pytest.raises(RuntimeMaintenanceError):
+            await manager.start(
+                "linear", _config(), "https://agent.example.com/auth/mcp/callback",
+                reload_mcp=lambda: asyncio.sleep(0, result={"ok": True}),
+            )
 
 
 @pytest.mark.asyncio
 async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    manager = McpOAuthManager()
+    manager = McpOAuthManager(RuntimeAdmission())
     connection = _Connection()
     received: dict[str, object] = {}
 
@@ -188,7 +269,7 @@ async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["linear"]
         received["redirect_uri"] = handlers.redirect_uri
         await handlers.redirect_handler(
@@ -247,6 +328,7 @@ async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
     assert result["status"] == "connected"
     assert result["completion_input"] == "callback_url"
     assert received["callback"] == ("oauth-code", "manual-state")
+    await manager.close()
     assert connection.closed is True
 
 
@@ -254,13 +336,13 @@ async def test_remote_http_flow_accepts_a_pasted_loopback_callback(
 async def test_browser_flow_surfaces_provider_denial_without_callback_description(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    manager = McpOAuthManager()
+    manager = McpOAuthManager(RuntimeAdmission())
     monkeypatch.setattr(
         "nanobot.webui.mcp_oauth_api.validate_url_target",
         lambda _url: (True, ""),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         handlers = oauth_handlers["notion"]
         await handlers.redirect_handler("https://accounts.example.com/auth?state=deny-state")
         await handlers.callback_handler()
@@ -300,13 +382,13 @@ async def test_browser_flow_blocks_unsafe_authorization_url(
     url_is_safe: bool,
     state: str,
 ) -> None:
-    manager = McpOAuthManager()
+    manager = McpOAuthManager(RuntimeAdmission())
     monkeypatch.setattr(
         "nanobot.webui.mcp_oauth_api.validate_url_target",
         lambda _url: (url_is_safe, "private address"),
     )
 
-    async def connect(_servers, _registry, *, oauth_handlers):
+    async def connect(_servers, _registry, *, oauth_handlers, network):
         await oauth_handlers["linear"].redirect_handler(authorization_url)
         return {}
 

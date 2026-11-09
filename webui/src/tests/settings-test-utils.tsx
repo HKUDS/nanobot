@@ -59,7 +59,7 @@ export function settingsPayload(): SettingsPayload {
     },
     web: {
       enable: true,
-      proxy: null,
+      use_proxy: false,
       user_agent: null,
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
@@ -128,7 +128,10 @@ export function settingsPayload(): SettingsPayload {
 type SettingsViewTestOptions = Partial<Pick<
   React.ComponentProps<typeof SettingsView>,
   | "initialSection"
+  | "focusTarget"
   | "initialSettings"
+  | "themePreference"
+  | "onChangeTheme"
   | "skills"
   | "skillsLoading"
   | "showSidebar"
@@ -138,7 +141,7 @@ type SettingsViewTestOptions = Partial<Pick<
   | "onStartAutomationChat"
   | "onNativeEngineRestart"
   | "onRestart"
->> & { client?: NanobotClient };
+>> & { client?: NanobotClient; webuiCapabilities?: string[] };
 
 export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
@@ -149,16 +152,17 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
         handler("open");
         return () => {};
       },
-    } as never} token="tok">
+    } as never} token="tok" webuiCapabilities={options.webuiCapabilities}>
       <SettingsView
-        theme="light"
+        themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}
+        focusTarget={options.focusTarget}
         initialSettings={options.initialSettings}
         skills={options.skills}
         skillsLoading={options.skillsLoading}
         showSidebar={options.showSidebar}
         mainNavigationExpanded={options.mainNavigationExpanded}
-        onToggleTheme={() => {}}
+        onChangeTheme={options.onChangeTheme ?? (() => {})}
         onBackToChat={options.onBackToChat ?? (() => {})}
         onModelNameChange={() => {}}
         onSettingsChange={options.onSettingsChange}

@@ -44,6 +44,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "resume-follow": "current-automatic-mode",
   },
   "follow-latest": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
   },
@@ -109,7 +110,6 @@ interface ThreadMotionTurn {
 interface ThreadMotionSnapshot {
   mode: ThreadMotionMode;
   turnId: string | null;
-  promptId: string | null;
   promptPositioned: boolean;
   measurementPending: boolean;
 }
@@ -134,6 +134,7 @@ interface ThreadMotionCoordinatorOptions {
   measure: (promptId: string | null) => ThreadMotionGeometry | null;
   onGeometry?: (geometry: ThreadMotionGeometry) => void;
   onAutoFollow?: () => void;
+  onLatestNavigationSettled?: () => void;
   scheduler?: ThreadMotionScheduler;
 }
 
@@ -159,6 +160,7 @@ export class ThreadMotionCoordinator {
   private readonly measure: ThreadMotionCoordinatorOptions["measure"];
   private readonly onGeometry?: ThreadMotionCoordinatorOptions["onGeometry"];
   private readonly onAutoFollow?: ThreadMotionCoordinatorOptions["onAutoFollow"];
+  private readonly onLatestNavigationSettled?: () => void;
   private readonly scheduler: ThreadMotionScheduler;
   private turn: ThreadMotionTurn = {
     id: null,
@@ -180,6 +182,7 @@ export class ThreadMotionCoordinator {
     this.measure = options.measure;
     this.onGeometry = options.onGeometry;
     this.onAutoFollow = options.onAutoFollow;
+    this.onLatestNavigationSettled = options.onLatestNavigationSettled;
     this.scheduler = options.scheduler ?? defaultScheduler();
   }
 
@@ -187,7 +190,6 @@ export class ThreadMotionCoordinator {
     return {
       mode: this.mode,
       turnId: this.turn.id,
-      promptId: this.turn.promptId,
       promptPositioned: this.promptPositioned,
       measurementPending: this.measurementFrameId !== null,
     };
@@ -311,23 +313,26 @@ export class ThreadMotionCoordinator {
     return result;
   }
 
-  navigateHistoryTo(top: number): ThreadCameraFollowResult | null {
-    return this.beginHistoryNavigation(top, null);
-  }
-
   navigateHistoryToPrompt(promptId: string): ThreadCameraFollowResult | null {
     const geometry = this.measure(promptId);
     if (!geometry || geometry.promptTop === null) return null;
     return this.beginHistoryNavigation(geometry.promptTop, promptId);
   }
 
-  private beginHistoryNavigation(top: number, promptId: string | null): ThreadCameraFollowResult | null {
+  private beginHistoryNavigation(top: number, promptId: string): ThreadCameraFollowResult | null {
     if (this.mode !== "navigating-history") this.camera.cancel();
     this.transition("navigate-history");
     this.historyNavigationPromptId = promptId;
     const result = this.camera.navigateTo(top);
     if (!result || result === "settled") this.transition("navigation-settled");
     return result;
+  }
+
+  cameraSettled(): void {
+    if (this.mode === "navigating-latest") {
+      this.settleLatestNavigation();
+      this.onLatestNavigationSettled?.();
+    }
   }
 
   isAutoFollowPaused(): boolean {
@@ -342,13 +347,14 @@ export class ThreadMotionCoordinator {
    * A scroll event reports geometry; it does not prove user intent. Explicit
    * input handlers call takeUserControl() before the browser scrolls. Layout,
    * sticky positioning, and camera writes therefore remain automatic even
-   * when the browser emits an intermediate scroll event for them.
+   * when the browser emits an intermediate scroll event for them. Proximity
+   * to a detached history page's bottom must not count as near the live tail.
    */
-  observeScroll(nearBottom: boolean): ThreadScrollOwner {
+  observeScroll(nearLiveTail: boolean): ThreadScrollOwner {
     switch (this.mode) {
       case "navigating-latest":
         if (!this.camera.isFollowing()) {
-          if (nearBottom) {
+          if (nearLiveTail) {
             this.settleLatestNavigation();
           } else {
             this.invalidateGeometry();
@@ -358,7 +364,7 @@ export class ThreadMotionCoordinator {
       case "navigating-history":
         if (!this.camera.isFollowing()) {
           this.transition("navigation-settled");
-          if (nearBottom) {
+          if (nearLiveTail) {
             this.resumeAutoFollow();
           } else {
             this.resumeFollowArmed = true;
@@ -366,7 +372,7 @@ export class ThreadMotionCoordinator {
         }
         return "navigation";
       case "browsing-history":
-        if (!nearBottom) {
+        if (!nearLiveTail) {
           this.resumeFollowArmed = true;
           return "user";
         }
@@ -374,7 +380,7 @@ export class ThreadMotionCoordinator {
         this.resumeAutoFollow();
         return "automatic";
       default:
-        if (!nearBottom) this.invalidateGeometry();
+        if (!nearLiveTail) this.invalidateGeometry();
         return "automatic";
     }
   }

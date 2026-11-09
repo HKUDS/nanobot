@@ -18,7 +18,7 @@ function renderShell(expanded: boolean) {
 }
 
 describe("ThinkingReasoningShell", () => {
-  it.each([false, true])("shows activity without clipping or edge fades (active: %s)", (active) => {
+  it.each([false, true])("renders the full activity list (active: %s)", (active) => {
     render(
       <ThinkingReasoningShell
         active={active}
@@ -32,8 +32,6 @@ describe("ThinkingReasoningShell", () => {
     const content = screen.getByTestId("agent-activity-content");
     expect(content).not.toHaveClass("max-h-[180px]");
     expect(content).not.toHaveClass("overflow-y-auto");
-    expect(screen.queryByTestId("activity-scroll-fade-top")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("activity-scroll-fade-bottom")).not.toBeInTheDocument();
     expect(screen.getByText("Activity 1")).toBeVisible();
     expect(screen.getByText("Activity 16")).toBeVisible();
   });

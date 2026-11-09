@@ -553,14 +553,11 @@ describe("NanobotTui session navigation", () => {
     const ui = app as unknown as {
       composer: TextareaRenderable
       sessionMenu: { visible: boolean; root: { getChildren(): unknown[] } }
-      title: { getChildren(): unknown[] }
     }
 
     try {
       await waitUntil(() => (app as unknown as { ready: boolean }).ready)
       await setup.renderOnce()
-      const titleItems = ui.title.getChildren() as TextRenderable[]
-      expect(titleItems.some((item) => item.id === "nanobot-tui-title-text")).toBe(false)
       expect(ui.sessionMenu.visible).toBe(false)
 
       ui.composer.setText("/sessions")
@@ -849,7 +846,7 @@ describe("NanobotTui session navigation", () => {
     }
   })
 
-  test("shows compact session context without exposing private reasoning", async () => {
+  test("shows compact session context and preserves the composer on resize", async () => {
     setup = await createRenderer({ width: 96, height: 26, screenMode: "alternate-screen" })
     const original = globalThis.fetch
     globalThis.fetch = ((input: string | URL | Request) => {
@@ -888,14 +885,11 @@ describe("NanobotTui session navigation", () => {
 
       expect(frame).toContain("~2.2k tokens  10 replay  16 archived")
       expect(frame).toContain("The earlier turns agreed on a release plan.")
-      expect(frame).not.toContain("Agent context")
-      expect(frame).not.toContain("summary active")
-      expect(frame).not.toContain("memory, instructions, and skills are added separately")
 
       setup.resize(40, 10)
       await setup.renderOnce()
       const compact = setup.captureCharFrame()
-      expect(occurrences(compact, "Agent context")).toBe(0)
+      expect(compact).not.toContain("The earlier turns agreed")
       expect(occurrences(compact, "Ask nanobot anything")).toBe(1)
 
       setup.mockInput.pressEscape()

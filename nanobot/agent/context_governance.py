@@ -21,6 +21,7 @@ from uuid import uuid4
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
+from nanobot.context_sources import drain_system_sources
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
     CONTEXT_SAFETY_BUFFER,
@@ -43,6 +44,7 @@ from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
     SessionSummaryCheckpoint,
 )
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
     estimate_prompt_tokens_chain,
     maybe_persist_tool_result,
@@ -100,7 +102,6 @@ def _request_extends_measured(
     measured: list[dict[str, Any]],
     current: list[dict[str, Any]],
 ) -> bool:
-    """Return whether measured messages are an unchanged prefix of the request."""
     return len(current) >= len(measured) and all(
         current[index] == measured[index] for index in range(len(measured))
     )
@@ -195,7 +196,7 @@ class ContextCompactionState:
         consolidate_provider_compaction: ProviderCompactionConsolidator | None,
     ) -> ContextCompactionState:
         """Create compaction state for a standalone runner transcript."""
-        raw_messages = list(messages)
+        raw_messages = messages
         instruction_prefix: list[dict[str, Any]] = []
         for message in raw_messages:
             if message.get("role") not in {"system", "developer"}:
@@ -256,6 +257,11 @@ class ModelRequestState:
     provider_compaction_applied: bool = False
     compacted_tool_results: set[str] = field(default_factory=set)
     events: EventSink = NO_EVENTS
+    request_run_id: str = field(default_factory=lambda: uuid4().hex)
+    request_sequence: int = 0
+    request_usage: LLMUsage | None = None
+    # Reported usage per runner round; recovery requests update the same slot.
+    recent_round_usages: list[LLMUsage | None] = field(default_factory=list)
 
 
 class ContextGovernor:
@@ -454,6 +460,53 @@ class ContextGovernor:
             source=source,
         )
 
+    def _fit_pending_file_reads(
+        self,
+        config: ContextGovernanceConfig,
+        messages: list[dict[str, Any]],
+        delta_messages: list[dict[str, Any]],
+        *,
+        tool_definitions: list[dict[str, Any]] | None,
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        notice = (
+            "Error: read_file result was not sent because the combined request exceeds "
+            "the context budget. No file was modified by this recovery. Read one file at a time "
+            "with a smaller offset/limit range; for large single-line JSON, use exec "
+            "to select only the needed records or fields."
+        )
+        pending_ids = {
+            message.get("tool_call_id") for message in delta_messages
+            if message.get("role") == "tool" and message.get("name") == "read_file"
+            and isinstance(message.get("tool_call_id"), str)
+        }
+        candidates = iter(sorted(
+            (
+                index for index, message in enumerate(messages)
+                if message.get("role") == "tool"
+                and message.get("tool_call_id") in pending_ids
+                and isinstance(message.get("content"), str)
+                and len(message["content"].encode("utf-8")) > len(notice)
+            ),
+            key=lambda index: len(messages[index]["content"].encode("utf-8")),
+            reverse=True,
+        ))
+        prepared = list(messages)
+        replacements: dict[str, str] = {}
+        while True:
+            try:
+                fitted = self.ensure_request_fits(
+                    config, prepared, tool_definitions=tool_definitions,
+                )
+                return fitted, replacements
+            except ContextWindowExceededError:
+                index = next(candidates, None)
+                if index is None:
+                    raise
+                # Only unread results can change. Record the same text for replay,
+                # so a later turn does not restore content the model never received.
+                replacements[prepared[index]["tool_call_id"]] = notice
+                prepared[index] = {**prepared[index], "content": notice}
+
     def request_pressure(
         self,
         config: ContextGovernanceConfig,
@@ -529,6 +582,11 @@ class ContextGovernor:
                 if message.get("role") == "tool"
                 and isinstance(message.get("tool_call_id"), str)
             )
+            if response.provider_compaction_event_id is None:
+                response.provider_compaction_event_id = uuid4().hex
+                await shield_and_drain(state.events.emit(ContextCompactionEvent(
+                    response.provider_compaction_event_id, "succeeded", reason="provider_native",
+                )))
         if (
             not response.provider_compaction_applied
             or response.provider_compaction_state is None
@@ -553,39 +611,17 @@ class ContextGovernor:
             )
             return
 
-        compaction_id = uuid4().hex
-        await state.events.emit(
-            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+        summary = await compaction.consolidate_provider_compaction(
+            response.provider_compaction_state,
+            await self.prepare_in_background(deepcopy, accepted_messages),
+            compaction.active_summary,
         )
-        try:
-            summary = await compaction.consolidate_provider_compaction(
-                response.provider_compaction_state,
-                await self.prepare_in_background(deepcopy, accepted_messages),
-                compaction.active_summary,
-            )
-        except (Exception, asyncio.CancelledError) as exc:
-            await state.events.emit(
-                ContextCompactionEvent(
-                    compaction_id=compaction_id,
-                    phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
-                ),
-            )
-            raise
         if not summary:
-            await state.events.emit(
-                ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
-            )
             return
         compaction.active_summary = summary
         compaction.summary_checkpoint = SessionSummaryCheckpoint(
             summary=summary,
             transcript_boundary=transcript_boundary,
-        )
-        await state.events.emit(
-            ContextCompactionEvent(
-                compaction_id=compaction_id,
-                phase="succeeded",
-            ),
         )
 
     async def _compact_request_history(
@@ -597,11 +633,10 @@ class ContextGovernor:
         *,
         tool_definitions: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
-        """Replace accepted history H with a checkpoint while preserving delta."""
         measured, _source = pressure
         compaction_id = uuid4().hex
         await state.events.emit(
-            ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+            ContextCompactionEvent(compaction_id=compaction_id, phase="started", reason="context_pressure"),
         )
         try:
             delta_messages = await self.prepare_in_background(
@@ -642,16 +677,23 @@ class ContextGovernor:
                     *delta_messages,
                 ],
             )
+            prepared, replacements = await self.prepare_in_background(
+                self._fit_pending_file_reads, state.config,
+                prepared,
+                delta_messages,
+                tool_definitions=tool_definitions,
+            )
+            # Commit only after the complete request fits, on the owning loop.
+            # Source files remain available for a narrower read. Previously
+            # accepted results and all tool call/result pairs remain unchanged.
+            for message in compaction.raw_messages[compaction.raw_accepted_boundary:]:
+                if message.get("role") == "tool" and message.get("tool_call_id") in replacements:
+                    message["content"] = replacements[message["tool_call_id"]]
             # Responses-style state is append-only. Replacing H with a
             # checkpoint requires a fresh request; a successful response may
             # establish a new provider-owned state at the rewritten boundary.
             state.conversation.replace_transcript(compaction.raw_messages)
             state.usage = None
-            prepared = await self.prepare_in_background(
-                self.ensure_request_fits, state.config,
-                prepared,
-                tool_definitions=tool_definitions,
-            )
             compaction.summary_checkpoint = SessionSummaryCheckpoint(
                 summary=summary,
                 transcript_boundary=compaction.raw_accepted_boundary,
@@ -661,15 +703,22 @@ class ContextGovernor:
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                    reason="context_pressure",
                 ),
             )
             raise
-        await state.events.emit(
-            ContextCompactionEvent(
-                compaction_id=compaction_id,
-                phase="succeeded",
-            ),
-        )
+        async def publish_success() -> None:
+            if (sources := drain_system_sources()) is not None:
+                await state.events.emit(sources)
+            await state.events.emit(
+                ContextCompactionEvent(
+                    compaction_id=compaction_id,
+                    phase="succeeded",
+                    reason="context_pressure",
+                ),
+            )
+
+        await shield_and_drain(publish_success())
         return prepared
 
     async def prepare_request(

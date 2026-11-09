@@ -25,10 +25,8 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { HoverHint } from "@/components/ui/tooltip";
@@ -51,6 +49,7 @@ export interface WorkbenchPane {
 
 interface PaneRenderContext {
   active: boolean;
+  multiplePanes: boolean;
   headerPortalTarget: HTMLElement | null | undefined;
   composerPortalTarget: HTMLElement | null | undefined;
   navigationFrame: HTMLElement | null | undefined;
@@ -206,6 +205,7 @@ export function PaneWorkbench({
 }: PaneWorkbenchProps) {
   const { t } = useTranslation();
   const compact = useMediaQuery("(max-width: 767px)");
+  const sharedComposer = chrome && panes.length > 1;
   const effectiveLayout = layout;
   const [headerPortalTarget, setHeaderPortalTarget] = useState<HTMLElement | null>(null);
   const [composerPortalTarget, setComposerPortalTarget] = useState<HTMLElement | null>(null);
@@ -634,10 +634,6 @@ export function PaneWorkbench({
             align="end"
             onCloseAutoFocus={(event) => event.preventDefault()}
           >
-            <DropdownMenuLabel>
-              {t("workbench.layout", { defaultValue: "Pane layout" })}
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
             <DropdownMenuRadioGroup
               value={layout}
               onValueChange={(value) => {
@@ -678,6 +674,7 @@ export function PaneWorkbench({
   return (
     <section
       ref={setNavigationFrame}
+      data-theme-surface
       aria-label={t("workbench.aria", { defaultValue: "Conversation workbench" })}
       className={cn(
         "thread-workspace relative flex h-full min-h-0 flex-col overflow-hidden bg-background",
@@ -693,14 +690,15 @@ export function PaneWorkbench({
             />
           </header>
         ) : null}
-        <div className="workbench-body relative min-h-0 flex-1 bg-background">
+        <div className="workbench-body relative min-h-0 flex-1">
           <div
             ref={gridRef}
+            data-theme-surface
             data-testid="pane-grid"
             data-layout={effectiveLayout}
             className={cn(
-              "grid h-full min-h-0 min-w-0 overflow-hidden",
-              chrome && displayedPanes.length > 1 && "gap-px bg-border/55",
+              "grid h-full min-h-0 min-w-0 overflow-hidden bg-background",
+              chrome && displayedPanes.length > 1 && "gap-px",
             )}
             style={gridStyle}
           >
@@ -715,22 +713,23 @@ export function PaneWorkbench({
                     else paneRefs.current.delete(pane.key);
                   }}
                   aria-label={pane.title}
+                  data-theme-surface
                   data-active={active ? "true" : "false"}
                   data-dragging={draggingPaneKey === pane.key ? "true" : undefined}
                   data-testid={`workbench-pane-${pane.key}`}
                   onPointerDownCapture={(event) => handlePanePointerDown(pane.key, event)}
                   onFocusCapture={(event) => handlePaneFocus(pane.key, event)}
-                  className="workbench-pane relative flex min-h-0 min-w-0 overflow-hidden bg-background"
+                  className={cn(
+                    "workbench-pane relative flex min-h-0 min-w-0 overflow-hidden bg-background",
+                    chrome && displayedPanes.length > 1 && "shadow-[0_0_0_1px_hsl(var(--border)/0.55)]",
+                  )}
                   style={layoutGeometry.paneStyles[index]}
                 >
                   {renderPane(pane, {
                     active,
-                    // A single conversation owns its header, alongside its preview tabs.
-                    // Multiple conversation panes still share the workbench toolbar.
+                    multiplePanes: displayedPanes.length > 1,
                     headerPortalTarget: chrome && displayedPanes.length > 1 ? headerPortalTarget : undefined,
-                    composerPortalTarget: chrome ? composerPortalTarget : undefined,
-                    // A single chat includes the shared composer in its visual frame.
-                    // Split chats keep navigation centered within their own pane.
+                    composerPortalTarget: sharedComposer ? composerPortalTarget : undefined,
                     navigationFrame: displayedPanes.length === 1 ? navigationFrame : undefined,
                     headerActions,
                   })}
@@ -829,8 +828,8 @@ export function PaneWorkbench({
           ) : null}
         </div>
 
-        {chrome ? (
-          <footer className="workbench-composer-footer shrink-0 bg-background px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:px-4">
+        {sharedComposer ? (
+          <footer className="workbench-composer-footer shrink-0 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-4 sm:pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
             <div
               ref={setComposerPortalTarget}
               data-testid="workbench-composer-host"

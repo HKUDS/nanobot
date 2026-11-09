@@ -92,7 +92,6 @@ function ChannelFormPreview({ name, mode, locale, t }: {
       notice={notice ? "key" in notice ? t(notice.key) : notice.message : null}
       onAdvancedOpenChange={setAdvancedOpen}
       onChangeField={(key, value) => { setValues((current) => ({ ...current, [key]: value })); setErrors({}); setSaved(false); }}
-      onFieldBlur={() => { setSaved(true); }}
       onToggleSecret={(key) => setVisibleSecrets((current) => ({ ...current, [key]: !current[key] }))}
       onClearSecret={(key, clear) => setClearedSecrets((current) => {
         const next = new Set(current); if (clear) next.add(key); else next.delete(key); return next;
@@ -101,7 +100,6 @@ function ChannelFormPreview({ name, mode, locale, t }: {
       onSubmit={() => { if (validate()) setEnabled(true); }}
       onCheckConnection={() => { if (validate()) setChecked(true); }}
       onToggleEnabled={(next) => { if (!next || validate()) setEnabled(next); }}
-      onSaveConnectionSettings={() => setSaved(true)}
       onCopyCommand={() => { if (setup.command) void copyTextToClipboard(setup.command).then((ok) => setNotice({ key: ok ? "settings.channels.commandCopied" : "settings.channels.commandCopyFailed" })); }}
       onNotice={(message) => setNotice(message ? { message } : null)} />
   </aside>;

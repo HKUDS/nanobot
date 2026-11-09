@@ -84,9 +84,8 @@
       "dm_allowFrom": {
         "label": "許可する DM ユーザー"
       },
-      "proxy": {
-        "label": "ネットワークプロキシ",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "プロキシを使う"
       }
     }
   }

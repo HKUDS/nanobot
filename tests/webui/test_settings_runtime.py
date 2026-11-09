@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -13,22 +14,87 @@ from nanobot.webui.settings_runtime import (
     runtime_config_payload,
     update_runtime_config,
 )
+from nanobot.webui.settings_services import WebUISettingsServices
 
 
-def test_web_proxy_roundtrip_while_disabled_preserves_model_proxy(tmp_path):
+def test_shared_proxy_roundtrip_preserves_independent_feature_switches(tmp_path):
     path = tmp_path / "config.json"
     config = Config()
     config.tools.web.enable = False
-    config.providers.openai.proxy = "http://model-proxy.example:8080"
+    config.providers.openai.use_proxy = True
     save_config(config, path)
-    for proxy in ("http://web-proxy.example:7890", None):
-        payload = update_runtime_config_settings({"tools.web.proxy": proxy}, local_browser=True, config_path=path)
-        assert payload["runtime_config"]["tools.web.proxy"] == proxy
+    for proxy in ("http://shared-proxy.example:7890", "http://shared-proxy.example:7891"):
+        payload = update_runtime_config_settings({"network.proxy": proxy}, local_browser=True, config_path=path)
+        assert payload["runtime_config"]["network.proxy"] == proxy
         assert payload["requires_restart"]
         saved = load_config(path)
-        assert saved.tools.web.proxy == proxy
+        assert saved.network.proxy == proxy
         assert saved.tools.web.enable is False
-        assert saved.providers.openai.proxy == "http://model-proxy.example:8080"
+        assert saved.tools.web.use_proxy is False
+        assert saved.providers.openai.use_proxy is True
+    update_runtime_config_settings({"tools.web.use_proxy": True}, config_path=path)
+    assert load_config(path).tools.web.use_proxy is True
+
+
+def test_legacy_sandbox_config_roundtrip_and_rejected_override_are_atomic(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"tools": {"exec": {"sandbox": "bwrap", "sandboxRoBinds": ["/opt/tools"]}}}))
+    config = load_config(path)
+    assert config.tools.exec.sandbox_launcher == ""
+    payload = update_runtime_config_settings({"tools.exec.timeout": 75}, config_path=path)
+    assert payload["runtime_config"]["tools.exec.sandbox_launcher"] == ""
+    assert load_config(path).tools.exec.sandbox_ro_binds == ["/opt/tools"]
+    before = path.read_bytes()
+    reason = "path_not_absolute" if os.name == "posix" else "platform_unsupported"
+    with pytest.raises(WebUISettingsError, match=f"sandbox_launcher_{reason}"):
+        update_runtime_config_settings({"tools.exec.sandbox_launcher": "bin/bwrap", "tools.exec.timeout": 99}, config_path=path)
+    assert path.read_bytes() == before
+    update_runtime_config_settings({"tools.exec.sandbox_launcher": ""}, config_path=path)
+    assert load_config(path).tools.exec.sandbox == "bwrap"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix protected launcher permissions")
+def test_sandbox_environment_paths_are_validated_without_rewriting_references(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("SANDBOX_TEST_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("SANDBOX_TEST_LAUNCHER", "/bin/sh")
+    monkeypatch.delenv("SANDBOX_TEST_MISSING_PROVIDER", raising=False)
+    config = Config.model_validate({
+        "agents": {"defaults": {"workspace": "${SANDBOX_TEST_WORKSPACE}"}},
+        "providers": {"openai": {"apiKey": "${SANDBOX_TEST_MISSING_PROVIDER}"}},
+        "tools": {"exec": {"sandbox": "bwrap"}},
+    })
+    save_config(config, path)
+    payload = update_runtime_config_settings({
+        "tools.exec.sandbox_launcher": "${SANDBOX_TEST_LAUNCHER}",
+    }, config_path=path)
+    saved = load_config(path)
+    assert payload["runtime_config"]["tools.exec.sandbox_launcher"] == "${SANDBOX_TEST_LAUNCHER}"
+    assert saved.tools.exec.sandbox_launcher == "${SANDBOX_TEST_LAUNCHER}"
+    assert saved.agents.defaults.workspace == "${SANDBOX_TEST_WORKSPACE}"
+    assert saved.providers.openai.api_key == "${SANDBOX_TEST_MISSING_PROVIDER}"
+    before = path.read_bytes()
+    monkeypatch.setenv("SANDBOX_TEST_RW_BIND", str(Path("/bin/sh").resolve().parent))
+    with pytest.raises(WebUISettingsError, match="sandbox_launcher_agent_writable"):
+        update_runtime_config_settings({
+            "tools.exec.sandbox_rw_binds": ["${SANDBOX_TEST_RW_BIND}"],
+        }, config_path=path)
+    assert path.read_bytes() == before
+    monkeypatch.delenv("SANDBOX_TEST_LAUNCHER")
+    with pytest.raises(WebUISettingsError, match="sandbox_launcher_path_unavailable"):
+        update_runtime_config_settings({
+            "tools.exec.sandbox_launcher": "${SANDBOX_TEST_LAUNCHER}",
+        }, config_path=path)
+    assert path.read_bytes() == before
+
+
+def test_enabling_web_proxy_without_an_address_preserves_config(tmp_path):
+    path = tmp_path / "config.json"
+    save_config(Config(), path)
+    before = path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="Advanced"):
+        update_runtime_config_settings({"tools.web.use_proxy": True}, config_path=path)
+    assert path.read_bytes() == before
 
 
 def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
@@ -66,6 +132,13 @@ def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
     {"tools.exec": {"enable": False}},
     {"agents.defaults.max_concurrent_subagents": 0},
     {"agents.defaults.max_tool_iterations": True},
+    {"agents.defaults.session_ttl_minutes": -1},
+    {"agents.defaults.session_ttl_minutes": 1.5},
+    {"agents.defaults.session_ttl_minutes": 15.0},
+    {"agents.defaults.session_ttl_minutes": "15"},
+    {"agents.defaults.session_ttl_minutes": True},
+    {"agents.defaults.session_ttl_minutes": False},
+    {"agents.defaults.session_ttl_minutes": None},
     {"tools.exec.timeout": -1},
     {"tools.exec.timeout": 86401},
     {"tools.exec.timeout": "60"},
@@ -150,7 +223,7 @@ def test_timezone_auto_and_nullable_fields():
     }}})
     assert update_runtime_config(config, {
         "agents.defaults.timezone_mode": "auto",
-        "tools.web.proxy": None,
+        "network.proxy": None,
     }, local_browser=True)
     assert config.agents.defaults.timezone_mode == "auto"
     assert config.agents.defaults.dream.cron == "0 2 * * *"
@@ -194,3 +267,49 @@ def test_sandbox_backend_persists_with_path_permissions(tmp_path, backend):
     assert saved.sandbox_rw_binds == ["shared/write"]
     assert payload["runtime_config"]["tools.exec.sandbox"] == backend
     assert payload["requires_restart"]
+
+
+def test_idle_compaction_settings_roundtrip_and_restart_contract(tmp_path):
+    path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "${PRIVATE_API_KEY}"
+    save_config(config, path)
+    services = WebUISettingsServices.create(path)
+    key = "agents.defaults.session_ttl_minutes"
+    assert runtime_config_payload(config)[key] == 15
+
+    for minutes in (0, 720, 721, 37, 15):
+        payload = services.mutate(update_runtime_config_settings, {key: minutes})
+        assert payload["runtime_config"][key] == minutes
+        assert payload["requires_restart"] is True
+        saved = load_config(path)
+        assert saved.agents.defaults.session_ttl_minutes == minutes
+        assert saved.agents.defaults.idle_compact_check_interval_seconds == 60
+        assert saved.providers.openai.api_key == "${PRIVATE_API_KEY}"
+        defaults = json.loads(path.read_text(encoding="utf-8"))["agents"]["defaults"]
+        assert defaults["idleCompactAfterMinutes"] == minutes
+        assert "sessionTtlMinutes" not in defaults
+        assert "session_ttl_minutes" not in defaults
+
+        unchanged = services.mutate(update_runtime_config_settings, {key: minutes})
+        assert unchanged["runtime_config"][key] == minutes
+        assert unchanged["requires_restart"] is False
+
+
+def test_idle_compaction_legacy_config_can_be_read_and_updated(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"agents": {"defaults": {
+        "sessionTtlMinutes": 720, "idleCompactCheckIntervalSeconds": 91,
+    }}}), encoding="utf-8")
+    key = "agents.defaults.session_ttl_minutes"
+    assert runtime_config_payload(load_config(path))[key] == 720
+
+    payload = update_runtime_config_settings({key: 0}, config_path=path)
+    assert payload["runtime_config"][key] == 0
+    assert payload["requires_restart"] is True
+    saved = load_config(path)
+    assert saved.agents.defaults.session_ttl_minutes == 0
+    assert saved.agents.defaults.idle_compact_check_interval_seconds == 91
+    defaults = json.loads(path.read_text(encoding="utf-8"))["agents"]["defaults"]
+    assert defaults["idleCompactAfterMinutes"] == 0
+    assert "sessionTtlMinutes" not in defaults

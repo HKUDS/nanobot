@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
-import type { SettingsPayload } from "@/lib/types";
+import type { ProviderCreationUpdate, SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
@@ -566,7 +566,7 @@ describe("Settings providers", () => {
 
     await chooseProviderToConfigure("OpenAI Codex");
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    const dialog = (await screen.findByText("Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.")).closest('[role="dialog"]') as HTMLElement;
+    const dialog = (await screen.findByText("Finish signing in using your browser. If nanobot does not connect automatically, copy the full URL from the localhost page’s address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.")).closest('[role="dialog"]') as HTMLElement;
 
     expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.provider.oauth_login",
@@ -576,10 +576,10 @@ describe("Settings providers", () => {
     expect(openMock).not.toHaveBeenCalled();
     expect(
       within(dialog).getByText(
-        "Complete sign-in in your browser. If nanobot does not connect automatically, copy the full localhost callback URL from the address bar and paste it below.",
+        "Finish signing in using your browser. If nanobot does not connect automatically, copy the full URL from the localhost page’s address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.",
       ),
     ).toBeInTheDocument();
-    expect(within(dialog).getByText("Waiting for the browser callback…")).toBeInTheDocument();
+    expect(within(dialog).getByText("Waiting for sign-in to finish…")).toBeInTheDocument();
 
     expect(
       await screen.findByText("Signed in", {}, { timeout: 2500 }),
@@ -666,12 +666,12 @@ describe("Settings providers", () => {
       ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-      const dialog = (await screen.findByText("Open ChatGPT in this browser and finish signing in. When the localhost page fails to load, copy the full URL from the address bar and paste it below.")).closest('[role="dialog"]') as HTMLElement;
+      const dialog = (await screen.findByText("Open ChatGPT in this browser and finish signing in. On the localhost page, copy the full URL from the address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.")).closest('[role="dialog"]') as HTMLElement;
 
       expect(openMock).not.toHaveBeenCalled();
       expect(
         within(dialog).getByText(
-          "Open ChatGPT in this browser and finish signing in. When the localhost page fails to load, copy the full URL from the address bar and paste it below.",
+          "Open ChatGPT in this browser and finish signing in. On the localhost page, copy the full URL from the address bar—even if the page cannot load—paste it below, then select “Finish sign-in”.",
         ),
       ).toBeInTheDocument();
       expect(within(dialog).getByText("Paste the callback URL to continue.")).toBeInTheDocument();
@@ -680,7 +680,7 @@ describe("Settings providers", () => {
       });
       expect(callbackInput).toHaveAttribute(
         "placeholder",
-        "http://localhost:1455/auth/callback?code=…&state=…",
+        "Paste the full callback URL here",
       );
 
       fireEvent.click(within(dialog).getByRole("button", { name: "Open ChatGPT" }));
@@ -711,7 +711,7 @@ describe("Settings providers", () => {
     }
   });
 
-  it("saves scoped proxies for xAI and OpenAI Codex OAuth providers", async () => {
+  it("saves proxy switches for xAI and OpenAI Codex OAuth providers before sign-in", async () => {
     const base = settingsPayload();
     const providers: SettingsPayload["providers"] = [
       {
@@ -727,8 +727,8 @@ describe("Settings providers", () => {
         oauth_account: null,
         oauth_expires_at: null,
         oauth_login_supported: true,
-        proxy: "http://127.0.0.1:7000",
-        advanced_fields: ["extra_body", "proxy"],
+        use_proxy: true,
+        advanced_fields: ["extra_body", "use_proxy"],
         extra_body: null,
       },
       {
@@ -744,8 +744,8 @@ describe("Settings providers", () => {
         oauth_account: null,
         oauth_expires_at: null,
         oauth_login_supported: true,
-        proxy: null,
-        advanced_fields: ["extra_body", "proxy"],
+        use_proxy: false,
+        advanced_fields: ["extra_body", "use_proxy"],
         extra_body: null,
       },
     ];
@@ -764,7 +764,7 @@ describe("Settings providers", () => {
     vi.stubGlobal("fetch", fetchMock);
     requestMutationMock.mockImplementation(async (
       _action: string,
-      values: { provider?: string; proxy?: string; extraBody?: string },
+      values: { provider?: string; use_proxy?: boolean; extraBody?: string },
     ) => {
       payload = {
         ...payload,
@@ -772,7 +772,7 @@ describe("Settings providers", () => {
           provider.name === values.provider
             ? {
                 ...provider,
-                proxy: values.proxy || null,
+                use_proxy: values.use_proxy,
                 extra_body: values.extraBody ? JSON.parse(values.extraBody) : null,
               }
             : provider,
@@ -785,9 +785,10 @@ describe("Settings providers", () => {
 
     await chooseProviderToConfigure("xAI Grok");
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    const xaiProxy = screen.getByLabelText("Network proxy");
-    expect(xaiProxy).toHaveValue("http://127.0.0.1:7000");
-    fireEvent.change(xaiProxy, { target: { value: "http://127.0.0.1:7890" } });
+    const xaiProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(xaiProxy).toBeChecked();
+    expect(screen.queryByPlaceholderText("http://127.0.0.1:7890")).not.toBeInTheDocument();
+    fireEvent.click(xaiProxy);
     expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sign in" })).toHaveAttribute(
       "title",
@@ -801,7 +802,7 @@ describe("Settings providers", () => {
         {
           provider: "xai_grok",
           extraBody: "",
-          proxy: "http://127.0.0.1:7890",
+          use_proxy: false,
         },
         20_000,
       ),
@@ -812,9 +813,9 @@ describe("Settings providers", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to providers" }));
     await chooseProviderToConfigure("OpenAI Codex");
     fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
-    const codexProxy = screen.getByLabelText("Network proxy");
-    expect(codexProxy).toHaveValue("");
-    fireEvent.change(codexProxy, { target: { value: "http://proxy.example:8080" } });
+    const codexProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(codexProxy).not.toBeChecked();
+    fireEvent.click(codexProxy);
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() =>
@@ -823,11 +824,39 @@ describe("Settings providers", () => {
         {
           provider: "openai_codex",
           extraBody: "",
-          proxy: "http://proxy.example:8080",
+          use_proxy: true,
         },
         20_000,
       ),
     );
+  });
+
+  it("persists a disabled proxy switch on an API-key provider without changing credentials", async () => {
+    const base = settingsPayload();
+    let payload: SettingsPayload = { ...base, providers: [{
+      name: "openrouter", label: "OpenRouter", configured: true,
+      api_key_hint: "sk-••••test", api_base: "https://openrouter.ai/api/v1",
+      use_proxy: true, advanced_fields: ["use_proxy"],
+    }] };
+    requestMutationMock.mockImplementation(async (_action, values) => {
+      payload = { ...payload, providers: payload.providers.map((provider) => ({ ...provider, use_proxy: values.use_proxy })) };
+      return payload;
+    });
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: "OpenRouter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    const useProxy = screen.getByRole("switch", { name: "Use proxy" });
+    expect(useProxy).toBeChecked();
+    fireEvent.click(useProxy);
+    fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.provider.update",
+      { provider: "openrouter", apiBase: "https://openrouter.ai/api/v1", apiKey: undefined, use_proxy: false },
+      20_000,
+    ));
+    fireEvent.click(await screen.findByRole("button", { name: "OpenRouter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("switch", { name: "Use proxy" })).not.toBeChecked();
   });
 
   it("maps provider request switches to raw extraBody fields", async () => {
@@ -841,7 +870,7 @@ describe("Settings providers", () => {
         api_key_required: false,
         oauth_account: "grok@example.com",
         oauth_login_supported: true,
-        advanced_fields: ["extra_body", "proxy"],
+        advanced_fields: ["extra_body", "use_proxy"],
         extra_body: null,
       },
       {
@@ -852,7 +881,7 @@ describe("Settings providers", () => {
         api_key_required: false,
         oauth_account: "codex@example.com",
         oauth_login_supported: true,
-        advanced_fields: ["extra_body", "proxy"],
+        advanced_fields: ["extra_body", "use_proxy"],
         extra_body: null,
       },
       {
@@ -1056,7 +1085,7 @@ describe("Settings providers", () => {
     vi.stubGlobal("fetch", fetchMock);
     requestMutationMock.mockImplementationOnce(async (
       _action: string,
-      values: Record<string, string>,
+      values: ProviderCreationUpdate,
     ) => {
         payload = {
           ...payload,
@@ -1076,13 +1105,13 @@ describe("Settings providers", () => {
                 "extra_headers",
                 "extra_body",
                 "extra_query",
-                "proxy",
+                "use_proxy",
                 "thinking_style",
               ],
-              extra_headers: JSON.parse(values.extraHeaders),
-              extra_body: JSON.parse(values.extraBody),
-              extra_query: JSON.parse(values.extraQuery),
-              proxy: values.proxy,
+              extra_headers: JSON.parse(values.extraHeaders ?? "{}"),
+              extra_body: JSON.parse(values.extraBody ?? "{}"),
+              extra_query: JSON.parse(values.extraQuery ?? "{}"),
+              use_proxy: values.use_proxy,
               thinking_style: values.thinkingStyle,
             },
           ],
@@ -1123,9 +1152,7 @@ describe("Settings providers", () => {
       fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
       await waitFor(() => expect(screen.queryByRole("dialog", { name: title })).not.toBeInTheDocument());
     }
-    fireEvent.change(screen.getByLabelText("Network proxy"), {
-      target: { value: "http://127.0.0.1:7890" },
-    });
+    fireEvent.click(screen.getByRole("switch", { name: "Use proxy" }));
     fireEvent.pointerDown(screen.getByRole("button", { name: "Reasoning format" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "enable_thinking" }));
     fireEvent.click(screen.getByRole("button", { name: "Add provider" }));
@@ -1139,7 +1166,7 @@ describe("Settings providers", () => {
         name: "Company Gateway",
         apiKey: "sk-company",
         apiBase: "https://gateway.example/v1",
-        proxy: "http://127.0.0.1:7890",
+        use_proxy: true,
         extraHeaders: '{"X-Tenant":"engineering"}',
         extraBody: '{"service_tier":"priority"}',
         extraQuery: '{"api-version":"2026-01-01"}',

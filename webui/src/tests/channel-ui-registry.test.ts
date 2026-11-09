@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { resolve } from "node:path";
 
 import postcss from "postcss";
@@ -40,7 +41,11 @@ describe("channel UI contributions", () => {
     vi.stubEnv("NODE_ENV", "production");
     try {
       const config = loadConfig(resolve(process.cwd(), "tailwind.config.js"));
-      const result = await postcss([tailwindcss(config)]).process("@tailwind utilities;", { from: undefined });
+      assert(Array.isArray(config.content));
+      // Keep production channel globs and exclusions without rebuilding unrelated app/test CSS.
+      const content = config.content.filter((entry) => typeof entry === "string"
+        && (entry.includes("../nanobot/channels/") || entry.startsWith("!")));
+      const result = await postcss([tailwindcss({ ...config, content })]).process("@tailwind utilities;", { from: undefined });
 
       // Linear's connecting indicator uses a channel-only arbitrary color.
       let backgroundColor: string | undefined;

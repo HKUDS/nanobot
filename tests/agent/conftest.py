@@ -1,5 +1,3 @@
-"""Shared fixtures and helpers for agent tests."""
-
 from __future__ import annotations
 
 import os

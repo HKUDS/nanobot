@@ -65,6 +65,7 @@ function messageEvents(message: UIMessage): ThreadProjectionEvent[] {
   if (message.kind === "compaction" && message.compaction) {
     return [{
       event: "context_compaction",
+      reason: message.compaction.reason,
       ...base,
       compaction_id: message.compaction.id,
       phase: message.compaction.phase,

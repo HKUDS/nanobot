@@ -1,6 +1,6 @@
-"""Base class for agent tools."""
 from __future__ import annotations
 
+import json
 import math
 import typing
 from abc import ABC, abstractmethod
@@ -16,7 +16,6 @@ if typing.TYPE_CHECKING:
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
 
-# Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
 _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "string": str,
     "integer": int,
@@ -34,7 +33,6 @@ def _is_json_integer(value: object) -> bool:
 
 
 def _json_values_equal(left: Any, right: Any) -> bool:
-    """Compare JSON values without treating booleans as numbers."""
     if isinstance(left, bool) or isinstance(right, bool):
         return left is right
     if isinstance(left, list) and isinstance(right, list):
@@ -200,15 +198,17 @@ class ToolResult(str):
     """String-compatible tool output with structured status."""
 
     is_error: bool
+    error_code: str | None
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(cls, content: str, *, is_error: bool = False, error_code: str | None = None) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.error_code = error_code
         return obj
 
     @classmethod
-    def error(cls, content: str) -> ToolResult:
-        return cls(content, is_error=True)
+    def error(cls, content: str, *, error_code: str | None = None) -> ToolResult:
+        return cls(content, is_error=True, error_code=error_code)
 
 
 class Tool(ABC):
@@ -256,7 +256,6 @@ class Tool(ABC):
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
 
-    # --- Plugin metadata ---
 
     config_key: str = ""
     _plugin_discoverable: bool = True
@@ -310,9 +309,51 @@ class Tool(ABC):
             return params
         return self._cast_object(params, schema)
 
+    @staticmethod
+    def _container_types(schema: dict[str, Any]) -> set[str]:
+        """Recognize explicit container-only types, without choosing a union branch."""
+        options = [schema] if "type" in schema else schema.get("oneOf", schema.get("anyOf"))
+        if not isinstance(options, list) or not options:
+            return set()
+        types: set[str] = set()
+        for option in cast(list[Any], options):
+            if not isinstance(option, dict):
+                return set()
+            raw_type = cast(dict[str, Any], option).get("type")
+            members = cast(list[Any], raw_type) if isinstance(raw_type, list) else [raw_type]
+            for member in members:
+                if not isinstance(member, str) or member not in {"object", "array", "null"}:
+                    return set()
+                if member != "null":
+                    types.add(member)
+        return types
+
+    @classmethod
+    def _decode_json_container(cls, value: Any, schema: dict[str, Any]) -> Any:
+        """Decode a JSON string only when it contains the expected container type."""
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        expected_type = "object" if stripped.startswith("{") else "array"
+        if not stripped.startswith(("{", "[")) or expected_type not in cls._container_types(schema):
+            return value
+
+        try:
+            parsed = json.loads(stripped)
+        except (TypeError, ValueError):
+            return value
+
+        if expected_type == "object" and isinstance(parsed, dict):
+            return cast(dict[str, Any], parsed)
+        if expected_type == "array" and isinstance(parsed, list):
+            return cast(list[Any], parsed)
+        return value
+
     def _cast_value(self, val: Any, schema: dict[str, Any] | bool) -> Any:
         if isinstance(schema, bool):
             return val
+        val = self._decode_json_container(val, schema)
         raw_type = schema.get("type")
         t = self._resolve_type(raw_type)
         if isinstance(raw_type, list):

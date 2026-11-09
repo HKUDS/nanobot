@@ -1,9 +1,8 @@
-"""Exercise scheduled delivery through the real gateway pipeline, without external sends."""
-
 import asyncio
 import json
 import os
 import sqlite3
+import subprocess
 from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
@@ -33,6 +32,7 @@ from nanobot.cron.bound_runner import run_bound_cron_job
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronSchedule
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.runtime_admission import RuntimeBusyError, RuntimeMaintenanceError
 from nanobot.session.manager import SessionManager
 
 
@@ -60,6 +60,58 @@ async def drain(manager):
     async with asyncio.timeout(5):
         while manager.bus.outbound_size or manager._outbound_tasks:
             await asyncio.sleep(0.01)
+
+
+async def test_parked_gateway_neither_initializes_nor_records_scheduled_delivery(tmp_path):
+    manager = make_manager(tmp_path)
+    try:
+        with manager.bus.admission.pause_before_start():
+            manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
+            await asyncio.sleep(0)
+            assert not manager._outbox.path.exists()
+            with pytest.raises(RuntimeMaintenanceError):
+                await manager.bus.publish_outbound(message())
+            with pytest.raises(RuntimeMaintenanceError):
+                await manager._recover_scheduled()
+            assert not manager._outbox.path.exists()
+            assert manager.bus.outbound_size == 0
+        await manager.bus.publish_outbound(message())
+        assert manager._outbox.path.exists()
+    finally:
+        await manager.stop_all()
+
+
+async def test_scheduled_recovery_remains_busy_while_waiting_for_a_send_slot(tmp_path, monkeypatch):
+    manager = make_manager(tmp_path)
+    channel = MagicMock(spec=BaseChannel, send=AsyncMock(), stop=AsyncMock())
+    channel.has_pending_delivery = False
+    manager.channels["whatsapp"] = channel
+    manager._outbox.record(message())
+    manager._outbound_slots = asyncio.Semaphore(0)
+    queued = asyncio.Event()
+    queue = manager._queue_outbound
+
+    async def wait_for_slot(channel, msg):
+        queued.set()
+        await queue(channel, msg)
+
+    monkeypatch.setattr(manager, "_queue_outbound", wait_for_slot)
+    recovery = asyncio.create_task(manager._recover_scheduled())
+    try:
+        await asyncio.wait_for(queued.wait(), 2)
+        assert not manager._outbound_tasks
+        with pytest.raises(RuntimeBusyError):
+            with manager.bus.admission.pause_if_idle(lambda: False):
+                pytest.fail("Durable recovery was admitted during maintenance")
+        manager._outbound_slots.release()
+        await asyncio.wait_for(recovery, 2)
+        await drain(manager)
+        channel.send.assert_awaited_once()
+        assert rows(manager._outbox)[0]["status"] == "sent"
+    finally:
+        recovery.cancel()
+        await asyncio.gather(recovery, return_exceptions=True)
+        await manager.stop_all()
 
 
 @pytest.mark.parametrize("legacy_message,one_shot,origin", [
@@ -108,11 +160,8 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
     if origin == "websocket":
         manager.channels["websocket"] = MagicMock(spec=BaseChannel, send=AsyncMock(), stop=AsyncMock())
     manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
-    # Legacy channel/to fields still normalize through the existing binding migration.
     schedule = CronSchedule(kind="at", at_ms=4102444800000) if one_shot else CronSchedule(kind="every", every_ms=86400000)
     if origin == "websocket":
-        # A WebUI-created task remains in its source chat even when its instructions
-        # explicitly request a separate send. Recovery must keep that send's target.
         with request_context(RequestContext("websocket", "source", session_key="websocket:source",
                                             metadata={"webui": True, "_wants_stream": True})):
             await CronTool(cron).execute(action="add", name="Reminder", every_seconds=86400,
@@ -148,7 +197,6 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         assert DELIVERY_RUN_META not in json.dumps(calls[0]["messages"])
         assert "Diagnostic result" not in calls[0]["messages"][0]["content"]
         await manager.stop_all()
-        # A second gateway uses the saved result; no timer, agent, or model is restarted.
         manager = make_manager(tmp_path, sessions)
         manager.channels["whatsapp"] = channel
         channel._connected = True
@@ -162,7 +210,6 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         await again._recover_scheduled()
         assert channel._client.send_message.await_count == 1
         assert len(calls) == count
-        # Existing jobs still load after delivery state is added beside them.
         old_jobs = CronService(cron.store_path).list_jobs()
         assert old_jobs == [] if one_shot else old_jobs[0].payload.message == job.payload.message
     finally:
@@ -281,7 +328,6 @@ async def test_recovery_keeps_destination_order_and_does_not_block_other_chats(t
     await manager._recover_scheduled()
     await drain(manager)
     assert [call.args[0].content for call in channel.send.await_args_list] == ["first", "other", "first", "second"]
-    # A stale queued copy must not downgrade the durable successful result.
     manager._outbox.finish(first, "failed", "channel_disabled")
     assert all(row["status"] == "sent" for row in rows(manager._outbox))
 
@@ -306,7 +352,9 @@ async def test_recovery_rechecks_attachment_workspace_boundary(tmp_path):
     manager = make_manager(tmp_path, sessions)
     manager.config.agents.defaults.workspace = str(workspace)
     manager.config.tools.restrict_to_workspace = True
-    attachment = workspace / "report.txt"
+    reports = workspace / "reports"
+    reports.mkdir()
+    attachment = reports / "report.txt"
     attachment.write_text("report")
     msg = message(generation=session.generation)
     msg.media = [str(attachment)]
@@ -314,9 +362,19 @@ async def test_recovery_rechecks_attachment_workspace_boundary(tmp_path):
     try:
         await manager.bus.publish_outbound(msg)
         attachment.unlink()
-        private = tmp_path / "private.txt"
-        private.write_text("not authorized")
-        attachment.symlink_to(private)
+        reports.rmdir()
+        private = tmp_path / "private"
+        private.mkdir()
+        (private / "report.txt").write_text("not authorized")
+        if os.name == "nt":
+            # Directory junctions resolve across the same workspace boundary
+            # without requiring Windows' privileged symlink capability.
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(reports), str(private)],
+                check=True, capture_output=True,
+            )
+        else:
+            reports.symlink_to(private, target_is_directory=True)
         await manager._send_scheduled(channel, msg)
         channel.send.assert_not_called()
         assert rows(manager._outbox)[0]["error"] == "attachment_access_denied"

@@ -8,81 +8,6 @@ import pytest
 import nanobot.webui.forking as forking
 
 
-async def test_create_fork_rebuilds_missing_transcript_and_saves_clean_title(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    forked = SimpleNamespace(messages=[{"role": "user", "content": "hello"}], metadata={})
-    manager = MagicMock()
-    manager.state.fork = AsyncMock(return_value=forked)
-    rebuild = MagicMock()
-    marker = MagicMock()
-    monkeypatch.setattr(forking.uuid, "uuid4", lambda: "fork-id")
-    monkeypatch.setattr(forking, "fork_transcript_before_user_index", lambda *_args: False)
-    monkeypatch.setattr(forking, "write_session_messages_as_transcript", rebuild)
-    monkeypatch.setattr(forking, "append_fork_marker", marker)
-
-    result = await forking.create_webui_chat_fork(
-        manager,
-        source_chat_id="source",
-        before_user_index=2,
-        title="  Useful fork  ",
-    )
-
-    assert result == ("fork-id", "websocket:fork-id")
-    manager.state.fork.assert_awaited_once_with(
-        "websocket:source",
-        "websocket:fork-id",
-        2,
-        title="Useful fork",
-    )
-    rebuild.assert_called_once_with("websocket:fork-id", forked.messages)
-    marker.assert_called_once_with("websocket:fork-id")
-
-
-async def test_create_fork_rolls_back_session_and_transcript_together(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = MagicMock()
-    manager.state.fork = AsyncMock(return_value=SimpleNamespace(messages=[], metadata={}))
-    manager.state.delete = AsyncMock()
-    delete_transcript = MagicMock()
-    monkeypatch.setattr(forking.uuid, "uuid4", lambda: "failed-fork")
-    monkeypatch.setattr(
-        forking,
-        "fork_transcript_before_user_index",
-        MagicMock(side_effect=OSError("disk full")),
-    )
-    monkeypatch.setattr(forking, "delete_webui_transcript", delete_transcript)
-
-    with pytest.raises(OSError, match="disk full"):
-        await forking.create_webui_chat_fork(
-            manager,
-            source_chat_id="source",
-            before_user_index=1,
-        )
-
-    delete_transcript.assert_called_once_with("websocket:failed-fork")
-    manager.state.delete.assert_awaited_once_with("websocket:failed-fork")
-
-
-async def test_create_fork_stops_before_transcript_work_when_source_is_invalid(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = MagicMock()
-    manager.state.fork = AsyncMock(return_value=None)
-    fork_transcript = MagicMock()
-    monkeypatch.setattr(forking, "fork_transcript_before_user_index", fork_transcript)
-
-    result = await forking.create_webui_chat_fork(
-        manager,
-        source_chat_id="missing",
-        before_user_index=1,
-    )
-
-    assert result is None
-    fork_transcript.assert_not_called()
-
-
 @pytest.mark.parametrize(
     ("envelope", "detail"),
     [
@@ -157,3 +82,36 @@ async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_e
 
     warning.assert_called_once_with("fork_chat failed: {}", ANY)
     channel.send_webui_protocol_error.assert_awaited_once_with(connection, "fork_chat_failed")
+
+
+@pytest.mark.parametrize("with_display", [False, True])
+async def test_fork_copies_prefix_and_boundary_in_the_session_transaction(history, monkeypatch, with_display):
+    sessions = history.sessions
+    source = sessions.get_or_create("websocket:source")
+    source.metadata.update(title="source title", session_handle="original", webui=True)
+    for number in range(3):
+        source.add_message("user", f"question {number}")
+        source.add_message("assistant", f"answer {number}")
+    sessions.save(source)
+    if with_display:
+        for number in range(3):
+            history.append(source.key, {"event": "user", "text": f"question {number}"})
+            history.append(source.key, {"event": "message", "text": f"answer {number}"})
+            history.append(source.key, {"event": "turn_end"})
+    monkeypatch.setattr(forking.uuid, "uuid4", lambda: "fork-id")
+    result = await forking.create_webui_chat_fork(sessions, source_chat_id="source", before_user_index=2, title="  Useful fork  ")
+    assert result == ("fork-id", "websocket:fork-id")
+    forked = await sessions.state.get(result[1])
+    assert [message["content"] for message in forked.messages] == ["question 0", "answer 0", "question 1", "answer 1"]
+    assert forked.metadata["title"] == "Useful fork"
+    assert forked.metadata.get("session_handle") != "original"
+    payload = history.build(forked.key)
+    visible = [event["text"] for event in payload["events"] if "text" in event]
+    assert visible == ["question 0", "answer 0", "question 1", "answer 1"]
+    assert payload["fork_boundary_event_index"] == len(payload["events"])
+    assert (await sessions.state.get(source.key)).messages == source.messages
+
+
+async def test_fork_missing_source_leaves_no_partial_session(history):
+    assert await forking.create_webui_chat_fork(history.sessions, source_chat_id="missing", before_user_index=1) is None
+    assert await history.sessions.state.list_sessions() == []

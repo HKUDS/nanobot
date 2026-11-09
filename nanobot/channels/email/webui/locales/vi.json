@@ -158,8 +158,7 @@
       },
       "trustedAuthservIds": {
         "label": "Dịch vụ xác thực tin cậy",
-        "placeholder": "mx.google.com, phân tách bằng dấu phẩy",
-        "help": "Nhập các authserv-id đáng tin cậy.\n\nGiá trị authserv-id chính xác do dịch vụ nhận thư thêm vào. Bắt buộc khi xác minh SPF hoặc DKIM."
+        "placeholder": "mx.google.com, phân tách bằng dấu phẩy"
       }
     }
   }

@@ -33,12 +33,13 @@ interface IndicatorGeometry {
   top: number;
   width: number;
   height: number;
+  baseWidth: number;
   animate: boolean;
 }
 
 function sameGeometry(
   previous: IndicatorGeometry,
-  next: Omit<IndicatorGeometry, "animate">,
+  next: Omit<IndicatorGeometry, "animate" | "baseWidth">,
 ): boolean {
   return previous.left === next.left
     && previous.top === next.top
@@ -83,7 +84,9 @@ export function SegmentedControl<T extends string>({
       };
       setIndicator((previous) => {
         if (previous && sameGeometry(previous, next)) return previous;
-        return { ...next, animate: Boolean(previous) && animate };
+        // Keep the box fixed while switching; rebase it when the option geometry changes without motion.
+        const baseWidth = !animate || !previous?.width ? Math.max(next.width, 1) : previous.baseWidth;
+        return { ...next, baseWidth, animate: Boolean(previous?.width) && animate };
       });
     };
 
@@ -151,9 +154,11 @@ export function SegmentedControl<T extends string>({
           )}
           style={{
             top: indicator.top,
-            width: indicator.width,
+            width: indicator.baseWidth,
             height: indicator.height,
-            transform: `translate3d(${indicator.left}px, 0, 0)`,
+            transformOrigin: "left center",
+            translate: `${indicator.left}px 0`,
+            scale: `${indicator.width / indicator.baseWidth} 1`,
           }}
         />
       ) : null}

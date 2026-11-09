@@ -23,14 +23,8 @@
         "label": "允許使用者",
         "placeholder": "使用者 ID，以逗號分隔"
       },
-      "proxy": {
-        "label": "網路代理"
-      },
-      "proxyUsername": {
-        "label": "代理賬號"
-      },
-      "proxyPassword": {
-        "label": "代理密碼"
+      "useProxy": {
+        "label": "使用代理"
       },
       "intents": {
         "label": "Gateway Intents"

@@ -41,7 +41,6 @@ export function ChannelQrConnectFlow({
   renderActions,
   renderView,
 }: {
-  token: string;
   channelName: string;
   startParams?: Readonly<Record<string, string | boolean>>;
   idleLabel?: string;
@@ -66,7 +65,10 @@ export function ChannelQrConnectFlow({
   const pageVisible = usePageVisibility();
   const [connect, setConnect] = useState<ChannelConnectPayload | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{
+    action: NonNullable<ChannelQrConnectFlowViewProps["errorAction"]>;
+    message: string;
+  } | null>(null);
   const handledRequestId = useRef(0);
   const autoStarted = useRef(false);
   const pollInFlight = useRef(false);
@@ -103,11 +105,10 @@ export function ChannelQrConnectFlow({
         if (payload.nanobot_features) {
           onFeaturesUpdate(payload.nanobot_features);
         }
-        if (payload.status !== "pending") {
-          setError(null);
-        }
+        setError((current) => payload.status !== "pending" || current?.action === "poll" ? null : current);
       } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+        if (!cancelled) setError((current) => current?.action === "cancel"
+          ? current : { action: "poll", message: (err as Error).message });
       } finally {
         pollInFlight.current = false;
       }
@@ -146,7 +147,7 @@ export function ChannelQrConnectFlow({
         onFeaturesUpdate(payload.nanobot_features);
       }
     } catch (err) {
-      setError((err as Error).message);
+      setError({ action: "start", message: (err as Error).message });
     } finally {
       setBusy(false);
     }
@@ -173,8 +174,9 @@ export function ChannelQrConnectFlow({
         connect.session_id,
       );
       setConnect(payload);
+      setError(null);
     } catch (err) {
-      setError((err as Error).message);
+      setError({ action: "cancel", message: (err as Error).message });
     } finally {
       setBusy(false);
     }
@@ -206,7 +208,7 @@ export function ChannelQrConnectFlow({
       }
       return payload;
     } catch (err) {
-      setError((err as Error).message);
+      setError({ action: "poll", message: (err as Error).message });
       return null;
     } finally {
       setBusy(false);
@@ -216,7 +218,8 @@ export function ChannelQrConnectFlow({
   const viewProps: ChannelQrConnectFlowViewProps = {
     connect,
     busy,
-    error,
+    error: error?.message ?? null,
+    errorAction: error?.action,
     onStart: () => void start(forceOnRepeat && !pending && (connected || connect?.status === "succeeded")),
     onCancel: () => void cancel(),
     onPoll: submitPoll,

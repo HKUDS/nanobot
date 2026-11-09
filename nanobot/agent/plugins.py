@@ -1,5 +1,3 @@
-"""Load and activate locally installed Agent Plugin packages."""
-
 from __future__ import annotations
 
 import base64
@@ -69,7 +67,6 @@ class AgentPlugin:
 
 
 def _installed_plugins(workspace: Path) -> list[AgentPlugin]:
-    """Return installed packages found under ``<workspace>/plugins/*``."""
     workspace = workspace.expanduser().resolve()
     root = _contained(workspace / "plugins", workspace, directory=True)
     if root is None:
@@ -189,7 +186,6 @@ def _invalidate_skill_cache(workspace: Path) -> None:
 def _package_fingerprint(
     root: Path, *, documents: dict[Path, bytes | None] | None = None,
 ) -> str | None:
-    """Hash package paths, link targets, and file contents."""
     digest = sha256()
     try:
         for candidate in sorted(root.rglob("*")):
@@ -313,7 +309,6 @@ def _accent_color(value: object) -> str | None:
 
 
 def _plugin_logo(value: object, plugin_root: Path) -> str | None:
-    """Resolve nanobot's optional packaged logo extension."""
     if value is None:
         return None
     if not isinstance(value, str) or not value.startswith("./"):
@@ -451,7 +446,6 @@ def _plugin_data_dir(workspace: Path, name: str, *, create: bool) -> Path:
 def _enabled_package_fingerprint(
     workspace: Path, plugin: AgentPlugin, *, documents: dict[Path, bytes | None] | None = None,
 ) -> str | None:
-    """Return the content fingerprint when this exact package is enabled."""
     marker = _plugin_data_dir(workspace, plugin.name, create=False) / "enabled"
     try:
         if not marker.is_file():
@@ -487,7 +481,6 @@ def _enabled(workspace: Path, plugin: AgentPlugin) -> bool:
 def _activation_marker(
     plugin: AgentPlugin, *, documents: dict[Path, bytes | None] | None = None,
 ) -> str | None:
-    """Bind activation to one immutable package snapshot."""
     fingerprint = _package_fingerprint(plugin.root, documents=documents)
     if fingerprint is None:
         return None

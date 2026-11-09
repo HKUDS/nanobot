@@ -195,7 +195,7 @@ describe("host session lifecycle", () => {
     act(() => result.current.loaded(ids[0]));
     expect(result.current.selected).toBeNull();
     expect(result.current.frames).toHaveLength(0);
-    expect(vi.getTimerCount()).toBe(1); // health interval only
+    expect(vi.getTimerCount()).toBe(1);
   });
 
   it("a timed-out cold page leaves the old host intact and can be retried", async () => {

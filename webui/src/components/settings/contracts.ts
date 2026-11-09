@@ -1,6 +1,6 @@
 import type { SettingsPayload } from "@/lib/types";
 
-export type SettingsExitGuard = (leave: () => void) => void;
+export type SettingsExitGuard = (leave: () => void, options?: { promptRestart?: boolean }) => void;
 
 export type SettingsSectionKey =
   | "overview"
@@ -40,3 +40,4 @@ export type ApplySettingsPayload = (
 ) => void;
 
 export type MaybeRestartHostEngine = (payload: RestartAwarePayload) => Promise<void>;
+export type SettingsFocusTarget = "sandbox" | "sandbox-launcher";

@@ -2,12 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Notices and the input share one width, including the compact screen inset. */
+@font-face {
+  font-family: "Open Sans";
+  src: url("./assets/fonts/open-sans-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 300 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Open Sans";
+  src: url("./assets/fonts/open-sans-variable-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 300 800;
+  font-display: swap;
+}
+
 .thread-composer-stack {
   --composer-content-width: 49.5rem;
 }
 .thread-composer-stack.is-hero {
   --composer-content-width: 58rem;
+}
+.subagent-task-dock {
+  --subagent-handle-inset: var(--radius-panel);
+  width: calc(100% - 0.5rem - 2 * var(--subagent-handle-inset));
+  max-width: calc(var(--composer-content-width, 49.5rem) - 2 * var(--subagent-handle-inset));
+}
+.thread-composer-stack.is-hero .subagent-task-dock {
+  --subagent-handle-inset: var(--radius-prominent);
+  width: calc(100% - 2 * var(--subagent-handle-inset));
+}
+.subagent-task-dock + .thread-composer-form {
+  padding-top: 0;
 }
 .thread-composer-notice {
   width: calc(100% - 0.5rem);
@@ -21,6 +48,9 @@
   .thread-composer-notice {
     width: 100%;
   }
+  .subagent-task-dock {
+    width: calc(100% - 2 * var(--subagent-handle-inset));
+  }
 }
 
 @supports (content-visibility: auto) {
@@ -30,10 +60,34 @@
   }
 }
 
+/* Only gradient owners need interpolable colors; palette tokens remain unchanged. */
+@property --thread-history-background {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-spot {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-start {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-end {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
     color-scheme: light;
+    --content-link: #0369a1;
+    --content-link-hover: #075985;
     --background: 0 0% 100%;
     --foreground: 240 3% 12%;
     --card: 0 0% 100%;
@@ -54,6 +108,7 @@
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
     --inline-token-highlight: #ad450b;
+    --inline-reference-highlight: rgb(244 169 73);
     --code-comment: #62626b;
     --code-string: #166534;
     --code-keyword: #7e22ce;
@@ -69,7 +124,6 @@
     --temporary-control-active: #ef8e30;
     --temporary-foreground: 17 88% 32%;
     --radius: 0.4375rem;
-    /* Shared shape scale: marks, compact content, controls, and progressively larger surfaces. */
     --radius-mark: 0.25rem;
     --radius-compact: 0.5rem;
     --radius-control: 0.75rem;
@@ -80,11 +134,6 @@
     --radius-pill: 9999px;
     --corner-shape: superellipse(1.5);
     --content-column-width: 49.5rem;
-    --reading-size-wide: 18px;
-    --reading-size-narrow: 16px;
-    --text-reading-size: var(--reading-size-wide);
-    --text-code-size: calc(var(--text-reading-size) * 0.875);
-    --text-code-dense-size: calc(var(--text-reading-size) * 0.75);
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-content: 240 3% 30%;
@@ -100,24 +149,29 @@
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
 
-  :root[data-reading-text-size="small"] {
-    --reading-size-wide: 16px;
-    --reading-size-narrow: 15px;
+  :root, .reading-typography {
+    --text-reading-size: 16px;
+    --reading-line-height: 1.6;
+    --text-code-size: calc(var(--text-reading-size) * 0.875);
+    --text-code-dense-size: calc(var(--text-reading-size) * 0.75);
   }
 
-  :root[data-reading-text-size="large"] {
-    --reading-size-wide: 20px;
-    --reading-size-narrow: 18px;
+  :root[data-reading-text-size="small"], .reading-typography[data-reading-text-size="small"] {
+    --text-reading-size: 15px;
   }
 
-  @media (max-width: 639px) {
-    :root {
-      --text-reading-size: var(--reading-size-narrow);
-    }
+  :root[data-reading-text-size="large"], .reading-typography[data-reading-text-size="large"] {
+    --text-reading-size: 18px;
+  }
+
+  :root[data-reading-text-size="custom"], .reading-typography[data-reading-text-size="custom"] {
+    --text-reading-size: var(--custom-reading-size, 18px);
   }
 
   .dark {
     color-scheme: dark;
+    --content-link: #bae6fd;
+    --content-link-hover: #e0f2fe;
     --background: 0 0% 19%;
     --foreground: 240 4% 96%;
     --card: 0 0% 22%;
@@ -132,13 +186,13 @@
     --muted-foreground: 0 0% 72%;
     --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
-    /* Destructive text needs contrast on dark surfaces; filled controls use a dark label. */
     --destructive: 0 93.5% 81.8%;
     --destructive-foreground: 0 0% 9%;
     --border: 0 0% 28%;
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --inline-reference-highlight: rgb(244 169 73);
     --code-comment: #c8c8d0;
     --code-string: #b5d99c;
     --code-keyword: #e3a5f7;
@@ -189,6 +243,13 @@
     @apply bg-background text-foreground font-sans antialiased;
     overflow: hidden;
     text-autospace: normal;
+  }
+
+  .text-reading,
+  .text-reading-small,
+  .text-composer,
+  .markdown-content {
+    font-family: "Open Sans", sans-serif;
   }
 
   /* Keep source text and editable values visually literal. */
@@ -383,6 +444,12 @@
     backdrop-filter: saturate(185%) blur(34px);
   }
 
+  .host-window-shell {
+    transition: --host-glass-spot var(--theme-paint-duration, 0s) linear,
+      --host-glass-start var(--theme-paint-duration, 0s) linear,
+      --host-glass-end var(--theme-paint-duration, 0s) linear;
+  }
+
   .host-sidebar-glass {
     background: hsl(var(--sidebar) / 0.94);
     -webkit-backdrop-filter: saturate(145%) blur(18px);
@@ -419,7 +486,6 @@
     height: 0;
   }
 
-  /* Keep the outer document rhythm clean at message boundaries. */
   .markdown-content > :first-child {
     @apply mt-0;
   }
@@ -427,24 +493,28 @@
     @apply mb-0;
   }
 
-  /* Override Tailwind Typography's built-in colors with our design tokens
-     so assistant messages use the same --foreground as user messages. */
   .markdown-content {
-    --tw-prose-body: hsl(var(--foreground));
-    --tw-prose-headings: hsl(var(--foreground));
-    --tw-prose-bold: hsl(var(--foreground));
-    --tw-prose-lead: hsl(var(--foreground));
+    --tw-prose-body: hsl(var(--foreground) / 0.9);
+    --tw-prose-headings: hsl(var(--foreground) / 0.9);
+    --tw-prose-bold: hsl(var(--foreground) / 0.9);
+    --tw-prose-lead: hsl(var(--foreground) / 0.9);
+    transition: var(--theme-ink-transition, color 0s);
     @apply text-reading;
   }
 
   .markdown-content :is(h1, h2, h3, h4, h5, h6) {
+    margin-block: 1.25em 0.5em;
     font-weight: 600;
-    line-height: 1.4;
+    line-height: 1.3;
   }
-  .markdown-content h1 { font-size: 1.5em; }
-  .markdown-content h2 { font-size: 1.25em; }
-  .markdown-content h3 { font-size: 1.125em; }
-  .markdown-content :is(h4, h5, h6) { font-size: 1em; }
+  .markdown-content h1 { font-size: 2em; }
+  .markdown-content h2 { font-size: 1.5em; }
+  .markdown-content h3 { font-size: 1.25em; }
+  .markdown-content h4 { font-size: 1.125em; }
+  .markdown-content :is(h5, h6) { font-size: 1em; }
+  .markdown-content :is(p, ul, ol) { margin-block: 0.8em; }
+  .markdown-content li { margin-block: 0.25em; }
+  .markdown-content :is(li > ul, li > ol) { margin-block: 0; }
   .markdown-content strong { font-weight: 600; }
   .markdown-content :is(th, td) {
     font-size: inherit;
@@ -473,18 +543,6 @@
     @apply list-none pl-0;
   }
 
-  /* Set the default before locale overrides: html also matches :lang(). */
-  :root {
-    --cjk-line-height: 1.625;
-  }
-
-  :lang(zh),
-  :lang(ja),
-  :lang(ko) {
-    --cjk-line-height: 1.8;
-  }
-
-  /* Balance short headings; preserve explicit line breaks in chat prose. */
   .markdown-content :is(h1, h2, h3, h4, h5, h6),
   .settings-section-title {
     text-wrap: balance;
@@ -495,8 +553,6 @@
     --activity-animation: 2.8s ease-in-out infinite;
   }
 
-  /* L→R sheen clipped to live activity labels. The highlight lives inside
-     the glyphs, not in the row background, so dark mode stays quiet. */
   @keyframes streaming-text-sheen-ltr {
     0% {
       background-position: 140% 50%;
@@ -554,9 +610,6 @@
       animation: none;
       content: "";
     }
-    .streaming-text-fallback::after {
-      animation: none;
-    }
   }
 
   /**
@@ -567,6 +620,7 @@
    */
   .thread-layout {
     --thread-composer-fade-height: 2.25rem;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
     transition: grid-template-rows 220ms ease-out;
   }
@@ -585,31 +639,47 @@
   /**
    * Keep the transcript and composer visually continuous. The scrollport owns
    * the fade because overflow clips its contents before an adjacent overlay
-   * can soften the edge. The matching in-flow gap keeps the last line fully
-   * visible once the user reaches the bottom.
+   * can soften the edge. On phones, the same mask keeps a clear top edge even
+   * after the initial inset scrolls away. The matching bottom in-flow gap keeps
+   * the last line fully visible once the user reaches the bottom.
    */
   .thread-message-viewport {
+    --thread-top-clearance: 0px;
+    --thread-top-fade-height: 0px;
     -webkit-mask-image: linear-gradient(
       to bottom,
-      #000 0,
+      transparent 0,
+      transparent var(--thread-top-clearance),
+      #000 var(--thread-top-fade-height),
       #000 calc(100% - var(--thread-composer-fade-height)),
       transparent 100%
     );
     mask-image: linear-gradient(
       to bottom,
-      #000 0,
+      transparent 0,
+      transparent var(--thread-top-clearance),
+      #000 var(--thread-top-fade-height),
       #000 calc(100% - var(--thread-composer-fade-height)),
       transparent 100%
     );
+  }
+  @media (max-width: 639px) {
+    .thread-message-viewport {
+      --thread-top-clearance: 6px;
+      --thread-top-fade-height: 22px;
+    }
   }
   .thread-message-end-gap {
     height: var(--thread-composer-fade-height);
   }
 
   .thread-history-status {
+    --thread-history-background: hsl(var(--background));
     height: 48px;
-    background: linear-gradient(hsl(var(--background)) 35%, hsl(var(--background) / 0));
+    background: linear-gradient(var(--thread-history-background) 35%, transparent);
     color: hsl(var(--muted-foreground));
+    transition: --thread-history-background var(--theme-paint-duration, 0s) linear,
+      var(--theme-ink-transition, color 0s);
   }
   .thread-history-reveal {
     transform: translateY(calc(var(--history-pull, 0px) - 100%));
@@ -682,27 +752,12 @@
       transform: translateY(0) scale(1);
     }
   }
-  @keyframes composer-status-strip-exit {
-    0% {
-      max-height: var(--composer-strip-max-height, 46px);
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-    100% {
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(8px) scale(0.99);
-    }
-  }
   .composer-status-strip {
     transform-origin: bottom center;
     will-change: max-height, opacity, transform;
   }
   .composer-status-strip[data-state="enter"] {
     animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-  .composer-status-strip[data-state="exit"] {
-    animation: composer-status-strip-exit 180ms ease-in both;
   }
   .composer-status-drawer {
     --composer-status-drawer-duration: 220ms;
@@ -737,7 +792,6 @@
     opacity: 1;
     transform: translateY(0);
   }
-  /* Shared in-flow disclosure: animate intrinsic height without measuring it. */
   .inline-disclosure {
     --inline-disclosure-duration: 220ms;
 
@@ -776,19 +830,6 @@
       transform: translateY(0);
     }
   }
-  @keyframes queued-prompt-row-enter {
-    0% {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    100% {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  .queued-prompt-row {
-    animation: queued-prompt-row-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
   @media (prefers-reduced-motion: reduce) {
     .composer-status-strip {
       will-change: auto;
@@ -806,9 +847,6 @@
     .thread-layout {
       transition-duration: 0.01ms;
     }
-    .queued-prompt-row {
-      animation: none;
-    }
   }
 
   .thread-workspace {
@@ -817,9 +855,32 @@
   .thread-preview-layout {
     container: thread-preview-layout / inline-size;
   }
+  .context-expanded-overlay[data-state="open"] {
+    animation: context-backdrop-in 250ms ease-out;
+  }
+  .context-expanded-overlay[data-state="closed"] {
+    animation: context-backdrop-in 250ms ease-out reverse;
+  }
+  @keyframes context-backdrop-in {
+    from { opacity: 0; backdrop-filter: blur(0); }
+    to { opacity: 1; backdrop-filter: blur(12px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .context-expanded-overlay { animation: none !important; }
+  }
+  /* Sidebars share the full pane height with a local conversation composer. */
+  .workbench-composer-footer:not(:has([data-active-composer])) {
+    display: none;
+  }
   /* A split needs 420px for the conversation plus 360px for the preview.
      Narrow workbench panes use the same contained overlay as a phone. */
   @container thread-preview-layout (min-width: 780px) {
+    /* A replacement owns the slot while the outgoing surface fades over it. */
+    .thread-preview-layout:has(> .file-preview-pane:not([data-closing])) > .file-preview-pane[data-closing] {
+      position: absolute;
+      width: var(--file-preview-width);
+      z-index: 30;
+    }
     .file-preview-pane {
       position: relative;
       z-index: auto;
@@ -828,7 +889,8 @@
       flex-shrink: 0;
     }
     .file-preview-content {
-      width: var(--file-preview-width);
+      width: calc(var(--file-preview-width) - 1rem);
+      bottom: var(--sidebar-bottom-inset, calc(1.125rem + env(safe-area-inset-bottom)));
       padding-bottom: 0;
     }
     .file-preview-resize {
@@ -841,7 +903,27 @@
       visibility: hidden;
     }
   }
-  /* Split content leaves no margin for floating conversation controls. */
+  @media (max-width: 639px) {
+    .context-drawer-backdrop {
+      animation: context-drawer-backdrop-in 150ms cubic-bezier(0.2, 0, 0, 1);
+      transition: background-color 150ms cubic-bezier(0.2, 0, 0, 1), backdrop-filter 150ms cubic-bezier(0.2, 0, 0, 1);
+    }
+    .context-drawer-backdrop:has(.context-drawer-panel[data-state="closed"]) {
+      animation: none;
+      background-color: transparent;
+      backdrop-filter: blur(0px);
+    }
+  }
+  @keyframes context-drawer-backdrop-in {
+    from { background-color: transparent; backdrop-filter: blur(0px); }
+    to { background-color: rgb(0 0 0 / 0.25); backdrop-filter: blur(8px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .context-drawer-backdrop { animation: none; transition: none; }
+  }
+  .thread-preview-layout:has(.context-drawer-panel) > .thread-conversation {
+    visibility: visible;
+  }
   .thread-preview-layout[data-preview-open] > .thread-conversation {
     --thread-header-position: relative;
   }
@@ -856,46 +938,6 @@
     transform-origin: top left;
   }
 
-  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
-  @keyframes goal-shell-glow-breathe {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
-        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
-    }
-    50% {
-      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
-        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
-    }
-  }
-  .goal-shell-glow {
-    animation: goal-shell-glow-breathe 4.8s ease-in-out infinite;
-  }
-  @keyframes goal-shell-glow-breathe-dark {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
-        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
-    }
-    50% {
-      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
-        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
-    }
-  }
-  .dark .goal-shell-glow {
-    animation-name: goal-shell-glow-breathe-dark;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .goal-shell-glow {
-      animation: none;
-      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
-    }
-    .dark .goal-shell-glow {
-      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
-    }
-  }
-
-  /* Subtle scrollbar that doesn't fight the dark background. */
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
@@ -926,8 +968,6 @@
    * overflow-x: auto), so clipping the thread column horizontally is safe.
    */
 
-  /* Prose container: allow it to shrink within its column and break long words
-     so long URLs / paths never stretch the conversation wider than 100vw. */
   .markdown-content {
     min-width: 0;
     max-width: 100%;
@@ -935,31 +975,21 @@
     word-wrap: break-word;
   }
 
-  /* Long links and inline code break rather than stretch the column. */
   .markdown-content a,
   .markdown-content code {
     overflow-wrap: anywhere;
     word-wrap: break-word;
   }
 
-  /* Fenced / pre blocks scroll inside their own box, never the page. */
   .markdown-content pre,
   .not-prose pre {
     max-width: 100%;
     overflow-x: auto;
   }
 
-  /* Prism's Markdown table tokens must not pick up Tailwind's table layout. */
-  .not-prose pre .token.table {
-    display: inline;
-  }
+  /* Markdown table cells retain whole-word minimum widths. The renderer's
+     overflow-x:auto wrapper contains tables wider than the preview or chat. */
 
-  /* Markdown tables wrap cell text to fit the conversation column. The
-     renderer's overflow-x:auto wrapper remains a fallback for content that
-     cannot shrink. */
-
-  /* Clip any residual horizontal bleed at the thread column edge. Vertical
-     scrolling and internal code-block scroll are unaffected. */
   .thread-viewport-scrollbar {
     overflow-x: hidden;
   }
@@ -967,13 +997,6 @@
   .thread-viewport {
     container-name: thread-viewport;
     container-type: inline-size;
-  }
-
-  @supports (content-visibility: auto) {
-    .thread-render-unit {
-      content-visibility: auto;
-      contain-intrinsic-size: auto 12rem;
-    }
   }
 
   .thread-prompt-rail {
@@ -1027,11 +1050,11 @@
 }
 
 [data-user-text-bubble] > .message-block-menu-trigger {
-  top: calc((1rem + var(--text-reading-size) * var(--cjk-line-height) - var(--message-block-control-size)) / 2);
+  top: calc((1rem + var(--text-reading-size) * var(--reading-line-height) - var(--message-block-control-size)) / 2);
 }
 
 [data-user-text-bubble] > .message-block-hover-time {
-  top: calc((1rem + var(--text-reading-size) * var(--cjk-line-height) + var(--message-block-control-size)) / 2);
+  top: calc((1rem + var(--text-reading-size) * var(--reading-line-height) + var(--message-block-control-size)) / 2);
 }
 
 [data-context-block-active] .message-block-menu-trigger,
@@ -1092,6 +1115,59 @@
   }
 }
 
+/* loading.dev Ring, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+.loading-ring-arc {
+  transform-origin: center;
+  animation: loading-ring-spin 800ms linear infinite;
+}
+@keyframes loading-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+.composer-primary-action {
+  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
+}
+.composer-action-icons {
+  transition: transform 120ms ease-out;
+}
+.composer-primary-action:active:not(:disabled) .composer-action-icons {
+  transform: scale(0.94);
+}
+.composer-action-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 140ms ease-out, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.composer-action-glyph[data-active] {
+  opacity: 1;
+  transform: scale(1);
+}
+.composer-action-icons[data-state="stop"] [data-action-icon="send"] {
+  transform: translateY(-3px) scale(0.8);
+}
+.composer-action-glyph:not([data-active]) .loading-ring-arc {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring-arc {
+    animation: none;
+  }
+  .composer-primary-action,
+  .composer-action-icons,
+  .composer-primary-action:active:not(:disabled) .composer-action-icons {
+    transition: none;
+    transform: none;
+  }
+  .composer-action-icons[data-state] .composer-action-glyph {
+    transform: none;
+    transition: opacity 80ms linear;
+  }
+}
+
 @media (pointer: coarse) {
   /* Readable form text avoids Safari's focus zoom without disabling the user's
      pinch zoom. Keep this after utilities so compact desktop overrides cannot
@@ -1124,7 +1200,6 @@
   }
 }
 
-/* On phones, actions follow the message instead of taking a separate gutter. */
 @media (max-width: 767px) {
   .thread-message-row {
     padding-inline: 1rem;
@@ -1137,13 +1212,47 @@
   }
 }
 
-/*
- * Composer controls adapt to their actual container, not just the viewport.
- * Narrow layouts move access and usage into a separate metadata row.
- */
+.sidebar-selection-highlight {
+  transition: transform 300ms ease-out, width 300ms ease-out, height 300ms ease-out,
+    var(--theme-paint-transition, background-color 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-selection-highlight {
+    transition: var(--theme-paint-transition, none);
+  }
+}
+
+.thread-composer-surface,
+.context-inspector-surface,
+.user-message-surface,
+.side-panel-surface {
+  --composer-shadow-color: 240 10% 16%;
+  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
 .thread-composer-surface {
+  transition: var(--theme-paint-transition, background-color 160ms ease-out, box-shadow 160ms ease-out), opacity 160ms ease-out;
   container-name: thread-composer;
   container-type: inline-size;
+}
+
+.dark .thread-composer-surface,
+.dark .context-inspector-surface,
+.dark .user-message-surface,
+.dark .side-panel-surface {
+  --composer-shadow-color: 240 12% 3%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-surface { transition: var(--theme-paint-transition, none); }
+}
+
+@media (forced-colors: active) {
+  .thread-composer-surface, .context-inspector-surface, .user-message-surface, .side-panel-surface { outline: 1px solid CanvasText; }
+  .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
+  [data-keyboard-focus] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
 
 .thread-composer-footer-actions {
@@ -1282,8 +1391,21 @@
   }
 }
 
-/* Narrow composers separate message actions from permissions and usage instead
- * of shrinking touch targets or hiding the active model and access state. */
+.thread-composer-meta {
+  padding-inline-start: calc(var(--composer-footer-inset) + var(--composer-action-margin) + (var(--composer-action-size) - 0.875rem) / 2 - 0.5rem);
+}
+
+@media (pointer: coarse) {
+  .thread-composer-form { --composer-action-size: 2.75rem; }
+}
+
+/* Compact composers keep their primary actions on a stable 44px touch grid. */
+.thread-composer-form[data-compact-controls] {
+  --composer-action-size: 2.25rem;
+  --composer-action-margin: 0.25rem;
+  --composer-footer-inset: 0.5rem;
+}
+
 [data-compact-controls] .thread-composer-footer {
   column-gap: 0.25rem;
   padding: 0 0.5rem 0.5rem;
@@ -1295,8 +1417,7 @@
 }
 
 [data-compact-controls] .thread-composer-footer-actions {
-  flex: none;
-  max-width: none;
+  max-width: 50%;
 }
 
 [data-compact-controls] .thread-composer-action.touch-target {
@@ -1318,11 +1439,11 @@
  * state; margins reserve its space so adjacent controls never overlap it. */
 [data-compact-controls] .thread-composer-round-action.touch-target {
   position: relative;
-  width: 2.25rem;
-  height: 2.25rem;
-  min-width: 2.25rem;
-  min-height: 2.25rem;
-  margin: 0.25rem;
+  width: var(--composer-action-size);
+  height: var(--composer-action-size);
+  min-width: var(--composer-action-size);
+  min-height: var(--composer-action-size);
+  margin: var(--composer-action-margin);
 }
 
 [data-compact-controls] .thread-composer-round-action::before {
@@ -1336,31 +1457,11 @@
   height: 2.25rem;
 }
 
-.thread-composer-meta .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-}
-
-.thread-composer-meta .thread-composer-access {
-  max-width: 100%;
-  padding-inline: 0.625rem 0.5rem;
-}
-
-.thread-composer-workspace-row {
-  padding-inline: 0.75rem;
-}
-
-.thread-composer-workspace-row .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-}
-
-.thread-composer-workspace-row .thread-composer-access {
-  padding-inline-end: 0;
-}
-
-.thread-composer-workspace-row .thread-composer-workspace {
-  padding-inline-start: 0.6875rem;
+@media (pointer: coarse) {
+  .thread-composer-meta .touch-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
 }
 
 @media (forced-colors: active) {
@@ -1373,7 +1474,7 @@
 @layer components {
   @media (prefers-reduced-motion: no-preference) {
     .segmented-control-indicator[data-animate="true"] {
-      transition-property: transform, width;
+      transition-property: translate, scale;
       transition-duration: 220ms, 160ms;
       transition-timing-function:
         cubic-bezier(0.2, 0.95, 0.25, 1.08),
@@ -1382,8 +1483,6 @@
   }
 }
 
-/* Settings grid: 4px baseline; 720px frame; 12 columns / 24px gutter on
-   desktop, 4 columns / 16px gutter on mobile. Rows share the same tracks. */
 @layer components {
   .settings-grid {
     --settings-columns: 4;
@@ -1402,7 +1501,6 @@
   .settings-grid.settings-feature-page.settings-automations-grid {
     max-inline-size: calc(60rem + 2 * var(--settings-margin));
   }
-  /* Stack a task's status below its title when the content column is narrow. */
   .automations-page {
     --settings-inset: 1rem;
     container: automations / inline-size;
@@ -1410,7 +1508,7 @@
   .automation-create-composer .thread-composer-surface {
     max-inline-size: none;
   }
-  .automation-create-composer .thread-composer-input textarea {
+  .automation-create-composer .thread-composer-input > :is(textarea, [aria-hidden]) {
     padding-inline: var(--settings-inset);
   }
   .automation-view-switch .segmented-control button {
@@ -1449,12 +1547,13 @@
   .thread-composer-collapsible-layout {
     container: composer-layout / inline-size;
   }
-  .thread-composer-collapsible .thread-composer-input textarea:placeholder-shown {
+  /* A wrapped placeholder must not resize the empty composer. */
+  .thread-composer-input textarea:placeholder-shown {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+  .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
     display: block;
     block-size: 3.125rem !important;
   }
@@ -1462,7 +1561,7 @@
     .thread-composer-collapsible .thread-composer-input {
       inline-size: 100%;
     }
-    .thread-composer-collapsible .thread-composer-input textarea {
+    .thread-composer-collapsible .thread-composer-input > :is(textarea, [aria-hidden]) {
       display: block;
       min-block-size: 3.5rem;
       padding-block: 1.125rem;
@@ -1470,7 +1569,7 @@
     .thread-composer-collapsible[data-compact] .thread-composer-input {
       inline-size: max(0px, calc(100% - var(--composer-compact-controls-width, 15rem) - 1.5rem));
     }
-    .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+    .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
       display: block;
       block-size: 3.5rem !important;
       min-block-size: 3.5rem;
@@ -1669,8 +1768,8 @@
     .settings-grid .settings-row > :nth-child(2),
     .settings-grid .settings-footer > :nth-child(2) { grid-column: 8 / -1; }
     .settings-grid .settings-footer-auto > :first-child { grid-column: 1 / -1; }
-    .settings-grid .settings-row:has(.segmented-control) > :first-child { grid-column: 1 / 7; }
-    .settings-grid .settings-row:has(.segmented-control) > :nth-child(2) { grid-column: 7 / -1; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :first-child { grid-column: 1 / 7; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :nth-child(2) { grid-column: 7 / -1; }
   }
   @media (min-width: 768px) {
     .settings-grid { --settings-inset: 24px; }
@@ -1773,35 +1872,35 @@
   to { transform: translateX(100%); }
 }
 
-/* Prism classes are generated at runtime, outside Tailwind's source inventory. */
 .code-content {
+  --code-foreground: hsl(var(--foreground));
+  --code-background: hsl(var(--background));
   color: hsl(var(--foreground));
 }
-/* Flattened JSX tokens retain the ancestor tag class; let inner token types win. */
-.code-content .token.tag {
-  color: var(--code-property);
+
+.nanobot-file-diff {
+  --code-foreground: hsl(var(--foreground));
+  --code-background: hsl(var(--background));
+  display: block;
+  min-width: 0;
+  --diffs-font-size: var(--text-code-dense-size);
+  --diffs-line-height: calc(var(--text-code-dense-size) * 1.6);
+  --diffs-gap-block: 0px;
+  --diffs-bg-context-override: transparent;
+  --diffs-bg-context-gutter-override: transparent;
+  --diffs-bg-addition-override: var(--diff-added);
+  --diffs-bg-addition-number-override: var(--diff-added);
+  --diffs-bg-deletion-override: var(--diff-deleted);
+  --diffs-bg-deletion-number-override: var(--diff-deleted);
+  --diffs-addition-color-override: var(--diff-added-foreground);
+  --diffs-deletion-color-override: var(--diff-deleted-foreground);
+  --diffs-fg-number-override: hsl(var(--muted-foreground));
+  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--diff-added-foreground) 15%, transparent);
+  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--diff-deleted-foreground) 15%, transparent);
 }
-.code-content :is(.token.comment, .token.prolog, .token.doctype, .token.cdata, .linenumber) {
-  color: var(--code-comment);
-}
-.code-content .token.comment {
-  font-style: italic;
-}
-.code-content :is(.token.string, .token.char, .token.attr-value, .token.regex, .token.inserted) {
-  color: var(--code-string);
-}
-.code-content :is(.token.keyword, .token.selector, .token.important, .token.atrule) {
-  color: var(--code-keyword);
-}
-.code-content :is(.token.function, .token.operator, .token.entity, .token.url) {
-  color: var(--code-function);
-}
-.code-content :is(.token.number, .token.boolean, .token.constant, .token.symbol, .token.attr-name, .token.class-name, .token.builtin, .token.property, .token.deleted) {
-  color: var(--code-property);
-}
-.code-content :is(.token.bold, .token.important) {
-  font-weight: 600;
-}
-.code-content .token.italic {
-  font-style: italic;
+
+.nanobot-diff-gap {
+  height: 26px;
+  box-sizing: border-box;
+  white-space: nowrap;
 }

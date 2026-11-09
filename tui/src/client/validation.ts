@@ -233,5 +233,10 @@ export function decodeInboundEvent(value: unknown): InboundEvent | null | undefi
         && typeof record.model_preset !== "string")
       || !optional(record.context_window_tokens, "number"))
   ) return null
+  if (name === "message" && record.render_as !== undefined && record.render_as !== "text") {
+    const message = { ...record }
+    delete message.render_as
+    return message as InboundEvent
+  }
   return value as InboundEvent
 }

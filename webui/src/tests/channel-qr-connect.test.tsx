@@ -92,7 +92,7 @@ describe("channel QR connect parameters", () => {
     requestMutation.mockResolvedValueOnce({
       session_id: "qr-session", status: "pending", qr_url: "https://example.com/connect",
     });
-    render(<ChannelQrConnectFlow token="tok" channelName="plugin-chat" labels={labels}
+    render(<ChannelQrConnectFlow channelName="plugin-chat" labels={labels}
       minimalPending={minimalPending} onFeaturesUpdate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByRole("img", { name: "Connection QR code" })).toHaveAttribute("src", "data:image/png;base64,preview");
@@ -104,7 +104,7 @@ describe("channel QR connect parameters", () => {
     requestMutation
       .mockResolvedValueOnce({ session_id: "browser-session", status: "pending", qr_url: "https://example.com/authorize" })
       .mockResolvedValueOnce({ session_id: "browser-session", status: "cancelled" });
-    render(<ChannelQrConnectFlow token="tok" channelName="plugin-chat" showQrCode={false}
+    render(<ChannelQrConnectFlow channelName="plugin-chat" showQrCode={false}
       labels={{ ...labels, scanTitle: "Authorize in browser", scanDescription: "Continue in the browser." }}
       onFeaturesUpdate={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
@@ -128,7 +128,7 @@ describe("channel QR connect parameters", () => {
     requestMutation
       .mockResolvedValueOnce({ session_id: "browser-session", status: "pending", qr_url: "https://example.com/authorize" })
       .mockResolvedValueOnce({ session_id: "browser-session", status: "succeeded", nanobot_features: features });
-    render(<ChannelQrConnectFlow token="tok" channelName="plugin-chat" showQrCode={false}
+    render(<ChannelQrConnectFlow channelName="plugin-chat" showQrCode={false}
       labels={labels} onFeaturesUpdate={onFeaturesUpdate} />);
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(await screen.findByText("Connected", {}, { timeout: 2000 })).toBeVisible();
@@ -141,7 +141,6 @@ describe("channel QR connect parameters", () => {
 
   it("forwards current channel parameters without restarting on rerender and preserves forced retries", async () => {
     const props = {
-      token: "tok",
       channelName: "plugin-chat",
       autoStart: true,
       forceOnRepeat: true,

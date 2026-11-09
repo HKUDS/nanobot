@@ -72,11 +72,15 @@ These fields answer different questions:
 | `model` | `modelPresets.<name>.model` | The model ID expected by that provider or gateway. |
 | `apiKey` | `providers.<provider>.apiKey` | Credential for that provider. Use `${ENV_VAR}` for secrets. |
 | `apiBase` | `providers.<provider>.apiBase` | HTTP base URL of the provider endpoint. |
-| `proxy` | `providers.<provider>.proxy` | Optional HTTP proxy for this provider only. Supported for OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI OAuth. |
+| `use_proxy` | `providers.<provider>.useProxy` | Use the shared `network.proxy` address for this provider. Supported for OpenAI-compatible providers, Anthropic Messages, OpenAI Codex, and xAI OAuth. |
 
 You usually omit `apiBase` for hosted built-in providers such as OpenRouter, Anthropic direct, OpenAI direct, Groq, or Bedrock because nanobot knows their default endpoints. Set `apiBase` for `custom`, local OpenAI-compatible servers, provider proxies, regional endpoints, or subscription endpoints. Include the API version path when the endpoint requires it, for example `https://api.example.com/v1` or `http://localhost:11434/v1`.
 
 Use `proxy` when one provider must send HTTP traffic through a proxy without changing process-wide `HTTP_PROXY` / `HTTPS_PROXY`. Supported providers include `openai`, `custom`, named custom providers, OpenRouter-style gateways, local OpenAI-compatible servers, Anthropic Messages, `openai_codex`, and `xai_grok`. For OAuth providers, this also covers exchanging and refreshing tokens. `bedrock`, `azure_openai`, and `github_copilot` reject `proxy`; use their endpoint-specific configuration instead.
+
+Tool execution requires the API's structured tool-call fields. OpenAI-compatible services that put `<tool_call>` markup in assistant text must expose structured tool calls to use nanobot's tools; nanobot preserves that markup as text.
+
+If a reply contains raw `<function=...>` or `<parameter=...>` tags, check the model and serving endpoint's tool-calling support. For self-hosted models, configure the server's tool-call parser for that model. For hosted services, ask the provider to return structured `tool_calls`, or use a compatible model and endpoint. Code examples remain text and are not executed. Changing the chat channel or hiding tags does not repair an upstream tool-calling format error.
 
 ## Inline Image Requests
 

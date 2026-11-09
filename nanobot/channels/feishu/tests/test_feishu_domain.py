@@ -1,4 +1,3 @@
-"""Tests for Feishu/Lark domain configuration."""
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest

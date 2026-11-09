@@ -1,5 +1,3 @@
-"""Create one self-contained, licensed native TUI release archive."""
-
 from __future__ import annotations
 
 import hashlib
@@ -48,6 +46,8 @@ def _source_archive(root: Path) -> bytes:
         "tsconfig.json",
         "src",
         "scripts/build.ts",
+        "scripts/targets.ts",
+        "scripts/target-bindings.ts",
         "scripts/prepare-target.ts",
         "scripts/release-notices.ts",
         "scripts/package-release.py",

@@ -7,9 +7,8 @@
         "label": "机器人令牌",
         "placeholder": "123456:ABC..."
       },
-      "proxy": {
-        "label": "网络代理",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "使用代理"
       },
       "allowFrom": {
         "label": "允许用户",

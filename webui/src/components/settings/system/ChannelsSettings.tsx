@@ -20,7 +20,7 @@ type ChannelFilter = "all" | "enabled";
 export function ChannelsSettings({
   token, nanobotFeatures, loading, actionKey, chatAppsDocsUrl, showBrandLogos,
   error, requiresRestartPending, onAction, onFeaturesUpdate, onDismissStatus,
-  onRestart, isRestarting, onConfigureMcp,
+  onRestart, isRestarting, onConfigureMcp, onBeforeCloseChange,
 }: {
   token: string;
   nanobotFeatures: NanobotFeaturesPayload | null;
@@ -34,6 +34,7 @@ export function ChannelsSettings({
   onFeaturesUpdate: (payload: NanobotFeaturesPayload) => void;
   onDismissStatus: () => void;
   onConfigureMcp?: (name: string) => void;
+  onBeforeCloseChange?: (handler: (() => Promise<boolean>) | null) => void;
   onRestart?: () => void;
   isRestarting?: boolean;
 }) {
@@ -54,6 +55,7 @@ export function ChannelsSettings({
   const hasEnabledConfigurableChannels = channels.some((feature) =>
     feature.enabled && !feature.capabilities?.includes("always_enabled"));
   const restartRequired = requiresRestartPending || Boolean(nanobotFeatures?.requires_restart);
+  const hasPendingChannelRestart = channels.some((feature) => feature.restart_pending);
   useLayoutEffect(() => {
     if (!nanobotFeatures || filterInitializedRef.current) return;
     filterInitializedRef.current = true;
@@ -93,8 +95,11 @@ export function ChannelsSettings({
     });
   }, []);
   const setBeforeChannelClose = useCallback(
-    (handler: (() => Promise<boolean>) | null) => { beforeCloseRef.current = handler; },
-    [],
+    (handler: (() => Promise<boolean>) | null) => {
+      beforeCloseRef.current = handler;
+      onBeforeCloseChange?.(handler);
+    },
+    [onBeforeCloseChange],
   );
 
   return (
@@ -116,7 +121,7 @@ export function ChannelsSettings({
         ]} />
       </div>
       {error && !selectedChannel ? <DismissibleStatusMessage message={error} isError onDismiss={onDismissStatus} /> : null}
-      {restartRequired ? (
+      {restartRequired && !hasPendingChannelRestart ? (
         <RestartRequiredNotice message={t("settings.channels.restartRequired")}
           onRestart={onRestart} isRestarting={isRestarting} />
       ) : null}
@@ -139,7 +144,8 @@ export function ChannelsSettings({
           <div className="grid grid-cols-1 gap-x-4 gap-y-1 min-[640px]:grid-cols-2">
           {group.channels.map((feature) => (
             <ChannelCatalogRow key={feature.name} feature={feature} showBrandLogos={showBrandLogos}
-              actionKey={actionKey} actionsDisabled={restartRequired || Boolean(isRestarting)} onAction={onAction}
+              actionKey={actionKey} restartRequired={restartRequired} onAction={onAction}
+              onRestart={onRestart} isRestarting={isRestarting}
               onSelect={(connect = false) => {
                 triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
                 beforeCloseRef.current = null;

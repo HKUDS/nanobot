@@ -17,9 +17,7 @@ export function MarkdownCodeBlock({ code, language }: { code: string; language?:
   const { streaming, highlight } = useContext(MarkdownCodeContext);
   const source = <CodeBlock language={language || "text"} code={code} className="my-3" highlight={highlight} showLineNumbers={code.includes("\n")} />;
   if (language?.toLowerCase() !== "mermaid") return source;
-  const preparing = <div aria-busy={streaming}>
-    <p className="my-1 text-xs text-muted-foreground" role="status">{t("diagram.preparing")}</p>{source}
-  </div>;
+  const preparing = <div aria-busy={streaming}>{source}</div>;
   if (streaming) return preparing;
   return <DiagramBoundary key={code} fallback={<><p className="text-xs text-muted-foreground" role="status">{t("diagram.errors.load")}</p>{source}</>}>
     <Suspense fallback={preparing}><MermaidBlock source={code} /></Suspense>

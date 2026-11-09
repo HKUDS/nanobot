@@ -1,5 +1,3 @@
-"""Give nanobot processes recognizable operating-system names."""
-
 from __future__ import annotations
 
 import hashlib

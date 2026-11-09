@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import { CodeBlock } from "@/components/CodeBlock";
 import { PreviewPane } from "@/components/PreviewPane";
 import { FilePreviewStore, useFilePreviewState } from "@/hooks/useFilePreviewState";
@@ -38,6 +39,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
 });
 
 describe("FilePreviewPanel", () => {
+  beforeAll(preloadMarkdownText);
+
   beforeEach(async () => {
     await setAppLanguage("en");
     vi.mocked(fetchFilePreview).mockReset();
@@ -89,7 +92,7 @@ describe("FilePreviewPanel", () => {
     });
     const store = new FilePreviewStore();
     const resource = createFilePreviewResource(path => fetchFilePreview("test", "a", path));
-    store.open("a", "file", "reports/REPORT.md");
+    store.open("a", "reports/REPORT.md");
     function View() {
       const { state, openFile, resolveFile, selectTab, closeTab, close } = useFilePreviewState("a", store);
       const active = state.tabs.find(tab => tab.id === state.activeId)!;
@@ -160,7 +163,6 @@ describe("FilePreviewPanel", () => {
     expect(codeBlock).toHaveTextContent("print('ok')");
     expect(codeBlock).toHaveAttribute("data-language", "python");
     expect(codeBlock).toHaveAttribute("data-highlight", "true");
-    expect(screen.queryByTestId("file-preview-breadcrumb")).not.toBeInTheDocument();
     expect(screen.queryByText("quicksort.py")).not.toBeInTheDocument();
 
   });
@@ -225,7 +227,7 @@ describe("FilePreviewPanel", () => {
       await setAppLanguage("zh-CN");
     });
 
-    expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible();
     expect(screen.getByRole("button", { name: "原文" })).toBeInTheDocument();
     expect(fetchFilePreview).toHaveBeenCalledTimes(1);
   });
@@ -244,7 +246,7 @@ describe("FilePreviewPanel", () => {
     source.focus();
     fireEvent.click(source);
     expect(source).toHaveFocus();
-    expect(source).toHaveAttribute("aria-pressed", "true");
+    expect(source).toHaveAccessibleName("Preview");
     expect(screen.getByTestId("mock-code-block").textContent).toBe(content);
     expect(CodeBlock).toHaveBeenLastCalledWith(expect.objectContaining({
       code: content, chrome: "none", showLineNumbers: true, wrapLongLines: false, viewportHighlight: true,
@@ -265,7 +267,8 @@ describe("FilePreviewPanel", () => {
     await screen.findByRole("heading", { name: "Notes" });
     fireEvent.click(screen.getByRole("button", { name: "Source" }));
     rerender(view("notes.md", "a", "new"));
-    expect(screen.getByRole("button", { name: "Source" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Preview" })).toBeVisible();
+    expect(screen.getByTestId("mock-code-block")).toHaveTextContent("# Notes");
     expect(fetchFilePreview).toHaveBeenCalledTimes(1);
     rerender(view("other.md"));
     await screen.findByRole("heading", { name: "Notes" });

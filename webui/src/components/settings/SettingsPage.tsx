@@ -2,9 +2,11 @@ import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import type { SettingsExitGuard } from "@/components/settings/contracts";
+import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
 import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
+import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
+import { SharedProxySetupDialog } from "@/components/settings/shared/SharedProxySetupDialog";
 import { SettingsSectionSkeleton } from "@/components/settings/shared/SettingsSectionSkeleton";
 
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -41,19 +43,22 @@ import {
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
 import { RUNTIME_CONFIG_FIELDS, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { RuntimeConfigSettings } from "@/components/settings/system/RuntimeConfigSettings";
+import { useClient } from "@/providers/ClientProvider";
 import { RuntimeSettings } from "@/components/settings/system/RuntimeSettings";
 import type { SettingsController } from "@/components/settings/useSettingsController";
 import type { SendAttachment, SendOptions } from "@/hooks/useNanobotStream";
+import type { ThemePreference } from "@/hooks/useTheme";
 import type { ChatSummary, SessionAutomationJob, SkillSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
   registerExitGuard?: (guard: SettingsExitGuard | null) => void;
+  focusTarget?: SettingsFocusTarget;
   controller: SettingsController;
-  theme: "light" | "dark";
+  themePreference: ThemePreference;
   showSidebar: boolean;
   mainNavigationExpanded: boolean;
-  onToggleTheme: () => void;
+  onChangeTheme: (value: ThemePreference) => void;
   onBackToChat: () => void;
   skills: SkillSummary[];
   skillsLoading: boolean;
@@ -73,11 +78,12 @@ interface SettingsPageProps {
 
 export function SettingsPage({
   registerExitGuard,
+  focusTarget,
   controller,
-  theme,
+  themePreference,
   showSidebar,
   mainNavigationExpanded,
-  onToggleTheme,
+  onChangeTheme,
   onBackToChat,
   skills,
   skillsLoading,
@@ -89,10 +95,12 @@ export function SettingsPage({
   isRestarting,
   hostChromeInset,
 }: SettingsPageProps) {
+  const { client, webuiCapabilities } = useClient();
   const [dialogLayoutAnchor, setDialogLayoutAnchor] = useState<HTMLDivElement | null>(null);
   const [mcpSetupName, setMcpSetupName] = useState<string | null>(null);
   const presetDeletedCallback = useRef<(() => void) | null>(null);
   const [providerPanel, setProviderPanel] = useState<ProviderSettingsEntry | null>(null);
+  const [proxySetupOpen, setProxySetupOpen] = useState(false);
   const providerSetupOrigin = useRef<{
     trigger: HTMLButtonElement | null;
     onAdded?: (provider: string) => void;
@@ -120,7 +128,7 @@ export function SettingsPage({
     pendingRestartSections: controllerPendingRestartSections,
     remoteBrowserAccess,
     restartViaSettingsSurface,
-    selectSection,
+    selectSection: selectSectionNow,
     setLocalPrefs,
     settings,
     t,
@@ -128,12 +136,57 @@ export function SettingsPage({
     transcriptionDirty,
   } = controller;
   const { providerOAuthFlow } = modelState;
+  const configureProxy = settings?.runtime_config && !String(settings.runtime_config["network.proxy"] ?? "").trim()
+    ? () => setProxySetupOpen(true)
+    : undefined;
 
   const restartInProgress = isRestarting || hostEngineApplying;
-  const requestExit = useCallback<SettingsExitGuard>((leave) => {
-    if (settings?.requires_restart && !restartInProgress) setPendingExit(() => leave);
-    else leave();
-  }, [settings?.requires_restart, restartInProgress]);
+  const latestExitState = useRef({ requiresRestart: settings?.requires_restart, restartInProgress });
+  latestExitState.current = { requiresRestart: settings?.requires_restart, restartInProgress };
+  const channelCompletion = useRef<(() => Promise<boolean>) | null>(null);
+  const registerChannelCompletion = useCallback((handler: (() => Promise<boolean>) | null) => {
+    channelCompletion.current = handler;
+  }, []);
+  const editOwners = new Map<SettingsSectionKey, EditCompletion[]>([
+    ["models", [controller.modelEdits]],
+    ["advanced", [controller.safetyEdits]],
+    ["capabilities", [controller.imageEdits, controller.transcriptionEdits, controller.webEdits]],
+  ]);
+  const latestEditOwners = useRef(editOwners);
+  latestEditOwners.current = editOwners;
+  const flushEdits = useCallback(async () => {
+    const results = await Promise.all([
+      ...[...latestEditOwners.current.values()].flat().map((edits) => edits.commit()),
+      channelCompletion.current?.() ?? true,
+    ]);
+    return results.every(Boolean);
+  }, []);
+  const needsCompletion = useCallback(() => {
+    return Boolean(channelCompletion.current) ||
+      [...latestEditOwners.current.values()].flat().some((edits) => edits.needsCompletion());
+  }, []);
+  const selectSection = (section: SettingsSectionKey) => {
+    const owners = editOwners.get(isCapabilitySection(activeSection) ? "capabilities" : activeSection) ?? [];
+    const channel = activeSection === "channels" ? channelCompletion.current : null;
+    if (!channel && !owners.some((edits) => edits.needsCompletion())) {
+      selectSectionNow(section);
+      return;
+    }
+    void Promise.all([...owners.map((edits) => edits.commit()), channel?.() ?? true]).then((results) => {
+      if (results.every(Boolean)) selectSectionNow(section);
+    });
+  };
+  // Credential repair retains the capability draft in this controller rather than discarding it.
+  const configureCapabilityProviders = () => selectSectionNow("models");
+  const requestExit = useCallback<SettingsExitGuard>((leave, { promptRestart = true } = {}) => {
+    const finish = () => {
+      const current = latestExitState.current;
+      if (promptRestart && current.requiresRestart && !current.restartInProgress) setPendingExit(() => leave);
+      else leave();
+    };
+    if (!needsCompletion()) finish();
+    else void flushEdits().then((saved) => { if (saved) finish(); });
+  }, [flushEdits, needsCompletion]);
   useEffect(() => {
     registerExitGuard?.(requestExit);
     return () => registerExitGuard?.(null);
@@ -144,11 +197,14 @@ export function SettingsPage({
     : controllerPendingRestartSections;
 
   const runtimeConfiguration = (page: RuntimeConfigPage) => settings && (
-    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState}
+    <RuntimeConfigSettings page={page} settings={settings} state={controller.runtimeConfigState} client={client}
+      focusTarget={page === "advanced" ? focusTarget : undefined}
+      sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")}
       onRestart={showSidebar ? undefined : restartViaSettingsSurface} isRestarting={restartInProgress}
       remoteBrowserAccess={remoteBrowserAccess}>
       {page === "advanced" ? (
         <AdvancedSettings
+          editCompletion={controller.safetyEdits}
           error={capabilityState.capabilityErrors.safety}
           form={capabilityState.networkSafetyForm}
           dirty={networkSafetyDirty}
@@ -180,20 +236,20 @@ export function SettingsPage({
               {!showSidebar && settings.requires_restart ? <RestartRequiredNotice message={t("settings.status.savedRestartApply")}
                 onRestart={restartViaSettingsSurface} isRestarting={restartInProgress} /> : null}
             </div>
-            <SettingsFeature title={t("settings.rows.imageGeneration")} enabled={capabilityState.imageGenerationForm.enabled}
+            <SettingsFeature onClose={() => { void controller.imageEdits.commit(); }} title={t("settings.rows.imageGeneration")} enabled={capabilityState.imageGenerationForm.enabled}
               error={capabilityState.imageGenerationForm.enabled && !settings.image_generation.providers.find((provider) => provider.name === capabilityState.imageGenerationForm.provider)?.configured
                 ? t("settings.image.missingCredential") : capabilityState.capabilityErrors.image}
               disabled={restartInProgress || capabilityState.imageGenerationSaving} initialOpen={activeSection === "image"}
               onChange={(enabled) => capabilityState.setImageGenerationForm((prev) => ({ ...prev, enabled }))}>
               {renderSection("image", true)}
             </SettingsFeature>
-            <SettingsFeature title={t("settings.rows.transcription")} enabled={capabilityState.transcriptionForm.enabled}
+            <SettingsFeature onClose={() => { void controller.transcriptionEdits.commit(); }} title={t("settings.rows.transcription")} enabled={capabilityState.transcriptionForm.enabled}
               error={capabilityState.capabilityErrors.voice}
               disabled={restartInProgress || capabilityState.transcriptionSaving} initialOpen={activeSection === "voice"}
               onChange={(enabled) => capabilityState.setTranscriptionForm((prev) => ({ ...prev, enabled }))}>
               {renderSection("voice", true)}
             </SettingsFeature>
-            <SettingsFeature title={t("settings.runtimeConfig.groups.web.title")}
+            <SettingsFeature onClose={() => { void controller.webEdits.commit(); }} title={t("settings.runtimeConfig.groups.web.title")}
               enabled={settings.runtime_config ? state.value("tools.web.enable") === true : settings.web.enable}
               disabled={restartInProgress || state.saving === "web" || !settings.runtime_config}
               initialOpen={activeSection === "browser"} error={state.errors.web || capabilityState.capabilityErrors.web}
@@ -220,24 +276,17 @@ export function SettingsPage({
         return <AboutSettings settings={settings} />;
       case "notifications":
         return <NotificationSettings localPrefs={localPrefs} onChangeLocalPrefs={setLocalPrefs} />;
-      case "appearance":
-        return (
-          <AppearanceSettings
-            theme={theme}
-            onToggleTheme={onToggleTheme}
-            localPrefs={localPrefs}
-            onChangeLocalPrefs={setLocalPrefs}
-          />
-        );
       case "models":
         return (
           <div className="settings-stack">
             <ModelsSettings
+              editCompletion={controller.modelEdits}
               token={token}
               form={modelState.form}
               setForm={modelState.setForm}
               editingPresetName={modelState.modelPresetEditingName}
               presetNameError={modelState.modelPresetNameError}
+              error={error}
               settings={settings}
               dirty={modelDirty}
               creating={modelState.modelPresetCreating}
@@ -281,6 +330,7 @@ export function SettingsPage({
               }}
             />
             {providerPanel ? <ProvidersSettings
+              onConfigureProxy={configureProxy}
               entry={providerPanel}
               onClose={() => setProviderPanel(null)}
               onProviderAdded={providerSetupOrigin.current?.onAdded
@@ -329,6 +379,7 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <ImageGenerationSettings
+              editCompletion={controller.imageEdits}
               error={capabilityState.capabilityErrors.image}
               embedded={embedded}
               token={token}
@@ -339,7 +390,7 @@ export function SettingsPage({
               onChangeForm={capabilityState.setImageGenerationForm}
               onSave={capabilityActions.saveImageGenerationSettings}
               onSaveRequestSettings={capabilityActions.saveImageRequestSettings}
-              onOpenProviders={() => selectSection("models")}
+              onOpenProviders={configureCapabilityProviders}
               showBrandLogos={localPrefs.brandLogos}
               onRestart={restartViaSettingsSurface}
               isRestarting={restartInProgress}
@@ -352,6 +403,7 @@ export function SettingsPage({
       case "voice":
         return (
           <TranscriptionSettings
+            editCompletion={controller.transcriptionEdits}
             error={capabilityState.capabilityErrors.voice}
             embedded={embedded}
             settings={settings}
@@ -360,7 +412,7 @@ export function SettingsPage({
             saving={capabilityState.transcriptionSaving}
             onChangeForm={capabilityState.setTranscriptionForm}
             onSave={capabilityActions.saveTranscriptionSettings}
-            onOpenProviders={() => selectSection("models")}
+            onOpenProviders={configureCapabilityProviders}
             showBrandLogos={localPrefs.brandLogos}
             onRestart={restartViaSettingsSurface}
             isRestarting={restartInProgress}
@@ -372,6 +424,7 @@ export function SettingsPage({
           <div className="settings-stack">
             {!embedded ? runtimeConfiguration("browser") : null}
             <WebSettings
+              editCompletion={controller.webEdits}
               error={capabilityState.capabilityErrors.web || controller.runtimeConfigState.errors.web}
               embedded={embedded}
               enabled={settings.runtime_config
@@ -438,9 +491,13 @@ export function SettingsPage({
 
   const renderSection = (section: SettingsSectionKey, embedded = false): ReactNode => {
     switch (section) {
+      case "appearance":
+        return <AppearanceSettings themePreference={themePreference} onChangeTheme={onChangeTheme}
+          localPrefs={localPrefs} onChangeLocalPrefs={setLocalPrefs} />;
       case "channels":
         return (
           <ChannelsSettings
+            onBeforeCloseChange={registerChannelCompletion}
             onConfigureMcp={(name) => {
               setMcpSetupName(name);
               systemState.setAppsKindFilter("mcp");
@@ -468,6 +525,7 @@ export function SettingsPage({
         return (
           <div className="settings-stack">
             <AppsCatalogSettings
+              onConfigureProxy={configureProxy}
               setupName={mcpSetupName}
               onSetupOpened={() => setMcpSetupName(null)}
               cliApps={systemState.cliApps}
@@ -565,7 +623,9 @@ export function SettingsPage({
         return renderSettingsSection(section, embedded);
     }
   };
-  const sectionReady = settings !== null || activeSection === "skills" || activeSection === "apps"
+  // Appearance reads only browser-local preferences, not the gateway settings snapshot.
+  const localSection = activeSection === "appearance";
+  const sectionReady = localSection || settings !== null || activeSection === "skills" || activeSection === "apps"
     || activeSection === "channels" || activeSection === "automations";
 
   return (
@@ -716,7 +776,8 @@ export function SettingsPage({
           ) : null}
 
           {loading && !sectionReady ? (
-            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar} />
+            <SettingsSectionSkeleton section={activeSection} showRestart={!showSidebar}
+              sandboxSupported={webuiCapabilities.includes("webui.sandbox-settings.v1")} />
           ) : error && !sectionReady ? (
             <SettingsGroup>
               <SettingsRow title={t("settings.status.loadError")}>
@@ -732,7 +793,7 @@ export function SettingsPage({
                   "flex min-h-0 flex-1 flex-col xl:overflow-hidden",
               )}
             >
-              {error ? (
+              {error && (!localSection || settings !== null) ? (
                 <div className="rounded-floating border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
                 </div>
@@ -743,6 +804,11 @@ export function SettingsPage({
         </div>
       </div>
     </div>
+    {proxySetupOpen ? <SharedProxySetupDialog
+      busy={controller.runtimeConfigState.saving !== null}
+      onClose={() => setProxySetupOpen(false)}
+      onSave={controller.runtimeConfigState.saveProxy}
+    /> : null}
     </DialogLayoutContext.Provider>
   );
 }

@@ -23,7 +23,7 @@ Change state selectors to inspect streaming, completion, disabled, missing-media
 
 Feature screens that own gateway requests, session state, or host connections are indexed with their source and callers. Exercise their complete workflows in the running WebUI. The gallery does not emulate those services.
 
-Runtime adapters and presentation views have separate responsibilities. Adapters subscribe to clients, load data, enforce browser restrictions, and perform service actions. Their views receive display data and operation callbacks. Production screens and gallery examples mount the same views, including host menus, pairing, file/web previews, session tasks, automation results, version information, and notification preferences. Connected source entries link to the corresponding view examples.
+Runtime adapters and presentation views have separate responsibilities. Adapters subscribe to clients, load data, enforce browser restrictions, and perform service actions. Their views receive display data and operation callbacks. Production screens and gallery examples mount the same views, including host menus, pairing, file previews, session tasks, automation results, version information, and notification preferences. Connected source entries link to the corresponding view examples.
 
 Every channel registration has a preview. Channels with shared configuration forms use their production setup view; Linear, Feishu, Weixin, and WhatsApp use their channel-owned views, including authorization, verification, assistant management, and connection reset. The source inventory includes channel `webui/index.ts` registrations as well as `.tsx` components. Connected adapters link to the views they own.
 
@@ -39,6 +39,7 @@ Channel fixture fields, defaults, and requirements come from the Python channel 
 | `src/components/settings/shared/` | Reusable settings-specific compositions | Settings rows/groups, feature editors, provider controls |
 | `src/components/settings/` | Settings feature screens and their controllers | Models, capabilities, channels, automations |
 | `src/components/remote/` | Host selection and connection interfaces | Host switcher, pairing and remote connections |
+| `src/components/pairing/` | Chat-channel pairing requests, approval lifecycle, and code input | `ChannelPairing`, `PairingCodePopup` |
 | `src/components/workbench/` | Pane layout and its interaction model | `PaneWorkbench` |
 | `src/components/icons/` | Product-specific icon vocabulary | `product-icons.tsx` |
 | `nanobot/channels/<channel>/webui/` | Channel-owned screens, components, and translations | Feishu assistants, Linear setup, Weixin connection |
@@ -55,11 +56,17 @@ History request hooks own loading, pagination and errors. `usePromptHistory.oper
 
 Prompt navigation retains at most three server pages. Static ready Blocks appear only during an uncommitted boundary pull; a completed header is hidden and offers no second pagination entry point. Loading continues at the new boundary, where the header binds to the current first display unit for wheel, touch and keyboard alike; page eviction therefore does not remove the header or the message being read. A failure animates the same Blocks in red without visible error text; hovering shows details, and selecting the red Blocks or a fresh boundary gesture starts another request. Failed reads suppress scroll-triggered automatic requests, not explicit user input.
 
+## Theme artwork and surface motion
+
+The application theme remains the single owner for paired day/night artwork. The Sidebar keeps the original daytime mark and uses a sleeping-cap variant in dark mode; the Star invitation pairs matching day/night illustrations. Both layers reserve the same geometry. `.theme-art` blends opacity for System changes and browsers without native snapshots; a native root View Transition owns the whole-frame fade instead. Reduced motion switches artwork directly. Entry and conversation surfaces keep their normal theme colors without decorative ambient glow.
+
+Dropdowns and popovers use Radix's resolved transform origin and side, so motion stays attached to the trigger after collision handling. Radix owns their presence and focus. `SidebarPanel` retains its content until the slot and surface finish their actual exit animations, ignores descendant activity, and cancels teardown when reopened. Closing content is inert and hidden from assistive navigation; callers still own focus restoration. Disclosures keep their existing in-flow height transition and draft retention.
+
 ## Typography
 
 Use the text roles in `tailwind.config.js` for shared metrics: `text-ui` for navigation, `text-control-label` for controls, `text-ui-label` for compact labels, `text-caption` for auxiliary text, and `text-title` / `text-ui-heading` for interface headings. These roles stay independent of reading preferences. Register new size utilities in `src/lib/utils.ts` so `cn()` distinguishes them from text colors.
 
-`text-reading` and `.markdown-content` own reading typography; Markdown headings retain relative sizes, and tables, inline code and fenced code preserve their own hierarchy. Browser preferences select small / standard / large body sizes of 16 / 18 / 20px on desktop and 15 / 16 / 18px below 640px. Latin body line height is 1.625; Chinese, Japanese and Korean retain 1.8. `text-code` and `text-code-dense` share the mono stack and scale to 0.875 and 0.75 of body size. Avoid local font-size or line-height overrides for these roles.
+`text-reading` and `.markdown-content` own reading typography; Markdown headings retain relative sizes, and tables, inline code and fenced code preserve their own hierarchy. Browser preferences select small / standard / large body sizes of 16 / 18 / 20px on desktop and 15 / 16 / 18px below 640px. Custom reading sizes use a persisted integer from 14 to 28px on both viewport sizes; switching presets preserves the custom value. The `.reading-typography` scope lets the Appearance live preview use the same tokens with its caller-owned preferences. Latin body line height is 1.625; Chinese, Japanese and Korean retain 1.8. `text-code` and `text-code-dense` share the mono stack and scale to 0.875 and 0.75 of body size. Avoid local font-size or line-height overrides for these roles.
 
 The Composer shares `text-composer` between its textarea and mention overlay, with a 16px minimum and 1.5 line height. Preserve identical text metrics, padding and literal CJK/Latin spacing in both layers. Reading preferences are projected by `useReadingTypography` through document tokens, without changing the root font size, the rem spacing grid or browser zoom.
 

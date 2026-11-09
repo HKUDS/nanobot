@@ -16,13 +16,13 @@ from pathlib import Path
 
 from nanobot.channels.websocket.attachment_policy import (
     DOCUMENT_MIME_ALLOWED,
-    MAX_VIDEO_BYTES,
     MAX_VIDEOS_PER_MESSAGE,
     UPLOAD_IDLE_TIMEOUT_SECONDS,
     UPLOAD_MIME_ALLOWED,
     UPLOAD_TIMEOUT_SECONDS,
-    VIDEO_MIME_ALLOWED,
     AttachmentIngressLimits,
+    validate_upload_batch,
+    validate_upload_size,
 )
 from nanobot.utils.media_decode import media_destination
 
@@ -32,7 +32,7 @@ class AttachmentUploadError(ValueError):
 
 
 @dataclass(frozen=True)
-class _Attachment:
+class StagedAttachment:
     owner: str
     path: Path
     mime: str
@@ -69,7 +69,7 @@ class AttachmentStore:
         self.ttl_seconds = ttl_seconds
         self.upload_timeout = upload_timeout
         self.upload_idle_timeout = upload_idle_timeout
-        self._entries: dict[str, _Attachment] = {}
+        self._entries: dict[str, StagedAttachment] = {}
         self._reserved_bytes = 0
         self._active = 0
         self._journal = media_dir / ".pending-attachments"
@@ -94,9 +94,10 @@ class AttachmentStore:
             raise AttachmentUploadError("Missing authenticated owner")
         if mime not in UPLOAD_MIME_ALLOWED:
             raise AttachmentUploadError("Unsupported attachment MIME")
-        limit = MAX_VIDEO_BYTES if mime in VIDEO_MIME_ALLOWED else self.limits.max_file_bytes
-        if isinstance(size, bool) or not 0 < size <= limit:
-            raise AttachmentUploadError("Invalid attachment size")
+        try:
+            validate_upload_size(mime, size, limits=self.limits)
+        except ValueError as exc:
+            raise AttachmentUploadError(str(exc)) from exc
         if self._active + len(self._entries) >= self.max_pending:
             raise AttachmentUploadError("Too many pending attachments")
         if self._reserved_bytes + size > self.max_pending_bytes:
@@ -135,7 +136,7 @@ class AttachmentStore:
             if received != size:
                 raise AttachmentUploadError("Incomplete attachment body")
             reference = secrets.token_urlsafe(32)
-            self._entries[reference] = _Attachment(
+            self._entries[reference] = StagedAttachment(
                 owner, path, mime, size, time.monotonic() + self.ttl_seconds,
             )
             stored = True
@@ -150,27 +151,27 @@ class AttachmentStore:
                     if marker_created:
                         (self._journal / path.name).unlink(missing_ok=True)
 
-    def resolve(self, references: list[str], *, owner: str) -> list[str]:
+    def inspect(self, references: list[str], *, owner: str) -> list[StagedAttachment]:
         """Validate a complete batch without consuming it, allowing send retries."""
         self.prune()
         if len(references) > self.limits.max_count + MAX_VIDEOS_PER_MESSAGE:
             raise AttachmentUploadError("Too many attachments")
         if len(set(references)) != len(references):
             raise AttachmentUploadError("Duplicate attachment reference")
-        entries: list[_Attachment] = []
+        entries: list[StagedAttachment] = []
         for reference in references:
             entry = self._entries.get(reference)
             if entry is None or not owner or entry.owner != owner:
                 raise AttachmentUploadError("Invalid attachment reference")
             entries.append(entry)
-        videos = sum(entry.mime in VIDEO_MIME_ALLOWED for entry in entries)
-        if videos > MAX_VIDEOS_PER_MESSAGE:
-            raise AttachmentUploadError("Too many attachments")
-        if len(entries) - videos > self.limits.max_count:
-            raise AttachmentUploadError("Too many attachments")
-        if sum(e.size for e in entries if e.mime not in VIDEO_MIME_ALLOWED) > self.limits.max_total_bytes:
-            raise AttachmentUploadError("Attachment total exceeds limit")
-        return [str(entry.path) for entry in entries]
+        try:
+            validate_upload_batch([(e.mime, e.size) for e in entries], limits=self.limits)
+        except ValueError as exc:
+            raise AttachmentUploadError(str(exc)) from exc
+        return entries
+
+    def resolve(self, references: list[str], *, owner: str) -> list[str]:
+        return [str(entry.path) for entry in self.inspect(references, owner=owner)]
 
     def commit(self, references: list[str], *, owner: str) -> list[str]:
         """Transfer validated files to session ownership after message acceptance.
