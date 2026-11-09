@@ -5,6 +5,7 @@ from typing import Any, ClassVar, Literal, cast
 
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
@@ -21,7 +22,6 @@ from nanobot.agent.tools.web_config import (
 from nanobot.agent.tools.web_config import WebToolsConfig
 from nanobot.config.home import get_default_workspace
 from nanobot.config.network import NetworkConfig, migrate_legacy_proxy_config
-from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
@@ -266,6 +266,19 @@ class ProviderConfig(Base):
         "reasoning_split",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_retired_api_selector(cls, value: object) -> object:
+        # Unknown fields are normally ignored. Do not silently switch an
+        # explicitly selected request API to Auto.
+        if isinstance(value, dict) and any(key in value for key in ("apiType", "api_type", "apitype")):
+            raise PydanticCustomError(
+                "retired_provider_api_selector",
+                "The apiType setting was removed. Use api.supportedApis for an explicit selection, "
+                "or remove the old setting for Auto. See the OpenAI API selector migration in the configuration guide.",
+            )
+        return value
+
     @field_validator("thinking_style")
     @classmethod
     def _validate_thinking_style(cls, v: str | None) -> str | None:
@@ -358,19 +371,6 @@ class ProvidersConfig(Base):
                 if isinstance(value, dict):
                     self.model_extra[key] = ProviderConfig.model_validate(value)
         return self
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_api_type(cls, value: Any) -> Any:
-        # Temporary for two releases; remove with provider_api_migration.py.
-        if not isinstance(value, dict):
-            return value
-        providers = cast(dict[str, Any], value)
-        return {
-            name: migrate_legacy_provider_api(cast(dict[str, Any], provider), provider_name=name)
-            if isinstance(provider, dict) else provider
-            for name, provider in providers.items()
-        }
 
 
 class HeartbeatConfig(Base):

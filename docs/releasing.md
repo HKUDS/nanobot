@@ -82,9 +82,7 @@ Retain legacy model JSONL, WebUI JSONL / segments and per-feature proxy migratio
 
 ### OpenAI API selector compatibility window
 
-The temporary `providers.openai.apiType` / `api_type` conversion lasts exactly two consecutive releases: the first containing `nanobot/config/provider_api_migration.py` and the next. Record the first and final supported tags in release notes. Config saves write `api`; there is no legacy runtime selector.
-
-Before the third release, remove `provider_api_migration.py`, its import, `ProvidersConfig._migrate_legacy_api_type`, the legacy settings query conversion in `nanobot/webui/settings_models.py` and migration-specific tests. Update configuration docs and release notes to require the current format. Keep current-format routing, settings and persistence regressions.
+v0.4.0 and v0.4.1 were the two releases with automatic conversion of `providers.openai.apiType` / `api_type`. The first release without that conversion must link to the [migration instructions](./configuration.md#legacy-openai-api-selector-migration) in its release notes. The new release rejects the old selector instead of silently changing the request API. Preserve current-format routing and settings; the 0.4.x history and proxy migration window is independent.
 
 ### TUI preflight without a release tag
 

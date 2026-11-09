@@ -1465,11 +1465,19 @@ In `config.json`, set `providers.<name>.api` for the built-in `custom` provider 
 
 ### Legacy OpenAI API selector migration
 
-If your configuration uses `providers.openai.apiType` (or `api_type`), save it with a version that supports the migration before upgrading further. Saving replaces the old field with `api`: `chat_completions` or `responses` becomes a single-API declaration, while `auto` keeps automatic selection. If both fields are present, `api` takes precedence, including `api: null`.
+Versions 0.4.0 and 0.4.1 can read and convert `providers.openai.apiType` (or `api_type`). Later releases reject the old setting so they do not silently change your request API. OpenAI connections, Responses, and Chat Completions are still supported.
 
-The migration also accepts the `NANOBOT_PROVIDERS__OPENAI__API_TYPE` and `NANOBOT_PROVIDERS__OPENAI__APITYPE` environment variables.
+Back up the configuration before upgrading. Update the existing configuration by hand:
 
-The old field is accepted in the first release containing this migration and the immediately following release. The third release will require the current `api` format.
+| Old value | Current configuration under `providers.openai` |
+| --- | --- |
+| `auto` | Remove the old field; leave `api` unset or set it to `null`. |
+| `responses` | Replace the old field with `"api": {"supportedApis": ["responses"]}`. |
+| `chat_completions` | Replace the old field with `"api": {"supportedApis": ["chat_completions"]}`. |
+
+If `api` is already present, keep it and remove the old field. If your launcher sets `NANOBOT_PROVIDERS__OPENAI__API_TYPE` or `NANOBOT_PROVIDERS__OPENAI__APITYPE`, remove the old variable there too. For an explicit selection, set `NANOBOT_PROVIDERS__OPENAI__API` to the JSON object from the table. For Auto, leave it unset. Do not change credentials, model names, or the workspace.
+
+If you already upgraded, edit the same configuration or launcher environment and restart the gateway. If a separate older client cannot save provider settings, update that client or open the WebUI served by the gateway.
 
 ### Preset request API
 

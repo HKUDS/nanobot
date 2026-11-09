@@ -15,6 +15,8 @@ Keep the original backup and retained JSONL import backups. Do not delete or ove
 
 ## Update from the WebUI
 
+If you use the old OpenAI `apiType` setting, [convert it to the current format](./configuration.md#legacy-openai-api-selector-migration) before updating past 0.4.1. Check your configuration file and launcher environment.
+
 1. Open the blue update entry in the sidebar or **Settings → About → Update**. Opening the dialog only checks the installation; it does not install or restart anything.
 2. Review the exact version and affected gateways. Active work must finish before shutdown. Gateways that were already stopped are not started by the update.
 3. Choose **Update & restart**. nanobot downloads and verifies the required files, backs up affected profiles, installs the update, and restarts the selected background gateways—not your computer or browser.

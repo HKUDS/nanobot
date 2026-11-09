@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, NotRequired, TypedDi
 import httpx
 
 from nanobot.config.loader import resolve_config_env_vars
-from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.schema import (
     Config,
     FallbackCandidate,
@@ -132,6 +131,11 @@ _PROVIDER_STRUCTURED_FIELDS = ("extra_headers", "extra_body", "extra_query")
 
 
 def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
+    if query_has_alias(query, "api_type", "apiType"):
+        raise WebUISettingsError(
+            "This client sent the retired apiType setting. Update the client or use the WebUI "
+            "served by the gateway to save the provider settings."
+        )
     updates: dict[str, Any] = {}
     string_fields = (
         ("api_key", "apiKey"),
@@ -161,9 +165,6 @@ def _provider_config_updates(query: QueryParams) -> dict[str, Any]:
             updates["api"] = json.loads(query_first(query, "api") or "null")
         except ValueError as exc:
             raise WebUISettingsError("api must declare supportedApis and a preferredApi from that list") from exc
-    # Temporary input compatibility for older clients during the two-release window.
-    if query_has_alias(query, "api_type", "apiType"):
-        updates["api_type"] = query_first_alias(query, "api_type", "apiType") or "auto"
     return updates
 
 
@@ -1645,12 +1646,6 @@ def update_provider_settings(
             config.network.resolve_proxy(True)
         except ValueError as exc:
             raise WebUISettingsError(str(exc)) from None
-    if not spec.is_oauth and spec.name != "openai":
-        updates.pop("api_type", None)
-    try:
-        updates = migrate_legacy_provider_api(updates, provider_name=provider_key)
-    except ValueError as exc:
-        raise WebUISettingsError(str(exc)) from None
     if spec.is_oauth:
         if spec.name not in _OAUTH_PROXY_PROVIDERS:
             raise WebUISettingsError("unknown provider")
