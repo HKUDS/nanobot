@@ -244,12 +244,13 @@ Common operations:
 
 ```bash
 systemctl --user status nanobot-gateway        # check status
+systemctl --user stop nanobot-gateway          # stop the service
 systemctl --user restart nanobot-gateway       # restart after config changes
 journalctl --user -u nanobot-gateway -f        # follow logs
 nanobot gateway uninstall-service --manager systemd
 ```
 
-The installer writes `~/.config/systemd/user/nanobot-gateway.service`, runs `systemctl --user daemon-reload`, enables the unit, and restarts it. It uses the current Python executable with `python -m nanobot gateway --foreground`, so the service runs in the same environment you used to install nanobot.
+The installer writes `~/.config/systemd/user/nanobot-gateway.service`, runs `systemctl --user daemon-reload`, enables the unit, and restarts it. It uses the current Python executable with `python -m nanobot gateway --foreground`, so the service runs in the same environment you used to install nanobot. To update an existing unit after upgrading, rerun the install command with the same options; this overwrites the unit and restarts the service. Custom systemd overrides remain in effect.
 
 > **Note:** User services only run while you are logged in. To keep the gateway running after logout, enable lingering:
 >
