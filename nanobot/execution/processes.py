@@ -7,11 +7,10 @@ import os
 import re
 import shutil
 import signal
-import subprocess
 import sys
 from contextlib import suppress
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -19,7 +18,34 @@ if TYPE_CHECKING:
     from nanobot.execution._windows_job import WindowsJob
 
 _IS_WINDOWS = sys.platform == "win32"
-_PROCESS_TREE_OWNER_ATTR = "_nanobot_process_tree_owner"
+
+
+class ProcessTree:
+    """Keep the root's streams and its native process-tree ownership together."""
+
+    __slots__ = ("process", "_job")
+
+    def __init__(self, process: asyncio.subprocess.Process, job: WindowsJob | None = None) -> None:
+        self.process = process
+        self._job = job
+
+    async def terminate(self) -> None:
+        """Stop descendants even if the root has already exited."""
+        try:
+            if self._job is not None:
+                self._job.terminate()
+            else:
+                with suppress(ProcessLookupError):
+                    os.killpg(self.process.pid, signal.SIGKILL)
+            await _stop_root(self.process)
+        finally:
+            _reap_pid(self.process.pid)
+
+    def finish(self) -> None:
+        """Release native ownership once the session has drained the streams."""
+        if self._job is not None:
+            self._job.release()
+        _reap_pid(self.process.pid)
 
 
 async def spawn_process_tree(
@@ -30,20 +56,18 @@ async def spawn_process_tree(
     login: bool = False,
     *,
     stdin: int = asyncio.subprocess.DEVNULL,
-) -> asyncio.subprocess.Process:
+) -> ProcessTree:
     """Start a prepared command in its own process group or Windows job."""
-    shell_command: str | None = None
     if isinstance(command, list):
         executable = shutil.which(command[0], path=env.get("PATH", ""))
         if executable is None:
             raise FileNotFoundError(f"Executable not found: {command[0]}")
-        argv = [executable, *command[1:]]
+        launch = [executable, *command[1:]]
     elif _IS_WINDOWS:
         program = shell_program or shutil.which("pwsh") or shutil.which("powershell") or "powershell"
         if PureWindowsPath(program).name.lower() in ("cmd", "cmd.exe"):
             env = {**env, "COMSPEC": program}
-            shell_command = command
-            argv = []
+            launch = command
         else:
             command = _normalize_powershell_command(command)
             command = (
@@ -53,39 +77,43 @@ async def spawn_process_tree(
                 f"{command}\n"
                 "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
             )
-            argv = [program, "-NoProfile", "-NonInteractive", "-Command", command]
+            launch = [program, "-NoProfile", "-NonInteractive", "-Command", command]
     else:
         program = shell_program or shutil.which("bash") or "/bin/bash"
-        argv = [program]
+        launch = [program]
         if login and Path(program).name.lower() in {"bash", "bash.exe", "zsh", "zsh.exe"}:
-            argv.append("-l")
-        argv.extend(["-c", command])
+            launch.append("-l")
+        launch.extend(["-c", command])
 
     job = _create_windows_job() if _IS_WINDOWS else None
+    creationflags = job.creation_flags if job is not None else 0
     process = None
     try:
-        if shell_command is not None:
+        if isinstance(launch, str):
             process = await asyncio.create_subprocess_shell(
-                shell_command, stdin=stdin, stdout=asyncio.subprocess.PIPE,
+                launch, stdin=stdin, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, cwd=cwd, env=env,
-                creationflags=job.creation_flags if job else 0,
+                creationflags=creationflags,
             )
         else:
             process = await asyncio.create_subprocess_exec(
-                *argv, stdin=stdin, stdout=asyncio.subprocess.PIPE,
+                *launch, stdin=stdin, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE, cwd=cwd, env=env,
-                creationflags=job.creation_flags if job else 0,
+                creationflags=creationflags,
                 start_new_session=not _IS_WINDOWS,
             )
         if job is not None:
             job.assign_and_resume(process.pid)
-            setattr(process, _PROCESS_TREE_OWNER_ATTR, job)
-        return process
+        return ProcessTree(process, job)
     except BaseException:
         if job is not None:
             job.terminate()
         if process is not None:
-            await _kill_process(process)
+            try:
+                with suppress(asyncio.TimeoutError):
+                    await _stop_root(process)
+            finally:
+                _reap_pid(process.pid)
         raise
 
 
@@ -131,76 +159,14 @@ def _reap_pid(pid: int) -> None:
         logger.debug("_reap_pid({}): {}", pid, exc)
 
 
-async def _kill_process(process: asyncio.subprocess.Process) -> None:
-    """Clean up the root process if launch fails before it joins its job."""
-    if process.returncode is not None:
-        _reap_pid(process.pid)
-        return
-    try:
+async def _stop_root(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is None:
         with suppress(ProcessLookupError):
             process.kill()
-        with suppress(asyncio.TimeoutError):
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-    finally:
-        _reap_pid(process.pid)
-
-
-async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
-    """Kill a session process and descendants, then reap the root process."""
-    owner = _process_tree_owner(process)
-    try:
-        if owner is not None:
-            owner.terminate()
-        elif _IS_WINDOWS:
-            if process.returncode is None:
-                with suppress(OSError, asyncio.TimeoutError):
-                    await asyncio.wait_for(
-                        asyncio.to_thread(
-                            subprocess.run,
-                            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                            check=False,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        ),
-                        timeout=5.0,
-                    )
-        else:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-
-        if process.returncode is None:
-            with suppress(ProcessLookupError):
-                process.kill()
-        await asyncio.wait_for(process.wait(), timeout=5.0)
-        if owner is not None:
-            _drop_process_tree_owner(process)
-    finally:
-        _reap_pid(process.pid)
-
-
-def _process_tree_owner(
-    process: asyncio.subprocess.Process,
-) -> WindowsJob | None:
-    # spawn_process_tree is the only writer for this private ownership marker.
-    return cast("WindowsJob | None", vars(process).get(_PROCESS_TREE_OWNER_ATTR))
+    await asyncio.wait_for(process.wait(), timeout=5.0)
 
 
 def _create_windows_job() -> WindowsJob:
     from nanobot.execution._windows_job import WindowsJob
 
     return WindowsJob.create()
-
-
-def _drop_process_tree_owner(process: asyncio.subprocess.Process) -> None:
-    with suppress(AttributeError):
-        delattr(process, _PROCESS_TREE_OWNER_ATTR)
-
-
-def finish_process_tree(process: asyncio.subprocess.Process) -> None:
-    """Release native ownership after the session finishes draining output."""
-    if (owner := _process_tree_owner(process)) is not None:
-        owner.release()
-        _drop_process_tree_owner(process)
-    _reap_pid(process.pid)

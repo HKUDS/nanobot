@@ -152,7 +152,7 @@ class _ExecSession:
         self,
         *,
         session_id: str,
-        process: asyncio.subprocess.Process,
+        process_tree: processes.ProcessTree,
         command: str,
         cwd: str,
         timeout: int | None,
@@ -162,7 +162,8 @@ class _ExecSession:
         started_at: float | None = None,
     ) -> None:
         self.session_id = session_id
-        self.process = process
+        self._process_tree = process_tree
+        process = process_tree.process
         self.command = command
         self.cwd = cwd
         self.owner_session_key = owner_session_key
@@ -194,6 +195,10 @@ class _ExecSession:
         )
         if self._timeout_task is not None:
             self._timeout_task.add_done_callback(self._on_supervisor_done)
+
+    @property
+    def process(self) -> asyncio.subprocess.Process:
+        return self._process_tree.process
 
     @property
     def stopping(self) -> bool:
@@ -235,7 +240,7 @@ class _ExecSession:
         finally:
             stopped.cancel()
             await asyncio.gather(stopped, return_exceptions=True)
-        processes.finish_process_tree(self.process)
+        self._process_tree.finish()
         self.finish_reason = self._stop_reason or "exit"
         self.finished_at = time.monotonic()
         self._state_changed.set()
@@ -403,7 +408,7 @@ class _ExecSession:
         # kill() replaces it on an explicit retry.
 
     async def _kill(self) -> None:
-        await processes.terminate_process_tree(self.process)
+        await self._process_tree.terminate()
         self._stop_complete.set()
 
 
@@ -491,11 +496,11 @@ class ExecSessionManager:
         session: _ExecSession | None = None
         try:
             started_at = time.monotonic()
-            process = await processes.spawn_process_tree(
+            process_tree = await processes.spawn_process_tree(
                 command, cwd, env, shell_program, login, stdin=stdin,
             )
             session = _ExecSession(
-                session_id=session_id, process=process,
+                session_id=session_id, process_tree=process_tree,
                 command=shlex.join(command) if isinstance(command, list) else command,
                 cwd=cwd, timeout=timeout, owner_session_key=owner_session_key,
                 idle_timeout=idle_timeout, idle_action=idle_action,

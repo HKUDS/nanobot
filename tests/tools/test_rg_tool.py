@@ -192,10 +192,10 @@ async def test_direct_process_cancellation_reaps_child(tmp_path, monkeypatch):
     original_spawn = processes.spawn_process_tree
 
     async def capture(*args, **kwargs):
-        process = await original_spawn(*args, **kwargs)
-        children.append(process)
+        tree = await original_spawn(*args, **kwargs)
+        children.append(tree.process)
         spawned.set()
-        return process
+        return tree
 
     monkeypatch.setattr(processes, "spawn_process_tree", capture)
     task = asyncio.create_task(ExecTool(working_dir=str(tmp_path)).execute(

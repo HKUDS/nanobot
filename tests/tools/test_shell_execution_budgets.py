@@ -448,7 +448,8 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
     spawn_returned = asyncio.Event()
 
     async def spawn_with_exit_order(*args, **kwargs):
-        process = await real_spawn(*args, **kwargs)
+        tree = await real_spawn(*args, **kwargs)
+        process = tree.process
         if early_root_exit:
             async with asyncio.timeout(5):
                 while process.returncode is None:
@@ -457,7 +458,7 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
         else:
             assert process.returncode is None
         spawn_returned.set()
-        return process
+        return tree
 
     monkeypatch.setattr(processes, "spawn_process_tree", spawn_with_exit_order)
     owner = RequestContext(channel="cli", chat_id="pipe-budget", session_key="cli:pipe-budget")
