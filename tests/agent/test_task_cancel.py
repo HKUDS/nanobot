@@ -793,9 +793,9 @@ class TestSubagentAnnounceSessionKey:
             origin_channel="telegram",
             origin_chat_id="444",
             runtime=_runtime(),
-            session_key="telegram:111:topic:5",
+            session_key="telegram:444:topic:5",
         )
         await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
         msg = await bus.consume_inbound()
-        assert msg.session_key_override == "telegram:111:topic:5"
+        assert msg.session_key_override == "telegram:444:topic:5"

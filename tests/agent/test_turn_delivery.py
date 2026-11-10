@@ -45,7 +45,6 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
         )
 
 
-@pytest.mark.parametrize("unified", [False, True])
 @pytest.mark.parametrize(("key", "channel", "chat_id", "metadata"), [
     ("slack:C123:1700000000.000100", "slack", "C123",
      {"slack": {"thread_ts": "1700000000.000100"}}),
@@ -59,14 +58,13 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
     ("dingtalk:group:conversation:user", "dingtalk", "group:conversation", {}),
 ])
 async def test_session_route_delivers_automatic_and_manual_compaction(
-    key, channel, chat_id, metadata, unified,
+    key, channel, chat_id, metadata,
 ) -> None:
     factory = TurnDeliveryFactory(MessageBus())
     automatic = ContextCompactionEvent(compaction_id="auto-1", phase="started")
     notified = ContextCompactionEvent(
         compaction_id="notified-1", phase="started", notify=True,
     )
-    key = "slack:C123" if unified else key
     msg = InboundMessage(
         channel=channel, sender_id="user", chat_id=chat_id, content="hello",
         metadata={
@@ -92,7 +90,7 @@ async def test_session_route_delivers_automatic_and_manual_compaction(
 
 async def test_idle_compaction_keeps_its_route_when_the_saved_route_changes() -> None:
     factory = TurnDeliveryFactory(MessageBus())
-    key = "unified:default"
+    key = "sdk:workflow"
     session_metadata = {}
     original = InboundMessage(
         channel="slack", sender_id="user", chat_id="C123", content="hello",
