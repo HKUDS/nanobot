@@ -1148,6 +1148,7 @@ def _with_backfilled_user(
             if input_id:
                 references = rec.get("response_input_ids")
                 if isinstance(references, list):
+                    references = cast(list[object], references)
                     following = {value for value in references[references.index(input_id) + 1:]
                                  if isinstance(value, str)}
                     index = next((i for i, prior in enumerate(records[:index])

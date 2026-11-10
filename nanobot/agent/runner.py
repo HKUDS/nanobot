@@ -187,7 +187,7 @@ class AgentRunner:
                     break
                 continue
             marker = message.get(HIDDEN_HISTORY_META)
-            if isinstance(marker, dict) and marker.get("kind") == "internal_continuation":
+            if isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
                 if identifiers:
                     break
                 continue
