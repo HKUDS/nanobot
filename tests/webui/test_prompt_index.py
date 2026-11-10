@@ -13,16 +13,21 @@ from nanobot.webui.client_contract import webui_contract
 from nanobot.webui.gateway_services import build_gateway_services
 
 
-def test_complete_index_and_bidirectional_pages_without_loading_model_messages(history, tmp_path, monkeypatch):
+@pytest.mark.parametrize("identified", [False, True])
+def test_complete_index_and_bidirectional_pages_without_loading_model_messages(history, tmp_path, monkeypatch, identified):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:navigation"
     for i in range(120):
-        history.append(key, {"event": "user", "chat_id": "navigation", "text": f"question {i}", "turn_id": f"t{i}"})
-        history.append(key, {"event": "message", "chat_id": "navigation", "text": "answer " + "x" * 200, "turn_id": f"t{i}"})
+        input_identity = {"input_id": f"user:t{i}"} if identified else {}
+        response_identity = {"response_input_ids": [f"user:t{i}"]} if identified else {}
+        history.append(key, {"event": "user", "chat_id": "navigation", "text": f"question {i}", "turn_id": f"t{i}", **input_identity})
+        history.append(key, {"event": "message", "chat_id": "navigation", "text": "answer " + "x" * 200, "turn_id": f"t{i}", **response_identity})
         history.append(key, {"event": "turn_end", "chat_id": "navigation", "turn_id": f"t{i}"})
+    with monkeypatch.context() as patch:
+        patch.setattr("nanobot.session.display_history.HistoryReader.navigation", lambda _: (_ for _ in ()).throw(AssertionError("page scanned full history")))
+        latest = history.build(key, limit=3)
     index = history.prompts(key)
     assert len(index) == 120
-    latest = history.build(key, limit=3)
     assert len(latest["events"]) < len(index)
     target = index[42]
     stats = transcript.TranscriptReplayStats()
@@ -182,6 +187,13 @@ def test_cross_session_inputs_are_reconciled_by_identity_across_turns(
         assert not second_recorded, "complete display history must not load model history"
         return messages
 
+    with monkeypatch.context() as patch:
+        if second_recorded:
+            patch.setattr("nanobot.session.display_history.HistoryReader.navigation", lambda _: (_ for _ in ()).throw(AssertionError("page scanned full history")))
+        latest = history.build(key, limit=1, session_messages_loader=loader)
+    assert [event["text"] for event in latest["events"] if event["event"] == "user_message"] == (
+        [] if second_recorded else ["same message"]
+    )
     page = history.build(key, limit=10, session_messages_loader=loader)
     users = [event for event in page["events"] if event["event"] == "user_message"]
     assert [user["text"] for user in users] == ["original question", "same message", "same message"]
@@ -196,10 +208,7 @@ def test_cross_session_inputs_are_reconciled_by_identity_across_turns(
     history.append(key, {"event": "user", "text": "same message", "session_message": provenance[0], "input_id": input_ids[0]})
     assert history.revision(key) == revision
     assert history.build(key, limit=10, session_messages_loader=loader) == page
-    latest = history.build(key, limit=1, session_messages_loader=loader)
-    assert [event["text"] for event in latest["events"] if event["event"] == "user_message"] == (
-        [] if second_recorded else ["same message"]
-    )
+    assert history.build(key, limit=1, session_messages_loader=loader) == latest
 
 
 @pytest.mark.asyncio

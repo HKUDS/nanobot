@@ -1119,9 +1119,16 @@ def _recover_incomplete_turns(
     return recovered
 
 
-def _needs_user_event_backfill(lines: list[dict[str, Any]]) -> bool:
-    return any("response_input_ids" in record for record in lines) or any(
-        not any(record.get("event") == "user" for record in turn)
+def _needs_user_event_backfill(lines: list[dict[str, Any]], history: HistoryReader) -> bool:
+    referenced_inputs = {
+        input_id
+        for record in lines
+        if isinstance(references := record.get("response_input_ids"), list)
+        for input_id in cast(list[object], references)
+        if isinstance(input_id, str) and input_id
+    }
+    return any(not history.has_input(input_id) for input_id in referenced_inputs) or any(
+        not any(record.get("event") == "user" or isinstance(record.get("response_input_ids"), list) for record in turn)
         and _transcript_turn_signature(turn)
         for turn in _split_transcript_turns(lines)
     )
@@ -1849,7 +1856,7 @@ def build_webui_thread_response(
             session_turns = _session_backfill_turns(session_key, session_messages or [])
         return session_turns
 
-    if _needs_user_event_backfill(lines):
+    if _needs_user_event_backfill(lines, history):
         view, _ = _prompt_view_snapshot(
             session_key, history=history, session_turns_loader=load_session_turns,
             session_version_loader=session_version_loader,
