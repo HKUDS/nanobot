@@ -8,10 +8,12 @@ from typing import Any, Protocol
 
 from nanobot.bus.delivery import DELIVERY_RUN_META
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.cron.service import CronJobSkippedError
 from nanobot.cron.session_delivery import origin_delivery_context
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.cron.types import CronJob, CronRunResult
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
+from nanobot.session.keys import RETIRED_SHARED_SESSION_KEY
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -69,6 +71,10 @@ async def run_bound_cron_job(
     session_key = job.payload.session_key
     if not session_key:
         raise ValueError(f"cron job {job.id} is missing payload.session_key")
+    if session_key == RETIRED_SHARED_SESSION_KEY:
+        raise CronJobSkippedError(
+            "shared sessions were removed; recreate this job from its destination chat"
+        )
 
     prompt = render_template(
         "agent/cron_reminder.md",

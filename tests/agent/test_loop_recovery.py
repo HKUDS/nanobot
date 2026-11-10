@@ -127,7 +127,6 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
 
     loop = AgentLoop.__new__(AgentLoop)
     loop.sessions = sessions
-    loop._unified_session = False
     loop._recovery_admission = recovery
     loop._session_locks = {}
     loop._concurrency_gate = None

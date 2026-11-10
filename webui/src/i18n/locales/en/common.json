@@ -589,10 +589,6 @@
           "label": "Message rate",
           "help": "Maximum tool messages to one session per minute.\n\nMaximum number of messages tools can send to the same session each minute."
         },
-        "agents_defaults_unified_session": {
-          "label": "Shared sessions",
-          "help": "Share one user's chat history across platforms.\n\nShare conversation history across chat channels for a single user."
-        },
         "tools_exec_enable": {
           "label": "Shell tool",
           "help": "Allow the agent to run Shell commands.\n\nAllow the agent to run shell commands."

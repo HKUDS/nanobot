@@ -1998,40 +1998,16 @@ def test_heartbeat_target_skips_archived_webui_sessions():
     assert target == ("websocket", "active")
 
 
-def test_heartbeat_target_uses_last_channel_for_unified_session():
+def test_heartbeat_target_skips_retired_shared_history():
     from nanobot.cli.gateway_runtime import _pick_heartbeat_target_from_sessions
-    from nanobot.session.keys import LAST_CHANNEL_METADATA_KEY, UNIFIED_SESSION_KEY
 
     target = _pick_heartbeat_target_from_sessions(
         enabled_channels=["telegram", "discord"],
         archived_keys=[],
-        sessions=[{"key": UNIFIED_SESSION_KEY}],
-        unified_session_metadata={LAST_CHANNEL_METADATA_KEY: "discord:chat-42"},
+        sessions=[{"key": "unified:default"}, {"key": "discord:active"}],
     )
 
-    assert target == ("discord", "chat-42")
-
-
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        {"last_channel": "telegram:chat-42"},
-        {"last_channel": "cli:direct"},
-        {"last_channel": "invalid"},
-    ],
-)
-def test_heartbeat_target_rejects_unroutable_unified_metadata(metadata):
-    from nanobot.cli.gateway_runtime import _pick_heartbeat_target_from_sessions
-    from nanobot.session.keys import UNIFIED_SESSION_KEY
-
-    target = _pick_heartbeat_target_from_sessions(
-        enabled_channels=["discord"],
-        archived_keys=[],
-        sessions=[{"key": UNIFIED_SESSION_KEY}],
-        unified_session_metadata=metadata,
-    )
-
-    assert target == ("cli", "direct")
+    assert target == ("discord", "active")
 
 
 def _write_instance_config(tmp_path: Path) -> Path:

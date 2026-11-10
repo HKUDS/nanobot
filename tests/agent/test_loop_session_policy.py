@@ -19,7 +19,6 @@ from nanobot.bus.events import (
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
 from nanobot.runtime_context import RuntimeContextBlock, public_history_message
-from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionPolicy
 from nanobot.webui.temporary_chats import WebUITemporaryChats
 from nanobot.webui.workspaces import WebUIWorkspaceController
@@ -270,12 +269,12 @@ async def test_session_worker_errors_keep_private_content_out_of_logs(
 
 
 @pytest.mark.asyncio
-async def test_transient_session_stays_outside_unified_session(tmp_path) -> None:
-    loop = _loop(tmp_path, ["private answer"], unified_session=True)
-    durable = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
+async def test_transient_session_keeps_retired_shared_history_intact(tmp_path) -> None:
+    loop = _loop(tmp_path, ["private answer"])
+    durable = loop.sessions.get_or_create("unified:default")
     durable.add_message("user", "durable question")
     loop.sessions.save(durable)
-    key = "websocket:transient-unified"
+    key = "websocket:transient"
     await loop.sessions.state.register_transient(key)
 
     await run_session(loop, _message(key, "private question"))

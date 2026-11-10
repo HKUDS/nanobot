@@ -10,7 +10,6 @@ from nanobot.bus.outbound_events import RecoveryStateEvent, SessionUpdatedEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.display_history import HistoryFact, HistoryKind
-from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import (
     PENDING_FOLLOWUPS_KEY,
@@ -43,6 +42,23 @@ def _coordinator(workspace: Path) -> tuple[RecoveryCoordinator, MessageBus, Sess
     bus = MessageBus()
     sessions = SessionManager(workspace)
     return RecoveryCoordinator(sessions, bus), bus, sessions
+
+
+@pytest.mark.asyncio
+async def test_startup_preserves_interrupted_retired_session_without_resuming(tmp_path: Path):
+    coordinator, bus, sessions = _coordinator(tmp_path)
+    shared = sessions.get_or_create("unified:default")
+    shared.add_message("user", "Old shared request")
+    shared.metadata.update(last_channel="websocket:chat", **{PENDING_USER_TURN_KEY: True})
+    _persist(sessions, shared)
+
+    await coordinator.scan()
+
+    retained = await sessions.state.read(shared.key)
+    assert retained is not None
+    assert retained.messages == shared.messages
+    assert retained.metadata == shared.metadata
+    assert bus.inbound.empty() and bus.outbound.empty()
 
 
 @pytest.mark.asyncio
@@ -681,8 +697,7 @@ async def test_new_user_message_supersedes_waiting_recovery(tmp_path: Path) -> N
 @pytest.mark.parametrize("channel", ["websocket", "discord"])
 async def test_new_input_only_supersedes_recovery_for_websocket(tmp_path: Path, channel: str) -> None:
     coordinator, bus, sessions = _coordinator(tmp_path)
-    coordinator.unified_session = True
-    session = sessions.get_or_create(UNIFIED_SESSION_KEY)
+    session = sessions.get_or_create("websocket:chat")
     session.metadata[RECOVERY_METADATA_KEY] = {
         "status": "resuming",
         "recovery_id": "active",

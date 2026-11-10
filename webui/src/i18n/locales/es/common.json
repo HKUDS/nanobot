@@ -556,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "Seguir reintentando", "help": "Reintenta errores recuperables; desactívalo para usar reintentos estándar.\n\nVuelve a intentar las solicitudes al modelo tras un error temporal. Desactiva esta opción para limitar el número de reintentos."},
         "agents_defaults_tool_hint_max_length": {"label": "Longitud del resumen", "help": "Límite de caracteres de los resúmenes de herramientas.\n\nLongitud máxima de las indicaciones breves de actividad."},
         "tools_max_session_messages_per_minute": {"label": "Frecuencia de mensajes", "help": "Máximo de mensajes de herramientas a una sesión por minuto.\n\nLimita la frecuencia de los mensajes que envían las herramientas a una conversación."},
-        "agents_defaults_unified_session": {"label": "Sesiones compartidas", "help": "Comparte el historial de un usuario entre plataformas.\n\nUsa la misma conversación para un usuario en varias plataformas de chat."},
         "tools_exec_enable": {"label": "Herramienta de shell", "help": "Permite al agente ejecutar comandos Shell.\n\nPermite al agente ejecutar comandos de shell."},
         "tools_file_enable": {"label": "Herramientas de archivos", "help": "Permite las herramientas integradas de lectura y edición de archivos."},
         "tools_web_enable": {"label": "Acceso web", "help": "Permite buscar y leer páginas web.\n\nPermite buscar en la web y obtener páginas."},

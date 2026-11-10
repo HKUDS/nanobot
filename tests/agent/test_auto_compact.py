@@ -19,13 +19,12 @@ from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.sdk.clients import RuntimeClient
-from nanobot.session.keys import HEARTBEAT_SESSION_KEY, UNIFIED_SESSION_KEY
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 
 
 def _make_loop(
     tmp_path: Path,
     session_ttl_minutes: int = 15,
-    unified_session: bool = False,
 ) -> AgentLoop:
     """Create a minimal AgentLoop for testing."""
     bus = MessageBus()
@@ -41,7 +40,6 @@ def _make_loop(
         model="test-model",
         context_window_tokens=128_000,
         session_ttl_minutes=session_ttl_minutes,
-        unified_session=unified_session,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     return loop
@@ -136,6 +134,11 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     session.metadata["_compaction_route"] = {"channel": "telegram", "chat_id": "chat"}
     session.updated_at = datetime.now() - timedelta(minutes=20)
     loop.sessions.save(session)
+    retired = loop.sessions.get_or_create("unified:default")
+    _add_turns(retired, 2, prefix="old shared")
+    retired.metadata["_compaction_route"] = session.metadata["_compaction_route"]
+    retired.updated_at = session.updated_at
+    loop.sessions.save(retired)
     loop.consolidator.archive_session = AsyncMock(return_value="Heartbeat summary.")
 
     await loop.auto_compact.check_expired(loop.schedule_background, loop.runtime_for_session)
@@ -145,6 +148,9 @@ async def test_heartbeat_idle_compaction_persists_summary_without_channel_notice
     loop.sessions.invalidate(HEARTBEAT_SESSION_KEY)
     refreshed = loop.sessions.get_or_create(HEARTBEAT_SESSION_KEY)
     assert refreshed.metadata["_last_summary"]["text"] == "Heartbeat summary."
+    retained = await loop.sessions.state.read(retired.key)
+    assert retained is not None and retained.messages == retired.messages
+    assert retained.metadata == retired.metadata
     assert loop.bus.outbound.empty()
 
 
@@ -226,33 +232,6 @@ async def test_idle_compaction_skips_subagent_sessions(tmp_path, monkeypatch, re
             assert len(child.messages) == 2
             assert child.last_archived == 0
             assert "_last_summary" not in child.metadata
-    finally:
-        await loop.aclose()
-
-
-async def test_expired_unified_turn_keeps_latest_delivery_route(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
-    loop = _make_loop(tmp_path / "workspace", unified_session=True)
-    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    session.metadata["last_channel"] = "telegram:old"
-    session.metadata["_compaction_route"] = {
-        "channel": "telegram", "chat_id": "old", "metadata": {},
-    }
-    session.updated_at = datetime.now() - timedelta(minutes=20)
-    loop.sessions.save(session)
-    try:
-        response = await loop.process_direct(
-            "hello", session_key=UNIFIED_SESSION_KEY, channel="discord", chat_id="new",
-        )
-
-        assert response is not None and response.content == "ok"
-        saved = await loop.sessions.state.get(UNIFIED_SESSION_KEY)
-        assert saved.generation == session.generation
-        assert saved.metadata["last_channel"] == "discord:new"
-        assert saved.metadata["_compaction_route"] == {
-            "channel": "discord", "chat_id": "new", "metadata": {},
-        }
     finally:
         await loop.aclose()
 

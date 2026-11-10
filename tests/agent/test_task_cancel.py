@@ -11,7 +11,6 @@ from nanobot.agent.memory import Consolidator
 from nanobot.bus.outbound_events import StreamDeltaEvent, StreamEndEvent
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
-from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.utils.llm_runtime import LLMRuntime
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
@@ -740,17 +739,15 @@ class TestSubagentAnnounceSessionKey:
         return mgr, bus
 
     @pytest.mark.asyncio
-    async def test_announce_uses_effective_key_in_unified_mode(self):
-        """In unified session mode, session_key_override must be 'unified:default'
-        so the result matches the pending queue key."""
+    async def test_announce_uses_explicit_topic_session_key(self):
         mgr, bus = self._make_mgr()
 
-        origin = {"channel": "telegram", "chat_id": "111", "session_key": UNIFIED_SESSION_KEY}
+        origin = {"channel": "telegram", "chat_id": "111", "session_key": "telegram:111:topic:5"}
         await mgr._announce_result("sub-1", "label", "task", "result", origin, "ok")
 
         msg = await bus.consume_inbound()
-        assert msg.session_key_override == UNIFIED_SESSION_KEY
-        assert msg.session_key == UNIFIED_SESSION_KEY
+        assert msg.session_key_override == "telegram:111:topic:5"
+        assert msg.session_key == "telegram:111:topic:5"
 
     @pytest.mark.asyncio
     async def test_announce_uses_raw_key_in_normal_mode(self):
@@ -796,9 +793,9 @@ class TestSubagentAnnounceSessionKey:
             origin_channel="telegram",
             origin_chat_id="444",
             runtime=_runtime(),
-            session_key=UNIFIED_SESSION_KEY,
+            session_key="telegram:111:topic:5",
         )
         await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
         msg = await bus.consume_inbound()
-        assert msg.session_key_override == UNIFIED_SESSION_KEY
+        assert msg.session_key_override == "telegram:111:topic:5"

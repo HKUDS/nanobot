@@ -103,6 +103,34 @@ def test_from_config_creates_instance(tmp_path):
     assert bot._loop.sessions.sessions_dir.parent == config_path.parent / "sessions"
 
 
+@pytest.mark.asyncio
+async def test_shared_history_remains_readable_after_retirement(tmp_path):
+    from nanobot.session.manager import SessionManager
+
+    config_path = _write_config(tmp_path, {
+        "agents": {"defaults": {"model": "openai/gpt-4.1", "unifiedSession": True}},
+    })
+    workspace = tmp_path / "workspace"
+    before = SessionManager(workspace, sessions_root=config_path.parent / "sessions")
+    shared = before.get_or_create("unified:default")
+    shared.metadata["last_channel"] = "telegram:legacy-chat"
+    shared.add_message("user", "Old shared question")
+    shared.add_message("assistant", "Old shared answer")
+    before.save(shared)
+    await before.state.aclose()
+    config_bytes = config_path.read_bytes()
+
+    for _ in range(2):
+        async with Nanobot.from_config(config_path, workspace=workspace) as bot:
+            assert {row.key for row in await bot.sessions.list()} >= {"unified:default"}
+            snapshot = await bot.sessions.get("unified:default")
+            assert snapshot is not None
+            assert [row["content"] for row in snapshot.messages] == [
+                "Old shared question", "Old shared answer",
+            ]
+    assert config_path.read_bytes() == config_bytes
+
+
 def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
     config_path = _write_config(
         tmp_path,

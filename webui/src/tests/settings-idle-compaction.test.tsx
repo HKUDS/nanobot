@@ -11,7 +11,7 @@ const path = "agents.defaults.session_ttl_minutes";
 function setup(minutes = 720) {
   let persisted = {
     ...settingsPayload(),
-    runtime_config: { [path]: minutes, "agents.defaults.unified_session": false },
+    runtime_config: { [path]: minutes },
   };
   requestMutationMock.mockImplementation(async (_action, { values }) => {
     persisted = { ...persisted, requires_restart: true,

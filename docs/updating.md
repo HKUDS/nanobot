@@ -62,6 +62,16 @@ Back up the configuration and data before updating. The old top-level `api` bloc
 
 To read old API conversations after updating, open the same configuration and workspace with [the Python SDK](./python-sdk.md#botsessions). Use `await bot.sessions.list()` to find keys such as `api:default` and `api:<session_id>`, then use `await bot.sessions.get(key)` to read their messages. If the old launcher used a separate API workspace, pass that workspace to `Nanobot.from_config(config_path, workspace=workspace)` instead of using the Gateway's workspace.
 
+## Shared sessions removal
+
+Messages no longer share context across chats by default or through a global switch. The **Shared sessions** switch is gone. An old `agents.defaults.unifiedSession` or `unified_session` setting no longer has any effect and is omitted the next time nanobot saves the configuration.
+
+The upgrade does not delete, copy, or merge chat history. WebUI chats keep their own transcripts. The old shared model conversation is not imported into any chat. To read it on the gateway computer, stop writers and open the same config and workspace with [the Python SDK](./python-sdk.md#botsessions). Use `await bot.sessions.get("unified:default")` to read the saved messages.
+
+Scheduled jobs and local triggers still bound to the old shared session cannot run. If a scheduled job offers **Run and reply in**, [choose a chat](./automations.md#change-the-chat-for-a-scheduled-task) there. Otherwise, recreate the job or trigger from the destination chat and disable the old entry. Heartbeat no longer follows the last chat used by the shared session; it selects from eligible individual chats. An interrupted turn saved to the shared session is not resumed automatically.
+
+Before upgrading, finish active turns and back up the config and data. If you roll back, the old version can still read the old session. Reapply its setting if a newer config save removed it. Do not overwrite current chats or configuration with a stale backup.
+
 ## Recover an interrupted update
 
 Refreshing restores saved progress, **not installation consent**. A staged update may ask you to review and confirm it again. A disconnected page cannot tell whether the worker stopped: do not start another installation while it reconnects. Closing the browser does not stop the managed update or its recovery.

@@ -10,6 +10,7 @@ from loguru import logger
 from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.runtime_admission import RuntimeAdmission
+from nanobot.session.keys import RETIRED_SHARED_SESSION_KEY
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
@@ -119,6 +120,10 @@ async def _deliver_delivery(
         raise _TerminalDeliveryError("trigger not found")
     if not trigger.enabled:
         raise _TerminalDeliveryError("trigger is disabled")
+    if trigger.session_key == RETIRED_SHARED_SESSION_KEY:
+        raise _TerminalDeliveryError(
+            "shared sessions were removed; recreate this trigger from its destination chat"
+        )
     if not is_channel_enabled(trigger.channel):
         raise _TerminalDeliveryError(f"target channel is not enabled: {trigger.channel}")
 

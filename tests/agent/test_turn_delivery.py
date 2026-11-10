@@ -66,7 +66,7 @@ async def test_session_route_delivers_automatic_and_manual_compaction(
     notified = ContextCompactionEvent(
         compaction_id="notified-1", phase="started", notify=True,
     )
-    key = "unified:default" if unified else key
+    key = "slack:C123" if unified else key
     msg = InboundMessage(
         channel=channel, sender_id="user", chat_id=chat_id, content="hello",
         metadata={
@@ -90,7 +90,7 @@ async def test_session_route_delivers_automatic_and_manual_compaction(
     assert [outbound.event for outbound in outbounds] == [automatic, notified]
 
 
-async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() -> None:
+async def test_idle_compaction_keeps_its_route_when_the_saved_route_changes() -> None:
     factory = TurnDeliveryFactory(MessageBus())
     key = "unified:default"
     session_metadata = {}
@@ -476,13 +476,13 @@ async def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_unified_display_route_admits_alias_generation_and_rejects_stale_lifetime(tmp_path):
+async def test_cross_session_display_route_rejects_stale_lifetime(tmp_path):
     from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
     from nanobot.session.sqlite_store import SessionConflictError
 
     sessions = SessionManager(tmp_path)
     alias = await sessions.state.get_header("websocket:chat")
-    source = await sessions.state.get_header("unified:default")
+    source = await sessions.state.get_header("heartbeat")
     policy = WebuiTurnRoutePolicy(sessions)
     factory = TurnDeliveryFactory(MessageBus(), route_policy=policy, route_admission=policy.admit)
     message = InboundMessage(channel="system", sender_id="cron", chat_id="websocket:chat", content="notice")

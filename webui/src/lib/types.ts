@@ -908,7 +908,6 @@ export interface SettingsPayload {
     dream: {
       schedule: string;
     };
-    unified_session: boolean;
   };
   usage?: {
     days: Array<{

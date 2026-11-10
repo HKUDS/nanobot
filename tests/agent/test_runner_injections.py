@@ -1081,13 +1081,11 @@ async def test_no_injections_flag_is_false_by_default():
 @pytest.mark.asyncio
 async def test_followup_routed_to_pending_queue(tmp_path):
     from nanobot.bus.events import InboundMessage
-    from nanobot.session.keys import UNIFIED_SESSION_KEY
 
     loop = _make_loop(tmp_path)
-    loop._unified_session = True
 
     pending = asyncio.Queue(maxsize=20)
-    loop._pending_queues[UNIFIED_SESSION_KEY] = pending
+    loop._pending_queues["discord:c"] = pending
 
     run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(channel="discord", sender_id="u", chat_id="c", content="follow-up")
@@ -1100,7 +1098,7 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
     assert loop._active_tasks == {}
     assert queued_msg.content == "follow-up"
-    assert queued_msg.session_key == UNIFIED_SESSION_KEY
+    assert queued_msg.session_key == "discord:c"
 
 
 @pytest.mark.asyncio
@@ -1131,44 +1129,6 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
 
     loop.stop()
     await asyncio.wait_for(run_task, timeout=2)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("channel", ["websocket", "discord"])
-async def test_unified_followup_admits_effective_session(tmp_path, channel):
-    from nanobot.bus.events import InboundMessage
-    from nanobot.session.keys import UNIFIED_SESSION_KEY
-
-    admission = MagicMock()
-    admission.admit = AsyncMock(return_value=True)
-    loop = _make_loop(tmp_path, recovery_admission=admission)
-    loop._unified_session = True
-
-    pending = asyncio.Queue(maxsize=20)
-    loop._pending_queues[UNIFIED_SESSION_KEY] = pending
-
-    msg = InboundMessage(
-        channel=channel,
-        sender_id="u",
-        chat_id="chat",
-        content="new request",
-    )
-    try:
-        # Exercise the real routing/journaling boundary to completion. This is
-        # a session-key contract, not a two-second SQLite fsync benchmark.
-        await loop._dispatch_inbound(msg)
-        queued_msg = pending.get_nowait()
-        admission.admit.assert_awaited_once()
-        admitted_msg = admission.admit.await_args.args[0]
-        assert admitted_msg.session_key == UNIFIED_SESSION_KEY
-        assert queued_msg.session_key == UNIFIED_SESSION_KEY
-        assert queued_msg.content == msg.content
-        if channel == "websocket":
-            assert queued_msg.metadata["_recovery_followup_id"]
-        else:
-            assert queued_msg.metadata == msg.metadata
-    finally:
-        await loop.aclose()
 
 
 @pytest.mark.asyncio

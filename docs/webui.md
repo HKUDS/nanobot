@@ -167,7 +167,7 @@ Temporary does not mean consequence-free. Requests still go to the configured mo
 
 Project selection and Full Access controls require an owner-authenticated WebUI connection. Ordinary WebSocket clients stay within the workspace and access mode configured by the operator; an owner's saved topic scope or WebUI preference does not grant a client additional access. Existing topics remain available to the owner, while clients attempting to resume a topic outside their configured authority receive an error instead of silently changing its scope. Legacy plain-text clients use the same permission boundary. Keep the configured `tokenIssueSecret` (or fallback `token`) private: it can issue owner credentials. Share short-lived client connection tokens, not that owner secret.
 
-With unified sessions, inputs with different workspace permissions wait for the active turn to finish, then run with their own permissions. Inputs with the same scope can still join the active turn.
+Inputs to the same session with different workspace permissions wait for the active turn to finish, then run with their own permissions. Inputs with the same scope can still join the active turn.
 
 Use the workspace picker to browse folders on the connected nanobot host, enter an absolute path, or return to recent and starred projects; favorites persist across gateway restarts. The host name appears above saved locations. Project paths refer to that machine, not the browser's filesystem.
 

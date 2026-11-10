@@ -6,6 +6,7 @@ import json
 import os
 from contextlib import suppress
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -273,6 +274,32 @@ def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path)
     assert reclaimed[0].content == "Review PR #4591"
     assert reclaimed[0].attempts == 1
     assert reclaimed[0].last_error == "delivery was recovered from interrupted processing"
+
+
+@pytest.mark.asyncio
+async def test_retired_shared_trigger_is_not_delivered(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="Old trigger", channel="websocket", chat_id="chat-1",
+        session_key="unified:default",
+    )
+    store.enqueue(trigger.id, "Do not replay in a different chat")
+    submit_turn = AsyncMock()
+
+    task = asyncio.create_task(run_local_trigger_queue(
+        store=store, submit_turn=submit_turn, is_channel_enabled=_channel_is_enabled,
+    ))
+    try:
+        async with asyncio.timeout(3):
+            while not (current := store.get(trigger.id)) or current.last_status != "error":
+                await asyncio.sleep(0.01)
+        assert current.last_error and "recreate this trigger" in current.last_error
+        assert current.session_key == "unified:default"
+        submit_turn.assert_not_awaited()
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 @pytest.mark.asyncio

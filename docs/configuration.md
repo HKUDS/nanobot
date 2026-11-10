@@ -2597,11 +2597,7 @@ Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/Londo
 
 ## Unified Session
 
-`agents.defaults.unifiedSession` is off by default. Keep it off for new setups so each channel and chat keeps its own conversation context.
-
-For existing setups, check **Settings → System → Shared sessions**. When it is on, messages use one shared session unless they are explicitly assigned to a separate session, such as a Telegram topic. In chats that use the shared session, `/new` resets that session and `/stop` cancels its active tasks.
-
-Turning this setting off changes where new messages go. It does not move the existing shared history into the separate sessions.
+The **Shared sessions** setting (`agents.defaults.unifiedSession`) has been removed. See [Shared sessions removal](./updating.md#shared-sessions-removal) for how to read existing shared history and check scheduled jobs after upgrading.
 
 ## Disabled Skills
 

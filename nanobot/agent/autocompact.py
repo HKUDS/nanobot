@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 from loguru import logger
 
 from nanobot.events import NO_EVENTS, EventSink
-from nanobot.session.keys import is_dream_session
+from nanobot.session.keys import RETIRED_SHARED_SESSION_KEY, is_dream_session
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import (
     SessionSummary,
@@ -77,6 +77,7 @@ class AutoCompact:
             key = info.get("key", "")
             if (
                 not key
+                or key == RETIRED_SHARED_SESSION_KEY
                 or is_dream_session(key)
                 or key.startswith("subagent:")
                 or key in self._archiving
