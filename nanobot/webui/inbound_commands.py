@@ -124,7 +124,6 @@ class WebUICommandTransport(Protocol):
         media: list[str] | None,
         metadata: dict[str, Any],
         is_dm: bool,
-        session_key: str | None,
         require_existing_session: bool,
         session_generation: str | None,
     ) -> None: ...
@@ -312,7 +311,6 @@ class WebUICommandRouter:
                 WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
             },
             is_dm=False,
-            session_key=None,
             require_existing_session=False,
             session_generation=None,
         )
@@ -650,7 +648,7 @@ class WebUICommandRouter:
             )
             return
         self._transport.webui_attach(connection, chat_id)
-        if temporary_policy is None or temporary_policy.hydrate_transcript:
+        if temporary_policy is None:
             await self._outbound.hydrate(chat_id)
 
         scope = temporary_policy.workspace_scope if temporary_policy is not None else (
@@ -765,11 +763,6 @@ class WebUICommandRouter:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
         accepted = False
-        session_key = (
-            temporary_policy.session_key
-            if temporary_policy is not None
-            else webui_session_key(chat_id)
-        )
         session_generation: str | None = None
         session_created = False
         try:
@@ -779,7 +772,6 @@ class WebUICommandRouter:
                     lambda: self._workspaces.persist_scope(
                         chat_id,
                         scope,
-                        session_key=session_key,
                         expected_generation=(
                             temporary_policy.session_generation
                             if temporary_policy is not None
@@ -794,9 +786,7 @@ class WebUICommandRouter:
                 session_generation, session_created = admission
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
-            if is_webui and not restart_control and (
-                temporary_policy is None or temporary_policy.persist_transcript
-            ):
+            if is_webui and not restart_control and temporary_policy is None:
                 await self._transcripts.append_user_message(
                     chat_id,
                     content,
@@ -830,12 +820,7 @@ class WebUICommandRouter:
                 media=media_paths or None,
                 metadata=metadata,
                 is_dm=False,
-                session_key=session_key if temporary_policy is not None else None,
-                require_existing_session=(
-                    temporary_policy.require_existing_session
-                    if temporary_policy is not None
-                    else False
-                ),
+                require_existing_session=temporary_policy is not None,
                 session_generation=session_generation,
             )
             accepted = True
@@ -845,7 +830,7 @@ class WebUICommandRouter:
                     del self._accepted_messages[next(iter(self._accepted_messages))]
         except BaseException:
             await self._workspaces.rollback_scope_admission(
-                session_key,
+                chat_id,
                 session_generation,
                 created=session_created,
             )

@@ -426,7 +426,6 @@ class WebSocketChannel(BaseChannel):
         media: list[str] | None,
         metadata: dict[str, Any],
         is_dm: bool,
-        session_key: str | None,
         require_existing_session: bool,
         session_generation: str | None,
     ) -> None:
@@ -437,7 +436,6 @@ class WebSocketChannel(BaseChannel):
             media=media,
             metadata=metadata,
             is_dm=is_dm,
-            session_key=session_key,
             require_existing_session=require_existing_session,
             session_generation=session_generation,
         )

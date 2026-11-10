@@ -33,7 +33,7 @@ async def save_completed_subagent(loop: AgentLoop, task_id: str, owner: str) -> 
 
 async def run_session(loop: AgentLoop, msg: InboundMessage) -> None:
     """Submit input and wait for its session worker to finish."""
-    (await loop._enqueue_session_message(msg))
+    await loop._enqueue_session_message(msg)
     await asyncio.gather(*loop._active_tasks[msg.session_key])
 
 

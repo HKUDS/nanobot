@@ -89,6 +89,19 @@ def _validated_llm_runtime(value: object) -> LLMRuntime | None:
     return value if isinstance(value, LLMRuntime) else None
 
 
+def _session_message_public_metadata(
+    envelope: SessionMessageEnvelope,
+) -> dict[str, Any]:
+    source = session_handle_for_name(
+        envelope["source_session_key"],
+        envelope["source_handle"],
+    )
+    return {
+        "message_id": envelope["message_id"],
+        "session": source.public_payload(),
+    }
+
+
 def _sync_websocket_turn_projection(chat_id: str) -> None:
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
     if not turns:
@@ -251,30 +264,6 @@ async def maybe_generate_webui_title(
     except SessionConflictError:
         return False
     return changed
-
-
-async def maybe_generate_webui_title_after_turn(
-    *,
-    channel: str,
-    chat_id: str,
-    metadata: dict[str, Any],
-    sessions: SessionManager,
-    session_key: str,
-    provider: LLMProvider,
-    model: str,
-) -> bool:
-    if (
-        channel != "websocket"
-        or session_key != webui_session_key(chat_id)
-        or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
-    ):
-        return False
-    return await maybe_generate_webui_title(
-        sessions=sessions,
-        session_key=session_key,
-        provider=provider,
-        model=model,
-    )
 
 
 def websocket_turn_wall_started_at(chat_id: str) -> float | None:
@@ -784,30 +773,27 @@ class WebuiTurnCoordinator:
         )
 
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
-        title_context = _validated_llm_runtime(event.runtime)
+        ctx = event.context
+        title_llm = event.runtime
         if (
-            event.context.metadata.get("webui") is not True
-            or title_context is None
+            ctx.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+            or ctx.session_key != webui_session_key(ctx.chat_id)
+            or not isinstance(title_llm, LLMRuntime)
         ):
             return
 
-        async def _generate_title_and_notify(
-            title_llm: LLMRuntime = title_context,
-        ) -> None:
-            generated = await maybe_generate_webui_title_after_turn(
-                channel=event.context.channel,
-                chat_id=event.context.chat_id,
-                metadata=event.context.metadata,
+        async def _generate_title_and_notify() -> None:
+            generated = await maybe_generate_webui_title(
                 sessions=self.sessions,
-                session_key=event.context.session_key,
+                session_key=ctx.session_key,
                 provider=title_llm.provider,
                 model=title_llm.model,
             )
             if generated:
                 await self._publish_session_metadata_updated(
-                    channel=event.context.channel,
-                    chat_id=event.context.chat_id,
-                    metadata=event.context.metadata,
+                    channel=ctx.channel,
+                    chat_id=ctx.chat_id,
+                    metadata=ctx.metadata,
                 )
 
         self.schedule_background(_generate_title_and_notify())
