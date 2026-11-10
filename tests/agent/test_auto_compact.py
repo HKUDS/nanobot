@@ -1361,7 +1361,7 @@ async def test_idle_compaction_rechecks_settled_activity(tmp_path, monkeypatch, 
     _add_turns(session, 2)
     session.updated_at = now[0] - timedelta(minutes=20)
     loop.sessions.save(session)
-    entered, release = asyncio.Event(), asyncio.Event()
+    entered, release, settled = asyncio.Event(), asyncio.Event(), asyncio.Event()
     archived = []
     other_responses = []
 
@@ -1381,30 +1381,30 @@ async def test_idle_compaction_rechecks_settled_activity(tmp_path, monkeypatch, 
         try:
             await asyncio.wait_for(entered.wait(), 5)
             now[0] += timedelta(minutes=20)
-            if ordering == "scan_during_turn":
-                loop._next_idle_compact_check_at = 0
-                await loop._check_expired_sessions_if_due()
-            other_responses.append(await asyncio.wait_for(
-                loop.process_direct("other input", session_key="cli:other"), 5,
-            ))
-            assert archived == []
+            async with asyncio.timeout(5):
+                if ordering == "scan_during_turn":
+                    loop._next_idle_compact_check_at = 0
+                    await loop._check_expired_sessions_if_due()
+                other_responses.append(await loop.process_direct("other input", session_key="cli:other"))
+                assert archived == []
         finally:
             release.set()
+        await asyncio.wait_for(settled.wait(), 5)
 
     loop.provider.chat_stream_with_retry.side_effect = respond
     loop.consolidator.archive_session = archive
-    finishing = None
     try:
         if ordering == "archive_queued_before_turn":
             loop._next_idle_compact_check_at = 0
             await loop._check_expired_sessions_if_due()
             assert key in loop.auto_compact._archiving
-        finishing = asyncio.create_task(finish_turn())
-        # Await inline: the direct call takes the free lock before the already
-        # scheduled archive task runs. No scheduler or lock is replaced.
-        async with asyncio.timeout(5):
+        # Each phase owns its watchdog; the held turn intentionally waits for
+        # another session. A phase failure cancels the inline turn through the group.
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(finish_turn())
+            # Await inline so admission still precedes the queued archive task.
             response = await loop.process_direct("new input", session_key=key)
-        await asyncio.wait_for(finishing, 5)
+            settled.set()
         await asyncio.wait_for(_drain_background_tasks(loop), 5)
         assert len(archived) == 0
         saved = await loop.sessions.state.get(key)
@@ -1426,6 +1426,4 @@ async def test_idle_compaction_rechecks_settled_activity(tmp_path, monkeypatch, 
         assert key not in loop.auto_compact._archiving
     finally:
         release.set()
-        if finishing is not None:
-            await asyncio.wait_for(asyncio.gather(finishing, return_exceptions=True), 5)
         await asyncio.wait_for(loop.aclose(), 10)
