@@ -29,7 +29,10 @@ test("complete rail scrolls independently, jumps to unloaded history and returns
   await expectRailCentered();
   await expect.poll(() => rail.evaluate((node) => node.scrollHeight)).toBe(32024);
   expect(reads).toHaveLength(0);
-  // Lazy markdown and content-visibility can change the scroll range during startup.
+  // A stationary lazy-render fallback is not a settled transcript.
+  await expect(body.locator('[data-thread-display-unit="a1999"] .markdown-content p')).toHaveCount(8);
+  await page.evaluate(async () => { await document.fonts.ready; });
+  // Content visibility and the camera can still settle after the renderer is ready.
   await body.evaluate(async (node) => {
     let previous = -1;
     let stable = 0;
