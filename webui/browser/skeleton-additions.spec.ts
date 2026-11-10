@@ -54,8 +54,8 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
       }
     });
 
-    test("settings sections preserve their loaded row layout", async ({ page }, testInfo) => {
-      for (const surface of ["notifications", "capabilities", "runtime", "advanced", "sandbox", "overview", "models", "about"]) {
+    for (const surface of ["notifications", "capabilities", "runtime", "advanced", "sandbox", "overview", "models", "about"]) {
+      test(`settings ${surface} preserves its loaded row layout`, async ({ page }, testInfo) => {
         const section = surface === "sandbox" ? "advanced" : surface;
         const extra = `&section=${section}${section === "notifications" ? "&notificationPermission=granted" : ""}${surface === "sandbox" ? "&sandboxSettings" : ""}`;
         await page.goto(fixture("settings", "loaded", extra));
@@ -93,8 +93,8 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
           await testInfo.attach("notifications-layout", { body: JSON.stringify({ loaded, skeleton, loadedControls, skeletonControls }, null, 2), contentType: "application/json" });
         }
         await accessibleSkeleton(page);
-      }
-    });
+      });
+    }
 
     test("appearance stays usable and keeps its layout while gateway settings load or fail", async ({ page }) => {
       await page.addInitScript(() => localStorage.setItem("nanobot-webui.settings-preferences", JSON.stringify({
