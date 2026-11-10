@@ -20,6 +20,7 @@ from nanobot.agent.tools.exec_session import (
 )
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.execution import processes
 
 
 def _python(code: str) -> list[str]:
@@ -443,7 +444,7 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
     if not early_root_exit:
         parent_code += f"while not Path({str(release_root)!r}).exists(): time.sleep(0.02)\n"
 
-    real_spawn = ExecTool._spawn
+    real_spawn = processes.spawn_process_tree
     spawn_returned = asyncio.Event()
 
     async def spawn_with_exit_order(*args, **kwargs):
@@ -458,7 +459,7 @@ async def test_execution_stop_stops_pipe_inheriting_child_after_root_exits(
         spawn_returned.set()
         return process
 
-    monkeypatch.setattr(ExecTool, "_spawn", staticmethod(spawn_with_exit_order))
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn_with_exit_order)
     owner = RequestContext(channel="cli", chat_id="pipe-budget", session_key="cli:pipe-budget")
     manager = ExecSessionManager()
     max_runtime = 12 if stop_reason == "owner_closed" else 2

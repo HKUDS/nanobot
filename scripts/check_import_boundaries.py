@@ -83,6 +83,11 @@ IMPORT_RULES = (
         allowed_targets=("nanobot.channels.notification_routes",),
     ),
     ImportRule(
+        "process-execution",
+        ("nanobot.execution.processes", "nanobot.execution._windows_job"),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.security", "nanobot.session"),
+    ),
+    ImportRule(
         "channel-routing-contracts",
         ("nanobot.channels.notification_routes",),
         ("nanobot",),

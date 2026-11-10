@@ -5,13 +5,11 @@ import os
 import re
 import shlex
 import shutil
-import signal
-import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
-from typing import Any, Literal, Protocol, cast
+from pathlib import Path
+from typing import Any, Literal
 from urllib.parse import unquote
 
 from loguru import logger
@@ -42,41 +40,6 @@ from nanobot.security.workspace_access import current_scope_allows_loopback, cur
 from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
-_PROCESS_TREE_OWNER_ATTR = "_nanobot_process_tree_owner"
-
-
-class _ProcessTreeOwner(Protocol):
-    creation_flags: int
-
-    def assign_and_resume(self, pid: int) -> None: ...
-
-    def release(self) -> None: ...
-
-    def terminate(self) -> None: ...
-
-
-def _reap_pid(pid: int) -> None:
-    """Best-effort ``waitpid`` to reap a child and prevent zombies.
-
-    Call this after killing or after normal completion of any subprocess
-    as a safety net — asyncio's child-watcher *should* have reaped it,
-    but in containers / edge-cases it sometimes doesn't.
-
-    Uses ``os`` capability checks rather than ``_IS_WINDOWS`` so this is
-    safe when tests patch the platform flag while still running on Windows
-    (``os.waitpid`` / ``os.WNOHANG`` do not exist there).
-    """
-    waitpid = getattr(os, "waitpid", None)
-    wnohang = getattr(os, "WNOHANG", None)
-    if waitpid is None or wnohang is None:
-        return
-    try:
-        waitpid(pid, wnohang)
-    except (ProcessLookupError, ChildProcessError):
-        # Already reaped, or not our child — both are fine.
-        pass
-    except OSError as exc:
-        logger.debug("_reap_pid({}): {}", pid, exc)
 
 
 _WORKSPACE_BOUNDARY_NOTE = (
@@ -529,146 +492,6 @@ class ExecTool(Tool):
         return f'export PATH="{path_expr}"; {command}'
 
     @staticmethod
-    async def _spawn(
-        command: str | list[str], cwd: str, env: dict[str, str],
-        shell_program: str | None = None,
-        login: bool = False,
-        *,
-        stdin: int = asyncio.subprocess.DEVNULL,
-        process_tree: bool = False,
-    ) -> asyncio.subprocess.Process:
-        """Launch an argument vector directly or a command string through a shell."""
-        if isinstance(command, list):
-            executable = shutil.which(command[0], path=env.get("PATH", ""))
-            if executable is None:
-                raise FileNotFoundError(f"Executable not found: {command[0]}")
-            windows_job = None
-            process = None
-            try:
-                if process_tree and sys.platform == "win32":
-                    windows_job = ExecTool._create_windows_job()
-                process = await asyncio.create_subprocess_exec(
-                    executable, *command[1:],
-                    stdin=stdin,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd,
-                    env=env,
-                    creationflags=windows_job.creation_flags if windows_job else 0,
-                    start_new_session=process_tree and sys.platform != "win32",
-                )
-                if windows_job is not None:
-                    windows_job.assign_and_resume(process.pid)
-                    setattr(process, _PROCESS_TREE_OWNER_ATTR, windows_job)
-                return process
-            except BaseException:
-                if windows_job is not None:
-                    windows_job.terminate()
-                if process is not None:
-                    await ExecTool._kill_process(process)
-                raise
-        if _IS_WINDOWS:
-            windows_job = None
-            process = None
-            creation_flags = 0
-            if process_tree and sys.platform == "win32":
-                windows_job = ExecTool._create_windows_job()
-                creation_flags = windows_job.creation_flags
-            # Default to PowerShell so single-line and multi-line commands
-            # share the same shell semantics.  cmd.exe is reachable via the
-            # explicit shell="cmd" parameter (see _resolve_shell).
-            default_program = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
-            program = shell_program or default_program
-            program_name = PureWindowsPath(program).name.lower()
-            try:
-                if program_name in ("cmd", "cmd.exe"):
-                    cmd_env = {**env, "COMSPEC": program}
-                    process = await asyncio.create_subprocess_shell(
-                        command,
-                        stdin=stdin,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=cwd,
-                        env=cmd_env,
-                        creationflags=creation_flags,
-                    )
-                else:
-                    command = ExecTool._normalize_powershell_command(command)
-                    command = (
-                        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
-                        "if ($PSVersionTable.PSVersion.Major -lt 6) { $OutputEncoding = [Console]::OutputEncoding }\n"
-                        "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
-                        f"{command}\n"
-                        "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
-                    )
-                    process = await asyncio.create_subprocess_exec(
-                        program, "-NoProfile", "-NonInteractive", "-Command", command,
-                        stdin=stdin,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=cwd,
-                        env=env,
-                        creationflags=creation_flags,
-                    )
-                if windows_job is not None:
-                    windows_job.assign_and_resume(process.pid)
-                    setattr(process, _PROCESS_TREE_OWNER_ATTR, windows_job)
-                return process
-            except BaseException:
-                if windows_job is not None:
-                    windows_job.terminate()
-                if process is not None:
-                    await ExecTool._kill_process(process)
-                raise
-        shell_program = shell_program or shutil.which("bash") or "/bin/bash"
-        args: list[str] = [shell_program]
-        shell_name = Path(shell_program).name.lower()
-        if login and shell_name in {"bash", "bash.exe", "zsh", "zsh.exe"}:
-            args.append("-l")
-        args.extend(["-c", command])
-        if process_tree:
-            return await asyncio.create_subprocess_exec(
-                *args,
-                stdin=stdin,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-                start_new_session=True,
-            )
-        return await asyncio.create_subprocess_exec(
-            *args,
-            stdin=stdin,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=env,
-        )
-
-    @staticmethod
-    def _normalize_powershell_command(command: str) -> str:
-        stripped = command.lstrip()
-        if not stripped or stripped[0] not in {"'", '"'}:
-            return command
-
-        quote = stripped[0]
-        end = stripped.find(quote, 1)
-        if end == -1 or (end + 1 < len(stripped) and not stripped[end + 1].isspace()):
-            return command
-
-        executable = stripped[1:end]
-        looks_like_windows_executable = (
-            bool(re.match(r"^[A-Za-z]:[\\/]", executable))
-            or executable.startswith(r"\\")
-            or executable.lower().endswith((".exe", ".cmd", ".bat", ".ps1"))
-        )
-        if not looks_like_windows_executable:
-            return command
-
-        leading = command[: len(command) - len(stripped)]
-        return f"{leading}& {stripped}"
-
-    @staticmethod
     def _resolve_shell(shell: str | None) -> tuple[str | None, str | None]:
         if not shell:
             return None, None
@@ -715,86 +538,6 @@ class ExecTool(Tool):
         if not resolved:
             return None, ToolResult.error(f"Error: shell not found: {shell}")
         return resolved, None
-
-    @staticmethod
-    async def _kill_process(process: asyncio.subprocess.Process) -> None:
-        """Kill a subprocess and reap it to prevent zombies.
-
-        Safe to call when the process has already exited (e.g. generic
-        exception handlers after a successful ``communicate()``): skips
-        ``kill()`` and only runs the safety-net reap.
-        """
-        if process.returncode is not None:
-            _reap_pid(process.pid)
-            return
-        try:
-            with suppress(ProcessLookupError):
-                process.kill()
-            with suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-        finally:
-            _reap_pid(process.pid)
-
-    @staticmethod
-    async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
-        """Kill a session process and descendants, then reap the root process."""
-        owner = ExecTool._process_tree_owner(process)
-        try:
-            if owner is not None:
-                owner.terminate()
-            elif _IS_WINDOWS:
-                if process.returncode is None:
-                    with suppress(OSError, asyncio.TimeoutError):
-                        await asyncio.wait_for(
-                            asyncio.to_thread(
-                                subprocess.run,
-                                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                                check=False,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                            ),
-                            timeout=5.0,
-                        )
-            else:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-
-            if process.returncode is None:
-                with suppress(ProcessLookupError):
-                    process.kill()
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-            if owner is not None:
-                ExecTool._drop_process_tree_owner(process)
-        finally:
-            _reap_pid(process.pid)
-
-    @staticmethod
-    def _process_tree_owner(
-        process: asyncio.subprocess.Process,
-    ) -> _ProcessTreeOwner | None:
-        # _spawn is the only writer for this private ownership marker.
-        return cast(_ProcessTreeOwner | None, vars(process).get(_PROCESS_TREE_OWNER_ATTR))
-
-    @staticmethod
-    def _create_windows_job() -> _ProcessTreeOwner:
-        from nanobot.agent.tools._windows_job import WindowsJob
-
-        return WindowsJob.create()
-
-    @staticmethod
-    def _drop_process_tree_owner(process: asyncio.subprocess.Process) -> None:
-        with suppress(AttributeError):
-            delattr(process, _PROCESS_TREE_OWNER_ATTR)
-
-    @staticmethod
-    def _release_process_tree(process: asyncio.subprocess.Process) -> None:
-        owner = ExecTool._process_tree_owner(process)
-        if owner is None:
-            return
-        owner.release()
-        ExecTool._drop_process_tree_owner(process)
 
     def _build_env(self) -> dict[str, str]:
         """Use platform defaults plus explicitly allowed environment keys.
