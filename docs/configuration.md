@@ -47,7 +47,7 @@ This page is the complete configuration reference. For task-oriented setup, use 
 | Add MCP servers | [MCP](#mcp-model-context-protocol) |
 | Review shell, workspace, and SSRF controls | [Security](#security) |
 | Control access and pairing | [Pairing](#pairing) |
-| Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Unified Session](#unified-session), [Tool Hint Max Length](#tool-hint-max-length) |
+| Tune gateway jobs, sessions, and tools | [Gateway Heartbeat](#gateway-heartbeat), [Auto Compact](#auto-compact), [Tool Hint Max Length](#tool-hint-max-length) |
 
 ## Where a Setting Lives
 
@@ -2597,36 +2597,11 @@ Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/Londo
 
 ## Unified Session
 
-Open **Settings → System** and change **Shared sessions**. Enable it only for a single-user setup where conversations should share context. Follow any restart prompt.
+`agents.defaults.unifiedSession` is off by default. Keep it off for new setups so each channel and chat keeps its own conversation context.
 
-By default, each channel × chat ID combination gets its own session. If you use nanobot across multiple channels (e.g. Telegram + Discord + CLI) and want them to share the same conversation, enable `unifiedSession`:
+For existing setups, check **Settings → System → Shared sessions**. When it is on, messages use one shared session unless they are explicitly assigned to a separate session, such as a Telegram topic. In chats that use the shared session, `/new` resets that session and `/stop` cancels its active tasks.
 
-<details>
-<summary>Manual configuration</summary>
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "unifiedSession": true
-    }
-  }
-}
-```
-
-</details>
-
-When enabled, all incoming messages — regardless of which channel they arrive on — are routed into a single shared session. Switching from Telegram to Discord (or any other channel) continues the same conversation seamlessly.
-
-| Behavior | `false` (default) | `true` |
-|----------|-------------------|--------|
-| Conversation scope | Separate for each channel and chat | Shared across channels and chats |
-| Cross-channel continuity | No | Yes |
-| `/new` clears | Current channel session | Shared session |
-| `/stop` finds tasks | By channel session | By shared session |
-| Separate conversations explicitly assigned by a channel (e.g. Telegram threads) | Kept separate | Still kept separate |
-
-> Use this only for single-user, multi-device setups: messages from different chats can share conversation context. It is **off by default**.
+Turning this setting off changes where new messages go. It does not move the existing shared history into the separate sessions.
 
 ## Disabled Skills
 

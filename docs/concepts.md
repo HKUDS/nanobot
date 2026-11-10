@@ -117,9 +117,7 @@ See [`providers.md`](./providers.md) for practical examples and [`configuration.
 
 ## Channels and Sessions
 
-Each channel maps inbound messages to a session key. That lets independent conversations keep separate history. The WebUI also supports multiple chats and workspace-scoped metadata for project workspaces.
-
-`agents.defaults.unifiedSession` can intentionally share one session across channels for a single-user multi-device setup. Leave it off if you expect separate people, groups, channels, or projects to keep separate context.
+By default, each channel and chat has its own session and conversation history. The WebUI also supports multiple chats and workspace-scoped metadata for project workspaces.
 
 ## Memory, Sessions, and Dream
 
