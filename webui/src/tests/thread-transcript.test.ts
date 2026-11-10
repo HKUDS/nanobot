@@ -41,6 +41,18 @@ function receive(thread: ThreadTranscript, ...events: ThreadProjectionEvent[]): 
 }
 
 describe("ThreadTranscript admission", () => {
+  it("updates a represented live input's final image URL without duplicating it", () => {
+    const thread = new ThreadTranscript();
+    const first: ThreadProjectionEvent = { ...at("upload", 1), event: "user_message", text: "look", starts_turn: true,
+      media_urls: [{ kind: "image", url: "data:image/png;base64,AAAA", name: "image.png" }] };
+    receive(thread, first);
+    receive(thread, { ...first, media_urls: [{ kind: "image", url: "/api/media/final", name: "image.png" }] });
+    expect(thread.messages).toHaveLength(1);
+    expect(thread.messages[0]).toMatchObject({ media: [{ url: "/api/media/final" }], images: [{ url: "/api/media/final" }] });
+    const restored = new ThreadTranscript([], thread.save());
+    expect(restored.messages[0].media?.[0].url).toBe("/api/media/final");
+  });
+
   it("keeps the history boundary unknown through live delivery and a failed first read", () => {
     const thread = new ThreadTranscript();
     const read = thread.begin("initial");

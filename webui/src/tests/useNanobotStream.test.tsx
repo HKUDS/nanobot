@@ -2557,6 +2557,20 @@ describe("useNanobotStream", () => {
     expect(result.current.runStartedAt).toBe(1_700_000_000);
   });
 
+  it("keeps an existing answer stream open when an ordinary input arrives", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-live-input", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("chat-live-input", { event: "delta", chat_id: "chat-live-input", stream_id: "answer", text: "first" });
+      fake.emit("chat-live-input", { event: "user_message", chat_id: "chat-live-input", turn_id: "queued", text: "next", starts_turn: false });
+      fake.emit("chat-live-input", { event: "delta", chat_id: "chat-live-input", stream_id: "answer", text: " second" });
+      fake.emit("chat-live-input", { event: "stream_end", chat_id: "chat-live-input", stream_id: "answer", resuming: true });
+    });
+    expect(result.current.messages.filter((row) => row.role === "assistant").map((row) => row.content)).toEqual(["first second"]);
+    expect(result.current.messages.filter((row) => row.role === "user").map((row) => row.content)).toEqual(["next"]);
+  });
+
   it("projects a cross-session input once without interrupting the answer being streamed", () => {
     const fake = fakeClient();
     const original: UIMessage[] = [{ id: "original", inputId: "user:original", role: "user", content: "original", createdAt: 1 }];

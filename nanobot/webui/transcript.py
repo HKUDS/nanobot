@@ -1139,11 +1139,19 @@ def _with_backfilled_user(
     user_event: dict[str, Any],
 ) -> list[dict[str, Any]]:
     input_id = user_event.get("input_id")
+    legacy = not any("response_input_ids" in record for record in records)
     for index, rec in enumerate(records):
         if (
             input_id and input_id in rec.get("response_input_ids", [])
-            or not input_id and rec.get("event") in _TURN_DISPLAY_EVENTS
+            or (not input_id or legacy) and rec.get("event") in _TURN_DISPLAY_EVENTS
         ):
+            if input_id:
+                references = rec.get("response_input_ids")
+                if isinstance(references, list):
+                    following = {value for value in references[references.index(input_id) + 1:]
+                                 if isinstance(value, str)}
+                    index = next((i for i, prior in enumerate(records[:index])
+                                  if prior.get("event") == "user" and prior.get("input_id") in following), index)
             return [*records[:index], dict(user_event), *records[index:]]
     return records
 
@@ -1856,7 +1864,9 @@ def build_webui_thread_response(
             session_turns = _session_backfill_turns(session_key, session_messages or [])
         return session_turns
 
-    if _needs_user_event_backfill(lines, history):
+    # Truncation can discard every reference that proves an input is missing.
+    # Complete pages keep the ordinary missing-input fast-path decision.
+    if replay_stats.truncated_oversized_turn or _needs_user_event_backfill(lines, history):
         view, _ = _prompt_view_snapshot(
             session_key, history=history, session_turns_loader=load_session_turns,
             session_version_loader=session_version_loader,
@@ -1866,8 +1876,13 @@ def build_webui_thread_response(
         for turn in selected_turns:
             # Page selection assigns this absolute identity before any recovery.
             ordinal = int(turn[0][_WEBUI_REPLAY_IDENTITY_KEY].split(":")[1])
-            for user in view.backfilled_users.get(ordinal, []):
-                turn = _with_backfilled_user(turn, user)
+            for anchor, user in view.backfill_plan.get(ordinal, []):
+                # Positions are stable even when the record at the anchor was
+                # removed by oversized-turn selection or delta compaction.
+                index = next((i for i, record in enumerate(turn)
+                              if (identity := record.get(_WEBUI_REPLAY_IDENTITY_KEY, "")).startswith(f"turn:{ordinal}:record:")
+                              and int(identity.rsplit(":", 1)[1]) >= anchor), len(turn))
+                turn.insert(index, dict(user))
             recovered_lines.extend(turn)
         lines = recovered_lines
     if _needs_incomplete_turn_recovery(lines):
@@ -1960,11 +1975,12 @@ class _ChunkPromptView(NamedTuple):
     candidates: tuple[_BackfillCandidate, ...]
     input_ids: frozenset[str]
     answers: dict[str, str]
+    turns: dict[int, list[dict[str, Any]]]
 
 
 class _PromptView(NamedTuple):
     prompts: tuple[PromptSummary, ...]
-    backfilled_users: dict[int, list[dict[str, Any]]]
+    backfill_plan: dict[int, list[tuple[int, dict[str, Any]]]]
     needs_canonical: bool
 
 
@@ -2041,7 +2057,7 @@ def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
                     if answer:
                         break
             result.append(_prompt_summary(record, ordinal, answer))
-    return _ChunkPromptView(tuple(result), tuple(candidates), frozenset(input_ids), answers)
+    return _ChunkPromptView(tuple(result), tuple(candidates), frozenset(input_ids), answers, turns)
 
 
 def _build_prompt_view(
@@ -2074,6 +2090,11 @@ def _build_prompt_view(
         if isinstance(user.get("input_id"), str)
     }
     represented = set(chunk.input_ids)
+    # Identity references take precedence over legacy answer matching, even when
+    # the matching legacy answer occurs earlier in the display history.
+    reserved = {input_id for candidate in candidates for input_id in candidate.input_ids or ()
+                if input_id in canonical_inputs}
+    used_positions: set[int] = set()
     for candidate in candidates:
         if not session_turns:
             break
@@ -2099,17 +2120,40 @@ def _build_prompt_view(
         if candidate.has_user:
             continue
         user = dict(session_turns[match].user_event)
-        if user.get("input_id") in represented:
+        if match in used_positions or user.get("input_id") in represented or user.get("input_id") in reserved:
             continue
+        used_positions.add(match)
+        if isinstance(input_id := user.get("input_id"), str) and input_id:
+            represented.add(input_id)
         summary = _prompt_summary(user, candidate.ordinal, candidate.answer_preview)
         entries.append((candidate.ordinal, summary, user))
-    prompts: list[PromptSummary] = []
     backfilled_users: dict[int, list[dict[str, Any]]] = {}
-    for ordinal, prompt, user in sorted(entries, key=lambda entry: entry[0]):
-        prompts.append(prompt)
+    for ordinal, _, user in entries:
         if user is not None:
             backfilled_users.setdefault(ordinal, []).append(user)
-    return _PromptView(tuple(prompts), backfilled_users, needs_canonical)
+    order: dict[tuple[int, str], int] = {}
+    plan: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+    for ordinal, records in chunk.turns.items():
+        users = backfilled_users.get(ordinal, [])
+        recovered_ids = {_client_projection_event_id(user) for user in users}
+        for user in users:
+            records = _with_backfilled_user(records, user)
+        next_anchor = 2**63 - 1
+        reverse_plan: list[tuple[int, dict[str, Any]]] = []
+        for position in range(len(records) - 1, -1, -1):
+            record = records[position]
+            identity = record.get(_WEBUI_REPLAY_IDENTITY_KEY, "")
+            if identity.startswith(f"turn:{ordinal}:record:"):
+                next_anchor = int(identity.rsplit(":", 1)[1])
+            if record.get("event") == "user":
+                event_id = _client_projection_event_id(record)
+                order[(ordinal, event_id)] = position
+                if event_id in recovered_ids:
+                    reverse_plan.append((next_anchor, record))
+        if reverse_plan:
+            plan[ordinal] = list(reversed(reverse_plan))
+    entries.sort(key=lambda entry: (entry[0], order.get((entry[0], entry[1]["id"]), 0)))
+    return _PromptView(tuple(prompt for _, prompt, _ in entries), plan, needs_canonical)
 
 
 def build_prompt_index(

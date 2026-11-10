@@ -13,6 +13,7 @@ from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.runtime_context import public_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import (
@@ -71,7 +72,7 @@ async def test_committed_model_failure_continues_with_tool_results_without_resen
     monkeypatch.setattr(read_tool, "execute", execute)
     request = InboundMessage(
         channel="websocket", sender_id="user", chat_id="chat", content="Read the note and summarize it",
-        metadata={"webui": True, "webui_turn_id": "request-1"},
+        metadata={"webui": True, "webui_turn_id": "request-1", "message_id": "original-input"},
     )
     try:
         with coordinator.connected():
@@ -83,9 +84,20 @@ async def test_committed_model_failure_continues_with_tool_results_without_resen
             await loop._dispatch_one(bus.inbound.get_nowait(), asyncio.Queue())
         final = await sessions.state.get(request.session_key)
         assert final.metadata[RECOVERY_METADATA_KEY]["status"] == "recovered"
+        answer = next(row for row in final.messages if row.get("content") == "Finished from the saved result.")
+        user = next(row for row in final.messages if row.get("role") == "user")
+        assert user["input_id"]
+        assert answer["response_input_ids"] == [user["input_id"]]
         assert execute.await_count == 1
         assert sum(message.get("role") == "user" for message in final.messages) == 1
         assert any(message.get("role") == "tool" and "saved evidence" in message["content"] for message in requests[-1]["messages"])
+        continuation = requests[-1]["messages"][-1]
+        assert continuation["_hidden_history"] == {"kind": "internal_continuation"}
+        # The marker is runner bookkeeping, not part of an OpenAI-compatible wire request.
+        wire_messages = OpenAICompatProvider._sanitize_messages(
+            OpenAICompatProvider(api_key="test"), requests[-1]["messages"], model="test-model",
+        )
+        assert all("_hidden_history" not in row for row in wire_messages)
         assert requests[0]["messages"][0] == requests[-1]["messages"][0]
         assert requests[0]["tools"] == requests[-1]["tools"]
         assert requests[-1]["messages"][:len(requests[1]["messages"])] == requests[1]["messages"]

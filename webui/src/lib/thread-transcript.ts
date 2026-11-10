@@ -249,12 +249,18 @@ export class ThreadTranscript {
   project(event: ThreadProjectionEvent, options: {
     createId: () => string; now: number; persisted?: boolean; sideChannel?: boolean; startSeq?: number;
   }): UIMessage[] {
+    if (!options.persisted && event.event === "user_message" && !event.provenance?.session_message) {
+      event = { turn_seq: 0, ...event };
+    }
     // Telemetry never contributes body sources, memberships, or admission barriers.
     if (event.event === "model_request") {
       this.projection = projectThreadEvent(this.projection, event, options);
       return this.messages;
     }
-    if (!options.persisted && this.represented(event)) return this.messages;
+    const updatesInputMedia = event.event === "user_message" && !event.provenance?.session_message
+      && !!event.turn_id && !!event.media_urls?.length
+      && this.messages.some((message) => message.role === "user" && message.turnId === event.turn_id);
+    if (!options.persisted && !updatesInputMedia && this.represented(event)) return this.messages;
     if (!event.projection_id && (!event.turn_id || event.turn_seq === undefined)) {
       event = { ...event, projection_id: options.createId() };
     }
@@ -307,6 +313,7 @@ export class ThreadTranscript {
     } else {
       projection = projectThreadEvent(projection, event, { ...options, effects });
     }
+    if (event.event === "user_message" && projection.messages === this.messages) return this.messages;
     this.projection = projection;
     const connected = new Set<Unit>();
     const existing = this.bySource.get(source);

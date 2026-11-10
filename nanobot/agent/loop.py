@@ -1246,6 +1246,15 @@ class AgentLoop:
             workspace=effective_scope.project_path,
             include_memory=session.policy.persist if session is not None else True,
         )
+        if initial_message is not None and turn_continuation.internal_continuation_inbound(initial_message.metadata):
+            build_transcript = transcript_builder
+
+            def transcript_builder(transcript: TranscriptInput) -> list[dict[str, Any]]:
+                messages = build_transcript(transcript)
+                if transcript.current_message is not None:
+                    messages[-1][HIDDEN_HISTORY_META] = {"kind": "internal_continuation"}
+                return messages
+
         if request_context is None:
             request_ctx = dataclasses.replace(
                 request_ctx,
