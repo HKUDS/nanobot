@@ -110,8 +110,7 @@ async def test_webui_admission_executes_with_the_routed_session(runtime: _Runtim
         assert session is not None
         assert [public_history_message(record)["content"] for record in session.messages
                 if record["role"] == "user"] == ["hello"]
-        display = await runtime.sessions.state.read_metadata(f"websocket:{chat_id}")
-        assert display is not None and display["metadata"]["webui"] is True
+        assert session.metadata["webui"] is True
     assert runtime.provider.calls == 2
 
 
@@ -146,6 +145,11 @@ async def test_failed_transport_admission_removes_new_sessions(
 
 
 async def test_temporary_chat_retains_its_own_generation(history, runtime: _Runtime) -> None:
+    state = runtime.sessions.state
+    retired = await state.get("unified:default")
+    retired.add_message("user", "Old shared history")
+    await state.finish_turn(retired)
+
     await runtime.channel._dispatch_envelope(
         runtime.connection, "webui-client", {"type": "new_temporary_chat"},
     )
@@ -155,7 +159,7 @@ async def test_temporary_chat_retains_its_own_generation(history, runtime: _Runt
     await runtime.execute(first)
     assert runtime.provider.calls == 1
     assert first.session_key == f"websocket:{chat_id}"
-    assert await runtime.sessions.state.list_sessions() == []
+    assert {row["key"] for row in await state.list_sessions()} == {retired.key}
     assert history.read(f"websocket:{chat_id}") == []
 
     queued = await runtime.message(chat_id, "discarded input")
@@ -163,5 +167,7 @@ async def test_temporary_chat_retains_its_own_generation(history, runtime: _Runt
     await runtime.execute(queued)
 
     assert runtime.provider.calls == 1
-    assert await runtime.sessions.state.read(first.session_key) is None
-    assert await runtime.sessions.state.list_sessions() == []
+    assert await state.read(first.session_key) is None
+    assert {row["key"] for row in await state.list_sessions()} == {retired.key}
+    saved = runtime.sessions.read_session_snapshot(retired.key)
+    assert saved is not None and saved.messages == retired.messages

@@ -111,7 +111,7 @@ async def test_scheduled_goal_command_cannot_generate_internal_input(tmp_path):
     )
     loop = _assembled_loop(bus=MessageBus(), provider=MagicMock(aclose=AsyncMock()), workspace=tmp_path, model="test-model")
     try:
-        await loop._dispatch_command_inline(msg, msg.session_key, msg.content, loop.commands.dispatch)
+        await loop._dispatch_command_inline(msg, msg.content, loop.commands.dispatch)
         response = loop.bus.outbound.get_nowait()
         assert "only be started by a user" in response.content
         assert loop._pending_queues == {}
@@ -142,7 +142,7 @@ async def test_goal_at_iteration_limit_stays_queued_for_a_tool_capable_turn(tmp_
         calls.append(str(kwargs["messages"]))
         if len(calls) == 1:
             await loop._dispatch_command_inline(
-                goal, goal.session_key, goal.content, loop.commands.dispatch,
+                goal, goal.content, loop.commands.dispatch,
             )
             if boundary == "tool":
                 return LLMResponse(content=None, tool_calls=[ToolCallRequest(
@@ -454,7 +454,7 @@ async def test_replaced_goal_uses_current_objective_for_same_run_prompt(tmp_path
         calls.append(kwargs)
         if len(calls) == 1:
             await loop._dispatch_command_inline(
-                replacement, replacement.session_key, replacement.content, loop.commands.dispatch,
+                replacement, replacement.content, loop.commands.dispatch,
             )
             return LLMResponse(content=None, tool_calls=[ToolCallRequest(
                 id="list", name="list_dir", arguments={"path": "."},
@@ -554,7 +554,7 @@ async def test_queued_goal_command_does_not_write_to_an_obsolete_generation(tmp_
         else:
             assert await loop.sessions.state.delete(key)
         with pytest.raises(SessionConflictError):
-            await loop._dispatch_command_inline(message, key, message.content, loop.commands.dispatch)
+            await loop._dispatch_command_inline(message, message.content, loop.commands.dispatch)
         current = await loop.sessions.state.read(key)
         if operation == "delete":
             assert current is None

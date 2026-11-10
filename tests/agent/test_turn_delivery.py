@@ -479,24 +479,18 @@ async def test_cross_session_display_route_rejects_stale_lifetime(tmp_path):
     from nanobot.session.sqlite_store import SessionConflictError
 
     sessions = SessionManager(tmp_path)
-    alias = await sessions.state.get_header("websocket:chat")
+    target = await sessions.state.get_header("websocket:chat")
     source = await sessions.state.get_header("heartbeat")
     policy = WebuiTurnRoutePolicy(sessions)
     factory = TurnDeliveryFactory(MessageBus(), route_policy=policy, route_admission=policy.admit)
     message = InboundMessage(channel="system", sender_id="cron", chat_id="websocket:chat", content="notice")
     delivery = factory.create(message, source.key)
     await delivery.bind_session_generation(source.generation)
-    assert delivery.route.metadata[HISTORY_GENERATION_METADATA_KEY] == alias.generation
+    assert delivery.route.metadata[HISTORY_GENERATION_METADATA_KEY] == target.generation
     assert delivery.delivery_message.session_generation == source.generation
     response = delivery.background_response("done", stop_reason="end_turn", streamed=False, latency_ms=1)
-    assert response.metadata[HISTORY_GENERATION_METADATA_KEY] == alias.generation
-    await sessions.state.delete(alias.key)
-    replacement = await sessions.state.get_header(alias.key)
-    stale = factory.create(InboundMessage(
-        channel="websocket", sender_id="user", chat_id="chat", content="old queued input",
-        metadata={HISTORY_GENERATION_METADATA_KEY: alias.generation},
-    ), source.key)
+    assert response.metadata[HISTORY_GENERATION_METADATA_KEY] == target.generation
+    await sessions.state.reset(target.key)
     with pytest.raises(SessionConflictError):
-        await stale.bind_session_generation(source.generation)
-    assert replacement.generation != alias.generation
+        await policy.admit(delivery.route, source.key, source.generation)
     await sessions.state.aclose()

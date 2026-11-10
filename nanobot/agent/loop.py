@@ -849,7 +849,6 @@ class AgentLoop:
     async def _dispatch_command_inline(
         self,
         msg: InboundMessage,
-        key: str,
         raw: str,
         dispatch_fn: Callable[
             [CommandContext], Awaitable[CommandExpansion | InboundMessage | OutboundMessage | None],
@@ -862,7 +861,7 @@ class AgentLoop:
         async def dispatch_and_publish() -> None:
             _, automation_metadata = automation_history_overrides(msg.metadata)
             ctx = CommandContext(
-                msg=msg, session=None, key=key, raw=raw, loop=self,
+                msg=msg, session=None, key=msg.session_key, raw=raw, loop=self,
                 is_user_turn=(
                     msg.is_user_input and msg.channel != "system"
                     and msg.sender_id != "subagent" and not automation_metadata
@@ -1449,10 +1448,7 @@ class AgentLoop:
         if msg.is_user_input:
             await self.runtime_event_publisher.user_input_accepted(msg, key)
         if msg.channel != "system" and self.commands.is_priority(raw):
-            await self._dispatch_command_inline(
-                msg, key, raw,
-                self.commands.dispatch_priority,
-            )
+            await self._dispatch_command_inline(msg, raw, self.commands.dispatch_priority)
             return
         # Mid-turn injection bypasses _dispatch_one. Admit before joining an
         # active queue; admission may cancel its worker and release the queue.
@@ -1467,7 +1463,7 @@ class AgentLoop:
             and msg.channel != "system"
             and self.commands.is_dispatchable_command(raw)
         ):
-            await self._dispatch_command_inline(msg, key, raw, self.commands.dispatch)
+            await self._dispatch_command_inline(msg, raw, self.commands.dispatch)
             return
         await self._enqueue_session_message(msg)
 

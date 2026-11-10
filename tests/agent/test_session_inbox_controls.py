@@ -524,7 +524,7 @@ async def test_stopped_followups_are_not_recovered_but_shutdown_preserves_them(
         stop = InboundMessage(
             channel="websocket", sender_id="u", chat_id="test", content="/stop",
         )
-        await loop._dispatch_command_inline(stop, key, "/stop", loop.commands.dispatch_priority)
+        await loop._dispatch_command_inline(stop, stop.content, loop.commands.dispatch_priority)
 
     # Use fresh managers and the real startup scan: a cache-only assertion can
     # miss the canceled journal being replayed from disk on the next restart.
@@ -683,7 +683,7 @@ async def test_ingress_sources_share_one_session_worker(loop, bus_running):
         else:
             (await loop._enqueue_session_message(second))
         compact = InboundMessage(channel="websocket", sender_id="u", chat_id="test", content="/compact")
-        await loop._dispatch_command_inline(compact, key, compact.content, loop.commands.dispatch)
+        await loop._dispatch_command_inline(compact, compact.content, loop.commands.dispatch)
         assert len(loop._active_tasks[key]) == 1
         release.set()
         results = await asyncio.wait_for(asyncio.gather(cron, trigger), timeout=3)

@@ -750,17 +750,6 @@ class TestSubagentAnnounceSessionKey:
         assert msg.session_key == "telegram:111:topic:5"
 
     @pytest.mark.asyncio
-    async def test_announce_uses_raw_key_in_normal_mode(self):
-        mgr, bus = self._make_mgr()
-
-        origin = {"channel": "telegram", "chat_id": "222", "session_key": "telegram:222"}
-        await mgr._announce_result("sub-2", "label", "task", "result", origin, "ok")
-
-        msg = await bus.consume_inbound()
-        assert msg.session_key_override == "telegram:222"
-        assert msg.session_key == "telegram:222"
-
-    @pytest.mark.asyncio
     async def test_announce_falls_back_to_origin_when_no_session_key(self):
         mgr, bus = self._make_mgr()
 

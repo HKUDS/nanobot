@@ -470,7 +470,7 @@ class WebuiTurnRoutePolicy:
         if revision is None:
             raise SessionConflictError("display destination is no longer active")
         admitted = metadata.get(HISTORY_GENERATION_METADATA_KEY)
-        # A distinct alias admitted by the WebSocket edge must still be current.
+        # An admitted display destination must still be current.
         if admitted not in (None, generation, revision[0]):
             raise SessionConflictError("display destination generation was replaced")
         metadata[HISTORY_GENERATION_METADATA_KEY] = revision[0]
