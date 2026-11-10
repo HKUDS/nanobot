@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -138,6 +139,11 @@ async def _stop_inline_gateway(process: subprocess.Popen[bytes], *, diagnostics:
                 await asyncio.to_thread(process.wait, timeout=10)
         if diagnostics.exists():
             print(diagnostics.read_text(encoding="utf-8"))
+        stacks = diagnostics.with_name("gateway-stacks.log")
+        if stacks.exists():
+            frames = re.findall(r'File "[^"\n]*[/\\]([^/\\"\n]+)", line (\d+) in (\w+)',
+                                stacks.read_text(encoding="utf-8"))
+            print("Gateway shutdown stack locations:", frames[-80:])
         raise
 
 
@@ -636,7 +642,8 @@ async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during
     config["providers"]["custom"]["apiBase"] = f"http://127.0.0.1:{model_port}/v1"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     launcher = _TASK_DIAGNOSTICS + """
-import asyncio, httpx, sys
+import asyncio, faulthandler, httpx, sys
+from pathlib import Path
 from nanobot.session.state import SessionState
 original = SessionState.checkpoint_view
 barrier_url = sys.argv[3]
@@ -655,7 +662,12 @@ SessionState.checkpoint_view = checkpoint
 home, config = sys.argv[1:3]
 sys.argv = ['nanobot', '--home', home, 'gateway', '--config', config]
 from nanobot.cli.entry import main
-main()
+with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
+    faulthandler.dump_traceback_later(10, repeat=True, file=stacks)
+    try:
+        main()
+    finally:
+        faulthandler.cancel_dump_traceback_later()
 """
     env = {key: value for key, value in os.environ.items() if not key.startswith("NANOBOT_")}
     env.update({"HOME": str(home), "USERPROFILE": str(home), "APPDATA": str(home),
@@ -774,7 +786,10 @@ main()
 
 @pytest.mark.skipif(not (sys.platform.startswith("linux") and os.name == "posix"), reason="Linux signals only")
 @pytest.mark.asyncio
-async def test_inline_gateway_timeout_dumps_tasks_and_reaps(tmp_path: Path) -> None:
+async def test_inline_gateway_timeout_dumps_tasks_and_reaps(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    (tmp_path / "gateway-stacks.log").write_text(
+        'Thread secret\n  File "/private/path/gateway.py", line 42 in blocked\n    secret source\n'
+    )
     log_path = tmp_path / "diagnostic.log"
     diagnostics = tmp_path / "tasks.log"
     script = _TASK_DIAGNOSTICS + """
@@ -799,6 +814,10 @@ asyncio.run(main())
         with pytest.raises(subprocess.TimeoutExpired):
             await _stop_inline_gateway(process, diagnostics=diagnostics, timeout=0.1)
         assert process.returncode is not None
+        captured = capsys.readouterr().out
+        assert "('gateway.py', '42', 'blocked')" in captured
+        assert "/private/path" not in captured
+        assert "secret source" not in captured
         output = diagnostics.read_text()
         assert "Gateway async task locations end" in output
         assert "<string> blocked " in output
