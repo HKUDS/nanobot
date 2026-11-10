@@ -243,6 +243,7 @@ class FileSearch:
 
     @contextmanager
     def _open_search_directory(self, directory: Path) -> Generator[int]:
+        """Pin a directory for a scan and validate it before releasing results."""
         relative = directory.relative_to(self.root)
         if ".." in relative.parts:
             raise ValueError("Expected a directory within the search root")
@@ -257,15 +258,19 @@ class FileSearch:
                 os.close(fd)
                 fd = child
             yield fd
+            # A descriptor survives a rename. Discard its results if the
+            # authorized path no longer points to the directory we scanned.
+            try:
+                if (
+                    Path(os.path.realpath(directory, strict=True)) == directory
+                    and os.path.samestat(os.fstat(fd), directory.stat(follow_symlinks=False))
+                ):
+                    return
+            except OSError:
+                pass
+            raise PermissionError("Search directory changed during the scan; retry the search.")
         finally:
             os.close(fd)
-
-    @staticmethod
-    def _directory_is_current(directory: Path, fd: int) -> bool:
-        return (
-            Path(os.path.realpath(directory, strict=True)) == directory
-            and os.path.samestat(os.fstat(fd), directory.stat(follow_symlinks=False))
-        )
 
     def modified_children(
         self, directory: Path, names: list[str], *, checkpoint: Callable[[], None],
@@ -292,10 +297,7 @@ class FileSearch:
                                 self.modified(directory / name) if stat.S_ISLNK(info.st_mode)
                                 else info.st_mtime
                             )
-                    # An open directory survives a rename. Do not use its batch if
-                    # the authorized path no longer points to that directory.
-                    if self._directory_is_current(directory, fd):
-                        return times
+                    return times
             except OSError:
                 pass  # Reauthorize each child if the directory could not be pinned.
 
@@ -345,38 +347,27 @@ class FileSearch:
         fd: int | None = None
         attempted = False
         with ExitStack() as handle:
-            def check_parent() -> None:
-                if parent is not None and fd is not None:
-                    try:
-                        if self._directory_is_current(parent, fd):
-                            return
-                    except OSError:
-                        pass
-                    raise PermissionError("Search directory changed during the scan; retry the search.")
-
             def read(path: Path, limit: int) -> SearchBytes | None:
                 nonlocal parent, fd, attempted
-                if path.parent != parent:
-                    check_parent()
+                directory = path.parent
+                if directory != parent:
                     handle.close()
-                    parent, fd, attempted = path.parent, None, False
+                    parent, fd, attempted = directory, None, False
                     return self._read_search_bytes(path, limit)
                 if not attempted:
                     attempted = True
                     # Only open directories with multiple candidates. If the host
                     # cannot pin this path, keep using per-file authorization.
-                    if parent is not None and parent.is_relative_to(self.root):
-                        try:
-                            _reject_device(parent, resolved=True)
-                            fd = handle.enter_context(self._open_search_directory(parent))
-                        except (OSError, ValueError):
-                            pass
+                    try:
+                        _reject_device(directory, resolved=True)
+                        fd = handle.enter_context(self._open_search_directory(directory))
+                    except (OSError, ValueError):
+                        pass
                 if path.name in ("", ".", ".."):
                     return self._read_search_bytes(path, limit)
                 return self._read_search_bytes(path, limit, fd)
 
             yield read
-            check_parent()
 
 
 def _regular_file(target: Path, *, suffix: str | None = None) -> ReadableFile:
