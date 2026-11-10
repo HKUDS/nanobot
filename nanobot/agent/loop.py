@@ -1454,24 +1454,21 @@ class AgentLoop:
                 self.commands.dispatch_priority,
             )
             return
-        # Mid-turn injection bypasses _dispatch_one, so admit before joining
-        # an active queue. Admission may cancel its worker and release the queue.
+        # Mid-turn injection bypasses _dispatch_one. Admit before joining an
+        # active queue; admission may cancel its worker and release the queue.
         if (
             key in self._pending_queues
             and self._recovery_admission is not None
             and not await self._recovery_admission.admit(msg)
         ):
             return
-        # If this session already has an active pending queue (i.e. a task
-        # is processing this session), route the message there for mid-turn
-        # injection instead of creating a competing task.
-        if key in self._pending_queues:
-            if msg.channel != "system" and self.commands.is_dispatchable_command(raw):
-                await self._dispatch_command_inline(
-                    msg, key, raw,
-                    self.commands.dispatch,
-                )
-                return
+        if (
+            key in self._pending_queues
+            and msg.channel != "system"
+            and self.commands.is_dispatchable_command(raw)
+        ):
+            await self._dispatch_command_inline(msg, key, raw, self.commands.dispatch)
+            return
         await self._enqueue_session_message(msg)
 
     def maintenance(self) -> AbstractContextManager[None]:

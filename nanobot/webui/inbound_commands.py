@@ -765,7 +765,7 @@ class WebUICommandRouter:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
         accepted = False
-        admission_session_key = (
+        session_key = (
             temporary_policy.session_key
             if temporary_policy is not None
             else webui_session_key(chat_id)
@@ -779,7 +779,7 @@ class WebUICommandRouter:
                     lambda: self._workspaces.persist_scope(
                         chat_id,
                         scope,
-                        session_key=admission_session_key,
+                        session_key=session_key,
                         expected_generation=(
                             temporary_policy.session_generation
                             if temporary_policy is not None
@@ -830,7 +830,7 @@ class WebUICommandRouter:
                 media=media_paths or None,
                 metadata=metadata,
                 is_dm=False,
-                session_key=temporary_policy.session_key if temporary_policy is not None else None,
+                session_key=session_key if temporary_policy is not None else None,
                 require_existing_session=(
                     temporary_policy.require_existing_session
                     if temporary_policy is not None
@@ -845,7 +845,7 @@ class WebUICommandRouter:
                     del self._accepted_messages[next(iter(self._accepted_messages))]
         except BaseException:
             await self._workspaces.rollback_scope_admission(
-                admission_session_key,
+                session_key,
                 session_generation,
                 created=session_created,
             )

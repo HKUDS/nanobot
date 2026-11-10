@@ -85,7 +85,8 @@ class RecoveryCoordinator:
         from nanobot.webui.history import initialize_history
 
         await initialize_history(self.sessions)
-        for key in await self._recovery_candidates():
+        for item in await self.sessions.state.list_sessions():
+            key = item["key"]
             chat_id = webui_chat_id(key)
             if chat_id is None:
                 continue
@@ -113,9 +114,6 @@ class RecoveryCoordinator:
                 )
                 await self.sessions.state.restore_interruption(session)
                 await self._publish(chat_id, failed)
-
-    async def _recovery_candidates(self) -> list[str]:
-        return [item["key"] for item in await self.sessions.state.list_sessions()]
 
     @staticmethod
     def _needs_recovery(metadata: Mapping[str, Any]) -> bool:

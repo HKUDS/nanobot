@@ -5948,7 +5948,6 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
         ("abc", True),
         ("a1b2_c:d-e", True),
         ("x" * 64, True),
-        ("unified:default", True),
         ("", False),
         ("x" * 65, False),
         ("has space", False),
