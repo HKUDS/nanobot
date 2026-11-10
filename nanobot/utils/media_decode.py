@@ -1,4 +1,4 @@
-"""Data-URL persistence for API uploads and audio transcription.
+"""Data-URL persistence for audio transcription.
 
 Binary WebUI uploads share the media filename layout through ``media_destination``.
 """
@@ -13,7 +13,6 @@ from pathlib import Path
 from nanobot.utils.helpers import safe_filename
 
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
-MAX_FILE_SIZE = DEFAULT_MAX_BYTES
 
 _MIME_EXTENSION_OVERRIDES = {
     # Python's ``mimetypes`` maps browser-recorded audio/webm to ``.weba`` and
@@ -51,9 +50,6 @@ class FileSizeExceededError(Exception):
     """Raised when a decoded payload exceeds the caller's size limit."""
 
 
-FileSizeExceeded = FileSizeExceededError
-
-
 def save_base64_data_url(
     data_url: str,
     media_dir: Path,
@@ -64,7 +60,7 @@ def save_base64_data_url(
     """Decode a ``data:<mime>;base64,<payload>`` URL and persist it.
 
     Returns the absolute path on success, ``None`` when the URL shape or the
-    base64 payload itself is malformed. Raises :class:`FileSizeExceeded`
+    base64 payload itself is malformed. Raises :class:`FileSizeExceededError`
     when the decoded payload is larger than ``max_bytes`` (default 10 MB).
     """
     # Parse delimiters directly so malformed MIME parameters cannot trigger regex backtracking.
@@ -83,7 +79,7 @@ def save_base64_data_url(
         return None
     limit = DEFAULT_MAX_BYTES if max_bytes is None else max_bytes
     if len(raw) > limit:
-        raise FileSizeExceeded(f"File exceeds {limit // (1024 * 1024)}MB limit")
+        raise FileSizeExceededError(f"File exceeds {limit // (1024 * 1024)}MB limit")
     dest = media_destination(media_dir, mime_type, filename=filename)
     dest.write_bytes(raw)
     return str(dest)

@@ -52,6 +52,16 @@ For an external update, stop all affected writers, back up configuration and dat
 
 Do not switch package managers to work around an error. Fixed wheel sources, locked requirements and custom installations need their original settings reviewed. If a fresh official installation fails, fix the reported prerequisite or network error and rerun the same installer command.
 
+## Standalone API service removal
+
+`nanobot serve` and its OpenAI-compatible `/v1` endpoints have been removed. This also removes the API server controls in Settings and the `nanobot-api` Compose service. The Gateway, WebUI, Python SDK, and OpenAI-compatible model connections are separate and still supported. The Python SDK embeds nanobot in a Python application; it is not an HTTP-compatible replacement. The `api` install extra is now empty so upgrades can preserve an existing installation's recorded extras. New installations do not need it.
+
+Before updating, stop any existing standalone API process through the launcher that started it. For a process started from Settings, use **Settings → System → Stop** in the old version. For Compose, use `docker compose stop nanobot-api` and `docker compose rm -f nanobot-api` with the old Compose file before switching to the new file. If you already switched, confirm which container belongs to your deployment and stop that old container explicitly; removing a service from the Compose file does not stop an existing container. Keep your bind mounts and volumes.
+
+Back up the configuration and data before updating. The old top-level `api` block is ignored on read and is omitted the next time nanobot saves the configuration. Session data and workspaces are not deleted or moved. If you must roll back, use the previous version and its matching deployment files, and recover the old service settings from your backup if necessary. Do not overwrite current configuration or conversations with a stale backup.
+
+To read old API conversations after updating, open the same configuration and workspace with [the Python SDK](./python-sdk.md#botsessions). Use `await bot.sessions.list()` to find keys such as `api:default` and `api:<session_id>`, then use `await bot.sessions.get(key)` to read their messages. If the old launcher used a separate API workspace, pass that workspace to `Nanobot.from_config(config_path, workspace=workspace)` instead of using the Gateway's workspace.
+
 ## Recover an interrupted update
 
 Refreshing restores saved progress, **not installation consent**. A staged update may ask you to review and confirm it again. A disconnected page cannot tell whether the worker stopped: do not start another installation while it reconnects. Closing the browser does not stop the managed update or its recovery.

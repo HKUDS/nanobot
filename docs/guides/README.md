@@ -38,7 +38,6 @@ Use **Channels** in the WebUI for guided setup. These guides explain the account
 | Goal | Guide |
 |---|---|
 | Run from Python | [Python AI agent SDK](./python-ai-agent-sdk.md) |
-| Expose `/v1/chat/completions` | [OpenAI-compatible agent API](./openai-compatible-agent-api.md) |
 
 ## Configure and Operate
 

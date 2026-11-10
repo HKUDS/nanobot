@@ -141,7 +141,7 @@ This requires a model that supports tools and an enabled `nanobot-document` skil
 | Add an App or MCP integration | Open **Apps** or follow [Configure MCP Tools](./guides/configure-mcp-tools.md) |
 | Schedule agent work | Read [Automations](./automations.md) |
 | Run continuously or remotely | Read [Deployment](./deployment.md) |
-| Integrate from code | Use the [Python SDK](./python-sdk.md) or [OpenAI-Compatible API](./openai-api.md) |
+| Integrate from code | Use the [Python SDK](./python-sdk.md) |
 
 ## Other Install Methods
 

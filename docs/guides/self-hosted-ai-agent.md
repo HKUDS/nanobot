@@ -1,13 +1,13 @@
 # How to Run a Self-Hosted AI Agent with nanobot
 
-This guide sets up nanobot as a self-hosted AI agent runtime on your own machine or server. The result is a gateway process that can serve the WebUI, chat apps, automations, and API integrations.
+This guide sets up nanobot as a self-hosted AI agent runtime on your own machine or server. The result is a gateway process for the WebUI, chat apps, and automations.
 
 ## What you will build
 
 - a nanobot config and workspace under your control
 - a model provider connected through `config.json`
 - a long-running `nanobot gateway`
-- optional browser, chat app, and API access
+- optional browser and chat app access
 
 ## When to use this
 
@@ -25,19 +25,18 @@ Self-hosting keeps the agent runtime and its state on your machine. A hosted mod
 
 ## Confirm the result
 
-Send a message through the interface you intend to use. Check that it replies, then confirm the chosen gateway or service stays running after you close the setup terminal. Browser, chat channels, and automations use the gateway; the optional OpenAI-compatible API has its own [service setup](./openai-compatible-agent-api.md).
+Send a message through the interface you intend to use. Check that it replies, then confirm the chosen gateway or service stays running after you close the setup terminal. Browser, chat channels, and automations use the gateway.
 
 ## Production notes
 
 - Use Docker, systemd, or a macOS LaunchAgent when the process should survive terminal exits.
 - Give every deployed instance a distinct config path, workspace path, and port set.
 - Keep secrets in environment variables and start the service from the same environment.
-- Use health checks against the gateway or API process, not chat app delivery as the only signal.
+- Use gateway health checks alongside chat app delivery.
 
 ## Security notes
 
 - Bind local-only services to `127.0.0.1` unless you intentionally expose them.
-- Set an API key before binding the OpenAI-compatible API to a public interface.
 - Prefer pairing for DM-capable chat apps, and keep any static `allowFrom` allowlists strict.
 - Enable `tools.restrictToWorkspace`; on Linux, use the bubblewrap sandbox for shell execution.
 
@@ -45,7 +44,7 @@ Send a message through the interface you intend to use. Check that it replies, t
 
 - Run `nanobot status` with the same `--config` and `--workspace` flags used by the service.
 - Run `nanobot gateway --verbose` while debugging channel startup.
-- Check port conflicts if the WebUI, WebSocket channel, or API endpoint fails to bind.
+- Check port conflicts if the WebUI or gateway health endpoint fails to bind.
 
 ## Related nanobot docs
 
@@ -53,4 +52,3 @@ Send a message through the interface you intend to use. Check that it replies, t
 - [Multiple Instances](../multiple-instances.md)
 - [Configuration](../configuration.md)
 - [Chat Apps](../chat-apps.md)
-- [OpenAI-Compatible API](../openai-api.md)

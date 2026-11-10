@@ -229,6 +229,11 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         gateway_port=gateway_port,
     )
 
+    legacy_config = json.loads(config_path.read_text(encoding="utf-8"))
+    legacy_config["api"] = {"host": "0.0.0.0", "apiKey": "${RETIRED_SMOKE_TOKEN}"}
+    config_path.write_text(json.dumps(legacy_config), encoding="utf-8")
+    before = config_path.read_bytes()
+
     process = _start_gateway(config_path, log_path)
     base_url = f"http://127.0.0.1:{ws_port}"
     try:
@@ -239,6 +244,17 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         async with websockets.connect(ws_url) as ws:
             ready = await _recv_until(ws, "ready")
             assert ready["client_id"] == "smoke"
+
+            # An old WebUI can still connect, but cannot start the retired listener.
+            await ws.send(json.dumps({
+                "type": "webui_request", "request_id": "old-api-start",
+                "action": "settings.api_service.start",
+                "payload": {"host": "127.0.0.1", "port": _free_port(), "timeout": 120},
+            }))
+            rejected = await _recv_until(ws, "webui_response")
+            assert rejected["request_id"] == "old-api-start"
+            assert rejected["ok"] is False and rejected["error"]["status"] == 404
+            assert config_path.read_bytes() == before
 
             await ws.send(json.dumps({"type": "new_chat"}))
             attached = await _recv_until(ws, "attached")

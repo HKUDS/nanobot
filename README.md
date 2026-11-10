@@ -47,7 +47,7 @@
 | Connect Telegram, Discord, WeChat, Slack, Email, Mattermost, Linear, or another channel | [Chat app guide](./docs/guides/chat-app-ai-agent.md) |
 | Configure providers, fallback models, Langfuse, MCP, web tools, or security | [Docs](./docs/README.md) and [Configuration](./docs/configuration.md) |
 | Develop the browser UI | [Install current source](#-install), then [WebUI development](./webui/README.md) and [Contributing](./CONTRIBUTING.md) |
-| Integrate from Python or HTTP | [Python SDK](./docs/python-sdk.md) or [Agent API](./docs/openai-api.md) |
+| Integrate from Python | [Python SDK](./docs/python-sdk.md) |
 | Understand or extend the internals | [Architecture](./docs/architecture.md), [Contributing](./CONTRIBUTING.md), and [Provider extensions](./docs/development.md) |
 | Deploy to the cloud or keep nanobot running as a service | [Deployment](./docs/deployment.md) |
 
@@ -61,13 +61,13 @@ nanobot can:
 - use shell, web search/fetch, MCP integrations, cron, image generation, and multi-agent delegation
 - keep session history and long-term memory through [Dream](./docs/memory.md#save-and-check-a-preference)
 - run [long-horizon goals](./docs/guides/long-running-ai-agent.md) and [scheduled automations](./docs/automations.md)
-- expose a Python SDK and OpenAI-compatible API for integrations
+- embed the agent with the Python SDK
 - deploy as a long-running local or server-side agent gateway
 
 ## 💡 Why nanobot
 
 - **Persistent workflows**: keep saved conversations, long-term memory, and task results for later work.
-- **Chat-native reach**: WebUI, API, Telegram, Feishu, Slack, Discord, Teams, email, Mattermost, and Linear.
+- **Chat-native reach**: WebUI, Telegram, Feishu, Slack, Discord, Teams, email, Mattermost, and Linear.
 - **Model freedom**: OpenAI-compatible APIs, local LLMs, image generation, search, and fallbacks.
 - **Small core**: readable internals with MCP, memory, deployment, and automation built in.
 - **Own your stack**: inspect, customize, self-host, and extend without a giant platform.
@@ -459,7 +459,7 @@ See the [WebUI guide](./docs/webui.md) for LAN access, background operation, wor
 
 The Python gateway owns agent execution, sessions, tools, memory, and security policy for the WebUI, TUI, and chat apps. The clients share that runtime; the core agent loop builds context, calls the model, executes requested tools, and returns the result. Memory, skills, channels, and MCP integrations extend that loop.
 
-The [Python SDK](./docs/python-sdk.md) embeds the agent runtime in your application process. The [OpenAI-compatible API](./docs/openai-api.md) starts a separate HTTP service for `/v1/chat/completions`: each request contains one user message, history is managed by the server, and the model comes from configuration. Responses return to the HTTP client; that service does not deliver tool messages to chat apps.
+The [Python SDK](./docs/python-sdk.md) embeds the agent runtime in your application process.
 
 See [Architecture](./docs/architecture.md) for source ownership and extension points.
 
@@ -471,7 +471,7 @@ Browse the [repo docs](./docs/README.md) for current source documentation, or vi
 - Choose and configure a model: [Providers and Models](./docs/providers.md) and [Provider Cookbook](./docs/provider-cookbook.md).
 - Connect a chat app: [Chat App AI Agent](./docs/guides/chat-app-ai-agent.md) and [channel reference](./docs/chat-apps.md).
 - Schedule or deploy work: [Automations](./docs/automations.md) and [Deployment](./docs/deployment.md).
-- Integrate from code: [Python SDK](./docs/python-sdk.md) and [OpenAI-Compatible API](./docs/openai-api.md).
+- Integrate from code: [Python SDK](./docs/python-sdk.md).
 - Look up runtime concepts or exact settings: [Concepts](./docs/concepts.md) and [Configuration](./docs/configuration.md).
 - Diagnose a failure: [Troubleshooting](./docs/troubleshooting.md).
 - Extend the core: [Architecture](./docs/architecture.md) and [contribution workflow](./CONTRIBUTING.md).

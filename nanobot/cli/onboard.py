@@ -1281,7 +1281,6 @@ def _configure_channels(config: Config) -> None:
 _SETTINGS_SECTIONS: dict[str, tuple[str, str, set[str] | None]] = {
     "Agent Settings": ("Agent Defaults", "Configure default model, temperature, and behavior", None),
     "Channel Common": ("Channel Common", "Configure cross-channel behavior: progress, tool hints, retries", None),
-    "API Server": ("API Server", "Configure OpenAI-compatible API endpoint", None),
     "Gateway": ("Gateway Settings", "Configure server host, port", None),
     "Tools": ("Tools Settings", "Configure web search, shell exec, and other tools", {"mcp_servers"}),
 }
@@ -1289,7 +1288,6 @@ _SETTINGS_SECTIONS: dict[str, tuple[str, str, set[str] | None]] = {
 _SETTINGS_GETTER: dict[str, Callable[[Config], BaseModel]] = {
     "Agent Settings": lambda c: c.agents.defaults,
     "Channel Common": lambda c: c.channels,
-    "API Server": lambda c: c.api,
     "Gateway": lambda c: c.gateway,
     "Tools": lambda c: c.tools,
 }
@@ -1297,7 +1295,6 @@ _SETTINGS_GETTER: dict[str, Callable[[Config], BaseModel]] = {
 _SETTINGS_SETTER: dict[str, Callable[[Config, BaseModel], None]] = {
     "Agent Settings": lambda c, v: setattr(c.agents, "defaults", v),
     "Channel Common": lambda c, v: setattr(c, "channels", v),
-    "API Server": lambda c, v: setattr(c, "api", v),
     "Gateway": lambda c, v: setattr(c, "gateway", v),
     "Tools": lambda c, v: setattr(c, "tools", v),
 }
@@ -1380,7 +1377,6 @@ def _show_summary(config: Config) -> None:
     for title, model in [
         ("Agent Settings", config.agents.defaults),
         ("Channel Common", config.channels),
-        ("API Server", config.api),
         ("Gateway", config.gateway),
         ("Tools", config.tools),
     ]:
@@ -1813,7 +1809,6 @@ def _configure_advanced_settings(config: Config) -> None:
         "[C] Chat Channel",
         "[H] Channel Common",
         "[A] Agent Settings",
-        "[I] API Server",
         "[G] Gateway",
         "[T] Tools",
         "[V] View Configuration Summary",
@@ -1843,7 +1838,6 @@ def _configure_advanced_settings(config: Config) -> None:
             "[C] Chat Channel": lambda: _configure_channels(config),
             "[H] Channel Common": lambda: _configure_general_settings(config, "Channel Common"),
             "[A] Agent Settings": lambda: _configure_general_settings(config, "Agent Settings"),
-            "[I] API Server": lambda: _configure_general_settings(config, "API Server"),
             "[G] Gateway": lambda: _configure_general_settings(config, "Gateway"),
             "[T] Tools": lambda: _configure_general_settings(config, "Tools"),
             "[V] View Configuration Summary": lambda: _show_summary(config),

@@ -34,7 +34,6 @@ from nanobot.webui.settings_api import (
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
-    update_api_settings,
     update_model_call_order,
     update_model_configuration,
     update_network_safety_settings,
@@ -169,7 +168,6 @@ def test_settings_payload_includes_relocated_capabilities(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.api.port = 9910
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
@@ -177,8 +175,6 @@ def test_settings_payload_includes_relocated_capabilities(
 
     payload = settings_payload()
 
-    assert payload["api"]["port"] == 9910
-    assert payload["api"]["api_key_hint"] is None
     assert payload["observability"]["provider"] == "langfuse"
     assert payload["observability"]["configured"] is True
 
@@ -196,56 +192,6 @@ def test_settings_payload_exposes_modelscope_image_model(
 
     assert providers["modelscope"]["models"] == ["Qwen/Qwen-Image-2512"]
     assert providers["modelscope"]["default_model"] == "Qwen/Qwen-Image-2512"
-
-
-def test_update_api_settings_requires_key_for_network_access(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    with pytest.raises(WebUISettingsError, match="API key"):
-        update_api_settings({"host": ["0.0.0.0"], "port": ["8900"]})
-
-    payload = update_api_settings(
-        {
-            "host": ["0.0.0.0"],
-            "port": ["9900"],
-            "api_key": ["secret-token"],
-        }
-    )
-    saved = load_config(config_path)
-    assert saved.api.host == "0.0.0.0"
-    assert saved.api.port == 9900
-    assert saved.api.api_key == "secret-token"
-    assert payload["api"]["api_key_hint"]
-
-
-def test_update_api_settings_requires_key_for_specific_network_interface(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    with pytest.raises(WebUISettingsError, match="API key"):
-        update_api_settings({"host": ["192.168.1.10"], "port": ["8900"]})
-
-
-def test_update_api_settings_allows_alternate_loopback_without_key(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    update_api_settings({"host": ["127.0.0.2"], "port": ["8900"]})
-
-    assert load_config(config_path).api.host == "127.0.0.2"
 
 
 def _dynamic_provider_config(

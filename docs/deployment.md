@@ -13,7 +13,7 @@ Check these before making a deployment persistent. For a new container host, per
 | Secrets are in environment variables or protected config files | API keys, bot tokens, OAuth state, and chat credentials should not be world-readable |
 | The active config directory (including `sessions/`) and workspace are persistent | Sessions follow `--config`; memory, generated artifacts, and the workspace identity marker follow the workspace |
 | Channel access control is intentional | Use `allowFrom`, pairing, WebSocket `token`/`tokenIssueSecret`, or private test channels before exposing the bot |
-| Ports are planned | Gateway health defaults to local-only `127.0.0.1:18790`; WebUI/WebSocket defaults to `8765`; `nanobot serve` defaults to `8900` |
+| Ports are planned | Gateway health defaults to local-only `127.0.0.1:18790`; WebUI/WebSocket defaults to `8765` |
 | Logs are easy to reach | Use `docker compose logs`, `journalctl`, LaunchAgent log files, or `nanobot gateway --verbose` while diagnosing startup |
 
 Restart the deployed process after editing `config.json`. Long-running processes read config at startup.
@@ -93,21 +93,15 @@ docker compose up -d
 docker compose logs
 ```
 
-On first boot, Compose initializes `~/.nanobot/config.json` with container bind addresses and random WebUI/API credentials. Open `http://HOST:8765`, enter the WebUI password printed in the first-boot logs, then configure your provider and model in **Settings → Models**. Send a message to verify the setup. No provider is required just to open the WebUI.
+On first boot, Compose initializes `~/.nanobot/config.json` with container bind addresses and a random WebUI password. Open `http://HOST:8765`, enter the WebUI password printed in the first-boot logs, then configure your provider and model in **Settings → Models**. Send a message to verify the setup. No provider is required just to open the WebUI.
 
-Export `NANOBOT_WEB_TOKEN` or `NANOBOT_API_KEY` before the first startup to supply your own credentials. Compose forwards these variables into the containers. Existing configuration is left untouched, including credentials and bind addresses; changing these variables later does not rotate persisted credentials. An explicit `--config` or `-c` selects a user-managed configuration and skips default-instance initialization. If you reuse an existing configuration, check the [Docker bind and authentication settings](#docker) above.
+Export `NANOBOT_WEB_TOKEN` before the first startup to supply your own WebUI password. Compose forwards this variable into the containers. Existing configuration is left untouched, including credentials and bind addresses; changing this variable later does not rotate persisted credentials. An explicit `--config` or `-c` selects a user-managed configuration and skips default-instance initialization. If you reuse an existing configuration, check the [Docker bind and authentication settings](#docker) above.
 
 The configuration and workspace persist in the `~/.nanobot` bind mount. Keep `agents.defaults.workspace` as a container path, normally `~/.nanobot/workspace`, rather than a host home-directory path. Other config `${VAR}` references require explicit `environment` entries in the CLI and gateway services; Compose does not forward arbitrary host variables.
 
-Compose starts both the gateway and the OpenAI-compatible API. Before a provider/model is configured, the API remains available for health checks and returns HTTP 503 with a `configuration_error` for model requests, including streaming requests. After configuring the model, restart the API to load those settings:
+The default Compose service runs the gateway and WebUI. If you are updating a deployment that used the former API service, follow the [API service removal steps](./updating.md#standalone-api-service-removal).
 
-```bash
-docker compose restart nanobot-api
-```
-
-Its endpoint is `http://127.0.0.1:8900/v1`; use the API key from the first-boot logs or `api.apiKey` in the persisted config. It is published to host loopback only.
-
-CLI commands do not trigger Docker service initialization. For terminal setup, run `docker compose run --rm nanobot-cli onboard --wizard`, configure the model, and merge the [Docker bind and authentication settings](#docker) and set `api.apiKey` to a private credential before starting services. Plain `onboard` keeps its original first-run behavior without an extra overwrite prompt. Verify it with `docker compose run --rm nanobot-cli agent -m "Hello!"` before starting the persistent gateway.
+CLI commands do not trigger Docker service initialization. For terminal setup, run `docker compose run --rm nanobot-cli onboard --wizard`, configure the model, and merge the [Docker bind and authentication settings](#docker) before starting the gateway. Plain `onboard` keeps its original first-run behavior without an extra overwrite prompt. Verify it with `docker compose run --rm nanobot-cli agent -m "Hello!"` before starting the persistent gateway.
 
 The default image preinstalls WhatsApp dependencies. To bake other enabled channels into an image (recommended for deployments without PyPI access), pass a comma-separated `NANOBOT_CHANNELS` build argument:
 

@@ -11,7 +11,6 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from nanobot.config.errors import ConfigLoadError
 from nanobot.config.loader import resolve_config_env_vars
 from nanobot.config.schema import Config
-from nanobot.security.network import is_loopback_host
 from nanobot.webui.settings_contracts import WebUISettingsError
 
 # Only these leaves may be read or patched through this surface. Model/provider,
@@ -57,8 +56,6 @@ RUNTIME_CONFIG_PATHS = (
     "tools.web.use_proxy",
     "tools.web.user_agent",
     "tools.image_generation.save_dir",
-    "api.host",
-    "api.timeout",
 )
 
 
@@ -123,7 +120,6 @@ def update_runtime_config(
         "agents.defaults.max_tool_iterations": 1,
         "agents.defaults.max_tool_result_chars": 1,
         "gateway.port": 1,
-        "api.timeout": 1,
     }
     for path, minimum in numeric_minima.items():
         if path in values:
@@ -132,15 +128,13 @@ def update_runtime_config(
                 raise WebUISettingsError(f"{path}: must be at least {minimum}")
     if "gateway.port" in values and validated.gateway.port > 65535:
         raise WebUISettingsError("gateway.port: must be at most 65535")
-    if "api.timeout" in values and validated.api.timeout > 3600:
-        raise WebUISettingsError("api.timeout: must be at most 3600 seconds")
     if "tools.exec.timeout" in values:
         limit = validated.tools.exec.max_runtime_limit
         if validated.tools.exec.max_runtime > limit:
             raise WebUISettingsError(
                 f"tools.exec.timeout: enter 1–{limit} seconds, or 0 for no time limit"
             )
-    for path in ("gateway.host", "api.host", "tools.image_generation.save_dir"):
+    for path in ("gateway.host", "tools.image_generation.save_dir"):
         if path in values:
             parent, leaf = _parent(validated, path)
             if not str(getattr(parent, leaf)).strip():
@@ -150,9 +144,6 @@ def update_runtime_config(
         if (PureWindowsPath(directory).drive or directory.startswith(("/", "\\"))
                 or ".." in PurePosixPath(directory.replace("\\", "/")).parts):
             raise WebUISettingsError("tools.image_generation.save_dir: use a relative path inside the media directory")
-    if "api.host" in values and not is_loopback_host(validated.api.host):
-        if not validated.api.api_key.strip():
-            raise WebUISettingsError("Set an API key in System before using a network bind address.")
     if "tools.exec.sandbox" in values and validated.tools.exec.sandbox not in {"", "bwrap", "seatbelt"}:
         raise WebUISettingsError("tools.exec.sandbox: choose no sandbox, bwrap, or seatbelt")
     if {"tools.exec.sandbox_launcher", "tools.exec.sandbox_rw_binds"} & values.keys() and validated.tools.exec.sandbox_launcher:
@@ -199,5 +190,4 @@ def update_runtime_config(
     config.tools = validated.tools
     config.network = validated.network
     config.gateway = validated.gateway
-    config.api = validated.api
     return True

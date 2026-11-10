@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",
       "commandRuntime": {
         "custom": "Tùy chỉnh (giây)",
         "customLabel": "Thời gian chạy tùy chỉnh (giây)",
@@ -585,8 +584,6 @@
         "gateway_host": {"label": "Địa chỉ gateway", "help": "Địa chỉ gateway; đặt địa chỉ lắng nghe WebUI riêng.\n\nĐịa chỉ gateway dùng để nhận kết nối. Địa chỉ WebSocket và WebUI được cấu hình trong Kênh → WebSocket."},
         "gateway_port": {"label": "Cổng gateway", "help": "Cổng gateway; tham số khởi chạy được ưu tiên.\n\nCổng được lưu. Tham số dòng lệnh được ưu tiên."},
         "gateway_restart_mode": {"label": "Chế độ khởi động lại", "help": "Chọn cách khởi động lại; Tự động dựa theo môi trường.\n\nCách khởi động lại tiến trình. Chế độ tự động chọn theo môi trường máy chủ."},
-        "api_host": {"label": "Địa chỉ API", "help": "Đặt khóa trước khi cho phép truy cập mạng; khởi động lại API sau thay đổi.\n\nCần khóa API khi nhận kết nối trên địa chỉ khác localhost. Đặt khóa trong Hệ thống rồi khởi động lại dịch vụ API để áp dụng thay đổi."},
-        "api_timeout": {"label": "Thời hạn API", "help": "Số giây mỗi yêu cầu API tối đa; khởi động lại để áp dụng.\n\nThời gian tối đa của yêu cầu. Khởi động lại dịch vụ API để áp dụng."},
         "tools_image_generation_save_dir": {"label": "Thư mục lưu", "help": "Đường dẫn tương đối trong thư mục media; không chuyển ảnh có sẵn.\n\nĐường dẫn tương đối trong thư mục phương tiện của nanobot. Ảnh hiện có không bị di chuyển."}
       },
       "groups": {
@@ -603,7 +600,6 @@
         "safety": {"title": "Quyền chung", "help": "Đặt giới hạn vùng làm việc, ngoại lệ mạng và cài đặt từ xa.\n\nGiới hạn không gian làm việc, mạng riêng và cài đặt từ xa."},
         "cli": {"title": "Giới hạn CLI", "help": "Đặt thời hạn cài đặt, chạy và thời gian cache danh sách.\n\nGiới hạn thời gian cài đặt, thực thi và lưu đệm danh mục."},
         "gateway": {"title": "Gateway", "help": "Đặt cách triển khai và khởi động lại."},
-        "api": {"title": "Thiết lập API", "help": "Đặt địa chỉ lắng nghe và thời hạn yêu cầu."},
         "storage": {"title": "Lưu trữ ảnh", "help": "Chọn nơi lưu ảnh được tạo."},
         "maintenance": {"title": "Sắp xếp bộ nhớ", "help": ""},
         "web": {"title": "Truy cập web", "help": ""},
@@ -1237,15 +1233,6 @@
         "github": "Quản lý kho mã, issue và PR.",
         "supabase": "Xem và quản lý dự án."
       }
-    },
-    "api": {
-      "title": "Máy chủ API", "openaiCompatible": "API tương thích OpenAI", "description": "Kết nối qua API tương thích OpenAI.",
-      "start": "Khởi động API", "starting": "Đang khởi động...", "stop": "Dừng", "stopping": "Đang dừng...",
-      "access": "Truy cập", "thisDevice": "Thiết bị này", "localNetwork": "Mạng nội bộ",
-      "localHelp": "Chỉ thiết bị này có thể kết nối.", "networkHelp": "Truy cập LAN cần khóa API.\n\nThiết bị khác có thể kết nối; cần khóa API.",
-      "port": "Cổng", "portHelp": "Cổng cục bộ dịch vụ API sử dụng.", "apiKey": "Khóa API", "apiKeyHelp": "Gửi khóa dưới dạng Bearer Token.",
-      "apiKeyRequired": "Bắt buộc trước khi mở API ra mạng.", "apiKeyPlaceholder": "Nhập khóa API",
-      "autoInstall": "Các gói cần thiết cho máy chủ API sẽ được cài tự động khi khởi động."
     },
     "observability": {
       "title": "Theo dõi chạy", "configured": "nanobot đã có thông tin xác thực để ghi lại quá trình xử lý.",

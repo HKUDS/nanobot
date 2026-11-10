@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",
       "commandRuntime": {
         "custom": "Kustom (detik)",
         "customLabel": "Durasi kustom (detik)",
@@ -585,8 +584,6 @@
         "gateway_host": {"label": "Alamat gateway", "help": "Alamat gateway; atur listener WebUI secara terpisah.\n\nAlamat tempat gateway menerima koneksi. Alamat WebSocket dan WebUI diatur di Kanal → WebSocket."},
         "gateway_port": {"label": "Port gateway", "help": "Port gateway; argumen peluncuran diutamakan.\n\nPort yang disimpan. Argumen baris perintah lebih diutamakan."},
         "gateway_restart_mode": {"label": "Mode mulai ulang", "help": "Pilih cara mulai ulang; Otomatis mengikuti lingkungan.\n\nCara memulai ulang proses. Mode otomatis memilih berdasarkan lingkungan host."},
-        "api_host": {"label": "Alamat API", "help": "Tetapkan kunci sebelum akses jaringan; mulai ulang API setelah perubahan.\n\nKunci API diperlukan untuk menerima koneksi pada alamat selain localhost. Atur kunci di Sistem, lalu mulai ulang layanan API untuk menerapkan perubahan."},
-        "api_timeout": {"label": "Batas waktu API", "help": "Batas detik tiap permintaan API; mulai ulang untuk menerapkan.\n\nDurasi maksimum permintaan. Mulai ulang layanan API untuk menerapkan perubahan."},
         "tools_image_generation_save_dir": {"label": "Direktori penyimpanan", "help": "Lokasi relatif dalam direktori media; gambar yang ada tidak dipindahkan.\n\nJalur relatif di dalam folder media nanobot. Gambar yang ada tidak dipindahkan."}
       },
       "groups": {
@@ -603,7 +600,6 @@
         "safety": {"title": "Izin global", "help": "Atur batas ruang kerja, pengecualian jaringan, dan pemasangan jarak jauh.\n\nPembatasan ruang kerja, jaringan privat, dan instalasi jarak jauh."},
         "cli": {"title": "Batas CLI", "help": "Atur batas waktu pemasangan dan eksekusi, serta durasi cache daftar.\n\nBatas waktu instalasi, eksekusi, dan cache katalog."},
         "gateway": {"title": "Gateway", "help": "Atur opsi penerapan dan mulai ulang."},
-        "api": {"title": "Pengaturan API", "help": "Atur alamat listener dan batas waktu permintaan."},
         "storage": {"title": "Penyimpanan gambar", "help": "Pilih lokasi penyimpanan gambar yang dibuat."},
         "maintenance": {"title": "Pengaturan memori", "help": ""},
         "web": {"title": "Akses web", "help": ""},
@@ -1237,15 +1233,6 @@
         "github": "Kelola repositori, issue, dan PR.",
         "supabase": "Lihat dan kelola proyek."
       }
-    },
-    "api": {
-      "title": "Server API", "openaiCompatible": "API kompatibel OpenAI", "description": "Hubungkan melalui API yang kompatibel dengan OpenAI.",
-      "start": "Mulai server API", "starting": "Memulai...", "stop": "Hentikan", "stopping": "Menghentikan...",
-      "access": "Akses", "thisDevice": "Perangkat ini", "localNetwork": "Jaringan lokal",
-      "localHelp": "Hanya perangkat ini yang dapat terhubung.", "networkHelp": "Akses LAN memerlukan kunci API.\n\nPerangkat lain dapat terhubung; kunci API diperlukan.",
-      "port": "Port", "portHelp": "Port lokal untuk layanan API.", "apiKey": "Kunci API", "apiKeyHelp": "Kirim kunci sebagai Bearer token.",
-      "apiKeyRequired": "Wajib sebelum membuka API ke jaringan.", "apiKeyPlaceholder": "Masukkan kunci API",
-      "autoInstall": "Paket yang diperlukan server API akan dipasang otomatis saat server dimulai."
     },
     "observability": {
       "title": "Pelacakan eksekusi", "configured": "Kredensial pelacakan sudah tersedia untuk nanobot.",

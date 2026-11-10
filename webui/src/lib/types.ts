@@ -845,12 +845,6 @@ export interface SettingsPayload {
       use_jina_reader: boolean;
     };
   };
-  api?: {
-    host: string;
-    port: number;
-    timeout: number;
-    api_key_hint?: string | null;
-  };
   observability?: {
     provider: "langfuse" | string;
     configured: boolean;
@@ -1046,20 +1040,6 @@ export interface SettingsPayload {
     chat_apps_url: string;
     latest_url?: string;
   };
-}
-
-export interface ApiServicePayload {
-  installed: boolean;
-  running: boolean;
-  managed: boolean;
-  host: string;
-  port: number;
-  timeout: number;
-  api_key_hint?: string | null;
-  endpoint: string;
-  command: string;
-  log_path?: string | null;
-  last_action?: "started" | "stopped" | string;
 }
 
 interface AppPackageRef {

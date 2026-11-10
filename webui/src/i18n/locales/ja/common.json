@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "保存しました。API サービスを再起動すると反映されます。",
       "commandRuntime": {
         "custom": "カスタム（秒）",
         "customLabel": "カスタム実行時間（秒）",
@@ -585,8 +584,6 @@
         "gateway_host": {"label": "ゲートウェイアドレス", "help": "ゲートウェイのアドレスです。WebUI の待ち受けは別に設定します。\n\nゲートウェイの待ち受けアドレスです。WebSocket と WebUI のアドレスは「チャンネル → WebSocket」で設定します。"},
         "gateway_port": {"label": "ゲートウェイのポート", "help": "ゲートウェイのポートです。起動引数が優先されます。\n\n保存するポート番号。コマンドライン引数が優先されます。"},
         "gateway_restart_mode": {"label": "再起動モード", "help": "再起動方法を選びます。「自動」は環境に合わせます。\n\nプロセスの再起動方法。自動モードではホスト環境に応じて選択します。"},
-        "api_host": {"label": "API アドレス", "help": "ネットワーク公開前にキーを設定し、変更後は API を再起動します。\n\nlocalhost 以外のアドレスで待ち受けるには API キーが必要です。「システム」でキーを設定し、API サービスを再起動して変更を反映してください。"},
-        "api_timeout": {"label": "API 制限時間", "help": "API 要求の最大秒数です。適用には再起動が必要です。\n\nリクエストの時間制限です。API サービスの再起動後に反映されます。"},
         "tools_image_generation_save_dir": {"label": "保存先", "help": "メディア内の相対パスです。既存の画像は移動しません。\n\nnanobot のメディアディレクトリ内の相対パス。既存の画像は移動しません。"}
       },
       "groups": {
@@ -603,7 +600,6 @@
         "safety": {"title": "全体の権限", "help": "ワークスペース制限、ネットワーク例外、リモートインストールを設定します。\n\nワークスペース制限、プライベートネットワーク、リモートインストール。"},
         "cli": {"title": "CLI 制限", "help": "インストール・実行の制限時間と一覧のキャッシュ期間を設定します。\n\nインストール、実行、カタログキャッシュの時間制限。"},
         "gateway": {"title": "ゲートウェイ", "help": "配置と再起動の方法を設定します。"},
-        "api": {"title": "API 設定", "help": "待ち受けアドレスと要求の制限時間を設定します。"},
         "storage": {"title": "画像の保存", "help": "生成した画像の保存先を選びます。"},
         "maintenance": {"title": "メモリー整理", "help": ""},
         "web": {"title": "ウェブアクセス", "help": ""},
@@ -1237,15 +1233,6 @@
         "github": "リポジトリ、Issue、PR を管理します。",
         "supabase": "プロジェクトを確認・管理します。"
       }
-    },
-    "api": {
-      "title": "API サーバー", "openaiCompatible": "OpenAI 互換 API", "description": "OpenAI 互換の API で接続します。",
-      "start": "API サーバーを起動", "starting": "起動中...", "stop": "停止", "stopping": "停止中...",
-      "access": "アクセス", "thisDevice": "このデバイス", "localNetwork": "ローカルネットワーク",
-      "localHelp": "この端末だけが接続できます。", "networkHelp": "LAN からのアクセスには API キーが必要です。\n\n他のデバイスも接続できるため API キーが必要です。",
-      "port": "ポート", "portHelp": "API サービスが使うローカルポートです。", "apiKey": "API キー", "apiKeyHelp": "キーを Bearer Token として送信します。",
-      "apiKeyRequired": "ネットワークに公開する前に必要です。", "apiKeyPlaceholder": "API キーを入力",
-      "autoInstall": "起動時に API サーバーに必要なパッケージを自動的にインストールします。"
     },
     "observability": {
       "title": "実行の追跡", "configured": "nanobot がトレース認証情報を利用できます。",

@@ -429,17 +429,6 @@ def update_web_search_settings(
     )
 
 
-def update_api_settings(
-    query: QueryParams,
-    *,
-    config_path: Path | None = None,
-) -> dict[str, Any]:
-    config = _load_settings_config(config_path)
-    capabilities.update_api_settings(config, query)
-    _save_settings_config(config, config_path)
-    return settings_payload(config_path=config_path)
-
-
 def update_image_generation_settings(
     query: QueryParams,
     *,

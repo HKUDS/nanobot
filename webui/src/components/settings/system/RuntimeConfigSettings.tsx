@@ -93,7 +93,7 @@ export function useRuntimeConfigSettings(
         const maximum = field.kind === "duration" ? settings.advanced.exec_max_runtime_limit : field.max;
         const parsed = Number(raw);
         if (String(raw).trim() === "" || !Number.isFinite(parsed)
-          || (field.path !== "api.timeout" && !Number.isInteger(parsed))
+          || !Number.isInteger(parsed)
           || (field.min !== undefined && parsed < field.min)
           || (maximum !== undefined && parsed > maximum)) {
           setErrors((prev) => ({ ...prev, [group]: t("settings.runtimeConfig.numberError") }));
@@ -288,7 +288,7 @@ export function RuntimeConfigSettings({
                                 onChange={(next) => state.change(field, next === "__none__" ? "" : next)} />
                             ) : (
                               <Input {...common} type={field.kind === "number" ? "number" : "text"}
-                                min={field.min} max={field.max} step={field.path === "api.timeout" ? "any" : 1}
+                                min={field.min} max={field.max} step={1}
                                 value={String(current)} className="h-9 rounded-full text-[13px]" autoComplete="off"
                                 onChange={(event) => state.change(field, event.target.value)} />
                             )}

@@ -18,7 +18,6 @@ if sys.platform == "win32":
 
 # Keep console encoding setup before importing CLI UI/logging libraries.
 import typer  # noqa: E402
-from loguru import logger  # noqa: E402
 from typer.core import TyperGroup  # noqa: E402
 
 from nanobot.utils.log_config import configure_console_logging  # noqa: E402
@@ -33,10 +32,6 @@ from rich.text import Text  # noqa: E402
 
 from nanobot import __logo__, __version__  # noqa: E402
 from nanobot import optional_features as feature_support  # noqa: E402
-from nanobot.agent.hooks import create_file_edit_activity_hook  # noqa: E402
-from nanobot.agent.loop import AgentLoop  # noqa: E402
-from nanobot.agent.tools.mcp import MCPProvider  # noqa: E402
-from nanobot.agent.tools.registry import ToolRegistry  # noqa: E402
 from nanobot.cli import terminal as cli_terminal  # noqa: E402
 from nanobot.cli.agent import agent  # noqa: E402
 from nanobot.cli.gateway import create_gateway_app  # noqa: E402
@@ -60,12 +55,10 @@ from nanobot.cli.webui_support import (  # noqa: E402
 )
 from nanobot.config.paths import get_workspace_path  # noqa: E402
 from nanobot.config.schema import Config  # noqa: E402
-from nanobot.security.network import is_loopback_host  # noqa: E402
 from nanobot.utils.helpers import sanitize_surrogates as _sanitize_surrogates  # noqa: E402,F401
 from nanobot.utils.helpers import (  # noqa: E402
     sync_workspace_templates,
 )
-from nanobot.webui.context_source_hook import create_context_source_hook  # noqa: E402
 
 # Backward-compatible import for callers that used the former module location.
 SafeFileHistory = cli_terminal.SafeFileHistory
@@ -139,6 +132,23 @@ def main(
         from nanobot.cli.entry import _run_agent
 
         _run_agent([], prog_name="nanobot")
+
+
+@app.command(
+    "serve",
+    hidden=True,
+    add_help_option=False,
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def _retired_serve() -> None:
+    """Explain the removal without processing flags from old launch scripts."""
+    typer.echo(
+        "'nanobot serve' has been removed. No API server was started.\n"
+        "To chat in your browser, run 'nanobot webui'.\n"
+        "The old /v1 endpoints have no drop-in replacement.",
+        err=True,
+    )
+    raise typer.Exit(2)
 
 
 @app.command()
@@ -332,106 +342,6 @@ def trigger(
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
     console.print(f"[green]Queued[/green] {delivery.trigger_id} ({delivery.id})")
-
-
-@app.command()
-def serve(
-    port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
-    host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
-    timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-):
-    """Start the OpenAI-compatible API server (/v1/chat/completions)."""
-    runtime_config = _load_runtime_config(config, workspace)
-    try:
-        from aiohttp import web  # noqa: F401
-    except ImportError:
-        console.print("[red]aiohttp is required. Install with: nanobot plugins enable api[/red]")
-        raise typer.Exit(1)
-
-    from nanobot.agent.tools.image_generation import register_image_generation_tool
-    from nanobot.api.server import create_app
-    from nanobot.bus.queue import MessageBus
-    from nanobot.session.manager import SessionManager
-
-    _set_nanobot_logs(verbose)
-
-    api_cfg = runtime_config.api
-    host = host if host is not None else api_cfg.host
-    port = port if port is not None else api_cfg.port
-    timeout = timeout if timeout is not None else api_cfg.timeout
-    api_key = api_cfg.api_key.strip() if api_cfg.api_key else ""
-    if not is_loopback_host(host) and not api_key:
-        console.print(
-            f"[red]Error: host {host} is available beyond this device but api_key is not set. "
-            "Set api.api_key in config to prevent unauthenticated access.[/red]"
-        )
-        raise typer.Exit(1)
-    sync_workspace_templates(runtime_config.workspace_path)
-    bus = MessageBus()
-    session_manager = SessionManager(runtime_config.workspace_path)
-    tools = ToolRegistry()
-    register_image_generation_tool(runtime_config, tools, workspace=runtime_config.workspace_path)
-    mcp_provider = MCPProvider.from_config(runtime_config, tools)
-    from nanobot.providers.factory import build_unconfigured_provider_snapshot
-
-    setup_error = _provider_setup_error(runtime_config)
-    unconfigured_provider = (
-        build_unconfigured_provider_snapshot(runtime_config, setup_error).provider
-        if setup_error else None
-    )
-    from nanobot.goal.assembly import install_goal
-
-    try:
-        agent_loop = AgentLoop.from_config(
-            runtime_config, bus,
-            provider=unconfigured_provider,
-            session_manager=session_manager,
-            hook_factories=[create_file_edit_activity_hook, create_context_source_hook],
-            tool_registry=tools,
-            builtin_assembly=install_goal,
-        )
-    except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        raise typer.Exit(1) from exc
-
-    model_name, preset_tag = _model_display(runtime_config)
-    console.print(f"{__logo__} Starting OpenAI-compatible API server")
-    console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
-    console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
-    console.print("  [cyan]Session[/cyan]  : api:default")
-    console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
-    if not is_loopback_host(host):
-        console.print(
-            "[yellow]API is available beyond this device "
-            "(authentication required).[/yellow]"
-        )
-    console.print()
-
-    api_app = create_app(
-        agent_loop, model_name=model_name, request_timeout=timeout,
-        api_key=api_key,
-        prepare_agent=mcp_provider.connect,
-    )
-
-    async def on_startup(_app: Any) -> None:
-        await mcp_provider.connect()
-
-    async def on_cleanup(_app: Any) -> None:
-        try:
-            await agent_loop.aclose()
-        finally:
-            await mcp_provider.aclose()
-
-    api_app.on_startup.append(on_startup)
-    api_app.on_cleanup.append(on_cleanup)
-
-    def _log_aiohttp(message: object) -> None:
-        logger.info("{}", message)
-
-    web.run_app(api_app, host=host, port=port, print=_log_aiohttp)
 
 
 app.command(name="webui")(webui)

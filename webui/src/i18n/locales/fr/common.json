@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Enregistré. Redémarrez le service API pour appliquer les modifications.",
       "commandRuntime": {
         "custom": "Personnalisée (secondes)",
         "customLabel": "Durée personnalisée (secondes)",
@@ -585,8 +584,6 @@
         "gateway_host": {"label": "Adresse de la passerelle", "help": "Adresse de la passerelle ; configurez l’écoute WebUI séparément.\n\nAdresse d’écoute de la passerelle. L’adresse de WebSocket et de la WebUI se règle dans Canaux → WebSocket."},
         "gateway_port": {"label": "Port de la passerelle", "help": "Port de la passerelle ; les arguments de lancement sont prioritaires.\n\nPort enregistré. Les arguments de ligne de commande ont priorité."},
         "gateway_restart_mode": {"label": "Mode de redémarrage", "help": "Choisissez le redémarrage ; Automatique suit votre environnement.\n\nMode de redémarrage du processus. Le mode automatique dépend de l’environnement hôte."},
-        "api_host": {"label": "Adresse API", "help": "Définissez une clé avant l’accès réseau ; redémarrez l’API après modification.\n\nUne clé API est requise pour écouter sur une adresse autre que localhost. Configurez-la dans Système, puis redémarrez le service API pour appliquer les modifications."},
-        "api_timeout": {"label": "Délai API", "help": "Secondes maximales par requête API ; redémarrez pour appliquer.\n\nDurée maximale des requêtes. Redémarrez le service API pour appliquer les modifications."},
         "tools_image_generation_save_dir": {"label": "Dossier de sauvegarde", "help": "Chemin relatif dans le dossier des médias ; les images existantes ne sont pas déplacées.\n\nChemin relatif sous le dossier multimédia de nanobot. Les images existantes ne sont pas déplacées."}
       },
       "groups": {
@@ -603,7 +600,6 @@
         "safety": {"title": "Permissions globales", "help": "Réglez les limites de l’espace, les exceptions réseau et les installations distantes.\n\nRestrictions de l’espace de travail, réseaux privés et installations à distance."},
         "cli": {"title": "Limites CLI", "help": "Réglez les délais d’installation et d’exécution, et la durée du cache.\n\nDélais d’installation, d’exécution et de cache du catalogue."},
         "gateway": {"title": "Passerelle", "help": "Réglez le déploiement et le redémarrage."},
-        "api": {"title": "Réglages API", "help": "Réglez l’adresse d’écoute et le délai des requêtes."},
         "storage": {"title": "Stockage des images", "help": "Choisissez où enregistrer les images générées."},
         "maintenance": {"title": "Organisation de la mémoire", "help": ""},
         "web": {"title": "Accès web", "help": ""},
@@ -1237,15 +1233,6 @@
         "github": "Gérez les dépôts, issues et PR.",
         "supabase": "Consultez et gérez les projets."
       }
-    },
-    "api": {
-      "title": "Serveur API", "openaiCompatible": "API compatible OpenAI", "description": "Connectez-vous via une API compatible OpenAI.",
-      "start": "Démarrer le serveur API", "starting": "Démarrage...", "stop": "Arrêter", "stopping": "Arrêt...",
-      "access": "Accès", "thisDevice": "Cet appareil", "localNetwork": "Réseau local",
-      "localHelp": "Seul cet appareil peut se connecter.", "networkHelp": "L’accès réseau local nécessite une clé API.\n\nD’autres appareils peuvent se connecter ; une clé API est requise.",
-      "port": "Port", "portHelp": "Port local du service API.", "apiKey": "Clé API", "apiKeyHelp": "Envoyez la clé comme Bearer token.",
-      "apiKeyRequired": "Requise avant d’exposer l’API au réseau.", "apiKeyPlaceholder": "Saisissez une clé API",
-      "autoInstall": "Les dépendances du serveur API seront installées automatiquement au démarrage."
     },
     "observability": {
       "title": "Traces d’exécution", "configured": "Les identifiants de traçage sont disponibles pour nanobot.",

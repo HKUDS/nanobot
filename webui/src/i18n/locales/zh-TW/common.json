@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "已儲存，重新啟動 API 服務後生效。",
       "commandRuntime": {
         "custom": "自訂（秒）",
         "customLabel": "自訂執行時間（秒）",
@@ -585,8 +584,6 @@
         "gateway_host": {"label": "閘道器地址", "help": "閘道器地址，WebUI 監聽地址另設\n\n閘道器使用的地址。WebUI 的監聽地址需在聊天平臺的 WebSocket 設定中單獨配置。"},
         "gateway_port": {"label": "閘道連接埠", "help": "閘道器埠，啟動引數優先\n\n閘道器使用的埠。啟動時指定的命令列引數優先於此設定。"},
         "gateway_restart_mode": {"label": "重新啟動方式", "help": "選擇重啟方式，自動按環境決定\n\n選擇閘道器的重啟方式。“自動”會根據執行環境選擇。"},
-        "api_host": {"label": "API 地址", "help": "對外開放須設金鑰；修改後重啟 API\n\n允許其他裝置連線前，請先在“系統”中設定 API 金鑰。修改後需重啟 API 服務。"},
-        "api_timeout": {"label": "API 超時", "help": "API 最長等待秒數，重啟服務生效\n\n每次 API 請求最長等待多久。修改後需重啟 API 服務。"},
         "tools_image_generation_save_dir": {"label": "儲存目錄", "help": "媒體目錄內相對路徑，不遷移已有圖片\n\nnanobot 媒體目錄內的子目錄。請使用相對路徑，已有圖片不會遷移。"}
       },
       "groups": {
@@ -603,7 +600,6 @@
         "safety": {"title": "全域性許可權", "help": "設定目錄限制、網路例外和遠端安裝\n\n設定工作區訪問限制、網路訪問例外和遠端安裝許可權。"},
         "cli": {"title": "CLI 限制", "help": "設定安裝、執行超時和列表快取\n\n設定安裝和執行超時，以及應用列表的快取時長。"},
         "gateway": {"title": "閘道器", "help": "設定部署和重啟方式"},
-        "api": {"title": "API 設定", "help": "設定監聽地址和請求超時"},
         "storage": {"title": "圖片儲存", "help": "選擇生成圖片的儲存位置"},
         "maintenance": {"title": "記憶整理", "help": ""},
         "web": {"title": "網路存取", "help": ""},
@@ -1237,15 +1233,6 @@
         "github": "管理倉庫、Issue 和 PR",
         "supabase": "檢視和管理專案"
       }
-    },
-    "api": {
-      "title": "API 伺服器", "openaiCompatible": "OpenAI 相容 API", "description": "透過相容 OpenAI 的 API 連線",
-      "start": "啟動 API 伺服器", "starting": "正在啟動…", "stop": "停止", "stopping": "正在停止…",
-      "access": "存取範圍", "thisDevice": "僅此裝置", "localNetwork": "區域網路",
-      "localHelp": "僅當前裝置可連線", "networkHelp": "區域網可連線，須設定 API 金鑰\n\n區域網內其他裝置可以連線，因此必須設定 API 金鑰。",
-      "port": "連接埠", "portHelp": "API 服務使用的本地埠", "apiKey": "API 金鑰", "apiKeyHelp": "透過 Bearer Token 傳送金鑰",
-      "apiKeyRequired": "向區域網路開放 API 前必須設定金鑰。", "apiKeyPlaceholder": "輸入 API 金鑰",
-      "autoInstall": "啟動時會自動安裝 API 服務所需的套件。"
     },
     "observability": {
       "title": "執行追蹤", "configured": "nanobot 已偵測到追蹤憑證。",

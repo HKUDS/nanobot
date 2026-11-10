@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "已保存，重启 API 服务后生效。",
       "commandRuntime": {
         "custom": "自定义（秒）",
         "customLabel": "自定义运行时长（秒）",
@@ -702,14 +701,6 @@
           "label": "重启模式",
           "help": "选择重启方式，自动按环境决定\n\n选择网关的重启方式。“自动”会根据运行环境选择。"
         },
-        "api_host": {
-          "label": "API 地址",
-          "help": "对外开放须设密钥；修改后重启 API\n\n允许其他设备连接前，请先在“系统”中设置 API 密钥。修改后需重启 API 服务。"
-        },
-        "api_timeout": {
-          "label": "API 超时",
-          "help": "API 最长等待秒数，重启服务生效\n\n每次 API 请求最长等待多久。修改后需重启 API 服务。"
-        },
         "tools_image_generation_save_dir": {
           "label": "保存目录",
           "help": "媒体目录内相对路径，不迁移已有图片\n\nnanobot 媒体目录内的子目录。请使用相对路径，已有图片不会迁移。"
@@ -767,10 +758,6 @@
         "gateway": {
           "title": "网关",
           "help": "设置部署和重启方式"
-        },
-        "api": {
-          "title": "API 设置",
-          "help": "设置监听地址和请求超时"
         },
         "storage": {
           "title": "图片存储",
@@ -1432,27 +1419,6 @@
       "searchSupport": "搜索服务支持包",
       "searchInstallOnSave": "保存时会自动安装 Olostep 所需的软件包。",
       "installing": "正在安装所需软件包…"
-    },
-    "api": {
-      "title": "API 服务",
-      "openaiCompatible": "OpenAI 兼容 API",
-      "description": "通过兼容 OpenAI 的 API 连接",
-      "start": "启动 API 服务",
-      "starting": "正在启动...",
-      "stop": "停止",
-      "stopping": "正在停止...",
-      "access": "访问范围",
-      "thisDevice": "仅此设备",
-      "localNetwork": "局域网",
-      "localHelp": "仅当前设备可连接",
-      "networkHelp": "局域网可连接，须设置 API 密钥\n\n局域网内其他设备可以连接，因此必须设置 API 密钥。",
-      "port": "端口",
-      "portHelp": "API 服务使用的本地端口",
-      "apiKey": "API 密钥",
-      "apiKeyHelp": "通过 Bearer Token 发送密钥",
-      "apiKeyRequired": "向局域网开放 API 前必须设置密钥。",
-      "apiKeyPlaceholder": "输入 API 密钥",
-      "autoInstall": "启动时会自动安装 API 服务所需的软件包。"
     },
     "observability": {
       "title": "运行追踪",

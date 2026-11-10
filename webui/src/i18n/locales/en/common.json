@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Saved. Restart the API service to apply changes.",
       "commandRuntime": {
         "custom": "Custom (seconds)",
         "customLabel": "Custom runtime (seconds)",
@@ -702,14 +701,6 @@
           "label": "Restart mode",
           "help": "Choose a restart method; Automatic follows your environment.\n\nChoose how the gateway restarts. Automatic selects a method for your environment."
         },
-        "api_host": {
-          "label": "API address",
-          "help": "Set a key before allowing network access; restart the API after changes.\n\nSet an API key in System before binding to a network address. Restart the API service to apply changes."
-        },
-        "api_timeout": {
-          "label": "API timeout",
-          "help": "Maximum seconds per API request; restart to apply.\n\nHow long each API request can take. Restart the API service to apply changes."
-        },
         "tools_image_generation_save_dir": {
           "label": "Save directory",
           "help": "Relative path inside the media directory; existing images stay put.\n\nSubdirectory of nanobot’s media directory. Use a relative path; existing images are not moved."
@@ -767,10 +758,6 @@
         "gateway": {
           "title": "Gateway",
           "help": "Set deployment and restart options."
-        },
-        "api": {
-          "title": "API settings",
-          "help": "Set the listening address and request timeout."
         },
         "storage": {
           "title": "Image storage",
@@ -1432,27 +1419,6 @@
       "searchSupport": "Search dependencies",
       "searchInstallOnSave": "Required Olostep packages will be installed automatically when you save.",
       "installing": "Installing required packages…"
-    },
-    "api": {
-      "title": "API server",
-      "openaiCompatible": "OpenAI-compatible API",
-      "description": "Connect through an OpenAI-compatible API.",
-      "start": "Start API server",
-      "starting": "Starting...",
-      "stop": "Stop",
-      "stopping": "Stopping...",
-      "access": "Access",
-      "thisDevice": "This device",
-      "localNetwork": "Local network",
-      "localHelp": "Only this device can connect.",
-      "networkHelp": "LAN access requires an API key.\n\nOther devices can connect; an API key is required.",
-      "port": "Port",
-      "portHelp": "Local port used by the API service.",
-      "apiKey": "API key",
-      "apiKeyHelp": "Send the key as a Bearer token.",
-      "apiKeyRequired": "Required before exposing the API to your network.",
-      "apiKeyPlaceholder": "Enter an API key",
-      "autoInstall": "Required API server packages will be installed automatically when you start it."
     },
     "observability": {
       "title": "Run tracing",

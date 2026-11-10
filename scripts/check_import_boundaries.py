@@ -34,7 +34,6 @@ class Violation:
 
 
 _ADAPTERS = (
-    "nanobot.api",
     "nanobot.channels",
     "nanobot.cli",
     "nanobot.gateway",
@@ -63,7 +62,7 @@ IMPORT_RULES = (
         ("nanobot.update_service", "nanobot.update_plan", "nanobot.update_jobs",
          "nanobot.update_worker", "nanobot.update_stop",
          "nanobot.update_profiles", "nanobot.update_handoff", "nanobot.update_guidance"),
-        ("nanobot.agent", "nanobot.session", "nanobot.api", "nanobot.cli",
+        ("nanobot.agent", "nanobot.session", "nanobot.cli",
          "nanobot.channels", "nanobot.webui"),
     ),
     ImportRule(

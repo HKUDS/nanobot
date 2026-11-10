@@ -194,7 +194,6 @@ Default ports:
 |---|---|
 | Gateway health endpoint | `http://127.0.0.1:18790/health` |
 | WebUI/WebSocket channel | `http://127.0.0.1:8765` |
-| OpenAI-compatible API (`nanobot serve`) | `http://127.0.0.1:8900` |
 
 Common gateway checks:
 

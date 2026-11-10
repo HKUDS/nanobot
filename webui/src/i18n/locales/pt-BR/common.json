@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Salvo. Reinicie o serviço de API para aplicar as alterações.",
       "commandRuntime": {
         "custom": "Personalizada (segundos)",
         "customLabel": "Duração personalizada (segundos)",
@@ -585,8 +584,6 @@
         "gateway_host": {"label": "Endereço do gateway", "help": "Endereço do gateway; configure a escuta WebUI separadamente.\n\nEndereço em que o gateway recebe conexões. Os endereços de WebSocket e WebUI são configurados em Canais → WebSocket."},
         "gateway_port": {"label": "Porta do gateway", "help": "Porta do gateway; os argumentos de inicialização têm prioridade.\n\nPorta salva. Os argumentos de linha de comando têm prioridade."},
         "gateway_restart_mode": {"label": "Modo de reinicialização", "help": "Escolha como reiniciar; Automático segue o ambiente.\n\nMétodo de reinicialização do processo. O modo automático depende do ambiente do host."},
-        "api_host": {"label": "Endereço da API", "help": "Defina uma chave antes do acesso pela rede; reinicie a API após alterações.\n\nÉ necessária uma chave de API para receber conexões em um endereço diferente de localhost. Configure a chave em Sistema e reinicie o serviço de API para aplicar as alterações."},
-        "api_timeout": {"label": "Tempo limite da API", "help": "Máximo de segundos por solicitação API; reinicie para aplicar.\n\nDuração máxima das solicitações. Reinicie o serviço de API para aplicar as alterações."},
         "tools_image_generation_save_dir": {"label": "Pasta de destino", "help": "Caminho relativo dentro da pasta de mídia; imagens existentes não são movidas.\n\nCaminho relativo dentro da pasta de mídia do nanobot. As imagens existentes não são movidas."}
       },
       "groups": {
@@ -603,7 +600,6 @@
         "safety": {"title": "Permissões globais", "help": "Configure limites do espaço, exceções de rede e instalações remotas.\n\nRestrições do espaço de trabalho, redes privadas e instalações remotas."},
         "cli": {"title": "Limites CLI", "help": "Configure tempos limite de instalação e execução e duração do cache.\n\nTempos de instalação, execução e cache do catálogo."},
         "gateway": {"title": "Gateway", "help": "Configure implantação e reinício."},
-        "api": {"title": "Ajustes da API", "help": "Configure o endereço de escuta e o tempo limite das solicitações."},
         "storage": {"title": "Armazenamento de imagens", "help": "Escolha onde salvar as imagens geradas."},
         "maintenance": {"title": "Organização de memória", "help": ""},
         "web": {"title": "Acesso web", "help": ""},
@@ -1240,27 +1236,6 @@
       "searchSupport": "Dependências do serviço de busca",
       "searchInstallOnSave": "As dependências do Olostep serão instaladas automaticamente ao salvar.",
       "installing": "Instalando dependências…"
-    },
-    "api": {
-      "title": "Servidor de API",
-      "openaiCompatible": "API compatível com OpenAI",
-      "description": "Conecte por uma API compatível com OpenAI.",
-      "start": "Iniciar servidor de API",
-      "starting": "Iniciando...",
-      "stop": "Parar",
-      "stopping": "Parando...",
-      "access": "Acesso",
-      "thisDevice": "Este dispositivo",
-      "localNetwork": "Rede local",
-      "localHelp": "Somente este dispositivo pode conectar.",
-      "networkHelp": "O acesso pela LAN exige uma chave API.\n\nOutros dispositivos podem se conectar; é necessária uma chave de API.",
-      "port": "Porta",
-      "portHelp": "Porta local do serviço API.",
-      "apiKey": "Chave de API",
-      "apiKeyHelp": "Envie a chave como Bearer token.",
-      "apiKeyRequired": "Obrigatória antes de expor a API na rede.",
-      "apiKeyPlaceholder": "Informe uma chave de API",
-      "autoInstall": "As dependências do servidor de API serão instaladas automaticamente ao iniciá-lo."
     },
     "observability": {
       "title": "Rastreamento de execução",

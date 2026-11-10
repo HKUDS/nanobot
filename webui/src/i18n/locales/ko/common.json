@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "저장했습니다. API 서비스를 다시 시작하면 적용됩니다.",
       "commandRuntime": {
         "custom": "사용자 지정(초)",
         "customLabel": "사용자 지정 실행 시간(초)",
@@ -585,8 +584,6 @@
         "gateway_host": {"label": "게이트웨이 주소", "help": "게이트웨이 주소입니다. WebUI 수신 주소는 별도로 설정합니다.\n\n게이트웨이가 연결을 수신하는 주소입니다. WebSocket과 WebUI 주소는 채널 → WebSocket에서 설정합니다."},
         "gateway_port": {"label": "게이트웨이 포트", "help": "게이트웨이 포트입니다. 시작 인수가 우선합니다.\n\n저장할 포트입니다. 명령줄 인수가 우선 적용됩니다."},
         "gateway_restart_mode": {"label": "다시 시작 방식", "help": "재시작 방법을 선택하세요. 자동은 실행 환경에 맞춥니다.\n\n프로세스를 다시 시작하는 방식입니다. 자동 모드는 호스트 환경에 따라 선택합니다."},
-        "api_host": {"label": "API 주소", "help": "네트워크 접근 허용 전 키를 설정하고, 변경 후 API를 재시작하세요.\n\nlocalhost 이외의 주소에서 연결을 받으려면 API 키가 필요합니다. 시스템에서 키를 설정하고 API 서비스를 다시 시작해 변경 사항을 적용하세요."},
-        "api_timeout": {"label": "API 제한 시간", "help": "API 요청당 최대 초입니다. 적용하려면 재시작하세요.\n\n요청에 허용되는 최대 시간입니다. API 서비스를 다시 시작하면 적용됩니다."},
         "tools_image_generation_save_dir": {"label": "저장 디렉터리", "help": "미디어 디렉터리 내부의 상대 경로입니다. 기존 이미지는 이동하지 않습니다.\n\nnanobot 미디어 폴더 아래의 상대 경로입니다. 기존 이미지는 이동하지 않습니다."}
       },
       "groups": {
@@ -603,7 +600,6 @@
         "safety": {"title": "전체 권한", "help": "작업 공간 제한, 네트워크 예외 및 원격 설치를 설정하세요.\n\n작업 공간 제한, 사설 네트워크 및 원격 설치입니다."},
         "cli": {"title": "CLI 제한", "help": "설치와 실행 제한 시간, 목록 캐시 시간을 설정하세요.\n\n설치, 실행 및 카탈로그 캐시의 시간 제한입니다."},
         "gateway": {"title": "게이트웨이", "help": "배포와 재시작 옵션을 설정하세요."},
-        "api": {"title": "API 설정", "help": "수신 주소와 요청 제한 시간을 설정하세요."},
         "storage": {"title": "이미지 저장", "help": "생성한 이미지의 저장 위치를 선택하세요."},
         "maintenance": {"title": "메모리 정리", "help": ""},
         "web": {"title": "웹 접근", "help": ""},
@@ -1237,15 +1233,6 @@
         "github": "저장소, 이슈 및 PR을 관리합니다.",
         "supabase": "프로젝트를 확인하고 관리합니다."
       }
-    },
-    "api": {
-      "title": "API 서버", "openaiCompatible": "OpenAI 호환 API", "description": "OpenAI 호환 API로 연결합니다.",
-      "start": "API 서버 시작", "starting": "시작 중...", "stop": "중지", "stopping": "중지 중...",
-      "access": "접근", "thisDevice": "이 기기", "localNetwork": "로컬 네트워크",
-      "localHelp": "이 기기만 연결할 수 있습니다.", "networkHelp": "LAN 접근에는 API 키가 필요합니다.\n\n다른 기기도 연결할 수 있으므로 API 키가 필요합니다.",
-      "port": "포트", "portHelp": "API 서비스가 사용하는 로컬 포트입니다.", "apiKey": "API 키", "apiKeyHelp": "키를 Bearer Token으로 전송합니다.",
-      "apiKeyRequired": "네트워크에 공개하기 전에 필요합니다.", "apiKeyPlaceholder": "API 키 입력",
-      "autoInstall": "서버를 시작할 때 필요한 패키지를 자동으로 설치합니다."
     },
     "observability": {
       "title": "실행 추적", "configured": "nanobot이 추적 인증 정보을 사용할 수 있습니다.",
