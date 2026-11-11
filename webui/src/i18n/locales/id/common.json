@@ -1963,7 +1963,6 @@
           "loaded": "Dimuat",
           "unloaded": "Belum dimuat",
           "expand": "Perbesar konteks",
-          "collapse": "Perkecil konteks",
           "noFiles": "Belum ada konteks yang tercatat",
           "estimatedNodeTokens": "Sekitar {{value}} token",
           "openFile": "Buka berkas",

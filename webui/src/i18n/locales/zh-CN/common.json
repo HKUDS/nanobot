@@ -2147,7 +2147,6 @@
           "loaded": "已加载",
           "unloaded": "未加载",
           "expand": "展开上下文面板",
-          "collapse": "收起上下文面板",
           "noFiles": "暂无上下文记录",
           "estimatedNodeTokens": "约 {{value}} tokens",
           "openFile": "打开文件",

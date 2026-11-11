@@ -1963,7 +1963,6 @@
           "loaded": "已載入",
           "unloaded": "未載入",
           "expand": "展開上下文面板",
-          "collapse": "收合上下文面板",
           "noFiles": "暫無上下文紀錄",
           "estimatedNodeTokens": "約 {{value}} tokens",
           "openFile": "開啟檔案",

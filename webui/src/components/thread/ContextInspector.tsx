@@ -57,13 +57,14 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   const input = usageSnapshot ? usageSnapshot.usage?.prompt_tokens : latestRound?.inputTokens;
   const cachedWidth = cached !== undefined && windowTokens ? Math.min(used ?? 0, cached / windowTokens * 100) : 0;
   const duration = usageSnapshot ? usageSnapshot.usage?.generation_ms : latestRound?.generationMs;
-  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const expand = useCallback(() => setExpanded(true), []);
+  const closeExpanded = useCallback(() => setExpanded(false), []);
   const openFileCallback = useRef(onOpenFile);
   openFileCallback.current = onOpenFile;
   const openFile = useCallback((path: string) => { setExpanded(false); openFileCallback.current?.(path); }, []);
   const content = (large: boolean) => <motion.div layoutId={layoutId} transition={{ duration: reducedMotion ? 0 : 0.25, ease: [0.2, 0, 0, 1] }} className={cn("flex flex-col gap-3", sidebar && !large && "h-full min-h-0")}>
     <Suspense fallback={<div aria-busy="true" className={cn(surface, "min-h-[300px]", sidebar && !large && "min-h-0 flex-1")} />}>
-      <ContextGraphScene graph={snapshot?.graph ?? EMPTY_GRAPH} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? toggleExpanded : undefined} onOpenFile={onOpenFile ? openFile : undefined} />
+      <ContextGraphScene graph={snapshot?.graph ?? EMPTY_GRAPH} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? expand : undefined} onClose={expandable ? closeExpanded : undefined} onOpenFile={onOpenFile ? openFile : undefined} />
     </Suspense>
     <div className="flex shrink-0 items-center gap-3">
     <div onPointerEnter={() => setMeterHover(true)} onPointerLeave={() => setMeterHover(false)} className={cn(surface, "relative flex h-14 min-w-0 flex-1 items-center gap-4 px-4 transition-transform duration-150 ease-out motion-reduce:transition-none", meterHover && "scale-[1.015]")}>

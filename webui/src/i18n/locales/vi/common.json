@@ -1963,7 +1963,6 @@
           "loaded": "Đã tải",
           "unloaded": "Chưa tải",
           "expand": "Mở rộng ngữ cảnh",
-          "collapse": "Thu gọn ngữ cảnh",
           "noFiles": "Chưa có ngữ cảnh được ghi nhận",
           "estimatedNodeTokens": "Khoảng {{value}} token",
           "openFile": "Mở tệp",

@@ -1963,7 +1963,6 @@
           "loaded": "불러옴",
           "unloaded": "불러오지 않음",
           "expand": "컨텍스트 확대",
-          "collapse": "컨텍스트 축소",
           "noFiles": "아직 기록된 컨텍스트가 없습니다",
           "estimatedNodeTokens": "약 {{value}} 토큰",
           "openFile": "파일 열기",

@@ -89,6 +89,15 @@ test.describe("touch graph", () => {
     await expect(page.locator("output")).toHaveText("/a.md");
     await expect(page.getByTestId("context-sidebar")).toHaveCount(0);
   });
+  test("closes the expanded panel by touch", async ({ page }) => {
+    await page.goto("/browser/context-graph.html?single");
+    await page.getByRole("button", { name: "Expand context panel" }).tap();
+    const dialog = page.getByRole("dialog", { name: "Context usage" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Close" }).tap();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Expand context panel" })).toBeVisible();
+  });
   test("keeps a 44px touch target and redraws on theme changes", async ({ page }) => {
     await page.goto("/browser/context-graph.html?single");
     const node = page.getByRole("button", { name: "a.md", exact: true });

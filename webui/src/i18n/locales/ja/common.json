@@ -1963,7 +1963,6 @@
           "loaded": "読み込み済み",
           "unloaded": "未読み込み",
           "expand": "コンテキストを拡大",
-          "collapse": "コンテキストを縮小",
           "noFiles": "コンテキストはまだ記録されていません",
           "estimatedNodeTokens": "約 {{value}} トークン",
           "openFile": "ファイルを開く",

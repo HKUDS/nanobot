@@ -1963,7 +1963,6 @@
           "loaded": "Cargado",
           "unloaded": "Sin cargar",
           "expand": "Ampliar contexto",
-          "collapse": "Reducir contexto",
           "noFiles": "Aún no hay contexto registrado",
           "estimatedNodeTokens": "Unos {{value}} tokens",
           "openFile": "Abrir archivo",
