@@ -7,6 +7,22 @@ from typing import Literal
 from nanobot.providers.base import LLMUsage
 
 SubagentState = Literal["queued", "running", "stopping", "done", "incomplete", "error", "cancelled", "interrupted"]
+ACTIVE_SUBAGENT_STATES = frozenset({"queued", "running", "stopping"})
+
+
+@dataclass(frozen=True, slots=True)
+class SubagentHistoryScope:
+    mode: Literal["page", "unlinked"]
+    message_ids: frozenset[str] = frozenset()
+    turn_ids: frozenset[str] = frozenset()
+
+    def includes(self, status: SubagentStatus) -> bool:
+        if status.state in ACTIVE_SUBAGENT_STATES:
+            return True
+        if self.mode == "unlinked":
+            return not status.origin_message_id and not status.origin_turn_id
+        return (status.origin_message_id in self.message_ids
+                or status.origin_turn_id in self.turn_ids)
 
 
 class SubagentSessionError(ValueError):

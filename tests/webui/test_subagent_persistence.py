@@ -7,7 +7,7 @@ import textwrap
 import threading
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import pytest
 from websockets.datastructures import Headers
@@ -844,9 +844,18 @@ async def test_temporary_parent_never_persists_task_content(tmp_path, monkeypatc
         assert sessions.get_cached_metadata(child.key)[TASK_METADATA_KEY]["state"] == "done"
         assert manager.check(task_id, parent.key).result == "Private findings"
         assert len(manager.statuses_for_session(parent.key)) == 1
+        gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+        path = "/api/sessions/websocket%3Atemporary/subagents"
+        empty = await gateway.http.dispatch(connection, Request(path + "?scope=page", headers))
+        unlinked = await gateway.http.dispatch(connection, Request(path + "?scope=unlinked", headers))
+        assert json.loads(empty.body)["tasks"] == []
+        assert [task["task_id"] for task in json.loads(unlinked.body)["tasks"]] == [task_id]
         reopened, _, _ = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
         assert reopened.statuses_for_session(parent.key) == {}
         await reopened.close()
+        await sessions.state.delete(parent.key)
+        deleted = await gateway.http.dispatch(connection, Request(path + "?scope=unlinked", headers))
+        assert json.loads(deleted.body)["tasks"] == []
     finally:
         await manager.close()
 
@@ -927,3 +936,342 @@ async def test_unreadable_task_history_is_not_an_empty_list(tmp_path):
         assert "task history unavailable" in response.body.decode()
     finally:
         await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_scoped_task_history_queries_only_matching_children_and_all_active(tmp_path, monkeypatch):
+    import nanobot.session.sqlite_store as sqlite_store
+
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    manager._run_slots = asyncio.Semaphore(2)
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Verified"))
+    owner, other = "websocket:parent", "websocket:other"
+    ids = {}
+    entered, release = asyncio.Queue(), asyncio.Event()
+    cancel_task = None
+
+    async def hold(_spec):
+        await entered.put(True)
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            await release.wait()
+        return AgentRunResult(messages=[], final_content="Finished")
+
+    try:
+        for label, parent, message_id, turn_id in (
+            ("exact", owner, "prompt-in", "different-turn"),
+            ("fallback", owner, "old-replay-id", "turn-in"),
+            ("same-turn-off-page", owner, "not-on-page", "turn-in"),
+            ("old", owner, "prompt-old", "turn-old"),
+            ("unlinked", owner, None, None),
+            ("unlinked-empty", owner, "", ""),
+            ("half-linked", owner, "missing-prompt", None),
+            ("foreign", other, "prompt-in", "turn-in"),
+        ):
+            await manager.run_inline(label, session_key=parent, origin_message_id=message_id,
+                                     origin_turn_id=turn_id, runtime=runtime)
+            ids[label] = next(tid for tid, status in manager._terminal_statuses.items()
+                              if status.task_description == label)
+        manager.runner.run = hold
+        for label in ("running", "stopping"):
+            await manager.spawn(label, session_key=owner, origin_message_id="off-page", runtime=runtime)
+            await asyncio.wait_for(entered.get(), 15)
+            ids[label] = next(tid for tid, record in manager._tasks.items()
+                              if record.status.task_description == label)
+        await manager.spawn("queued", session_key=owner, origin_message_id="off-page", runtime=runtime)
+        ids["queued"] = next(tid for tid, record in manager._tasks.items()
+                             if record.status.task_description == "queued")
+        cancel_task = asyncio.create_task(manager.cancel(ids["stopping"], owner))
+        for _ in range(1000):
+            if manager._tasks[ids["stopping"]].status.state == "stopping":
+                break
+            await asyncio.sleep(0.01)
+        assert manager._tasks[ids["stopping"]].status.state == "stopping"
+        gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+        path = "/api/sessions/websocket%3Aparent/subagents"
+        blocked = set()
+        original_object = sqlite_store._object
+        original_contains, original_status = manager.sessions.contains, manager.sessions.status
+
+        def checked_object(raw):
+            assert not any(f'"task_id":"{task_id}"' in raw for task_id in blocked), "decoded unrelated task"
+            return original_object(raw)
+
+        def checked_contains(task_id, parent):
+            assert task_id not in blocked, "looked up unrelated retained task"
+            return original_contains(task_id, parent)
+
+        def checked_status(task_id, parent):
+            assert task_id not in blocked, "read unrelated retained task"
+            return original_status(task_id, parent)
+
+        monkeypatch.setattr(sqlite_store, "_object", checked_object)
+        monkeypatch.setattr(manager.sessions, "contains", checked_contains)
+        monkeypatch.setattr(manager.sessions, "status", checked_status)
+        active = {ids[name] for name in ("running", "stopping", "queued")}
+
+        async def read(query):
+            response = await gateway.http.dispatch(connection, Request(path + query, headers))
+            assert response.status_code == 200
+            assert response.headers["Cache-Control"] == "no-store"
+            return {task["task_id"]: task for task in json.loads(response.body)["tasks"]}
+
+        blocked.update(ids[name] for name in ("old", "unlinked", "unlinked-empty", "half-linked", "foreign"))
+        page = await read("?scope=page&message_id=prompt-in&turn_id=turn-in")
+        # A turn match is a candidate even when its message ID is outside this page.
+        assert set(page) == active | {ids["exact"], ids["fallback"], ids["same-turn-off-page"]}
+        assert {page[ids[name]]["state"] for name in ("running", "stopping", "queued")} == {
+            "running", "stopping", "queued",
+        }
+        blocked.update(ids[name] for name in ("exact", "fallback", "same-turn-off-page"))
+        assert set(await read("?scope=page")) == active
+        blocked.difference_update({ids["unlinked"], ids["unlinked-empty"]})
+        assert set(await read("?scope=unlinked")) == active | {ids["unlinked"], ids["unlinked-empty"]}
+        blocked.clear()
+        assert set(await read("")) == set(ids.values()) - {ids["foreign"]}
+        assert set(await read("?message_id=ignored&extra=legacy")) == set(ids.values()) - {ids["foreign"]}
+        denied = await gateway.http.dispatch(connection, Request(path + "?scope=page", Headers()))
+        assert denied.status_code == 401
+    finally:
+        release.set()
+        if cancel_task is not None:
+            await asyncio.gather(cancel_task, return_exceptions=True)
+        await manager.close()
+        await sessions.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_scoped_task_history_http_validation_and_capability(tmp_path):
+    manager, sessions, _ = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    path = "/api/sessions/websocket%3Aparent/subagents"
+    try:
+        bootstrap = await gateway.http.dispatch(connection, Request(
+            "/webui/bootstrap", Headers({"Host": "127.0.0.1:8765"}),
+        ))
+        assert bootstrap.status_code == 200
+        contract = json.loads(bootstrap.body)["terminal"]["webui"]
+        assert contract["min_protocol"] <= 1 <= contract["max_protocol"]
+        assert "webui.subagents.scoped-history.v1" in contract["capabilities"]
+        valid = [
+            "?scope=page", "?scope=unlinked",
+            "?" + urlencode([("scope", "page")] + [("message_id", "x")] * 80),
+            "?" + urlencode({"scope": "page", "turn_id": "é" * 256}),
+        ]
+        invalid = [
+            "?scope=unknown", "?scope=", "?scope=page&scope=page", "?scope=unlinked&message_id=x",
+            "?scope=page&message_id=", "?scope=page&turn_id=%20", "?scope=page&message_id=%00",
+            "?scope=page&message_id=%FF", "?scope=page&message_id=%ZZ", "?scope=page&unknown=x",
+            "?" + urlencode([("scope", "page")] + [("message_id", "x")] * 80 + [("turn_id", "x")]),
+            "?" + urlencode({"scope": "page", "message_id": "é" * 257}),
+        ]
+        for query in valid:
+            assert (await gateway.http.dispatch(connection, Request(path + query, headers))).status_code == 200
+        for query in invalid:
+            assert (await gateway.http.dispatch(connection, Request(path + query, headers))).status_code == 400
+        token = next(iter(gateway.tokens.api_tokens))
+        assert (await gateway.http.dispatch(connection, Request(path + f"?scope=page&token={token}", Headers()))).status_code == 200
+        assert (await gateway.http.dispatch(connection, Request(path + "?scope=unknown", Headers()))).status_code == 401
+        assert (await gateway.http.dispatch(connection, Request(path.replace("websocket%3Aparent", "subagent%3Aother") + "?scope=page", headers))).status_code == 404
+    finally:
+        await manager.close()
+        await sessions.state.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome,query", [
+    ("finish", "?scope=page&turn_id=off-page"),
+    ("finish", "?scope=page"),
+    ("newer-persisted", "?scope=page&turn_id=off-page"),
+    ("delete", "?scope=page&turn_id=off-page"),
+])
+async def test_scoped_active_completion_after_index_read_is_refreshed(tmp_path, monkeypatch, outcome, query):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    entered, finish = asyncio.Event(), asyncio.Event()
+    loaded, release = asyncio.Event(), threading.Event()
+    loop, owner_thread = asyncio.get_running_loop(), threading.get_ident()
+    original_load, original_status = manager.sessions.load, manager.sessions.status
+    refreshed = []
+    request = None
+
+    def observed_status(task_id, owner):
+        refreshed.append(task_id)
+        return original_status(task_id, owner)
+
+    async def run(_spec):
+        entered.set()
+        await finish.wait()
+        return AgentRunResult(messages=[], final_content="Verified")
+
+    def paused_load(owner, scope):
+        assert threading.get_ident() != owner_thread
+        statuses = original_load(owner, scope)
+        loop.call_soon_threadsafe(loaded.set)
+        assert release.wait(15), "scoped history read was not released"
+        return statuses
+
+    manager.runner.run = run
+    try:
+        await manager.spawn("off-page", session_key="websocket:parent", origin_turn_id="off-page", runtime=runtime)
+        await asyncio.wait_for(entered.wait(), 15)
+        task_id, = manager._running_tasks
+        previous_revision = manager._tasks[task_id].status.revision
+        execution = manager._running_tasks[task_id]
+        monkeypatch.setattr(manager.sessions, "load", paused_load)
+        monkeypatch.setattr(manager.sessions, "status", observed_status)
+        request = asyncio.create_task(gateway.http.dispatch(connection, Request(
+            "/api/sessions/websocket%3Aparent/subagents" + query, headers,
+        )))
+        await asyncio.wait_for(loaded.wait(), 15)
+        finish.set()
+        await asyncio.wait_for(execution, 15)
+        if outcome == "newer-persisted":
+            key = SubagentSessions.key(task_id)
+            metadata = sessions.read_session_metadata(key)["metadata"][TASK_METADATA_KEY]
+            metadata.update(revision=metadata["revision"] + 10, result="Newer persisted result")
+            await sessions.state.update_metadata(key, {TASK_METADATA_KEY: metadata})
+        elif outcome == "delete":
+            await sessions.state.delete("websocket:parent")
+        release.set()
+        response = await asyncio.wait_for(request, 15)
+        assert response.status_code == 200
+        tasks = json.loads(response.body)["tasks"]
+        if outcome == "delete":
+            assert tasks == []
+        else:
+            assert task_id in refreshed
+            if query == "?scope=page":
+                assert tasks == []
+            else:
+                task, = tasks
+                assert task["task_id"] == task_id and task["state"] == "done"
+                assert task["revision"] > previous_revision
+                assert task["result"] == ("Newer persisted result" if outcome == "newer-persisted" else "Verified")
+    finally:
+        release.set()
+        finish.set()
+        if request is not None:
+            await asyncio.gather(request, return_exceptions=True)
+        await manager.close()
+        await sessions.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_scoped_read_handles_completion_before_terminal_status_is_saved(tmp_path, monkeypatch):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    entered, finish, finishing, save_terminal = (asyncio.Event() for _ in range(4))
+    loaded, release_history = asyncio.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    original_load, original_save = manager.sessions.load, manager._save_transcript
+    request = None
+
+    async def run(_spec):
+        entered.set()
+        await finish.wait()
+        return AgentRunResult(messages=[], final_content="Verified")
+
+    def paused_load(owner, scope):
+        result = original_load(owner, scope)
+        loop.call_soon_threadsafe(loaded.set)
+        assert release_history.wait(15)
+        return result
+
+    async def paused_save(record):
+        finishing.set()
+        await save_terminal.wait()
+        await original_save(record)
+
+    manager.runner.run = run
+    monkeypatch.setattr(manager, "_save_transcript", paused_save)
+    try:
+        await manager.spawn("off-page", session_key="websocket:parent", origin_turn_id="off-page", runtime=runtime)
+        await asyncio.wait_for(entered.wait(), 15)
+        task_id, = manager._running_tasks
+        monkeypatch.setattr(manager.sessions, "load", paused_load)
+        path = "/api/sessions/websocket%3Aparent/subagents"
+        request = asyncio.create_task(gateway.http.dispatch(connection, Request(
+            path + "?scope=page&turn_id=off-page", headers,
+        )))
+        await asyncio.wait_for(loaded.wait(), 15)
+        finish.set()
+        await asyncio.wait_for(finishing.wait(), 15)
+        assert manager.sessions.status(task_id, "websocket:parent").state == "running"
+        release_history.set()
+        response = await asyncio.wait_for(request, 15)
+        task, = json.loads(response.body)["tasks"]
+        assert task["task_id"] == task_id and task["state"] == "done" and task["result"] == "Verified"
+        # A later empty page must not resurrect the still-persisted active observation.
+        monkeypatch.setattr(manager.sessions, "load", original_load)
+        response = await gateway.http.dispatch(connection, Request(path + "?scope=page", headers))
+        assert json.loads(response.body)["tasks"] == []
+    finally:
+        release_history.set()
+        finish.set()
+        save_terminal.set()
+        if request is not None:
+            await asyncio.gather(request, return_exceptions=True)
+        await manager.close()
+        await sessions.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_empty_scoped_page_refreshes_task_started_during_history_read(tmp_path, monkeypatch):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    before_query, loaded, entered, finish = (asyncio.Event() for _ in range(4))
+    query, release = threading.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    original_load, original_status = manager.sessions.load, manager.sessions.status
+    refreshed = []
+    request = None
+
+    async def run(_spec):
+        entered.set()
+        await finish.wait()
+        return AgentRunResult(messages=[], final_content="Verified")
+
+    def paused_load(owner, scope):
+        loop.call_soon_threadsafe(before_query.set)
+        assert query.wait(15)
+        statuses = original_load(owner, scope)
+        loop.call_soon_threadsafe(loaded.set)
+        assert release.wait(15)
+        return statuses
+
+    def observed_status(task_id, owner):
+        refreshed.append(task_id)
+        return original_status(task_id, owner)
+
+    manager.runner.run = run
+    try:
+        await sessions.state.get("websocket:parent")
+        monkeypatch.setattr(manager.sessions, "load", paused_load)
+        monkeypatch.setattr(manager.sessions, "status", observed_status)
+        request = asyncio.create_task(gateway.http.dispatch(connection, Request(
+            "/api/sessions/websocket%3Aparent/subagents?scope=page", headers,
+        )))
+        await asyncio.wait_for(before_query.wait(), 15)
+        await manager.spawn("started during read", session_key="websocket:parent", runtime=runtime)
+        await asyncio.wait_for(entered.wait(), 15)
+        task_id, = manager._running_tasks
+        execution = manager._running_tasks[task_id]
+        query.set()
+        await asyncio.wait_for(loaded.wait(), 15)
+        finish.set()
+        await asyncio.wait_for(execution, 15)
+        release.set()
+        response = await asyncio.wait_for(request, 15)
+        assert response.status_code == 200
+        assert json.loads(response.body)["tasks"] == []
+        assert task_id in refreshed
+    finally:
+        query.set()
+        release.set()
+        finish.set()
+        if request is not None:
+            await asyncio.gather(request, return_exceptions=True)
+        await manager.close()
+        await sessions.state.aclose()

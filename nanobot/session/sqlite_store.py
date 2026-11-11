@@ -123,9 +123,45 @@ def _create_schema_v5(db: sqlite3.Connection) -> None:
     ) WHERE kind='input'""")
 
 
+# The CASE also makes the partial indexes safe to build over damaged metadata.
+_SUBAGENT_INDEX_PREDICATE = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.session_type')='subagent' ELSE 0 END"
+_SUBAGENT_PARENT = "json_extract(metadata, '$.parent_session_key')"
+_SUBAGENT_MESSAGE = "nullif(json_extract(metadata, '$.subagent_task.origin_message_id'), '')"
+_SUBAGENT_TURN = "nullif(json_extract(metadata, '$.subagent_task.origin_turn_id'), '')"
+_SUBAGENT_STATE = "json_extract(metadata, '$.subagent_task.state')"
+
+
+def _create_schema_v6(db: sqlite3.Connection) -> None:
+    for name, columns in (
+        ("subagent_origin_message", f"{_SUBAGENT_PARENT}, {_SUBAGENT_MESSAGE}, {_SUBAGENT_TURN}"),
+        ("subagent_origin_turn", f"{_SUBAGENT_PARENT}, {_SUBAGENT_TURN}"),
+        ("subagent_active_state", f"{_SUBAGENT_PARENT}, {_SUBAGENT_STATE}"),
+    ):
+        db.execute(f"CREATE INDEX {name} ON sessions ({columns}) WHERE {_SUBAGENT_INDEX_PREDICATE}")
+
+
+def _scoped_subagent_query(
+    parent_key: str, message_ids: tuple[str, ...], turn_ids: tuple[str, ...], *, unlinked: bool,
+) -> tuple[str, tuple[str, ...]]:
+    base = "SELECT key, created_at, updated_at, metadata FROM sessions"
+    predicate = f"{_SUBAGENT_INDEX_PREDICATE} AND {_SUBAGENT_PARENT}=?"
+    queries = [f"{base} WHERE {predicate} AND {_SUBAGENT_STATE} IN ('queued', 'running', 'stopping')"]
+    params = [parent_key]
+    if unlinked:
+        queries.append(f"{base} WHERE {predicate} AND {_SUBAGENT_MESSAGE} IS NULL AND {_SUBAGENT_TURN} IS NULL")
+        params.append(parent_key)
+    else:
+        for expression, ids in ((_SUBAGENT_MESSAGE, message_ids), (_SUBAGENT_TURN, turn_ids)):
+            if ids:
+                queries.append(f"{base} WHERE {predicate} AND {expression} IN (SELECT value FROM json_each(?))")
+                params.extend((parent_key, _encode(ids)))
+    return " UNION ".join(queries) + " ORDER BY updated_at DESC", tuple(params)
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4, _create_schema_v5,
+    _create_schema_v6,
 )
 
 
@@ -727,6 +763,15 @@ class SqliteSessionStore:
                             ORDER BY updated_at DESC""",
                         (parent_key,),
                     )]
+
+    def list_scoped_subagent_metadata(
+        self, parent_key: str, message_ids: tuple[str, ...], turn_ids: tuple[str, ...], *, unlinked: bool,
+    ) -> list[SessionMetadataPayload]:
+        """Read only matching child headers and active tasks, without decoding other sessions."""
+        query, params = _scoped_subagent_query(parent_key, message_ids, turn_ids, unlinked=unlinked)
+        with self.transaction(write=False) as db:
+            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
+                     "metadata": _object(row[3])} for row in db.execute(query, params)]
 
     def list_metadata(self) -> list[dict[str, Any]]:
         with self.transaction(write=False) as db:

@@ -18,8 +18,8 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from urllib.parse import parse_qs, quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
 from websockets.datastructures import Headers
@@ -27,7 +27,7 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.agent.subagent import SubagentControlError
-from nanobot.agent.subagent_status import SubagentSessionError
+from nanobot.agent.subagent_status import SubagentHistoryScope, SubagentSessionError
 from nanobot.command.application import builtin_command_palette
 from nanobot.context_graph import ContextGraph
 from nanobot.cron.binding import CronBindingError, binding_revision
@@ -910,6 +910,31 @@ class GatewayHTTPHandler:
             return _http_error(exc.status, str(exc))
         return _http_json_response(result)
 
+    @staticmethod
+    def _subagent_history_scope(path: str) -> SubagentHistoryScope | None:
+        # Unscoped requests retain the original behavior, including ignored query parameters.
+        if "scope" not in _parse_query(path):
+            return None
+        raw = urlsplit(path).query
+        if re.search(r"%(?![0-9a-fA-F]{2})", raw):
+            raise ValueError("invalid subagent history query")
+        try:
+            query = parse_qs(raw, keep_blank_values=True, errors="strict")
+            modes = query.get("scope", [])
+            if (len(modes) != 1 or modes[0] not in {"page", "unlinked"}
+                    or set(query) - {"scope", "message_id", "turn_id", "token"}):
+                raise ValueError("invalid subagent history scope")
+            message_ids, turn_ids = query.get("message_id", []), query.get("turn_id", [])
+            ids = message_ids + turn_ids
+            if (len(ids) > 80 or (modes[0] == "unlinked" and ids)
+                    or any(not item.strip() or len(item.encode("utf-8")) > 512
+                           or any(ord(char) < 32 or ord(char) == 127 for char in item) for item in ids)):
+                raise ValueError("invalid subagent history IDs")
+        except (UnicodeDecodeError, UnicodeEncodeError) as exc:
+            raise ValueError("invalid subagent history query") from exc
+        mode = cast(Literal["page", "unlinked"], modes[0])
+        return SubagentHistoryScope(mode, frozenset(message_ids), frozenset(turn_ids))
+
     async def _handle_subagents_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -918,10 +943,14 @@ class GatewayHTTPHandler:
             return _http_error(400, "invalid session key")
         if not is_webui_session_key(session_key):
             return _http_error(404, "session not found")
+        try:
+            scope = self._subagent_history_scope(request.path)
+        except ValueError:
+            return _http_error(400, "invalid subagent history query")
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
         try:
-            statuses = await self.subagent_manager.read_statuses_for_session(session_key)
+            statuses = await self.subagent_manager.read_statuses_for_session(session_key, scope)
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response({

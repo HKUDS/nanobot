@@ -19,8 +19,12 @@ from nanobot.agent.hooks import create_file_edit_activity_hook
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.session_activity import SessionActivity
 from nanobot.agent.subagent_sessions import SubagentSessions
+from nanobot.agent.subagent_status import (
+    ACTIVE_SUBAGENT_STATES,
+    SubagentHistoryScope,
+    SubagentStatus,
+)
 from nanobot.agent.subagent_status import SubagentState as SubagentState
-from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import (
     RequestContext,
@@ -433,27 +437,71 @@ class SubagentManager:
             **deepcopy(self._terminal_statuses),
         }
 
-    def _runtime_statuses_for_session(self, session_key: str) -> dict[str, SubagentStatus]:
+    def _runtime_statuses_for_session(
+        self, session_key: str, scope: SubagentHistoryScope | None = None,
+    ) -> dict[str, SubagentStatus]:
         return {
             **{tid: record.snapshot() for tid, record in self._tasks.items()
-               if record.status.owner == session_key and record.status.finished_at is None},
+               if record.status.owner == session_key
+               and (record.status.finished_at is None or scope is not None)
+               and (scope is None or scope.includes(record.status))},
             **{tid: deepcopy(status) for tid, status in self._terminal_statuses.items()
-               if status.owner == session_key},
+               if status.owner == session_key and (scope is None or scope.includes(status))},
+        }
+
+    def _excluded_terminal_revisions(self, session_key: str, scope: SubagentHistoryScope) -> dict[str, int]:
+        # A finishing task can already be terminal in memory while its last saved state is active.
+        return {
+            **{tid: record.status.revision for tid, record in self._tasks.items()
+               if record.status.owner == session_key and record.status.state not in ACTIVE_SUBAGENT_STATES
+               and not scope.includes(record.status)},
+            **{tid: status.revision for tid, status in self._terminal_statuses.items()
+               if status.owner == session_key and not scope.includes(status)},
         }
 
     def _merge_session_statuses(
         self, session_key: str, runtime: Mapping[str, SubagentStatus], *, include_history: bool,
-    ) -> Mapping[str, SubagentStatus]:
+        scope: SubagentHistoryScope | None = None, excluded: Mapping[str, int] | None = None,
+    ) -> dict[str, SubagentStatus]:
         if self.sessions is not None and not self.sessions.exists(session_key):
             return {}
-        statuses = self.sessions.load(session_key) if include_history and self.sessions is not None else {}
+        if include_history and self.sessions is not None:
+            statuses = self.sessions.load(session_key) if scope is None else self.sessions.load(session_key, scope)
+        else:
+            statuses = {}
+        for task_id, revision in (excluded or {}).items():
+            if task_id in statuses and statuses[task_id].revision <= revision:
+                del statuses[task_id]
         for task_id, status in runtime.items():
             if self.sessions is not None and not self.sessions.contains(task_id, session_key):
+                if scope is not None:
+                    statuses.pop(task_id, None)
                 continue
             persisted = statuses.get(task_id)
             if persisted is None or status.revision >= persisted.revision:
                 statuses[task_id] = status
+        if scope is not None and self.sessions is not None and not self.sessions.exists(session_key):
+            return {}
         return statuses
+
+    def _refresh_finished_statuses(
+        self, session_key: str, finished: Mapping[str, SubagentStatus | None],
+    ) -> dict[str, SubagentStatus | None] | None:
+        if self.sessions is not None and not self.sessions.exists(session_key):
+            return None
+        result: dict[str, SubagentStatus | None] = {}
+        for task_id, runtime in finished.items():
+            if self.sessions is not None:
+                if not self.sessions.contains(task_id, session_key):
+                    result[task_id] = None
+                    continue
+                persisted = self.sessions.status(task_id, session_key)
+            else:
+                persisted = None
+            result[task_id] = (runtime if runtime is not None
+                               and (persisted is None or runtime.revision >= persisted.revision)
+                               else persisted)
+        return result
 
     def statuses_for_session(
         self, session_key: str | None, *, include_history: bool = True,
@@ -465,12 +513,42 @@ class SubagentManager:
             session_key, self._runtime_statuses_for_session(session_key), include_history=include_history,
         )
 
-    async def read_statuses_for_session(self, session_key: str) -> Mapping[str, SubagentStatus]:
+    async def read_statuses_for_session(
+        self, session_key: str, scope: SubagentHistoryScope | None = None,
+    ) -> Mapping[str, SubagentStatus]:
         """Capture runtime observations on the owner loop; read stored metadata on a worker."""
-        runtime = self._runtime_statuses_for_session(session_key)
-        return await asyncio.to_thread(
-            self._merge_session_statuses, session_key, runtime, include_history=True,
+        runtime = self._runtime_statuses_for_session(session_key, scope)
+        excluded = self._excluded_terminal_revisions(session_key, scope) if scope is not None else None
+        statuses = await asyncio.to_thread(
+            self._merge_session_statuses, session_key, runtime, include_history=True, scope=scope, excluded=excluded,
         )
+        if scope is None:
+            return statuses
+        pending = {tid for tid, status in runtime.items() if status.state in ACTIVE_SUBAGENT_STATES}
+        # A task may have started after the runtime snapshot but before the indexed read.
+        pending.update(tid for tid, status in statuses.items() if status.state in ACTIVE_SUBAGENT_STATES)
+        while pending:
+            finished: dict[str, SubagentStatus | None] = {}
+            for task_id in pending:
+                record = self._tasks.get(task_id)
+                current = record.status if record is not None else self._terminal_statuses.get(task_id)
+                if current is None or current.state not in ACTIVE_SUBAGENT_STATES:
+                    finished[task_id] = deepcopy(current)
+                elif (task_id in statuses and current.owner == session_key
+                      and current.revision > statuses[task_id].revision):
+                    statuses[task_id] = deepcopy(current)
+            if not finished:
+                break
+            pending.difference_update(finished)
+            refreshed = await asyncio.to_thread(self._refresh_finished_statuses, session_key, finished)
+            if refreshed is None:
+                return {}
+            for task_id, status in refreshed.items():
+                if status is None or not scope.includes(status):
+                    statuses.pop(task_id, None)
+                else:
+                    statuses[task_id] = status
+        return statuses
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         """Update the deprecated runtime source used by legacy ``spawn`` calls."""
