@@ -80,22 +80,33 @@ test("reduced motion keeps the canvas fade but switches the icon directly", asyn
   const icon = toggle.locator("svg");
   const core = icon.locator(":scope > circle");
   await expect(core).toHaveCSS("r", "5px");
+  const capture = await page.locator(".workbench-pane").evaluateHandle(node => {
+    const sample = { transitions: 0, middle: "" };
+    const observer = new MutationObserver(() => {
+      if (document.documentElement.classList.contains("dark")) return;
+      observer.disconnect();
+      // Capture at the class commit, before a protocol round-trip can outlive the fade.
+      const transitions = node.getAnimations().filter(animation => animation instanceof CSSTransition
+        && animation.transitionProperty === "background-color");
+      sample.transitions = transitions.length;
+      for (const transition of transitions) {
+        transition.pause();
+        transition.currentTime = 140;
+      }
+      sample.middle = getComputedStyle(node).backgroundColor;
+      for (const transition of transitions) transition.play();
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return sample;
+  });
   await toggle.click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await expect(core).toHaveCSS("r", "8px");
   expect(await icon.evaluate(node => node.getAnimations({ subtree: true }).length)).toBe(0);
-  const middle = await page.locator(".workbench-pane").evaluate(async node => {
-    await new Promise(requestAnimationFrame);
-    const transitions = node.getAnimations();
-    for (const transition of transitions) {
-      transition.pause();
-      transition.currentTime = 140;
-    }
-    const color = getComputedStyle(node).backgroundColor;
-    for (const transition of transitions) transition.play();
-    return color;
-  });
-  const red = Number(middle.match(/[\d.]+/)![0]);
+  const sample = await capture.jsonValue();
+  await capture.dispose();
+  expect(sample.transitions).toBe(1);
+  const red = Number(sample.middle.match(/[\d.]+/)![0]);
   expect(red).toBeGreaterThan(48);
   expect(red).toBeLessThan(255);
   await expect.poll(() => page.locator("html").getAttribute("data-theme-transition")).toBeNull();
