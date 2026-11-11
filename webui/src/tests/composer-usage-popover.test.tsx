@@ -33,9 +33,18 @@ describe("Context sidebar", () => {
     await user.click(within(expanded).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument());
     expect(within(sidebar).getByRole("button", { name: "Expand context panel" })).toBeVisible();
-    expect(within(sidebar).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
     await user.click(screen.getByTestId("composer-context-usage"));
     await waitFor(() => expect(screen.getByTestId("composer-context-usage")).toHaveFocus());
+  });
+
+  it("closes the sidebar from its own control", async () => {
+    const user = userEvent.setup();
+    render(<ComposerUsagePopover context={null} rounds={[]} snapshots={[first]} />);
+    await user.click(screen.getByTestId("composer-context-usage"));
+    const sidebar = screen.getByRole("complementary", { name: "Context usage" });
+    await user.click(within(sidebar).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("complementary")).not.toBeInTheDocument());
+    expect(screen.getByTestId("composer-context-usage")).toHaveFocus();
   });
 
   it("mounts in the conversation's side slot and closes with Escape from its controls", async () => {
