@@ -325,6 +325,7 @@ def test_oversized_incomplete_turn_recovers_once_across_all_fragments(history, m
     assert all(left["end"] == right["start"] for left, right in zip(ranges, ranges[1:]))
     recovered = next(event for event in events if event.get("text") == "complete canonical answer")
     latest = read()
+    assert latest["page"]["recovered_answers"] is True
     assert next(event for event in latest["events"] if event.get("text") == recovered["text"]) == recovered
     for left, right in zip(pages, pages[1:]):
         assert read(before=right["page"]["before_cursor"])["events"] == left["events"]
@@ -367,6 +368,42 @@ def test_oversized_legacy_prompt_cursor_finds_backfilled_user_on_cold_page(histo
     assert [event["text"] for event in events if event["event"] == "message" and not event.get("kind")] == [
         "distinct answer",
     ]
+
+
+def test_recovered_prompt_cursor_keeps_answers_owned_by_both_inputs(history):
+    key = "websocket:backfilled-input-recovery"
+    rows = [
+        {"event": "user", "text": "A", "input_id": "user:a", "turn_id": "t", "turn_seq": 1},
+        {"event": "message", "text": "Answer A", "response_input_ids": ["user:a"], "turn_id": "t", "turn_seq": 2},
+        {"event": "message", "kind": "progress", "text": "Working", "turn_id": "t", "turn_seq": 3},
+        {"event": "message", "text": "Answer B", "response_input_ids": ["user:b"], "turn_id": "t", "turn_seq": 4},
+        {"event": "message", "kind": "progress", "text": "Finished", "turn_id": "t", "turn_seq": 5},
+        {"event": "turn_end", "turn_id": "t", "turn_seq": 6, "transcript_incomplete": True},
+    ]
+    for row in rows:
+        history.append(key, row)
+    original = history.read(key)
+    messages = [
+        {"role": "user", "content": "A", "input_id": "user:a"},
+        {"role": "assistant", "content": "Answer A", "response_input_ids": ["user:a"]},
+        {"role": "user", "content": "B", "input_id": "user:b"},
+        {"role": "assistant", "content": "Answer B", "response_input_ids": ["user:b"]},
+    ]
+    whole = history.build(key, session_messages=messages)
+    prompts = history.prompts(key, session_messages_loader=lambda: messages)
+    prompt = next(item for item in prompts if item["inputId"] == "user:b")
+    navigated = history.build(key, after=prompt["cursor"], session_messages=messages)
+
+    def contents(body):
+        return [event["text"] for event in body["events"]
+                if event["event"] in {"user_message", "message"} and not event.get("kind")]
+
+    assert contents(whole) == ["A", "Answer A", "B", "Answer B"]
+    assert contents(navigated) == ["B", "Answer B"]
+    assert navigated["events"][0]["projection_id"] == prompt["id"]
+    assert whole["completed_turn_ids"] == navigated["completed_turn_ids"] == []
+    assert navigated["has_pending_tool_calls"] is True
+    assert history.read(key) == original
 
 
 @pytest.mark.parametrize("ambiguous", ["duplicate-canonical-user", "two-physical-users"])

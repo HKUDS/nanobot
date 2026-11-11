@@ -835,6 +835,46 @@ describe("ThreadTranscript admission", () => {
     expect(new Set(stored).size).toBe(stored.length);
   });
 
+  it.each([{ position: 1, gap: false }, { position: 2, gap: false }, { position: 2, gap: true }])("withdraws recovered answers from an open fragment (%j)", ({ position, gap }) => {
+    const thread = new ThreadTranscript();
+    const partial: ThreadProjectionEvent = { ...at("recovery", position + 1), event: "stream_end", stream_id: "old-answer", text: "Partial answer" };
+    const reasoning: ThreadProjectionEvent = { ...at("recovery", 4), event: "reasoning_end", text: "Retained reasoning" };
+    const tool: ThreadProjectionEvent = { ...at("recovery", 5), event: "message", kind: "tool_hint", text: "read_file()" };
+    // Telemetry accounts for the raw positions that have no projected body event.
+    const active = history([partial, reasoning, tool], { active_turn_id: "recovery",
+      page: { history_generation: "generation", record_range: { turn: 0, start: 1, end: 4001 },
+        before_cursor: "before-1", has_more_before: true, truncated_oversized_turn: true } });
+    const recovered = history([...(gap ? [] : [reasoning, tool]),
+      { chat_id: "hydration-chat", turn_id: "recovery", event: "message", text: "Correct final answer", projection_id: "canonical-recovery" },
+      { ...at("recovery", gap ? 12000 : 4002), event: "turn_end" },
+    ], { completed_turn_ids: ["recovery"],
+      page: { history_generation: "generation", record_range: { turn: 0, start: gap ? 6002 : 2, end: gap ? 10002 : 4002 }, recovered_answers: true,
+        before_cursor: gap ? "before-6002" : "before-2", has_more_before: true, truncated_oversized_turn: true } });
+    expect(thread.accept(active, thread.begin("initial"))).toBe(true);
+    if (gap) receive(thread, { ...at("recovery", 9000), event: "delta", stream_id: "unpersisted", text: "Unconfirmed live tail" });
+    let restored = new ThreadTranscript([], thread.save());
+    expect(restored.accept(recovered, restored.begin("latest"))).toBe(true);
+    if (gap) {
+      restored = new ThreadTranscript([], restored.save());
+      expect(restored.accept(history([], {
+        page: { history_generation: "generation", record_range: { turn: 0, start: 4001, end: 6002 }, before_cursor: "before-4001", has_more_before: true },
+      }), restored.begin("older"))).toBe(true);
+    }
+    const reopened = new ThreadTranscript();
+    expect(reopened.accept(recovered, reopened.begin("initial"))).toBe(true);
+    const answers = (owner: ThreadTranscript) => owner.messages.filter((row) => row.role === "assistant" && row.kind !== "trace" && row.content).map((row) => row.content);
+    const expected = [...(gap ? ["Unconfirmed live tail"] : []), ...answers(reopened)];
+    expect(answers(reopened)).toEqual(["Correct final answer"]);
+    expect(answers(restored)).toEqual(expected);
+    expect(restored.messages.filter((row) => row.reasoning).map((row) => row.reasoning)).toEqual(["Retained reasoning"]);
+    expect(restored.messages.filter((row) => row.kind === "trace").map((row) => row.content)).toEqual(["read_file()"]);
+    expect(restored.accept(history([input("recovery", "Question")], {
+      page: { history_generation: "generation", record_range: { turn: 0, start: 0, end: 2 }, before_cursor: null, has_more_before: false },
+    }), restored.begin("older"))).toBe(true);
+    expect(answers(restored)).toEqual(expected);
+    expect(restored.messages.filter((row) => row.role === "user").map((row) => row.content)).toEqual(["Question"]);
+  });
+
   it("reprojects adjacent pages of one turn without losing a cumulative answer", () => {
     const events: ThreadProjectionEvent[] = [
       input("long-turn", "Question"),
@@ -1082,7 +1122,7 @@ describe("ThreadTranscript admission", () => {
     expect(restored.messages.at(-1)?.content).toBe("ABCDE");
   });
 
-  it("does not join fragments from a deleted and recreated session", () => {
+  it.each(["history", "live-user", "live-session-input"] as const)("does not join fragments from a deleted and recreated session (%s)", (delivery) => {
     const fragment = (generation: string, events: ThreadProjectionEvent[], start: number, end: number, before: string | null) => history(events, {
       page: { history_generation: generation, before_cursor: before, has_more_before: before !== null,
         truncated_oversized_turn: true, record_range: { turn: 0, start, end } },
@@ -1092,7 +1132,12 @@ describe("ThreadTranscript admission", () => {
       { ...at("same-turn", 3), event: "message", text: "Old tail" },
       { ...at("same-turn", 4), event: "turn_end" },
     ], 2, 4, "old-prefix"), thread.begin("initial"))).toBe(true);
-    expect(thread.accept(fragment("old", [input("same-turn", "Old question"),
+    const question: ThreadProjectionEvent = { ...input("same-turn", "Old question"), input_id: "user:old",
+      ...(delivery === "live-session-input" ? { input_id: "session-message:old", provenance: { session_message: {
+        message_id: "old", session: { id: "handle_0123456789abcdef0123456789abcdef", name: "mira" },
+      } } } : {}) };
+    if (delivery !== "history") receive(thread, { ...question, turn_seq: undefined });
+    expect(thread.accept(fragment("old", [question,
       { ...at("same-turn", 2), event: "message", text: "Old middle" }], 0, 2, null), thread.begin("older"))).toBe(true);
     expect(thread.accept(fragment("new", [
       { ...at("same-turn", 3), event: "message", text: "New tail" },
@@ -1102,6 +1147,12 @@ describe("ThreadTranscript admission", () => {
     expect(thread.accept(fragment("new", [input("same-turn", "New question"),
       { ...at("same-turn", 2), event: "message", text: "New middle" }], 0, 2, null), thread.begin("older"))).toBe(true);
     expect(thread.messages.map((row) => row.content)).toEqual(["New question", "New middle", "New tail"]);
+    if (delivery !== "history") {
+      receive(thread, { ...question, turn_id: "pending-turn", turn_seq: undefined, input_id: "pending-input", text: "Pending question",
+        ...(question.provenance ? { provenance: { session_message: { ...question.provenance.session_message!, message_id: "pending-message" } } } : {}) });
+      expect(thread.accept(fragment("third", [input("third-turn", "Replacement")], 0, 1, null), thread.begin("latest"))).toBe(false);
+      expect(thread.messages.at(-1)?.content).toBe("Pending question");
+    }
   });
 
   it("does not certify earlier reasoning from a truncated snapshot with an unknown left boundary", () => {

@@ -437,6 +437,9 @@ export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPay
       throw new Error("Invalid WebUI thread record range");
     }
   }
+  if (isRecord(value.page) && value.page.recovered_answers !== undefined && typeof value.page.recovered_answers !== "boolean") {
+    throw new Error("Invalid WebUI thread answer recovery");
+  }
   const graphs = new Map<string, ContextGraph>();
   if (value.context_graphs !== undefined) {
     if (!isRecord(value.context_graphs)) throw new Error("Invalid context graph dictionary");

@@ -234,6 +234,14 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("preserves the fragment answer-recovery declaration at the HTTP boundary", () => {
+    const payload = { schemaVersion: 3, projection: "events", events: [],
+      page: { record_range: { turn: 0, start: 2, end: 4002 }, recovered_answers: true } };
+    expect(parseWebuiThreadPayload(payload).page).toEqual(payload.page);
+    expect(() => parseWebuiThreadPayload({ ...payload, page: { ...payload.page, recovered_answers: "true" } }))
+      .toThrow("Invalid WebUI thread answer recovery");
+  });
+
   it.each(["stream_end", "reasoning_end"])("validates %s text snapshot coverage", (event) => {
     const payload = (fields: Record<string, unknown>) => ({ schemaVersion: 3, projection: "events",
       events: [{ event, chat_id: "chat-1", turn_id: "turn-1", turn_seq: 6, text: "Reply", ...fields }] });

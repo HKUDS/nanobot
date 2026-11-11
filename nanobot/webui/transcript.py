@@ -1073,17 +1073,19 @@ def _user_recovery_signature(event: dict[str, Any]) -> str:
     return json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _find_unique_session_turn_by_user(
+def _find_recoverable_session_turn(
     session_turns: list[_SessionBackfillTurn],
-    user_event: dict[str, Any],
+    user_events: list[dict[str, Any]],
 ) -> _SessionBackfillTurn | None:
-    signature = _user_recovery_signature(user_event)
+    if len(user_events) != 1:
+        return None
+    signature = _user_recovery_signature(user_events[0])
     matches = [
         turn
         for turn in session_turns
         if _user_recovery_signature(turn.user_event) == signature
     ]
-    return matches[0] if len(matches) == 1 else None
+    return matches[0] if len(matches) == 1 and matches[0].assistant_records else None
 
 
 def _is_recoverable_answer_record(record: dict[str, Any]) -> bool:
@@ -1144,11 +1146,8 @@ def _recover_incomplete_turns(
             continue
 
         user_events = [record for record in turn if record.get("event") == "user"]
-        if len(user_events) != 1:
-            recovered.extend(turn)
-            continue
-        session_turn = _find_unique_session_turn_by_user(session_turns, user_events[0])
-        if session_turn is None or not session_turn.assistant_records:
+        session_turn = _find_recoverable_session_turn(session_turns, user_events)
+        if session_turn is None:
             recovered.extend(turn)
             continue
 
@@ -1909,15 +1908,17 @@ def build_webui_thread_response(
         history.has_missing_input_references(ref.ordinal)
         or (ref.user_count == 0 and record_range["start"] == 0 and history.has_navigation_answer(ref.ordinal))
     ) if ref is not None and record_range is not None else _needs_user_event_backfill(lines, history, legacy=not fragment)
+    backfill_plan: dict[int, list[tuple[int, dict[str, Any]]]] = {}
     if needs_backfill:
         view, _ = _prompt_view_snapshot(
             session_key, history=history, session_turns_loader=load_session_turns,
             session_version_loader=session_version_loader,
         )
+        backfill_plan = view.backfill_plan
         recovered_lines: list[dict[str, Any]] = []
         for turn in _split_transcript_turns(lines):
             ordinal = int(turn[0][_WEBUI_REPLAY_IDENTITY_KEY].split(":")[1])
-            for anchor, user in view.backfill_plan.get(ordinal, []):
+            for anchor, user in backfill_plan.get(ordinal, []):
                 if record_range is not None and not record_range["start"] <= anchor < record_range["end"]:
                     continue
                 index = next((i for i, record in enumerate(turn)
@@ -1946,9 +1947,12 @@ def build_webui_thread_response(
                     if records:
                         user = records[0]
                 if user is not None:
-                    session_turn = _find_unique_session_turn_by_user(load_session_turns(), user)
-                    if session_turn is not None and session_turn.assistant_records:
+                    users = [user, *(item for _, item in backfill_plan.get(ordinal, []))]
+                    session_turn = _find_recoverable_session_turn(load_session_turns(), users)
+                    if session_turn is not None:
                         lines = _recover_incomplete_fragment(lines, session_turn, terminal=terminal)
+                        if terminal:
+                            page["recovered_answers"] = True
     elif _needs_incomplete_turn_recovery(lines):
         lines = _recover_incomplete_turns(lines, load_session_turns())
     bang_inputs = {

@@ -1773,6 +1773,8 @@ export interface WebuiThreadRecordRange {
 interface WebuiThreadPagePayload {
   history_generation?: string | null;
   record_range?: WebuiThreadRecordRange;
+  /** The fragment includes the canonical replacement for this turn's stored answers. */
+  recovered_answers?: boolean;
   before_cursor?: string | null;
   has_more_before?: boolean;
   after_cursor?: string | null;

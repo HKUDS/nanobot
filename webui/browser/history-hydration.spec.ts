@@ -187,6 +187,30 @@ test("loading an earlier fragment restores a long turn without duplicating its a
   backend.healthy();
 });
 
+test("canonical recovery replaces the partial answer in an open oversized turn", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const active = history([end(3, "Partial answer", "partial-wire")], { before: "before-1", more: true, active: TURN });
+  active.page = { ...active.page, history_generation: "generation", record_range: { turn: 0, start: 1, end: 4001 }, truncated_oversized_turn: true };
+  await backend.release(await backend.read(), active);
+  await expect(body.getByText("Partial answer", { exact: true })).toBeVisible();
+  const recovered = history([
+    { chat_id: A, turn_id: TURN, event: "message", text: "Correct final answer" },
+    { ...at(TURN, 4002, "complete"), event: "turn_end" },
+  ], { before: "before-2", more: true });
+  recovered.page = { ...recovered.page, history_generation: "generation", record_range: { turn: 0, start: 2, end: 4002 },
+    truncated_oversized_turn: true, recovered_answers: true };
+  backend.refreshThread();
+  await backend.release(await backend.read(A, null, 1), recovered);
+  await expect(body.getByText("Correct final answer", { exact: true })).toBeVisible();
+  await expect(body.getByText("Partial answer", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await backend.ready();
+  await backend.release(await backend.read(A, null, 2), recovered);
+  await expect(body.getByText("Correct final answer", { exact: true })).toHaveCount(1);
+  await expect(body.getByText("Partial answer", { exact: true })).toHaveCount(0);
+  backend.healthy();
+});
+
 test("prepending a fragment keeps the same answer at the reading position", async ({ page }) => {
   const { backend, body } = await openFixture(page);
   const prefix: ThreadProjectionEvent[] = [

@@ -81,6 +81,7 @@ export interface ThreadTranscriptSnapshot extends ThreadCheckpoint {
   live: LiveContribution[];
   historyGeneration: string | null;
   pendingFragmentGap: PendingFragmentGap | null;
+  withdrawnSources: Set<string>;
 }
 
 function addRange(ranges: Ranges, first: number, last = first): void {
@@ -176,6 +177,7 @@ export class ThreadTranscript {
   private live: LiveContribution[] = [];
   private historyGeneration: string | null = null;
   private pendingFragmentGap: PendingFragmentGap | null = null;
+  private withdrawnSources = new Set<string>();
   fragmentCompletedTurnIds: string[] = [];
   private readonly recordLiveContributions: boolean;
   private revision = 0;
@@ -196,6 +198,7 @@ export class ThreadTranscript {
       this.live = this.recordLiveContributions ? [...saved.live] : [];
       this.historyGeneration = saved.historyGeneration;
       this.pendingFragmentGap = saved.pendingFragmentGap ? { ...saved.pendingFragmentGap } : null;
+      this.withdrawnSources = new Set(saved.withdrawnSources);
       this.paging = { ...saved.paging, loading: false, loadingOlder: false };
       this.revision = saved.revision;
       for (const unit of saved.units) this.installUnit({ ...unit, rows: new Set(unit.rows),
@@ -447,6 +450,8 @@ export class ThreadTranscript {
     gap: PendingFragmentGap | null): true {
     const page = joined.body.page!;
     this.fragments = joined.pages;
+    // The visible projection is retained until admission, including across cache restore.
+    for (const event of joined.withdrawn) this.withdrawnSources.add(this.describe(event).source);
     this.pendingFragmentGap = gap;
     this.historyGeneration = page.history_generation ?? this.historyGeneration;
     this.paging = { ...this.paging, loading: false, loadingOlder: false, error: null, olderError: null,
@@ -577,8 +582,13 @@ export class ThreadTranscript {
       return this.stageFragment(joined, read, groupRange.start > 0
         ? { turn: groupRange.turn, oldEnd: 0, front: groupRange.start } : null);
     }
-    const overlaps = new Set(Array.from(this.units).filter((old) =>
-      Array.from(candidate.units).some((unit) => sourcesOverlap(unit, old))));
+    const withdrawnSources = new Set([...this.withdrawnSources, ...(joined?.withdrawn ?? []).map((event) => this.describe(event).source)]);
+    const withdrawn = new Set(Array.from(withdrawnSources).flatMap((source) => {
+      const unit = this.bySource.get(source);
+      return unit ? [unit] : [];
+    }));
+    const overlaps = new Set([...withdrawn, ...Array.from(this.units).filter((old) =>
+      Array.from(candidate.units).some((unit) => sourcesOverlap(unit, old)))]);
     const firstOverlap = this.messages.findIndex((row) => overlaps.has(this.byRow.get(row.id)!));
     const windowRows = new Set(this.messages.slice(Math.max(0, firstOverlap)).map((row) => row.id));
     const received = replacedHistory ? [] : Array.from(this.units).filter((unit) => unit.received > 0
@@ -634,8 +644,9 @@ export class ThreadTranscript {
       && !body?.page?.truncated_oversized_turn
       && (this.messages.length === 0 || reset || overlaps.size > 0);
     const replaced = new Set<Unit>();
-    for (const old of this.units) if ((reset && !protectedUnits.includes(old)) || Array.from(admitted)
-      .some((unit) => sourcesOverlap(unit, old) && (old.received === 0 || this.unitCovered(old, candidate)))) replaced.add(old);
+    for (const old of this.units) if ((reset && !protectedUnits.includes(old))
+      || ((withdrawn.has(old) || Array.from(admitted).some((unit) => sourcesOverlap(unit, old)))
+        && (old.received === 0 || this.unitCovered(old, candidate)))) replaced.add(old);
     const previousCount = this.messages.length;
     const firstReplaced = this.messages.findIndex((row) => replaced.has(this.byRow.get(row.id)!));
     const prefix = read.kind !== "older" && !reset && firstReplaced > 0
@@ -705,6 +716,7 @@ export class ThreadTranscript {
       for (const key of unit.sources) this.bySource.delete(key);
     }
     for (const unit of admitted) this.installUnit(unit);
+    this.withdrawnSources = new Set(Array.from(withdrawnSources).filter((source) => withdrawn.has(this.bySource.get(source)!)));
     const retainedMembers: Members = new Map();
     for (const unit of this.units) mergeMembers(retainedMembers, unit.members);
     const installed: Members = new Map();
@@ -724,7 +736,16 @@ export class ThreadTranscript {
     }
     this.installed = installed;
     this.textCoverage = Array.from(certificates.values());
-    this.live = this.live.filter(({ event }) => !this.represented(event));
+    const confirmedInputs = new Set<string>();
+    for (const event of body?.events ?? []) {
+      if (event.event !== "user_message" || !admitted.has(candidate.bySource.get(candidate.describe(event).source)!)) continue;
+      if (event.input_id) confirmedInputs.add(`id:${event.input_id}`);
+      if (event.provenance?.session_message?.message_id) confirmedInputs.add(`message:${event.provenance.session_message.message_id}`);
+    }
+    this.live = this.live.filter(({ event }) => !(event.event === "user_message"
+      && ((event.input_id && confirmedInputs.has(`id:${event.input_id}`))
+        || (event.provenance?.session_message?.message_id && confirmedInputs.has(`message:${event.provenance.session_message.message_id}`))))
+      && !this.represented(event));
     if (adoptProjection) {
       this.boundaries = new Map(candidate.boundaries);
       this.knownTurns = new Set(candidate.knownTurns);
@@ -842,6 +863,7 @@ export class ThreadTranscript {
       boundaries: new Map(this.boundaries), knownTurns: new Set(this.knownTurns),
       paging: { ...this.paging }, revision: this.revision, fragments: [...this.fragments], live: [...this.live],
       historyGeneration: this.historyGeneration,
-      pendingFragmentGap: this.pendingFragmentGap ? { ...this.pendingFragmentGap } : null };
+      pendingFragmentGap: this.pendingFragmentGap ? { ...this.pendingFragmentGap } : null,
+      withdrawnSources: new Set(this.withdrawnSources) };
   }
 }
