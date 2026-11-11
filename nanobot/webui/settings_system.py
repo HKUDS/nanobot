@@ -144,7 +144,7 @@ def system_settings_payload(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         workspace=config.workspace_path,
     )
-    return {
+    payload: SystemSettingsPayload = {
         "runtime_config": runtime_config_payload(config),
         "runtime": {
             "config_path": str(config_path.expanduser()),
@@ -160,7 +160,6 @@ def system_settings_payload(
             },
             "unified_session": defaults.unified_session,
         },
-        **({"usage": llm_usage_payload(timezone_name=defaults.timezone)} if include_usage else {}),
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
             "workspace_sandbox": sandbox_status.as_dict(),
@@ -182,6 +181,9 @@ def system_settings_payload(
         },
         "docs": docs_payload(version),
     }
+    if include_usage:
+        payload["usage"] = llm_usage_payload(timezone_name=defaults.timezone)
+    return payload
 
 
 def settings_usage_payload(config: Config) -> dict[str, Any]:
