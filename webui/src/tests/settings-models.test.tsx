@@ -1,7 +1,11 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
-import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
+import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView as renderSettingsViewBase, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
+
+const renderSettingsView: typeof renderSettingsViewBase = (options = {}) => renderSettingsViewBase({
+  webuiCapabilities: ["webui.model-preset-save.v1"], ...options,
+});
 
 
 function settingsPayloadWithBackup() {
@@ -140,14 +144,14 @@ describe("Settings models", () => {
     expect(within(editor).getByRole("textbox")).toHaveValue('{"X-Route":"preset"}');
     fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
-      "settings.model_configuration.update", { name: "primary", extra_headers: '{"X-Route":"preset"}' }, 20_000,
+      "settings.model_configuration.update", { include_usage: false, name: "primary", extra_headers: '{"X-Route":"preset"}' }, 20_000,
     ));
     fireEvent.click(await screen.findByRole("button", { name: "Headers Entries: 1 Edit" }));
     editor = screen.getByRole("dialog", { name: "Headers" });
     fireEvent.change(within(editor).getByRole("textbox", { name: "Headers" }), { target: { value: "" } });
     fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
-      "settings.model_configuration.update", { name: "primary", extra_headers: "" }, 20_000,
+      "settings.model_configuration.update", { include_usage: false, name: "primary", extra_headers: "" }, 20_000,
     ));
     expect(await screen.findByRole("button", { name: "Headers Use provider settings Edit" })).toBeEnabled();
   });
@@ -182,7 +186,7 @@ describe("Settings models", () => {
     fireEvent.click(presetSaveButton());
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.model_configuration.update",
-      { name: "primary", api: { supported_apis: ["responses"], preferred_api: "responses" } },
+      { include_usage: false, name: "primary", api: { supported_apis: ["responses"], preferred_api: "responses" } },
       20_000,
     ));
     await waitFor(() => expect(presetSaveButton()).toBeDisabled());
@@ -194,7 +198,7 @@ describe("Settings models", () => {
     fireEvent.click(presetSaveButton());
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.model_configuration.update",
-      { name: "primary", api: { supported_apis: ["responses", "chat_completions"], preferred_api: "responses" } },
+      { include_usage: false, name: "primary", api: { supported_apis: ["responses", "chat_completions"], preferred_api: "responses" } },
       20_000,
     ));
     await waitFor(() => expect(presetSaveButton()).toBeDisabled());
@@ -211,7 +215,7 @@ describe("Settings models", () => {
     await returnToPresetEditor();
     fireEvent.click(presetSaveButton());
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
-      "settings.model_configuration.update", { name: "primary", api: null }, 20_000,
+      "settings.model_configuration.update", { include_usage: false, name: "primary", api: null }, 20_000,
     ));
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/model-api?"))).toBe(false);
   });
@@ -243,7 +247,7 @@ describe("Settings models", () => {
     fireEvent.click(presetSaveButton());
     await waitFor(() => expect(requestMutationMock).toHaveBeenLastCalledWith(
       "settings.model_configuration.update",
-      { name: "primary", api: { supported_apis: ["anthropic_messages"], preferred_api: "anthropic_messages" } },
+      { include_usage: false, name: "primary", api: { supported_apis: ["anthropic_messages"], preferred_api: "anthropic_messages" } },
       20_000,
     ));
     await waitFor(() => expect(presetSaveButton()).toBeDisabled());
@@ -294,7 +298,7 @@ describe("Settings models", () => {
     fireEvent.click(presetSaveButton());
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.model_configuration.update", {
-        name: "primary",
+        include_usage: false, name: "primary",
         api: { supported_apis: ["responses"], preferred_api: "responses" },
       }, 20_000,
     ));
@@ -342,7 +346,7 @@ describe("Settings models", () => {
     await act(async () => { finishHigh(jsonResponse({ provider: "openai", api: "responses" })); });
     expect(screen.getByLabelText("API connection")).toHaveTextContent("Auto (Chat Completions)");
     expect(requestMutationMock).toHaveBeenCalledWith(
-      "settings.model_configuration.update", { name: "primary", reasoning_effort: "high" }, 20_000,
+      "settings.model_configuration.update", { include_usage: false, name: "primary", reasoning_effort: "high" }, 20_000,
     );
   });
 
@@ -371,7 +375,7 @@ describe("Settings models", () => {
     await returnToPresetEditor();
     fireEvent.click(presetSaveButton());
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
-      "settings.model_configuration.update", { name: "primary", reasoning_effort: "high" }, 20_000,
+      "settings.model_configuration.update", { include_usage: false, name: "primary", reasoning_effort: "high" }, 20_000,
     ));
   });
 
@@ -424,7 +428,7 @@ describe("Settings models", () => {
     await returnToPresetEditor();
     fireEvent.click(presetSaveButton());
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
-      "settings.model_configuration.update", { name: "primary", new_name: "Renamed" }, 20_000,
+      "settings.model_configuration.update", { include_usage: false, name: "primary", new_name: "Renamed" }, 20_000,
     ));
   });
 
@@ -558,7 +562,7 @@ describe("Settings models", () => {
     await waitFor(() => {
       expect(requestMutationMock).toHaveBeenCalledWith(
         "settings.model_configuration.update",
-        { name: "Fast", temperature: 0.4 },
+        { include_usage: false, name: "Fast", temperature: 0.4 },
         20_000,
       );
     });
@@ -591,7 +595,7 @@ describe("Settings models", () => {
     await waitFor(() => {
       expect(requestMutationMock).toHaveBeenCalledWith(
         "settings.model_configuration.update",
-        { name: "primary", new_name: "Codex" },
+        { include_usage: false, name: "primary", new_name: "Codex" },
         20_000,
       );
     });
@@ -1178,8 +1182,14 @@ describe("Settings models", () => {
     expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
-  it("appends a new model preset to the call order immediately", async () => {
-    const { payload } = settingsPayloadWithBackup();
+  it.each([true, false])("appends a new model preset with optimized host support: %s", async (optimized) => {
+    const { payload: base } = settingsPayloadWithBackup();
+    const payload: SettingsPayload = { ...base, usage: {
+      days: [], total_tokens: 1500, total_tokens_30d: 1500, total_tokens_365d: 1500,
+      peak_day_tokens: 1500, current_streak_days: 1, longest_streak_days: 1,
+      active_days_30d: 1, requests_30d: 2,
+    } };
+    const onSettingsChange = vi.fn();
     const writerPreset = {
       ...payload.model_presets[0],
       name: "Writer",
@@ -1193,12 +1203,12 @@ describe("Settings models", () => {
       ...payload,
       model_presets: [...payload.model_presets, writerPreset],
       created_model_preset: writerPreset.name,
+      model_call_order: optimized ? ["primary", "backup", "Writer"] : ["primary", "backup"],
     };
     const orderedPayload: SettingsPayload = {
-      ...createdPayload,
-      model_call_order: ["primary", "backup", "Writer"],
-      created_model_preset: undefined,
+      ...createdPayload, model_call_order: ["primary", "backup", "Writer"],
     };
+    if (optimized) delete createdPayload.usage;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(payload);
@@ -1211,11 +1221,11 @@ describe("Settings models", () => {
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
-    requestMutationMock
-      .mockResolvedValueOnce(createdPayload)
-      .mockResolvedValueOnce(orderedPayload);
+    requestMutationMock.mockResolvedValueOnce(createdPayload);
+    if (!optimized) requestMutationMock.mockResolvedValueOnce(orderedPayload);
 
-    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    renderSettingsView({ initialSection: "models", initialSettings: payload, onSettingsChange,
+      webuiCapabilities: optimized ? ["webui.model-preset-save.v1"] : [] });
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1241,13 +1251,25 @@ describe("Settings models", () => {
     fireEvent.click(saveButton);
 
     await waitFor(() => {
-      expect(requestMutationMock).toHaveBeenLastCalledWith(
-        "settings.model_call_order.update",
-        { order: ["primary", "backup", "Writer"] },
+      expect(requestMutationMock).toHaveBeenCalledWith(
+        "settings.model_configuration.create",
+        expect.objectContaining(optimized
+          ? { name: "Writer", append_to_order: true, include_usage: false }
+          : { name: "Writer" }),
         20_000,
       );
+      if (optimized) {
+        expect(requestMutationMock).toHaveBeenCalledTimes(1);
+      } else {
+        const createCall = requestMutationMock.mock.calls.find(([action]) => action === "settings.model_configuration.create");
+        expect(createCall?.[1]).not.toHaveProperty("append_to_order");
+        expect(requestMutationMock).toHaveBeenCalledWith(
+          "settings.model_call_order.update", { order: ["primary", "backup", "Writer"] }, 20_000,
+        );
+      }
     });
     const writerRow = await screen.findByTestId("model-call-order-row-Writer");
+    expect(onSettingsChange).toHaveBeenLastCalledWith(expect.objectContaining({ usage: payload.usage }));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(within(writerRow).getByRole("switch", { name: "Disable preset" })).toBeChecked();
     expect(screen.getAllByText("Writer").length).toBeGreaterThan(0);
@@ -2248,7 +2270,7 @@ describe("Settings models", () => {
         action === "settings.model_configuration.update",
       );
       expect(saveCall).toBeDefined();
-      expect(saveCall?.[1]).toEqual({ name: "primary", model: "deepseek-reasoner" });
+      expect(saveCall?.[1]).toEqual({ include_usage: false, name: "primary", model: "deepseek-reasoner" });
       expect(requestMutationMock).toHaveBeenCalledWith(
         "settings.model_configuration.update", expect.objectContaining({ reasoning_effort: "provider-native-mode" }), 20_000,
       );

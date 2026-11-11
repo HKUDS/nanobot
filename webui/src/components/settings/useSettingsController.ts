@@ -82,7 +82,7 @@ export function useSettingsController({
   onNativeEngineRestart,
 }: SettingsControllerOptions) {
   const { t } = useTranslation();
-  const { client, getToken, token } = useClient();
+  const { client, getToken, token, webuiCapabilities } = useClient();
   const pageVisible = usePageVisibility();
   const remoteBrowserAccess =
     typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
@@ -433,6 +433,7 @@ export function useSettingsController({
     setError,
     onModelNameChange,
     remoteBrowserAccess,
+    optimizedPresetSave: webuiCapabilities.includes("webui.model-preset-save.v1"),
     closeProviderOAuthFlow,
     installCapabilities,
     configuredModelProviderOptions,

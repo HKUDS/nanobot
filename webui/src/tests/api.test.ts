@@ -716,7 +716,7 @@ describe("webui API helpers", () => {
       contextWindowTokens: 128000,
       temperature: 0.4,
       reasoningEffort: "high",
-    });
+    }, true);
 
     expect(requestMutation).toHaveBeenCalledWith(
       "settings.model_configuration.create",
@@ -724,6 +724,8 @@ describe("webui API helpers", () => {
         name: "Fast writing",
         provider: "openai",
         model: "openai/gpt-4.1-mini",
+        append_to_order: true,
+        include_usage: false,
         max_tokens: 4096,
         context_window_tokens: 128000,
         temperature: 0.4,
@@ -743,12 +745,13 @@ describe("webui API helpers", () => {
       contextWindowTokens: 65536,
       temperature: 0,
       reasoningEffort: null,
-    });
+    }, true);
 
     expect(requestMutation).toHaveBeenCalledWith(
       "settings.model_configuration.update",
       {
         name: "codex",
+        include_usage: false,
         new_name: "Codex",
         provider: "openai_codex",
         model: "openai-codex/gpt-5.5",
