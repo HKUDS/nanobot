@@ -1,5 +1,3 @@
-"""Composition helpers for the embedded WebUI gateway."""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Mapping

@@ -49,9 +49,8 @@ const RELATIVE_THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [
   [Number.POSITIVE_INFINITY, "year"],
 ];
 
-export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, onAction, onEdit,
+export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onAction, onEdit,
   onSurfacesOpenChange, calendarHref, onOpenCalendar }: {
-  title: string;
   jobs: SessionAutomationJob[];
   loading: boolean;
   loadFailed: boolean;
@@ -201,16 +200,7 @@ export function SessionInfoPopoverView({ title, jobs, loading, loadFailed, now, 
         >
           <div className="flex max-h-[min(var(--radix-popover-content-available-height),32rem)] flex-col">
             <div className="px-4 pb-3 pt-3.5">
-              <div className="min-w-0">
-                <div className="text-[12px] font-normal text-muted-foreground/75">
-                  {t("thread.sessionInfo.title")}
-                </div>
-                <div className="mt-0.5 truncate text-[14px] font-medium text-foreground">
-                  {title || t("thread.sessionInfo.untitled")}
-                </div>
-              </div>
-
-              <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/45 pt-3">
+              <div className="flex items-center justify-between gap-3">
                 <span className="truncate text-[13px] font-medium text-foreground">
                   {t("thread.sessionInfo.automations")}
                 </span>

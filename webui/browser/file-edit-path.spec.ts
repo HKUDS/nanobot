@@ -22,8 +22,8 @@ for (const width of [360, 1024]) {
     const longPath = references.first();
     await expect(longPath).toContainText("…");
     await expect(references.nth(1)).not.toContainText("…");
-    // The last filename stays inside the clipping viewport, without reversing text direction.
     const filename = longPath.locator(".font-semibold");
+    await expect(filename).toHaveCSS("color", "rgb(3, 105, 161)");
     const tail = await filename.evaluate((element) => {
       const clip = element.parentElement!.parentElement!.getBoundingClientRect();
       const name = element.getBoundingClientRect();
@@ -33,6 +33,7 @@ for (const width of [360, 1024]) {
     expect(tail.right).toBeLessThanOrEqual(tail.clipRight + 1);
     await page.screenshot({ path: testInfo.outputPath("summary.png") });
     await longPath.hover();
+    await expect(filename).toHaveCSS("color", "rgb(7, 89, 133)");
     const hint = page.getByRole("tooltip");
     await expect(hint).toHaveText(longEditPath);
     const surface = page.locator('[data-radix-popper-content-wrapper] > [data-state="delayed-open"], [data-radix-popper-content-wrapper] > [data-state="instant-open"]');
@@ -47,8 +48,7 @@ for (const width of [360, 1024]) {
     await longPath.press("Enter");
     await expect(page.getByLabel("Opened file")).toHaveText(longEditPath);
     await expect(hint).toBeHidden();
-    await page.getByRole("button", { name: /View changes/ }).first().click();
-    await expect(page.getByTestId("file-edit-diff")).toBeVisible();
+    // Check hover before expanding the diff above it, which moves the image row.
     const imagePath = references.nth(3);
     await expect(imagePath).toContainText("…");
     await imagePath.hover();
@@ -61,9 +61,15 @@ for (const width of [360, 1024]) {
     await page.mouse.move(0, 0);
     await imagePath.focus();
     await expect(hint).toContainText(longEditPath.replace("serve_fixture.py", "screenshot.png"));
+    await page.getByRole("button", { name: /View changes/ }).first().click();
+    await expect(page.getByTestId("file-edit-diff")).toBeVisible();
     await page.setViewportSize({ width: 1600, height: 800 });
     await page.getByLabel("File edits").evaluate((element) => { (element as HTMLElement).style.maxWidth = "none"; });
     await expect(longPath).not.toContainText("…");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.setViewportSize({ width, height: 800 });
+    await page.getByLabel("File edits").evaluate((element) => { (element as HTMLElement).style.maxWidth = "640px"; });
+    await expect(longPath).toContainText("…");
+    await expect(references.nth(1)).not.toContainText("…");
   });
 }

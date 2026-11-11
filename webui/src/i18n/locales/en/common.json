@@ -477,8 +477,66 @@
       "password": "Password",
       "proxyReferenceAuth": "Set authentication in the referenced proxy URL."
     },
+    "sandbox": {
+      "title": "Command sandbox",
+      "method": "Isolation method",
+      "off": "No isolation",
+      "status": "Saved configuration",
+      "check": "Check sandbox",
+      "checking": "Checking…",
+      "scope": "Checks the saved launcher with temporary test files only. This is not a full security audit. Restart the gateway to apply saved changes to command execution.",
+      "path": "Trusted launcher path",
+      "launcher": "sandbox launcher",
+      "pathHelp": "Usually leave this blank for system lookup of {{launcher}}. For a custom installation, ask the package maintainer for the full launcher path. The file and its parent directories must be root-owned and not group- or world-writable, and outside writable agent paths.",
+      "automatic": "System lookup",
+      "checkError": "Could not complete the check. Reopen settings and try again.",
+      "saveError": "Could not save. Keep your draft and try again.",
+      "disableTitle": "Turn off command isolation?",
+      "disableHelp": "After restart, commands run with the gateway account’s permissions. File tools also lose the workspace restriction supplied by this sandbox; independently configured restrictions still apply.",
+      "keep": "Keep isolation",
+      "disable": "Turn off isolation",
+      "notice": {
+        "title": "Commands need attention",
+        "missing": "The gateway could not find {{launcher}}. If installed, set its full path. Otherwise, contact the package maintainer or administrator. You can keep chatting.",
+        "path": "The gateway cannot use the configured {{launcher}} path. Check its full path and access permissions.",
+        "permissions": "{{launcher}} is not in a protected location. Contact the package maintainer or administrator.",
+        "startup": "{{launcher}} could not start. Check the gateway installation and system restrictions.",
+        "configurePath": "Configure {{launcher}} path",
+        "openSettings": "Open sandbox settings"
+      },
+      "states": {
+        "disabled": "Commands disabled",
+        "off": "Isolation off",
+        "unsupported": "Not supported",
+        "unchecked": "Not checked",
+        "unavailable": "Unavailable",
+        "passed": "Basic check passed",
+        "checking": "Checking…"
+      },
+      "help": {
+        "disabled": "Enable commands to use a sandbox.",
+        "off": "Commands are not isolated. Choose an isolation method to protect the host.",
+        "unsupported": "This isolation method is not supported on the gateway’s operating system.",
+        "unchecked": "Run a check to test the saved sandbox configuration.",
+        "unsaved": "Save changes, then check the sandbox.",
+        "unavailable": "The sandbox cannot start. Commands will not run in this sandbox.",
+        "passed": "The launcher started, temporary workspace writes worked, and the external test file was blocked.",
+        "checking": "Starting a bounded sandbox test…"
+      },
+      "reasons": {
+        "launcher_missing": "{{launcher}} was not found on the gateway. If installed, enter its full path below. Otherwise, contact the package maintainer or administrator.",
+        "path_not_absolute": "Enter an absolute path, not a command name.",
+        "not_executable": "The path must point to an executable file.",
+        "agent_writable": "The launcher is in an agent-writable path. Ask the package maintainer for a protected installation.",
+        "unprotected_installation": "The launcher or a parent directory is writable by a non-root user. Ask the administrator for a protected installation.",
+        "path_unavailable": "Cannot read this path. Check that it exists on the gateway and is accessible.",
+        "platform_unsupported": "Choose the isolation method supported by this gateway’s operating system.",
+        "probe_failed": "The isolation test failed. Check the launcher installation, kernel namespace support and additional mounts.",
+        "probe_timeout": "The check timed out. Check the launcher installation and host restrictions, then try again.",
+        "unknown": "The launcher is unavailable. Check its installation and access permissions."
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "Saved. Restart the API service to apply changes.",
       "commandRuntime": {
         "custom": "Custom (seconds)",
         "customLabel": "Custom runtime (seconds)",
@@ -643,14 +701,6 @@
           "label": "Restart mode",
           "help": "Choose a restart method; Automatic follows your environment.\n\nChoose how the gateway restarts. Automatic selects a method for your environment."
         },
-        "api_host": {
-          "label": "API address",
-          "help": "Set a key before allowing network access; restart the API after changes.\n\nSet an API key in System before binding to a network address. Restart the API service to apply changes."
-        },
-        "api_timeout": {
-          "label": "API timeout",
-          "help": "Maximum seconds per API request; restart to apply.\n\nHow long each API request can take. Restart the API service to apply changes."
-        },
         "tools_image_generation_save_dir": {
           "label": "Save directory",
           "help": "Relative path inside the media directory; existing images stay put.\n\nSubdirectory of nanobot’s media directory. Use a relative path; existing images are not moved."
@@ -708,10 +758,6 @@
         "gateway": {
           "title": "Gateway",
           "help": "Set deployment and restart options."
-        },
-        "api": {
-          "title": "API settings",
-          "help": "Set the listening address and request timeout."
         },
         "storage": {
           "title": "Image storage",
@@ -814,19 +860,12 @@
       "catalogStale": "Cached list may be out of date.",
       "catalogFallback": "Built-in list may be out of date.",
       "selectModel": "Select model",
-      "addConfiguration": "Add configuration",
-      "newConfiguration": "New model configuration",
-      "newConfigurationHelp": "Save a provider, model, and generation settings as a reusable preset.",
-      "configurationName": "Configuration name",
-      "configurationNameHelp": "Rename this saved model configuration.",
-      "configurationNamePlaceholder": "Fast writing",
       "callOrder": "Model order",
       "primary": "Primary",
       "addToOrder": "Enable preset",
       "newPreset": "New preset",
       "newPresetHelp": "Save a model and settings for reuse.",
       "presets": "Model presets",
-      "editPreset": "Edit preset",
       "presetName": "Preset name",
       "presetNameHelp": "Names must be unique; also used by /model.",
       "presetNameDuplicate": "A preset with this name already exists.",
@@ -851,25 +890,18 @@
       "converting": "Converting...",
       "convertAction": "Convert to presets",
       "dragToReorder": "Drag to reorder",
-      "moveUp": "Move up",
-      "moveDown": "Move down",
       "removeFromOrder": "Disable preset",
-      "inCallOrder": "In call order",
       "disabled": "Disabled",
       "noPresets": "No model presets yet",
-      "noPresetsHelp": "Create a preset, then add it to the call order.",
       "removeBeforeDelete": "Cannot delete the primary model",
       "providerSetupRequired": "Provider setup required",
-      "configureProviderBeforeSaving": "Configure this provider before saving the preset.",
       "deletePresetTitle": "Delete model preset?",
       "deletePresetHelp": "Delete “{{name}}” and remove it from the fallback list. Provider credentials will be kept.",
       "searchModels": "Choose model",
       "useCustomModel": "Use",
       "loadingModels": "Loading models...",
       "searchCatalog": "Search this provider’s model catalog.",
-      "modelsAvailable": "available",
       "noModelResults": "No matching models.",
-      "loadFailed": "Model list unavailable.",
       "unsupportedModelList": "Type a model ID manually.",
       "providerNotConfigured": "Configure this provider before loading models.",
       "autoProviderCustomOnly": "Enter a model ID manually when using automatic provider selection.",
@@ -1031,39 +1063,17 @@
       "empty": "No matching timezones."
     },
     "cliApps": {
-      "allCategories": "All categories",
-      "availableCount": "{{count}} apps",
-      "installedCount": "{{count}} CLIs installed",
-      "summary": "{{installed}} of {{total}} CLIs installed",
-      "filterAll": "All",
-      "filterInstalled": "Installed CLIs",
-      "filterNotInstalled": "Not installed",
-      "searchPlaceholder": "Search CLIs",
-      "loading": "Loading CLI apps…",
-      "empty": "No CLI apps match this filter.",
       "statusInstalled": "App ready",
-      "statusMissing": "Missing",
-      "statusAvailable": "Available",
-      "statusUnsupported": "Unsupported",
-      "statusNotInstalled": "App not installed",
-      "requires": "Requires",
       "test": "Test app",
       "update": "Update app",
       "uninstall": "Uninstall app",
       "install": "Install app",
-      "readyTitle": "@{{name}} is ready",
       "readyStatus": "Ready",
       "readyTry": "Try @{{name}}",
       "readyCopied": "Copied",
       "readyPrompt": "Ask nanobot to use @{{name}} for this task.",
       "openChat": "Open chat",
-      "unsupported": "Unsupported",
-      "unavailable": "Unavailable",
-      "noDescription": "No description available.",
-      "availableCount_one": "{{count}} app",
-      "availableCount_other": "{{count}} apps",
-      "installedCount_one": "{{count}} CLI installed",
-      "installedCount_other": "{{count}} CLIs installed"
+      "unavailable": "Unavailable"
     },
     "about": {
       "updateNotice": "Update available",
@@ -1314,20 +1324,12 @@
       "workspace": "Working directory"
     },
     "usage": {
-      "title": "Token usage",
       "shortTitle": "Token usage",
-      "last30Days": "Last 30 days",
       "viewDetails": "View details",
-      "previousPage": "Previous page",
-      "nextPage": "Next page",
-      "dailyAverage": "Daily average",
-      "inputTokens": "Input tokens",
       "cacheHitRate": "Cache hit rate",
-      "requestTrend": "Daily requests",
       "cacheRateHelp": "Cache hit rate excludes input with unknown cache status.",
       "dailyTrend": "Daily tokens",
       "bySource": "Usage by source",
-      "byModel": "Usage by model",
       "modelTrend": "Model trends",
       "modelsUnavailable": "No model breakdown available.",
       "otherModels": "Other / unattributed",
@@ -1339,19 +1341,8 @@
       "cacheUnknown": "Unknown status",
       "outputTokens": "Output",
       "otherTokens": "Other tokens",
-      "subtitle": "Provider-reported usage over the last 12 months.",
-      "empty": "Token activity will appear after new model replies.",
       "totalTokens": "Total tokens",
-      "peakTokens": "Peak tokens",
-      "thirtyDayTokens": "30-day tokens",
-      "currentStreak": "Current streak",
-      "longestStreak": "Longest streak",
-      "daysValue": "{{count}}d",
-      "last30": "30 days",
-      "activeDays": "Active days",
       "requests": "Requests",
-      "estimated": "estimated",
-      "includesEstimates": "includes estimates",
       "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} requests",
       "sources": {
         "user": "Chat",
@@ -1428,27 +1419,6 @@
       "searchSupport": "Search dependencies",
       "searchInstallOnSave": "Required Olostep packages will be installed automatically when you save.",
       "installing": "Installing required packages…"
-    },
-    "api": {
-      "title": "API server",
-      "openaiCompatible": "OpenAI-compatible API",
-      "description": "Connect through an OpenAI-compatible API.",
-      "start": "Start API server",
-      "starting": "Starting...",
-      "stop": "Stop",
-      "stopping": "Stopping...",
-      "access": "Access",
-      "thisDevice": "This device",
-      "localNetwork": "Local network",
-      "localHelp": "Only this device can connect.",
-      "networkHelp": "LAN access requires an API key.\n\nOther devices can connect; an API key is required.",
-      "port": "Port",
-      "portHelp": "Local port used by the API service.",
-      "apiKey": "API key",
-      "apiKeyHelp": "Send the key as a Bearer token.",
-      "apiKeyRequired": "Required before exposing the API to your network.",
-      "apiKeyPlaceholder": "Enter an API key",
-      "autoInstall": "Required API server packages will be installed automatically when you start it."
     },
     "observability": {
       "title": "Run tracing",
@@ -1875,6 +1845,10 @@
       "marketplaceNpxRequired": "Node.js with npx is required",
       "marketplaceInstalling": "Installing",
       "marketplaceInstalled": "Installed",
+      "marketplaceNameConflict": "Name already in use",
+      "marketplaceOriginUnknown": "Installed source unknown",
+      "marketplaceConflictHelp": "Review same-name skills in Installed before removing them to use another source.",
+      "marketplaceInstallConflict": "Installation conflict. Wait for any installation to finish, then review same-name skills in Installed.",
       "marketplaceInstall": "Install",
       "marketplaceNoTrend": "No trend yet",
       "marketplaceTrendLabel": "8-week install trend",
@@ -1938,9 +1912,7 @@
     "showArchived": "Show archived",
     "hideArchived": "Hide archived",
     "select": "Select",
-    "cancelSelection": "Cancel selection",
     "selectedCount": "{{count}} selected",
-    "deleteSelected": "Delete",
     "delete": "Delete",
     "newChat": "New topic",
     "groups": {
@@ -1952,6 +1924,14 @@
       "earlier": "Earlier",
       "archived": "Archived"
     }
+  },
+  "archiveConfirm": {
+    "title": "Archive this topic?",
+    "titleMany": "Archive {{count}} topics?",
+    "unarchiveTitle": "Unarchive this topic?",
+    "unarchiveTitleMany": "Unarchive {{count}} topics?",
+    "description": "Conversations are kept. You can unarchive them at any time.",
+    "unarchiveDescription": "These topics will return to the sidebar."
   },
   "deleteConfirm": {
     "title": "Delete this topic?",
@@ -1991,7 +1971,6 @@
     "subagents": {
       "stopFailed": "Could not stop this task.",
       "stopTask": "Stop {{label}}",
-      "receiptHelp": "Delivered means the message was included in the subtask’s next model request. It does not mean the instructions have been carried out.",
       "states": {
         "queued": "Queued",
         "running": "Running",
@@ -2002,11 +1981,6 @@
         "cancelled": "Cancelled",
         "interrupted": "Interrupted"
       },
-      "receipts": {
-        "accepted": "Queued: {{count}}",
-        "delivered": "Delivered: {{count}}",
-        "undelivered": "Undelivered: {{count}}"
-      },
       "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically.",
       "workTitle": "Subtasks",
       "otherWorkTitle": "Other tasks",
@@ -2014,8 +1988,8 @@
       "progress": "{{completed}} of {{total}} completed",
       "running": "Running: {{count}}",
       "finished": "Finished: {{count}}",
-      "needsReview": "Review needed: {{count}}",
-      "messages": "Message status"
+      "completed": "Completed: {{count}}",
+      "needsReview": "Review needed: {{count}}"
     },
     "compaction": {
       "reasons": {
@@ -2119,8 +2093,6 @@
       "sessionInfo": "Session details"
     },
     "sessionInfo": {
-      "title": "Session",
-      "untitled": "Untitled topic",
       "automations": "Automations",
       "count": "{{count}}",
       "loading": "Loading automations...",
@@ -2145,8 +2117,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Type your message…",
-      "placeholderHero": "Describe what you’d like to do",
+      "placeholder": "Type / for commands, @ for chats or apps, $ for skills",
+      "placeholderCompact": "Type a message…",
       "placeholderOpening": "Opening a new topic…",
       "inputAria": "Message input",
       "goalStateStrip": "Goal: {{label}}",
@@ -2160,6 +2132,10 @@
       "removeQuotedContext": "Remove quote",
       "modelNotConfigured": "Model not configured",
       "configureModel": "Configure model",
+      "shell": {
+        "run": "Run Shell command",
+        "removeContext": "Remove attachments and quoted text before running a command."
+      },
       "chooseAI": "Choose model",
       "switchModel": "Switch model",
       "manageModels": "Manage presets",
@@ -2169,15 +2145,21 @@
       "reauthFallback": "A fallback model handled this response.",
       "reauthSettings": "Open model settings",
       "context": {
+          "loaded": "Loaded",
+          "unloaded": "Not loaded",
+          "expand": "Expand context panel",
+          "collapse": "Collapse context panel",
+          "noFiles": "No context recorded yet",
+          "estimatedNodeTokens": "About {{value}} tokens",
+          "openFile": "Open file",
+          "history": "Context history",
+          "playHistory": "Play context history",
         "tooltip": "Context {{percent}}%",
         "detailsLabel": "Open context usage",
         "panelTitle": "Context usage",
         "contextTitle": "Context",
-        "recentRounds": "Recent rounds",
-        "inputTrend": "Input tokens",
-        "input": "Input tokens",
-        "cacheHitRate": "KV cache hit rate",
-        "output": "Output tokens",
+        "cacheHitRate": "Cache hit rate",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Generation time"
       },
       "queued": {
@@ -2368,7 +2350,7 @@
     "actions": "Message actions",
     "streaming": "streaming",
     "delivery": {
-      "sending": "Sending…",
+      "sending": "Sending",
       "failed": "Not sent"
     },
     "assistantTyping": "Assistant is typing",
@@ -2546,8 +2528,9 @@
     "retryRateLimit": "Rate limited",
     "retryServer": "Model unavailable",
     "retryUnknown": "Model request failed",
-    "retryWaiting": "{{error}}. Retrying in {{seconds}}s (attempt {{attempt}}).",
-    "retryExhausted": "{{error}}. Ending turn.",
+    "retryWaiting": "{{error}} Retrying in {{seconds}}s",
+    "retrying": "{{error}} Retrying",
+    "retryExhausted": "{{error}} Ending turn",
     "cliActivityRunningOne": "Using {{name}}",
     "cliActivityRanOne": "Used {{name}}",
     "cliActivityFailedOne": "Could not use {{name}}",
@@ -2584,8 +2567,7 @@
     "fileEditDiffTruncated": "Diff truncated. Open the file for the full change.",
     "usage": {
       "context": "Context now: {{tokens}}{{capacity}}",
-      "requests": "{{count}} calls this turn",
-      "estimated": "Includes estimated usage"
+      "requests": "{{count}} calls this turn"
     }
   },
   "recovery": {
@@ -2596,6 +2578,7 @@
     "failedHelp": "The saved task could not be restored safely. Review it before continuing.",
     "resuming": "Restoring interrupted task…",
     "review": "Review the task before continuing. Tools will not be replayed automatically.",
+    "replyPreserved": "Reply saved. You can continue.",
     "safeResume": "Continuing from saved conversation context.",
     "dismiss": "Dismiss",
     "continue": "Continue"
@@ -2720,7 +2703,7 @@
       "authenticationBody": "Sign in again or check the provider’s API key in model settings.",
       "billingTitle": "Model provider quota is unavailable",
       "billingBody": "Add credit or check billing for the provider account, then try again.",
-      "connectionTitle": "Could not connect to the model provider",
+      "connectionTitle": "Model connection failed",
       "timeoutTitle": "Model provider request timed out",
       "rateLimitTitle": "Model provider rate limit reached",
       "serverTitle": "Model provider service error",

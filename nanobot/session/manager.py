@@ -1,9 +1,9 @@
-"""Session management for conversation history."""
-
 from __future__ import annotations
 
 import asyncio
 import re
+import threading
+from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,19 +40,15 @@ _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
-_SESSION_LIST_PREVIEW_MAX_RECORDS = 200
-_SESSION_LIST_PREVIEW_MAX_CHARS = 1_000_000
 _FORK_VOLATILE_METADATA_KEYS = {
     "_stopped_at_iteration_limit",
     PARENT_SESSION_KEY,
     SESSION_TYPE_KEY,
-    "goal_state",
     "pending_user_turn",
     "pending_user_followups",
     "runtime_checkpoint",
     "session_handle",
     "webui_recovery",
-    "thread_goal",
     "title",
     "title_user_edited",
 }
@@ -75,7 +71,6 @@ def _sanitize_assistant_replay_text(content: str) -> str:
 
 
 def _text_preview(content: object) -> str:
-    """Return compact display text for session lists."""
     if isinstance(content, str):
         text = content
     elif isinstance(content, list):
@@ -249,7 +244,6 @@ class Session:
                 sliced = sliced[start:]
                 break
 
-        # Drop orphan tool results at the front.
         start = find_legal_message_start(sliced)
         if start:
             sliced = sliced[start:]
@@ -309,6 +303,12 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
+            if include_runtime_context and "input_id" in message and not is_hidden_history_message(message):
+                entry["_meta"] = {"input_id": message["input_id"]}
+            marker = message.get(HIDDEN_HISTORY_META)
+            if include_runtime_context and isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
+                # Attribution must distinguish persisted continuations from no-ID automation inputs.
+                entry[HIDDEN_HISTORY_META] = {"kind": "internal_continuation"}
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]
@@ -371,6 +371,10 @@ class SessionMetadataPayload(TypedDict):
     metadata: dict[str, Any]
 
 
+class SessionHistoryPayload(SessionMetadataPayload):
+    generation: str
+
+
 class SessionInfo(TypedDict):
     key: str
     created_at: str
@@ -380,7 +384,10 @@ class SessionInfo(TypedDict):
     path: str
 
 
-def fork_session(source: Session, target_key: str, before_user_index: int) -> Session | None:
+def fork_session(
+    source: Session, target_key: str, before_user_index: int,
+    *, exclude_metadata: frozenset[str] = frozenset(),
+) -> Session | None:
     """Build a portable fork ending before the requested visible user message."""
     if before_user_index < 0:
         return None
@@ -400,7 +407,7 @@ def fork_session(source: Session, target_key: str, before_user_index: int) -> Se
         return None
 
     metadata = deepcopy(source.metadata)
-    for key in _FORK_VOLATILE_METADATA_KEYS:
+    for key in _FORK_VOLATILE_METADATA_KEYS | exclude_metadata:
         metadata.pop(key, None)
 
     last_consolidated = min(source.last_archived, len(copied))
@@ -438,7 +445,12 @@ class SessionManager:
         self._store.initialize(workspace)
         self._delete_observer: Callable[[str], None] | None = None
         self.types = SessionTypes()
+        self._generation_exclusions: set[str] = set()
         self._state: SessionState | None = None
+
+    def exclude_generation_metadata(self, keys: frozenset[str]) -> None:
+        """Register feature metadata that cannot cross a fork or reset."""
+        self._generation_exclusions.update(keys)
 
     @property
     def state(self) -> SessionState:
@@ -446,7 +458,10 @@ class SessionManager:
         if self._state is None:
             from nanobot.session.state import SessionState
 
-            self._state = SessionState(self._store, on_delete=self._notify_delete, types=self.types)
+            self._state = SessionState(
+                self._store, on_delete=self._notify_delete, types=self.types,
+                generation_exclusions=self._generation_exclusions,
+            )
         return self._state
 
     def _notify_delete(self, key: str) -> None:
@@ -470,24 +485,14 @@ class SessionManager:
         return SessionLocation.safe_key(key)
 
     @staticmethod
-    def _storage_key(key: str) -> str:
-        """Collision-resistant encoding for internal session storage filenames."""
-        return SessionLocation.storage_key(key)
-
-    @staticmethod
     def _decode_storage_key(stem: str) -> str | None:
-        """Reverse _storage_key(): decode a base64url (no-padding) stem back to the original key."""
+        """Decode a base64url (no-padding) stem back to the original key."""
         return SessionLocation.decode_storage_key(stem)
 
     @staticmethod
     def decode_storage_key(stem: str) -> str | None:
         """Public decoder for components that inspect canonical session filenames."""
         return SessionManager._decode_storage_key(stem)
-
-    @classmethod
-    def _session_key_from_path(cls, path: Path) -> str | None:
-        """Decode a session key only from a canonical collision-resistant filename."""
-        return SessionLocation.session_key_from_path(path)
 
     def _require_offline_mutation(self) -> None:
         if self._state is not None and self._state.is_bound:
@@ -586,7 +591,9 @@ class SessionManager:
             source = self._store.load(source_key)
             if source is None:
                 return None
-            target = fork_session(source, target_key, before_user_index)
+            target = fork_session(
+                source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
+            )
             if target is not None:
                 self._store.save(target)
                 self._store.copy_history_prefix(source_key, target, before_user_index)
@@ -609,6 +616,37 @@ class SessionManager:
                 self._store.save(session)
             self._store.append_history(key, facts, expected_generation=session.generation)
         self._store.run_write(append)
+
+    def read_consistently(
+        self, operation: Callable[[], _T], *, cancelled: threading.Event | None = None,
+    ) -> _T:
+        """Run nested repository reads against one committed snapshot."""
+        return self._store.run_read(operation, cancelled=cancelled)
+
+    def read_batch(self, operation: Callable[[], _T]) -> _T:
+        """Reuse a connection without extending nested read snapshots."""
+        return self._store.run_read_batch(operation)
+
+    def read_history_header(self, key: str) -> SessionHistoryPayload | None:
+        """Read the metadata and generation needed by persisted history tools."""
+        return self._store.read_history_header(key)
+
+    def project_session_messages(
+        self,
+        key: str,
+        project: Callable[[SessionHistoryPayload, Iterator[tuple[int, dict[str, Any]]]], _T],
+    ) -> _T | None:
+        """Project a session header and reverse message stream within one snapshot.
+
+        The stream is valid only during the callback.
+        """
+        return self._store.project_session_messages(key, project)
+
+    def project_session_handle_names(
+        self, project: Callable[[Iterator[tuple[str, object]]], _T],
+    ) -> _T:
+        """Project stored handle names within the caller's read snapshot."""
+        return self._store.project_session_handle_names(project)
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:
         """Read a session without populating the cache."""

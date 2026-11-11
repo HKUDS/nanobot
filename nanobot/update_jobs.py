@@ -355,7 +355,7 @@ async def prepare_job(plan: UpdatePlan, feed: ReleaseFeed) -> Path:
         # replace its archive or begin another preparation while it is active.
         with file_access(root / "prepare-native.lock", exclusive=True):
             archive = directory / "worker.pyz"
-            archive.unlink(missing_ok=True)  # No committed request exists above.
+            archive.unlink(missing_ok=True)
             _worker_archive(archive)
             process = PreparationProcess.create(directory, plan.installation.environment)
         JobStatus(plan.id, Phase.PREPARING, 0, False,

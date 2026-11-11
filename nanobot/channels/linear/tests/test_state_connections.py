@@ -1,5 +1,3 @@
-"""Store operations release SQLite resources without waiting for cyclic GC."""
-
 import sqlite3
 from dataclasses import replace
 
@@ -61,7 +59,6 @@ def test_store_closes_connections_and_commits_public_operations(tmp_path, connec
 def test_store_rolls_back_and_closes_after_partial_write(tmp_path, connections):
     store = LinearStateStore(tmp_path / "state.sqlite3")
     assert store.enqueue_webhook("delivery", {"type": "original"})
-    # Force the second enqueue statement to fail, after it writes a receipt.
     with store._connect() as connection:
         connection.execute("DELETE FROM webhook_receipts WHERE delivery_id = 'delivery'")
 
@@ -70,7 +67,6 @@ def test_store_rolls_back_and_closes_after_partial_write(tmp_path, connections):
     _assert_closed(connections)
 
     store.complete_webhook("delivery")
-    # The failed enqueue's receipt must have rolled back, not blocked a retry.
     assert store.enqueue_webhook("delivery", {"type": "retry"})
     assert store.claim_webhooks()[0].payload == {"type": "retry"}
     _assert_closed(connections)

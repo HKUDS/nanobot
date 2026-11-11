@@ -16,7 +16,6 @@ if [ "$(id -u)" = "0" ]; then
     exit 1
 fi
 
-# Already non-root: make sure the data dir is writable before starting.
 if [ -d "$dir" ] && [ ! -w "$dir" ]; then
     owner_uid=$(stat -c %u "$dir" 2>/dev/null || stat -f %u "$dir" 2>/dev/null)
     cat >&2 <<EOF
@@ -42,7 +41,7 @@ if [ "$RENDER" = "true" ]; then
         echo "[entrypoint] existing $config found — leaving it in place"
     fi
     set -- "$@" --config "$config"
-elif [ "$NANOBOT_DOCKER_BOOTSTRAP" = "1" ] && { [ "$1" = "gateway" ] || [ "$1" = "serve" ]; }; then
+elif [ "$NANOBOT_DOCKER_BOOTSTRAP" = "1" ] && [ "$1" = "gateway" ]; then
     # Explicit config selectors belong to the CLI; bootstrap only the default instance.
     initialize_default=1
     for argument in "$@"; do

@@ -1,5 +1,3 @@
-"""Ingress regressions for the receiving-service authentication boundary."""
-
 import base64
 from datetime import date
 

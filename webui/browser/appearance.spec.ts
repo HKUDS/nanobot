@@ -52,7 +52,7 @@ test("custom reading size previews, persists and survives preset changes", async
   await page.reload();
   await expect(input).toHaveValue("24");
   await page.getByRole("radio", { name: "Small reading text", exact: true }).click();
-  await expect(paragraph).toHaveCSS("font-size", "16px");
+  await expect(paragraph).toHaveCSS("font-size", "15px");
   await page.getByRole("spinbutton", { name: "Custom text size", exact: true }).click();
   await expect(input).toHaveValue("24");
   await expect(paragraph).toHaveCSS("font-size", "24px");
@@ -78,11 +78,41 @@ for (const narrow of [false, true]) {
     await checkbox.click();
     await expect(checkbox).toHaveAttribute("aria-checked", "false");
     await page.getByRole("button", { name: "折叠修改", exact: true }).click();
-    await expect(page.getByText("默认收起代码差异，需要时点开。", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "修改预览", exact: true }).click();
+    await expect(page.getByRole("tooltip")).toHaveText("默认收起代码差异，需要时点开。");
+    await page.keyboard.press("Escape");
     await page.locator("main").evaluate((element) => element.scrollTo(0, 0));
     await page.screenshot({ path: info.outputPath("appearance.png") });
   });
 }
+
+test("appearance explanations open on demand and follow the selected display modes", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=appearance");
+  const explanations = [
+    ["Reading text size", "Adjust messages, code and the composer—not navigation."],
+    ["Activity display", "Choose how much detail appears as nanobot works."],
+    ["Activity details", "Show progress while working; keep finished work compact."],
+    ["Edit preview", "Show changed files and line counts."],
+  ];
+  for (const [label, description] of explanations) {
+    await expect(page.getByText(description, { exact: true })).toBeHidden();
+    await page.getByRole("button", { name: label, exact: true }).hover();
+    await expect(page.getByRole("tooltip")).toHaveText(description);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toBeHidden();
+  }
+
+  await page.getByRole("button", { name: "Expanded", exact: true }).click();
+  const activity = page.getByRole("button", { name: "Activity details", exact: true });
+  await activity.focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Keep activity details expanded by default.");
+  await activity.press("Escape");
+  await expect(page.getByRole("tooltip")).toBeHidden();
+  await page.getByRole("button", { name: "Diff", exact: true }).click();
+  const edits = page.getByRole("button", { name: "Edit preview", exact: true });
+  await edits.focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Show code changes directly in the conversation.");
+});
 
 test("changing a custom size reflows an existing composer and its mention layer", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -208,7 +238,10 @@ test("unfinished numeric input reports an error instead of acting like a cleared
     expect(await input.evaluate((element: HTMLInputElement) => element.validity.badInput)).toBe(true);
     await input.press("Enter");
     await expect(input).toHaveAttribute("aria-invalid", "true");
+    // The pointer can leave the editor while the user reads the validation hint.
+    await page.mouse.move(0, 0);
     await expect(page.getByRole("tooltip", { name: /Your text remains at 18 px\./ })).toBeVisible();
+    await expect(input).toBeFocused();
     await expect(paragraph).toHaveCSS("font-size", "18px");
     await input.click();
     await input.press("Escape");

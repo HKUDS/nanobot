@@ -179,6 +179,18 @@
     "reset": "Atur ulang pratinjau",
     "hint": "Pilih status pemulihan, lalu coba lanjutkan atau tutup."
   },
+  "sandbox": {
+    "gateway": "Contoh gateway",
+    "unknownGateway": "Tidak ditentukan",
+    "title": "Pemberitahuan perintah",
+    "description": "Bandingkan komponen yang hilang, pemasangan tidak terlindungi, dan kegagalan awal dengan komponen produksi.",
+    "options": "Pemberitahuan tidak mengambil fokus atau mengulang perintah. Ubah status, tutup, lalu lanjutkan mengetik.",
+    "missing": "Komponen tidak ditemukan",
+    "permissions": "Pemasangan perlu diperiksa",
+    "startup": "Tidak dapat dimulai",
+    "hint": "Hanya demo komponen. Tidak ada perintah atau perubahan pengaturan.",
+    "settingsAction": "Pengaturan sandbox diminta (demo)."
+  },
   "fallback": {
     "title": "ModelFallbackNotice · Model cadangan",
     "description": "Lihat pemberitahuan model cadangan dan otorisasi kedaluwarsa, lalu coba pengaturan atau tutup.",

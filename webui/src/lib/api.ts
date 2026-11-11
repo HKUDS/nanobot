@@ -1,6 +1,6 @@
+import { isContextGraph, isContextInspection } from "@/lib/context-graph";
 import { isCompactionPhase, isCompactionReason } from "../../../packages/client-events/notifications";
 import type {
-  ApiServicePayload,
   AutomationChatsPayload,
   AutomationChatUpdate,
   AutomationsPayload,
@@ -10,6 +10,7 @@ import type {
   ChannelConnectPayload,
   ChannelValidationPayload,
   ChatSummary,
+  ContextGraph,
   CliAppsPayload,
   FilePreviewPayload,
   FileReferenceMetadata,
@@ -228,7 +229,7 @@ export async function listSessions(
       runStartedAt: s.run_started_at ?? null,
       recoveryState: s.recovery_state ?? null,
       workspaceScope: s.workspace_scope ?? null,
-      projectLocked: s.project_locked,
+      projectLocked: s.project_locked ?? true,
       handle,
     };
   });
@@ -283,6 +284,9 @@ function hasValidProjectionMetadata(value: Record<string, unknown>): boolean {
       "user", "reasoning", "activity", "answer", "complete",
     ].includes(String(value.turn_phase)))
     && (value.turn_seq === undefined || typeof value.turn_seq === "number")
+    && (value.input_id === undefined || typeof value.input_id === "string")
+    && (value.response_input_ids === undefined || (Array.isArray(value.response_input_ids)
+      && value.response_input_ids.every((id: unknown) => typeof id === "string")))
     && (
       value.response_sources === undefined
       || (isRecordArray(value.response_sources) && value.response_sources.every((source) => (
@@ -315,7 +319,7 @@ function isProjectionTraceDetail(value: unknown): boolean {
     && value.traceCount >= 0;
 }
 
-function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
+function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet<unknown> = new Set()): ThreadProjectionEvent {
   if (!isRecord(value) || typeof value.event !== "string" || typeof value.chat_id !== "string") {
     throw new Error("Invalid WebUI thread event");
   }
@@ -381,12 +385,33 @@ function parseThreadProjectionEvent(value: unknown): ThreadProjectionEvent {
     case "stream_end":
     case "reasoning_end":
       if (value.text !== undefined && typeof value.text !== "string") break;
+      if (value.text_from_seq !== undefined && (
+        !Number.isSafeInteger(value.text_from_seq) || Number(value.text_from_seq) < 0
+        || !Number.isSafeInteger(value.turn_seq) || Number(value.text_from_seq) > Number(value.turn_seq)
+      )) break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
+      if (value.context_graph !== undefined && !validatedGraphs.has(value.context_graph) && !isContextGraph(value.context_graph)) break;
+      if (value.context_snapshot !== undefined && !isContextInspection(value.context_snapshot, (graph): graph is ContextGraph => validatedGraphs.has(graph) || isContextGraph(graph))) break;
       if (typeof value.compaction_id !== "string" || !value.compaction_id
         || !isCompactionPhase(value.phase)
         || (value.reason !== undefined && !isCompactionReason(value.reason))) break;
       return value as unknown as ThreadProjectionEvent;
+    case "model_request": {
+      if (value.context_graph !== undefined && !validatedGraphs.has(value.context_graph) && !isContextGraph(value.context_graph)) break;
+      const isUsage = (usage: unknown) => isRecord(usage)
+        && Object.values(usage).every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0);
+      if (typeof value.request_id !== "string" || !value.request_id
+        || typeof value.run_id !== "string" || !value.run_id
+        || !Number.isSafeInteger(value.sequence) || Number(value.sequence) < 0
+        || !["started", "completed", "failed", "cancelled"].includes(String(value.phase))
+        || (value.usage !== undefined && !isUsage(value.usage))
+        || (value.request_usage != null && !isUsage(value.request_usage))
+        || (value.round_usages !== undefined && (!Array.isArray(value.round_usages) || !value.round_usages.every(isUsage)))
+        || (value.context_window_tokens !== undefined && (typeof value.context_window_tokens !== "number"
+          || !Number.isFinite(value.context_window_tokens) || value.context_window_tokens < 0))) break;
+      return value as unknown as ThreadProjectionEvent;
+    }
     case "turn_end":
       return value as unknown as ThreadProjectionEvent;
   }
@@ -400,12 +425,72 @@ export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPay
   if (value.projection !== "events" || !Array.isArray(value.events)) {
     throw new Error("Invalid WebUI thread events");
   }
-  const events = value.events.map(parseThreadProjectionEvent);
-  return {
-    ...value,
-    projection: "events",
-    events,
-  } as unknown as WebuiThreadPersistedPayload;
+  if (isRecord(value.page) && value.page.history_generation != null
+    && (typeof value.page.history_generation !== "string" || !value.page.history_generation)) {
+    throw new Error("Invalid WebUI thread history generation");
+  }
+  if (isRecord(value.page) && value.page.record_range !== undefined) {
+    const range = value.page.record_range;
+    if (!isRecord(range) || !Number.isSafeInteger(range.turn) || Number(range.turn) < 0
+      || !Number.isSafeInteger(range.start) || Number(range.start) < 0
+      || !Number.isSafeInteger(range.end) || Number(range.end) <= Number(range.start)) {
+      throw new Error("Invalid WebUI thread record range");
+    }
+  }
+  if (isRecord(value.page) && value.page.recovered_answers !== undefined && typeof value.page.recovered_answers !== "boolean") {
+    throw new Error("Invalid WebUI thread answer recovery");
+  }
+  const graphs = new Map<string, ContextGraph>();
+  if (value.context_graphs !== undefined) {
+    if (!isRecord(value.context_graphs)) throw new Error("Invalid context graph dictionary");
+    const table = { nodes: value.context_graph_nodes, edges: value.context_graph_edges };
+    if (!isContextGraph(table)) throw new Error("Invalid context graph entity table");
+    const resolveIndex = <T,>(entries: readonly T[], index: unknown): T => {
+      if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index >= entries.length) {
+        throw new Error("Unknown context graph entity reference");
+      }
+      return entries[index];
+    };
+    for (const [key, descriptor] of Object.entries(value.context_graphs)) {
+      if (!isRecord(descriptor) || !Array.isArray(descriptor.nodes) || !Array.isArray(descriptor.edges)) {
+        throw new Error("Invalid context graph dictionary entry");
+      }
+      const nodes = descriptor.nodes.map((index: unknown) => resolveIndex(table.nodes, index));
+      const paths = new Set(nodes.map((node) => node.path));
+      const edges = descriptor.edges.map((index: unknown) => {
+        const edge = resolveIndex(table.edges, index);
+        if (!paths.has(edge.source) || !paths.has(edge.target)) throw new Error("Invalid context graph edge reference");
+        return edge;
+      });
+      graphs.set(key, { nodes, edges });
+    }
+  }
+  const validatedGraphs = new Set(graphs.values());
+  const resolveGraph = (key: unknown): ContextGraph => {
+    const graph = typeof key === "string" ? graphs.get(key) : undefined;
+    if (!graph) throw new Error("Unknown context graph reference");
+    return graph;
+  };
+  const events = value.events.map((raw) => {
+    if (!isRecord(raw)) return parseThreadProjectionEvent(raw);
+    const event = { ...raw };
+    if (event.context_graph_ref !== undefined) {
+      if (event.context_graph !== undefined) throw new Error("Ambiguous context graph reference");
+      event.context_graph = resolveGraph(event.context_graph_ref);
+      delete event.context_graph_ref;
+    }
+    if (isRecord(event.context_snapshot) && event.context_snapshot.graph_ref !== undefined) {
+      if (event.context_snapshot.graph !== undefined) throw new Error("Ambiguous context graph reference");
+      const { graph_ref, ...snapshot } = event.context_snapshot;
+      event.context_snapshot = { ...snapshot, graph: resolveGraph(graph_ref) };
+    }
+    return parseThreadProjectionEvent(event, validatedGraphs);
+  });
+  const body: Record<string, unknown> = { ...value, projection: "events", events };
+  delete body.context_graphs;
+  delete body.context_graph_nodes;
+  delete body.context_graph_edges;
+  return body as unknown as WebuiThreadPersistedPayload;
 }
 
 function parseWebuiThreadTraceDetailPayload(value: unknown): WebuiThreadTraceDetailPayload {
@@ -419,7 +504,7 @@ function parseWebuiThreadTraceDetailPayload(value: unknown): WebuiThreadTraceDet
   }
   return {
     message_id: value.message_id,
-    events: value.events.map(parseThreadProjectionEvent),
+    events: value.events.map((event) => parseThreadProjectionEvent(event)),
   };
 }
 
@@ -436,6 +521,8 @@ export async function fetchWebuiThread(
   if (options?.direction) params.set("direction", options.direction);
   if (options?.before) params.set("before", options.before);
   if (options?.after) params.set("after", options.after);
+  params.set("include_model_requests", "1");
+  params.set("context_graph_encoding", "references-v1");
   const query = params.toString();
   const suffix = query ? `?${query}` : "";
   const url = `${resolvedBase}/api/sessions/${encodeURIComponent(key)}/webui-thread${suffix}`;
@@ -471,10 +558,11 @@ export async function fetchPromptIndex(token: string, key: string, signal: Abort
   const prompts = body.prompts.map((item: unknown) => {
     if (!isRecord(item) || typeof item.id !== "string" || typeof item.preview !== "string"
       || typeof item.answerPreview !== "string" || typeof item.cursor !== "string" || typeof item.turnId !== "string"
+      || (item.inputId !== undefined && typeof item.inputId !== "string")
       || typeof item.createdAt !== "number" || !Number.isFinite(item.createdAt)) {
       throw new Error("Invalid prompt summary");
     }
-    return { id: item.id, preview: item.preview, answerPreview: item.answerPreview,
+    return { id: item.id, inputId: item.inputId, preview: item.preview, answerPreview: item.answerPreview,
       cursor: item.cursor, createdAt: item.createdAt, turnId: item.turnId };
   });
   return { prompts: [...(cached?.prompts.slice(0, replaceFrom) ?? []), ...prompts],
@@ -945,33 +1033,6 @@ export async function fetchNanobotFeatures(
   );
 }
 
-export async function fetchApiService(token: string, base: string = ""): Promise<ApiServicePayload> {
-  return request<ApiServicePayload>(`${base}/api/settings/api-service`, token);
-}
-
-export async function startApiService(
-  transport: WebUIMutationTransport,
-  values: { host: string; port: number; timeout: number; apiKey?: string },
-): Promise<ApiServicePayload> {
-  return mutation<ApiServicePayload>(
-    transport,
-    "settings.api_service.start",
-    {
-      host: values.host,
-      port: values.port,
-      timeout: values.timeout,
-      ...(values.apiKey !== undefined ? { api_key: values.apiKey } : {}),
-    },
-    PACKAGE_MUTATION_TIMEOUT_MS,
-  );
-}
-
-export async function stopApiService(
-  transport: WebUIMutationTransport,
-): Promise<ApiServicePayload> {
-  return mutation<ApiServicePayload>(transport, "settings.api_service.stop");
-}
-
 export async function enableNanobotFeature(
   transport: WebUIMutationTransport,
   name: string,
@@ -1336,14 +1397,16 @@ function modelGenerationSettingsPayload(
 export async function createModelConfiguration(
   transport: WebUIMutationTransport,
   configuration: ModelConfigurationCreate,
-): Promise<SettingsPayload> {
-  return mutation<SettingsPayload>(
+  optimized = false,
+): Promise<Omit<SettingsPayload, "usage"> & Partial<Pick<SettingsPayload, "usage">>> {
+  return mutation<Omit<SettingsPayload, "usage">>(
     transport,
     "settings.model_configuration.create",
     {
       name: configuration.name,
       provider: configuration.provider,
       model: configuration.model,
+      ...(optimized ? { append_to_order: true, include_usage: false } : {}),
       ...modelGenerationSettingsPayload(configuration),
     },
   );
@@ -1352,12 +1415,14 @@ export async function createModelConfiguration(
 export async function updateModelConfiguration(
   transport: WebUIMutationTransport,
   configuration: ModelConfigurationUpdate,
-): Promise<SettingsPayload> {
-  return mutation<SettingsPayload>(
+  optimized = false,
+): Promise<Omit<SettingsPayload, "usage"> & Partial<Pick<SettingsPayload, "usage">>> {
+  return mutation<Omit<SettingsPayload, "usage">>(
     transport,
     "settings.model_configuration.update",
     {
       name: configuration.name,
+      ...(optimized ? { include_usage: false } : {}),
       ...(configuration.newName !== undefined ? { new_name: configuration.newName } : {}),
       ...(configuration.provider !== undefined ? { provider: configuration.provider } : {}),
       ...(configuration.model !== undefined ? { model: configuration.model } : {}),
@@ -1528,6 +1593,12 @@ export async function updateRuntimeConfigSettings(
   values: Record<string, import("@/lib/types").RuntimeConfigValue>,
 ): Promise<SettingsPayload> {
   return mutation<SettingsPayload>(transport, "settings.runtime_config.update", { values });
+}
+
+export async function checkSandboxSettings(
+  transport: WebUIMutationTransport,
+): Promise<{ sandbox: import("@/lib/types").SandboxCheck }> {
+  return mutation(transport, "settings.sandbox.check", {});
 }
 
 export function starPromptAction(

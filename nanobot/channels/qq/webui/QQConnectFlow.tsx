@@ -7,7 +7,6 @@ import { channelStatusLabel } from "@/components/settings/channels/ChannelIdenti
 import { QQConnectFlowView, useQQConnectLabels } from "./QQConnectFlowView";
 
 export function QQConnectFlow({
-  token,
   feature,
   connectRequestId,
   onOpenAdvanced,
@@ -20,7 +19,6 @@ export function QQConnectFlow({
     : channelStatusLabel(feature, (key, fallback) => t(key, { defaultValue: fallback }));
   return (
     <ChannelQrConnectFlow
-      token={token}
       channelName="qq"
       connectRequestId={connectRequestId}
       autoStart={!feature.configured}

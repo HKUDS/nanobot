@@ -4,7 +4,6 @@ import type { NanobotFeaturesPayload } from "@/lib/types";
 import { FeishuConnectFlowView, useFeishuConnectLabels } from "./FeishuConnectFlowView";
 
 export function FeishuConnectFlow({
-  token,
   instanceId = "default",
   mode = "replace",
   idleLabel,
@@ -21,7 +20,6 @@ export function FeishuConnectFlow({
   const labels = useFeishuConnectLabels();
   return (
     <ChannelQrConnectFlow
-      token={token}
       channelName="feishu"
       startParams={{ domain: "feishu", instance_id: instanceId, mode }}
       idleLabel={idleLabel}

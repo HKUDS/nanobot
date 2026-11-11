@@ -504,5 +504,12 @@
     "view": "招待を表示",
     "dismissed": "プレビューで今後表示しないを選択しました",
     "starred": "プレビューで GitHub リンクを選択しました"
+  },
+  "sidebarPanel": {
+    "title": "サイドパネル",
+    "toggle": "パネルの表示を切り替え",
+    "content": "詳細は現在のペイン内に表示されます。",
+    "description": "共通の開くアニメーションを持つ非モーダルのサイドパネル。",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

@@ -623,7 +623,7 @@ Besides normal assistant text, nanobot can emit low-emphasis trace blocks. These
 
 ### Progress and Tool Hints
 
-Progress and tool hints arrive through the normal `send(msg)` path. Check `msg.event` before rendering:
+Generic progress and tool activity arrive through `send(msg)`. Tool activity carries a `ProgressEvent` with structured `tool_events`; its core `content` is empty. Each item retains its call ID, tool name, arguments, lifecycle phase, and terminal result or error. Before queuing delivery, `prepare_tool_events(msg)` projects the activity for this channel. Its default implementation formats starts as concise text in a channel-local message copy, so text-only adapters can keep their normal formatting and thread handling:
 
 ```python
 from nanobot.bus.outbound_events import ProgressEvent
@@ -644,7 +644,9 @@ async def send(self, msg: OutboundMessage) -> None:
     await self._send_message(msg.chat_id, msg.content, media=msg.media)
 ```
 
-Tool hints are on by default. Users can disable them globally or per channel:
+Override `prepare_tool_events(msg)` to return the original message when the platform consumes structured activity directly, or return your own display projection. Keep this hook free of network sends: it runs once before delivery and its returned envelope is reused across retries. In `send(msg)`, consume `msg.event.tool_events` for native activity, grouping, buffering, or card updates; retain destination/thread metadata and handle start/end/error by call ID. Do not assume a preformatted hint is present or route a rendered copy back into the message bus. The default text formatter uses `self.tool_hint_max_length`, initialized from `agents.defaults.toolHintMaxLength`. Direct-call `on_progress` callbacks that display tools must accept the `tool_events` keyword and render those events themselves; `nanobot.utils.tool_hints.format_tool_event_hints()` is available for text consumers.
+
+Tool starts are controlled by `sendToolHints`; terminal tool events retain the existing `sendProgress` policy. Tool hints are on by default. Users can disable them globally or per channel:
 
 ```json
 {

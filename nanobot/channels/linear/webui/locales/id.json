@@ -1,37 +1,23 @@
 {
-  "description": "Gunakan nanobot dari issue Linear melalui Agent Session native.",
-  "requirements": "Aplikasi OAuth Linear privat dan URL callback HTTPS publik yang stabil",
   "setup": {
     "docsLabel": "Buka panduan penyiapan Linear",
     "officialLabel": "Buat aplikasi OAuth Linear",
-    "tryIt": "Mention aplikasi atau delegasikan issue kepadanya; percakapan lanjutan di Agent Session tidak memerlukan mention lagi.",
-    "summary": "Buat aplikasi OAuth Linear privat, simpan kredensial dan URL publiknya, lalu otorisasi workspace. Mulai sesi dengan mention aplikasi atau mendelegasikan issue; komentar biasa diabaikan.",
-    "steps": [
-      "Ekspos instans nanobot ini melalui URL HTTPS yang stabil (tunnel dapat digunakan).",
-      "Buat aplikasi OAuth privat di Linear dengan scope read, write, app:mentionable, dan app:assignable.",
-      "Daftarkan webhook aplikasi untuk AgentSessionEvent, PermissionChange, dan OAuthAuthorization menggunakan URL yang dibuat.",
-      "Hubungkan workspace melalui OAuth, lalu mention aplikasi atau delegasikan issue kepadanya."
-    ],
     "fields": {
       "clientId": {
         "label": "ID klien OAuth",
-        "placeholder": "ID klien OAuth Linear",
-        "help": "Salin dari aplikasi OAuth privat.\n\nSalin dari aplikasi OAuth privat di Linear."
+        "placeholder": "ID klien OAuth Linear"
       },
       "clientSecret": {
         "label": "Secret klien OAuth",
-        "placeholder": "••••••",
-        "help": "Hanya disimpan oleh instans nanobot ini."
+        "placeholder": "••••••"
       },
       "webhookSigningSecret": {
         "label": "Secret penandatanganan webhook",
-        "placeholder": "••••••",
-        "help": "Verifikasi tanda tangan Webhook.\n\nDigunakan untuk memverifikasi Linear-Signature sebelum isi webhook diurai."
+        "placeholder": "••••••"
       },
       "publicBaseUrl": {
         "label": "URL HTTPS publik",
-        "placeholder": "https://nanobot.example.com",
-        "help": "Masukkan URL HTTPS tanpa path.\n\nOrigin HTTPS stabil yang diarahkan ke listener di bawah; jangan sertakan path."
+        "placeholder": "https://nanobot.example.com"
       },
       "host": {
         "label": "Host listener",
@@ -51,12 +37,10 @@
       },
       "allowFrom": {
         "label": "Pengguna Linear yang diizinkan",
-        "placeholder": "ID pengguna Linear, dipisahkan koma",
-        "help": "Pilih siapa yang boleh memakai koneksi ini.\n\nBiarkan kosong untuk memakai pairing nanobot, atau gunakan * untuk mengizinkan semua pengguna di workspace yang terhubung."
+        "placeholder": "ID pengguna Linear, dipisahkan koma"
       },
       "showReasoning": {
-        "label": "Tampilkan penalaran",
-        "help": "Kirim penalaran sebagai aktivitas berpikir.\n\nKirim penalaran model sebagai aktivitas pemikiran di Linear. Nonaktifkan untuk sesi yang lebih ringkas."
+        "label": "Tampilkan penalaran"
       }
     }
   },
@@ -78,9 +62,6 @@
     "savePublicUrl": "Masukkan URL HTTPS publik untuk membuat aplikasi Linear.",
     "retrySave": "Coba lagi",
     "channelRunning": "Channel berjalan",
-    "accessAll": "Semua anggota workspace yang diotorisasi dapat menjalankan agen ini.",
-    "accessRestricted": "Hanya ID pengguna Linear yang tercantum di Lanjutan yang dapat menjalankan agen ini.",
-    "accessPairing": "Lakukan pairing saat pertama digunakan dan hubungkan Linear MCP untuk mencari atau mengedit issue.",
     "configureTools": "Konfigurasi Linear MCP",
     "workspacesTitle": "Workspace yang diotorisasi",
     "refreshWorkspaces": "Muat ulang workspace",
@@ -128,7 +109,6 @@
     "allow": "Izinkan {{name}} memakai nanobot",
     "saveUnconfirmed": "Akses belum dikonfirmasi. Segarkan anggota sebelum mencoba lagi.",
     "guide": "Gunakan Akses anggota untuk menyetujui rekan tanpa kode pairing. Persetujuan lama tetap berlaku kecuali dinonaktifkan. Hubungkan Linear MCP untuk mencari atau mengedit issue.",
-    "intro": "Pilih siapa yang boleh memakai nanobot di Linear, tanpa kode pairing.",
     "details": "Tentang akses anggota",
     "summary": "{{allowed}} diizinkan",
     "loading": "Mencari anggota…",

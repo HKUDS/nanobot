@@ -179,6 +179,18 @@
     "reset": "重置预览",
     "hint": "选择恢复状态，再试用继续或关闭。"
   },
+  "sandbox": {
+    "gateway": "示例网关系统",
+    "unknownGateway": "未指定",
+    "title": "命令提示",
+    "description": "使用正式提示组件，体验缺失组件、安装位置受限和启动异常三种状态。",
+    "options": "提示不抢焦点，也不自动重试命令。可切换状态、关闭提示并继续输入。",
+    "missing": "找不到组件",
+    "permissions": "安装位置受限",
+    "startup": "启动异常",
+    "hint": "这里只演示组件，不会执行命令或修改设置。",
+    "settingsAction": "已请求打开沙箱设置（演示）。"
+  },
   "fallback": {
     "title": "ModelFallbackNotice · 模型回退",
     "description": "查看模型回退和授权失效提示。",

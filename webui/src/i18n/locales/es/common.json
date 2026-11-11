@@ -477,8 +477,66 @@
       "password": "Contraseña",
       "proxyReferenceAuth": "Configura la autenticación en la URL del proxy referenciada."
     },
+    "sandbox": {
+      "title": "Sandbox de comandos",
+      "method": "Método de aislamiento",
+      "off": "Sin aislamiento",
+      "status": "Configuración guardada",
+      "check": "Comprobar sandbox",
+      "checking": "Comprobando…",
+      "scope": "Solo prueba el lanzador guardado con archivos temporales. No es una auditoría de seguridad completa. Reinicia la puerta de enlace para aplicar los cambios a los comandos.",
+      "path": "Ruta del lanzador de confianza",
+      "launcher": "lanzador del entorno aislado",
+      "pathHelp": "Normalmente, déjala vacía para buscar {{launcher}} en el sistema. Para una instalación personalizada, pide la ruta completa del lanzador al responsable del paquete. El archivo y sus directorios padre deben ser de root, sin escritura para grupos u otros usuarios, y estar fuera de las rutas de escritura del agente.",
+      "automatic": "Búsqueda del sistema",
+      "checkError": "No se pudo completar la prueba. Abre los ajustes de nuevo y reinténtalo.",
+      "saveError": "No se pudo guardar. El borrador se conserva; vuelve a intentarlo.",
+      "disableTitle": "¿Desactivar el aislamiento?",
+      "disableHelp": "Tras reiniciar, los comandos usarán los permisos de la cuenta de la puerta de enlace. Las herramientas de archivos también perderán la restricción de espacio de trabajo de este sandbox; las restricciones independientes se mantienen.",
+      "keep": "Mantener aislamiento",
+      "disable": "Desactivar aislamiento",
+      "notice": {
+        "title": "Los comandos requieren atención",
+        "missing": "La pasarela no encuentra {{launcher}}. Si está instalado, indica su ruta completa. Si no, contacta al responsable del paquete o al administrador. Puedes seguir chateando.",
+        "path": "La pasarela no puede usar la ruta configurada de {{launcher}}. Revisa la ruta completa y los permisos de acceso.",
+        "permissions": "{{launcher}} no está en una ubicación protegida. Contacta al responsable del paquete o al administrador.",
+        "startup": "{{launcher}} no pudo iniciarse. Revisa la instalación de la pasarela y las restricciones del sistema.",
+        "configurePath": "Configurar ruta de {{launcher}}",
+        "openSettings": "Abrir ajustes del entorno aislado"
+      },
+      "states": {
+        "disabled": "Comandos desactivados",
+        "off": "Sin aislamiento",
+        "unsupported": "No compatible",
+        "unchecked": "Sin comprobar",
+        "unavailable": "No disponible",
+        "passed": "Prueba básica superada",
+        "checking": "Comprobando…"
+      },
+      "help": {
+        "disabled": "Activa los comandos para usar un sandbox.",
+        "off": "Los comandos no están aislados. Elige un método para proteger el equipo.",
+        "unsupported": "El sistema de la puerta de enlace no admite este método.",
+        "unchecked": "Comprueba la configuración guardada del sandbox.",
+        "unsaved": "Guarda los cambios y comprueba el sandbox.",
+        "unavailable": "El sandbox no puede iniciarse. No se ejecutarán comandos en él.",
+        "passed": "El lanzador arrancó, se pudo escribir en el espacio de trabajo temporal y se bloqueó el archivo externo de prueba.",
+        "checking": "Ejecutando una prueba con tiempo limitado…"
+      },
+      "reasons": {
+        "launcher_missing": "La pasarela no encuentra {{launcher}}. Si está instalado, indica su ruta completa abajo. Si no, contacta al responsable del paquete o al administrador.",
+        "path_not_absolute": "Introduce una ruta absoluta, no un nombre de comando.",
+        "not_executable": "La ruta debe apuntar a un archivo ejecutable.",
+        "agent_writable": "El agente puede escribir en esta ruta. Pide una instalación protegida al responsable del paquete.",
+        "unprotected_installation": "Un usuario distinto de root puede modificar el lanzador o un directorio padre. Pide una instalación protegida al administrador.",
+        "path_unavailable": "No se puede leer la ruta. Comprueba su existencia y permisos en la puerta de enlace.",
+        "platform_unsupported": "Elige un método compatible con el sistema de la puerta de enlace.",
+        "probe_failed": "La prueba falló. Comprueba la instalación, los espacios de nombres del núcleo y los montajes adicionales.",
+        "probe_timeout": "La prueba agotó el tiempo. Comprueba la instalación y las restricciones del equipo y reinténtalo.",
+        "unknown": "Lanzador no disponible. Comprueba su instalación y permisos."
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "Guardado. Reinicia el servicio API para aplicar los cambios.",
       "commandRuntime": {
         "custom": "Personalizada (segundos)",
         "customLabel": "Duración personalizada (segundos)",
@@ -526,8 +584,6 @@
         "gateway_host": {"label": "Dirección de la puerta de enlace", "help": "Dirección de la puerta de enlace; configura el listener WebUI aparte.\n\nDirección de escucha de la pasarela. Las direcciones de WebSocket y WebUI se configuran en Canales → WebSocket."},
         "gateway_port": {"label": "Puerto de la pasarela", "help": "Puerto de la puerta de enlace; los argumentos de inicio tienen prioridad.\n\nPuerto guardado. Los argumentos de línea de comandos tienen prioridad."},
         "gateway_restart_mode": {"label": "Modo de reinicio", "help": "Elige cómo reiniciar; Automático se adapta al entorno.\n\nMétodo de reinicio del proceso. El modo automático depende del entorno del host."},
-        "api_host": {"label": "Dirección API", "help": "Configura una clave antes del acceso por red; reinicia la API tras los cambios.\n\nSe requiere una clave API para escuchar en una dirección distinta de localhost. Configúrala en Sistema y reinicia el servicio API para aplicar los cambios."},
-        "api_timeout": {"label": "Tiempo límite de API", "help": "Segundos máximos por solicitud API; reinicia para aplicar.\n\nDuración máxima de las solicitudes. Reinicia el servicio API para aplicar los cambios."},
         "tools_image_generation_save_dir": {"label": "Directorio de guardado", "help": "Ruta relativa dentro del directorio multimedia; las imágenes existentes no se mueven.\n\nRuta relativa dentro de la carpeta multimedia de nanobot. Las imágenes existentes no se mueven."}
       },
       "groups": {
@@ -544,7 +600,6 @@
         "safety": {"title": "Permisos globales", "help": "Configura límites del espacio, excepciones de red e instalaciones remotas.\n\nRestricciones del espacio de trabajo, redes privadas e instalaciones remotas."},
         "cli": {"title": "Límites CLI", "help": "Configura tiempos límite de instalación y ejecución y la duración de caché.\n\nTiempos de instalación, ejecución y caché del catálogo."},
         "gateway": {"title": "Puerta de enlace", "help": "Configura el despliegue y el reinicio."},
-        "api": {"title": "Ajustes API", "help": "Configura la dirección de escucha y el tiempo límite de solicitudes."},
         "storage": {"title": "Almacenamiento de imágenes", "help": "Elige dónde guardar las imágenes generadas."},
         "maintenance": {"title": "Organización de memoria", "help": ""},
         "web": {"title": "Acceso web", "help": ""},
@@ -878,21 +933,13 @@
       "workspace": "Directorio de trabajo"
     },
     "usage": {
-      "title": "Actividad de tokens",
       "shortTitle": "Uso de tokens",
-      "last30Days": "Últimos 30 días",
       "viewDetails": "Ver detalles",
-      "previousPage": "Página anterior",
-      "nextPage": "Página siguiente",
-      "dailyAverage": "Promedio diario",
-      "inputTokens": "Tokens de entrada",
       "cacheHitRate": "Tasa de aciertos de caché",
-      "requestTrend": "Solicitudes diarias",
       "cacheRateHelp": "La tasa excluye las entradas cuyo estado de caché se desconoce.",
       "dailyTrend": "Tokens diarios",
       "systemHelp": "Incluye tareas internas y llamadas sin origen registrado.",
       "bySource": "Uso por origen",
-      "byModel": "Uso por modelo",
       "modelTrend": "Tendencias por modelo",
       "modelsUnavailable": "Sin desglose por modelo.",
       "otherModels": "Otros / sin atribuir",
@@ -904,19 +951,8 @@
       "cacheUnknown": "Estado desconocido",
       "outputTokens": "Salida",
       "otherTokens": "Otros tokens",
-      "subtitle": "Uso reportado por el proveedor durante los últimos 12 meses.",
-      "empty": "La actividad de tokens aparecerá después de nuevas respuestas del modelo.",
       "totalTokens": "Tokens totales",
-      "peakTokens": "Pico de tokens",
-      "thirtyDayTokens": "Tokens de 30 días",
-      "currentStreak": "Racha actual",
-      "longestStreak": "Racha más larga",
-      "daysValue": "{{count}} d",
-      "last30": "30 días",
-      "activeDays": "Días activos",
       "requests": "Solicitudes",
-      "estimated": "estimado",
-      "includesEstimates": "incluye estimaciones",
       "cellTitle": "{{date}}: {{tokens}} tokens, {{requests}} solicitudes",
       "sources": {
         "user": "Chat",
@@ -998,19 +1034,12 @@
       "catalogStale": "La lista en caché puede estar desactualizada.",
       "catalogFallback": "La lista integrada puede estar desactualizada.",
       "selectModel": "Seleccionar modelo",
-      "addConfiguration": "Agregar configuración",
-      "newConfiguration": "Nueva configuración de modelo",
-      "newConfigurationHelp": "Guarda un proveedor y un modelo para seleccionarlos rápidamente.",
-      "configurationName": "Nombre de configuración",
-      "configurationNameHelp": "Renombra esta configuración de modelo guardada.",
-      "configurationNamePlaceholder": "Escritura rápida",
       "callOrder": "Orden de modelos",
       "primary": "Principal",
       "addToOrder": "Activar preajuste",
       "newPreset": "Nuevo preajuste",
       "newPresetHelp": "Guarda un modelo y sus ajustes para reutilizarlos.",
       "presets": "Preajustes de modelo",
-      "editPreset": "Editar preajuste",
       "presetName": "Nombre del preajuste",
       "presetNameHelp": "Los nombres deben ser únicos; también se usan en /model.",
       "presetNameDuplicate": "Ya existe un preajuste con este nombre.",
@@ -1035,16 +1064,11 @@
       "converting": "Convirtiendo...",
       "convertAction": "Convertir en preajustes",
       "dragToReorder": "Arrastrar para reordenar",
-      "moveUp": "Subir",
-      "moveDown": "Bajar",
       "removeFromOrder": "Desactivar preajuste",
-      "inCallOrder": "En el orden de llamada",
       "disabled": "Desactivado",
       "noPresets": "Aún no hay preajustes de modelo",
-      "noPresetsHelp": "Crea un preajuste y añádelo al orden de llamada.",
       "removeBeforeDelete": "No se puede eliminar el modelo principal",
       "providerSetupRequired": "El proveedor requiere configuración",
-      "configureProviderBeforeSaving": "Configura este proveedor antes de guardar el preajuste.",
       "deletePresetTitle": "¿Eliminar el preajuste de modelo?",
       "deletePresetHelp": "Se eliminará el preajuste «{{name}}» y se quitará del orden de llamada. Las credenciales del proveedor se conservarán.",
       "searchModels": "Elegir modelo",
@@ -1052,9 +1076,7 @@
       "loadingModels": "Cargando modelos...",
       "searchCatalog": "Busca un modelo en el catálogo del proveedor.",
       "availableCount": "Modelos disponibles: {{count}}",
-      "modelsAvailable": "disponibles",
       "noModelResults": "No hay modelos coincidentes.",
-      "loadFailed": "Lista de modelos no disponible.",
       "unsupportedModelList": "Escribe un ID de modelo manualmente.",
       "providerNotConfigured": "Configura este proveedor antes de cargar modelos.",
       "autoProviderCustomOnly": "Introduce un ID de modelo para usar la selección automática del proveedor."
@@ -1065,39 +1087,17 @@
       "empty": "No hay zonas horarias coincidentes."
     },
     "cliApps": {
-      "allCategories": "Todas las categorías",
-      "availableCount_one": "{{count}} aplicación",
-      "availableCount_other": "{{count}} aplicaciones",
-      "availableCount": "{{count}} aplicaciones",
-      "installedCount_one": "{{count}} herramienta CLI instalada",
-      "installedCount_other": "{{count}} herramientas CLI instaladas",
-      "installedCount": "{{count}} instaladas",
-      "summary": "{{installed}} de {{total}} herramientas CLI instaladas",
-      "filterAll": "Todas",
-      "filterInstalled": "Herramientas CLI instaladas",
-      "filterNotInstalled": "No instaladas",
-      "searchPlaceholder": "Buscar herramientas CLI",
       "statusInstalled": "Instalada",
-      "statusAvailable": "Disponible",
-      "statusMissing": "Falta dependencia",
-      "statusUnsupported": "No compatible",
-      "statusNotInstalled": "No instalada",
-      "unsupported": "No compatible",
-      "loading": "Cargando aplicaciones CLI...",
-      "empty": "Ninguna aplicación CLI coincide con este filtro.",
-      "readyTitle": "@{{name}} está listo",
       "readyStatus": "Listo",
       "readyPrompt": "Usa @{{name}} para descubrir qué puedes hacer con esta herramienta.",
       "readyTry": "Probar @{{name}}",
       "readyCopied": "Copiado",
       "openChat": "Abrir chat",
-      "requires": "Requiere",
       "test": "Probar CLI",
       "update": "Actualizar CLI",
       "uninstall": "Desinstalar CLI",
       "install": "Instalar CLI",
-      "unavailable": "No disponible",
-      "noDescription": "Sin descripción disponible."
+      "unavailable": "No disponible"
     },
     "about": {
       "updateNotice": "Actualización disponible",
@@ -1233,16 +1233,6 @@
         "github": "Gestiona repositorios, issues y PR.",
         "supabase": "Consulta y gestiona proyectos."
       }
-    },
-    "api": {
-      "title": "Servidor API", "openaiCompatible": "API compatible con OpenAI",
-      "description": "Conecta mediante una API compatible con OpenAI.",
-      "start": "Iniciar servidor API", "starting": "Iniciando...", "stop": "Detener", "stopping": "Deteniendo...",
-      "access": "Acceso", "thisDevice": "Este dispositivo", "localNetwork": "Red local",
-      "localHelp": "Solo este dispositivo puede conectarse.", "networkHelp": "El acceso desde la red local requiere una clave API.\n\nOtros dispositivos pueden conectarse; se requiere una clave API.",
-      "port": "Puerto", "portHelp": "Puerto local del servicio API.", "apiKey": "Clave API",
-      "apiKeyHelp": "Envía la clave como Bearer token.", "apiKeyRequired": "Obligatoria antes de exponer la API en la red.",
-      "apiKeyPlaceholder": "Introduce una clave API", "autoInstall": "Las dependencias del servidor API se instalarán automáticamente al iniciarlo."
     },
     "observability": {
       "title": "Trazas de ejecución", "configured": "Las credenciales de trazas están disponibles para nanobot.",
@@ -1670,6 +1660,10 @@
       "marketplaceNpxRequired": "Se requiere Node.js con npx",
       "marketplaceInstalling": "Instalando",
       "marketplaceInstalled": "Instalada",
+      "marketplaceNameConflict": "El nombre ya está en uso",
+      "marketplaceOriginUnknown": "Origen instalado desconocido",
+      "marketplaceConflictHelp": "Revisa las habilidades con el mismo nombre en Instaladas antes de eliminarlas para usar otro origen.",
+      "marketplaceInstallConflict": "Conflicto de instalación. Espera a que termine la instalación en curso y revisa las habilidades del mismo nombre en Instaladas.",
       "marketplaceInstall": "Instalar",
       "marketplaceNoTrend": "Sin tendencia todavía",
       "marketplaceTrendLabel": "Tendencia de instalaciones de 8 semanas",
@@ -1733,9 +1727,7 @@
     "showArchived": "Mostrar archivados",
     "hideArchived": "Ocultar archivados",
     "select": "Seleccionar",
-    "cancelSelection": "Cancelar selección",
     "selectedCount": "{{count}} seleccionados",
-    "deleteSelected": "Eliminar",
     "delete": "Eliminar",
     "newChat": "Nuevo tema",
     "groups": {
@@ -1747,6 +1739,14 @@
       "earlier": "Anteriores",
       "archived": "Archivados"
     }
+  },
+  "archiveConfirm": {
+    "title": "¿Archivar este tema?",
+    "titleMany": "¿Archivar {{count}} temas?",
+    "unarchiveTitle": "¿Desarchivar este tema?",
+    "unarchiveTitleMany": "¿Desarchivar {{count}} temas?",
+    "description": "Las conversaciones se conservan. Puedes desarchivarlas en cualquier momento.",
+    "unarchiveDescription": "Estos temas volverán a la barra lateral."
   },
   "deleteConfirm": {
     "title": "¿Eliminar este chat?",
@@ -1786,7 +1786,6 @@
     "subagents": {
       "stopFailed": "No se pudo detener esta tarea.",
       "stopTask": "Detener {{label}}",
-      "receiptHelp": "Entregado significa que el mensaje se incluyó en la siguiente solicitud del subagente, sin confirmar su ejecución.",
       "states": {
         "queued": "En cola",
         "running": "En curso",
@@ -1797,11 +1796,6 @@
         "cancelled": "Cancelada",
         "interrupted": "Interrumpida"
       },
-      "receipts": {
-        "accepted": "En cola: {{count}}",
-        "delivered": "Entregados: {{count}}",
-        "undelivered": "Sin entregar: {{count}}"
-      },
       "interruptedHelp": "El servidor se reinició antes de terminar esta tarea. No se ha vuelto a ejecutar automáticamente.",
       "workTitle": "Subtareas",
       "otherWorkTitle": "Otras tareas",
@@ -1809,8 +1803,8 @@
       "progress": "{{completed}} de {{total}} completadas",
       "running": "En curso: {{count}}",
       "finished": "Finalizadas: {{count}}",
-      "needsReview": "Revisar: {{count}}",
-      "messages": "Estado de mensajes"
+      "completed": "Completadas: {{count}}",
+      "needsReview": "Revisar: {{count}}"
     },
     "compaction": {
       "reasons": {
@@ -1914,8 +1908,6 @@
       "sessionInfo": "Detalles de la sesión"
     },
     "sessionInfo": {
-      "title": "Sesión",
-      "untitled": "Tema sin título",
       "automations": "Automatizaciones",
       "count": "{{count}}",
       "loading": "Cargando automatizaciones...",
@@ -1940,8 +1932,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Escribe tu mensaje…",
-      "placeholderHero": "Describe lo que quieres hacer",
+      "placeholder": "Escribe / para ver comandos, @ para mencionar conversaciones o aplicaciones y $ para elegir habilidades",
+      "placeholderCompact": "Escribe un mensaje…",
       "placeholderOpening": "Abriendo un nuevo tema…",
       "inputAria": "Entrada de mensaje",
       "goalStateStrip": "Objetivo: {{label}}",
@@ -1955,6 +1947,10 @@
       "removeQuotedContext": "Quitar cita",
       "modelNotConfigured": "Modelo no configurado",
       "configureModel": "Configurar modelo",
+      "shell": {
+        "run": "Ejecutar comando de Shell",
+        "removeContext": "Elimina los archivos adjuntos y el texto citado antes de ejecutar un comando."
+      },
       "chooseAI": "Elegir modelo",
       "switchModel": "Cambiar modelo",
       "manageModels": "Gestionar preajustes",
@@ -1964,15 +1960,21 @@
       "reauthFallback": "Un modelo alternativo respondió esta vez.",
       "reauthSettings": "Abrir ajustes del modelo",
       "context": {
+          "loaded": "Cargado",
+          "unloaded": "Sin cargar",
+          "expand": "Ampliar contexto",
+          "collapse": "Reducir contexto",
+          "noFiles": "Aún no hay contexto registrado",
+          "estimatedNodeTokens": "Unos {{value}} tokens",
+          "openFile": "Abrir archivo",
+          "history": "Historial de contexto",
+          "playHistory": "Reproducir historial del contexto",
         "tooltip": "Contexto {{percent}}%",
         "detailsLabel": "Abrir uso del contexto",
         "panelTitle": "Uso del contexto",
         "contextTitle": "Contexto",
-        "recentRounds": "Rondas recientes",
-        "inputTrend": "Tokens de entrada",
-        "input": "Tokens de entrada",
-        "cacheHitRate": "Tasa de aciertos de KV Cache",
-        "output": "Tokens de salida",
+        "cacheHitRate": "Tasa de aciertos de caché",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Tiempo de generación"
       },
       "queued": {
@@ -2163,7 +2165,7 @@
     "actions": "Acciones del mensaje",
     "streaming": "transmitiendo",
     "delivery": {
-      "sending": "Enviando…",
+      "sending": "Enviando",
       "failed": "No enviado"
     },
     "assistantTyping": "El asistente está escribiendo",
@@ -2200,8 +2202,7 @@
     "fileEditDiffTruncated": "Diferencias truncadas. Abre el archivo para ver el cambio completo.",
     "usage": {
       "context": "Contexto más reciente: {{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} solicitudes al modelo",
-      "estimated": "Incluye uso estimado"
+      "requests": "{{count}} solicitudes al modelo"
     },
     "activityThinkingFor": "Pensando durante {{duration}}",
     "activityThought": "Pensamiento completado",
@@ -2369,8 +2370,9 @@
     "retryRateLimit": "Límite de solicitudes alcanzado",
     "retryServer": "Modelo no disponible",
     "retryUnknown": "La solicitud al modelo falló",
-    "retryWaiting": "{{error}}, reintentando en {{seconds}} s, intento {{attempt}}",
-    "retryExhausted": "{{error}}, finalizando el turno",
+    "retryWaiting": "{{error}} Reintentando en {{seconds}} s",
+    "retrying": "{{error}} Reintentando",
+    "retryExhausted": "{{error}} Finalizando el turno",
     "cliActivityRunningOne": "Usando {{name}}",
     "cliActivityRanOne": "Usó {{name}}",
     "cliActivityFailedOne": "No se pudo usar {{name}}",
@@ -2391,6 +2393,7 @@
     "failedHelp": "La tarea guardada no se pudo restaurar de forma segura. Revísala antes de continuar.",
     "resuming": "Restaurando la tarea interrumpida…",
     "review": "Revisa la tarea antes de continuar. Las herramientas no se repetirán automáticamente.",
+    "replyPreserved": "La respuesta está guardada. Puedes continuar.",
     "safeResume": "Continuando desde el contexto guardado de la conversación.",
     "dismiss": "Descartar",
     "continue": "Continuar"
@@ -2515,7 +2518,7 @@
       "authenticationBody": "Vuelve a iniciar sesión o revisa la clave API en los ajustes del modelo.",
       "billingTitle": "La cuota del proveedor del modelo no está disponible",
       "billingBody": "Añade crédito o revisa la facturación de la cuenta del proveedor y vuelve a intentarlo.",
-      "connectionTitle": "No se pudo conectar con el proveedor del modelo",
+      "connectionTitle": "Error de conexión con el modelo",
       "timeoutTitle": "La solicitud al proveedor del modelo agotó el tiempo de espera",
       "rateLimitTitle": "Se alcanzó el límite de solicitudes del proveedor del modelo",
       "serverTitle": "Error del servicio del proveedor del modelo",

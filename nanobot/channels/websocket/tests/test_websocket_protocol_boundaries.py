@@ -1,5 +1,3 @@
-"""Boundary tests for pure WebSocket protocol helpers."""
-
 from __future__ import annotations
 
 import pytest

@@ -74,8 +74,9 @@ jobs:
             coverage: false
             # Process identities run serially; isolated update jobs use case-level
             # scheduling below so one file cannot serialize all real venv work.
-            # Double the prior three-worker budget; keep native-process checks separate.
-            pytest_args: "-n 6 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
+            # Bound real persistence contention: six workers can delay session
+            # startup beyond its watchdog. Keep every assertion and test enabled.
+            pytest_args: "-n 4 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py --ignore=tests/test_update_stop.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +103,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      # Feishu selects websockets<16. Check the default transport before the
+      # all-channel suite exercises the older compatible resolution.
+      - name: Test default WebSocket transport
+        run: >-
+          uv run --no-sync python -m pytest -q
+          nanobot/channels/websocket/tests/test_handshake_disconnect.py
+          nanobot/channels/websocket/tests/test_binary_http.py
+
       - name: Install channel dependencies
         run: uv run --no-sync python -m scripts.install_channel_dependencies --all-channels
 
@@ -127,10 +136,13 @@ jobs:
 
       - name: Check Windows update coordination before the full suite
         if: runner.os == 'Windows'
+        # Real gateway startup/stop must not compete with the parallel package
+        # and session-index fixtures. Keep its startup and lease assertions intact.
         run: >-
           uv run --no-sync python -m pytest
           tests/test_installation_lock.py
           tests/test_update_profiles.py
+          tests/test_update_stop.py
           tests/utils/test_helpers.py::test_atomic_record_reader_does_not_block_concurrent_replacement
           tests/gateway/test_runtime.py::test_runtime_state_publish_keeps_existing_snapshot_readable
           tests/gateway/test_runtime.py::test_runtime_state_reader_does_not_block_publish_while_decoding
@@ -139,12 +151,13 @@ jobs:
       # Each update job owns its venv, HOME, profile and lock directory. Preserve
       # the real installation/restore checks, but avoid a loadfile straggler and
       # disk contention with timing-sensitive runtime-registration checks.
-      # Keep three update workers; the six-worker trial exceeded supervisor deadlines.
+      # Three concurrent offline pip fixture installs exceeded their 60s bounds.
+      # Reduce startup contention; keep every command deadline and lease assertion.
       - name: Run Windows isolated update jobs
         if: runner.os == 'Windows' && github.event_name != 'push' && needs.changes.outputs.native_required == 'true'
         run: >-
           uv run --no-sync python -m pytest tests/test_update_jobs.py
-          -n 3 --dist load -vv --durations=25 --durations-min=1.0
+          -n 2 --dist load -vv --durations=25 --durations-min=1.0
           --junitxml=test-results/update-jobs.xml --timing-report=test-results/update-jobs.json
 
       - name: Run tests with coverage
@@ -172,6 +185,7 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
+          -o faulthandler_timeout=60
           --junitxml=test-results/main.xml --timing-report=test-results/main.json
           --durations=25 --durations-min=1.0
 
@@ -204,10 +218,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.14
+      # Keep this focused job on the affected pre-3.14 ctypes runtime family;
+      # the full Windows suite above continues to cover the latest Python.
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -229,6 +245,7 @@ jobs:
           uv run --no-sync python -m pytest
           tests/tools/test_exec_platform.py
           tests/cli/test_wsl_browser.py
+          tests/gateway/test_runtime.py
           --junitxml=test-results/process.xml --timing-report=test-results/process.json
           --durations=25 --durations-min=1.0
 
@@ -245,9 +262,9 @@ jobs:
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.python_required == 'true' && needs.changes.outputs.native_required == 'true'
     runs-on: windows-latest
-    # The real installer matrix took 18m06s alone; process checks and teardown
-    # previously pushed the combined job beyond its 20-minute bound.
-    timeout-minutes: 25
+    # Two installer workers retain the per-command 90s deadline without four
+    # concurrent PowerShell/venv cold starts competing on the same Windows VM.
+    timeout-minutes: 40
     env:
       PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed -p scripts.pytest_timing"
     steps:
@@ -267,12 +284,12 @@ jobs:
           uv tool install pipx==1.17.12
           uv tool dir --bin >> "$GITHUB_PATH"
 
-      # Each case owns an isolated manager/config root. Keep four workers:
-      # eight-way installer startup exceeded the existing command deadlines in CI.
+      # Each case owns an isolated manager/config root. Four concurrent starts
+      # exceeded the command deadlines; reduce contention, not test coverage.
       - name: Run Windows installer checks
         run: >-
           uv run --no-sync python -m pytest tests/test_install_scripts.py
-          -n 4 --dist load -x -vv --durations=10
+          -n 2 --dist load -x -vv --durations=10
           --junitxml=test-results/installers.xml --timing-report=test-results/installers.json
 
       - name: Upload Windows process test timings
@@ -355,7 +372,18 @@ jobs:
 
       - name: Test browser layout and history motion
         working-directory: webui
-        run: bun run test:browser
+        run: bun run test:browser --trace=retain-on-failure
+
+      - name: Retain browser failure details
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failures
+          path: |
+            webui/test-results/browser/**/trace.zip
+            webui/test-results/browser/**/test-failed-*.png
+            webui/test-results/browser/**/error-context.md
+          retention-days: 7
 
   webui:
     needs: [changes, webui_checks, webui_browser]
@@ -364,7 +392,6 @@ jobs:
     timeout-minutes: 1
 
     steps:
-      # Keep the existing check name dependent on every WebUI acceptance check.
       - name: Require both WebUI jobs to pass
         env:
           CHECKS_RESULT: ${{ needs.webui_checks.result }}
@@ -472,7 +499,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docker_required == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - uses: actions/checkout@v4
@@ -480,8 +507,31 @@ jobs:
       - name: Build image with default channel dependencies
         run: docker build -t nanobot:test .
 
-      - name: Verify first-boot WebUI and API
+      - name: Verify first-boot gateway and WebUI
         run: python scripts/docker_compose_smoke.py --image nanobot:test
+
+      - name: Check out the real previous release for retained-volume acceptance
+        uses: actions/checkout@v4
+        with:
+          ref: 1bb712d3488915ca4ed9ccc1a93067ff722f5ab9 # v0.3.5
+          path: .docker-baseline
+          persist-credentials: false
+
+      - name: Verify old-image upgrade without replacing user data
+        run: |
+          docker build -t nanobot:baseline .docker-baseline
+          python scripts/docker_upgrade_smoke.py --baseline-image nanobot:baseline \
+            --image nanobot:test --version "$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')" \
+            --source-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/docker-upgrade-report.json"
+
+      - name: Retain Docker upgrade acceptance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-upgrade-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/docker-upgrade-report.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Verify Docker Compose startup and privilege boundary
         env:
@@ -515,7 +565,7 @@ jobs:
           from pathlib import Path
 
           config = json.loads(Path(os.environ["RUNNER_TEMP"], "bwrap-compose.json").read_text())
-          for service_name in ("nanobot-gateway", "nanobot-api", "nanobot-cli"):
+          for service_name in ("nanobot-gateway", "nanobot-cli"):
               service = config["services"][service_name]
               assert {"CHOWN", "SETGID", "SETUID", "SYS_ADMIN"} <= set(service["cap_add"])
               assert "no-new-privileges:true" in service["security_opt"]

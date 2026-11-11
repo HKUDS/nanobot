@@ -3,8 +3,10 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
+import { userPromptAnchors } from "@/components/thread/promptNavigation";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
+import { composerUsageSnapshots } from "@/lib/model-request";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import type { NanobotClient, StreamError } from "@/lib/nanobot-client";
 import type {
@@ -91,7 +93,6 @@ function fakeClient() {
       getRunState: lifecycle.getRunState.bind(lifecycle),
       getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
       restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
-      getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
       getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
       getGoalState: lifecycle.getGoalState.bind(lifecycle),
       hasUnsettledRun: lifecycle.hasUnsettledRun.bind(lifecycle),
@@ -101,6 +102,7 @@ function fakeClient() {
         return () => errorHandlers.delete(handler);
       },
       sendMessage: vi.fn(lifecycle.sendMessage.bind(lifecycle)),
+      sendUserShellCommand: vi.fn(lifecycle.sendUserShellCommand.bind(lifecycle)),
       sendAttachments: vi.fn(async (...args: Parameters<NanobotClient["sendAttachments"]>) => {
         lifecycle.sendMessage(args[0], args[1], undefined, args[3]);
       }),
@@ -157,6 +159,31 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it.each([true, false])("keeps temporary and new persistent streams separate when the history key is absent (temporary=%s)", (temporary) => {
+    const fake = fakeClient();
+    const cache = new ThreadMessageCache(() => temporary);
+    const options = { key: null, cache, temporary };
+    const first = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], options), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 1, text: "First " });
+    });
+    first.unmount();
+    const snapshot = cache.get("checkpoint")!;
+    expect(snapshot.live).toHaveLength(temporary ? 0 : 1);
+    expect(snapshot.projection.messages[0].content).toBe("First ");
+    const restored = renderHook(() => useNanobotStream("checkpoint", EMPTY_MESSAGES, false,
+      undefined, undefined, [], options), { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 2, text: "First ", resuming: true, merge_next: true });
+      fake.emit("checkpoint", { event: "delta", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 3, text: "last" });
+      fake.emit("checkpoint", { event: "stream_end", chat_id: "checkpoint", turn_id: "turn", stream_id: "answer", turn_seq: 4, text: "First last" });
+    });
+    expect(restored.result.current.messages[0].content).toBe("First last");
+    restored.unmount();
+    if (temporary) expect(cache.get("checkpoint")!.live).toEqual([]);
+  });
+
   it("resumes a merge_next cached snapshot including reasoning queued before detach", () => {
     const fake = fakeClient();
     const cache = new ThreadMessageCache(() => false);
@@ -821,6 +848,26 @@ describe("useNanobotStream", () => {
     },
   );
 
+  it.each([true, false, undefined])("keeps saved-reply facts consistent live and on attach (%s)", (preserved) => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-preserved", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const state = {
+      recovery_id: "preserved-1", status: "awaiting_user" as const,
+      reason: "model_request_failed", failure_error_kind: "connection",
+      ...(preserved === undefined ? {} : { reply_preserved: preserved }),
+    };
+    act(() => fake.emit("chat-preserved", {
+      event: "recovery_state", chat_id: "chat-preserved", ...state,
+    }));
+    expect(result.current.recoveryState).toEqual(state);
+    act(() => fake.emit("chat-preserved", {
+      event: "attached", chat_id: "chat-preserved", recovery_state: state,
+    }));
+    expect(result.current.recoveryState).toEqual(state);
+  });
+
   it("does not let historical recovered state clear a later active turn", () => {
     const fake = fakeClient();
     const { result } = renderHook(
@@ -993,6 +1040,7 @@ describe("useNanobotStream", () => {
         initialProps: { chatId: "chat-old" },
       },
     );
+    expect(result.current.messagesKey).toBe("chat-old");
 
     act(() => {
       fake.emit("chat-old", {
@@ -1003,6 +1051,7 @@ describe("useNanobotStream", () => {
     });
 
     rerender({ chatId: "chat-new" });
+    expect(result.current.messagesKey).toBe("chat-new");
 
     act(() => {
       fake.emit("chat-new", {
@@ -2533,16 +2582,32 @@ describe("useNanobotStream", () => {
     expect(result.current.runStartedAt).toBe(1_700_000_000);
   });
 
-  it("projects a cross-session input with its public handle exactly once", () => {
+  it("keeps an existing answer stream open when an ordinary input arrives", () => {
     const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-live-input", EMPTY_MESSAGES),
+      { wrapper: wrap(fake.client) });
+    act(() => {
+      fake.emit("chat-live-input", { event: "delta", chat_id: "chat-live-input", stream_id: "answer", text: "first" });
+      fake.emit("chat-live-input", { event: "user_message", chat_id: "chat-live-input", turn_id: "queued", text: "next", starts_turn: false });
+      fake.emit("chat-live-input", { event: "delta", chat_id: "chat-live-input", stream_id: "answer", text: " second" });
+      fake.emit("chat-live-input", { event: "stream_end", chat_id: "chat-live-input", stream_id: "answer", resuming: true });
+    });
+    expect(result.current.messages.filter((row) => row.role === "assistant").map((row) => row.content)).toEqual(["first second"]);
+    expect(result.current.messages.filter((row) => row.role === "user").map((row) => row.content)).toEqual(["next"]);
+  });
+
+  it("projects a cross-session input once without interrupting the answer being streamed", () => {
+    const fake = fakeClient();
+    const original: UIMessage[] = [{ id: "original", inputId: "user:original", role: "user", content: "original", createdAt: 1 }];
     const { result } = renderHook(
-      () => useNanobotStream("chat-target", EMPTY_MESSAGES),
+      () => useNanobotStream("chat-target", original),
       { wrapper: wrap(fake.client) },
     );
     const event: InboundEvent = {
       event: "user_message",
       chat_id: "chat-target",
       text: "Please review this.",
+      input_id: "session-message:message-1",
       created_at_ms: 1_700_000_000_123,
       starts_turn: false,
       provenance: {
@@ -2557,18 +2622,29 @@ describe("useNanobotStream", () => {
     };
 
     act(() => {
+      fake.emit("chat-target", { event: "delta", chat_id: "chat-target", text: "Original",
+        stream_id: "original-answer", response_input_ids: ["user:original"] });
       fake.emit("chat-target", event);
       fake.emit("chat-target", event);
+      fake.emit("chat-target", { event: "delta", chat_id: "chat-target", text: " answer",
+        stream_id: "original-answer", response_input_ids: ["user:original"] });
+      fake.emit("chat-target", { event: "stream_end", chat_id: "chat-target", stream_id: "original-answer",
+        response_input_ids: ["user:original"], resuming: true });
     });
-
-    expect(result.current.messages).toEqual([expect.objectContaining({
+    expect(userPromptAnchors(result.current.messages).map((prompt) => prompt.answerPreview)).toEqual(["Original answer", ""]);
+    expect(result.current.messages.filter((row) => row.role === "assistant")).toHaveLength(1);
+    expect(result.current.messages.filter((row) => row.sessionMessage)).toEqual([expect.objectContaining({
       id: "session-message:message-1",
+      inputId: "session-message:message-1",
       role: "user",
       content: "Please review this.",
       createdAt: 1_700_000_000_123,
       sessionMessage: event.provenance?.session_message,
     })]);
     expect(result.current.isStreaming).toBe(true);
+    act(() => fake.emit("chat-target", { event: "message", chat_id: "chat-target", text: "Review answer",
+      response_input_ids: ["session-message:message-1"] }));
+    expect(userPromptAnchors(result.current.messages).map((prompt) => prompt.answerPreview)).toEqual(["Original answer", "Review answer"]);
   });
 
   it("marks only the optimistic turn named by a correlated rejection as failed", () => {
@@ -3057,6 +3133,34 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages).toHaveLength(1);
     expect(result.current.messages[0].content).toBe("long task");
+  });
+
+  it("delivers bang output separately while the active Agent answer continues", async () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("shell", EMPTY_MESSAGES), { wrapper: wrap(fake.client) });
+    act(() => { result.current.send("long task"); });
+    const activeTurnId = fake.client.sendMessage.mock.calls.at(-1)![3]!.turnId!;
+    act(() => { fake.emit("shell", { event: "delta", chat_id: "shell", text: "first ", turn_id: activeTurnId, stream_id: "answer" }); });
+    await flushStreamFrame();
+    const answerId = result.current.messages.find((row) => row.role === "assistant")!.id;
+    let shell!: ReturnType<typeof result.current.send>;
+    act(() => { shell = result.current.send("!pwd", undefined, { sideChannel: true, userShell: true }); });
+    expect(fake.client.sendUserShellCommand).toHaveBeenCalledWith("shell", "!pwd", expect.objectContaining({ turnId: shell!.turnId, startsNewRun: false }));
+    expect(fake.client.sendMessage).toHaveBeenCalledOnce();
+    act(() => {
+      fake.emit("shell", { event: "message_accepted", chat_id: "shell", turn_id: shell!.turnId, starts_turn: false, active_turn_id: activeTurnId });
+      fake.emit("shell", { event: "message", chat_id: "shell", text: "```text\nPath\n----\n```", turn_id: shell!.turnId });
+    });
+    await shell!.delivery;
+    expect(result.current.isStreaming).toBe(true);
+    act(() => { fake.emit("shell", { event: "delta", chat_id: "shell", text: "last", turn_id: activeTurnId, stream_id: "answer" }); });
+    await flushStreamFrame();
+    expect(result.current.messages.find((row) => row.id === answerId)).toMatchObject({ content: "first last", isStreaming: true });
+    const shellAnswer = result.current.messages.find((row) => row.turnId === shell!.turnId && row.role === "assistant");
+    expect(shellAnswer).toMatchObject({ content: "```text\nPath\n----\n```" });
+    expect(Boolean(shellAnswer!.isStreaming)).toBe(false);
+    act(() => { fake.emit("shell", { event: "turn_end", chat_id: "shell", turn_id: activeTurnId }); });
+    expect(result.current.isStreaming).toBe(false);
   });
 
   it("does not mark side-channel slash commands as streaming", () => {
@@ -3785,4 +3889,31 @@ describe("live canonical event projection", () => {
       "Recovered answer.",
     ]);
   });
+});
+
+
+it("projects active model usage without ending the turn and ignores late usage after stop", () => {
+  const fake = fakeClient();
+  const { result } = renderHook(() => useNanobotStream("chat-model", EMPTY_MESSAGES), {
+    wrapper: wrap(fake.client),
+  });
+  const envelope = { chat_id: "chat-model", turn_id: "turn-model" };
+  act(() => {
+    fake.emit("chat-model", { ...envelope, event: "goal_status", status: "running", started_at: 1700 });
+    fake.emit("chat-model", { ...envelope, event: "user_message", text: "hello", starts_turn: true, turn_seq: 0 });
+    fake.emit("chat-model", { ...envelope, event: "model_request", request_id: "first", run_id: "run",
+      sequence: 1, turn_seq: 1, phase: "completed", usage: { prompt_tokens: 105000, completion_tokens: 100,
+        context_tokens: 105000, request_count: 1 }, round_usages: [{ prompt_tokens: 105000, completion_tokens: 100 }] });
+    fake.emit("chat-model", { ...envelope, event: "model_request", request_id: "second", run_id: "run",
+      sequence: 2, turn_seq: 2, phase: "started" });
+  });
+  expect(result.current.isStreaming).toBe(true);
+  expect(composerUsageSnapshots(result.current.messages, result.current.modelRequests).at(-1)?.usage?.context_tokens).toBe(105000);
+  act(() => result.current.stop());
+  expect(result.current.isStreaming).toBe(false);
+  act(() => fake.emit("chat-model", { ...envelope, event: "model_request", request_id: "late", run_id: "run",
+    sequence: 3, turn_seq: 3, phase: "completed", usage: { prompt_tokens: 999, completion_tokens: 1,
+      context_tokens: 999, request_count: 2 } }));
+  expect(result.current.isStreaming).toBe(false);
+  expect(composerUsageSnapshots(result.current.messages, result.current.modelRequests).at(-1)?.usage?.context_tokens).toBe(105000);
 });

@@ -216,7 +216,7 @@ def test_absent_desktop_selects_current_python(monkeypatch, capsys) -> None:
     ("\x1b[B\r", "python"),
     ("\x1b[B\x1b[A\r", "desktop"),
     ("\x1b[A\r", "python"),
-    ("2\r", "desktop"),  # Numeric keys no longer move the highlight.
+    ("2\r", "desktop"),
     ("\x1b[B1\r", "python"),
 ])
 def test_target_picker_accepts_real_navigation_keys(keys, expected):
@@ -253,7 +253,6 @@ def test_target_picker_cancellation_exits_without_attachment(monkeypatch, capsys
     with create_pipe_input() as pipe_input:
         with create_app_session(input=pipe_input, output=DummyOutput()):
             if cancel == "interrupt":
-                # Cancel even after moving the highlight to the Python option.
                 pipe_input.send_text("\x1b[B\x03")
             else:
                 pipe_input.close()

@@ -1,5 +1,3 @@
-"""Detached views and transient session lifetime."""
-
 import pytest
 
 from nanobot.session.manager import Session, SessionManager
@@ -8,7 +6,6 @@ from nanobot.session.sqlite_store import SessionConflictError
 
 async def test_committed_view_cache_is_bounded(tmp_path):
     manager = SessionManager(tmp_path)
-    # Persist the input before binding the async owner; exercise real cache reads below.
     with manager._store.transaction():
         for i in range(140):
             manager.save(Session(key=str(i), metadata={"title": str(i)}))

@@ -19,6 +19,7 @@ export function copyThreadCheckpoint(
     projection: {
       ...checkpoint.projection,
       messages,
+      modelRequests: new Map(checkpoint.projection.modelRequests),
       closedAssistantIds: new Set(checkpoint.projection.closedAssistantIds),
       closedAnswerStreamIds: new Set(checkpoint.projection.closedAnswerStreamIds),
       closedTurnIds: new Set(checkpoint.projection.closedTurnIds),

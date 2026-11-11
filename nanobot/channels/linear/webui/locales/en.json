@@ -1,37 +1,23 @@
 {
-  "description": "Work with nanobot from Linear issues through native Agent Sessions.",
-  "requirements": "A private Linear OAuth app and a stable public HTTPS callback URL",
   "setup": {
     "docsLabel": "Open Linear setup guide",
     "officialLabel": "Create Linear OAuth app",
-    "tryIt": "Mention the app in an issue comment or delegate an issue to it. Follow-ups inside its Agent Session do not need another mention.",
-    "summary": "Create a private Linear OAuth app, save its credentials and public URL, then authorize each workspace. Start a session by mentioning the app or delegating an issue to it; ordinary comments are ignored.",
-    "steps": [
-      "Expose this nanobot instance through a stable HTTPS URL (a tunnel is fine).",
-      "Create a private OAuth app in Linear with read, write, app:mentionable, and app:assignable scopes.",
-      "Subscribe the app webhook to AgentSessionEvent, PermissionChange, and OAuthAuthorization using the generated webhook URL.",
-      "Connect the workspace with OAuth, then mention the app or delegate an issue to it."
-    ],
     "fields": {
       "clientId": {
         "label": "OAuth client ID",
-        "placeholder": "Linear OAuth client ID",
-        "help": "Copy from the private OAuth app.\n\nCopy it from the private OAuth app in Linear."
+        "placeholder": "Linear OAuth client ID"
       },
       "clientSecret": {
         "label": "OAuth client secret",
-        "placeholder": "••••••",
-        "help": "Stored only by this nanobot instance."
+        "placeholder": "••••••"
       },
       "webhookSigningSecret": {
         "label": "Webhook signing secret",
-        "placeholder": "••••••",
-        "help": "Verify the Webhook signature.\n\nUsed to verify Linear-Signature before any webhook body is parsed."
+        "placeholder": "••••••"
       },
       "publicBaseUrl": {
         "label": "Public HTTPS URL",
-        "placeholder": "https://nanobot.example.com",
-        "help": "Enter an HTTPS URL without a path.\n\nA stable HTTPS origin routed to the listener below; do not include a path."
+        "placeholder": "https://nanobot.example.com"
       },
       "host": {
         "label": "Listen host",
@@ -51,12 +37,10 @@
       },
       "allowFrom": {
         "label": "Allowed Linear users",
-        "placeholder": "Linear user IDs, comma separated",
-        "help": "Choose who can use this connection.\n\nLeave empty to use nanobot pairing, or use * to allow every user in connected workspaces."
+        "placeholder": "Linear user IDs, comma separated"
       },
       "showReasoning": {
-        "label": "Show reasoning",
-        "help": "Post reasoning as thought activity.\n\nPost model reasoning as thought activities in Linear. Turn this off for a quieter session."
+        "label": "Show reasoning"
       }
     }
   },
@@ -78,9 +62,6 @@
     "savePublicUrl": "Enter a public HTTPS URL to create a Linear app.",
     "retrySave": "Retry",
     "channelRunning": "Channel running",
-    "accessAll": "Every member of an authorized workspace can run this agent.",
-    "accessRestricted": "Only the Linear user IDs listed in Advanced can run this agent.",
-    "accessPairing": "Pair on first use; connect Linear MCP to search or edit issues.",
     "configureTools": "Configure Linear MCP",
     "workspacesTitle": "Authorized workspaces",
     "refreshWorkspaces": "Refresh workspaces",
@@ -128,7 +109,6 @@
     "allow": "Allow {{name}} to use nanobot",
     "saveUnconfirmed": "Access was not confirmed. Refresh members before trying again.",
     "guide": "Use Member access to approve teammates without pairing codes. Existing approvals still work unless switched off. Connect Linear MCP to search or edit issues.",
-    "intro": "Choose who can use nanobot in Linear. No pairing codes needed.",
     "details": "About member access",
     "summary": "{{allowed}} enabled",
     "loading": "Finding members…",

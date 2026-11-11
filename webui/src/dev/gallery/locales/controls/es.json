@@ -504,5 +504,12 @@
     "view": "Ver invitación",
     "dismissed": "Se eligió no volver a recordar en la vista previa",
     "starred": "Se eligió el enlace de GitHub en la vista previa"
+  },
+  "sidebarPanel": {
+    "title": "Panel lateral",
+    "toggle": "Mostrar u ocultar panel",
+    "content": "Los detalles permanecen en el panel actual.",
+    "description": "Un panel lateral no modal con una transición de apertura compartida.",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

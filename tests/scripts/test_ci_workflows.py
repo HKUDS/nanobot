@@ -1,8 +1,6 @@
-"""Producer/consumer artifact wiring must survive failed-jobs-only retries."""
-
+import json
 from pathlib import Path
 
-import pytest
 import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github/workflows"
@@ -12,10 +10,10 @@ def workflow(name):
     return yaml.load((WORKFLOWS / name).read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 
 
-@pytest.mark.parametrize("platform,step", [("linux", "linux_input"), ("windows", "windows_input")])
-def test_native_consumers_receive_immutable_producer_ids(platform, step):
+def test_native_consumers_receive_immutable_producer_ids():
     jobs = workflow("release-candidate.yml")["jobs"]
-    key = f"{platform}_artifact_id"
+    key = "candidate_artifact_id"
+    step = "native_input"
     producer = jobs["candidate"]
     assert producer["outputs"][key] == "${{ steps." + step + ".outputs.artifact-id }}"
     upload = next(item for item in producer["steps"] if item.get("id") == step)
@@ -28,11 +26,27 @@ def test_native_consumers_receive_immutable_producer_ids(platform, step):
     assert download["with"]["merge-multiple"] == "true"
 
 
+def test_candidate_executes_all_five_native_wheels_without_expanding_pr_matrix():
+    native = workflow("native-acceptance.yml")
+    assert native["jobs"]["native"]["strategy"]["matrix"]["include"] == "${{ fromJSON(inputs.platforms) }}"
+    defaults = json.loads(native["on"]["workflow_call"]["inputs"]["platforms"]["default"])
+    assert {item["target"] for item in defaults} == {"linux-x64", "win32-x64"}
+    candidate = workflow("release-candidate.yml")["jobs"]["native"]["with"]
+    assert candidate["candidate"] == "true"
+    assert {(item["os"], item["target"], item["wheel_tag"]) for item in json.loads(candidate["platforms"])} == {
+        ("ubuntu-latest", "linux-x64", "manylinux_2_17_x86_64"),
+        ("ubuntu-24.04-arm", "linux-arm64", "manylinux_2_17_aarch64"),
+        ("windows-latest", "win32-x64", "win_amd64"),
+        ("macos-15", "darwin-arm64", "macosx_13_0_arm64"),
+        ("macos-15-intel", "darwin-x64", "macosx_13_0_x86_64"),
+    }
+
+
 def test_accepted_handoff_uses_the_producer_id_and_requires_native_success():
     jobs = workflow("release-candidate.yml")["jobs"]
     assert jobs["candidate"]["outputs"]["prepared_artifact_id"] == "${{ steps.prepared.outputs.artifact-id }}"
     verified = jobs["verified"]
-    assert set(verified["needs"]) == {"candidate", "native"}
+    assert set(verified["needs"]) == {"plan", "candidate", "native"}
     gate = verified["steps"][0]
     assert gate["env"]["NATIVE_RESULT"] == "${{ needs.native.result }}"
     assert gate["run"] == 'test "$BUILD_RESULT" = success && test "$NATIVE_RESULT" = success'
@@ -55,7 +69,18 @@ def test_windows_installer_matrix_has_an_independent_required_job():
     assert "native_required" in installer["if"] and "python_required" in installer["if"]
     assert "github.event_name != 'push'" in installer["if"]
     commands = [step.get("run", "") for step in installer["steps"]]
-    assert any("tests/test_install_scripts.py" in command and "-n 4" in command for command in commands)
+    assert any("tests/test_install_scripts.py" in command and "-n 2" in command for command in commands)
     assert not any("tests/test_install_scripts.py" in step.get("run", "")
                    for step in jobs["windows_process"]["steps"])
     assert "windows_installers" in jobs["required"]["needs"]
+
+
+def test_windows_gateway_stop_checks_run_serially_without_losing_coverage():
+    job = workflow("ci.yml")["jobs"]["test"]
+    path = "tests/test_update_stop.py"
+    for item in job["strategy"]["matrix"]["include"]:
+        assert (f"--ignore={path}" in item["pytest_args"]) == (item["os"] == "windows-latest")
+    steps = [step for step in job["steps"] if path in step.get("run", "").split()]
+    assert len(steps) == 1
+    assert steps[0]["if"] == "runner.os == 'Windows'"
+    assert "-n" not in steps[0]["run"].split()

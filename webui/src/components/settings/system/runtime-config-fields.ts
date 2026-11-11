@@ -25,7 +25,6 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabl
   { id: "safety", page: "advanced" },
   { id: "cli", page: "advanced", enabledBy: "tools.cli_apps.enable" },
   { id: "gateway", page: "advanced" },
-  { id: "api", page: "advanced" },
   { id: "storage", page: "image" },
 ];
 
@@ -50,6 +49,7 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "shell", path: "tools.exec.path_prepend", kind: "text" },
   { group: "shell", path: "tools.exec.path_append", kind: "text" },
   { group: "shell", path: "tools.exec.sandbox", kind: "select", options: ["", "bwrap", "seatbelt"] },
+  { group: "shell", path: "tools.exec.sandbox_launcher", kind: "text", manual: true },
   { group: "shell", path: "tools.exec.sandbox_ro_binds", kind: "list", when: { path: "tools.exec.sandbox", value: ["bwrap", "seatbelt"] } },
   { group: "shell", path: "tools.exec.sandbox_rw_binds", kind: "list", when: { path: "tools.exec.sandbox", value: ["bwrap", "seatbelt"] } },
   { group: "shell", path: "tools.exec.allowed_env_keys", kind: "list" },
@@ -67,7 +67,5 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "gateway", path: "gateway.host", kind: "text", manual: true },
   { group: "gateway", path: "gateway.port", kind: "number", min: 1, max: 65535, manual: true },
   { group: "gateway", path: "gateway.restart_mode", kind: "select", options: ["auto", "exec", "spawn", "exit"] },
-  { group: "api", path: "api.host", kind: "text", manual: true },
-  { group: "api", path: "api.timeout", kind: "number", min: 1, max: 3600 },
   { group: "storage", path: "tools.image_generation.save_dir", kind: "text" },
 ];

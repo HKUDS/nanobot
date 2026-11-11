@@ -102,7 +102,7 @@ HTTP, HTTPS, SOCKS5, and SOCKS5H URLs are accepted; individual integrations reta
 
 </details>
 
-On upgrade, one legacy proxy address moves to `network.proxy` and previously configured features receive `useProxy: true`. The migrated configuration is written on the next normal save, including `nanobot onboard --refresh`. If the old configuration contains different proxy addresses, choose one and set `network.proxy` explicitly before upgrading; multiple per-feature addresses are no longer supported. For Discord configurations that store the entire proxy URL in an environment variable and credentials separately, combine them into one full URL environment variable and set `network.proxy` to that reference before upgrading. Credential references inside a URL remain references when saved. Back up the original configuration before saving if you may need to downgrade.
+Legacy proxy migration is supported throughout 0.4.x and is removed in **0.5.0**. On upgrade, one legacy proxy address moves to `network.proxy` and previously configured features receive `useProxy: true`. The migrated configuration is written on the next normal save, including `nanobot onboard --refresh`. If the old configuration contains different proxy addresses, choose one and set `network.proxy` explicitly before upgrading; multiple per-feature addresses are no longer supported. For Discord configurations that store the entire proxy URL in an environment variable and credentials separately, combine them into one full URL environment variable and set `network.proxy` to that reference before upgrading. Credential references inside a URL remain references when saved. Back up the original configuration before saving if you may need to downgrade.
 
 ## Environment Variables for Secrets
 
@@ -255,7 +255,7 @@ Install the optional package in the same Python environment that runs nanobot:
 nanobot plugins enable langfuse
 ```
 
-Set Langfuse credentials before starting `nanobot agent`, `nanobot gateway`, or `nanobot serve`:
+Set Langfuse credentials before starting `nanobot agent` or `nanobot gateway`:
 
 ```bash
 export LANGFUSE_SECRET_KEY="sk-lf-..."
@@ -420,6 +420,8 @@ The WebUI's OpenAI web-search switch selects Responses without Chat fallback. Pr
 Providers that use the Responses API can keep reasoning context across a conversation, which helps with multi-step tasks. Supported providers can also compact long conversations automatically.
 
 nanobot preserves Responses conversation state automatically for OpenAI Responses, OpenAI Codex, Azure OpenAI, DeepSeek V4, and compatible GitHub Copilot models. Native compaction is also automatic when the provider supports it. The threshold is derived from the active model's context window and reserved output headroom; no provider configuration is required.
+
+An explicit rejection of a native compaction field or input type disables that capability for the current provider instance. Invalid threshold values and other request errors do not disable it. For OpenAI and Azure Responses requests, an unsupported compaction field permits one retry without that field; a validation error is returned for correction. Codex compaction required to fit the input budget must succeed before the conversation can continue.
 
 <details>
 <summary><b>Azure OpenAI</b></summary>
@@ -1461,14 +1463,6 @@ In `config.json`, set `providers.<name>.api` for the built-in `custom` provider 
 
 `supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Auto presets inherit this default; explicit presets can only use protocols in the connection's list. Before removing a protocol used by an explicit preset, update that preset first.
 
-### Legacy OpenAI API selector migration
-
-If your configuration uses `providers.openai.apiType` (or `api_type`), save it with a version that supports the migration before upgrading further. Saving replaces the old field with `api`: `chat_completions` or `responses` becomes a single-API declaration, while `auto` keeps automatic selection. If both fields are present, `api` takes precedence, including `api: null`.
-
-The migration also accepts the `NANOBOT_PROVIDERS__OPENAI__API_TYPE` and `NANOBOT_PROVIDERS__OPENAI__APITYPE` environment variables.
-
-The old field is accepted in the first release containing this migration and the immediately following release. The third release will require the current `api` format.
-
 ### Preset request API
 
 Leave API selection on **Auto** unless your service requires a specific protocol. To change it, open **Settings → Models → a preset → Advanced options → API connection**. Choose **Responses**, **Chat Completions**, or **Anthropic Messages** from the available options. Hover, focus, or tap a setting label for help. Credentials and endpoint URLs stay in the provider; two presets sharing a provider can select different APIs.
@@ -1510,7 +1504,7 @@ To configure presets in `config.json`:
 
 `supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Omit `api` or set it to `null` for Auto. An explicit preset declaration overrides the OpenAI connection default; for custom connections, it must stay within the connection's supported APIs.
 
-A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Other errors do not trigger this API fallback. Provider-hosted search uses Responses when the preset allows it.
+A Responses-only preset never falls back to Chat Completions. To allow Chat fallback for Responses compatibility errors, include both `responses` and `chat_completions` with `preferredApi: "responses"`. Fallback requires an explicit rejection of the Responses API, a Responses-specific parameter, or the `input_image` input type. Invalid parameter values, missing conversation state, authentication failures, rate limits, and server errors do not trigger this API fallback or count toward temporarily bypassing Responses. Provider-hosted search uses Responses when the preset allows it.
 
 Declare `anthropic_messages` alone in a preset. Requests use the same provider connection settings and go to `/v1/messages`; `apiBase` may include a trailing `/v1`. Automatic API fallback between Anthropic Messages and OpenAI formats is not supported; use separate [fallback presets](#model-fallbacks) when needed.
 
@@ -2119,7 +2113,7 @@ AnySearch works out of the box with no key, via its anonymous quota (lower rate 
 
 Create a key at [platform.deepseek.com](https://platform.deepseek.com). Set `tools.web.search.apiKey` directly or with a `${VAR_NAME}` reference. Missing credentials cause a configuration error, with no provider fallback.
 
-Queries are limited to 128 Unicode characters after trimming whitespace; longer queries are rejected. Pricing is ¥5 per 1,000 successful requests, with an account-wide limit of 5 QPS across API keys. See the [DeepSeek Search API documentation](https://api-docs.deepseek.com/zh-cn/guides/search/) for search syntax and billing details.
+Queries are limited to 128 Unicode characters after trimming whitespace; longer queries are rejected. See the [DeepSeek Search API documentation](https://api-docs.deepseek.com/zh-cn/guides/search/) for search syntax, pricing, and account-wide rate limits.
 
 #### `tools.web.search`
 
@@ -2322,6 +2316,7 @@ For API keys, tokens, and other secrets, see [Environment Variables for Secrets]
 | `tools.restrictToWorkspace` | `false` | When `true`, enables nanobot's application-level workspace guards for workspace-aware tools. File tools resolve paths under the active workspace; selected internal roots can be added as read-only or explicitly write-enabled roots, and media uploads are read-only by default. Shell execution rejects workspace-external `working_dir` values and applies best-effort command path checks, but this is not an OS sandbox. |
 | `tools.maxSessionMessagesPerMinute` | `6` | Maximum messages one source session may send during any rolling 60-second window. Additional sends are rejected to stop runaway agent loops. |
 | `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. `"bwrap"` (Linux) or `"seatbelt"` (macOS) restricts filesystem access to the workspace (read-write), media (read-only), required system paths and configured extra binds. The workspace's parent is denied except for allowed roots; keep secrets outside the workspace and binds. Automatically enables workspace restriction for file tools. `"bwrap"` requires bubblewrap (`apt install bubblewrap`; pre-installed in Docker). `"seatbelt"` uses macOS `sandbox-exec(1)`; it sets `HOME` and `TMPDIR` to the workspace rather than sharing host temporary directories. Use `mktemp "$TMPDIR/job.XXXXXX"` for macOS shell scratch files. Neither backend restricts network access. Windows logs a warning and runs commands without OS sandboxing. |
+| `tools.exec.sandboxLauncher` | `""` | Optional absolute path to a sandbox launcher from a trusted publisher on the gateway. Empty keeps the existing system lookup. An override must resolve to an executable regular file owned by root, with root-owned parent directories and no group/other write permission or write access for the gateway's non-root account. It must be outside the workspace and extra writable binds. nanobot resolves symlinks and rechecks the path before each command; it does not install, elevate privileges, or trust the agent's `PATH`. |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.maxRuntime` | `3600` | Default hard runtime in seconds for shell commands, measured from process start even while output is arriving. Set `0` only in trusted configuration to allow unlimited runtime. |
 | `tools.exec.maxRuntimeLimit` | `86400` | Positive upper bound in seconds for explicit model-requested hard runtimes. Independent of `maxRuntime`; it does not limit or change the trusted default. |
@@ -2374,6 +2369,14 @@ The tool result distinguishes a hard-runtime termination from inactivity. With `
 
 Silence is not proof that a command is stuck: builds, downloads, and buffered programs can be quiet while working. Only bytes received through stdout or stderr count as activity; output redirected to files is not observed, and reading logs does not refresh the inactivity clock. Inactivity checks do not detect prompts or supply answers. Choose `"terminate"` only when stopping a quiet command is acceptable, and use a finite hard runtime when total execution time must remain bounded. Shell sessions are not durable jobs and should not be used as a replacement for a scheduler or service manager. A command that detaches a background service and exits is not a managed job; these timing checks do not manage that service afterward.
 
+
+With a Unix sandbox enabled, the selected shell and any requested login profile run inside the sandbox, with its workspace-scoped `HOME`. Custom interpreters outside the exposed system paths require an explicit read-only bind. Tool PATH settings affect commands inside the sandbox, not selection of the host launcher. By default, install `bwrap` in the operating system's default executable search path (normally `/bin:/usr/bin`); a custom parent or tool `PATH` cannot override that launcher. Seatbelt defaults to `/usr/bin/sandbox-exec`. For a protected nonstandard installation, set `sandboxLauncher` instead of changing the host's global `/bin` or adding writable directories to the launcher search path. A missing, rejected, or failed launcher never falls back to unsandboxed execution.
+
+In **Settings → Advanced → Command sandbox**, choose the host's isolation method and use **Check sandbox**. The gateway checks the saved configuration with a bounded, temporary test: launcher startup, workspace writes, and denial of an external test file. It does not run a user command, change the real workspace, or certify all security properties. The result describes the saved configuration, not a live command session; restart the gateway after saving to apply changes. Open **Advanced options** to set a trusted launcher path and the existing additional paths and command controls. An older host without this optional settings capability keeps the existing sandbox editor and does not receive check requests.
+
+When command execution confirms a missing or rejected sandbox launcher, or the operating system rejects starting that launcher, the WebUI shows a small notice above the message input. It names Bubblewrap (`bwrap`) or macOS Seatbelt (`sandbox-exec`) using the gateway's supported backend, not the browser's operating system. For missing or unavailable paths, **Configure bwrap path** or **Configure sandbox-exec path** opens and focuses the trusted path editor. Other failures use **Open sandbox settings**; if gateway backend details are unavailable, the notice keeps generic wording instead of guessing a launcher. The notice does not take input focus, edit configuration, install software, turn isolation off, or retry a command. Closing it suppresses the same issue for the current turn; a new turn needs a fresh failure to show it again. Opening old conversation history does not replay notices. Ordinary command output and nonzero exit codes do not by themselves prove a sandbox fault; use **Check sandbox** to investigate other failures. For a custom package, obtain the protected component location from its maintainer rather than guessing a path.
+
+NAS and other custom packages can provide their own launcher, but a file in an app's writable data directory is not safe to launch before isolation. For fnOS or similar installations, ask the package maintainer to install bubblewrap and its parent directories in a root-protected location, then set that absolute path. Finding `bwrap` in an interactive shell or venv does not establish that the gateway can launch it safely or that the kernel permits namespaces. A failed check must be resolved in the launcher installation, host kernel policy, or container setup; it does not turn isolation off. Existing configurations without `sandboxLauncher` retain the same defaults. Clearing this field restores system lookup; no chat or configuration migration is required.
 
 ## Pairing
 

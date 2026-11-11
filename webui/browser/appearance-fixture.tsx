@@ -7,7 +7,6 @@ import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
 import { readLocalPreferences, writeLocalPreferences, type LocalPreferences } from "@/lib/local-preferences";
 
-/** Actual appearance controls in a browser-local harness, without a gateway. */
 export function AppearanceFixture() {
   const { t } = useTranslation();
   const { theme, preference, setTheme } = useTheme();

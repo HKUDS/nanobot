@@ -9,12 +9,14 @@ import type { ChatSummary, UIMessage } from "@/lib/types";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
+import { StarPromptView } from "@/components/StarPromptView";
+import { Button } from "@/components/ui/button";
 
 export function ThemeToggleFixture() {
   const { theme, toggle } = useTheme();
   return (
     <ThemeProvider theme={theme}>
-      {new URLSearchParams(location.search).has("chat") ? <ThemeChatFixture theme={theme} toggle={toggle} /> : (
+      {new URLSearchParams(location.search).has("star") ? <ThemeInvitationFixture toggle={toggle} /> : new URLSearchParams(location.search).has("chat") ? <ThemeChatFixture theme={theme} toggle={toggle} /> : (
         <main data-theme-surface className="thread-workspace relative flex flex-col justify-center gap-8 bg-background px-6" style={{ height: "100vh" }}>
           <div className="absolute inset-x-0 top-0">
             <ThreadHeader title="Theme preview" hideTitle theme={theme} onToggleTheme={toggle} onToggleSidebar={() => {}} />
@@ -29,6 +31,16 @@ export function ThemeToggleFixture() {
       )}
     </ThemeProvider>
   );
+}
+
+function ThemeInvitationFixture({ toggle }: { toggle: () => void }) {
+  const [open, setOpen] = useState(false);
+  return <main className="flex h-full flex-col items-center justify-center gap-4 bg-background">
+    <Button onClick={toggle}>Toggle theme</Button>
+    <Button onClick={() => setOpen(true)}>Open invitation</Button>
+    <StarPromptView open={open} saving={false} error={false} onOpenChange={setOpen}
+      onDismissForever={() => setOpen(false)} onStar={() => {}} />
+  </main>;
 }
 
 const sessions: ChatSummary[] = ["Theme chat", "Another chat"].map((title, index) => ({
@@ -46,6 +58,9 @@ const noop = () => {};
 function ThemeChatFixture({ theme, toggle }: { theme: "light" | "dark"; toggle: () => void }) {
   const [activeKey, setActiveKey] = useState(sessions[0].key);
   const composer = <ThreadComposer onSend={noop} />;
+  const header = <ThreadHeader title="Theme chat" hideTitle theme={theme} onToggleTheme={toggle} onToggleSidebar={noop} />;
+  const panes = [{ key: "theme", title: "Theme chat" }];
+  if (new URLSearchParams(location.search).has("split")) panes.push({ key: "theme-secondary", title: "Secondary chat" });
   return <main data-theme-surface className="flex bg-background" style={{ height: "100vh" }}>
     <aside className="hidden w-64 shrink-0 sm:block">
       <Sidebar sessions={sessions} activeKey={activeKey} onSelect={setActiveKey} loading={false} newChatActive={false}
@@ -55,14 +70,16 @@ function ThemeChatFixture({ theme, toggle }: { theme: "light" | "dark"; toggle: 
         onOpenChannels={noop} onOpenSearch={noop} onToggleArchived={noop} />
     </aside>
     <div className="min-w-0 flex-1">
-      <PaneWorkbench panes={[{ key: "theme", title: "Theme chat" }]} activePaneKey="theme" layout="columns"
+      <PaneWorkbench panes={panes} activePaneKey="theme" layout="columns"
         showLayoutControl={false} onActivatePane={noop} onAddPane={noop} onLayoutChange={noop} onPaneOrderChange={noop}
         renderPane={(_pane, context) => <div className="relative flex min-h-0 flex-1 flex-col">
-          <ThreadHeader title="Theme chat" hideTitle theme={theme} onToggleTheme={toggle} onToggleSidebar={noop} />
+          {context.active && (context.headerPortalTarget
+            ? createPortal(header, context.headerPortalTarget)
+            : context.headerPortalTarget === undefined ? header : null)}
           <ThreadViewport messages={messages} isStreaming={false} conversationKey={activeKey}
-            navigationFrame={context.navigationFrame} composer={null} />
+            navigationFrame={context.navigationFrame} composer={context.composerPortalTarget === undefined ? composer : null} />
           <ThreadHistoryStatus loading={false} error={null} exhausted onRetry={noop} />
-          {context.composerPortalTarget && createPortal(composer, context.composerPortalTarget)}
+          {context.active && context.composerPortalTarget && createPortal(<div data-active-composer>{composer}</div>, context.composerPortalTarget)}
         </div>} />
     </div>
   </main>;

@@ -1,5 +1,3 @@
-"""WhatsApp-owned interactive QR connection flow."""
-
 from __future__ import annotations
 
 import asyncio
@@ -100,7 +98,12 @@ class WhatsAppConnectStore:
             if session is not None:
                 session.qr_url = qr_data.decode("utf-8")
 
-        client, result = channel.connect_open_client(capture_qr)
+        from nanobot.channels.whatsapp.runtime import WhatsAppDependencyError
+
+        try:
+            client, result = channel.connect_open_client(capture_qr)
+        except WhatsAppDependencyError as exc:
+            raise ChannelConnectError(str(exc)) from exc
         connect_task = asyncio.create_task(
             self._connect(channel, client, result),
             name=f"whatsapp-connect-{session_id}",

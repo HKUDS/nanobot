@@ -28,7 +28,6 @@ function fakeClient() {
     onRunCompletion: () => () => {},
     onError: () => () => {},
     onChat: () => () => {},
-    getRunStartedAt: () => null,
     onSessionUpdate: (handler: (chatId: string, scope?: string) => void) => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
@@ -257,18 +256,9 @@ describe("useSessions", () => {
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-a"]);
   });
 
-  it("refreshes sessions when the websocket reports a session update", async () => {
+  it("locks a draft project when a session update reports it persisted", async () => {
     vi.mocked(api.listSessions)
-      .mockResolvedValueOnce([
-      {
-        key: "websocket:chat-a",
-        channel: "websocket",
-        chatId: "chat-a",
-        createdAt: "2026-04-16T10:00:00Z",
-        updatedAt: "2026-04-16T10:00:00Z",
-        preview: "",
-      },
-      ])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           key: "websocket:chat-a",
@@ -278,21 +268,26 @@ describe("useSessions", () => {
           updatedAt: "2026-04-16T10:01:00Z",
           title: "生成的小标题",
           preview: "用户第一句话",
+          projectLocked: true,
         },
       ]);
     const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-a");
 
     const { result } = renderHook(() => useSessions(), {
       wrapper: wrap(client),
     });
 
-    await waitFor(() => expect(result.current.sessions[0]?.title).toBeUndefined());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await result.current.createChat(); });
+    expect(result.current.sessions[0].projectLocked).toBe(false);
 
     act(() => {
-      client.emitSessionUpdate("chat-a");
+      client.emitSessionUpdate("chat-a", "metadata");
     });
 
     await waitFor(() => expect(result.current.sessions[0]?.title).toBe("生成的小标题"));
+    expect(result.current.sessions[0].projectLocked).toBe(true);
     expect(api.listSessions).toHaveBeenCalledTimes(2);
   });
 
@@ -943,6 +938,7 @@ describe("useSessions", () => {
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.messages[0]?.id).toBe("selected-user");
+    expect(result.current.messagesKey).toBe("websocket:selected");
     expect(result.current.hasMoreBefore).toBe(true);
     expect(result.current.userMessageOffset).toBe(4);
     expect(result.current.hasPendingToolCalls).toBe(true);
@@ -952,6 +948,7 @@ describe("useSessions", () => {
     rerender({ sessionKey: null });
 
     expect(result.current.messages).toEqual([]);
+    expect(result.current.messagesKey).toBeNull();
     expect(result.current.loading).toBe(false);
     expect(result.current.hasMoreBefore).toBe(false);
     expect(result.current.userMessageOffset).toBe(0);
@@ -1140,6 +1137,35 @@ describe("useSessions", () => {
     expect(result.current.userMessageOffset).toBe(0);
     expect(result.current.version).toBe(latestVersion);
     expect(result.current.lineage).toBe(latestLineage);
+  });
+
+  it("continues past an empty latest fragment to the visible history", async () => {
+    vi.mocked(api.fetchWebuiThread)
+      .mockResolvedValueOnce({
+        schemaVersion: 3, projection: "events", completed_turn_ids: ["long"],
+        events: [
+          { event: "model_request", chat_id: "empty-tail", projection_id: "request", turn_id: "long", turn_seq: 4,
+            request_id: "request", run_id: "run", sequence: 1, phase: "completed" },
+          { event: "turn_end", chat_id: "empty-tail", projection_id: "end", turn_id: "long", turn_seq: 5 },
+        ],
+        page: { before_cursor: "inside", has_more_before: true, truncated_oversized_turn: true,
+          record_range: { turn: 0, start: 3, end: 5 } },
+      })
+      .mockResolvedValueOnce({
+        schemaVersion: 3, projection: "events",
+        events: [{ event: "user_message", chat_id: "empty-tail", projection_id: "question", turn_id: "long",
+          turn_seq: 1, text: "Question", starts_turn: true }],
+        page: { before_cursor: null, has_more_before: false, truncated_oversized_turn: true,
+          record_range: { turn: 0, start: 0, end: 3 } },
+      });
+    const { result } = renderHook(() => useSessionHistory("websocket:empty-tail"), {
+      wrapper: wrap(fakeClient()),
+    });
+    await waitFor(() => expect(result.current.messages.map((row) => row.content)).toEqual(["Question"]));
+    expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2);
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:empty-tail",
+      expect.objectContaining({ before: "inside", limit: 120 }));
+    expect(result.current.hasMoreBefore).toBe(false);
   });
 
   it("keeps older-history failures separate and retries them explicitly", async () => {

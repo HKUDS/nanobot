@@ -1,5 +1,3 @@
-"""Context builder for assembling agent prompts."""
-
 import base64
 import mimetypes
 import platform
@@ -12,6 +10,7 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools import sessions as session_tools
 from nanobot.apps.cli import utils as cli_app_utils
+from nanobot.context_sources import record_source, system_source_scope
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_MESSAGE_META,
     RuntimeContextBlock,
@@ -65,6 +64,7 @@ class TranscriptInput:
     current_role: str = "user"
     session_summary: SessionSummary | None = None
     runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None
+    input_metadata: Mapping[str, Any] | None = None
 
     @property
     def message_count(self) -> int:
@@ -100,7 +100,7 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        parts.append(render_template("agent/tool_contract.md"))
+        parts.append(render_template("agent/tool_contract.md", track_source=True))
 
         project_path = root.expanduser().resolve()
         if project_path != self.workspace.expanduser().resolve():
@@ -114,6 +114,9 @@ class ContextBuilder:
             memory = self.memory.read_memory()
             if memory and not self._is_template_content(memory, "memory/MEMORY.md"):
                 parts.append(memory)
+                record_source(self.memory.memory_file, memory)
+            elif self.memory.memory_file.is_file():
+                record_source(self.memory.memory_file, "", loaded=False)
 
         with self.skills.snapshot():
             active_skills = self.skills.get_always_skills()
@@ -127,7 +130,7 @@ class ContextBuilder:
                 workspace=root,
             )
         if skills_summary:
-            parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
+            parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary, track_source=True))
 
         if session_summary and session_summary["text"] != "(nothing)":
             parts.append(
@@ -139,7 +142,6 @@ class ContextBuilder:
         return "\n\n---\n\n".join(parts)
 
     def _get_identity(self, channel: str | None = None, workspace: Path | None = None) -> str:
-        """Get the core identity section."""
         root = workspace or self.workspace
         workspace_path = str(root.expanduser().resolve())
         agent_workspace_path = str(self.workspace.expanduser().resolve())
@@ -148,6 +150,7 @@ class ContextBuilder:
 
         return render_template(
             "agent/identity.md",
+            track_source=True,
             workspace_path=workspace_path,
             agent_workspace_path=agent_workspace_path,
             runtime=runtime,
@@ -179,7 +182,6 @@ class ContextBuilder:
         return _to_blocks(left) + _to_blocks(right)
 
     def _load_bootstrap_files(self, workspace: Path | None = None) -> str:
-        """Load project instructions plus the agent's global profile files."""
         parts: list[str] = []
         project_root = workspace or self.workspace
         sources = [
@@ -198,12 +200,15 @@ class ContextBuilder:
                 ):
                     content = load_bundled_template("SOUL.md") or content
                 if not content.strip():
+                    record_source(file_path, "", loaded=False)
                     continue
                 if filename in self._SKIPPABLE_DEFAULTS and self._is_template_content(
                     content, filename
                 ):
+                    record_source(file_path, "", loaded=False)
                     continue
                 parts.append(f"## {filename}\n\n{content}")
+                record_source(file_path, content)
 
         return "\n\n".join(parts) if parts else ""
 
@@ -271,16 +276,15 @@ class ContextBuilder:
         """Build a model transcript while preserving the fresh-turn boundary."""
         root = workspace or self.workspace
         with self.skills.snapshot():
+            with system_source_scope():
+                system_prompt = self.build_system_prompt(
+                    channel=channel,
+                    session_summary=transcript.session_summary,
+                    workspace=root,
+                    include_memory=include_memory,
+                )
             messages: list[dict[str, Any]] = [
-                {
-                    "role": "system",
-                    "content": self.build_system_prompt(
-                        channel=channel,
-                        session_summary=transcript.session_summary,
-                        workspace=root,
-                        include_memory=include_memory,
-                    ),
-                },
+                {"role": "system", "content": system_prompt},
                 *transcript.history,
             ]
             if transcript.current_message is None:
@@ -292,6 +296,8 @@ class ContextBuilder:
                 current_role=transcript.current_role,
                 runtime_context_blocks=transcript.runtime_context_blocks,
             )
+            if transcript.input_metadata:
+                current["_meta"] = {**current.get("_meta", {}), **transcript.input_metadata}
             messages.append(current)
             return messages
 

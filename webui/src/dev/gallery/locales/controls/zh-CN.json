@@ -504,5 +504,12 @@
     "view": "查看邀请",
     "dismissed": "预览中选择了不再提醒",
     "starred": "预览中选择了 GitHub 链接"
+  },
+  "sidebarPanel": {
+    "title": "侧边面板",
+    "toggle": "切换侧边面板",
+    "content": "详情保留在当前窗格内。",
+    "description": "非模态侧边面板，使用统一的展开动画。",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

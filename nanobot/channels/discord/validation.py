@@ -1,5 +1,3 @@
-"""Discord setup validation owned by the channel package."""
-
 from typing import Any
 
 import httpx

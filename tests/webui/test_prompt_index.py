@@ -1,5 +1,3 @@
-"""Complete, lightweight navigation uses the same IDs and cursors as replay."""
-
 import json
 import time
 
@@ -15,16 +13,21 @@ from nanobot.webui.client_contract import webui_contract
 from nanobot.webui.gateway_services import build_gateway_services
 
 
-def test_complete_index_and_bidirectional_pages_without_loading_model_messages(history, tmp_path, monkeypatch):
+@pytest.mark.parametrize("identified", [False, True])
+def test_complete_index_and_bidirectional_pages_without_loading_model_messages(history, tmp_path, monkeypatch, identified):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:navigation"
     for i in range(120):
-        history.append(key, {"event": "user", "chat_id": "navigation", "text": f"question {i}", "turn_id": f"t{i}"})
-        history.append(key, {"event": "message", "chat_id": "navigation", "text": "answer " + "x" * 200, "turn_id": f"t{i}"})
+        input_identity = {"input_id": f"user:t{i}"} if identified else {}
+        response_identity = {"response_input_ids": [f"user:t{i}"]} if identified else {}
+        history.append(key, {"event": "user", "chat_id": "navigation", "text": f"question {i}", "turn_id": f"t{i}", **input_identity})
+        history.append(key, {"event": "message", "chat_id": "navigation", "text": "answer " + "x" * 200, "turn_id": f"t{i}", **response_identity})
         history.append(key, {"event": "turn_end", "chat_id": "navigation", "turn_id": f"t{i}"})
+    with monkeypatch.context() as patch:
+        patch.setattr("nanobot.session.display_history.HistoryReader.navigation", lambda _: (_ for _ in ()).throw(AssertionError("page scanned full history")))
+        latest = history.build(key, limit=3)
     index = history.prompts(key)
     assert len(index) == 120
-    latest = history.build(key, limit=3)
     assert len(latest["events"]) < len(index)
     target = index[42]
     stats = transcript.TranscriptReplayStats()
@@ -33,11 +36,10 @@ def test_complete_index_and_bidirectional_pages_without_loading_model_messages(h
     assert page["events"][0]["text"] == "question 42"
     assert page["page"]["user_message_offset"] == 42
     assert page["page"]["has_more_before"] and page["page"]["has_more_after"]
-    assert stats.parsed_records < 40  # Not the 360-record transcript.
+    assert stats.parsed_records < 40
     newer = history.build(key, after=page["page"]["after_cursor"], limit=6)
     older = history.build(key, before=newer["page"]["before_cursor"], limit=6)
     assert older["events"] == page["events"]
-    # Warm navigation uses the committed revision and cached summaries.
     with monkeypatch.context() as patch:
         patch.setattr("nanobot.session.display_history.HistoryReader.navigation", lambda _: (_ for _ in ()).throw(AssertionError("replayed history")))
         assert history.prompts(key) == index
@@ -106,7 +108,6 @@ def test_summary_deltas_rebuild_after_append_rewrite_eviction_and_delete(history
     assert appended["replaceFrom"] == 100
     assert len(appended["prompts"]) == 1
     assert [*initial["prompts"], *appended["prompts"]] == history.prompts(key)
-    # A late answer changes the last preview; it must replace that prompt, not append it.
     history.append(key, {"event": "message", "text": "answer", "turn_id": "next"})
     changed = history.prompt_response(key, appended["revision"])
     assert changed["replaceFrom"] == 100
@@ -116,7 +117,7 @@ def test_summary_deltas_rebuild_after_append_rewrite_eviction_and_delete(history
     replaced = history.prompt_response(key, changed["revision"])
     assert replaced["replaceFrom"] == 0
     assert len(replaced["prompts"]) == 1
-    transcript._PROMPT_SNAPSHOTS.clear()  # Restart/eviction sends a complete response.
+    transcript._PROMPT_SNAPSHOTS.clear()
     assert history.prompt_response(key, replaced["revision"])["replaceFrom"] == 0
     history.sessions.delete_session(key)
     assert history.prompt_response(key, replaced["revision"])["prompts"] == ()
@@ -152,6 +153,64 @@ def test_recovered_prompt_identity_time_and_cursor_survive_pages(history, tmp_pa
     assert history.prompts(key, session_messages_loader=loader) == index
 
 
+@pytest.mark.parametrize("second_recorded", [True, False])
+@pytest.mark.parametrize("grouped", [True, False])
+def test_cross_session_inputs_are_reconciled_by_identity_across_turns(
+    history, tmp_path, monkeypatch, second_recorded, grouped,
+):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:cross-session-replay"
+    provenance = [
+        {"message_id": f"message-{i}", "session": {"id": "handle_" + "1" * 32, "name": "luma"}}
+        for i in range(2)
+    ]
+    input_ids = [f"session-message:{source['message_id']}" for source in provenance]
+    messages = [
+        {"role": "user", "content": "original question", "input_id": "user:original"},
+        {"role": "assistant", "content": "original answer"},
+    ]
+    history.append(key, {"event": "user", "text": "original question", "input_id": "user:original"})
+    for i, source in enumerate(provenance):
+        messages.append({"role": "user", "content": "same message", "session_message": source, "input_id": input_ids[i]})
+        if not grouped or i == 1:
+            messages.append({"role": "assistant", "content": f"answer {i}"})
+        if i == 0 or second_recorded:
+            history.append(key, {"event": "user", "text": "same message", "session_message": source, "input_id": input_ids[i]})
+    history.append(key, {"event": "message", "text": "original answer", "response_input_ids": ["user:original"]})
+    assert [prompt["answerPreview"] for prompt in history.prompts(key)] == ["original answer"] + [""] * (2 if second_recorded else 1)
+    history.append(key, {"event": "turn_end"})
+    for i in ([1] if grouped else range(2)):
+        history.append(key, {"event": "message", "text": f"answer {i}", "response_input_ids": input_ids if grouped else [input_ids[i]]})
+        history.append(key, {"event": "turn_end"})
+
+    def loader():
+        assert not second_recorded, "complete display history must not load model history"
+        return messages
+
+    with monkeypatch.context() as patch:
+        if second_recorded:
+            patch.setattr("nanobot.session.display_history.HistoryReader.navigation", lambda _: (_ for _ in ()).throw(AssertionError("page scanned full history")))
+        latest = history.build(key, limit=1, session_messages_loader=loader)
+    assert [event["text"] for event in latest["events"] if event["event"] == "user_message"] == (
+        [] if second_recorded else ["same message"]
+    )
+    page = history.build(key, limit=10, session_messages_loader=loader)
+    users = [event for event in page["events"] if event["event"] == "user_message"]
+    assert [user["text"] for user in users] == ["original question", "same message", "same message"]
+    assert [user["provenance"]["session_message"]["message_id"] for user in users[1:]] == [
+        "message-0", "message-1",
+    ]
+    prompts = history.prompts(key, session_messages_loader=loader)
+    assert [prompt["id"] for prompt in prompts] == [user["projection_id"] for user in users]
+    assert [prompt["answerPreview"] for prompt in prompts] == ["original answer", "answer 1" if grouped else "answer 0", "answer 1"]
+    assert [prompt["inputId"] for prompt in prompts] == ["user:original", *input_ids]
+    revision = history.revision(key)
+    history.append(key, {"event": "user", "text": "same message", "session_message": provenance[0], "input_id": input_ids[0]})
+    assert history.revision(key) == revision
+    assert history.build(key, limit=10, session_messages_loader=loader) == page
+    assert history.build(key, limit=1, session_messages_loader=loader) == latest
+
+
 @pytest.mark.asyncio
 async def test_recovered_public_index_and_page_validators_include_canonical_timestamp(history, tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
@@ -183,8 +242,6 @@ async def test_recovered_public_index_and_page_validators_include_canonical_time
             Request(path, Headers([*auth, ("If-None-Match", response.headers["ETag"])])), path,
         )
         assert unchanged.status_code == 304
-    # A canonical-only update must invalidate the recovered display even when
-    # transcript artifacts and the session's updated_at are unchanged.
     session = await manager.state.get(key)
     session.messages[0]["timestamp"] = "2026-06-02T10:01:00+00:00"
     await manager.state.finish_turn(session)
@@ -252,14 +309,12 @@ async def test_cached_history_routes_skip_replay_and_canonical_reads(history, tm
             Request(conditional, Headers([*auth, ("If-None-Match", previous.headers["ETag"])])), path.split("?")[0],
         )
         assert response.status_code == 304 and not response.body
-    # An ordinary directory read also reuses the view, with or without `since`.
     for suffix in ("", "?since=" + prompts["revision"]):
         response = await gateway.http._dispatch_session_routes(Request(base + "/prompts" + suffix, Headers(auth)), base + "/prompts")
         assert response.status_code == 200
         data = json.loads(response.body)
         assert data["prompts"] == ([] if suffix else prompts["prompts"])
         assert data["replaceFrom"] == (3 if suffix else 0)
-    # Eviction must not turn a valid conditional request into a replay either.
     transcript._PROMPT_SNAPSHOTS.clear()
     for path, previous in initial.items():
         response = await gateway.http._dispatch_session_routes(
@@ -333,10 +388,32 @@ def test_indexed_backfill_preserves_unique_in_suffix_matching(history, tmp_path,
         history.append(key, {"event": "message", "text": answer})
         history.append(key, {"event": "turn_end"})
     prompts = history.prompts(key, session_messages_loader=lambda: messages)
-    # A unique intervening answer advances the alignment past the first duplicate.
     assert len(prompts) == (len(answers) if with_anchor else 1)
     page = history.build(key, limit=1, session_messages=messages)
     users = [event for event in page["events"] if event["event"] == "user_message"]
     assert [user["text"] for user in users] == (["question 2"] if with_anchor else [])
     if with_anchor:
         assert users[0]["projection_id"] == prompts[-1]["id"]
+
+
+def test_recover_multiple_missing_inputs_for_one_answer_across_pages(history, tmp_path, monkeypatch):
+    """A grouped answer can stand for multiple inputs absent from display history."""
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:missing-grouped-inputs"
+    ids = ["session-message:first", "session-message:second"]
+    messages = [
+        {"role": "user", "content": "first", "input_id": ids[0]},
+        {"role": "user", "content": "second", "input_id": ids[1]},
+        {"role": "assistant", "content": "shared answer"},
+    ]
+    history.append(key, {"event": "message", "text": "shared answer", "response_input_ids": ids})
+    history.append(key, {"event": "turn_end"})
+    def loader():
+        return messages
+
+    page = history.build(key, limit=1, session_messages_loader=loader)
+    users = [event for event in page["events"] if event["event"] == "user_message"]
+    assert [event["text"] for event in users] == ["first", "second"]
+    prompts = history.prompts(key, session_messages_loader=loader)
+    assert [prompt["inputId"] for prompt in prompts] == ids
+    assert [prompt["id"] for prompt in prompts] == [event["projection_id"] for event in users]

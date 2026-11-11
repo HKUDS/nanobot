@@ -1,5 +1,3 @@
-"""Provision the Bun runtime used by source installations and package builds."""
-
 from __future__ import annotations
 
 import hashlib

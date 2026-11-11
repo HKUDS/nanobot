@@ -1,5 +1,3 @@
-"""Unit tests for the Signal markdown → plain text + textStyle converter."""
-
 import pytest
 
 from nanobot.channels.signal.runtime import _markdown_to_signal, _partition_styles
@@ -31,11 +29,6 @@ def utf16_styles_for(plain: str, text_styles: list[str]) -> dict[str, list[str]]
         span = encoded[start * 2 : (start + length) * 2].decode("utf-16-le")
         result.setdefault(span, []).append(style)
     return result
-
-
-# ---------------------------------------------------------------------------
-# Basic cases
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -83,11 +76,6 @@ def test_markdown_style_mapping(markdown, expected_plain, styled_text, style):
     assert styles_for(plain, styles) == {styled_text: [style]}
 
 
-# ---------------------------------------------------------------------------
-# Code
-# ---------------------------------------------------------------------------
-
-
 def test_code_block():
     plain, styles = _markdown_to_signal("```\nprint('hi')\n```")
     assert plain.rstrip("\n") == "print('hi')"
@@ -105,25 +93,17 @@ def test_code_block_with_lang():
 
 
 def test_code_block_not_processed_further():
-    """Markdown inside a code block must not be styled."""
     plain, styles = _markdown_to_signal("```\n**not bold**\n```")
     assert "**not bold**" in plain
-    # Only MONOSPACE should be applied, no BOLD
     for entry in styles:
         assert "BOLD" not in entry
 
 
 def test_inline_code_not_processed_further():
-    """Markdown inside inline code must not be styled."""
     plain, styles = _markdown_to_signal("use `**raw**` please")
     assert "**raw**" in plain
     for entry in styles:
         assert "BOLD" not in entry
-
-
-# ---------------------------------------------------------------------------
-# Lists
-# ---------------------------------------------------------------------------
 
 
 def test_bullet_dash():
@@ -142,19 +122,9 @@ def test_numbered_list():
     assert "2. second" in plain
 
 
-# ---------------------------------------------------------------------------
-# Links
-# ---------------------------------------------------------------------------
-
-
 def test_link_text_equals_url_without_scheme():
     plain, styles = _markdown_to_signal("[example.com](https://example.com)")
     assert plain == "https://example.com"
-
-
-# ---------------------------------------------------------------------------
-# Mixed / nesting
-# ---------------------------------------------------------------------------
 
 
 def test_bold_and_italic_adjacent():
@@ -166,7 +136,6 @@ def test_bold_and_italic_adjacent():
 
 
 def test_header_with_inline_code():
-    """Header becomes BOLD; code inside becomes MONOSPACE (not double-BOLD)."""
     plain, styles = _markdown_to_signal("# Use `grep`")
     assert plain == "Use grep"
     assert utf16_styles_for(plain, styles) == {
@@ -186,11 +155,6 @@ def test_multiline_mixed():
     assert "ITALIC" in sd.get("italic", [])
 
 
-# ---------------------------------------------------------------------------
-# Table rendering
-# ---------------------------------------------------------------------------
-
-
 def test_table_rendered_as_monospace():
     md = "| A | B |\n| - | - |\n| 1 | 2 |"
     plain, styles = _markdown_to_signal(md)
@@ -198,13 +162,7 @@ def test_table_rendered_as_monospace():
     assert any("MONOSPACE" in s for s in styles)
 
 
-# ---------------------------------------------------------------------------
-# Style range format
-# ---------------------------------------------------------------------------
-
-
 def test_style_range_format():
-    """Each style entry must be 'start:length:STYLE'."""
     _, styles = _markdown_to_signal("**bold** text")
     for entry in styles:
         parts = entry.split(":")
@@ -224,13 +182,10 @@ def test_style_ranges_are_within_bounds():
         assert start + length <= len(plain)
 
 
-# ---------------------------------------------------------------------------
 # Non-BMP / UTF-16 offsets
-#
 # Signal's BodyRange (and signal-cli's textStyle) interprets start/length in
 # UTF-16 code units. Python's len() counts code points, so characters outside
 # the BMP (emojis, supplementary CJK) shift offsets by +1 per occurrence.
-# ---------------------------------------------------------------------------
 
 
 def assert_within_utf16_bounds(plain: str, styles: list[str]) -> None:
@@ -261,7 +216,6 @@ def test_style_offsets_use_utf16(markdown, expected_plain, styled_text, style):
 
 
 def test_ascii_offsets_unchanged():
-    """ASCII-only path must produce the same offsets as before the UTF-16 fix."""
     plain, styles = _markdown_to_signal("**bold** plain *it*")
     assert plain == "bold plain it"
     assert sorted(styles) == sorted(["0:4:BOLD", "11:2:ITALIC"])
@@ -289,14 +243,11 @@ def test_reported_daily_brief_pattern():
     assert_within_utf16_bounds(plain, styles)
 
 
-# ---------------------------------------------------------------------------
 # Chunk redistribution
-#
 # split_message can break a long Signal payload into multiple chunks. The
 # style ranges from _markdown_to_signal are anchored to the full text, so
 # they must be redistributed per-chunk with rebased offsets — otherwise
 # styles for chunks 1..N are silently lost.
-# ---------------------------------------------------------------------------
 
 
 def test_partition_styles_single_chunk_passthrough():
@@ -312,16 +263,13 @@ def test_partition_styles_no_styles():
 
 
 def test_partition_styles_drops_styles_outside_chunks():
-    """Whitespace trimmed by split_message must not carry a style range."""
     plain = "a   b"
-    # Fake a style spanning the trimmed whitespace only.
     chunks = ["a", "b"]
     parts = _partition_styles(plain, chunks, ["1:3:BOLD"])
     assert parts == [[], []]
 
 
 def test_partition_styles_keeps_offset_in_indented_chunk():
-    """Styles after preserved indentation remain relative to the chunk."""
     plain = "header\n    code"
     chunks = split_message(plain, 10)
 
@@ -338,18 +286,14 @@ def test_partition_styles_keeps_offset_after_crlf_boundary():
 
 
 def test_partition_styles_long_message_preserves_chunk_one_styles():
-    """A bold span deep in the message must follow the message into chunk 1."""
-    # Two ~30-char paragraphs separated by a blank line, then **tail**.
-    line_a = "alpha " * 5  # 30 chars, ends with space
+    line_a = "alpha " * 5
     line_b = "beta " * 5
     md = f"{line_a.strip()}\n\n{line_b.strip()}\n\n**tail**"
     plain, styles = _markdown_to_signal(md)
-    # Force a split between the paragraphs.
-    max_len = len(line_a.strip()) + 2  # fits paragraph A + the "\n\n"
+    max_len = len(line_a.strip()) + 2
     chunks = split_message(plain, max_len)
     assert len(chunks) >= 2, "test setup must produce a split"
     parts = _partition_styles(plain, chunks, styles)
-    # The bold "tail" should land in the last chunk, with chunk-relative offset.
     final_chunk = chunks[-1]
     final_styles = parts[-1]
     assert any("BOLD" in s for s in final_styles)
@@ -363,21 +307,16 @@ def test_partition_styles_long_message_preserves_chunk_one_styles():
 
 
 def test_partition_styles_chunk_zero_styles_unchanged():
-    """Styles entirely in chunk 0 keep their original offsets."""
     md = "**head** middle and **tail**"
     plain, styles = _markdown_to_signal(md)
-    # Split so chunk 0 contains "head" and part of the rest, chunk 1 contains "tail".
     chunks = split_message(plain, 12)
     assert len(chunks) >= 2
     parts = _partition_styles(plain, chunks, styles)
-    # "head" lives in chunk 0; assert its offset is unchanged (chunk 0 starts at 0).
     head_entries = [s for s in parts[0] if "BOLD" in s]
     assert any(s.startswith("0:4:") for s in head_entries)
 
 
 def test_partition_styles_with_non_bmp_chunk_offset():
-    """Chunk-start offsets must be expressed in UTF-16 code units."""
-    # Emoji in chunk 0, bold in chunk 1.
     md = "🎉 alpha beta gamma\n\n**tail**"
     plain, styles = _markdown_to_signal(md)
     chunks = split_message(plain, 18)
@@ -396,25 +335,15 @@ def test_partition_styles_with_non_bmp_chunk_offset():
 
 
 def test_partition_styles_range_spanning_chunks_is_split():
-    """A style range that straddles a chunk boundary gets sliced into both chunks."""
-    # Construct manually: plain = "abc def", style covers "abc def" (whole thing).
     plain = "abc def"
-    chunks = split_message(plain, 4)  # "abc" / "def"
+    chunks = split_message(plain, 4)
     assert chunks == ["abc", "def"]
     parts = _partition_styles(plain, chunks, ["0:7:BOLD"])
-    # Chunk 0 holds 0:3:BOLD, chunk 1 holds 0:3:BOLD (length=3 each, "def" only
-    # since the space was trimmed by lstrip).
     assert parts[0] == ["0:3:BOLD"]
     assert parts[1] == ["0:3:BOLD"]
 
 
-# ---------------------------------------------------------------------------
-# Adjacency, nesting, and malformed input
-# ---------------------------------------------------------------------------
-
-
 def test_bold_italic_combo_outer_bold_inner_italic():
-    """`**_combo_**` carries both BOLD and ITALIC over the same span."""
     plain, styles = _markdown_to_signal("**_combo_**")
     assert plain == "combo"
     sd = styles_for(plain, styles)
@@ -422,7 +351,6 @@ def test_bold_italic_combo_outer_bold_inner_italic():
 
 
 def test_bold_and_italic_adjacent_no_separator():
-    """`**bold***italic*` produces BOLD on `bold` and ITALIC on `italic`."""
     plain, styles = _markdown_to_signal("**bold***italic*")
     assert plain == "bolditalic"
     sd = styles_for(plain, styles)
@@ -431,7 +359,6 @@ def test_bold_and_italic_adjacent_no_separator():
 
 
 def test_inline_code_inside_blockquote():
-    """Blockquote prefix is stripped; inline code becomes MONOSPACE."""
     plain, styles = _markdown_to_signal("> use `grep`")
     assert plain == "use grep"
     sd = styles_for(plain, styles)
@@ -439,7 +366,6 @@ def test_inline_code_inside_blockquote():
 
 
 def test_header_with_inner_bold_covers_whole_header():
-    """Header text is bold regardless of equivalent adjacent range fragmentation."""
     plain, styles = _markdown_to_signal("# **wrap** me")
     assert plain == "wrap me"
     assert_within_utf16_bounds(plain, styles)

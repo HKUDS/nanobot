@@ -77,7 +77,6 @@ export function preloadMarkdownText(): Promise<void> {
   return loadMarkdownRenderer().then(() => undefined);
 }
 
-/** Lazy boundary for the heavier GFM, math, and code renderer. */
 export function MarkdownText({
   children,
   className,

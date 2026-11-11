@@ -1,5 +1,3 @@
-"""Microsoft Teams management contract."""
-
 from nanobot.channels._manifest import field, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin

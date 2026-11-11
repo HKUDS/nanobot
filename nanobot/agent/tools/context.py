@@ -1,4 +1,3 @@
-"""Runtime context for tool construction."""
 from __future__ import annotations
 
 from contextlib import contextmanager

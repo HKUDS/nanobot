@@ -2,6 +2,17 @@
 
 Use the update method that owns your installation. If your version does not include the WebUI updater, first upgrade through the original installer or package manager. This does not convert an existing installation into an installer-managed one.
 
+## Upgrade older JSONL installations
+
+The 0.4.x releases retain automatic import of legacy model JSONL history, WebUI JSONL / segments and per-feature proxy settings. You can upgrade an older installation directly to 0.4.1 through its original installation method; an intermediate 0.4.0 installation is not required. These importers are scheduled for removal in 0.5.0.
+
+1. Stop all writers and back up the complete instance, including the configuration directory and workspace.
+2. Upgrade through the original installation method, preserving existing extras, constraints and installation ownership.
+3. Start the updated instance with the same configuration and workspace selectors. Open existing conversations and verify both messages and displayed history. Check proxy settings and save the migrated shared-proxy configuration.
+4. Verify the running version, a new message and another restart before considering the upgrade complete.
+
+Keep the original backup and retained JSONL import backups. Do not delete or overwrite old data to resolve a missing-history problem. Complete and verify the migration on a 0.4.x release before upgrading to 0.5.0.
+
 ## Update from the WebUI
 
 1. Open the blue update entry in the sidebar or **Settings → About → Update**. Opening the dialog only checks the installation; it does not install or restart anything.
@@ -40,6 +51,16 @@ When inline installation is unavailable, the update dialog identifies the instal
 For an external update, stop all affected writers, back up configuration and data, update through the original installation method, then restart the same profiles through their original launcher. New versions may migrate stored data. Verify the **running** version in **About** and check that configuration and conversations remain available. Package-manager success alone does not verify the gateway, and manual updates do not inherit the managed updater's automatic recovery.
 
 Do not switch package managers to work around an error. Fixed wheel sources, locked requirements and custom installations need their original settings reviewed. If a fresh official installation fails, fix the reported prerequisite or network error and rerun the same installer command.
+
+## Standalone API service removal
+
+`nanobot serve` and its OpenAI-compatible `/v1` endpoints have been removed. This also removes the API server controls in Settings and the `nanobot-api` Compose service. The Gateway, WebUI, Python SDK, and OpenAI-compatible model connections are separate and still supported. The Python SDK embeds nanobot in a Python application; it is not an HTTP-compatible replacement. The `api` install extra is now empty so upgrades can preserve an existing installation's recorded extras. New installations do not need it.
+
+Before updating, stop any existing standalone API process through the launcher that started it. For a process started from Settings, use **Settings → System → Stop** in the old version. For Compose, use `docker compose stop nanobot-api` and `docker compose rm -f nanobot-api` with the old Compose file before switching to the new file. If you already switched, confirm which container belongs to your deployment and stop that old container explicitly; removing a service from the Compose file does not stop an existing container. Keep your bind mounts and volumes.
+
+Back up the configuration and data before updating. The old top-level `api` block is ignored on read and is omitted the next time nanobot saves the configuration. Session data and workspaces are not deleted or moved. If you must roll back, use the previous version and its matching deployment files, and recover the old service settings from your backup if necessary. Do not overwrite current configuration or conversations with a stale backup.
+
+To read old API conversations after updating, open the same configuration and workspace with [the Python SDK](./python-sdk.md#botsessions). Use `await bot.sessions.list()` to find keys such as `api:default` and `api:<session_id>`, then use `await bot.sessions.get(key)` to read their messages. If the old launcher used a separate API workspace, pass that workspace to `Nanobot.from_config(config_path, workspace=workspace)` instead of using the Gateway's workspace.
 
 ## Recover an interrupted update
 

@@ -32,7 +32,7 @@ function startupSkeleton(): Plugin {
 
 const GZIP_MIN_BYTES = 4 * 1024;
 const GZIP_ASSET_PATTERN = /\.(?:css|html|js|json|mjs|svg)$/i;
-const LAZY_FEATURE_CHUNK_PREFIXES = ["markdown-vendor-", "markdown-diagrams-", "MermaidBlock-", "syntax-highlight-", "katex-"];
+const LAZY_FEATURE_CHUNK_PREFIXES = ["markdown-vendor-", "markdown-diagrams-", "MermaidBlock-", "HighlightedCode-", "code-highlighter-", "PierreFileDiff-", "katex-"];
 
 export function entryLazyFeatureImports(imports: string[]): string[] {
   return imports.filter((fileName) =>
@@ -105,21 +105,9 @@ export function webuiManualChunk(id: string): string | undefined {
   ) {
     return "react-vendor";
   }
-  if (id.includes("node_modules/refractor/lang/")) {
-    return;
-  }
   // Streamdown retains a lazy viewer shell, not the native Mermaid engine.
   if (id.includes("node_modules/streamdown/dist/mermaid-")) return "markdown-diagrams";
   if (id.includes("node_modules/streamdown/dist/highlighted-body-")) return "markdown-code";
-  // Refractor reaches this HAST helper through hastscript. Keeping it with
-  // Refractor prevents syntax-highlight <-> markdown-vendor circular chunks.
-  if (
-    id.includes("node_modules/react-syntax-highlighter")
-    || id.includes("node_modules/refractor/core")
-    || id.includes("node_modules/hast-util-parse-selector")
-  ) {
-    return "syntax-highlight";
-  }
   if (
     id.includes("node_modules/streamdown")
     || id.includes("node_modules/remend")
@@ -159,6 +147,8 @@ export default defineConfig(({ mode }) => {
       // so nested overlays can dismiss the wrong layer in development.
       include: [
         "@radix-ui/react-dialog",
+        "@pierre/diffs", "@pierre/diffs/worker", "@pierre/highlights",
+        "shiki/core", "shiki/langs", "shiki/engine/javascript",
         // Vite's HTML scan does not follow the lazy Worker entry. Discovering
         // these imports on first render would reload the page and lose UI state.
         "pele/lazy", "saxes", "css-tree/parser", "css-tree/walker", "css-tree/generator",

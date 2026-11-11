@@ -65,6 +65,31 @@ def _mutation_request(path: str, payload: dict[str, object]) -> SimpleNamespace:
     return request
 
 
+async def test_sandbox_check_is_authenticated_explicit_and_serialized(tmp_path, monkeypatch):
+    path = "/api/settings/sandbox/check"
+    router = _router(config_path=tmp_path / "config.json")
+    response = await router.dispatch(None, SimpleNamespace(path=path, headers=Headers()), path)
+    assert response.status_code == 405
+    unauthorized = _router(authorized=False, config_path=tmp_path / "config.json")
+    assert (await unauthorized.dispatch(None, _mutation_request(path, {}), path)).status_code == 401
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def probe(config, workspace):
+        started.set()
+        await release.wait()
+        return {"state": "passed", "reason": "", "launcher": "/usr/bin/bwrap", "revision": "test", "supported_backend": "bwrap"}
+
+    monkeypatch.setattr("nanobot.webui.settings_system.check_sandbox", probe)
+    first = asyncio.create_task(router.dispatch(None, _mutation_request(path, {}), path))
+    await asyncio.wait_for(started.wait(), 2)
+    try:
+        assert (await router.dispatch(None, _mutation_request(path, {}), path)).status_code == 409
+    finally:
+        release.set()
+    assert (await first).status_code == 200
+    assert (await router.dispatch(None, _mutation_request(path, {}), path)).status_code == 200
+
+
 @pytest.mark.asyncio
 async def test_nanobot_update_requires_auth_local_permission_and_websocket(tmp_path, monkeypatch):
     router = _router(config_path=tmp_path / "config.json")
@@ -176,7 +201,6 @@ async def test_failed_codex_login_start_still_owns_late_worker(tmp_path, monkeyp
     def login(*, storage, **_kwargs):
         entered.set()
         assert release.wait(3)
-        # The actual SDK can finish its token exchange after start() timed out.
         storage.save(SimpleNamespace(access="late-fixture-token"))
 
     monkeypatch.setattr(oauth, "login_oauth_interactive", login)
@@ -741,6 +765,25 @@ async def test_model_update_route_forwards_session_rename_dependency(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_older_client_does_not_partially_update_provider_settings(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    before = '{"providers":{"openai":{"apiKey":"fixture","api":{"supportedApis":["responses"]}}}}'
+    config_path.write_text(before, encoding="utf-8")
+    refresh = MagicMock()
+    router = _router(config_path=config_path, refresh_runtime_config=refresh)
+    path = "/api/settings/provider/update"
+    request = _mutation_request(path, {"provider": "openai", "apiType": "auto", "apiBase": "https://example.test/v1"})
+
+    response = await router.dispatch(None, request, path)
+
+    assert response is not None
+    assert response.status_code == 400
+    assert "Update the client" in json.loads(response.body)["error"]
+    assert config_path.read_text(encoding="utf-8") == before
+    refresh.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_settings_get_mutation_route_is_method_not_allowed() -> None:
     path = "/api/settings/provider/update"
     request = SimpleNamespace(
@@ -814,8 +857,6 @@ async def test_version_check_and_mcp_requests_share_the_gateway_loop(monkeypatch
 
     def resolve(url, **_kwargs):
         if url == f"{PYPI_URL}/json":
-            # Settle the gateway requests on the next tick of the checking loop,
-            # after discovery has tried to acquire the already-contended lock.
             asyncio.get_running_loop().call_soon(gateway_loop.call_soon_threadsafe, finish.set)
         return True, "", ("93.184.216.34",)
 
@@ -852,7 +893,7 @@ async def test_version_check_and_mcp_requests_share_the_gateway_loop(monkeypatch
         first = asyncio.create_task(client.get("https://mcp.example/first"))
         await asyncio.wait_for(entered.wait(), timeout=5)
         second = asyncio.create_task(client.get("https://mcp.example/second"))
-        await asyncio.sleep(0)  # Let the second gateway request wait on the shared lock.
+        await asyncio.sleep(0)
         try:
             response = await asyncio.wait_for(_router().dispatch(None, request, request.path), timeout=5)
         finally:
@@ -952,19 +993,16 @@ async def test_runtime_config_route_authentication_validation_and_restart(tmp_pa
     assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
 
 
-async def test_runtime_settings_only_save_without_refreshing_or_rebinding(tmp_path, monkeypatch):
+async def test_runtime_settings_only_save_without_refreshing_or_rebinding(tmp_path):
     refresh = MagicMock()
-    runtime = MagicMock()
-    monkeypatch.setattr(WebUISettingsRouter, "_api_runtime", lambda _self: runtime)
     router = _router(config_path=tmp_path / "config.json", refresh_runtime_config=refresh)
     path = "/api/settings/runtime-config/update"
     response = await router.dispatch(None, _mutation_request(path, {
-        "values": {"agents.defaults.dream.enabled": False, "api.timeout": 45},
+        "values": {"agents.defaults.dream.enabled": False, "gateway.port": 19001},
     }), path)
     assert response.status_code == 200
     assert json.loads(response.body)["requires_restart"]
     refresh.assert_not_called()
-    runtime.restart.assert_not_called()
 
 
 async def test_reverting_runtime_switch_clears_restart_but_preserves_other_changes(tmp_path):
@@ -993,7 +1031,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
     router = _router(config_path=tmp_path / "config.json")
     config = router.settings.config.load()
     original_reader = config.tools.web.fetch.use_jina_reader
-    original_timeout = config.api.timeout
+    original_port = config.gateway.port
     path = "/api/settings/web-search/update"
     first = await router.dispatch(None, _mutation_request(path, {
         "provider": "duckduckgo", "use_jina_reader": not original_reader,
@@ -1003,7 +1041,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
 
     runtime_path = "/api/settings/runtime-config/update"
     changed = await router.dispatch(None, _mutation_request(runtime_path, {
-        "values": {"api.timeout": original_timeout + 1},
+        "values": {"gateway.port": original_port + 1},
     }), runtime_path)
     assert changed.status_code == 200
     assert set(json.loads(changed.body)["restart_required_sections"]) == {"browser", "runtime"}
@@ -1016,7 +1054,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
     refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
     assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
     reverted = await router.dispatch(None, _mutation_request(runtime_path, {
-        "values": {"api.timeout": original_timeout},
+        "values": {"gateway.port": original_port},
     }), runtime_path)
     assert reverted.status_code == 200
     assert json.loads(reverted.body)["restart_required_sections"] == []

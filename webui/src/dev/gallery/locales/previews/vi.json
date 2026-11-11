@@ -179,6 +179,18 @@
     "reset": "Đặt lại bản xem trước",
     "hint": "Chọn trạng thái khôi phục, rồi thử tiếp tục hoặc đóng."
   },
+  "sandbox": {
+    "gateway": "Gateway minh họa",
+    "unknownGateway": "Chưa chỉ định",
+    "title": "Thông báo lệnh",
+    "description": "So sánh thành phần bị thiếu, vị trí cài đặt không được bảo vệ và lỗi khởi động bằng thành phần thực tế.",
+    "options": "Thông báo không chiếm tiêu điểm hay tự chạy lại lệnh. Đổi trạng thái, đóng thông báo rồi tiếp tục nhập.",
+    "missing": "Không tìm thấy thành phần",
+    "permissions": "Cần kiểm tra cài đặt",
+    "startup": "Không thể khởi động",
+    "hint": "Chỉ minh họa thành phần. Không chạy lệnh hay thay đổi cài đặt.",
+    "settingsAction": "Đã yêu cầu mở cài đặt sandbox (minh họa)."
+  },
   "fallback": {
     "title": "ModelFallbackNotice · Mô hình dự phòng",
     "description": "Xem thông báo mô hình dự phòng, ủy quyền hết hạn và thử mở cài đặt hoặc đóng.",

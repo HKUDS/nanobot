@@ -34,7 +34,6 @@ from nanobot.webui.settings_api import (
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
-    update_api_settings,
     update_model_call_order,
     update_model_configuration,
     update_network_safety_settings,
@@ -50,6 +49,12 @@ from nanobot.webui.settings_services import WebUIOAuthFlowRegistry
 
 DYNAMIC_PROVIDER_NAME = "my-company-api"
 DYNAMIC_PROVIDER_API_BASE = "https://example.test/v1"
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings_config(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings tests must never fall through to a user's default config."""
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
 
 @pytest.fixture
@@ -163,7 +168,6 @@ def test_settings_payload_includes_relocated_capabilities(
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.api.port = 9910
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "secret")
@@ -171,8 +175,6 @@ def test_settings_payload_includes_relocated_capabilities(
 
     payload = settings_payload()
 
-    assert payload["api"]["port"] == 9910
-    assert payload["api"]["api_key_hint"] is None
     assert payload["observability"]["provider"] == "langfuse"
     assert payload["observability"]["configured"] is True
 
@@ -190,56 +192,6 @@ def test_settings_payload_exposes_modelscope_image_model(
 
     assert providers["modelscope"]["models"] == ["Qwen/Qwen-Image-2512"]
     assert providers["modelscope"]["default_model"] == "Qwen/Qwen-Image-2512"
-
-
-def test_update_api_settings_requires_key_for_network_access(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    with pytest.raises(WebUISettingsError, match="API key"):
-        update_api_settings({"host": ["0.0.0.0"], "port": ["8900"]})
-
-    payload = update_api_settings(
-        {
-            "host": ["0.0.0.0"],
-            "port": ["9900"],
-            "api_key": ["secret-token"],
-        }
-    )
-    saved = load_config(config_path)
-    assert saved.api.host == "0.0.0.0"
-    assert saved.api.port == 9900
-    assert saved.api.api_key == "secret-token"
-    assert payload["api"]["api_key_hint"]
-
-
-def test_update_api_settings_requires_key_for_specific_network_interface(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    with pytest.raises(WebUISettingsError, match="API key"):
-        update_api_settings({"host": ["192.168.1.10"], "port": ["8900"]})
-
-
-def test_update_api_settings_allows_alternate_loopback_without_key(
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config.json"
-    save_config(Config(), config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    update_api_settings({"host": ["127.0.0.2"], "port": ["8900"]})
-
-    assert load_config(config_path).api.host == "127.0.0.2"
 
 
 def _dynamic_provider_config(
@@ -262,6 +214,66 @@ def _dynamic_provider_config(
             }
         }
     return Config.model_validate(raw_config)
+
+
+def test_create_model_configuration_appends_atomically_without_querying_usage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    config.model_presets["primary"] = ModelPresetConfig(model="openai/gpt-4o", provider="openai")
+    config.agents.defaults.model_preset = "primary"
+    save_config(config, config_path)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_system.llm_usage_payload",
+        lambda **_kwargs: pytest.fail("model save must not query usage"),
+    )
+    query = {
+        "name": ["Writer"], "provider": ["openai"], "model": ["openai/gpt-4o-mini"],
+        "append_to_order": ["true"], "include_usage": ["false"],
+    }
+    result = create_model_configuration(query, config_path=config_path)
+    assert result["model_call_order"] == ["primary", "Writer"]
+    assert "usage" not in result
+    assert load_config(config_path).agents.defaults.fallback_models == ["Writer"]
+    updated = update_model_configuration(
+        {"name": ["Writer"], "temperature": ["0.5"], "include_usage": ["false"]},
+        config_path=config_path,
+    )
+    assert updated["model_call_order"] == ["primary", "Writer"]
+    assert "usage" not in updated
+
+
+def test_create_and_append_first_preset_is_primary_once(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    result = create_model_configuration(
+        {"name": ["Writer"], "provider": ["openai"], "model": ["openai/gpt-4o-mini"],
+         "append_to_order": ["true"]}, config_path=config_path,
+    )
+    assert result["model_call_order"] == ["Writer"]
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset == "Writer"
+    assert saved.agents.defaults.fallback_models == []
+
+
+def test_create_and_append_does_not_persist_when_legacy_order_needs_migration(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    config.agents.defaults.model = "openai/gpt-4o"
+    config.agents.defaults.provider = "openai"
+    save_config(config, config_path)
+    before = config_path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="convert"):
+        create_model_configuration(
+            {"name": ["Writer"], "provider": ["openai"], "model": ["openai/gpt-4o-mini"],
+             "append_to_order": ["true"]}, config_path=config_path,
+        )
+    assert config_path.read_bytes() == before
 
 
 def test_create_model_configuration_accepts_legacy_label_without_changing_call_order(
@@ -1046,7 +1058,7 @@ def test_update_provider_settings_persists_provider_specific_advanced_options(
     update_provider_settings(
         {
             "provider": ["openai"],
-            "apiType": ["responses"],
+            "api": [json.dumps({"supportedApis": ["responses"]})],
             "use_proxy": ["true"],
             "extraHeaders": [json.dumps({"X-Trace": "enabled"})],
             "extraBody": [json.dumps({"service_tier": "priority"})],
@@ -2737,16 +2749,10 @@ def test_create_model_configuration_accepts_configured_oauth_provider(
     assert saved.model_presets["codex"].provider == "openai_codex"
 
 
-# ---------------------------------------------------------------------------
-# Azure OpenAI: settings contract for static-key vs AAD (DefaultAzureCredential)
-# ---------------------------------------------------------------------------
-
-
 def test_settings_payload_azure_openai_with_api_key_is_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Static-key mode: api_key + api_base both set -> configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_key = "k"
@@ -2767,7 +2773,6 @@ def test_settings_payload_azure_openai_aad_mode_is_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AAD mode: only api_base set (no api_key) -> still configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_base = "https://r.openai.azure.com"
@@ -2787,7 +2792,6 @@ def test_settings_payload_azure_openai_missing_base_not_configured(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """api_key alone (no api_base) is NOT a working config -> not configured."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_key = "k"
@@ -2804,7 +2808,6 @@ def test_create_model_configuration_accepts_azure_openai_aad_mode(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Provider-validation accepts azure_openai with only api_base (AAD mode)."""
     config_path = tmp_path / "config.json"
     config = Config()
     config.providers.azure_openai.api_base = "https://r.openai.azure.com"
@@ -2909,13 +2912,12 @@ def test_custom_connection_cannot_remove_api_used_by_legacy_or_inline_model(tmp_
     assert config_path.read_bytes() == before
 
 
-@pytest.mark.parametrize("field", ["apiType", "api_type"])
-def test_legacy_openai_settings_can_return_to_auto(monkeypatch, tmp_path, field):
+def test_openai_settings_can_return_to_auto(monkeypatch, tmp_path):
     config_path = tmp_path / "config.json"
     config = Config.model_validate({"providers": {"openai": {
         "apiKey": "fixture", "api": {"supportedApis": ["responses"]},
     }}})
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-    update_provider_settings({"provider": ["openai"], field: ["auto"]})
+    update_provider_settings({"provider": ["openai"], "api": ["null"]})
     assert load_config(config_path).providers.openai.api is None

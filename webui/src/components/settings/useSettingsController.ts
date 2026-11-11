@@ -33,6 +33,7 @@ import { useRuntimeConfigSettings } from "@/components/settings/system/RuntimeCo
 import { createSystemSettingsActions } from "@/components/settings/system/createSystemSettingsActions";
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
+import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
@@ -81,7 +82,7 @@ export function useSettingsController({
   onNativeEngineRestart,
 }: SettingsControllerOptions) {
   const { t } = useTranslation();
-  const { client, getToken, token } = useClient();
+  const { client, getToken, token, webuiCapabilities } = useClient();
   const pageVisible = usePageVisibility();
   const remoteBrowserAccess =
     typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
@@ -113,7 +114,7 @@ export function useSettingsController({
   } = capabilityState;
   const draftsRef = useRef({ form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm });
   draftsRef.current = { form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm };
-  const systemState = useSystemSettingsState();
+  const systemState = useSystemSettingsState(getToolsCatalog(client, token));
   const featureCatalog = systemState.nanobotFeatures?.features ?? [];
 
   useEffect(() => {
@@ -155,11 +156,6 @@ export function useSettingsController({
   );
 
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
-
-  const markUpdateInstalled = useCallback(() => {
-    setPendingRestartSections((current) => ({ ...current, runtime: true }));
-    setSettings((current) => current ? { ...current, requires_restart: true } : current);
-  }, []);
 
   const closeProviderOAuthFlow = useCallback((cancelPending = true) => {
     const flow = providerOAuthFlowRef.current;
@@ -419,10 +415,8 @@ export function useSettingsController({
     state: systemState,
     featureCatalog,
     client,
-    token,
     getToken,
     t,
-    applyPayload,
     maybeRestartHostEngine,
     setPendingRestartSections,
     refreshAutomations,
@@ -439,6 +433,7 @@ export function useSettingsController({
     setError,
     onModelNameChange,
     remoteBrowserAccess,
+    optimizedPresetSave: webuiCapabilities.includes("webui.model-preset-save.v1"),
     closeProviderOAuthFlow,
     installCapabilities,
     configuredModelProviderOptions,
@@ -479,7 +474,6 @@ export function useSettingsController({
     systemState,
     systemActions,
     activeSection,
-    markUpdateInstalled,
     runtimeConfigState,
     closeProviderOAuthFlow,
     error,

@@ -1,5 +1,3 @@
-"""Helpers for validated session-summary metadata."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

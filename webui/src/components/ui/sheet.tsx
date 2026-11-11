@@ -5,6 +5,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/lib/utils";
+import { modalOverlayClassName, sidePanelSurfaceClassName } from "./floating-surface";
 
 const Sheet = DialogPrimitive.Root;
 const SheetTrigger = DialogPrimitive.Trigger;
@@ -29,7 +30,7 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-  "fixed z-50 flex flex-col gap-4 bg-background outline-none transition ease-in-out",
+  "fixed z-50 flex flex-col gap-4 bg-background outline-none ease-out",
   {
     variants: {
       side: {
@@ -42,12 +43,14 @@ const sheetVariants = cva(
           "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
         ),
         left: cn(
-          "inset-y-0 left-0 h-full w-3/4 sm:max-w-sm",
-          "data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left",
+          "inset-y-2 left-2 w-3/4 max-w-[calc(100vw-1rem)] sm:max-w-sm",
+          sidePanelSurfaceClassName,
+          "data-[state=closed]:slide-out-to-left-4 data-[state=open]:slide-in-from-left-4",
         ),
         right: cn(
-          "inset-y-0 right-0 h-full w-3/4 sm:max-w-sm",
-          "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
+          "inset-y-2 right-2 w-3/4 max-w-[calc(100vw-1rem)] sm:max-w-sm",
+          sidePanelSurfaceClassName,
+          "data-[state=closed]:slide-out-to-right-4 data-[state=open]:slide-in-from-right-4",
         ),
       },
     },
@@ -83,13 +86,13 @@ const SheetContent = React.forwardRef<
   const { t } = useTranslation();
   return (
     <SheetPortal>
-      <SheetOverlay className={overlayClassName} />
+      <SheetOverlay className={cn((side === "right" || side === "left") && modalOverlayClassName, overlayClassName)} />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
           sheetVariants({ side }),
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
-          "duration-300 motion-reduce:transition-none",
+          "data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 duration-200 motion-reduce:transition-none",
           "motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
           className,
         )}
@@ -99,7 +102,7 @@ const SheetContent = React.forwardRef<
         {showCloseButton ? (
           <DialogPrimitive.Close
             className={cn(
-              "absolute right-4 top-4 rounded-mark opacity-70 ring-offset-background transition-opacity",
+              "absolute right-2 top-2 grid size-10 place-items-center rounded-full opacity-70 ring-offset-background transition-opacity",
               "hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               "disabled:pointer-events-none",
               closeButtonClassName,

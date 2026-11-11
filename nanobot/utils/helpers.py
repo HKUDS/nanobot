@@ -1,5 +1,3 @@
-"""Utility functions for nanobot."""
-
 from __future__ import annotations
 
 import base64
@@ -130,7 +128,6 @@ def _estimate_tools_tokens(
     *,
     leading_separator: bool,
 ) -> int:
-    """Estimate stable tool definition tokens without re-encoding every loop."""
     # ToolRegistry keeps the returned definitions list alive until the registry changes.
     tools_id = id(tools)
     fingerprint = tuple(id(tool) for tool in tools)
@@ -196,10 +193,8 @@ def strip_think(text: str) -> str:
     tokens mid-text would silently rewrite any message where a user or the
     assistant discusses the tokens themselves.
     """
-    # Every supported control tag contains '<'; ordinary text only needs trimming.
     if "<" not in text:
         return text.strip()
-    # Well-formed blocks first.
     text = re.sub(rf"<(?P<tag>{_THINKING_TAG})>[\s\S]*?</(?P=tag)>", "", text)
     text = re.sub(rf"^\s*<{_THINKING_TAG}>[\s\S]*$", "", text)
     # Self-closing `<thinking/>` is an empty marker, not user-visible text.
@@ -212,7 +207,6 @@ def strip_think(text: str) -> str:
     # Unicode regex mode it matches CJK characters too, which would defeat
     # the primary fix for `<think广场…` leaks.
     text = re.sub(rf"<{_THINKING_TAG}(?![A-Za-z0-9_\-:>/])", "", text)
-    # Edge-only orphan closing tags (start or end of text).
     text = re.sub(rf"^\s*</{_THINKING_TAG}>\s*", "", text)
     text = re.sub(rf"\s*</{_THINKING_TAG}>\s*$", "", text)
     # Edge-only channel markers (harmony / Gemma 4 variant leaks).
@@ -439,7 +433,6 @@ def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
 
 
 def _truncate_text_to_utf8_bytes(text: str, max_bytes: int) -> str:
-    """Return the longest code-point prefix within a UTF-8 byte budget."""
     if max_bytes <= 0:
         return ""
     encoded = text.encode("utf-8")
@@ -706,11 +699,6 @@ def _estimate_prompt_tokens_with_source(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> tuple[int, str]:
-    """Estimate prompt tokens and identify the counter used.
-
-    Counts all fields that providers send to the LLM: content, tool_calls,
-    reasoning_content, tool_call_id, name, plus per-message framing overhead.
-    """
     parts: list[str] = []
     for msg in messages:
         content = msg.get("content")
@@ -919,7 +907,6 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
 
-    # Initialize git for memory version control
     try:
         from nanobot.utils.gitstore import GitStore
 

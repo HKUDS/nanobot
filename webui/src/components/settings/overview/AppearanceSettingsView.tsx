@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle } from "@/components/settings/shared/SettingsControls";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { ThemePreference } from "@/hooks/useTheme";
@@ -39,6 +40,7 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
               <span className="appearance-theme-miniature" data-mode={value} aria-hidden>
                 <span className="appearance-mini-sidebar"><span /><span /><span /></span>
                 <span className="appearance-mini-main"><span /><span /><span /><span /></span>
+                <span className="appearance-mini-sky"><Sun /><Moon /></span>
               </span>
               <span className="appearance-theme-label text-ui-label">
                 <span className="flex min-w-0 items-center gap-1.5"><Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /><span>{label}</span></span>
@@ -66,18 +68,20 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
     </section>
 
     <section>
-      <SettingsSectionTitle>{t("settings.appearance.process")}</SettingsSectionTitle>
-      <p className="appearance-setting-help">{t("settings.appearance.processHelp")}</p>
+      <SettingsSectionTitle>
+        <SettingsHint description={t("settings.appearance.processHelp")}>{t("settings.appearance.process")}</SettingsHint>
+      </SettingsSectionTitle>
       <SettingsGroup>
-        <SettingsRow title={t("settings.rows.activityMode")}>
+        <SettingsRow title={t("settings.rows.activityMode")}
+          description={t(`settings.appearance.${localPrefs.activityMode === "auto" ? "autoHelp" : "expandedHelp"}`)}>
           <SegmentedControl<LocalActivityMode> value={localPrefs.activityMode}
             ariaLabel={t("settings.rows.activityMode")}
             options={[{ value: "auto", label: t("settings.values.auto") }, { value: "expanded", label: t("settings.values.expanded") }]}
             onChange={(activityMode) => onChangeLocalPrefs((previous) => ({ ...previous, activityMode }))} />
         </SettingsRow>
-        <p className="appearance-setting-help">{t(`settings.appearance.${localPrefs.activityMode === "auto" ? "autoHelp" : "expandedHelp"}`)}</p>
         <div className="settings-group-divider">
-          <SettingsRow title={t("settings.rows.fileEditDisplay")}>
+          <SettingsRow title={t("settings.rows.fileEditDisplay")}
+            description={t(`settings.appearance.${editHelp[localPrefs.fileEditDisplayMode]}`)}>
             <SegmentedControl<FileEditDisplayMode> value={localPrefs.fileEditDisplayMode}
               ariaLabel={t("settings.rows.fileEditDisplay")}
               options={[
@@ -87,7 +91,6 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
               ]}
               onChange={(fileEditDisplayMode) => onChangeLocalPrefs((previous) => ({ ...previous, fileEditDisplayMode }))} />
           </SettingsRow>
-          <p className="appearance-setting-help">{t(`settings.appearance.${editHelp[localPrefs.fileEditDisplayMode]}`)}</p>
         </div>
       </SettingsGroup>
     </section>

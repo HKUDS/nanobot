@@ -1,4 +1,4 @@
-import { pastedFilePath, PastedPathRange, isLocalAttachment, type LocalAttachment } from "../../../../packages/client-events/attachments";
+import { pastedFilePath, PastedPathRange, type LocalAttachment } from "../../../../packages/client-events/attachments";
 import {
   NewChatIcon,
   CompactIcon,
@@ -15,7 +15,6 @@ import {
   MemoryIcon,
   HelpIcon,
   HistoryIcon,
-  ConversationIcon,
   AttachIcon,
   RestartIcon,
   RestrictedAccessIcon,
@@ -32,7 +31,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type Ref,
@@ -53,8 +51,10 @@ import {
 import {
   composerMentionText,
   isCapabilityMentionStart,
+  type CapabilityMentionSegment,
 } from "@/lib/composer-mention-text";
-import { INLINE_TOKEN_HIGHLIGHT_COLOR } from "@/components/InlineTokenHighlight";
+import { INLINE_REFERENCE_HIGHLIGHT_COLOR, INLINE_TOKEN_HIGHLIGHT_COLOR, InlineTokenHighlight } from "@/components/InlineTokenHighlight";
+import { SlashCommandText } from "@/components/SlashCommandText";
 import {
   ChevronDown,
   ChevronUp,
@@ -90,11 +90,7 @@ import {
   ModelPresetBadge,
   type ModelPresetOption,
 } from "@/components/thread/ModelPresetBadge";
-import {
-  ComposerUsagePopover,
-  type ComposerContextUsage,
-  type ComposerRoundUsage,
-} from "@/components/thread/ComposerUsagePopover";
+import type { ComposerUsageControl } from "@/components/thread/ComposerUsagePopover";
 import {
   ACCEPT_ATTR,
   acceptedAttachmentKind,
@@ -138,6 +134,7 @@ import { requestSkillsRefresh } from "@/lib/skill-events";
 import {
   isRegisteredSlashCommand,
   isSideChannelLifecycle,
+  matchingSlashCommand,
   slashCommandLifecycle,
 } from "@/lib/slash-command";
 import {
@@ -149,6 +146,13 @@ import { formatQuotedUserMessage } from "@/lib/user-message-quote";
 import { cn } from "@/lib/utils";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
+import {
+  queuedImagesToSendImages,
+  queuedUploadBytes,
+  readyImagesToQueuedImages,
+  useQueuedPrompt,
+  type QueuedPromptContent,
+} from "@/components/thread/useQueuedPrompt";
 
 const VOICE_SHORTCUT_CODE = "KeyD";
 const VOICE_SHORTCUT_ARIA = "Control+Shift+D";
@@ -237,8 +241,7 @@ interface ThreadComposerProps {
   modelNeedsSetup?: boolean;
   onModelBadgeClick?: () => void;
   onManageModels?: () => void;
-  contextUsage?: ComposerContextUsage | null;
-  recentRoundUsage?: readonly ComposerRoundUsage[];
+  renderContextUsage?: ComposerUsageControl;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
   onMentionSearch?: () => void;
@@ -309,9 +312,6 @@ const SLASH_PALETTE_MIN_HEIGHT_PX = 144;
 const SLASH_PALETTE_CHROME_PX = 12;
 const SLASH_RECENTS_STORAGE_KEY = "nanobot.webui.slashCommandRecents";
 const SLASH_RECENTS_LIMIT = 5;
-const QUEUED_PROMPTS_STORAGE_PREFIX = "nanobot.webui.composerQueuedGuidance.v1:";
-const EMPTY_COMPLETED_TURN_IDS: readonly string[] = [];
-const QUEUED_PROMPTS_LIMIT = 20;
 const SESSION_MENTIONS_LIMIT = 8;
 
 function VoiceRecordingMeter({
@@ -359,61 +359,6 @@ interface SlashPaletteLayout {
   placement: SlashPalettePlacement;
   maxHeight: number;
 }
-
-interface QueuedPrompt {
-  id: string;
-  text: string;
-  images?: QueuedPromptImage[];
-  quotedContext?: string;
-  sessionMentions?: SessionMention[];
-  autoAfterTurnId?: string;
-  autoPaused?: boolean;
-  autoSendPageId?: string;
-}
-
-let queuedPromptPageId: string | undefined;
-
-function getQueuedPromptPageId(): string {
-  return queuedPromptPageId ??= crypto.randomUUID();
-}
-
-function canAutoSendQueuedPrompt(prompt: QueuedPrompt): boolean {
-  return !prompt.autoPaused && prompt.autoSendPageId === getQueuedPromptPageId();
-}
-
-function pauseQueuedPrompt(prompt: QueuedPrompt): QueuedPrompt {
-  return { ...prompt, autoAfterTurnId: undefined, autoSendPageId: undefined, autoPaused: true };
-}
-
-function mergeQueuedPrompt(first: QueuedPrompt, next: QueuedPrompt): QueuedPrompt {
-  const prompts = [first, next];
-  const mentions = new Map<string, SessionMention>();
-  for (const prompt of prompts) {
-    for (const mention of prompt.sessionMentions ?? []) {
-      if (!mentions.has(mention.session_key)) mentions.set(mention.session_key, mention);
-    }
-  }
-  return {
-    id: first.id,
-    text: prompts.map((prompt) => prompt.text).filter(Boolean).join("\n"),
-    images: prompts.flatMap((prompt) => prompt.images ?? []),
-    quotedContext: [...new Set(prompts.map((prompt) => prompt.quotedContext).filter(Boolean))].join("\n\n"),
-    sessionMentions: [...mentions.values()],
-    autoAfterTurnId: first.autoAfterTurnId,
-    autoPaused: prompts.some((prompt) => prompt.autoPaused),
-    autoSendPageId: first.autoSendPageId,
-  };
-}
-
-function queuedUploadBytes(image: QueuedPromptImage): number {
-  if (image.local) return 0;
-  const dataUrl = image.dataUrl ?? "";
-  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
-  return Math.floor(base64.length * 3 / 4) - padding;
-}
-
-type QueuedPromptImage = RestoredReadyImage;
 
 interface CliAppMentionQuery {
   query: string;
@@ -526,238 +471,7 @@ function storeSlashRecents(commands: string[]): void {
   }
 }
 
-function queuedPromptsStorageKey(key?: string | null): string | null {
-  const clean = key?.trim();
-  return clean ? `${QUEUED_PROMPTS_STORAGE_PREFIX}${clean}` : null;
-}
-
-function normalizeQueuedSessionMentions(value: unknown): SessionMention[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const candidate = item as Partial<SessionMention>;
-    const name = candidate.name?.trim().slice(0, 80);
-    const sessionKey = candidate.session_key?.trim().slice(0, 512);
-    if (
-      !name
-      || !sessionKey?.startsWith("websocket:")
-      || !/^[\p{L}\p{N}_-]+$/u.test(name)
-    ) return [];
-    return [{
-      ...(typeof candidate.id === "string" && /^handle_[a-f0-9]{32}$/i.test(candidate.id)
-        ? { id: candidate.id }
-        : {}),
-      name,
-      session_key: sessionKey,
-      title: candidate.title?.trim().slice(0, 160) ?? "",
-    }];
-  });
-}
-
-function normalizeQueuedPrompt(item: unknown, index: number): QueuedPrompt | null {
-  if (!item || typeof item !== "object") return null;
-  const record = item as Partial<QueuedPrompt>;
-  if (typeof record.text !== "string") return null;
-  const text = record.text.trim();
-  const images = Array.isArray(record.images)
-    ? record.images.flatMap((image): QueuedPromptImage[] => {
-        if (!image || typeof image !== "object") return [];
-        const candidate = image as Partial<QueuedPromptImage>;
-        if (isLocalAttachment(candidate.local)) {
-          return [{ local: candidate.local, kind: candidate.local.kind, name: candidate.local.name }];
-        }
-        if (typeof candidate.dataUrl !== "string" || !candidate.dataUrl.startsWith("data:")) {
-          return [];
-        }
-        const kind = candidate.kind === "file" || candidate.kind === "image" || candidate.kind === "video"
-          ? candidate.kind
-          : candidate.dataUrl.startsWith("data:image/")
-            ? "image"
-            : "file";
-        return [{
-          dataUrl: candidate.dataUrl,
-          kind,
-          ...(typeof candidate.name === "string" && candidate.name.trim()
-            ? { name: candidate.name.trim() }
-            : {}),
-        }];
-      })
-    : [];
-  const quotedContext = typeof record.quotedContext === "string"
-    ? record.quotedContext.trim()
-    : "";
-  const sessionMentions = normalizeQueuedSessionMentions(record.sessionMentions);
-  if (!text && images.length === 0) return null;
-  const id = typeof record.id === "string" && record.id.trim()
-    ? record.id
-    : `queued-prompt-restored-${index}`;
-  const prompt: QueuedPrompt = {
-    id,
-    text,
-    ...(images.length > 0 ? { images } : {}),
-    ...(quotedContext ? { quotedContext } : {}),
-    ...(sessionMentions.length > 0 ? { sessionMentions } : {}),
-    ...(typeof record.autoAfterTurnId === "string" && record.autoAfterTurnId.trim()
-      ? { autoAfterTurnId: record.autoAfterTurnId.trim() }
-      : {}),
-    ...(record.autoPaused === true ? { autoPaused: true } : {}),
-    ...(typeof record.autoSendPageId === "string" ? { autoSendPageId: record.autoSendPageId } : {}),
-  };
-  return canAutoSendQueuedPrompt(prompt) ? prompt : pauseQueuedPrompt(prompt);
-}
-
-function readQueuedPrompt(storageKey: string): QueuedPrompt | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return null;
-    return parsed.slice(0, QUEUED_PROMPTS_LIMIT)
-      .map((item, index) => normalizeQueuedPrompt(item, index))
-      .filter((item): item is QueuedPrompt => item != null)
-      .reduce<QueuedPrompt | null>((pending, prompt) => (
-        pending ? mergeQueuedPrompt(pending, prompt) : prompt
-      ), null);
-  } catch {
-    return null;
-  }
-}
-
-function storeQueuedPrompt(storageKey: string, prompt: QueuedPrompt | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (!prompt) {
-      window.localStorage.removeItem(storageKey);
-      return;
-    }
-    // Retain the v1 array shape so existing queued drafts remain readable.
-    window.localStorage.setItem(storageKey, JSON.stringify([prompt]));
-  } catch {
-    // localStorage persistence is a convenience; the in-memory draft still works.
-  }
-}
-
-interface QueuedPromptSnapshot {
-  prompt: QueuedPrompt | null;
-  sending: boolean;
-  error: string | null;
-}
-
-// Delivery can outlive the composer during attachment upload or topic navigation.
-// Keep one owner per mounted/sending topic; idle, unmounted owners are reloaded from storage.
-const queuedPromptStores = new Map<string, QueuedPromptStore>();
-
-class QueuedPromptStore {
-  private snapshot: QueuedPromptSnapshot;
-  private listeners = new Set<() => void>();
-
-  constructor(private storageKey: string | null) {
-    this.snapshot = { prompt: storageKey ? readQueuedPrompt(storageKey) : null, sending: false, error: null };
-  }
-
-  getSnapshot = () => this.snapshot;
-
-  subscribe = (listener: () => void) => {
-    if (this.storageKey) queuedPromptStores.set(this.storageKey, this);
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-      this.release();
-    };
-  };
-
-  private release() {
-    if (this.storageKey && !this.snapshot.sending && this.listeners.size === 0
-      && queuedPromptStores.get(this.storageKey) === this) queuedPromptStores.delete(this.storageKey);
-  }
-
-  private publish(next: QueuedPromptSnapshot) {
-    if (this.storageKey && next.prompt !== this.snapshot.prompt) storeQueuedPrompt(this.storageKey, next.prompt);
-    this.snapshot = next;
-    for (const listener of this.listeners) listener();
-    this.release();
-  }
-
-  set = (next: QueuedPrompt | null | ((current: QueuedPrompt | null) => QueuedPrompt | null)) => {
-    const prompt = typeof next === "function" ? next(this.snapshot.prompt) : next;
-    if (prompt !== this.snapshot.prompt) this.publish({ ...this.snapshot, prompt, error: null });
-  };
-
-  send(prompt: QueuedPrompt, send: () => void | boolean | Promise<void | boolean>) {
-    if (this.snapshot.sending) return;
-    const retained = pauseQueuedPrompt(prompt);
-    this.publish({ prompt: retained, sending: true, error: null });
-    const finish = (accepted: void | boolean, error?: unknown) => {
-      const failed = accepted === false || error !== undefined;
-      this.publish({
-        prompt: failed ? retained : null,
-        sending: false,
-        error: failed ? error instanceof Error ? error.message : "Message not sent; queued draft retained" : null,
-      });
-    };
-    try {
-      const result = send();
-      if (result instanceof Promise) void result.then((accepted) => finish(accepted), (error: unknown) => finish(false, error));
-      else finish(result);
-    } catch (error) {
-      finish(false, error);
-    }
-  }
-}
-
-function queuedPromptStoreFor(storageKey: string | null): QueuedPromptStore {
-  if (!storageKey) return new QueuedPromptStore(null);
-  let store = queuedPromptStores.get(storageKey);
-  if (!store) {
-    store = new QueuedPromptStore(storageKey);
-    queuedPromptStores.set(storageKey, store);
-  }
-  return store;
-}
-
-function expireQueuedPromptAuthorization(): void {
-  queuedPromptPageId = undefined;
-  for (const store of queuedPromptStores.values()) {
-    store.set((prompt) => prompt && !prompt.autoPaused ? pauseQueuedPrompt(prompt) : prompt);
-  }
-}
-
-// Saved content survives a page's lifetime; permission to execute it does not.
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", expireQueuedPromptAuthorization);
-  document.addEventListener("freeze", expireQueuedPromptAuthorization);
-}
-
-function readyImagesToQueuedImages(
-  images: AttachedImage[],
-): QueuedPromptImage[] {
-  return images.map((img) => ({
-    dataUrl: img.dataUrl,
-    local: img.local,
-    kind: img.kind,
-    name: img.file.name,
-  }));
-}
-
-function queuedImagesToSendImages(images?: QueuedPromptImage[]): SendAttachment[] | undefined {
-  if (!images?.length) return undefined;
-  return images.flatMap((img): SendAttachment[] => {
-    if (img.local) return [{
-      media: { path: img.local.path, name: img.local.name },
-      preview: { kind: img.local.kind, url: img.local.url, name: img.local.name },
-    }];
-    if (!img.dataUrl) return [];
-    return [{
-      media: { data_url: img.dataUrl, ...(img.name ? { name: img.name } : {}) },
-      preview: {
-        kind: img.kind ?? (img.dataUrl.startsWith("data:image/") ? "image" : img.dataUrl.startsWith("data:video/") ? "video" : "file"),
-        url: img.dataUrl, ...(img.name ? { name: img.name } : {}),
-      },
-    }];
-  });
-}
-
-function queuedPromptLabel(prompt: QueuedPrompt): string {
+function queuedPromptLabel(prompt: QueuedPromptContent): string {
   const text = prompt.text.trim();
   if (text) return text;
   return prompt.images?.map((img) => img.name).filter(Boolean).join(", ") || "File attachment";
@@ -1065,7 +779,7 @@ export function ThreadComposer({
   compactWhenIdle = false,
   isStreaming = false,
   activeTurnId = null,
-  completedTurnIds = EMPTY_COMPLETED_TURN_IDS,
+  completedTurnIds,
   modelLabel = null,
   modelDetail = null,
   modelPreset = null,
@@ -1076,8 +790,7 @@ export function ThreadComposer({
   modelNeedsSetup = false,
   onModelBadgeClick,
   onManageModels,
-  contextUsage = null,
-  recentRoundUsage = [],
+  renderContextUsage,
   variant = "thread",
   slashCommands = [],
   onMentionSearch,
@@ -1117,6 +830,7 @@ export function ThreadComposer({
   const [initialDraft] = useState(() => draftKey ? draftStore?.get(draftKey, persistDraft) : undefined);
   const [value, setValue] = useState(initialDraft?.text ?? "");
   const [composerFocused, setComposerFocused] = useState(false);
+  const [compactPlaceholder, setCompactPlaceholder] = useState(false);
   const blurFrame = useRef<number | null>(null);
   const [boundSessionMentions, setBoundSessionMentions] = useState<SessionMention[]>(
     initialDraft?.sessionMentions ?? [],
@@ -1137,103 +851,14 @@ export function ThreadComposer({
   pathCheckScope.current = scopeIdentity;
   useEffect(() => () => { pathCheckGeneration.current += 1; }, []);
   const [modelSetupAttentionRequest, setModelSetupAttentionRequest] = useState(0);
-  const queuedPromptStorageKey = queuedPromptsStorageKey(pendingQueueKey);
-  const queuedPromptStore = useMemo(() => queuedPromptStoreFor(queuedPromptStorageKey), [queuedPromptStorageKey]);
-  const queueSnapshot = useSyncExternalStore(queuedPromptStore.subscribe, queuedPromptStore.getSnapshot);
-  const queuedPrompt = queueSnapshot.prompt;
-  const setQueuedPrompt = queuedPromptStore.set;
-  const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
-  useEffect(() => {
-    if (queueSnapshot.error) setInlineError(queueSnapshot.error);
-  }, [queueSnapshot.error]);
-  const [voiceErrorFading, setVoiceErrorFading] = useState(false);
-  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
-  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
-  const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
-  const [selectedCliAppIndex, setSelectedCliAppIndex] = useState(0);
-  const [cursorPosition, setCursorPosition] = useState(0);
-  const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
-  const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
-  // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
-  // keyboard still get the newline-on-Enter behavior.
-  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
-  const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
-  const { readingTextSize, customReadingTextSize } = useLocalPreferences();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const mentionOverlayRef = useRef<HTMLDivElement>(null);
-  const formRef = useRef<HTMLFormElement>(null);
-  const [compactControls, setCompactControls] = useState(false);
-
-  useLayoutEffect(() => {
-    const form = formRef.current;
-    if (!form) return;
-    let previousWidth = 0;
-    const update = () => {
-      const width = form.getBoundingClientRect().width;
-      if (width <= 0 || width === previousWidth) return;
-      previousWidth = width;
-      setCompactControls(width <= 512);
-      const input = textareaRef.current;
-      if (input) autosizeTextarea(input);
-    };
-    update();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
-    observer?.observe(form);
-    window.addEventListener("resize", update);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", update);
-    };
+  const focusTextarea = useCallback(() => {
+    requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
-  const queuedPromptCounterRef = useRef(0);
-  const previousPendingQueueKeyRef = useRef(pendingQueueKey);
-  const previousQueueRunRef = useRef({ key: pendingQueueKey, isStreaming });
-  const voiceShortcutDownRef = useRef(false);
-  const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isHero = variant === "hero";
-  const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
-  const projectPickerAvailable =
-    !workspaceProjectLocked
-    && !!workspaceDefaultScope
-    && !!onWorkspaceScopeChange
-    && !!onLoadWorkspaceProjects
-    && !!onBrowseWorkspaceDirectories
-    && !!onResolveWorkspaceProject
-    && !!onFavoriteWorkspaceProject
-    && workspaceControls?.can_change_project !== false;
-  const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
-
-  useEffect(() => {
-    if (!isStreaming || !activeTurnId) return;
-    setQueuedPrompt((prompt) => (
-      !prompt || prompt.autoPaused || prompt.autoAfterTurnId === activeTurnId
-        ? prompt
-        : { ...prompt, autoAfterTurnId: activeTurnId }
-    ));
-  }, [activeTurnId, isStreaming, pendingQueueKey, setQueuedPrompt]);
-
-  const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholderThread");
-
   const maxAttachments = ingressLimits?.attachments.max_count
     ?? MAX_ATTACHMENTS_PER_MESSAGE;
   const maxFileBytes = ingressLimits?.attachments.max_file_bytes ?? MAX_ATTACHMENT_BYTES;
   const maxTextBytes = ingressLimits?.message.max_text_bytes ?? 64 * 1024;
-  const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
-    useAttachedImages({ ingressLimits });
-  const encoding = encodingFiles || pathInspection !== null;
-  const restoredDraftAttachments = useRef(false);
-  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.attachments.length);
-  useLayoutEffect(() => {
-    if (restoredDraftAttachments.current) return;
-    restoredDraftAttachments.current = true;
-    for (const attachment of initialDraft?.attachments ?? []) {
-      if (attachment instanceof File) enqueue([attachment], { restoringDraft: true });
-      else addLocal(attachment, { restoringDraft: true });
-    }
-    setDraftAttachmentsReady(true);
-  }, [enqueue, addLocal, initialDraft]);
 
   const formatRejection = useCallback(
     (reason: Exclude<AttachmentError, "too_large">): string => {
@@ -1266,6 +891,146 @@ export function ThreadComposer({
     }),
     [maxTextBytes, t],
   );
+
+  const queuedPromptError = useCallback((prompt: QueuedPromptContent): string | null => {
+    if (utf8Bytes(formatQuotedUserMessage(prompt.text, prompt.quotedContext)) > maxTextBytes) {
+      return textTooLargeMessage();
+    }
+    const attachments = prompt.images ?? [];
+    const videos = attachments.filter((item) => item.kind === "video").length;
+    if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
+    if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
+    const oversized = attachments.find((item) => queuedUploadBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes));
+    if (oversized) {
+      return formatUploadTooLarge(queuedUploadBytes(oversized), oversized.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
+    }
+    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedUploadBytes(item)), 0);
+    if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
+      return formatRejection("total_too_large");
+    }
+    if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
+      return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
+    }
+    return null;
+  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
+
+  const {
+    snapshot: queueSnapshot,
+    collect: collectQueuedPrompt,
+    enqueue: enqueueQueuedPrompt,
+    clear: clearQueuedPrompt,
+    pause: pauseQueue,
+    send: sendQueuedPrompt,
+  } = useQueuedPrompt(pendingQueueKey, { isStreaming, activeTurnId, completedTurnIds }, {
+    disabled: !!disabled || sendPending,
+    onSend,
+    validate: queuedPromptError,
+    onValidationError: setInlineError,
+    onSendAttempt: focusTextarea,
+  });
+  const queuedPrompt = queueSnapshot.prompt;
+  const interactionDisabled = !!disabled || sendPending || queueSnapshot.sending;
+  useEffect(() => {
+    if (queueSnapshot.error) setInlineError(queueSnapshot.error);
+  }, [queueSnapshot.error]);
+  const [voiceErrorFading, setVoiceErrorFading] = useState(false);
+  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [cliAppMenuDismissed, setCliAppMenuDismissed] = useState(false);
+  const [selectedCliAppIndex, setSelectedCliAppIndex] = useState(0);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [recentSlashCommands, setRecentSlashCommands] = useState<string[]>(() => readSlashRecents());
+  const hasTouchPrimaryPointer = useMediaQuery("(hover: none) and (pointer: coarse)");
+  // Coarser than hasTouchPrimaryPointer on purpose: tablets with a physical
+  // keyboard still get the newline-on-Enter behavior.
+  const hasCoarsePointer = useMediaQuery("(pointer: coarse)");
+  const mobileWorkspaceControls = useMediaQuery("(max-width: 639px)");
+  const { readingTextSize, customReadingTextSize } = useLocalPreferences();
+  const placeholderMeasureRef = useRef<HTMLSpanElement>(null);
+  const mentionOverlayRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [compactControls, setCompactControls] = useState(false);
+
+  useLayoutEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    let previousWidth = 0;
+    const update = () => {
+      const width = form.getBoundingClientRect().width;
+      if (width <= 0 || width === previousWidth) return;
+      previousWidth = width;
+      setCompactControls(width <= 512);
+      const input = textareaRef.current;
+      if (input) autosizeTextarea(input);
+    };
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(form);
+    window.addEventListener("resize", update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const chipRefs = useRef(new Map<string, HTMLButtonElement>());
+  const previousPendingQueueKeyRef = useRef(pendingQueueKey);
+  const voiceShortcutDownRef = useRef(false);
+  const voiceErrorFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isHero = variant === "hero";
+  const voiceShortcutLabel = useMemo(getVoiceShortcutLabel, []);
+  const projectPickerAvailable =
+    !workspaceProjectLocked
+    && !!workspaceDefaultScope
+    && !!onWorkspaceScopeChange
+    && !!onLoadWorkspaceProjects
+    && !!onBrowseWorkspaceDirectories
+    && !!onResolveWorkspaceProject
+    && !!onFavoriteWorkspaceProject
+    && workspaceControls?.can_change_project !== false;
+  const showProjectPicker = projectPickerAvailable && !workspaceControlsHidden;
+
+  const resolvedPlaceholder = placeholder ?? t("thread.composer.placeholder");
+  const showCompactPlaceholder = placeholder === undefined && compactPlaceholder;
+  const displayedPlaceholder = showCompactPlaceholder ? t("thread.composer.placeholderCompact") : resolvedPlaceholder;
+
+  useLayoutEffect(() => {
+    const input = textareaRef.current;
+    const text = placeholderMeasureRef.current;
+    if (!input || !text || placeholder !== undefined) return;
+    const measure = () => {
+      const style = getComputedStyle(input);
+      const available = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (available > 0) setCompactPlaceholder(text.getBoundingClientRect().width > available);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(input);
+    observer?.observe(text);
+    window.addEventListener("resize", measure);
+    let active = true;
+    void document.fonts?.ready.then(() => { if (active) measure(); });
+    return () => {
+      active = false;
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [placeholder, resolvedPlaceholder, compactControls, readingTextSize, customReadingTextSize]);
+
+  const { images, enqueue, addLocal, remove, clear, restoreReadyImages, encoding: encodingFiles, full } =
+    useAttachedImages({ ingressLimits });
+  const encoding = encodingFiles || pathInspection !== null;
+  const restoredDraftAttachments = useRef(false);
+  const [draftAttachmentsReady, setDraftAttachmentsReady] = useState(!initialDraft?.attachments.length);
+  useLayoutEffect(() => {
+    if (restoredDraftAttachments.current) return;
+    restoredDraftAttachments.current = true;
+    for (const attachment of initialDraft?.attachments ?? []) {
+      if (attachment instanceof File) enqueue([attachment], { restoringDraft: true });
+      else addLocal(attachment, { restoringDraft: true });
+    }
+    setDraftAttachmentsReady(true);
+  }, [enqueue, addLocal, initialDraft]);
 
   const addFiles = useCallback(
     (files: File[]) => {
@@ -1322,18 +1087,21 @@ export function ThreadComposer({
   );
   const hasErrors = images.some((img) => img.status === "error");
 
+  const isUserShell = value.trimStart().startsWith("!");
+  const requiresModelSetup = modelNeedsSetup && !isUserShell;
   const hasComposerContent = value.trim().length > 0 || readyImages.length > 0;
   const canSend =
     !interactionDisabled
-    && !modelNeedsSetup
+    && !requiresModelSetup
     && !encoding
     && !hasErrors
     && hasComposerContent;
   const canOpenModelSettings = Boolean(
-    modelNeedsSetup && onModelBadgeClick && !interactionDisabled,
+    requiresModelSetup && onModelBadgeClick && !interactionDisabled,
   );
   const canQueueGuidance =
     isStreaming
+    && !isUserShell
     && !interactionDisabled
     && !modelNeedsSetup
     && !encoding
@@ -1352,7 +1120,7 @@ export function ThreadComposer({
   }, [interactionDisabled, slashMenuDismissed, value]);
 
   const skillQuery = useMemo(() => {
-    if (interactionDisabled || slashMenuDismissed) return null;
+    if (interactionDisabled || isUserShell || slashMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
     const match = /\$([A-Za-z0-9_-]*)$/i.exec(beforeCaret);
@@ -1362,7 +1130,7 @@ export function ThreadComposer({
       start: match.index,
       text: match[1].toLowerCase(),
     };
-  }, [cursorPosition, interactionDisabled, slashMenuDismissed, value]);
+  }, [cursorPosition, interactionDisabled, isUserShell, slashMenuDismissed, value]);
 
   const skillMenuActive = skillQuery !== null;
   useEffect(() => {
@@ -1496,7 +1264,7 @@ export function ThreadComposer({
 
   const showSlashMenu = filteredSlashCommands.length > 0;
   const cliAppMention = useMemo<CliAppMentionQuery | null>(() => {
-    if (interactionDisabled || cliAppMenuDismissed) return null;
+    if (interactionDisabled || isUserShell || cliAppMenuDismissed) return null;
     const caret = Math.min(Math.max(cursorPosition, 0), value.length);
     const beforeCaret = value.slice(0, caret);
     const match = /@([\p{L}\p{N}_-]*)$/iu.exec(beforeCaret);
@@ -1507,7 +1275,7 @@ export function ThreadComposer({
       start: match.index,
       end: caret,
     };
-  }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, value]);
+  }, [cliAppMenuDismissed, cursorPosition, interactionDisabled, isUserShell, value]);
 
   const mentionSearchActive = cliAppMention !== null;
   useEffect(() => {
@@ -1522,9 +1290,10 @@ export function ThreadComposer({
     () => [...availableSessionMentions, ...boundSessionMentions],
     [availableSessionMentions, boundSessionMentions],
   );
-  const mentionSegments = useMemo(
-    () => splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
-    [cliApps, mcpPresets, sessionMentionCatalog, value],
+  const mentionSegments = useMemo<CapabilityMentionSegment[]>(
+    () => isUserShell ? [{ kind: "text", text: value }]
+      : splitCapabilityMentionSegments(value, cliApps, mcpPresets, sessionMentionCatalog),
+    [cliApps, isUserShell, mcpPresets, sessionMentionCatalog, value],
   );
   const editMentionInput = useCallback((next: string, cursor: number) => {
     setValue(next);
@@ -1541,7 +1310,7 @@ export function ThreadComposer({
   const { rawSelection, replace: replaceMentionInput } = mentionInput;
   const onPaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     onAttachmentPaste(event);
-    if (event.defaultPrevented || interactionDisabled || !onInspectAttachment) return;
+    if (event.defaultPrevented || interactionDisabled || isUserShell || !onInspectAttachment) return;
     const raw = event.clipboardData.getData("text/plain");
     const path = pastedFilePath(raw);
     if (!path) return;
@@ -1554,17 +1323,16 @@ export function ThreadComposer({
     void onInspectAttachment(path).then((attachment) => {
       if (generation !== pathCheckGeneration.current) return;
       setPathInspection((current) => current?.generation === generation ? { ...current, attachment } : current);
-    }).catch((error: unknown) => {
+    }).catch(() => {
       if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
+      // Attachment recognition is optional; the pasted text is already in the draft.
       setPathInspection(null);
-      if (error instanceof Error && "status" in error && error.status === 404) return;
-      setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
     });
-  }, [interactionDisabled, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   useLayoutEffect(() => {
     if (!pathInspection) return;
-    if (pathInspection.scope !== scopeIdentity || !pathInspection.range.update(value)) {
+    if (isUserShell || pathInspection.scope !== scopeIdentity || !pathInspection.range.update(value)) {
       pathCheckGeneration.current += 1;
       setPathInspection(null);
       return;
@@ -1572,16 +1340,12 @@ export function ThreadComposer({
     // Let the native IME commit before removing the confirmed path from its text.
     if (!pathInspection.attachment || mentionInput.isComposing) return;
     const edited = pathInspection.range.replace("", rawSelection().start);
-    if (edited) {
-      const rejection = addLocal(pathInspection.attachment);
-      if (rejection) setInlineError(formatRejection(rejection));
-      else {
-        replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
-        setInlineError(null);
-      }
+    if (edited && !addLocal(pathInspection.attachment)) {
+      replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
+      setInlineError(null);
     }
     setPathInspection(null);
-  }, [addLocal, formatRejection, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
+  }, [addLocal, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   const draftText = composerMentionText(mentionInput.segments).raw;
   const sessionDragInsertion = sessionDragPreview
@@ -1718,10 +1482,11 @@ export function ThreadComposer({
   const showCliAppMenu = filteredMentionCandidates.length > 0;
   const showAnyPalette = showSlashMenu || showCliAppMenu;
   const inlineSegments = useMemo(
-    () => withSkillReferences(displayMentionSegments),
-    [displayMentionSegments],
+    () => isUserShell ? displayMentionSegments : withSkillReferences(displayMentionSegments),
+    [displayMentionSegments, isUserShell],
   );
-  const hasInlineDecorations = inlineSegments.some((segment) => segment.kind !== "text");
+  const slashCommand = matchingSlashCommand(sessionDragInsertion?.value ?? draftText, slashCommands);
+  const hasInlineDecorations = isUserShell || slashCommand !== null || inlineSegments.some((segment) => segment.kind !== "text");
   const activeCliMentionApps = useMemo(() => {
     const seen = new Set<string>();
     return mentionSegments.flatMap((segment) => {
@@ -1829,10 +1594,6 @@ export function ThreadComposer({
     };
   }, [filteredMentionCandidates.length, filteredSlashCommands.length, showAnyPalette]);
 
-  const focusTextarea = useCallback(() => {
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, []);
-
   useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el || mentionInput.isComposing) return;
@@ -1939,9 +1700,9 @@ export function ThreadComposer({
   }, [onTranscribeAudio, voiceRecorder.beginShortcutHold, voiceRecorder.endShortcutHold]);
 
   const handleStop = useCallback(() => {
-    setQueuedPrompt((prompt) => prompt ? pauseQueuedPrompt(prompt) : null);
+    pauseQueue();
     onStop?.();
-  }, [onStop, setQueuedPrompt]);
+  }, [onStop, pauseQueue]);
 
   const chooseSlashCommand = useCallback(
     (command: SlashPaletteCommand) => {
@@ -2064,64 +1825,29 @@ export function ThreadComposer({
     if (restoreFocus) focusTextarea();
   }, [focusTextarea]);
 
-  const queuedPromptError = useCallback((prompt: QueuedPrompt): string | null => {
-    if (utf8Bytes(formatQuotedUserMessage(prompt.text, prompt.quotedContext)) > maxTextBytes) {
-      return textTooLargeMessage();
-    }
-    const attachments = prompt.images ?? [];
-    const videos = attachments.filter((item) => item.kind === "video").length;
-    if (videos > MAX_VIDEOS_PER_MESSAGE) return formatRejection("too_many_videos");
-    if (attachments.length - videos > maxAttachments) return formatRejection("too_many_attachments");
-    const oversized = attachments.find((item) => queuedUploadBytes(item) > (item.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes));
-    if (oversized) {
-      return formatUploadTooLarge(queuedUploadBytes(oversized), oversized.kind === "video" ? MAX_VIDEO_BYTES : maxFileBytes);
-    }
-    const total = attachments.reduce((sum, item) => sum + (item.kind === "video" ? 0 : queuedUploadBytes(item)), 0);
-    if (total > (ingressLimits?.attachments.max_total_bytes ?? MAX_TOTAL_ATTACHMENT_BYTES)) {
-      return formatRejection("total_too_large");
-    }
-    if ((prompt.sessionMentions?.length ?? 0) > SESSION_MENTIONS_LIMIT) {
-      return t("thread.composer.queued.tooManyMentions", { max: SESSION_MENTIONS_LIMIT });
-    }
-    return null;
-  }, [formatRejection, formatUploadTooLarge, ingressLimits, maxAttachments, maxFileBytes, maxTextBytes, t, textTooLargeMessage]);
-
-  const collectGuidancePrompt = useCallback((): QueuedPrompt => {
-    queuedPromptCounterRef.current += 1;
-    const prompt: QueuedPrompt = {
-      id: `queued-prompt-${Date.now()}-${queuedPromptCounterRef.current}`,
-      text: value.trim(),
-      autoSendPageId: getQueuedPromptPageId(),
-      images: readyImagesToQueuedImages(readyImages),
-      ...(activeTurnId ? { autoAfterTurnId: activeTurnId } : {}),
-      ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
-      sessionMentions: activeSessionMentions,
-    };
-    return queuedPrompt ? mergeQueuedPrompt(queuedPrompt, prompt) : prompt;
-  }, [activeSessionMentions, activeTurnId, normalizedQuotedContext, queuedPrompt, readyImages, value]);
+  const collectGuidancePrompt = useCallback(() => collectQueuedPrompt({
+    text: value,
+    images: readyImagesToQueuedImages(readyImages),
+    ...(normalizedQuotedContext ? { quotedContext: normalizedQuotedContext } : {}),
+    sessionMentions: activeSessionMentions,
+  }), [activeSessionMentions, collectQueuedPrompt, normalizedQuotedContext, readyImages, value]);
 
   const queueGuidancePrompt = useCallback(() => {
     if (!canQueueGuidance) return;
-    const prompt = collectGuidancePrompt();
-    const error = queuedPromptError(prompt);
-    if (error) {
-      setInlineError(error);
-      return;
-    }
-    setQueuedPrompt(prompt);
+    if (!enqueueQueuedPrompt(collectGuidancePrompt())) return;
     clear();
     clearComposerText();
     onQuotedContextChange?.(null);
-  }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, queuedPromptError, setQueuedPrompt]);
+  }, [canQueueGuidance, clear, clearComposerText, collectGuidancePrompt, onQuotedContextChange, enqueueQueuedPrompt]);
 
   const removeQueuedPrompt = useCallback(() => {
-    setQueuedPrompt(null);
+    clearQueuedPrompt();
     requestAnimationFrame(() => textareaRef.current?.focus());
-  }, [setQueuedPrompt]);
+  }, [clearQueuedPrompt]);
 
-  const editQueuedPrompt = useCallback((pending: QueuedPrompt) => {
+  const editQueuedPrompt = useCallback((pending: QueuedPromptContent) => {
     const prompt = hasComposerContent || normalizedQuotedContext ? collectGuidancePrompt() : pending;
-    setQueuedPrompt(null);
+    clearQueuedPrompt();
     replaceMentionInput(prompt.text, prompt.text.length);
     setBoundSessionMentions(prompt.sessionMentions ?? []);
     setInlineError(null);
@@ -2134,60 +1860,20 @@ export function ThreadComposer({
       clear();
     }
     focusTextarea();
-  }, [clear, collectGuidancePrompt, hasComposerContent, normalizedQuotedContext, onQuotedContextChange, replaceMentionInput, focusTextarea, restoreReadyImages, setQueuedPrompt]);
-
-  const sendQueuedPrompt = useCallback(
-    (prompt: QueuedPrompt, extraOptions?: SendOptions) => {
-      if (interactionDisabled) return;
-      const error = queuedPromptError(prompt);
-      if (error) {
-        setQueuedPrompt(pauseQueuedPrompt(prompt));
-        setInlineError(error);
-        return;
-      }
-      const text = prompt.text.trim();
-      const queuedImages = queuedImagesToSendImages(prompt.images);
-      const options: SendOptions | undefined = (
-        extraOptions || prompt.quotedContext || prompt.sessionMentions?.length || isStreaming
-      )
-        ? {
-            ...extraOptions,
-            ...(prompt.quotedContext ? { quotedContext: prompt.quotedContext } : {}),
-            ...(prompt.sessionMentions?.length ? { sessionMentions: prompt.sessionMentions } : {}),
-            ...(isStreaming ? { continueActiveTurn: true } : {}),
-          }
-        : undefined;
-      queuedPromptStore.send(prompt, () => (
-        options ? onSend(text, queuedImages, options)
-          : queuedImages?.length ? onSend(text, queuedImages)
-          : onSend(text)
-      ));
-      requestAnimationFrame(() => textareaRef.current?.focus());
-    },
-    [interactionDisabled, isStreaming, onSend, queuedPromptStore, queuedPromptError, setQueuedPrompt],
-  );
-
-  useEffect(() => {
-    const previous = previousQueueRunRef.current;
-    previousQueueRunRef.current = { key: pendingQueueKey, isStreaming };
-    // Switching to an idle session is not completion of the previous session's run.
-    if (previous.key !== pendingQueueKey) return;
-    if (isStreaming || interactionDisabled || !queuedPrompt || !canAutoSendQueuedPrompt(queuedPrompt)) return;
-    const waitingTurnCompleted = queuedPromptStorageKey !== null && queuedPrompt.autoAfterTurnId !== undefined
-      ? completedTurnIds.includes(queuedPrompt.autoAfterTurnId)
-      : previous.isStreaming;
-    if (!waitingTurnCompleted) return;
-    sendQueuedPrompt(queuedPrompt);
-  }, [completedTurnIds, interactionDisabled, sendQueuedPrompt, isStreaming, pendingQueueKey, queuedPrompt, queuedPromptStorageKey]);
+  }, [clear, collectGuidancePrompt, hasComposerContent, normalizedQuotedContext, onQuotedContextChange, replaceMentionInput, focusTextarea, restoreReadyImages, clearQueuedPrompt]);
 
   const submit = useCallback(() => {
-    if (modelNeedsSetup) {
+    if (requiresModelSetup) {
       if (hasComposerContent) {
         setModelSetupAttentionRequest((request) => request + 1);
       }
       return;
     }
     if (!canSend) return;
+    if (isUserShell && (images.length > 0 || normalizedQuotedContext)) {
+      setInlineError(t("thread.composer.shell.removeContext"));
+      return;
+    }
     const trimmed = value.trim();
     const content = trimmed;
     if (utf8Bytes(formatQuotedUserMessage(content, normalizedQuotedContext)) > maxTextBytes) {
@@ -2199,11 +1885,12 @@ export function ThreadComposer({
     const payload = queuedImagesToSendImages(readyImagesToQueuedImages(readyImages));
     const attachedCliApps = activeCliMentionApps.map(cliAppMentionPayload);
     const attachedMcpPresets = activeMcpPresetMentions.map(mcpPresetMentionPayload);
-    const options: SendOptions | undefined =
+    const options: SendOptions | undefined = !isUserShell && (
       attachedCliApps.length > 0
       || attachedMcpPresets.length > 0
       || activeSessionMentions.length > 0
       || normalizedQuotedContext
+    )
         ? {
             ...(attachedCliApps.length > 0 ? { cliApps: attachedCliApps } : {}),
             ...(attachedMcpPresets.length > 0 ? { mcpPresets: attachedMcpPresets } : {}),
@@ -2232,10 +1919,10 @@ export function ThreadComposer({
       onQuotedContextChange?.(null);
       return;
     }
-    const isSlashSideChannel = isSideChannelLifecycle(slashLifecycle);
+    const isSideChannel = isUserShell || isSideChannelLifecycle(slashLifecycle);
     const finalizeActiveTurn =
       slashLifecycle === "finalize_active_turn";
-    if (!slashLifecycle) {
+    if (!isUserShell && !slashLifecycle) {
       const prompt = collectGuidancePrompt();
       const error = queuedPromptError(prompt);
       if (error) {
@@ -2257,7 +1944,7 @@ export function ThreadComposer({
       if (draftKey && draftStore && draftStore.get(draftKey) !== submittedDraft) return;
       if (draftKey) draftStore?.delete(draftKey);
       if (hasTouchPrimaryPointer) textareaRef.current?.blur();
-      if (!isStreaming || finalizeActiveTurn) setQueuedPrompt(null);
+      if ((!isStreaming && !isUserShell) || finalizeActiveTurn) clearQueuedPrompt();
       // Bubble owns the data URL copy; safe to revoke every staged blob
       // preview here without affecting the rendered message.
       clear();
@@ -2267,10 +1954,11 @@ export function ThreadComposer({
     const result = onSend(
       content,
       payload,
-      isSlashSideChannel
+      isSideChannel
         ? {
             ...options,
             sideChannel: true,
+            ...(isUserShell ? { userShell: true } : {}),
             ...(finalizeActiveTurn ? { finalizeActiveTurn } : {}),
           }
         : isStreaming ? { ...options, continueActiveTurn: true } : options,
@@ -2301,19 +1989,22 @@ export function ThreadComposer({
     queuedPrompt,
     queuedPromptError,
     sendQueuedPrompt,
-    setQueuedPrompt,
+    clearQueuedPrompt,
     hasTouchPrimaryPointer,
     hasComposerContent,
     handleStop,
+    images.length,
     isStreaming,
+    isUserShell,
     maxTextBytes,
-    modelNeedsSetup,
+    requiresModelSetup,
     onSend,
     onStop,
     onQuotedContextChange,
     normalizedQuotedContext,
     readyImages,
     slashCommands,
+    t,
     textTooLargeMessage,
     value,
   ]);
@@ -2468,7 +2159,7 @@ export function ThreadComposer({
   const showStopButton = isStreaming && !!onStop && !canSend;
   const actionState: ComposerActionState = showVoiceButton
     ? voiceRecorder.state === "transcribing" ? "busy" : voiceRecorder.isRecording ? "recording" : "voice"
-    : showStopButton ? "stop" : modelNeedsSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
+    : showStopButton ? "stop" : requiresModelSetup ? "setup" : canSend || !isStreaming ? "send" : "busy";
   const relaxedHeroInput = isHero && images.length === 0 && !isStreaming;
   const compactIdle = compactWhenIdle && !compactControls && !isHero && !composerFocused
     && value.length === 0 && images.length === 0 && !inlineError
@@ -2500,6 +2191,7 @@ export function ThreadComposer({
       scope={workspaceScope}
       disabled={interactionDisabled || workspaceScopeDisabled}
       onChange={onWorkspaceScopeChange}
+      hintBoundaryRef={formRef}
     />
   ) : null;
   const workspaceControl = showProjectPicker ? (
@@ -2535,9 +2227,8 @@ export function ThreadComposer({
     />
   ) : null;
   const usageInMeta = mobileWorkspaceControls || compactControls;
-  const usageControl = !voiceRecorder.isRecording && (contextUsage || recentRoundUsage.length) ? (
-    <ComposerUsagePopover context={contextUsage} rounds={recentRoundUsage} showLabel={usageInMeta} compactLabel={mobileWorkspaceControls} bottomSheet={usageInMeta} />
-  ) : null;
+  const usageControl = !voiceRecorder.isRecording
+    ? renderContextUsage?.({ showLabel: usageInMeta, compactLabel: mobileWorkspaceControls }) : null;
   const inputTextClasses = cn(
     // Keep the overlay's CJK/Latin spacing aligned with the native textarea caret.
     "w-full resize-none bg-transparent text-composer [text-autospace:no-autospace]",
@@ -2709,10 +2400,16 @@ export function ThreadComposer({
         ) : null}
         <GoalStateStrip goalState={goalState} />
         <div className="thread-composer-input relative min-w-0">
+          {placeholder === undefined ? (
+            <span className="pointer-events-none invisible absolute h-0 w-0 overflow-hidden">
+              <span ref={placeholderMeasureRef} aria-hidden className="inline-block whitespace-pre text-composer [text-autospace:no-autospace]">{resolvedPlaceholder}</span>
+            </span>
+          ) : null}
           {hasInlineDecorations ? (
             <ComposerInlineReferenceOverlay
               overlayRef={mentionOverlayRef}
               segments={inlineSegments}
+              slashCommand={slashCommand?.command ?? null}
               isHero={isHero}
               isComposing={mentionInput.isComposing}
               className={inputTextClasses}
@@ -2742,9 +2439,10 @@ export function ThreadComposer({
             onPaste={onPaste}
             rows={1}
             enterKeyHint={hasCoarsePointer ? "enter" : undefined}
-            placeholder={sessionDragPreview ? "" : resolvedPlaceholder}
+            placeholder={sessionDragPreview ? "" : displayedPlaceholder}
             disabled={interactionDisabled}
             aria-label={inputAriaLabel ?? t("thread.composer.inputAria")}
+            aria-description={sessionDragPreview ? undefined : resolvedPlaceholder}
             className={cn(
               inputTextClasses,
               "relative z-10 block caret-foreground placeholder:text-muted-foreground",
@@ -2828,7 +2526,7 @@ export function ThreadComposer({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    type={showVoiceButton || showStopButton || modelNeedsSetup ? "button" : "submit"}
+                    type={showVoiceButton || showStopButton || requiresModelSetup ? "button" : "submit"}
                     size="icon"
                     disabled={showVoiceButton ? voiceRecorder.buttonDisabled : showStopButton ? interactionDisabled : !canSend && !canOpenModelSettings}
                     aria-label={
@@ -2836,9 +2534,9 @@ export function ThreadComposer({
                         ? voiceButtonLabel
                         : showStopButton
                           ? t("thread.composer.stop")
-                          : modelNeedsSetup
+                          : requiresModelSetup
                             ? t("thread.composer.configureModel", { defaultValue: "Configure model" })
-                            : t("thread.composer.send")
+                            : isUserShell ? t("thread.composer.shell.run") : t("thread.composer.send")
                     }
                     aria-keyshortcuts={showVoiceButton ? VOICE_SHORTCUT_ARIA : undefined}
                     onPointerDown={showVoiceButton ? voiceRecorder.beginPress : undefined}
@@ -2849,7 +2547,7 @@ export function ThreadComposer({
                       event.preventDefault();
                       event.stopPropagation();
                     }}
-                    onClick={showVoiceButton ? voiceRecorder.handleClick : showStopButton ? handleStop : modelNeedsSetup ? onModelBadgeClick : undefined}
+                    onClick={showVoiceButton ? voiceRecorder.handleClick : showStopButton ? handleStop : requiresModelSetup ? onModelBadgeClick : undefined}
                     className={cn(
                       "composer-primary-action thread-composer-action thread-composer-round-action touch-target rounded-full bg-clip-padding",
                       actionState === "stop"
@@ -2862,7 +2560,9 @@ export function ThreadComposer({
                       isHero ? "h-8 w-8" : "h-9 w-9",
                     )}
                   >
-                    <ComposerActionIcon state={actionState} />
+                    {isUserShell && actionState === "send"
+                      ? <ToolRunIcon className="h-4 w-4" />
+                      : <ComposerActionIcon state={actionState} />}
                   </Button>
                 </TooltipTrigger>
                 {showVoiceButton ? (
@@ -2878,6 +2578,8 @@ export function ThreadComposer({
                       </kbd>
                     ) : null}
                   </TooltipContent>
+                ) : isUserShell ? (
+                  <TooltipContent>{t("thread.composer.shell.run")}</TooltipContent>
                 ) : null}
               </Tooltip>
             </TooltipProvider>
@@ -2918,7 +2620,7 @@ function QueuedPromptPreview({
   onDelete,
   onEdit,
 }: {
-  prompt: QueuedPrompt;
+  prompt: QueuedPromptContent;
   disabled: boolean;
   editDisabled: boolean;
   label: string;
@@ -2996,6 +2698,7 @@ function QueuedPromptPreview({
 function ComposerInlineReferenceOverlay({
   overlayRef,
   segments,
+  slashCommand,
   isHero,
   isComposing,
   className,
@@ -3003,6 +2706,7 @@ function ComposerInlineReferenceOverlay({
 }: {
   overlayRef: Ref<HTMLDivElement>;
   segments: InlineReferenceSegment[];
+  slashCommand: string | null;
   isHero: boolean;
   isComposing: boolean;
   className: string;
@@ -3025,7 +2729,17 @@ function ComposerInlineReferenceOverlay({
         const start = offset;
         offset += segment.text.length;
         if (segment.kind === "text") {
-          return <span key={`text-${index}`}>{segment.text}</span>;
+          const bangPrefix = index === 0 ? /^(\s*)!/.exec(segment.text) : null;
+          return <span key={`text-${index}`}>{bangPrefix ? <>
+            {bangPrefix[1]}
+            <InlineTokenHighlight testId="composer-shell-prefix" className="font-normal" color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
+              <span className="opacity-90">!</span>
+            </InlineTokenHighlight>
+            {segment.text.slice(bangPrefix[0].length)}
+          </> : start === 0 && slashCommand ? <>
+            <SlashCommandText command={slashCommand} testId="composer-slash-command" />
+            {segment.text.slice(slashCommand.length)}
+          </> : segment.text}</span>;
         }
         if (segment.kind === "skill") {
           return <SkillReferenceToken
@@ -3143,6 +2857,9 @@ function CliAppMentionPalette({
             {group.items.map(({ candidate, index }) => {
               const selected = index === selectedIndex;
               const name = candidate.name;
+              const handleColor = candidate.kind === "session"
+                ? candidate.mention.id ? sessionHandleColor(candidate.mention.id) : INLINE_TOKEN_HIGHLIGHT_COLOR
+                : undefined;
               const typeLabel = candidate.kind === "cli"
                 ? t("thread.composer.mentions.cliBadge")
                 : candidate.kind === "mcp"
@@ -3160,7 +2877,7 @@ function CliAppMentionPalette({
                   role="option"
                   data-palette-index={index}
                   aria-selected={selected}
-                  aria-label={`${candidate.displayName} @${name} ${ariaDescription} ${typeLabel}`}
+                  aria-label={`@${name} ${candidate.displayName} ${ariaDescription} ${typeLabel}`}
                   onMouseEnter={() => onHover(index)}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -3169,33 +2886,39 @@ function CliAppMentionPalette({
                   className={cn(
                     floatingItemClassName,
                     floatingItemFocusClassName,
-                    "touch-target flex min-h-10 w-full items-center gap-2.5 px-2.5 py-1.5 text-left transition-colors",
+                    "touch-target flex min-h-10 w-full flex-wrap items-center gap-x-2.5 gap-y-1 px-2.5 py-1.5 text-left transition-colors",
                     selected
-                      ? "bg-foreground/[0.055] text-foreground"
+                      ? "bg-foreground/[0.055] text-foreground dark:bg-black/[0.12]"
                       : "text-foreground/90 hover:bg-foreground/[0.04]",
                   )}
                 >
-                  <MentionCandidateLogo candidate={candidate} selected={selected} />
-                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
-                    <span className="min-w-0 truncate text-[15px] font-medium tracking-normal text-foreground">
+                  <span
+                    className="max-w-full shrink-0 truncate text-[15px] font-normal tracking-normal text-muted-foreground/72"
+                    style={{ color: handleColor }}
+                  >
+                    @{name}
+                  </span>
+                  <span className={cn(
+                    "flex max-w-full flex-1 flex-wrap items-center gap-x-2.5 gap-y-1",
+                    candidate.kind === "session" ? "min-w-[min(4rem,100%)]" : "min-w-[min(8rem,100%)]",
+                  )}>
+                    {candidate.kind !== "session" ? <MentionCandidateLogo candidate={candidate} selected={selected} /> : null}
+                    <span className="min-w-[min(4rem,100%)] flex-1 truncate text-[15px] font-medium tracking-normal text-foreground">
                       {candidate.displayName}
                     </span>
-                    <span className="truncate text-[15px] font-normal tracking-normal text-muted-foreground/72">
-                      @{name}
-                    </span>
+                    {candidate.kind !== "session" ? (
+                      <span
+                        className={cn(
+                          "ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-normal",
+                          candidate.kind === "cli"
+                            ? "bg-orange-500/10 text-orange-600 dark:text-orange-300"
+                            : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
+                        )}
+                      >
+                        {typeLabel}
+                      </span>
+                    ) : null}
                   </span>
-                  {candidate.kind !== "session" ? (
-                    <span
-                      className={cn(
-                        "ml-2 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-normal",
-                        candidate.kind === "cli"
-                          ? "bg-orange-500/10 text-orange-600 dark:text-orange-300"
-                          : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
-                      )}
-                    >
-                      {typeLabel}
-                    </span>
-                  ) : null}
                 </button>
               );
             })}
@@ -3210,28 +2933,13 @@ function MentionCandidateLogo({
   candidate,
   selected,
 }: {
-  candidate: MentionCandidate;
+  candidate: Extract<MentionCandidate, { kind: "cli" | "mcp" }>;
   selected: boolean;
 }) {
-  const color = candidate.kind === "session"
-    ? candidate.mention.id
-      ? sessionHandleColor(candidate.mention.id)
-      : INLINE_TOKEN_HIGHLIGHT_COLOR
-    : candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
-  const rawLogoUrl = candidate.kind === "session" ? null : candidate.logoUrl;
-  const logoUrls = useMemo(() => logoFallbackUrls(rawLogoUrl), [rawLogoUrl]);
+  const color = candidate.brandColor || INLINE_TOKEN_HIGHLIGHT_COLOR;
+  const logoUrls = useMemo(() => logoFallbackUrls(candidate.logoUrl), [candidate.logoUrl]);
   const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
 
-  if (candidate.kind === "session") {
-    return (
-      <span
-        className="flex h-5 w-5 shrink-0 items-center justify-center"
-        style={{ color }}
-      >
-        <ConversationIcon className="h-4 w-4" aria-hidden />
-      </span>
-    );
-  }
   if (logoUrl) {
     return (
       <span

@@ -1,5 +1,3 @@
-"""WebUI admission binds the generation of the session that executes the turn."""
-
 from __future__ import annotations
 
 import asyncio

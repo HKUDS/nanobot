@@ -504,5 +504,12 @@
     "view": "查看邀請",
     "dismissed": "已在預覽中選取不再提醒",
     "starred": "已在預覽中選取 GitHub 連結"
+  },
+  "sidebarPanel": {
+    "title": "側邊面板",
+    "toggle": "切換側邊面板",
+    "content": "詳細資訊保留在目前的窗格內。",
+    "description": "非模態側邊面板，使用統一的展開動畫。",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

@@ -1,5 +1,3 @@
-"""Telegram setup validation owned by the channel package."""
-
 import re
 from typing import Any, cast
 

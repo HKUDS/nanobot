@@ -1,5 +1,3 @@
-"""Tests for append-only WebUI transcript replay."""
-
 from __future__ import annotations
 
 import json
@@ -273,7 +271,6 @@ def test_thread_response_preserves_optional_stream_ids(history, delta_event, end
         "wire-first", "wire-first", "wire-second", "wire-second", None, None,
     ]
     assert all("stream_id" not in event for event in stream_events[-2:])
-    assert all("projection_receipts" not in event for event in stream_events)
     assert history.read(key) == original_rows
 
 
@@ -282,7 +279,7 @@ def test_thread_response_preserves_optional_stream_ids(history, delta_event, end
     [("delta", "stream_end", "answer"), ("reasoning_delta", "reasoning_end", "reasoning")],
 )
 @pytest.mark.parametrize("completed_text", [None, "canonical text"])
-def test_thread_response_receipts_for_folded_legacy_deltas(
+def test_complete_turn_folds_legacy_deltas_into_authoritative_stream_snapshots(
     history, delta_event, end_event, phase, completed_text,
 ) -> None:
     key = "websocket:folded-receipts"
@@ -312,9 +309,8 @@ def test_thread_response_receipts_for_folded_legacy_deltas(
     assert [(event["stream_id"], event["turn_seq"], event["text"]) for event in ends] == [
         ("primary", 9, primary_text), ("secondary", 10, "other"),
     ]
-    assert [event["projection_receipts"] for event in ends] == [
-        [{"turn_id": "turn-folded", "ranges": [[3, 4], [8, 9]]}],
-        [{"turn_id": "turn-folded", "ranges": [[6, 6], [10, 10]]}],
+    assert [event["event"] for event in payload["events"]] == [
+        "user_message", "message", end_event, end_event, "turn_end",
     ]
     assert history.read(key) == original_rows
     # Migration compaction retains its existing record format, without HTTP metadata.
@@ -463,7 +459,6 @@ def test_many_short_trace_rows_are_bounded_and_resolved(history, tmp_path, monke
         {"event": "message", "chat_id": "deferred-many-traces", "text": "done"},
         {"event": "turn_end", "chat_id": "deferred-many-traces"},
     ]
-    # Replay needs the full stored input, not one durable append per trace row.
     history.sessions.append_history(
         key,
         [fact_from_record({**row, "created_at_ms": 1_700_000_000_000}) for row in rows],
@@ -484,7 +479,8 @@ def test_many_short_trace_rows_are_bounded_and_resolved(history, tmp_path, monke
     assert detail["events"][-1]["text"] == f"tool_{trace_count - 1}(value)"
 
 
-def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(history) -> None:
+@pytest.mark.parametrize("with_model_requests", [False, True])
+def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(history, with_model_requests) -> None:
     key = "websocket:summary-receipts"
     history.append(key, {"event": "user", "text": "run tools", "turn_id": "turn-T", "turn_seq": 1})
     members = [("turn-T", 3), ("turn-T", 4), ("turn-U", 2), ("turn-T", 8)]
@@ -493,13 +489,25 @@ def test_thread_response_summary_receipts_preserve_holes_and_turn_membership(his
             "event": "message", "kind": "progress", "text": f'exec({"x" * 10_000})',
             "turn_id": turn_id, "turn_seq": sequence, "turn_phase": "activity",
         })
+        if with_model_requests and (turn_id, sequence) == ("turn-T", 4):
+            history.append(key, {
+                "event": "model_request", "turn_id": "turn-T", "turn_seq": 5,
+                "request_id": "request-one", "run_id": "run-one", "sequence": 2,
+                "phase": "completed", "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+            })
     history.append(key, {"event": "turn_end", "turn_id": "turn-T", "turn_seq": 9})
     original_rows = history.read(key)
 
-    payload = history.build(key)
+    payload = history.build(key, include_model_requests=True)
 
     assert payload is not None
-    assert len(payload["events"]) == 3
+    assert len(payload["events"]) == 3 + int(with_model_requests)
+    if with_model_requests:
+        request = payload["events"][2]
+        assert (request["event"], request["turn_seq"], request["usage"]["prompt_tokens"]) == ("model_request", 5, 100)
+        legacy = history.build(key)
+        assert legacy is not None
+        assert len(legacy["events"]) == 3
     summary = payload["events"][1]
     assert summary["trace_detail"]["traceCount"] == len(members)
     assert summary["projection_receipts"] == [
@@ -560,15 +568,16 @@ def test_single_oversized_turn_is_bounded_and_marked(history, tmp_path, monkeypa
 
     assert latest is not None
     assert stats.selected_records <= 5
-    assert stats.selected_bytes <= 1_200
+    assert stats.source_bytes <= 1_200
     assert stats.capped_by_records is True
     assert stats.capped_by_bytes is True
     assert stats.truncated_oversized_turn is True
     assert latest["page"]["truncated_oversized_turn"] is True
-    assert _message_contents(latest) == ["question", "final answer"]
+    assert latest["page"]["record_range"] == {"turn": 0, "start": 18, "end": 23}
+    assert _message_contents(latest) == ["final answer"]
 
 
-def test_truncated_turn_does_not_advertise_ambiguous_trace_detail(history,
+def test_sliced_turn_keeps_full_trace_details_inline(history,
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -613,10 +622,11 @@ def test_truncated_turn_does_not_advertise_ambiguous_trace_detail(history,
 
     assert payload is not None
     assert payload["page"]["truncated_oversized_turn"] is True
-    trace_event = next(event for event in payload["events"] if event.get("kind") == "progress")
-    assert trace_event["text"] == "second_3(…)"
-    assert "trace_detail" not in trace_event
-    assert len(json.dumps(trace_event).encode("utf-8")) < 4_096
+    traces = [event for event in payload["events"] if event.get("kind") == "progress"]
+    assert [event["text"] for event in traces] == [
+        f"second_{idx}({('x' * 12_000)})" for idx in range(4)
+    ]
+    assert all("trace_detail" not in event for event in traces)
 
 
 def test_page_cursor_survives_appends_after_latest_page(history,
@@ -649,6 +659,10 @@ def test_build_response_reports_fork_boundary_from_marker(history, tmp_path, mon
         {"event": "message", "chat_id": "fork", "text": "answer1"},
     ):
         history.append(key, ev)
+    history.append(key, {
+        "event": "model_request", "chat_id": "fork", "request_id": "request",
+        "run_id": "run", "sequence": 2, "phase": "completed", "round_usages": [],
+    })
     history.append(key, {"event": "fork_marker"})
     history.append(key, {"event": "user", "chat_id": "fork", "text": "new branch"})
 
@@ -659,6 +673,9 @@ def test_build_response_reports_fork_boundary_from_marker(history, tmp_path, mon
         "round1", "answer1", "new branch",
     ]
     assert out["fork_boundary_event_index"] == 2
+    modern = history.build(key, include_model_requests=True)
+    assert modern is not None
+    assert modern["fork_boundary_event_index"] == 3
 
 
 def test_thread_response_does_not_mark_completed_message_tool_tail_pending(history,
@@ -1191,3 +1208,86 @@ def test_build_response_schema(history, monkeypatch, tmp_path) -> None:
     assert out["schemaVersion"] == WEBUI_TRANSCRIPT_SCHEMA_VERSION
     assert out["sessionKey"] == key
     assert len(_conversation_events(out)) == 1
+
+
+def test_shell_output_format_survives_reload_and_paging_without_loading_model_history(history, tmp_path) -> None:
+    from nanobot.session.manager import SessionManager
+
+    key = "websocket:shell-output"
+    output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)\n"
+    history.append(key, {"event": "user", "text": "!pwd", "turn_id": "shell-turn"})
+    history.append(key, {
+        "event": "message", "text": output, "render_as": "text", "turn_id": "shell-turn",
+    })
+    history.append(key, {"event": "turn_end", "turn_id": "shell-turn"})
+    _append_numbered_turn(history, key, "shell-output", 2)
+    reopened = SessionManager(tmp_path)
+
+    def fail_if_loaded():
+        pytest.fail("Recorded output formatting must not load model history")
+
+    def build(**kwargs):
+        return reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(
+            key, history=snapshot, session_messages_loader=fail_if_loaded,
+            augment_assistant_text=lambda text: text.replace("local.png", "/api/media/signed"), **kwargs,
+        ))
+
+    latest = build(limit=2, direction="latest")
+    older = build(limit=2, before=latest["page"]["before_cursor"])
+    [answer] = [event for event in older["events"] if event["event"] == "message"]
+    assert answer["text"] == output
+    assert answer["render_as"] == "text"
+    assert history.read(key)[1]["text"] == output
+    assert history.read(key)[1]["render_as"] == "text"
+
+
+@pytest.mark.parametrize("command", [True, False])
+def test_existing_shell_output_uses_canonical_command_identity_not_bang_text(history, command) -> None:
+    key = "websocket:existing-shell-output"
+    output = "Path\n----\n__pycache__"
+    history.append(key, {"event": "user", "text": "!pwd", "turn_id": "shell-turn"})
+    history.append(key, {"event": "message", "text": output, "turn_id": "shell-turn"})
+    history.append(key, {"event": "turn_end", "turn_id": "shell-turn"})
+    messages = [
+        {"role": "user", "content": "/__shell pwd" if command else "!pwd",
+         "webui_turn_id": "shell-turn", "_command": command},
+        {"role": "assistant", "content": output, "_command": command},
+    ]
+    response = history.build(key, session_messages=messages)
+    [answer] = [event for event in response["events"] if event["event"] == "message"]
+    assert answer["text"] == output
+    assert answer.get("render_as") == ("text" if command else None)
+    assert history.read(key)[1]["text"] == output
+    assert messages[1]["content"] == output
+
+
+@pytest.mark.parametrize("phase", ["started", "completed", "failed", "cancelled"])
+@pytest.mark.parametrize("measured", [False, True])
+def test_model_request_persists_through_reconnect_projection(history, tmp_path, phase, measured):
+    from nanobot.events import ModelRequestEvent
+    from nanobot.providers.base import LLMUsage
+    from nanobot.session.manager import SessionManager
+    from nanobot.webui.outbound_wire import project_notification
+
+    key = "websocket:requests"
+    history.append(key, {"event": "user", "chat_id": "requests", "text": "hello"})
+    usage = LLMUsage.reported(input_tokens=12, output_tokens=3)
+    projection = project_notification("requests", ModelRequestEvent(
+        request_id="request", run_id="run", sequence=2, phase=phase,
+        usage=usage, round_usages=(usage,) * 10, context_window_tokens=32000,
+        request_usage=usage if measured else None,
+    ))
+    assert projection is not None
+    assert projection.persistence == "turn_activity"
+    assert projection.deliver_offline
+    record = {**projection.payload, "turn_id": "turn", "turn_seq": 2}
+    history.append(key, record)
+    reopened = SessionManager(tmp_path)
+    response = reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(
+        key, history=snapshot, include_model_requests=True,
+    ))
+    assert response is not None
+    [event] = [e for e in response["events"] if e["event"] == "model_request"]
+    assert {field: event[field] for field in record} == record
+    assert len(event["round_usages"]) == 8
+    assert event["usage"] == usage.to_turn_dict()

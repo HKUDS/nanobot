@@ -2,13 +2,11 @@
   "setup": {
     "docsLabel": "エージェント設定ガイドを開く",
     "officialLabel": "WhatsApp エージェントのヘルプを開く",
-    "summary": "WhatsApp Agent Platform API を通じて nanobot を接続します。会話できるのは本人だけで、他の WhatsApp チャットにはアクセスできません。",
     "privacyNotice": "エージェントとのチャットはエンドツーエンド暗号化されません。メッセージは nanobot と設定したモデルプロバイダーによって処理されます。",
     "fields": {
       "token": {
         "label": "API トークン",
-        "placeholder": "WhatsApp で 設定 → エージェント を開き、エージェントを作成して、エージェントのチャット → チャット情報 → API キー からキーをコピーします。",
-        "help": "WhatsApp で 設定 → エージェント を開き、エージェントを作成して、エージェントのチャット → チャット情報 → API キー からキーをコピーします。"
+        "placeholder": "WhatsApp で 設定 → エージェント を開き、エージェントを作成して、エージェントのチャット → チャット情報 → API キー からキーをコピーします。"
       },
       "allowFrom": {
         "label": "許可する送信者",

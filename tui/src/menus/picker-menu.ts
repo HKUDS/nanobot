@@ -29,7 +29,6 @@ interface PickerMenuOptions<T> {
   onSelect?: (item: T) => void
 }
 
-/** Shared retained picker for command discovery and session navigation. */
 export class PickerMenu<T> {
   readonly root: BoxRenderable
   private items: T[] = []

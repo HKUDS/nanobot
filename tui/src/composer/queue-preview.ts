@@ -20,7 +20,6 @@ export interface QueuePreviewTheme {
 
 const MAX_VISIBLE = 3
 
-/** A compact, retained projection of follow-ups waiting behind the active turn. */
 export class QueuePreview {
   readonly root: BoxRenderable
   private readonly header: TextRenderable

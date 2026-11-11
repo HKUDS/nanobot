@@ -1,4 +1,3 @@
-"""Utilities for redirecting stdlib logging to loguru."""
 from __future__ import annotations
 
 import logging

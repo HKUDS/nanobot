@@ -44,6 +44,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "resume-follow": "current-automatic-mode",
   },
   "follow-latest": {
+    "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
   },
@@ -109,7 +110,6 @@ interface ThreadMotionTurn {
 interface ThreadMotionSnapshot {
   mode: ThreadMotionMode;
   turnId: string | null;
-  promptId: string | null;
   promptPositioned: boolean;
   measurementPending: boolean;
 }
@@ -127,6 +127,8 @@ type ThreadMotionCamera = Pick<
   | "isFollowing"
   | "jumpTo"
   | "navigateTo"
+  | "observeScroll"
+  | "reset"
 >;
 
 interface ThreadMotionCoordinatorOptions {
@@ -134,6 +136,7 @@ interface ThreadMotionCoordinatorOptions {
   measure: (promptId: string | null) => ThreadMotionGeometry | null;
   onGeometry?: (geometry: ThreadMotionGeometry) => void;
   onAutoFollow?: () => void;
+  onLatestNavigationSettled?: () => void;
   scheduler?: ThreadMotionScheduler;
 }
 
@@ -159,6 +162,7 @@ export class ThreadMotionCoordinator {
   private readonly measure: ThreadMotionCoordinatorOptions["measure"];
   private readonly onGeometry?: ThreadMotionCoordinatorOptions["onGeometry"];
   private readonly onAutoFollow?: ThreadMotionCoordinatorOptions["onAutoFollow"];
+  private readonly onLatestNavigationSettled?: () => void;
   private readonly scheduler: ThreadMotionScheduler;
   private turn: ThreadMotionTurn = {
     id: null,
@@ -171,8 +175,8 @@ export class ThreadMotionCoordinator {
   private measurementFrameId: number | null = null;
   private geometryDirty = false;
   private composerInputDuringTurn = false;
-  // A user leaving the live tail must first move beyond the near-bottom
-  // boundary, or explicitly reverse toward latest, before follow can resume.
+  // Only input toward latest may resume follow; layout can also return a
+  // reading position to the tail without the user scrolling forward.
   private resumeFollowArmed = false;
 
   constructor(options: ThreadMotionCoordinatorOptions) {
@@ -180,6 +184,7 @@ export class ThreadMotionCoordinator {
     this.measure = options.measure;
     this.onGeometry = options.onGeometry;
     this.onAutoFollow = options.onAutoFollow;
+    this.onLatestNavigationSettled = options.onLatestNavigationSettled;
     this.scheduler = options.scheduler ?? defaultScheduler();
   }
 
@@ -187,7 +192,6 @@ export class ThreadMotionCoordinator {
     return {
       mode: this.mode,
       turnId: this.turn.id,
-      promptId: this.turn.promptId,
       promptPositioned: this.promptPositioned,
       measurementPending: this.measurementFrameId !== null,
     };
@@ -202,7 +206,7 @@ export class ThreadMotionCoordinator {
     const isNewTurn = this.turn.id !== turn.id;
     this.turn = turn;
     if (isNewTurn) {
-      this.camera.cancel();
+      this.camera.reset();
       this.composerInputDuringTurn = false;
       this.resumeFollowArmed = false;
       this.promptPositioned = turn.entry === "restored";
@@ -311,23 +315,26 @@ export class ThreadMotionCoordinator {
     return result;
   }
 
-  navigateHistoryTo(top: number): ThreadCameraFollowResult | null {
-    return this.beginHistoryNavigation(top, null);
-  }
-
   navigateHistoryToPrompt(promptId: string): ThreadCameraFollowResult | null {
     const geometry = this.measure(promptId);
     if (!geometry || geometry.promptTop === null) return null;
     return this.beginHistoryNavigation(geometry.promptTop, promptId);
   }
 
-  private beginHistoryNavigation(top: number, promptId: string | null): ThreadCameraFollowResult | null {
+  private beginHistoryNavigation(top: number, promptId: string): ThreadCameraFollowResult | null {
     if (this.mode !== "navigating-history") this.camera.cancel();
     this.transition("navigate-history");
     this.historyNavigationPromptId = promptId;
     const result = this.camera.navigateTo(top);
     if (!result || result === "settled") this.transition("navigation-settled");
     return result;
+  }
+
+  cameraSettled(): void {
+    if (this.mode === "navigating-latest") {
+      this.settleLatestNavigation();
+      this.onLatestNavigationSettled?.();
+    }
   }
 
   isAutoFollowPaused(): boolean {
@@ -338,14 +345,13 @@ export class ThreadMotionCoordinator {
     return this.mode === "browsing-history";
   }
 
-  /**
-   * A scroll event reports geometry; it does not prove user intent. Explicit
-   * input handlers call takeUserControl() before the browser scrolls. Layout,
-   * sticky positioning, and camera writes therefore remain automatic even
-   * when the browser emits an intermediate scroll event for them. Proximity
-   * to a detached history page's bottom must not count as near the live tail.
-   */
+  private observeUserScroll(): void {
+    const delta = this.camera.observeScroll();
+    if (Math.abs(delta) > GEOMETRY_EPSILON_PX) this.handleUserScrollIntent(true, delta > 0);
+  }
+
   observeScroll(nearLiveTail: boolean): ThreadScrollOwner {
+    this.observeUserScroll();
     switch (this.mode) {
       case "navigating-latest":
         if (!this.camera.isFollowing()) {
@@ -362,13 +368,13 @@ export class ThreadMotionCoordinator {
           if (nearLiveTail) {
             this.resumeAutoFollow();
           } else {
-            this.resumeFollowArmed = true;
+            this.resumeFollowArmed = false;
           }
         }
         return "navigation";
       case "browsing-history":
         if (!nearLiveTail) {
-          this.resumeFollowArmed = true;
+          this.resumeFollowArmed = false;
           return "user";
         }
         if (!this.resumeFollowArmed) return "user";
@@ -386,7 +392,7 @@ export class ThreadMotionCoordinator {
       this.measurementFrameId = null;
     }
     this.geometryDirty = false;
-    this.camera.cancel();
+    this.camera.reset();
     this.turn = { id: null, promptId: null, hasOutput: false };
     this.composerInputDuringTurn = false;
     this.resumeFollowArmed = false;
@@ -457,6 +463,7 @@ export class ThreadMotionCoordinator {
       || (!this.isHistoryMode() && this.turn.id !== null && !this.promptPositioned);
     const geometry = this.measure(navigationPromptId ?? (needsPromptGeometry ? this.turn.promptId : null));
     if (!geometry) return;
+    this.observeUserScroll();
     this.onGeometry?.(geometry);
 
     if (this.mode === "navigating-history" && navigationPromptId !== null) {

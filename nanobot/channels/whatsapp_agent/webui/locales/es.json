@@ -2,13 +2,11 @@
   "setup": {
     "docsLabel": "Abrir la guía de configuración del agente",
     "officialLabel": "Abrir la ayuda de agentes de WhatsApp",
-    "summary": "Conecta nanobot mediante la API de WhatsApp Agent Platform. Solo tú puedes chatear con él y no puede acceder a tus otros chats de WhatsApp.",
     "privacyNotice": "Los chats con el agente no están cifrados de extremo a extremo. nanobot y el proveedor de modelos que hayas configurado procesan los mensajes.",
     "fields": {
       "token": {
         "label": "Token de API",
-        "placeholder": "En WhatsApp, abre Ajustes → Agentes, crea el agente y copia la clave desde el chat del agente → Info del chat → Clave de API.",
-        "help": "En WhatsApp, abre Ajustes → Agentes, crea el agente y copia la clave desde el chat del agente → Info del chat → Clave de API."
+        "placeholder": "En WhatsApp, abre Ajustes → Agentes, crea el agente y copia la clave desde el chat del agente → Info del chat → Clave de API."
       },
       "allowFrom": {
         "label": "Remitentes permitidos",

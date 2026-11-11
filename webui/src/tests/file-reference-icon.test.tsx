@@ -96,6 +96,7 @@ describe("shared file icons", () => {
       display="path" showIcon={false} onOpen={open} />);
 
     const reference = screen.getByRole("button", { name: "src/app.tsx" });
+    expect(reference).toHaveClass("text-content-link", "hover:text-content-link-hover");
     expect(reference).toHaveTextContent("src/app.tsx");
     expect(reference.querySelector("svg")).toBeNull();
     expect(reference).toHaveAttribute("tabindex", "0");

@@ -1,5 +1,3 @@
-"""Cron service for scheduled agent tasks."""
-
 from typing import TYPE_CHECKING, Any
 
 from nanobot.cron.types import CronJob, CronSchedule

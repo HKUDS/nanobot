@@ -1,5 +1,3 @@
-"""Installation-scoped member choices, with non-destructive legacy approval fallback."""
-
 from nanobot.channels.linear.config import LinearConfig
 from nanobot.channels.linear.state import LinearStateStore
 from nanobot.pairing.store import is_approved

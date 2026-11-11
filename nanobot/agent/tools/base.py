@@ -1,4 +1,3 @@
-"""Base class for agent tools."""
 from __future__ import annotations
 
 import json
@@ -17,7 +16,6 @@ if typing.TYPE_CHECKING:
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
 
-# Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
 _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "string": str,
     "integer": int,
@@ -35,7 +33,6 @@ def _is_json_integer(value: object) -> bool:
 
 
 def _json_values_equal(left: Any, right: Any) -> bool:
-    """Compare JSON values without treating booleans as numbers."""
     if isinstance(left, bool) or isinstance(right, bool):
         return left is right
     if isinstance(left, list) and isinstance(right, list):
@@ -201,15 +198,17 @@ class ToolResult(str):
     """String-compatible tool output with structured status."""
 
     is_error: bool
+    error_code: str | None
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(cls, content: str, *, is_error: bool = False, error_code: str | None = None) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.error_code = error_code
         return obj
 
     @classmethod
-    def error(cls, content: str) -> ToolResult:
-        return cls(content, is_error=True)
+    def error(cls, content: str, *, error_code: str | None = None) -> ToolResult:
+        return cls(content, is_error=True, error_code=error_code)
 
 
 class Tool(ABC):
@@ -257,7 +256,6 @@ class Tool(ABC):
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
 
-    # --- Plugin metadata ---
 
     config_key: str = ""
     _plugin_discoverable: bool = True

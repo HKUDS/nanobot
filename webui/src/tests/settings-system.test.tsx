@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
@@ -487,51 +487,6 @@ describe("Settings system domains", () => {
     });
   });
 
-  it("starts the managed API server from System", async () => {
-    const base = settingsPayload();
-    const stopped = {
-      installed: false,
-      running: false,
-      managed: false,
-      host: "127.0.0.1",
-      port: 8900,
-      timeout: 120,
-      api_key_hint: null,
-      endpoint: "http://127.0.0.1:8900/v1",
-      command: "nanobot serve",
-    };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/settings") return jsonResponse(base);
-      if (url === "/api/settings/api-service") return jsonResponse(stopped);
-      if (url === "/api/settings/nanobot-features") {
-        return jsonResponse({ features: [], enabled_count: 0 });
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    requestMutationMock.mockResolvedValueOnce({
-      ...stopped,
-      installed: true,
-      running: true,
-      managed: true,
-    });
-
-    renderSettingsView({ initialSection: "runtime", initialSettings: base, showSidebar: true });
-
-    const startButton = await screen.findByRole("button", { name: "Start API server" });
-    await waitFor(() => expect(startButton).toBeEnabled());
-    fireEvent.click(startButton);
-
-    await waitFor(() => {
-      expect(requestMutationMock).toHaveBeenCalledWith(
-        "settings.api_service.start",
-        { host: "127.0.0.1", port: 8900, timeout: 120 },
-        150_000,
-      );
-    });
-  });
-
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -562,7 +517,8 @@ describe("Settings system domains", () => {
       },
     });
 
-    renderSettingsView();
+    const client = { requestMutation: requestMutationMock, status: "open", onStatus: () => () => {} } as never;
+    renderSettingsView({ client });
 
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
     const uninstall = screen.getByRole("button", { name: "Uninstall app" });
@@ -579,7 +535,12 @@ describe("Settings system domains", () => {
     expect(await screen.findByText("Uninstalled CLI for AnyGen.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-
+    cleanup();
+    fetchMock.mockClear();
+    renderSettingsView({ client, initialSettings: settingsPayload() });
+    expect(screen.getByText("AnyGen")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Uninstall app" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("cli-apps"))).toHaveLength(0);
   });
 
   it("keeps runtime dependencies out of Apps and explains chat mentions", async () => {

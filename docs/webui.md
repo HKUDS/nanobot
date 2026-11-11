@@ -91,6 +91,8 @@ The sidebar is the topic switcher. Each topic keeps its own history, title, work
 
 Drag topics within a sidebar group to reorder them. **Rename** edits a topic title in place; a failed save keeps the draft for retry.
 
+Use **Select** in a topic's action menu to archive or delete several topics with one confirmation. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics from the default list while keeping their conversations. Use **Show archived** to find them again; selecting only archived topics offers **Unarchive**.
+
 ### Conversation groups and panes
 
 Open a topic's sidebar action menu and choose **Create group** to turn it into a conversation group. Use **Add pane** in the workbench header to start another topic alongside it. A group holds up to four panes. To bring in an existing topic, drag it onto the group or use **Move to** in its action menu.
@@ -108,6 +110,10 @@ Scroll past the oldest loaded message, or pull down and release on touch devices
 Tasks in persistent topics can continue while the connection is lost. Status and completed replies update after reconnecting; some missed text may appear only when the task finishes. [Temporary chats](#temporary-chats) end on connection loss.
 
 The context indicator beside the model badge shows context-window usage. **Recent rounds** includes token usage, generation time and KV cache hits when reported. Provider figures may be estimated or unavailable and are not a billing statement.
+
+Open the file graph to see files used since the latest compaction and local Markdown references discovered in those files. Click a node to see its estimated token count or open the file, and drag across the usage bar or use replay to review earlier rounds. A loaded node means the file was read or supplied during this phase; it does not guarantee that the whole file, or its original text, remains in the model's current request. Compaction starts a new replay phase; its graph appears with the next request. Previously saved snapshots remain readable, but missing historical snapshots are not reconstructed from current files.
+
+Switching topics closes the previous topic's graph. Reopen it from the context indicator for the selected topic. Large or continuously growing graphs may be less responsive on slower devices.
 
 During compaction, the model switches to a summary plus subsequent messages; the original messages remain in chat history. Use `/compact` to compact the current topic manually. See [Memory](./memory.md) for compaction and Dream consolidation.
 
@@ -131,13 +137,17 @@ File previews follow the active topic's access mode. Restricted workspace access
 
 ### Model failures
 
+If a model stream fails after producing reply text, the text is retained for reading and follow-up questions. A reply can look complete even when the request ended with a connection error.
+
 After a model request fails and automatic retries stop, the WebUI shows the failure category. Use **Continue** to resume from the saved conversation, or open model settings to change the model or correct its authorization. Review completed work before continuing: saved tool results are retained, but the model can choose to call tools again. Continuing does not resend the original message. Sending a new message or dismissing the notice clears the pending decision. Saved recovery decisions remain available after a refresh or gateway restart; temporary chats still follow their normal lifetime.
 
 ### Delegated work
 
-When nanobot delegates work to subagents, a work group appears under the request that started it. Progress continues to update after the main reply finishes. Completed tasks stay available for inspection, and refreshing or reopening the WebUI restores saved progress and results without restarting the work.
+When nanobot delegates work to subagents, **Subtasks** appears above the message input while tasks are queued, running, or stopping. It stays within reach as the conversation scrolls, even after the main reply finishes or you send another message. Open it for live activity; on narrow screens it opens from the bottom. The task list scrolls independently of the conversation.
 
-Work groups follow the browser's **Activity details** preference: **Auto** opens running work and folds it when all tasks finish; **Expanded** keeps it open by default. You can also expand or fold a group manually to check individual outcomes, including failures and partial results.
+Finished tasks leave the live list when it is closed. If you are already reading the list, they remain until you close it. When all tasks finish with the list closed, a brief completion or failure summary appears and then disappears; focusing or hovering over it keeps it available.
+
+Saved results appear as compact, expandable records beside the requests that started the work, and scroll with the conversation. Tasks without a matching request in the displayed history remain under **Other tasks**. Refreshing or reopening the WebUI restores active work in the fixed entry and finished work in the conversation, without restarting tasks or bringing all old tasks back into the live list.
 
 Select a task for its read-only conversation and tool activity. Closing the details leaves it running; its stop button cancels only that task. Give follow-up instructions to nanobot in the main conversation.
 
@@ -155,7 +165,13 @@ Temporary does not mean consequence-free. Requests still go to the configured mo
 
 ## Workspace and Access
 
+Project selection and Full Access controls require an owner-authenticated WebUI connection. Ordinary WebSocket clients stay within the workspace and access mode configured by the operator; an owner's saved topic scope or WebUI preference does not grant a client additional access. Existing topics remain available to the owner, while clients attempting to resume a topic outside their configured authority receive an error instead of silently changing its scope. Legacy plain-text clients use the same permission boundary. Keep the configured `tokenIssueSecret` (or fallback `token`) private: it can issue owner credentials. Share short-lived client connection tokens, not that owner secret.
+
+With unified sessions, inputs with different workspace permissions wait for the active turn to finish, then run with their own permissions. Inputs with the same scope can still join the active turn.
+
 Use the workspace picker to browse folders on the connected nanobot host, enter an absolute path, or return to recent and starred projects; favorites persist across gateway restarts. The host name appears above saved locations. Project paths refer to that machine, not the browser's filesystem.
+
+Choose the project when starting a new topic. Saved topics, including forks, keep their project directory fixed. Start a new topic for another project. You can still change access mode within the same project while the topic is idle.
 
 Browsing does not change the topic's workspace until you choose **Confirm**. **Filter this folder** searches only the current directory. **Cmd/Ctrl+Shift+G** opens host-path entry, with Tab completion; **Last visited folder** returns to the previous location.
 
@@ -169,7 +185,7 @@ Selecting a project does not replace the configured agent workspace. The two pat
 | Relative file paths and shell working directory | Long-term memory and history |
 | The normal read/write boundary in Restricted mode | Custom skills and instance state |
 
-A new topic separates conversation history; a project selection changes the file working directory. Neither creates a separate long-term memory store. Project switching can therefore carry preferences and facts learned in other topics into the new project. Use [separate instances](./multiple-instances.md) when client or user data must stay separate; see [Memory](./memory.md) for how shared memory is maintained.
+A new topic separates conversation history; a project selection changes the file working directory. Neither creates a separate long-term memory store. Choosing another project for a new topic can therefore carry preferences and facts learned in other topics into the new project. Use [separate instances](./multiple-instances.md) when client or user data must stay separate; see [Memory](./memory.md) for how shared memory is maintained.
 
 Project-local `SOUL.md` and `USER.md` files are ignored, and the agent workspace's `AGENTS.md` is not inherited by a separately selected project. When the selected project is the configured agent workspace, both roles naturally use the same directory.
 
@@ -180,6 +196,8 @@ In Restricted mode, ordinary file and shell work stays inside the selected proje
 ## Composer
 
 The composer supports text, attachments (images, documents, and videos), slash commands and `@` mentions. With voice transcription configured, the empty composer offers voice input; transcription is added to the draft before sending.
+
+Start a message with `!` to run a Shell command directly in the topic's workspace, without calling the model (for example, `!git status`). Multiline commands are supported; remove attachments and quoted text before running a command. Commands run immediately, separately from waiting messages, and use the topic's existing permissions and Shell limits.
 
 Images appear as thumbnails above the draft. Hover over a thumbnail for its filename and size; use its top-right × to remove it before sending. Documents and videos keep their file cards, and attachment errors remain visible.
 
@@ -232,6 +250,8 @@ Open **Skills → Installed** to review built-in and workspace-provided skills. 
 Open **Skills → Discover** to browse or search skills from skills.sh and SkillHub. A marketplace skill is copied into the active agent workspace after you confirm the installation. skills.sh installation requires Node.js with `npx`; SkillHub installation does not.
 
 Marketplace skills are third-party instructions and may include executable scripts. Review the source and instructions before installing one, and enable only skills you trust with the same files, tools, and credentials available to your agent.
+
+Discover marks a skill as installed only when its recorded marketplace source matches. A skill with the same name from another source is a name conflict, not another installed copy. Older or manually copied skills without a source record remain usable and show “Installed source unknown.” Review the existing skill in **Installed** before removing it if you want a different source; installation never replaces it automatically. New installs keep a small `.nanobot-origin.json` receipt beside `SKILL.md`. Keep that receipt with the skill when moving or backing up the workspace. Older nanobot versions ignore it; no skill-directory rename or history migration is required.
 
 ## Automations
 

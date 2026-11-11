@@ -1,5 +1,3 @@
-"""Durable session checkpoints and pending-turn recovery state."""
-
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +11,8 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage
 from nanobot.session.manager import Session
+from nanobot.session.message_metadata import persisted_message
+from nanobot.session.session_messages import session_message_envelope, session_message_input
 
 RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
 PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -27,7 +27,7 @@ PROVIDER_STATE_CHECKPOINT_VERSION = "v1"
 _RECOVERY_STATUSES = frozenset({"resuming", "awaiting_user", "recovered", "failed"})
 UNCERTAIN_TOOL_PHASES = frozenset({"awaiting_tools"})
 KNOWN_CHECKPOINT_PHASES = frozenset(
-    {"final_response", "tools_completed", "awaiting_tools", "error"}
+    {"model_input", "final_response", "tools_completed", "awaiting_tools", "error"}
 )
 
 
@@ -52,7 +52,12 @@ def request_origin_from_metadata(metadata: Mapping[str, Any]) -> RequestOrigin |
 
 
 class RecoveryAdmission(Protocol):
-    """Narrow AgentLoop boundary for explicit recovery validation."""
+    """Own recovery eligibility before queue injection and worker dispatch.
+
+    Messages carry their effective session key and may come from any channel.
+    Implementations must tolerate repeated admission. Admission may cancel an
+    active worker, so callers must re-read queue ownership afterwards.
+    """
 
     async def admit(self, message: InboundMessage) -> bool: ...
 
@@ -63,7 +68,7 @@ class RecoveryAdmission(Protocol):
 
 def record_pending_followup(session: Session, message: InboundMessage) -> str | None:
     """Durably journal a WebUI follow-up before injecting it into a live turn."""
-    if message.channel != "websocket":
+    if message.channel != "websocket" and session_message_input(message) is None:
         return None
     try:
         metadata_value: object = json.loads(json.dumps(message.metadata))
@@ -112,7 +117,7 @@ def pending_followups(session: Session) -> list[InboundMessage]:
         sender_id = cast(object, record.get("sender_id"))
         chat_id = cast(object, record.get("chat_id"))
         content = cast(object, record.get("content"))
-        metadata = cast(object, record.get("metadata"))
+        metadata_value = cast(object, record.get("metadata"))
         if (
             not isinstance(followup_id, str)
             or not followup_id
@@ -122,8 +127,9 @@ def pending_followups(session: Session) -> list[InboundMessage]:
             or not chat_id
         ):
             continue
-        if not isinstance(content, str) or not isinstance(metadata, dict):
+        if not isinstance(content, str) or not isinstance(metadata_value, dict):
             continue
+        metadata = cast(dict[str, Any], metadata_value)
         media_value = cast(object, record.get("media"))
         media = (
             [item for item in cast(list[object], media_value) if isinstance(item, str)]
@@ -133,15 +139,18 @@ def pending_followups(session: Session) -> list[InboundMessage]:
         timestamp = record.get("timestamp")
         # Older journals did not retain admission time; retain their existing recovery policy.
         received_at = datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else datetime.now()
+        envelope = session_message_envelope(metadata)
+        is_session_input = envelope is not None and envelope["target_session_key"] == session.key
         messages.append(
             InboundMessage(
-                channel="websocket",
+                channel="system" if is_session_input else "websocket",
+                input_role="user" if is_session_input else None,
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=content,
                 timestamp=received_at,
                 media=media,
-                metadata={**cast(dict[str, Any], metadata), PENDING_FOLLOWUP_ID_KEY: followup_id},
+                metadata={**metadata, PENDING_FOLLOWUP_ID_KEY: followup_id},
                 session_key_override=session.key,
                 require_existing_session=True,
             )
@@ -186,7 +195,6 @@ def _checkpoint_tool_call_ids(
     *,
     result_rows: bool = False,
 ) -> list[str] | None:
-    """Validate checkpoint tool rows and return their stable IDs."""
     if not isinstance(value, list):
         return None
     ids: list[str] = []
@@ -213,6 +221,33 @@ def _checkpoint_tool_call_ids(
     return ids if len(ids) == len(set(ids)) else None
 
 
+def _checkpoint_prefix_is_complete(value: object) -> bool:
+    if not isinstance(value, list):
+        return False
+    pending: set[str] = set()
+    for value_row in cast(list[object], value):
+        if not isinstance(value_row, dict):
+            return False
+        row = cast(dict[str, Any], value_row)
+        role = row.get("role")
+        if role == "tool":
+            call_id = row.get("tool_call_id")
+            if not isinstance(call_id, str) or call_id not in pending:
+                return False
+            pending.remove(call_id)
+        elif role in ("user", "assistant"):
+            if pending:
+                return False
+            if role == "assistant" and row.get("tool_calls") is not None:
+                ids = _checkpoint_tool_call_ids(row["tool_calls"])
+                if ids is None:
+                    return False
+                pending.update(ids)
+        else:
+            return False
+    return not pending
+
+
 def runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
     """Return whether a checkpoint is safe to offer for continuation.
 
@@ -220,6 +255,16 @@ def runtime_checkpoint_is_well_formed(checkpoint: Mapping[str, Any]) -> bool:
     Continue is stricter: silently dropping a malformed tool result could make
     the model repeat an external side effect.
     """
+    if not _checkpoint_prefix_is_complete(checkpoint.get("preceding_messages", [])):
+        return False
+    if checkpoint.get("phase") == "model_input":
+        return (
+            checkpoint.get(PROVIDER_STATE_CHECKPOINT_VERSION_KEY)
+            == PROVIDER_STATE_CHECKPOINT_VERSION
+            and checkpoint.get("assistant_message") is None
+            and checkpoint.get("completed_tool_results") == []
+            and checkpoint.get("pending_tool_calls") == []
+        )
     assistant_value = cast(object, checkpoint.get("assistant_message"))
     if not isinstance(assistant_value, dict):
         return False
@@ -279,8 +324,8 @@ def restore_runtime_checkpoint(session: Session) -> bool:
     """Materialize the durable checkpoint exactly once and clear it.
 
     Pending tool calls become explicit interrupted tool results.  They are
-    never executed here.  Provider-native state is retained only for the two
-    checkpoint shapes known to be synchronized with persisted history.
+    never executed here. Provider-native state is retained only for checkpoint
+    shapes known to be synchronized with persisted history.
     """
     checkpoint = cast(object, session.metadata.get(RUNTIME_CHECKPOINT_KEY))
     if not isinstance(checkpoint, dict):
@@ -292,7 +337,11 @@ def restore_runtime_checkpoint(session: Session) -> bool:
     completed = cast(list[object], completed_value) if isinstance(completed_value, list) else []
     pending = cast(list[object], pending_value) if isinstance(pending_value, list) else []
 
-    restored: list[dict[str, Any]] = []
+    preceding = data.get("preceding_messages", [])
+    restored = (
+        [dict(cast(dict[str, Any], row)) for row in cast(list[object], preceding) if isinstance(row, dict)]
+        if isinstance(preceding, list) else []
+    )
     if isinstance(assistant, dict):
         assistant_row = cast(dict[str, Any], assistant)
     else:
@@ -329,21 +378,32 @@ def restore_runtime_checkpoint(session: Session) -> bool:
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "name": name if isinstance(name, str) and name else "tool",
-                "content": "Error: Task interrupted before this tool finished.",
+                "content": "Error: Task interrupted; this tool's outcome is unknown. Check its effects before retrying.",
                 "timestamp": datetime.now().isoformat(),
                 "_recovery_interrupted": True,
             }
         )
 
+    restored = [persisted_message(message) for message in restored]
     overlap = 0
-    for size in range(min(len(session.messages), len(restored)), 0, -1):
-        if all(
-            _checkpoint_message_key(left) == _checkpoint_message_key(right)
-            for left, right in zip(session.messages[-size:], restored[:size])
-        ):
-            overlap = size
-            break
+    # Cumulative checkpoints contain only the delta after accepted input. The
+    # owner commits it and clears the checkpoint in one transaction, so none of
+    # it is already in history. Equal text can belong to distinct user inputs.
+    # Only legacy single-batch checkpoints may overlap a materialized tail.
+    if "preceding_messages" not in data:
+        for size in range(min(len(session.messages), len(restored)), 0, -1):
+            if all(
+                _checkpoint_message_key(left) == _checkpoint_message_key(right)
+                for left, right in zip(session.messages[-size:], restored[:size])
+            ):
+                overlap = size
+                break
     session.messages.extend(restored[overlap:])
+    followup_ids = data.get("consumed_followup_ids", [])
+    if isinstance(followup_ids, list) and followup_ids:
+        session.consumed_followup_ids |= {
+            value for value in cast(list[object], followup_ids) if isinstance(value, str)
+        }
 
     assistant_data = cast(dict[str, Any], assistant) if isinstance(assistant, dict) else None
     synchronized = (
@@ -364,7 +424,8 @@ def restore_runtime_checkpoint(session: Session) -> bool:
         and assistant_data.get("role") == "assistant"
         and not data.get("pending_tool_calls")
     )
-    if not (synchronized and (exact_final or exact_tools)):
+    exact_input = phase == "model_input" and runtime_checkpoint_is_well_formed(data)
+    if not (synchronized and (exact_input or exact_final or exact_tools)):
         session.provider_state = None
 
     session.metadata.pop(PENDING_USER_TURN_KEY, None)
@@ -452,4 +513,6 @@ def recovery_state_from_metadata(metadata: Mapping[str, Any] | None) -> dict[str
         "authentication", "billing", "connection", "timeout", "rate_limit", "server", "unknown",
     }:
         payload["failure_error_kind"] = failure_error_kind
+    if state.get("reply_preserved") is True:
+        payload["reply_preserved"] = True
     return payload

@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-// Opaque and transparent artwork exercise both common brand-image layouts offline.
 const tile = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="#171717"/><circle cx="16" cy="16" r="10" fill="white"/></svg>';
 const mark = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="12" fill="#E87D0D"/></svg>';
 

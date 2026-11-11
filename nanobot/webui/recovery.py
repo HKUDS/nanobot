@@ -1,5 +1,3 @@
-"""WebUI restart recovery over durable session checkpoints."""
-
 from __future__ import annotations
 
 import asyncio
@@ -19,6 +17,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.session import turn_continuation
+from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
 from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import (
@@ -74,7 +73,6 @@ class RecoveryCoordinator:
             self._active_recovery_tasks.pop(session_key, None)
 
     async def _cancel_active_recovery(self, session_key: str) -> None:
-        """Stop an explicit continuation before accepting newer user input."""
         task = self._active_recovery_tasks.get(session_key)
         if task is None or task is asyncio.current_task() or task.done():
             return
@@ -102,6 +100,7 @@ class RecoveryCoordinator:
             session = await self.sessions.state.get(key)
             try:
                 await self._recover_session(session, route[1])
+                await self._close_interrupted_turns(session)
                 await self._requeue_pending_followups(session)
             except Exception:
                 logger.exception("failed to recover interrupted WebUI session {}", session.key)
@@ -118,7 +117,6 @@ class RecoveryCoordinator:
                 await self._publish(route[1], failed)
 
     async def _recovery_candidates(self) -> list[str]:
-        """Legacy display-only sessions have canonical headers after import."""
         return [item["key"] for item in await self.sessions.state.list_sessions()]
 
     @staticmethod
@@ -144,12 +142,23 @@ class RecoveryCoordinator:
                 and state["status"] == "resuming"
                 and state["recovery_id"] == recovery_id
             )
-        if message.channel != "websocket":
+        from nanobot.session.session_messages import session_message_input
+
+        chat_id = message.chat_id if message.channel == "websocket" else None
+        if session_message_input(message) is not None:
+            chat_id = webui_chat_id(message.session_key)
+        if chat_id is None:
             return True
         session = await self.sessions.state.get(message.session_key)
         state = recovery_state_from_metadata(session.metadata)
         if state and state["status"] in {"resuming", "awaiting_user", "failed"}:
             await self._cancel_active_recovery(message.session_key)
+            # Cancellation may have committed the checkpoint or completed the
+            # recovery. Classify a fresh owner draft after that handoff.
+            session = await self.sessions.state.get(message.session_key)
+            state = recovery_state_from_metadata(session.metadata)
+            if not state or state["status"] not in {"resuming", "awaiting_user", "failed"}:
+                return True
             if state.get("reason") != "model_request_failed":
                 restore_runtime_checkpoint(session)
                 if not restore_pending_interruption(session, superseded=True):
@@ -162,7 +171,7 @@ class RecoveryCoordinator:
                 reason="superseded",
             )
             await self.sessions.state.restore_interruption(session)
-            await self._publish(message.chat_id, recovered)
+            await self._publish(chat_id, recovered)
         return True
 
     async def turn_completed(
@@ -187,6 +196,8 @@ class RecoveryCoordinator:
                 can_continue=any(message.get("role") == "user" for message in session.messages),
             )
             waiting["failure_error_kind"] = failure_error_kind or "unknown"
+            if session.messages and session.messages[-1].get("_interrupted") is True:
+                waiting["reply_preserved"] = True
             await self.sessions.state.restore_interruption(session)
             await self._publish(route[1], waiting)
             return
@@ -418,8 +429,32 @@ class RecoveryCoordinator:
             )
         )
 
+    async def _close_interrupted_turns(self, session: Session) -> None:
+        # Startup has no live execution owners. Persist their terminal identities
+        # before admitting new work so reconnecting clients can settle old runs.
+        queued_turns = {message.metadata.get(WEBUI_TURN_METADATA_KEY) for message in pending_followups(session)}
+
+        def completions(history: HistoryReader) -> list[HistoryFact]:
+            if not history.turn_count:
+                return []
+            tail = history.read_entries(history.turn_count - 1)
+            if not tail or tail[-1][1].kind is HistoryKind.COMPLETION:
+                # In particular, don't bypass a transcript_incomplete marker.
+                return []
+            sequences: dict[str, int] = {}
+            for _, fact in tail:
+                if fact.turn_id and fact.turn_id not in queued_turns:
+                    sequences[fact.turn_id] = max(sequences.get(fact.turn_id, 0), fact.sequence or 0)
+            return [HistoryFact(
+                HistoryKind.COMPLETION, {"outcome": "interrupted"}, turn_id=turn_id,
+                phase="complete", sequence=sequence + 1, created_at_ms=int(datetime.now().timestamp() * 1000),
+            ) for turn_id, sequence in sequences.items()]
+
+        facts = await self.sessions.state.project_history(session.key, completions)
+        if facts:
+            await self.sessions.state.append_history(session.key, facts, expected_generation=session.generation)
+
     async def _requeue_pending_followups(self, session: Session) -> None:
-        """Return durable live-turn follow-ups to the bus after a restart."""
         for message in pending_followups(session):
             await self.bus.publish_inbound(message)
 
@@ -437,7 +472,6 @@ class RecoveryCoordinator:
         chat_id: str,
         state: Mapping[str, Any],
     ) -> None:
-        """Publish the recovery state and invalidate its sidebar projection."""
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel="websocket",
@@ -449,6 +483,7 @@ class RecoveryCoordinator:
                     attempts=cast(int, state.get("attempts", 0)),
                     can_continue=cast(bool | None, state.get("can_continue")),
                     failure_error_kind=cast(str | None, state.get("failure_error_kind")),
+                    reply_preserved=cast(bool | None, state.get("reply_preserved")),
                 ),
             )
         )

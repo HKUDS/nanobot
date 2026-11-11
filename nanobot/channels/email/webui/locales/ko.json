@@ -158,8 +158,7 @@
       },
       "trustedAuthservIds": {
         "label": "신뢰할 인증 서비스",
-        "placeholder": "mx.google.com, 쉼표로 구분",
-        "help": "신뢰하는 authserv-id를 입력하세요.\n\n수신 메일 서비스가 추가한 정확한 authserv-id입니다. SPF 또는 DKIM 확인 시 필수입니다."
+        "placeholder": "mx.google.com, 쉼표로 구분"
       }
     }
   }

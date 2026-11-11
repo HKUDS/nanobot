@@ -1,5 +1,3 @@
-"""WeChat-owned interactive connection flow."""
-
 from __future__ import annotations
 
 import secrets
@@ -25,7 +23,6 @@ class WeixinConnectSession:
     force: bool
     created_wall: float
     deadline: float
-    last_error: str | None = None
 
 
 class WeixinConnectStore:
@@ -123,7 +120,6 @@ class WeixinConnectStore:
             )
         except Exception as exc:
             if session.channel.connect_poll_error_is_retryable(exc):
-                session.last_error = str(exc)
                 return self._pending_payload(session)
             self._sessions.pop(session_id, None)
             await self._close_channel(session.channel)

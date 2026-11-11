@@ -1,4 +1,4 @@
-"""Data-URL persistence for API uploads and audio transcription.
+"""Data-URL persistence for audio transcription.
 
 Binary WebUI uploads share the media filename layout through ``media_destination``.
 """
@@ -7,16 +7,13 @@ from __future__ import annotations
 
 import base64
 import mimetypes
-import re
 import uuid
 from pathlib import Path
 
 from nanobot.utils.helpers import safe_filename
 
 DEFAULT_MAX_BYTES = 10 * 1024 * 1024
-MAX_FILE_SIZE = DEFAULT_MAX_BYTES
 
-_DATA_URL_RE = re.compile(r"^data:([^;,]+)(?:;[^,]*)*;base64,(.+)$", re.DOTALL)
 _MIME_EXTENSION_OVERRIDES = {
     # Python's ``mimetypes`` maps browser-recorded audio/webm to ``.weba`` and
     # audio/ogg to ``.oga`` on macOS. Some transcription APIs validate by the
@@ -53,9 +50,6 @@ class FileSizeExceededError(Exception):
     """Raised when a decoded payload exceeds the caller's size limit."""
 
 
-FileSizeExceeded = FileSizeExceededError
-
-
 def save_base64_data_url(
     data_url: str,
     media_dir: Path,
@@ -66,13 +60,17 @@ def save_base64_data_url(
     """Decode a ``data:<mime>;base64,<payload>`` URL and persist it.
 
     Returns the absolute path on success, ``None`` when the URL shape or the
-    base64 payload itself is malformed. Raises :class:`FileSizeExceeded`
+    base64 payload itself is malformed. Raises :class:`FileSizeExceededError`
     when the decoded payload is larger than ``max_bytes`` (default 10 MB).
     """
-    m = _DATA_URL_RE.match(data_url)
-    if not m:
+    # Parse delimiters directly so malformed MIME parameters cannot trigger regex backtracking.
+    header, separator, b64_payload = data_url.partition(",")
+    if not separator or header[:5].lower() != "data:" or header[-7:].lower() != ";base64":
         return None
-    mime_type, b64_payload = m.group(1).strip().lower(), m.group(2)
+    mime_type = header[5:-7].partition(";")[0]
+    if not mime_type:
+        return None
+    mime_type = mime_type.strip().lower()
     try:
         raw = base64.b64decode(b64_payload, validate=True)
     except Exception:
@@ -81,7 +79,7 @@ def save_base64_data_url(
         return None
     limit = DEFAULT_MAX_BYTES if max_bytes is None else max_bytes
     if len(raw) > limit:
-        raise FileSizeExceeded(f"File exceeds {limit // (1024 * 1024)}MB limit")
+        raise FileSizeExceededError(f"File exceeds {limit // (1024 * 1024)}MB limit")
     dest = media_destination(media_dir, mime_type, filename=filename)
     dest.write_bytes(raw)
     return str(dest)

@@ -477,8 +477,66 @@
       "password": "Kata sandi",
       "proxyReferenceAuth": "Atur autentikasi di URL proxy yang dirujuk."
     },
+    "sandbox": {
+      "title": "Sandbox perintah",
+      "method": "Metode isolasi",
+      "off": "Tanpa isolasi",
+      "status": "Konfigurasi tersimpan",
+      "check": "Periksa sandbox",
+      "checking": "Memeriksa…",
+      "scope": "Hanya menguji peluncur tersimpan dengan berkas sementara. Ini bukan audit keamanan lengkap. Mulai ulang gateway untuk menerapkan perubahan ke eksekusi perintah.",
+      "path": "Jalur peluncur tepercaya",
+      "launcher": "peluncur sandbox",
+      "pathHelp": "Biasanya biarkan kosong untuk mencari {{launcher}} di sistem. Untuk instalasi khusus, minta jalur lengkap peluncur kepada pengelola paket. Berkas dan direktori induk harus dimiliki root, tidak dapat ditulis grup/pengguna lain, dan di luar jalur tulis agen.",
+      "automatic": "Pencarian sistem",
+      "checkError": "Pemeriksaan gagal. Buka ulang pengaturan dan coba lagi.",
+      "saveError": "Gagal menyimpan. Draf tetap tersimpan; coba lagi.",
+      "disableTitle": "Nonaktifkan isolasi perintah?",
+      "disableHelp": "Setelah mulai ulang, perintah berjalan dengan izin akun gateway. Alat berkas juga kehilangan pembatasan ruang kerja dari sandbox ini; pembatasan yang diatur terpisah tetap berlaku.",
+      "keep": "Pertahankan isolasi",
+      "disable": "Nonaktifkan isolasi",
+      "notice": {
+        "title": "Perintah perlu diperiksa",
+        "missing": "Gateway tidak menemukan {{launcher}}. Jika sudah terpasang, atur jalur lengkapnya. Jika belum, hubungi pengelola paket atau administrator. Anda tetap bisa mengobrol.",
+        "path": "Gateway tidak dapat menggunakan jalur {{launcher}} yang dikonfigurasi. Periksa jalur lengkap dan izin aksesnya.",
+        "permissions": "{{launcher}} tidak berada di lokasi terlindungi. Hubungi pengelola paket atau administrator.",
+        "startup": "{{launcher}} tidak dapat dimulai. Periksa instalasi gateway dan pembatasan sistem.",
+        "configurePath": "Atur jalur {{launcher}}",
+        "openSettings": "Buka pengaturan sandbox"
+      },
+      "states": {
+        "disabled": "Perintah nonaktif",
+        "off": "Isolasi nonaktif",
+        "unsupported": "Tidak didukung",
+        "unchecked": "Belum diperiksa",
+        "unavailable": "Tidak tersedia",
+        "passed": "Uji dasar berhasil",
+        "checking": "Memeriksa…"
+      },
+      "help": {
+        "disabled": "Aktifkan perintah untuk memakai sandbox.",
+        "off": "Perintah tidak diisolasi. Pilih metode untuk melindungi host.",
+        "unsupported": "Sistem operasi gateway tidak mendukung metode ini.",
+        "unchecked": "Jalankan pemeriksaan konfigurasi sandbox tersimpan.",
+        "unsaved": "Simpan perubahan, lalu periksa sandbox.",
+        "unavailable": "Sandbox tidak bisa dimulai. Perintah tidak akan dijalankan di sandbox ini.",
+        "passed": "Peluncur berjalan, ruang kerja sementara dapat ditulis, dan berkas uji eksternal diblokir.",
+        "checking": "Menjalankan uji sandbox dengan batas waktu…"
+      },
+      "reasons": {
+        "launcher_missing": "Gateway tidak menemukan {{launcher}}. Jika sudah terpasang, masukkan jalur lengkapnya di bawah. Jika belum, hubungi pengelola paket atau administrator.",
+        "path_not_absolute": "Masukkan jalur absolut, bukan nama perintah.",
+        "not_executable": "Jalur harus menuju berkas yang dapat dieksekusi.",
+        "agent_writable": "Agen dapat menulis ke jalur ini. Minta pemasangan terlindungi kepada pengelola paket.",
+        "unprotected_installation": "Pengguna selain root dapat menulis ke peluncur atau induknya. Minta pemasangan terlindungi kepada administrator.",
+        "path_unavailable": "Jalur tidak dapat dibaca. Periksa keberadaan dan izinnya di gateway.",
+        "platform_unsupported": "Pilih metode yang didukung sistem operasi gateway.",
+        "probe_failed": "Uji isolasi gagal. Periksa pemasangan, namespace kernel, dan mount tambahan.",
+        "probe_timeout": "Waktu habis. Periksa pemasangan dan pembatasan host, lalu coba lagi.",
+        "unknown": "Peluncur tidak tersedia. Periksa pemasangan dan izin akses."
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",
       "commandRuntime": {
         "custom": "Kustom (detik)",
         "customLabel": "Durasi kustom (detik)",
@@ -526,8 +584,6 @@
         "gateway_host": {"label": "Alamat gateway", "help": "Alamat gateway; atur listener WebUI secara terpisah.\n\nAlamat tempat gateway menerima koneksi. Alamat WebSocket dan WebUI diatur di Kanal → WebSocket."},
         "gateway_port": {"label": "Port gateway", "help": "Port gateway; argumen peluncuran diutamakan.\n\nPort yang disimpan. Argumen baris perintah lebih diutamakan."},
         "gateway_restart_mode": {"label": "Mode mulai ulang", "help": "Pilih cara mulai ulang; Otomatis mengikuti lingkungan.\n\nCara memulai ulang proses. Mode otomatis memilih berdasarkan lingkungan host."},
-        "api_host": {"label": "Alamat API", "help": "Tetapkan kunci sebelum akses jaringan; mulai ulang API setelah perubahan.\n\nKunci API diperlukan untuk menerima koneksi pada alamat selain localhost. Atur kunci di Sistem, lalu mulai ulang layanan API untuk menerapkan perubahan."},
-        "api_timeout": {"label": "Batas waktu API", "help": "Batas detik tiap permintaan API; mulai ulang untuk menerapkan.\n\nDurasi maksimum permintaan. Mulai ulang layanan API untuk menerapkan perubahan."},
         "tools_image_generation_save_dir": {"label": "Direktori penyimpanan", "help": "Lokasi relatif dalam direktori media; gambar yang ada tidak dipindahkan.\n\nJalur relatif di dalam folder media nanobot. Gambar yang ada tidak dipindahkan."}
       },
       "groups": {
@@ -544,7 +600,6 @@
         "safety": {"title": "Izin global", "help": "Atur batas ruang kerja, pengecualian jaringan, dan pemasangan jarak jauh.\n\nPembatasan ruang kerja, jaringan privat, dan instalasi jarak jauh."},
         "cli": {"title": "Batas CLI", "help": "Atur batas waktu pemasangan dan eksekusi, serta durasi cache daftar.\n\nBatas waktu instalasi, eksekusi, dan cache katalog."},
         "gateway": {"title": "Gateway", "help": "Atur opsi penerapan dan mulai ulang."},
-        "api": {"title": "Pengaturan API", "help": "Atur alamat listener dan batas waktu permintaan."},
         "storage": {"title": "Penyimpanan gambar", "help": "Pilih lokasi penyimpanan gambar yang dibuat."},
         "maintenance": {"title": "Pengaturan memori", "help": ""},
         "web": {"title": "Akses web", "help": ""},
@@ -878,21 +933,13 @@
       "workspace": "Direktori kerja"
     },
     "usage": {
-      "title": "Aktivitas token",
       "shortTitle": "Penggunaan token",
-      "last30Days": "30 hari terakhir",
       "viewDetails": "Lihat detail",
-      "previousPage": "Halaman sebelumnya",
-      "nextPage": "Halaman berikutnya",
-      "dailyAverage": "Rata-rata harian",
-      "inputTokens": "Token input",
       "cacheHitRate": "Rasio cache hit",
-      "requestTrend": "Permintaan harian",
       "cacheRateHelp": "Rasio tidak mencakup input dengan status cache yang tidak diketahui.",
       "dailyTrend": "Token harian",
       "systemHelp": "Termasuk tugas internal dan panggilan tanpa sumber tercatat.",
       "bySource": "Penggunaan berdasarkan sumber",
-      "byModel": "Penggunaan per model",
       "modelTrend": "Tren model",
       "modelsUnavailable": "Rincian per model tidak tersedia.",
       "otherModels": "Lainnya / belum dikategorikan",
@@ -904,19 +951,8 @@
       "cacheUnknown": "Status tidak diketahui",
       "outputTokens": "Output",
       "otherTokens": "Token lainnya",
-      "subtitle": "Penggunaan yang dilaporkan penyedia selama 12 bulan terakhir.",
-      "empty": "Aktivitas token akan muncul setelah balasan model baru.",
       "totalTokens": "Total token",
-      "peakTokens": "Penggunaan token tertinggi",
-      "thirtyDayTokens": "Token 30 hari",
-      "currentStreak": "Rentetan saat ini",
-      "longestStreak": "Rentetan terpanjang",
-      "daysValue": "{{count}} hari",
-      "last30": "30 hari",
-      "activeDays": "Hari aktif",
       "requests": "Permintaan",
-      "estimated": "perkiraan",
-      "includesEstimates": "termasuk perkiraan",
       "cellTitle": "{{date}}: {{tokens}} token, {{requests}} permintaan",
       "sources": {
         "user": "Chat",
@@ -998,19 +1034,12 @@
       "catalogStale": "Daftar dalam cache mungkin sudah usang.",
       "catalogFallback": "Daftar bawaan mungkin sudah usang.",
       "selectModel": "Pilih model",
-      "addConfiguration": "Tambah konfigurasi",
-      "newConfiguration": "Konfigurasi model baru",
-      "newConfigurationHelp": "Simpan penyedia dan model agar mudah dipilih kembali.",
-      "configurationName": "Nama konfigurasi",
-      "configurationNameHelp": "Ganti nama konfigurasi model tersimpan ini.",
-      "configurationNamePlaceholder": "Menulis cepat",
       "callOrder": "Urutan model",
       "primary": "Utama",
       "addToOrder": "Aktifkan prasetel",
       "newPreset": "Preset baru",
       "newPresetHelp": "Simpan model dan pengaturan untuk digunakan kembali.",
       "presets": "Prasetel model",
-      "editPreset": "Ubah prasetel",
       "presetName": "Nama prasetel",
       "presetNameHelp": "Nama harus unik; juga digunakan oleh /model.",
       "presetNameDuplicate": "Prasetel dengan nama ini sudah ada.",
@@ -1035,16 +1064,11 @@
       "converting": "Mengonversi...",
       "convertAction": "Ubah ke preset",
       "dragToReorder": "Seret untuk mengurutkan ulang",
-      "moveUp": "Naikkan",
-      "moveDown": "Turunkan",
       "removeFromOrder": "Nonaktifkan prasetel",
-      "inCallOrder": "Dalam urutan pemanggilan",
       "disabled": "Nonaktif",
       "noPresets": "Belum ada prasetel model",
-      "noPresetsHelp": "Buat prasetel, lalu tambahkan ke urutan pemanggilan.",
       "removeBeforeDelete": "Model utama tidak dapat dihapus",
       "providerSetupRequired": "Penyedia perlu dikonfigurasi",
-      "configureProviderBeforeSaving": "Konfigurasikan penyedia ini sebelum menyimpan prasetel.",
       "deletePresetTitle": "Hapus prasetel model?",
       "deletePresetHelp": "Prasetel “{{name}}” akan dihapus, termasuk dari urutan pemanggilan. Kredensial penyedia tetap disimpan.",
       "searchModels": "Pilih model",
@@ -1052,9 +1076,7 @@
       "loadingModels": "Memuat model...",
       "searchCatalog": "Cari model di katalog penyedia.",
       "availableCount": "Model tersedia: {{count}}",
-      "modelsAvailable": "tersedia",
       "noModelResults": "Tidak ada model yang cocok.",
-      "loadFailed": "Daftar model tidak tersedia.",
       "unsupportedModelList": "Ketik ID model secara manual.",
       "providerNotConfigured": "Konfigurasikan penyedia ini sebelum memuat model.",
       "autoProviderCustomOnly": "Masukkan ID model untuk memilih penyedia secara otomatis."
@@ -1065,39 +1087,17 @@
       "empty": "Tidak ada zona waktu yang cocok."
     },
     "cliApps": {
-      "allCategories": "Semua kategori",
-      "availableCount_one": "{{count}} aplikasi",
-      "availableCount_other": "{{count}} aplikasi",
-      "availableCount": "{{count}} aplikasi",
-      "installedCount_one": "{{count}} alat CLI terpasang",
-      "installedCount_other": "{{count}} alat CLI terpasang",
-      "installedCount": "{{count}} terpasang",
-      "summary": "{{installed}} dari {{total}} CLI terpasang",
-      "filterAll": "Semua",
-      "filterInstalled": "CLI terpasang",
-      "filterNotInstalled": "Belum terpasang",
-      "searchPlaceholder": "Cari CLI",
       "statusInstalled": "Terpasang",
-      "statusAvailable": "Tersedia",
-      "statusMissing": "Dependensi belum terpasang",
-      "statusUnsupported": "Tidak didukung",
-      "statusNotInstalled": "Belum terpasang",
-      "unsupported": "Tidak didukung",
-      "loading": "Memuat aplikasi CLI...",
-      "empty": "Tidak ada aplikasi CLI yang cocok dengan filter ini.",
-      "readyTitle": "@{{name}} siap",
       "readyStatus": "Siap",
       "readyPrompt": "Gunakan @{{name}} untuk melihat kemampuan CLI ini.",
       "readyTry": "Coba @{{name}}",
       "readyCopied": "Disalin",
       "openChat": "Buka chat",
-      "requires": "Membutuhkan",
       "test": "Uji CLI",
       "update": "Perbarui CLI",
       "uninstall": "Copot CLI",
       "install": "Pasang CLI",
-      "unavailable": "Tidak tersedia",
-      "noDescription": "Tidak ada deskripsi."
+      "unavailable": "Tidak tersedia"
     },
     "about": {
       "updateNotice": "Pembaruan tersedia",
@@ -1233,15 +1233,6 @@
         "github": "Kelola repositori, issue, dan PR.",
         "supabase": "Lihat dan kelola proyek."
       }
-    },
-    "api": {
-      "title": "Server API", "openaiCompatible": "API kompatibel OpenAI", "description": "Hubungkan melalui API yang kompatibel dengan OpenAI.",
-      "start": "Mulai server API", "starting": "Memulai...", "stop": "Hentikan", "stopping": "Menghentikan...",
-      "access": "Akses", "thisDevice": "Perangkat ini", "localNetwork": "Jaringan lokal",
-      "localHelp": "Hanya perangkat ini yang dapat terhubung.", "networkHelp": "Akses LAN memerlukan kunci API.\n\nPerangkat lain dapat terhubung; kunci API diperlukan.",
-      "port": "Port", "portHelp": "Port lokal untuk layanan API.", "apiKey": "Kunci API", "apiKeyHelp": "Kirim kunci sebagai Bearer token.",
-      "apiKeyRequired": "Wajib sebelum membuka API ke jaringan.", "apiKeyPlaceholder": "Masukkan kunci API",
-      "autoInstall": "Paket yang diperlukan server API akan dipasang otomatis saat server dimulai."
     },
     "observability": {
       "title": "Pelacakan eksekusi", "configured": "Kredensial pelacakan sudah tersedia untuk nanobot.",
@@ -1669,6 +1660,10 @@
       "marketplaceNpxRequired": "Node.js dengan npx diperlukan",
       "marketplaceInstalling": "Memasang",
       "marketplaceInstalled": "Terpasang",
+      "marketplaceNameConflict": "Nama sudah digunakan",
+      "marketplaceOriginUnknown": "Sumber instalasi tidak diketahui",
+      "marketplaceConflictHelp": "Periksa skill bernama sama di Terpasang sebelum menghapusnya untuk memakai sumber lain.",
+      "marketplaceInstallConflict": "Konflik instalasi. Tunggu instalasi selesai, lalu periksa skill bernama sama di Terpasang.",
       "marketplaceInstall": "Pasang",
       "marketplaceNoTrend": "Belum ada tren",
       "marketplaceTrendLabel": "Tren pemasangan 8 minggu",
@@ -1732,9 +1727,7 @@
     "showArchived": "Tampilkan yang diarsipkan",
     "hideArchived": "Sembunyikan yang diarsipkan",
     "select": "Pilih",
-    "cancelSelection": "Batalkan pilihan",
     "selectedCount": "{{count}} dipilih",
-    "deleteSelected": "Hapus",
     "delete": "Hapus",
     "newChat": "Topik baru",
     "groups": {
@@ -1746,6 +1739,14 @@
       "earlier": "Sebelumnya",
       "archived": "Diarsipkan"
     }
+  },
+  "archiveConfirm": {
+    "title": "Arsipkan topik ini?",
+    "titleMany": "Arsipkan {{count}} topik?",
+    "unarchiveTitle": "Batalkan arsip topik ini?",
+    "unarchiveTitleMany": "Batalkan arsip {{count}} topik?",
+    "description": "Percakapan tetap tersimpan. Anda dapat membatalkan arsipnya kapan saja.",
+    "unarchiveDescription": "Topik ini akan kembali muncul di bilah samping."
   },
   "deleteConfirm": {
     "title": "Hapus obrolan ini?",
@@ -1785,7 +1786,6 @@
     "subagents": {
       "stopFailed": "Tidak dapat menghentikan tugas ini.",
       "stopTask": "Hentikan {{label}}",
-      "receiptHelp": "Terkirim berarti pesan disertakan dalam permintaan model berikutnya dari subagen, bukan konfirmasi bahwa pekerjaan selesai.",
       "states": {
         "queued": "Dalam antrean",
         "running": "Berjalan",
@@ -1796,11 +1796,6 @@
         "cancelled": "Dibatalkan",
         "interrupted": "Terputus"
       },
-      "receipts": {
-        "accepted": "Dalam antrean: {{count}}",
-        "delivered": "Terkirim: {{count}}",
-        "undelivered": "Tidak terkirim: {{count}}"
-      },
       "interruptedHelp": "Server dimulai ulang sebelum tugas ini selesai. Tugas tidak dijalankan ulang secara otomatis.",
       "workTitle": "Subtugas",
       "otherWorkTitle": "Tugas lain",
@@ -1808,8 +1803,8 @@
       "progress": "{{completed}} dari {{total}} selesai",
       "running": "Berjalan: {{count}}",
       "finished": "Berakhir: {{count}}",
-      "needsReview": "Perlu diperiksa: {{count}}",
-      "messages": "Status pesan"
+      "completed": "Selesai: {{count}}",
+      "needsReview": "Perlu diperiksa: {{count}}"
     },
     "compaction": {
       "reasons": {
@@ -1913,8 +1908,6 @@
       "sessionInfo": "Detail sesi"
     },
     "sessionInfo": {
-      "title": "Sesi",
-      "untitled": "Topik tanpa judul",
       "automations": "Otomasi",
       "count": "{{count}}",
       "loading": "Memuat otomasi...",
@@ -1939,8 +1932,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Ketik pesan Anda…",
-      "placeholderHero": "Jelaskan apa yang ingin Anda lakukan",
+      "placeholder": "Ketik / untuk melihat perintah, @ untuk memilih percakapan atau aplikasi, $ untuk memilih keterampilan",
+      "placeholderCompact": "Ketik pesan…",
       "placeholderOpening": "Membuka topik baru…",
       "inputAria": "Input pesan",
       "goalStateStrip": "Tujuan: {{label}}",
@@ -1954,6 +1947,10 @@
       "removeQuotedContext": "Hapus kutipan",
       "modelNotConfigured": "Model belum dikonfigurasi",
       "configureModel": "Konfigurasi model",
+      "shell": {
+        "run": "Jalankan perintah Shell",
+        "removeContext": "Hapus lampiran dan teks kutipan sebelum menjalankan perintah."
+      },
       "chooseAI": "Pilih model",
       "switchModel": "Ganti model",
       "manageModels": "Kelola preset",
@@ -1963,15 +1960,21 @@
       "reauthFallback": "Model cadangan menangani respons ini.",
       "reauthSettings": "Buka pengaturan model",
       "context": {
+          "loaded": "Dimuat",
+          "unloaded": "Belum dimuat",
+          "expand": "Perbesar konteks",
+          "collapse": "Perkecil konteks",
+          "noFiles": "Belum ada konteks yang tercatat",
+          "estimatedNodeTokens": "Sekitar {{value}} token",
+          "openFile": "Buka berkas",
+          "history": "Riwayat konteks",
+          "playHistory": "Putar riwayat konteks",
         "tooltip": "Konteks {{percent}}%",
         "detailsLabel": "Buka penggunaan konteks",
         "panelTitle": "Penggunaan konteks",
         "contextTitle": "Konteks",
-        "recentRounds": "Putaran terbaru",
-        "inputTrend": "Token masukan",
-        "input": "Token masukan",
-        "cacheHitRate": "Rasio hit KV cache",
-        "output": "Token keluaran",
+        "cacheHitRate": "Rasio cache hit",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Waktu pembuatan"
       },
       "queued": {
@@ -2162,7 +2165,7 @@
     "actions": "Tindakan pesan",
     "streaming": "sedang mengalir",
     "delivery": {
-      "sending": "Mengirim…",
+      "sending": "Mengirim",
       "failed": "Belum terkirim"
     },
     "assistantTyping": "Asisten sedang mengetik",
@@ -2199,8 +2202,7 @@
     "fileEditDiffTruncated": "Perbedaan dipotong. Buka file untuk melihat perubahan lengkap.",
     "usage": {
       "context": "Konteks terbaru: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} permintaan model",
-      "estimated": "Termasuk penggunaan perkiraan"
+      "requests": "{{count}} permintaan model"
     },
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",
@@ -2368,8 +2370,9 @@
     "retryRateLimit": "Batas permintaan tercapai",
     "retryServer": "Model tidak tersedia",
     "retryUnknown": "Permintaan model gagal",
-    "retryWaiting": "{{error}}, mencoba lagi dalam {{seconds}} dtk, percobaan {{attempt}}",
-    "retryExhausted": "{{error}}, mengakhiri giliran",
+    "retryWaiting": "{{error}} Mencoba lagi dalam {{seconds}} detik",
+    "retrying": "{{error}} Sedang mencoba lagi",
+    "retryExhausted": "{{error}} Mengakhiri giliran",
     "cliActivityRunningOne": "Menggunakan {{name}}",
     "cliActivityRanOne": "Menggunakan {{name}} selesai",
     "cliActivityFailedOne": "Tidak dapat menggunakan {{name}}",
@@ -2390,6 +2393,7 @@
     "failedHelp": "Tugas tersimpan tidak dapat dipulihkan dengan aman. Tinjau sebelum melanjutkan.",
     "resuming": "Memulihkan tugas yang terputus…",
     "review": "Tinjau tugas sebelum melanjutkan. Alat tidak akan dijalankan ulang secara otomatis.",
+    "replyPreserved": "Balasan tersimpan. Anda dapat melanjutkan.",
     "safeResume": "Melanjutkan dari konteks percakapan yang tersimpan.",
     "dismiss": "Abaikan",
     "continue": "Lanjutkan"
@@ -2514,7 +2518,7 @@
       "authenticationBody": "Masuk kembali atau periksa kunci API di pengaturan model.",
       "billingTitle": "Kuota penyedia model tidak tersedia",
       "billingBody": "Tambahkan kredit atau periksa tagihan akun penyedia, lalu coba lagi.",
-      "connectionTitle": "Tidak dapat terhubung ke penyedia model",
+      "connectionTitle": "Koneksi model gagal",
       "timeoutTitle": "Permintaan ke penyedia model kehabisan waktu",
       "rateLimitTitle": "Batas permintaan penyedia model tercapai",
       "serverTitle": "Kesalahan layanan penyedia model",

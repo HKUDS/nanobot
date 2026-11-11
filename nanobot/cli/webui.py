@@ -1,5 +1,3 @@
-"""WebUI CLI command."""
-
 import hashlib
 import sys
 from contextlib import ExitStack
@@ -55,7 +53,6 @@ def _wait_with_existing_foreground_gateway(
     gateway_port: int,
     dev_server: WebUIDevServer,
 ) -> None:
-    """Keep a Vite sidecar alive without taking ownership of an external gateway."""
     import time
 
     try:
@@ -282,7 +279,6 @@ def webui(
             try:
                 with run_webui_dev_server(
                     target_url=webui_dev_proxy_target(webui_url),
-                    browser_url=dev_browser_url,
                     output=lambda message: console.print(message, style="dim", markup=False),
                 ) as dev_server:
                     managed = not existing_gateway or runtime.status().running

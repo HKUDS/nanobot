@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createThreadProjectionState, projectThreadEvent, projectThreadEvents } from "@/lib/thread-event-projection";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
+import { ThreadProjectionIndex } from "@/lib/thread-projection-index";
 import type { ThreadProjectionEvent, UIMessage } from "@/lib/types";
 import projectionFixture from "./fixtures/live-replay-event-projection.json";
 
@@ -77,8 +78,9 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
 describe("canonical thread event projection", () => {
   it("routes late snapshots by stream without moving same-text answers or stealing the active cursor", () => {
     let state = createThreadProjectionState();
+    const index = new ThreadProjectionIndex();
     const emit = (event: ThreadProjectionEvent) => {
-      state = projectThreadEvent(state, event, { createId: () => `live-${state.messages.length}`, now: 100 });
+      state = projectThreadEvent(state, event, { createId: () => `live-${state.messages.length}`, now: 100, index });
     };
     emit({ event: "delta", chat_id: "chat", turn_id: "turn", stream_id: "first", turn_seq: 1, text: "Same answer" });
     emit({ event: "stream_end", chat_id: "chat", turn_id: "turn", stream_id: "first", turn_seq: 2, resuming: true });
@@ -95,6 +97,28 @@ describe("canonical thread event projection", () => {
       .toEqual(["Same answer", "read_file(first)", "Same answer continued"]);
     expect(state.messages[0]).toMatchObject({ projectionStartSeq: 1, turnSeq: 5, responseSources: [source] });
     expect(state.messages[2]).toMatchObject({ projectionStartSeq: 4, turnSeq: 6, streamId: "second" });
+  });
+
+  it("can resume an earlier checkpoint after another branch closes the same stream", () => {
+    const index = new ThreadProjectionIndex();
+    const options = { createId: () => "answer", now: 100, index };
+    const initial = createThreadProjectionState();
+    const open = projectThreadEvent(initial, {
+      event: "delta", chat_id: "chat", turn_id: "turn", stream_id: "wire", text: "Prefix",
+    }, options);
+    const ended = projectThreadEvent(open, {
+      event: "stream_end", chat_id: "chat", turn_id: "turn", stream_id: "wire", text: "Prefix final",
+    }, options);
+    expect(ended.closedAnswerStreamIds.size).toBe(1);
+    expect(open.closedAnswerStreamIds.size).toBe(0);
+    expect(open.closedAssistantIds.size).toBe(0);
+    const resumed = projectThreadEvent(open, {
+      event: "delta", chat_id: "chat", turn_id: "turn", stream_id: "wire", text: " continues",
+    }, options);
+    expect(initial.messages).toEqual([]);
+    expect(open.messages.map((row) => row.content)).toEqual(["Prefix"]);
+    expect(ended.messages.map((row) => row.content)).toEqual(["Prefix final"]);
+    expect(resumed.messages.map((row) => row.content)).toEqual(["Prefix continues"]);
   });
 
   it("updates an identified reasoning snapshot without duplicating it or closing another phase", () => {
@@ -167,14 +191,15 @@ describe("canonical thread event projection", () => {
     expect(messages[0]).toMatchObject({ content: "Complete answer", projectionStartSeq: 1, turnSeq: 3 });
   });
 
-  it.each(["message", "stream_end"] as const)("preserves recorded sources in %s replay", (event) => {
+  it.each(["message", "stream_end"] as const)("preserves recorded response metadata in %s replay", (event) => {
     const source = { provider: "xai", model: "grok", preset: "saved backup", fallback: true };
     const messages = projectThreadEvents([
-      { event, chat_id: "chat", text: "Recovered", response_sources: [source] },
+      { event, chat_id: "chat", text: "Recovered", response_sources: [source], response_input_ids: ["session-message:received"] },
       { event: "turn_end", chat_id: "chat" },
       { event: "message", chat_id: "chat", text: "Legacy response" },
     ]);
     expect(messages[0].responseSources).toEqual([source]);
+    expect(messages[0].responseInputIds).toEqual(["session-message:received"]);
     expect(messages[1].responseSources).toBeUndefined();
   });
 
@@ -193,7 +218,7 @@ describe("canonical thread event projection", () => {
     expect(normalizeProjection(messages)).toEqual(fixtureCase.expected);
   });
 
-  it("keeps deferred activity rows separately addressable in one segment", () => {
+  it.each(["read_file(…)", ""])("keeps deferred activity rows separately addressable in one segment (summary=%s)", (summary) => {
     const firstDetail = { ref: "2.history-aaaaaaaaaaaaaaaaaaaa", bytes: 40_000, traceCount: 1 };
     const secondDetail = { ref: "2.history-bbbbbbbbbbbbbbbbbbbb", bytes: 41_000, traceCount: 1 };
 
@@ -209,7 +234,7 @@ describe("canonical thread event projection", () => {
       {
         event: "message",
         chat_id: "chat-1",
-        text: "read_file(…)",
+        text: summary,
         kind: "tool_hint",
         projection_id: "history-bbbbbbbbbbbbbbbbbbbb",
         trace_detail: secondDetail,
@@ -217,6 +242,7 @@ describe("canonical thread event projection", () => {
     ]);
 
     expect(messages).toHaveLength(2);
+    expect(messages.map((message) => message.content)).toEqual(["exec(…)", summary]);
     expect(messages.map((message) => message.traceDetail)).toEqual([
       firstDetail,
       secondDetail,

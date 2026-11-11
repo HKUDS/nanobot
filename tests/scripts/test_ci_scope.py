@@ -1,5 +1,3 @@
-"""Path policy and real git range regressions for the CI selector."""
-
 import html
 import json
 import os
@@ -27,6 +25,7 @@ def selected(result):
         ("README.md", {"docker"}),
         ("Dockerfile", {"docker"}),
         ("entrypoint.sh", {"docker"}),
+        ("render.yaml", {"python"}),
         ("tests/test_docker_config.py", {"python", "docker"}),
         ("tests/test_docker_smoke.py", {"python", "docker"}),
         ("tests/test_docker.sh", {"docker"}),
@@ -76,7 +75,6 @@ def selected(result):
     ],
 )
 def test_existing_path_policy(path, expected):
-    # These are reachable repository inputs, not merely invented glob matches.
     assert (ROOT / path).is_file()
     result = classify_paths([path])
     assert selected(result) == expected

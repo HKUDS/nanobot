@@ -1,5 +1,3 @@
-"""Tests for subprocess zombie reaping in ExecTool / exec sessions."""
-
 from __future__ import annotations
 
 import asyncio
@@ -67,7 +65,6 @@ async def _cleanup_session(session: _ExecSession) -> None:
 
 
 def test_reap_pid_noops_without_waitpid():
-    """On platforms (or test stubs) without waitpid, reaping is a no-op."""
     with patch("nanobot.agent.tools.shell.os") as mock_os:
         mock_os.waitpid = None
         mock_os.WNOHANG = None
@@ -94,7 +91,6 @@ def test_reap_pid_swallows_already_reaped_errors():
 
 @pytest.mark.asyncio
 async def test_kill_process_skips_kill_when_already_exited():
-    """Already-dead processes must not raise ProcessLookupError from kill()."""
     process = _MockProcess(pid=4242, returncode=0)
     process.kill = MagicMock(side_effect=ProcessLookupError("already dead"))
 
@@ -121,7 +117,6 @@ async def test_kill_process_kills_and_reaps_live_process():
 
 @pytest.mark.asyncio
 async def test_kill_process_reaps_even_if_kill_races_exit():
-    """If the child exits between returncode check and kill(), still reap."""
     process = _MockProcess(pid=88, returncode=None)
 
     def raced_exit() -> None:
@@ -278,7 +273,6 @@ async def test_exec_session_wait_cancellation_does_not_kill_process_tree():
 
 @pytest.mark.asyncio
 async def test_execute_exception_after_success_does_not_raise_on_dead_process():
-    """Formatting a completed result must not attempt to kill the dead process."""
     process = _MockProcess(pid=1003, returncode=0, stdout=b"out\n")
     process.kill.side_effect = ProcessLookupError("already dead")
     manager = ExecSessionManager()
@@ -370,7 +364,6 @@ async def test_kill_process_tree_targets_group_after_root_exits():
 @pytest.mark.skipif(sys.platform == "win32", reason="requires Unix process groups")
 @pytest.mark.asyncio
 async def test_execute_timeout_kills_background_process_tree(tmp_path):
-    """A one-shot timeout must stop background descendants before they write."""
     marker = tmp_path / "child-survived"
     command = f"(sleep 2; touch {shlex.quote(str(marker))}) >/dev/null 2>&1 & sleep 30"
 
@@ -387,7 +380,6 @@ async def test_execute_timeout_kills_background_process_tree(tmp_path):
 
 @pytest.mark.asyncio
 async def test_kill_process_tree_kills_descendant_after_root_exits(tmp_path):
-    """Tree ownership must outlive a root shell that has demonstrably exited."""
     marker = tmp_path / "child-survived-root"
     started = tmp_path / "child-started"
     release = tmp_path / "release-child"
@@ -554,7 +546,6 @@ async def test_exec_session_poll_reaps_after_exit():
 @pytest.mark.skipif(sys.platform == "win32", reason="zombie reaping is a Unix waitpid concern")
 @pytest.mark.asyncio
 async def test_real_timeout_leaves_no_zombie(tmp_path):
-    """Integration: timed-out sleep should not leave a defunct child of this process."""
     import os
 
     tool = ExecTool(working_dir=str(tmp_path), timeout=1)

@@ -234,7 +234,6 @@ def test_exec_session_yield_returns_when_process_finishes_early(tmp_path):
                     if pending.done():
                         pytest.fail(f"child exited before readiness: {await pending}")
                     await asyncio.sleep(0.01)
-            # Measure responsiveness only after the actual child is ready to exit.
             release.touch()
             return await asyncio.wait_for(pending, timeout=3)
         finally:
@@ -446,7 +445,7 @@ def test_exec_rejects_unsupported_shell(tmp_path):
 def test_exec_can_continue_with_stdin(tmp_path):
     async def run() -> tuple[str, str, str]:
         manager = ExecSessionManager()
-        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
         stdin_tool = ExecSessionTool(manager=manager)
         command = _python_command(
             "import sys; print('ready', flush=True); "
@@ -454,16 +453,18 @@ def test_exec_can_continue_with_stdin(tmp_path):
         )
 
         try:
-            initial = await exec_tool.execute(command=command, yield_time_ms=500)
+            initial = await exec_tool.execute(command=command, yield_time_ms=0)
             sid = _session_id(initial)
-            result = await stdin_tool.execute(session_id=sid, input="ping\n", timeout_ms=1000)
-            observed, final = await _poll_if_running(result, stdin_tool)
+            if "ready" not in initial:
+                initial += await stdin_tool.execute(session_id=sid, wait_for="ready", timeout_ms=10000)
+            assert "ready" in initial, initial
+            result = await stdin_tool.execute(session_id=sid, input="ping\n", timeout_ms=0)
+            observed, final = await _poll_if_running(result, stdin_tool, timeout_ms=10000)
             return initial, observed, final
         finally:
             await manager.close_all()
 
     initial, result, final = asyncio.run(run())
-    assert "ready" in initial + result
     assert "Process running" in initial
     assert "Elapsed:" in initial
     assert "got:ping" in result
@@ -472,30 +473,37 @@ def test_exec_can_continue_with_stdin(tmp_path):
 
 
 def test_exec_session_can_close_stdin(tmp_path):
-    async def run() -> tuple[str, str]:
+    async def run() -> tuple[str, str, str]:
         manager = ExecSessionManager()
-        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=5, session_manager=manager)
+        exec_tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
         stdin_tool = ExecSessionTool(manager=manager)
         command = _python_command(
             "import sys; print('ready', flush=True); "
             "data=sys.stdin.read(); print('got:' + data, flush=True)"
         )
 
-        initial = await exec_tool.execute(command=command, yield_time_ms=1500)
-        sid = _session_id(initial)
-        result = await stdin_tool.execute(
-            session_id=sid,
-            input="payload",
-            close_stdin=True,
-            timeout_ms=1500,
-        )
-        return initial, result
+        try:
+            initial = await exec_tool.execute(command=command, yield_time_ms=0)
+            sid = _session_id(initial)
+            if "ready" not in initial:
+                initial += await stdin_tool.execute(session_id=sid, wait_for="ready", timeout_ms=10000)
+            assert "ready" in initial, initial
+            # Check the acknowledgement separately from the child's EOF-driven exit.
+            result = await stdin_tool.execute(
+                session_id=sid,
+                input="payload",
+                close_stdin=True,
+                timeout_ms=0,
+            )
+            observed, final = await _poll_if_running(result, stdin_tool, timeout_ms=10000)
+            return result, observed, final
+        finally:
+            await manager.close_all()
 
-    initial, result = asyncio.run(run())
-    assert "ready" in initial + result
-    assert "got:payload" in result
+    result, observed, final = asyncio.run(run())
     assert "Stdin closed." in result
-    assert "Exit code: 0" in result
+    assert "got:payload" in observed
+    assert "Exit code: 0" in final
 
 
 def test_exec_session_can_terminate_session(tmp_path):
@@ -727,7 +735,6 @@ def test_exec_session_wait_for_reports_timeout_without_killing_session(tmp_path)
 
         initial = await exec_tool.execute(command=command, yield_time_ms=0)
         sid = _session_id(initial)
-        # Synchronize on an stdin-gated marker before exercising the immediate timeout below.
         ready = await stdin_tool.execute(
             session_id=sid,
             input="\n",
@@ -1157,7 +1164,6 @@ def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
         manager = ExecSessionManager()
         tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
 
-        # Spawn without owner (no request context)
         initial = await tool.execute(
             command=_waiting_shell_command("ready"),
             yield_time_ms=100,

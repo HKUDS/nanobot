@@ -49,7 +49,10 @@ test("keyboard selection restores visible focus to the permission trigger", asyn
 test("Escape restores keyboard focus even after pointer entry", async ({ page }) => {
   const trigger = page.locator(".thread-composer-access");
   await trigger.click();
-  await expect(page.getByRole("menu")).toBeVisible();
+  const menu = page.getByRole("menu");
+  // Reduced motion can expose the surface before Radix finishes its focus/layer setup.
+  await expect(menu).toBeFocused();
+  await expect(menu).toHaveCSS("pointer-events", "auto");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(trigger).toHaveAccessibleName("Workspace access mode: Full Access");

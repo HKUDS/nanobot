@@ -49,7 +49,6 @@ async function expectFileDetails(page: Page, card: Locator, filename: string, wi
 for (const width of [1024, 360]) {
   for (const theme of ["light", "dark"]) {
     test(`mixed attachments stay compact, aligned and readable at ${width}px in ${theme}`, async ({ page }, testInfo) => {
-      // The two widths also cover both localized download names, without a second matrix.
       const chinese = width === 360;
       await page.route("**/fixture/retry.webm", (route) => route.fulfill({ status: 503, body: "Temporarily unavailable" }));
       await openAttachments(page, width, theme, chinese ? "zh-CN" : "en");
@@ -136,7 +135,7 @@ for (const width of [1024, 360]) {
       }
       await expect(files.nth(2).getByRole("link")).toHaveAccessibleName(chinese ? "下载 文件附件" : "Download File attachment");
       for (const [label, filename, status] of [
-        ["Pending attachment", "pending.zip", chinese ? "发送中…" : "Sending…"],
+        ["Pending attachment", "pending.zip", chinese ? "发送中" : "Sending"],
         ["Unavailable attachment", "unavailable.pdf", chinese ? "附件不可用" : "Attachment unavailable"],
       ]) {
         const region = page.getByRole("region", { name: label, exact: true });

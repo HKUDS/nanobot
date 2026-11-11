@@ -23,7 +23,6 @@ function updatedLabel(value: string | null): string {
   return `${Math.floor(age / 86_400_000)}d`
 }
 
-/** Searchable session navigation over the gateway-owned session list. */
 export class SessionMenu {
   readonly root: BoxRenderable
   private readonly picker: PickerMenu<SessionMenuRow>

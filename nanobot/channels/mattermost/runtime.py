@@ -1,5 +1,3 @@
-"""Mattermost channel implementation using WebSocket + REST API."""
-
 from __future__ import annotations
 
 import asyncio
@@ -119,7 +117,6 @@ class MattermostChannel(BaseChannel):
         self._stream_root_ids: dict[str, str] = {}
         self._thread_context_attempted: set[str] = set()
 
-    # Lifecycle ----------------------------------------------------------------
 
     async def start(self) -> None:
         if not self.config.server_url or not self.config.token:
@@ -169,7 +166,6 @@ class MattermostChannel(BaseChannel):
             await self._http_client.aclose()
             self._http_client = None
 
-    # WebSocket ----------------------------------------------------------------
 
     async def _ws_listen_loop(self) -> None:
         import websockets
@@ -205,7 +201,6 @@ class MattermostChannel(BaseChannel):
         elif event == "post_deleted":
             await self._handle_post_deleted_event(msg)
 
-    # Event: posted ------------------------------------------------------------
 
     async def _handle_posted_event(self, msg: dict[str, Any]) -> None:
         data = cast(dict[str, Any], msg.get("data", {}))
@@ -278,7 +273,7 @@ class MattermostChannel(BaseChannel):
         session_key = f"mattermost:{channel_id}:{thread_ts}" if thread_ts else None
 
         try:
-            await self._add_reaction(channel_id, post_id, self.config.react_emoji)
+            await self._add_reaction(post_id, self.config.react_emoji)
         except Exception:
             self.logger.debug("add reaction failed")
 
@@ -315,7 +310,6 @@ class MattermostChannel(BaseChannel):
             is_dm=is_dm,
         )
 
-    # Event: action ------------------------------------------------------------
 
     async def _handle_action_event(self, msg: dict[str, Any]) -> None:
         data = cast(dict[str, Any], msg.get("data", {}))
@@ -342,7 +336,6 @@ class MattermostChannel(BaseChannel):
             metadata={"mattermost": {"channel_type": channel_type, "is_action": True}},
         )
 
-    # Event: post_deleted ------------------------------------------------------
 
     async def _handle_post_deleted_event(self, msg: dict[str, Any]) -> None:
         data = cast(dict[str, Any], msg.get("data", {}))
@@ -364,7 +357,6 @@ class MattermostChannel(BaseChannel):
             self._stream_last_content.pop(sid, None)
             self._stream_committed.pop(sid, None)
 
-    # Permission / policy ------------------------------------------------------
 
     def is_allowed(self, sender_id: str) -> bool:
         return True
@@ -451,7 +443,6 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("failed to resolve email for {}: {}", user_id, e)
             return None
 
-    # Thread context -----------------------------------------------------------
 
     async def _with_thread_context(self, text: str, *, channel_id: str, root_id: str) -> str:
         key = f"{channel_id}:{root_id}"
@@ -492,7 +483,6 @@ class MattermostChannel(BaseChannel):
             return text
         return "Mattermost thread context before this mention:\n" + "\n".join(lines) + f"\n\nCurrent message:\n{text}"
 
-    # Send ---------------------------------------------------------------------
 
     async def send(self, msg: OutboundMessage) -> None:
         if isinstance(msg.event, ContextCompactionEvent) and not (
@@ -513,12 +503,8 @@ class MattermostChannel(BaseChannel):
 
             file_ids: list[str] = []
             for media_path in msg.media or []:
-                try:
-                    fid = await self._upload_file(chat_id, media_path)
-                    if fid:
-                        file_ids.append(fid)
-                except Exception:
-                    self.logger.exception("Failed to upload file {}", media_path)
+                fid = await self._upload_file(chat_id, media_path)
+                file_ids.append(fid)
 
             if msg.content or file_ids:
                 text = msg.content or " "
@@ -537,7 +523,7 @@ class MattermostChannel(BaseChannel):
                     self.logger.debug("remove reaction failed")
                 if self.config.done_emoji:
                     try:
-                        await self._add_reaction(chat_id, meta["message_id"], self.config.done_emoji)
+                        await self._add_reaction(meta["message_id"], self.config.done_emoji)
                     except Exception:
                         self.logger.debug("done reaction failed")
 
@@ -545,7 +531,6 @@ class MattermostChannel(BaseChannel):
             self.logger.exception("Error sending message")
             raise
 
-    # Streaming -----------------------------------------------------------------
 
     async def send_delta(
         self,
@@ -612,7 +597,7 @@ class MattermostChannel(BaseChannel):
                         self.logger.debug("remove reaction failed")
                 if first_post_id and self.config.done_emoji:
                     try:
-                        await self._add_reaction(chat_id, first_post_id, self.config.done_emoji)
+                        await self._add_reaction(first_post_id, self.config.done_emoji)
                     except Exception:
                         self.logger.debug("done reaction failed")
 
@@ -646,7 +631,6 @@ class MattermostChannel(BaseChannel):
         self._stream_last_content.pop(stream_id, None)
         self._stream_committed.pop(stream_id, None)
 
-    # API helpers ---------------------------------------------------------------
 
     def _require_http_client(self) -> httpx.AsyncClient:
         if self._http_client is None:
@@ -681,27 +665,19 @@ class MattermostChannel(BaseChannel):
             body["file_ids"] = file_ids
         return await self._api_post("/api/v4/posts", body)
 
-    async def _upload_file(self, channel_id: str, file_path: str) -> str | None:
+    async def _upload_file(self, channel_id: str, file_path: str) -> str:
         path = Path(file_path)
-        if not path.exists():
-            self.logger.warning("file not found: {}", file_path)
-            return None
-
-        try:
-            files = {"files": (path.name, path.read_bytes())}
-            resp = await self._require_http_client().post(
-                "/api/v4/files",
-                data={"channel_id": channel_id},
-                files=files,
-            )
-            resp.raise_for_status()
-            data = cast(dict[str, Any], resp.json())
-            infos = cast(list[dict[str, Any]], data.get("file_infos", []))
-            if infos:
-                return infos[0].get("id")
-        except Exception as e:
-            self.logger.warning("file upload failed for {}: {}", file_path, e)
-        return None
+        files = {"files": (path.name, path.read_bytes())}
+        resp = await self._require_http_client().post(
+            "/api/v4/files", data={"channel_id": channel_id}, files=files,
+        )
+        resp.raise_for_status()
+        data = cast(dict[str, Any], resp.json())
+        infos = cast(list[dict[str, Any]], data.get("file_infos", []))
+        file_id = infos[0].get("id") if infos else None
+        if not isinstance(file_id, str) or not file_id:
+            raise ValueError(f"Mattermost upload returned no file id for {file_path}")
+        return file_id
 
     async def _download_file(self, file_id: str) -> str | None:
         try:
@@ -721,7 +697,7 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("file download failed for {}: {}", file_id, e)
             return None
 
-    async def _add_reaction(self, channel_id: str, post_id: str, emoji: str) -> None:
+    async def _add_reaction(self, post_id: str, emoji: str) -> None:
         if not self._self_id or not emoji:
             return
         await self._api_post("/api/v4/reactions", {

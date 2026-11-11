@@ -1,5 +1,3 @@
-"""Subagent manager for background task execution."""
-
 from __future__ import annotations
 
 import asyncio
@@ -40,6 +38,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, SubagentTaskChanged
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.context_sources import without_source_capture
 from nanobot.events import AgentEvent, EventSink
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
 from nanobot.providers.base import LLMProvider, ToolCallRequest
@@ -509,12 +508,8 @@ class SubagentManager:
         )
 
     def _subagent_tools_config(self) -> ToolsConfig:
-        """Build a ToolsConfig scoped for subagent use."""
-        return ToolsConfig(
-            exec=self.tools_config.exec,
-            web=self.tools_config.web,
-            file=self.tools_config.file,
-            restrict_to_workspace=self.restrict_to_workspace,
+        return self.tools_config.model_copy(
+            update={"restrict_to_workspace": self.restrict_to_workspace},
         )
 
     def _build_tools(
@@ -523,7 +518,6 @@ class SubagentManager:
         tools_config: ToolsConfig | None = None,
         exec_manager: ExecSessionManager | None = None,
     ) -> ToolRegistry:
-        """Build an isolated subagent tool registry via ToolLoader."""
         root = self.workspace if workspace is None else workspace
         registry = ToolRegistry()
         cfg = tools_config if tools_config is not None else self._subagent_tools_config()
@@ -604,7 +598,8 @@ class SubagentManager:
         )
         self._tasks[task_id] = record
         self._publish_status(status)
-        execution = asyncio.create_task(self._run_subagent(record))
+        with without_source_capture():
+            execution = asyncio.create_task(self._run_subagent(record))
         self._running_tasks[task_id] = execution
         execution.add_done_callback(partial(self._task_done, record))
         logger.info("Started subagent [{}]: {}", task_id,
@@ -715,7 +710,6 @@ class SubagentManager:
         return outcome.result
 
     async def _run_subagent(self, record: _SubagentTask) -> str:
-        """Execute once, seal the outcome, then clean up and publish once."""
         status = record.status
         task_text, label = status.task_description, status.label
         record.begun = True
@@ -754,7 +748,6 @@ class SubagentManager:
         return outcome.result
 
     async def _run_admitted_subagent(self, record: _SubagentTask) -> _SubagentOutcome:
-        """Execute the admitted task with task-owned shell resources."""
         status, origin, runtime = record.status, record.origin, record.runtime
         task_id, label = status.task_id, status.label
         origin_message_id, workspace_scope = record.origin_message_id, record.workspace_scope
@@ -897,7 +890,6 @@ class SubagentManager:
         error: str | None = None,
         partial_result: bool = False,
     ) -> None:
-        """Announce the subagent result to the main agent via the message bus."""
         status_text = {
             "ok": "completed successfully", "cancelled": "was cancelled",
             "incomplete": "stopped before completing the task",
@@ -950,7 +942,6 @@ class SubagentManager:
         logger.debug("Subagent [{}] announced result to {}:{}", task_id, origin['channel'], origin['chat_id'])
 
     def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
-        """Build a focused system prompt for the subagent."""
         from nanobot.agent.skills import SkillsLoader
 
         agent_workspace = self.workspace.expanduser().resolve()

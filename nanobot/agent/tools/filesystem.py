@@ -1,13 +1,15 @@
-"""File system tools: read, write, edit, list."""
-
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
+import codecs
 import difflib
 import hashlib
 import mimetypes
+import os
+import stat
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext
@@ -188,11 +190,6 @@ class _FsTool(Tool):
         return current_tool_workspace(self._workspace).project_path
 
 
-# ---------------------------------------------------------------------------
-# read_file
-# ---------------------------------------------------------------------------
-
-
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
     "/dev/stdin", "/dev/stdout", "/dev/stderr",
@@ -206,7 +203,6 @@ def _is_blocked_device(path: str | Path) -> bool:
     import re
     raw = str(path)
 
-    # Resolve symlinks to check the actual target
     try:
         resolved = str(Path(raw).resolve())
     except (OSError, ValueError):
@@ -219,14 +215,12 @@ def _is_blocked_device(path: str | Path) -> bool:
     if re.match(r"/proc/\d+/fd/[012]$", resolved) or re.match(r"/proc/self/fd/[012]$", resolved):
         return True
 
-    # Check if resolved path starts with /dev/ (covers symlinks to devices)
     if resolved.startswith("/dev/"):
         return True
     return False
 
 
 def _builtin_skill_read_path(path: str) -> Path | None:
-    """Map workspace-relative skills/<name>/... reads onto bundled skills."""
     from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 
     requested = Path(path)
@@ -240,6 +234,111 @@ def _builtin_skill_read_path(path: str) -> Path | None:
     if candidate != root and root not in candidate.parents:
         return None
     return candidate if candidate.is_file() else None
+
+
+_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+
+
+class _TextRange:
+    """Count splitlines and retain only the requested, displayable text."""
+
+    def __init__(self, offset: int, limit: int, max_chars: int):
+        self.offset = offset
+        self.limit = limit
+        self.max_chars = max_chars
+        self.total = 0
+        self.numbered: list[str] = []
+        self.line_truncated = False
+        self._output_chars = 0
+        self._fragments: list[str] = []
+        self._fragment_chars = 0
+        self._stopped = False
+        self._incomplete = False
+        self._normalize_cr = False
+        self._pending_cr = False
+
+    def feed(self, text: str) -> None:
+        if not text:
+            return
+        # The existing CRLF replacement runs before splitlines: for example,
+        # CR-CR-LF becomes CR-LF and therefore counts as one separator.
+        if self._normalize_cr:
+            text = "\r" + text
+        self._normalize_cr = text.endswith("\r")
+        if self._normalize_cr:
+            text = text[:-1]
+        self._feed_normalized(text.replace("\r\n", "\n"))
+
+    def _feed_normalized(self, text: str) -> None:
+        if not text:
+            return
+        if self._pending_cr and text.startswith("\n"):
+            text = text[1:]
+        self._pending_cr = False
+        if not text:
+            return
+
+        self._pending_cr = text.endswith("\r")
+        self._incomplete = text[-1] not in _LINE_BREAKS
+        parts = text.splitlines(keepends=True)
+        completed = len(parts) - int(self._incomplete)
+
+        if not self._stopped:
+            first = max(0, self.offset - self.total - 1)
+            last = min(len(parts), self.offset + self.limit - self.total - 1)
+            for i in range(first, last):
+                line_no = self.total + i + 1
+                part = parts[i]
+                if i < completed:
+                    part = part[:-2] if part.endswith("\r\n") else part[:-1]
+                self._accept(part, line_no, complete=i < completed)
+                if self._stopped:
+                    break
+
+        self.total += completed
+
+    def _accept(self, part: str, line_no: int, *, complete: bool) -> None:
+        prefix = f"{line_no}| "
+        separator = 1 if self.numbered else 0
+        available = self.max_chars - self._output_chars - separator - len(prefix)
+        if self._fragment_chars + len(part) > available:
+            if not self.numbered:
+                fragment = part[:max(0, available - self._fragment_chars)]
+                self.numbered.append((prefix + "".join(self._fragments) + fragment)[:self.max_chars])
+                self.line_truncated = True
+            self._fragments.clear()
+            self._stopped = True
+            return
+
+        if part:
+            self._fragments.append(part)
+            self._fragment_chars += len(part)
+        if complete:
+            line = prefix + "".join(self._fragments)
+            self._output_chars += len(line) + separator
+            self.numbered.append(line)
+            self._fragments.clear()
+            self._fragment_chars = 0
+            if len(self.numbered) >= self.limit:
+                self._stopped = True
+
+    def finish(self) -> None:
+        if self._normalize_cr:
+            self._feed_normalized("\r")
+        if self._incomplete:
+            self.total += 1
+            if not self._stopped and self.offset <= self.total < self.offset + self.limit:
+                self._accept("", self.total, complete=True)
+
+
+def _decode_error_message(error: UnicodeDecodeError, offset: int) -> str:
+    """Render the whole-input decode error position for an incremental BOM decoder."""
+    start, end = offset + error.start, offset + error.end
+    if end - start == 1:
+        where = f"byte 0x{error.object[error.start]:02x} in position {start}"
+    else:
+        where = f"bytes in position {start}-{end - 1}"
+    return f"'{error.encoding}' codec can't decode {where}: {error.reason}"
 
 
 @tool_parameters(
@@ -267,6 +366,8 @@ class ReadFileTool(_FsTool):
 
     _MAX_CHARS = 128_000
     _MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
+    _READ_CHUNK_SIZE = 64 * 1024
+    _IMAGE_READ_CHUNK_SIZE = 1024 * 1024
     _DEFAULT_LIMIT = 2000
     _MAX_PDF_PAGES = 20
 
@@ -298,7 +399,6 @@ class ReadFileTool(_FsTool):
             if not path:
                 return ToolResult.error("Error reading file: Unknown path")
 
-            # Device path blacklist
             if _is_blocked_device(path):
                 return ToolResult.error(f"Error: Reading {path} is blocked (device path that could hang or produce infinite output).")
 
@@ -314,116 +414,186 @@ class ReadFileTool(_FsTool):
 
             file_size = fp.stat().st_size
             if file_size > self._MAX_FILE_SIZE_BYTES:
-                size_mib = file_size / (1024 * 1024)
-                max_mib = self._MAX_FILE_SIZE_BYTES // (1024 * 1024)
-                return ToolResult.error(
-                    f"Error: File too large to read ({size_mib:.1f} MiB). "
-                    f"Maximum is {max_mib} MiB."
-                )
+                return self._file_too_large(file_size)
 
-            # PDF support
             if fp.suffix.lower() == ".pdf":
                 return self._read_pdf(fp, pages)
 
-            # Office document support
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
                 return self._read_office_doc(fp, offset, limit)
 
-            raw = fp.read_bytes()
-            if not raw:
-                return f"(Empty file: {path})"
+            # Keep one open file description for detection, hashing, and decoding.
+            # Nonblocking/no-follow flags also avoid opening a swapped-in FIFO or
+            # final symlink on platforms that support them.
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+            flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+            with os.fdopen(os.open(fp, flags), "rb") as stream:
+                opened = os.fstat(stream.fileno())
+                if not stat.S_ISREG(opened.st_mode):
+                    return ToolResult.error(f"Error: Not a file: {path}")
+                if opened.st_size > self._MAX_FILE_SIZE_BYTES:
+                    return self._file_too_large(opened.st_size)
 
-            mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-            if mime and mime.startswith("image/"):
-                return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
+                check_previous = not force
+                while True:
+                    first = stream.read(min(max(16, self._READ_CHUNK_SIZE), self._MAX_FILE_SIZE_BYTES + 1))
+                    if not first:
+                        return f"(Empty file: {path})"
+                    if len(first) > self._MAX_FILE_SIZE_BYTES:
+                        return self._file_too_large(len(first))
 
-            content_hash = hashlib.sha256(raw).hexdigest()
-            if not force and self._file_states.is_unchanged(
-                fp, offset=offset, limit=limit, content_hash=content_hash,
-            ):
-                return f"[File unchanged since last read: {path}]"
-            from nanobot.utils.document import _decode_bom_text
+                    mime = detect_image_mime(first) or mimetypes.guess_type(path)[0]
+                    if mime and mime.startswith("image/"):
+                        chunks = [first]
+                        bytes_read = len(first)
+                        # Bound each read without preallocating from a size that
+                        # may have become stale during the receipt check.
+                        remaining = os.fstat(stream.fileno()).st_size - bytes_read
+                        chunk_size = min(self._IMAGE_READ_CHUNK_SIZE, max(self._READ_CHUNK_SIZE, remaining))
+                        while chunk := stream.read(min(
+                            chunk_size, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
+                        )):
+                            bytes_read += len(chunk)
+                            if bytes_read > self._MAX_FILE_SIZE_BYTES:
+                                return self._file_too_large(bytes_read)
+                            chunks.append(chunk)
+                        raw = b"".join(chunks)
+                        del chunks
+                        return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
-            text_content = _decode_bom_text(raw)
-            if text_content is None:
-                try:
-                    text_content = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    # Match the former eager extractor for known text formats while
-                    # keeping arbitrary binary files on the guarded error path.
-                    from nanobot.utils.document import _is_text_extension
-
-                    if _is_text_extension(fp.suffix.lower()):
-                        text_content = raw.decode("latin-1")
-                    else:
-                        mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-                        if mime and mime.startswith("image/"):
-                            return build_image_content_blocks(
-                                raw,
-                                mime,
-                                str(fp),
-                                f"(Image file: {path})",
-                            )
-                        return ToolResult.error(
-                            f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
-                            "Only supported text files and images can be read."
-                        )
-
-            if not text_content:
-                return f"(Empty file: {path})"
-
-            # Normalize CRLF -> LF before line-splitting. Primarily a Windows
-            # concern (git checkouts with autocrlf, editors saving CRLF) but
-            # applied on all platforms so downstream StrReplace/Grep behavior
-            # is consistent regardless of where the file was written.
-            text_content = text_content.replace("\r\n", "\n")
-
-            all_lines = text_content.splitlines()
-            total = len(all_lines)
-
-            if offset < 1:
-                offset = 1
-            if offset > total:
-                return ToolResult.error(f"Error: offset {offset} is beyond end of file ({total} lines)")
-
-            start = offset - 1
-            end = min(start + (limit or self._DEFAULT_LIMIT), total)
-            numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(all_lines[start:end])]
-            result = "\n".join(numbered)
-            line_truncated = False
-
-            if len(result) > self._MAX_CHARS:
-                trimmed: list[str] = []
-                chars = 0
-                for line in numbered:
-                    extra = len(line) + (1 if trimmed else 0)
-                    if chars + extra > self._MAX_CHARS:
-                        if not trimmed:
-                            trimmed.append(line[: self._MAX_CHARS])
-                            line_truncated = True
-                        break
-                    trimmed.append(line)
-                    chars += extra
-                end = start + len(trimmed)
-                result = "\n".join(trimmed)
-
-            if line_truncated:
-                result += (
-                    f"\n\n(Line {offset} truncated; its remaining characters are not shown. "
-                    "Use exec with a targeted command to inspect the omitted content.)"
-                )
-            if end < total:
-                result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
-            else:
-                result += f"\n\n(End of file — {total} lines total)"
-            self._file_states.record_read(
-                fp, offset=offset, limit=limit, content_hash=content_hash, result=result,
-            )
-            return result
+                    previous_hash = (
+                        self._file_states.visible_read_hash(fp, offset=offset, limit=limit)
+                        if check_previous else None
+                    )
+                    if previous_hash is None:
+                        return self._read_text(stream, first, fp, path, mime, offset, limit)
+                    digest = hashlib.sha256(first)
+                    bytes_read = len(first)
+                    while chunk := stream.read(min(
+                        self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
+                    )):
+                        bytes_read += len(chunk)
+                        if bytes_read > self._MAX_FILE_SIZE_BYTES:
+                            return self._file_too_large(bytes_read)
+                        digest.update(chunk)
+                    if digest.hexdigest() == previous_hash:
+                        return f"[File unchanged since last read: {path}]"
+                    # Re-detect the file after rewinding: it may have changed
+                    # type while the previous receipt was being checked.
+                    stream.seek(0)
+                    check_previous = False
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
             return ToolResult.error(f"Error reading file: {e}")
+
+    def _file_too_large(self, size: int) -> str:
+        size_mib = size / (1024 * 1024)
+        max_mib = self._MAX_FILE_SIZE_BYTES // (1024 * 1024)
+        return ToolResult.error(
+            f"Error: File too large to read ({size_mib:.1f} MiB). Maximum is {max_mib} MiB."
+        )
+
+    def _read_text(
+        self, stream: BinaryIO, first: bytes, fp: Path, path: str, mime: str | None,
+        offset: int, limit: int | None,
+    ) -> str:
+        from nanobot.utils.document import _is_text_extension
+
+        bom_length = 0
+        if first.startswith(codecs.BOM_UTF8):
+            encoding, bom_length = "utf-8", len(codecs.BOM_UTF8)
+        elif first.startswith(codecs.BOM_UTF32_LE):
+            encoding, bom_length = "utf-32-le", len(codecs.BOM_UTF32_LE)
+        elif first.startswith(codecs.BOM_UTF32_BE):
+            encoding, bom_length = "utf-32-be", len(codecs.BOM_UTF32_BE)
+        elif first.startswith(codecs.BOM_UTF16_LE):
+            encoding, bom_length = "utf-16-le", len(codecs.BOM_UTF16_LE)
+        elif first.startswith(codecs.BOM_UTF16_BE):
+            encoding, bom_length = "utf-16-be", len(codecs.BOM_UTF16_BE)
+        else:
+            encoding = "utf-8"
+
+        selected_offset = max(1, offset)
+        selected_limit = limit or self._DEFAULT_LIMIT
+        text = _TextRange(selected_offset, selected_limit, self._MAX_CHARS)
+        # ASCII is identical in UTF-8 and Latin-1. Fork the accumulated range
+        # only when a non-ASCII byte makes the two interpretations differ.
+        allow_latin = not bom_length and _is_text_extension(fp.suffix.lower())
+        latin: _TextRange | None = None
+        decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
+        digest = hashlib.sha256()
+        bytes_read = 0
+        decoded_bytes = 0
+        decode_error: str | None = None
+        chunk = first
+        while chunk:
+            bytes_read += len(chunk)
+            if bytes_read > self._MAX_FILE_SIZE_BYTES:
+                return self._file_too_large(bytes_read)
+            digest.update(chunk)
+            payload = chunk[bom_length:] if bytes_read == len(chunk) else chunk
+            if allow_latin:
+                if latin is None and not payload.isascii():
+                    latin = deepcopy(text)
+                if latin is not None:
+                    latin.feed(payload.decode("latin-1"))
+            if decode_error is None:
+                buffered = len(decoder.getstate()[0])
+                try:
+                    text.feed(decoder.decode(payload, final=False))
+                except UnicodeDecodeError as e:
+                    # utf-8-sig reports positions after the BOM; utf-16/32
+                    # report them in the complete original byte sequence.
+                    base = bom_length if encoding != "utf-8" else 0
+                    decode_error = _decode_error_message(e, base + decoded_bytes - buffered)
+                decoded_bytes += len(payload)
+            chunk = stream.read(min(self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read))
+
+        if decode_error is None:
+            buffered = len(decoder.getstate()[0])
+            try:
+                text.feed(decoder.decode(b"", final=True))
+            except UnicodeDecodeError as e:
+                base = bom_length if encoding != "utf-8" else 0
+                decode_error = _decode_error_message(e, base + decoded_bytes - buffered)
+
+        content_hash = digest.hexdigest()
+        if decode_error is not None:
+            if bom_length:
+                return ToolResult.error(f"Error reading file: {decode_error}")
+            if latin is None:
+                return ToolResult.error(
+                    f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
+                    "Only supported text files and images can be read."
+                )
+            text = latin
+
+        text.finish()
+        total = text.total
+        if total == 0:
+            return f"(Empty file: {path})"
+        offset = selected_offset
+        if offset > total:
+            return ToolResult.error(f"Error: offset {offset} is beyond end of file ({total} lines)")
+
+        numbered = text.numbered
+        line_truncated = text.line_truncated
+        end = offset - 1 + len(numbered)
+        result = "\n".join(numbered)
+        if line_truncated:
+            result += (
+                f"\n\n(Line {offset} truncated; its remaining characters are not shown. "
+                "Use exec with a targeted command to inspect the omitted content.)"
+            )
+        if end < total:
+            result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
+        else:
+            result += f"\n\n(End of file — {total} lines total)"
+        self._file_states.record_read(
+            fp, offset=offset, limit=limit, content_hash=content_hash, result=result,
+        )
+        return result
 
     def _read_pdf(self, fp: Path, pages: str | None) -> str:
         from nanobot.utils.document import PdfPageRangeError, PdfSafetyError, extract_pdf_pages
@@ -541,11 +711,6 @@ class ReadFileTool(_FsTool):
                 close()
 
 
-# ---------------------------------------------------------------------------
-# write_file
-# ---------------------------------------------------------------------------
-
-
 @tool_parameters(
     tool_parameters_schema(
         path=StringSchema("The file path to write to"),
@@ -586,14 +751,10 @@ class WriteFileTool(_FsTool):
             return ToolResult.error(f"Error writing file: {e}")
 
 
-# ---------------------------------------------------------------------------
-# edit_file
-# ---------------------------------------------------------------------------
-
 _QUOTE_TABLE = str.maketrans({
-    "\u2018": "'", "\u2019": "'",  # curly single → straight
-    "\u201c": '"', "\u201d": '"',  # curly double → straight
-    "'": "'", '"': '"',            # identity (kept for completeness)
+    "\u2018": "'", "\u2019": "'",
+    "\u201c": '"', "\u201d": '"',
+    "'": "'", '"': '"',
 })
 
 
@@ -631,7 +792,6 @@ def _curly_single_quotes(text: str) -> str:
 
 
 def _preserve_quote_style(old_text: str, actual_text: str, new_text: str) -> str:
-    """Preserve curly quote style when a quote-normalized fallback matched."""
     if _normalize_quotes(old_text.strip()) != _normalize_quotes(actual_text.strip()) or old_text == actual_text:
         return new_text
 
@@ -648,7 +808,6 @@ def _leading_ws(line: str) -> str:
 
 
 def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
-    """Preserve the outer indentation from the actual matched block."""
     # A terminal newline does not add a logical line, even at an unterminated EOF.
     old_lines = old_text.removesuffix("\n").split("\n")
     actual_lines = actual_text.removesuffix("\n").split("\n")
@@ -794,7 +953,6 @@ def _find_quote_matches(content: str, old_text: str) -> list[_MatchSpan]:
 
 
 def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
-    """Locate all matches using progressively looser strategies."""
     for matcher in (
         lambda: _find_exact_matches(content, old_text),
         lambda: _find_trim_matches(content, old_text),
@@ -812,7 +970,6 @@ def _collapse_internal_whitespace(text: str) -> str:
 
 
 def _diagnose_near_match(old_text: str, actual_text: str) -> list[str]:
-    """Return actionable hints describing why text was close but not exact."""
     hints: list[str] = []
 
     if old_text.lower() == actual_text.lower() and old_text != actual_text:
@@ -828,7 +985,6 @@ def _diagnose_near_match(old_text: str, actual_text: str) -> list[str]:
 
 
 def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], list[str]]:
-    """Find the closest line-window match and return ratio/start/snippet/hints."""
     lines = content.splitlines(keepends=True)
     old_lines = old_text.splitlines(keepends=True)
     window = max(1, len(old_lines))
@@ -881,7 +1037,7 @@ class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
     _scopes = {"core", "subagent", "memory"}
 
-    _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
+    _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
 
     @property
@@ -942,7 +1098,6 @@ class EditFileTool(_FsTool):
             if file_exists and old_text == new_text:
                 return ToolResult.error("Error: new_text must be different from old_text.")
 
-            # Create-file semantics: old_text='' + file doesn't exist → create
             if not file_exists:
                 if old_text == "":
                     fp.parent.mkdir(parents=True, exist_ok=True)
@@ -951,7 +1106,6 @@ class EditFileTool(_FsTool):
                     return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
                 return self._file_not_found_msg(path, fp)
 
-            # File size protection
             try:
                 fsize = fp.stat().st_size
             except OSError:
@@ -959,7 +1113,6 @@ class EditFileTool(_FsTool):
             if fsize > self._MAX_EDIT_FILE_SIZE:
                 return ToolResult.error(f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB.")
 
-            # Create-file: old_text='' but file exists and not empty → reject
             if old_text == "":
                 raw = fp.read_bytes()
                 content = raw.decode("utf-8")
@@ -1071,7 +1224,6 @@ class EditFileTool(_FsTool):
             return ToolResult.error(f"Error editing file: {e}")
 
     def _file_not_found_msg(self, path: str, fp: Path) -> str:
-        """Build an error message with 'Did you mean ...?' suggestions."""
         parent = fp.parent
         suggestions: list[str] = []
         if parent.is_dir():
@@ -1110,10 +1262,6 @@ class EditFileTool(_FsTool):
             )
         return ToolResult.error(f"Error: old_text not found in {path}. No similar text found. Verify the file content.")
 
-
-# ---------------------------------------------------------------------------
-# list_dir
-# ---------------------------------------------------------------------------
 
 @tool_parameters(
     tool_parameters_schema(

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.bus.events import InboundMessage
-from nanobot.command.builtin import build_help_text, register_builtin_commands
+from nanobot.command.application import build_help_text, register_builtin_commands
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.triggers.local_store import LocalTriggerStore

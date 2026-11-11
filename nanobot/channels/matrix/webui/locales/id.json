@@ -28,8 +28,12 @@
         "choices": {
           "mention": "Hanya mention",
           "open": "Semua pesan",
-          "allowlist": "Daftar izin"
+          "allowlist": "Daftar izin",
+          "listen": "Dengar (balas saat disebut)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Pengecualian aturan per ruang (JSON)"
       },
       "allowFrom": {
         "label": "Pengguna diizinkan"
@@ -62,6 +66,13 @@
       },
       "allowRoomMentions": {
         "label": "Mention ruang",
+        "choices": {
+          "true": "Aktif",
+          "false": "Mati"
+        }
+      },
+      "replyToMessage": {
+        "label": "Kutip pesan",
         "choices": {
           "true": "Aktif",
           "false": "Mati"

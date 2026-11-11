@@ -1,5 +1,3 @@
-"""Setup contract and validation ownership for the Agent Platform channel."""
-
 from __future__ import annotations
 
 import httpx
@@ -20,7 +18,6 @@ def test_manifest_and_setup_contract_match_the_runtime_fields():
     assert plugin.name == "whatsapp_agent"
     assert plugin.display_name == "WhatsApp Agent Platform"
     assert plugin.runtime == "nanobot.channels.whatsapp_agent.runtime:WhatsAppAgentChannel"
-    # No optional platform SDK: the API is plain HTTPS.
     assert plugin.dependencies == ()
     assert plugin.default_enabled is False
     assert plugin.setup is not None
@@ -33,7 +30,6 @@ def test_token_is_a_secret_and_setup_does_not_require_a_second_step():
     assert spec is not None
     assert spec.secrets == {"token"}
     assert spec.route_field_types["token"] == "secret"
-    # There is no QR or terminal login step; the token alone completes setup.
     assert spec.is_configured({"token": "abc"}) is True
     assert spec.is_configured({"token": ""}) is False
 

@@ -1,5 +1,3 @@
-"""Registration and exec delegation for ripgrep."""
-
 import asyncio
 import os
 import re
@@ -225,12 +223,14 @@ async def test_direct_search_uses_configured_path(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
 def test_direct_search_preserves_sandbox_and_arguments(tmp_path, monkeypatch, backend):
+    trusted_bin = tmp_path / "trusted-bin"
     monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
+    monkeypatch.setattr("nanobot.agent.tools.shell.shutil.which", lambda name, **_kwargs: str(trusted_bin / os.path.basename(name)))
     args = ["rg", "-F", "hello | $HOME; 'world'", "."]
     prepared = RgTool(working_dir=str(tmp_path), sandbox=backend)._prepare_command(args)
     assert isinstance(prepared, _PreparedCommand)
     assert isinstance(prepared.command, list)
-    assert prepared.command[0] == ("bwrap" if backend == "bwrap" else "/usr/bin/sandbox-exec")
+    assert prepared.command[0] == str(trusted_bin / ("bwrap" if backend == "bwrap" else "sandbox-exec"))
     assert prepared.command[-2] == "-c"
     inner_command = prepared.command[-1].split("\n")[-1]
     assert shlex.split(inner_command) == args

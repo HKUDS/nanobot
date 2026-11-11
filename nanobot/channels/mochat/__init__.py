@@ -1,1 +1,0 @@
-"""MoChat channel package."""

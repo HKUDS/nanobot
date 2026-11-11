@@ -1,5 +1,3 @@
-"""Tests for Memory checkpoint consolidation and history journaling."""
-
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -57,7 +55,6 @@ def runtime(mock_provider):
 def consolidator(store):
     sessions = MagicMock()
     sessions.save = MagicMock()
-    # Store sessions by key so refreshes observe the same test object.
     _session_cache: dict[str, MagicMock] = {}
     sessions.get_or_create = MagicMock(side_effect=lambda key: _session_cache.get(key, MagicMock()))
     sessions._session_cache = _session_cache
@@ -326,7 +323,6 @@ class TestConsolidatorSummarize:
     async def test_summarize_appends_to_history(
         self, consolidator, mock_provider, store, runtime
     ):
-        """Consolidator should persist the LLM summary in history.jsonl."""
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content="User fixed a bug in the auth module."
         )
@@ -365,7 +361,6 @@ class TestConsolidatorSummarize:
     async def test_summarize_raw_dumps_on_llm_failure(
         self, consolidator, mock_provider, store, runtime
     ):
-        """On LLM failure, append raw messages to memory/history.jsonl."""
         mock_provider.chat_stream_with_retry.side_effect = Exception("API error")
         messages = [{"role": "user", "content": "hello"}]
         result = await _archive(consolidator, messages, runtime)
@@ -459,7 +454,6 @@ class TestConsolidatorArchiveErrorHandling:
         runtime,
         finish_reason: str,
     ):
-        """Incomplete LLM output should trigger raw_archive, not persist partial text."""
         invalid_output = f"INVALID_{finish_reason.upper()}_OUTPUT"
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content=invalid_output,
@@ -480,7 +474,6 @@ class TestConsolidatorArchiveErrorHandling:
     async def test_archive_preserves_summary_on_success(
         self, consolidator, mock_provider, store, runtime
     ):
-        """Normal LLM response should still produce a proper summary entry."""
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content="User fixed a bug in the auth module.",
             finish_reason="stop",
@@ -539,7 +532,6 @@ class TestConsolidatorArchiveErrorHandling:
 
 class TestConsolidatorPromptEstimate:
     async def test_estimate_uses_full_unarchived_tail(self, consolidator, runtime):
-        """Consolidation pressure must account for the full unarchived tail."""
         session = Session(key="test:full-tail")
         for i in range(160):
             session.add_message("user", f"msg-{i}")
@@ -576,7 +568,6 @@ class TestConsolidatorPromptEstimate:
         assert captured["history"] == []
 
 class TestCompactIdleSession:
-    """Idle compaction tests."""
 
     @pytest.fixture
     def runtime(self, mock_provider):
@@ -1037,7 +1028,6 @@ class TestCompactIdleSession:
         for i in range(18):
             session.add_message("user", f"user msg {i}")
             session.add_message("assistant", f"assistant msg {i}")
-        # The latest correction must be included in the replacement summary.
         session.add_message("user", "no, that's wrong, use approach B")
         session.add_message("assistant", "CORRECTED_FINAL_RESULT_alpha")
         sessions.save(session)
@@ -1056,7 +1046,6 @@ class TestCompactIdleSession:
     async def test_raw_dumps_full_archive_batch_on_llm_failure(
         self, real_consolidator, mock_provider, store, runtime
     ):
-        """The fallback covers the same full range as successful idle archival."""
         mock_provider.chat_stream_with_retry.side_effect = RuntimeError("LLM unavailable")
         sessions = real_consolidator.sessions
         session = sessions.get_or_create("cli:rawdrop")
@@ -1109,7 +1098,6 @@ class TestCompactIdleSession:
     async def test_empty_session_does_not_refresh_timestamp(
         self, real_consolidator, runtime
     ):
-        """Empty session with old updated_at does not look active after compaction."""
         from datetime import datetime, timedelta
 
         sessions = real_consolidator.sessions
@@ -1131,7 +1119,6 @@ class TestCompactIdleSession:
     async def test_nothing_commits_checkpoint_once_without_raw_archive(
         self, real_consolidator, mock_provider, runtime
     ):
-        """A model's decision to retain nothing is a successful replacement."""
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content="(nothing)", finish_reason="stop"
         )
@@ -1178,7 +1165,6 @@ class TestCompactIdleSession:
         assert result is not None
         assert "[RAW]" in result
 
-        # raw_archive should have been called (history.jsonl gets an entry)
         entries = store.read_unprocessed_history(since_cursor=0)
         assert entries[0]["content"].startswith("[RAW] 20 messages")
 
@@ -1192,7 +1178,6 @@ class TestCompactIdleSession:
     async def test_respects_last_archived(
         self, real_consolidator, mock_provider, runtime
     ):
-        """30 turns with last_archived=50 → only the unarchived tail is considered."""
         mock_provider.chat_stream_with_retry.return_value = MagicMock(
             content="Tail summary.", finish_reason="stop"
         )
@@ -1201,7 +1186,7 @@ class TestCompactIdleSession:
         for i in range(30):
             session.add_message("user", f"u{i}")
             session.add_message("assistant", f"a{i}")
-        session.last_archived = 50  # Only 10 messages remain unarchived
+        session.last_archived = 50
         sessions.save(session)
 
         result = await real_consolidator.compact_idle_session(
@@ -1212,12 +1197,9 @@ class TestCompactIdleSession:
         assert len(reloaded.messages) == 61
         assert reloaded.last_archived == 60
 
-        # Verify only the unarchived tail was processed:
-        # All 10 unarchived messages (50-59) are archived exactly once.
         archived_call = mock_provider.chat_stream_with_retry.call_args
         sent_messages = archived_call.kwargs["messages"]
         sent_content = [message.get("content") for message in sent_messages]
-        # The replacement overview covers all model-visible conversation context.
         assert "u0" not in sent_content
         assert "u26" in sent_content
         assert sent_messages[-1]["content"] == _ARCHIVE_PROMPT
@@ -1250,7 +1232,6 @@ class TestCompactIdleSession:
         assert reloaded.last_archived == 25
         assert reloaded.get_history(max_messages=25) == []
 
-        # Both the first question and the final tool-heavy exchange are summarized.
         archived_call = mock_provider.chat_stream_with_retry.call_args
         sent_content = [message.get("content") for message in archived_call.kwargs["messages"]]
         assert "user-00" in sent_content
@@ -1548,10 +1529,8 @@ class TestCompactIdleSession:
     async def test_acquires_consolidation_lock(
         self, real_consolidator, mock_provider, runtime
     ):
-        """Verify lock is held during execution."""
         import asyncio
 
-        # Use a slow LLM response to ensure the lock is held while we check
         started = asyncio.Event()
         release_chat = asyncio.Event()
 
@@ -1585,7 +1564,6 @@ class TestCompactIdleSession:
 
 
 class TestRawArchiveChunks:
-    """raw_archive() keeps complete journal content with bounded individual entries."""
 
     @pytest.mark.parametrize("boundary", ["A ", "\n\n", "<think>PRIVATE</think>"])
     def test_raw_chunks_preserve_sanitized_boundaries(self, store, boundary):
@@ -1598,7 +1576,6 @@ class TestRawArchiveChunks:
 
         store.raw_archive([message])
 
-        # Reload the real journal, rather than observing append call arguments.
         entries = MemoryStore(store.workspace).read_unprocessed_history(since_cursor=0)
         joined = "".join(entry["content"].split("\n", 1)[1] for entry in entries)
         assert joined == expected
@@ -1606,7 +1583,6 @@ class TestRawArchiveChunks:
         assert "PUBLIC_TAIL" in joined
 
     def test_raw_archive_splits_large_content_into_bounded_entries(self, store):
-        """Large messages are split across bounded journal entries."""
         big = "x" * 50_000
         messages = [{"role": "user", "content": big}]
         store.raw_archive(messages)
@@ -1616,7 +1592,6 @@ class TestRawArchiveChunks:
         assert "[RAW]" in entries[0]["content"]
 
     def test_raw_archive_preserves_small_content(self, store):
-        """Small messages should not be truncated."""
         messages = [{"role": "user", "content": "hello"}]
         store.raw_archive(messages)
         entries = store.read_unprocessed_history(since_cursor=0)
@@ -1661,7 +1636,6 @@ class TestRawArchiveChunks:
         assert entries[0]["session_key"] == "websocket:chat-1"
 
     def test_raw_archive_custom_max_chars(self, store):
-        """max_chars parameter should override default limit."""
         messages = [{"role": "user", "content": "a" * 200}]
         store.raw_archive(messages, max_chars=100)
         entries = store.read_unprocessed_history(since_cursor=0)

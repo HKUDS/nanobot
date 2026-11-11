@@ -76,7 +76,6 @@ That flow is the same whether the message starts in the CLI, WebUI, Telegram, Di
 | CLI one-shot | `nanobot agent -m "..."` | First-run checks, scripts, and quick local questions |
 | CLI interactive | `nanobot agent` | Terminal chat with persistent session history |
 | Gateway | `nanobot gateway` | Chat apps, WebUI, heartbeat, Dream, and long-running service mode |
-| OpenAI-compatible API | `nanobot serve` | Programmatic access through `/v1/chat/completions` |
 | WebUI | `nanobot webui` | Prepare the local WebUI, start the gateway, and open the browser workbench |
 
 The WebUI launcher is the normal browser entry point. Underneath, the gateway keeps the WebSocket channel and other long-running services alive. The gateway health endpoint is on `gateway.port` (`18790` by default); the browser WebUI is served on `8765` by default, not by the health endpoint.

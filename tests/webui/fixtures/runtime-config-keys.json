@@ -17,6 +17,7 @@
   "tools.exec.path_prepend",
   "tools.exec.path_append",
   "tools.exec.sandbox",
+  "tools.exec.sandbox_launcher",
   "tools.exec.sandbox_ro_binds",
   "tools.exec.sandbox_rw_binds",
   "tools.exec.allowed_env_keys",
@@ -37,7 +38,5 @@
   "network.proxy",
   "tools.web.use_proxy",
   "tools.web.user_agent",
-  "tools.image_generation.save_dir",
-  "api.host",
-  "api.timeout"
+  "tools.image_generation.save_dir"
 ]

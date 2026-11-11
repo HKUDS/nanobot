@@ -1,5 +1,3 @@
-"""Helpers for runtime model preset selection."""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping

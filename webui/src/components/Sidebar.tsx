@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 
 import {
   ChatList,
+  type SidebarDeleteDecision,
   type SidebarDeleteItem,
   type SidebarPaneGroup,
 } from "@/components/ChatList";
@@ -49,12 +50,13 @@ interface SidebarProps {
   onNewChat: () => void;
   onSelect: (key: string) => void;
   onCloseTemporaryChat?: (key: string) => void;
-  onRequestDelete: (key: string, label: string) => void;
-  onRequestDeleteMany?: (items: SidebarDeleteItem[]) => void;
+  onRequestDelete: (key: string, label: string, onDecision?: SidebarDeleteDecision) => void;
+  onRequestDeleteMany?: (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => void;
   onTogglePin: (key: string) => void;
   onRequestRename: (key: string, title: string) => Promise<void>;
   onRequestRenameTab?: (key: string, label: string) => void;
   onToggleArchive: (key: string) => void;
+  onArchiveMany?: (keys: string[], archive: boolean) => void;
   paneGroups?: Record<string, SidebarPaneGroup>;
   onSelectPane?: (tabKey: string, paneKey: string) => void;
   onCreateTab?: (paneKey: string) => void;
@@ -180,7 +182,7 @@ export function Sidebar(props: SidebarProps) {
           onClick={collapsed ? props.onExpand : undefined}
           tabIndex={collapsed ? 0 : -1}
           className={cn(
-            "host-no-drag flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors",
+            "host-no-drag relative flex h-8 w-8 shrink-0 items-center justify-center rounded-control transition-colors",
             props.hostChromeInset && "mt-5",
             !collapsed && "pointer-events-none",
           )}
@@ -188,7 +190,13 @@ export function Sidebar(props: SidebarProps) {
           <img
             src="/brand/nanobot_mark.svg"
             alt=""
-            className="h-8 w-8 select-none object-contain"
+            className="theme-art h-8 w-8 select-none object-contain dark:opacity-0"
+            draggable={false}
+          />
+          <img
+            src="/brand/nanobot_mark_night.svg"
+            alt=""
+            className="theme-art absolute inset-0 h-8 w-8 select-none object-contain opacity-0 dark:opacity-100"
             draggable={false}
           />
         </button>
@@ -289,6 +297,7 @@ export function Sidebar(props: SidebarProps) {
             onRequestRename={props.onRequestRename}
             onRequestRenameTab={props.onRequestRenameTab}
             onToggleArchive={props.onToggleArchive}
+            onArchiveMany={props.onArchiveMany}
             paneGroups={props.paneGroups}
             onSelectPane={props.onSelectPane}
             onCreateTab={props.onCreateTab}

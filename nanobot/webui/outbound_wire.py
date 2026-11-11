@@ -1,5 +1,3 @@
-"""Encode typed outbound events for the WebUI wire protocol."""
-
 from __future__ import annotations
 
 import time
@@ -13,7 +11,8 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.events import AgentEvent, CompactionReason
+from nanobot.context_graph import ContextGraph, ContextGraphParts, ContextSnapshot
+from nanobot.events import AgentEvent, CompactionReason, ModelRequestEvent
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 _JSONValue: TypeAlias = (
@@ -29,7 +28,6 @@ def _is_base64_data_url(value: str) -> bool:
 
 
 def _project_tool_event_value(value: object) -> _JSONValue:
-    """Copy one dynamic value while removing inline binary payloads."""
     if value is None or isinstance(value, bool | int | float):
         return value
     if isinstance(value, str):
@@ -73,6 +71,7 @@ class RecoveryStateWirePayload(_ChatWirePayload):
     reason: NotRequired[str]
     can_continue: NotRequired[bool]
     failure_error_kind: NotRequired[str]
+    reply_preserved: NotRequired[bool]
 
 
 class RetryStatusWirePayload(_ChatWirePayload):
@@ -98,7 +97,22 @@ class TurnEndWirePayload(_ChatWirePayload):
     failure_message: NotRequired[str]
 
 
+class ModelRequestWirePayload(_ChatWirePayload):
+    request_usage: dict[str, int] | None
+    context_graph: NotRequired[ContextGraph]
+    event: Literal["model_request"]
+    request_id: str
+    run_id: str
+    sequence: int
+    phase: Literal["started", "completed", "failed", "cancelled"]
+    usage: NotRequired[dict[str, int]]
+    round_usages: NotRequired[list[dict[str, int]]]
+    context_window_tokens: NotRequired[int]
+
+
 class ContextCompactionWirePayload(_ChatWirePayload):
+    context_graph: NotRequired[ContextGraph]
+    context_snapshot: NotRequired[ContextSnapshot]
     event: Literal["context_compaction"]
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
@@ -110,9 +124,82 @@ class SubagentTaskWirePayload(_ChatWirePayload):
     task: dict[str, object]
 
 
+class MessageWirePayload(_ChatWirePayload):
+    event: Literal["message"]
+    text: str
+    render_as: NotRequired[Literal["text"]]
+    media: NotRequired[list[str]]
+    media_urls: NotRequired[list[dict[str, str]]]
+    reply_to: NotRequired[str]
+    latency_ms: NotRequired[int]
+    tool_events: NotRequired[list[dict[str, _JSONValue]]]
+    agent_ui: NotRequired[object]
+    kind: NotRequired[Literal["tool_hint", "progress"]]
+
+
+class StreamWirePayload(_ChatWirePayload):
+    event: Literal["delta", "stream_end", "reasoning_delta", "reasoning_end"]
+    text: NotRequired[str]
+    stream_id: NotRequired[str]
+    resuming: NotRequired[bool]
+    merge_next: NotRequired[bool]
+
+
+class FileEditWirePayload(_ChatWirePayload):
+    event: Literal["file_edit"]
+    edits: list[dict[str, Any]]
+
+
+class GoalStateWirePayload(_ChatWirePayload):
+    event: Literal["goal_state"]
+    goal_state: dict[str, Any]
+
+
+class GoalStatusWirePayload(_ChatWirePayload):
+    event: Literal["goal_status"]
+    status: str
+    started_at: NotRequired[float]
+
+
+class SessionUpdatedWirePayload(_ChatWirePayload):
+    event: Literal["session_updated"]
+    scope: NotRequired[str]
+
+
+class UserInputWirePayload(_ChatWirePayload):
+    event: Literal["user_message"]
+    text: str
+    created_at_ms: int
+    starts_turn: bool
+    provenance: NotRequired[dict[str, Any]]
+    input_id: NotRequired[str]
+
+
+class PairingChangedWirePayload(TypedDict):
+    event: Literal["pairing_changed"]
+
+
+class RuntimeModelWirePayload(TypedDict):
+    event: Literal["runtime_model_updated"]
+    model_name: str
+    model_preset: NotRequired[str]
+
+
+class TurnModelWirePayload(_ChatWirePayload):
+    event: Literal["turn_model_updated"]
+    model_name: str
+    model_preset: NotRequired[str]
+    context_window_tokens: NotRequired[int]
+    fallback: NotRequired[bool]
+    reauth_provider: NotRequired[str]
+
+
 WebUIWirePayload: TypeAlias = (
+    ModelRequestWirePayload |
     RetryStatusWirePayload | ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
-    | SubagentTaskWirePayload
+    | SubagentTaskWirePayload | MessageWirePayload | StreamWirePayload | FileEditWirePayload
+    | GoalStateWirePayload | GoalStatusWirePayload | SessionUpdatedWirePayload | UserInputWirePayload
+    | PairingChangedWirePayload | RuntimeModelWirePayload | TurnModelWirePayload
 )
 WebUIWirePersistence: TypeAlias = Literal[
     "transient",
@@ -139,6 +226,8 @@ def encode_recovery_state(
         payload["can_continue"] = event.can_continue
     if event.failure_error_kind is not None:
         payload["failure_error_kind"] = event.failure_error_kind
+    if event.reply_preserved is not None:
+        payload["reply_preserved"] = event.reply_preserved
     return payload
 
 
@@ -166,15 +255,37 @@ class NotificationProjection:
     persistence: WebUIWirePersistence = "transient"
     deliver_offline: bool = False
     attach_turn_metadata: bool = False
+    context_graph_parts: ContextGraphParts | None = None
 
 
 def project_notification(
     chat_id: str, event: AgentEvent | None, metadata: Mapping[str, object] | None = None,
+    *, context_graph: ContextGraph | None = None,
 ) -> NotificationProjection | None:
     """Keep notification serialization and persistence decisions at one boundary."""
-    if isinstance(event, ContextCompactionEvent):
+    if isinstance(event, ModelRequestEvent):
+        payload: ModelRequestWirePayload = {
+            "event": "model_request", "chat_id": chat_id,
+            "request_id": event.request_id, "run_id": event.run_id,
+            "sequence": event.sequence, "phase": event.phase,
+            "request_usage": event.request_usage.to_turn_dict() if event.request_usage is not None else None,
+        }
+        if context_graph is not None:
+            payload["context_graph"] = context_graph
+        if event.usage is not None:
+            payload["usage"] = event.usage.to_turn_dict()
+        payload["round_usages"] = [usage.to_turn_dict() for usage in event.round_usages[-8:]]
+        if event.context_window_tokens is not None:
+            payload["context_window_tokens"] = event.context_window_tokens
         return NotificationProjection(
-            encode_context_compaction(chat_id, event),
+            payload, persistence="turn_activity", deliver_offline=True, attach_turn_metadata=True,
+        )
+    if isinstance(event, ContextCompactionEvent):
+        compaction_payload = encode_context_compaction(chat_id, event)
+        if context_graph is not None:
+            compaction_payload["context_graph"] = context_graph
+        return NotificationProjection(
+            compaction_payload,
             persistence="transient" if event.phase == "started" else "turn_activity",
             deliver_offline=True,
             attach_turn_metadata=True,

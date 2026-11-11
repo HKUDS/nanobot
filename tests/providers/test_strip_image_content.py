@@ -8,13 +8,8 @@ from __future__ import annotations
 
 from nanobot.providers.base import LLMProvider
 
-# ---------------------------------------------------------------------------
-# _strip_image_content (returns new list)
-# ---------------------------------------------------------------------------
-
 
 class TestStripImageContent:
-    """Tests for the non-mutating _strip_image_content method."""
 
     def test_replaces_image_url_with_nondescriptive_placeholder(self):
         messages = [
@@ -37,10 +32,8 @@ class TestStripImageContent:
         assert content[0] == {"type": "text", "text": "What is this?"}
         assert content[1]["type"] == "text"
         placeholder = content[1]["text"]
-        # Must NOT leak the file path
         assert "/tmp/screenshot.png" not in placeholder
         assert "screenshot" not in placeholder
-        # Must clearly indicate the image was not delivered
         assert "not delivered" in placeholder.lower()
 
     def test_returns_none_when_no_images(self):
@@ -71,7 +64,6 @@ class TestStripImageContent:
         result = LLMProvider._strip_image_content(messages)
         assert result is not None
         content = result[0]["content"]
-        # text + 2 placeholders
         assert len(content) == 3
         for block in content[1:]:
             assert block["type"] == "text"
@@ -113,20 +105,12 @@ class TestStripImageContent:
         ]
         result = LLMProvider._strip_image_content(messages)
         assert result is not None
-        # system and assistant messages unchanged
         assert result[0]["content"] == "You are helpful."
         assert result[2]["content"] == "Hi there!"
-        # user message has image replaced
         assert result[1]["content"][0]["type"] == "text"
 
 
-# ---------------------------------------------------------------------------
-# _strip_image_content_inplace (mutates in place)
-# ---------------------------------------------------------------------------
-
-
 class TestStripImageContentInplace:
-    """Tests for the mutating _strip_image_content_inplace method."""
 
     def test_replaces_image_url_with_nondescriptive_placeholder(self):
         messages = [
@@ -167,6 +151,5 @@ class TestStripImageContentInplace:
         ]
         messages = [{"role": "user", "content": original_content}]
         LLMProvider._strip_image_content_inplace(messages)
-        # The original list was mutated
         assert original_content[1]["type"] == "text"
         assert "/img.png" not in original_content[1]["text"]

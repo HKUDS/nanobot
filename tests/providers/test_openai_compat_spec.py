@@ -1,17 +1,10 @@
-"""Tests for OpenAICompatProvider spec-driven behavior.
-
-Validates that:
-- OpenRouter (no strip) keeps model names intact.
-- AiHubMix strips provider prefixes declared by its spec.
-- Standard providers pass model names through as-is.
-"""
-
 from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
@@ -129,6 +122,20 @@ def _chat_chunk(delta, finish=None, usage=None) -> ChatCompletionChunk:
     })
 
 
+class _FakeChatStream:
+    def __init__(self, iterator):
+        self.iterator = iterator
+        self.close_error = None
+
+    def __aiter__(self):
+        return self.iterator.__aiter__()
+
+    async def close(self):
+        await self.iterator.aclose()
+        if self.close_error is not None:
+            raise self.close_error
+
+
 def _fake_chat_stream(text: str = "ok"):
     async def _stream():
         yield _chat_chunk({"content": text})
@@ -136,7 +143,7 @@ def _fake_chat_stream(text: str = "ok"):
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return _stream()
+    return _FakeChatStream(_stream())
 
 
 def _fake_chat_stream_reasoning_chunks():
@@ -150,7 +157,7 @@ def _fake_chat_stream_reasoning_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return _stream()
+    return _FakeChatStream(_stream())
 
 
 def _fake_chat_stream_tool_call_chunks():
@@ -171,7 +178,7 @@ def _fake_chat_stream_tool_call_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return _stream()
+    return _FakeChatStream(_stream())
 
 
 def _fake_chat_stream_legacy_function_call_chunks():
@@ -186,12 +193,38 @@ def _fake_chat_stream_legacy_function_call_chunks():
             "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
         })
 
-    return _stream()
+    return _FakeChatStream(_stream())
+
+
+@pytest.mark.parametrize("close_error", [
+    httpx.CloseError("connection reset"), TimeoutError("cleanup deadline"),
+], ids=["close-error", "close-timeout"])
+@pytest.mark.parametrize("with_image", [False, True], ids=["text", "image"])
+async def test_stream_close_only_error_is_visible_without_retry(close_error, with_image):
+    stream = _fake_chat_stream("complete")
+    stream.close_error = close_error
+    content = [{"type": "text", "text": "work"}]
+    if with_image:
+        content.append({"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}})
+    messages = [{"role": "user", "content": content}]
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_openai:
+        create = AsyncMock(return_value=stream)
+        mock_openai.return_value.chat.completions.create = create
+        provider = OpenAICompatProvider(
+            api_key="synthetic", default_model="synthetic",
+            model_api=ModelAPICapabilities(("chat_completions",), "chat_completions"),
+        )
+        provider._CHAT_RETRY_DELAYS = (0,)
+        result = await provider.chat_stream_with_retry(messages)
+
+    assert result.finish_reason == "error" and str(close_error) in result.content
+    assert result.error_kind == "cleanup" and result.error_should_retry is False
+    assert create.await_count == 1
+    assert messages[0]["content"] == content
 
 
 @pytest.mark.asyncio
 async def test_openai_compat_chat_stream_forwards_reasoning_deltas_deepseek_style() -> None:
-    """DeepSeek Chat Completions exposes ``delta.reasoning_content`` while streaming."""
     mock_chat = AsyncMock(return_value=_fake_chat_stream_reasoning_chunks())
     spec = find_by_name("deepseek")
     thinking: list[str] = []
@@ -399,6 +432,9 @@ class _FakeResponsesError(Exception):
 
 
 class _StalledStream:
+    async def close(self):
+        pass
+
     def __aiter__(self):
         return self
 
@@ -480,7 +516,6 @@ async def test_openrouter_user_headers_override_default_attribution() -> None:
 
 @pytest.mark.asyncio
 async def test_openrouter_keeps_model_name_intact() -> None:
-    """OpenRouter gateway keeps the full model name (gateway does its own routing)."""
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("openrouter")
 
@@ -505,7 +540,6 @@ async def test_openrouter_keeps_model_name_intact() -> None:
 
 @pytest.mark.asyncio
 async def test_aihubmix_strips_model_prefix() -> None:
-    """AiHubMix strips provider prefixes declared by its spec."""
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("aihubmix")
 
@@ -530,7 +564,6 @@ async def test_aihubmix_strips_model_prefix() -> None:
 
 @pytest.mark.asyncio
 async def test_standard_provider_passes_model_through() -> None:
-    """Standard provider (e.g. deepseek) passes model name through as-is."""
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("deepseek")
 
@@ -554,7 +587,6 @@ async def test_standard_provider_passes_model_through() -> None:
 
 @pytest.mark.asyncio
 async def test_openai_compat_preserves_extra_content_on_tool_calls() -> None:
-    """Gemini extra_content (thought signatures) must survive parse→serialize round-trip."""
     mock_create = AsyncMock(return_value=_fake_tool_call_response())
     spec = find_by_name("gemini")
 
@@ -603,7 +635,6 @@ def test_openai_compat_parse_preserves_array_tool_arguments() -> None:
 
 
 def test_openai_model_passthrough() -> None:
-    """OpenAI models pass through unchanged."""
     spec = find_by_name("openai")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(
@@ -703,7 +734,7 @@ async def test_direct_openai_retries_without_unsupported_server_compaction() -> 
     assert result.content == "compaction fallback"
     assert result.provider_state is not None
     assert mock_responses.await_count == 2
-    assert "context_management" in mock_responses.call_args_list[0].kwargs
+    assert "context_management" in mock_responses.call_args_list[0].kwargs["extra_body"]
     assert "context_management" not in mock_responses.call_args_list[1].kwargs
     assert provider.supports_native_compaction("gpt-5.6") is False
     mock_chat.assert_not_awaited()
@@ -1361,10 +1392,6 @@ async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch)
     assert "stream stalled" in result.content
 
 
-# ---------------------------------------------------------------------------
-# Provider-specific thinking parameters (extra_body)
-# ---------------------------------------------------------------------------
-
 def _build_kwargs_for(provider_name: str, model: str, reasoning_effort=None):
     spec = find_by_name(provider_name)
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
@@ -1402,21 +1429,18 @@ def test_dashscope_thinking_enabled_with_reasoning_effort() -> None:
 
 
 def test_dashscope_thinking_disabled_for_minimal() -> None:
-    """'minimal' → wire 'minimum' + thinking off on DashScope."""
     kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimal")
     assert kw["reasoning_effort"] == "minimum"
     assert kw["extra_body"] == {"enable_thinking": False}
 
 
 def test_dashscope_thinking_disabled_for_minimum_alias() -> None:
-    """Native 'minimum' spelling must also disable thinking, not enable it."""
     kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimum")
     assert kw["reasoning_effort"] == "minimum"
     assert kw["extra_body"] == {"enable_thinking": False}
 
 
 def test_non_dashscope_minimal_not_retranslated() -> None:
-    """DashScope-specific translation must not leak to other providers."""
     kw = _build_kwargs_for("openai", "gpt-5", reasoning_effort="minimal")
     assert kw["reasoning_effort"] == "minimal"
 
@@ -1505,7 +1529,6 @@ def test_byteplus_thinking_disabled_for_minimal() -> None:
 
 
 def test_deepseek_thinking_enabled() -> None:
-    """DeepSeek V4 requires extra_body.thinking when reasoning_effort is set."""
     kw = _build_kwargs_for("deepseek", "deepseek-v4-pro", reasoning_effort="high")
     assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
 
@@ -1522,7 +1545,6 @@ def test_deepseek_thinking_enabled() -> None:
 def test_deepseek_reasoning_effort_controls(
     effort: str | None, wire_effort: str | None, thinking_type: str | None,
 ) -> None:
-    """DeepSeek's minimal alias enables low-effort thinking; none disables it."""
     kw = _build_kwargs_for("deepseek", "deepseek-flash", reasoning_effort=effort)
     if wire_effort is None:
         assert "reasoning_effort" not in kw
@@ -1562,7 +1584,6 @@ def test_deepseek_backfills_reasoning_content_on_legacy_tool_call_messages() -> 
 
 
 def test_backfill_does_not_touch_messages_when_thinking_explicitly_off() -> None:
-    """When thinking is explicitly disabled, legacy messages must NOT be altered."""
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
@@ -1585,7 +1606,6 @@ def test_backfill_does_not_touch_messages_when_thinking_explicitly_off() -> None
 
 
 def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit() -> None:
-    """DeepSeek-V4 reasons natively: backfill even without explicit reasoning_effort."""
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
@@ -1618,7 +1638,6 @@ def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit
 def test_deepseek_flash_backfills_missing_tool_history_reasoning(
     model: str, effort: str | None, history_reasoning: str | None,
 ) -> None:
-    """Default thinking rejects tool-call history without reasoning_content."""
     provider = OpenAICompatProvider(
         api_key="k", default_model=model, spec=find_by_name("deepseek"),
     )
@@ -1694,7 +1713,6 @@ def test_deepseek_chat_keeps_tool_history_when_effort_implicit() -> None:
 
 
 def test_deepseek_coerces_list_content_to_string() -> None:
-    """DeepSeek chat endpoint expects message.content to be a string."""
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         p = OpenAICompatProvider(api_key="k", default_model="deepseek-chat", spec=spec)
@@ -1731,7 +1749,6 @@ def test_deepseek_coerces_list_content_to_string() -> None:
 def test_deepseek_vision_preserves_multimodal_content(
     model: str, prefixed: bool, with_text: bool, responses: bool,
 ) -> None:
-    """DeepSeek vision models must preserve images on both API surfaces."""
     if prefixed:
         model = f"deepseek/{model}"
     spec = find_by_name("deepseek")
@@ -1789,7 +1806,6 @@ def test_deepseek_pro_remains_text_only(responses: bool) -> None:
 
 
 def test_non_deepseek_keeps_list_content() -> None:
-    """Only DeepSeek should force string content; OpenAI-compatible providers keep blocks."""
     spec = find_by_name("openai")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         p = OpenAICompatProvider(api_key="k", default_model="gpt-4o", spec=spec)
@@ -1813,7 +1829,6 @@ def test_non_deepseek_keeps_list_content() -> None:
 
 
 def test_openai_no_thinking_extra_body() -> None:
-    """Non-thinking providers should never get extra_body for thinking."""
     kw = _build_kwargs_for("openai", "gpt-4o", reasoning_effort="medium")
     assert "extra_body" not in kw
 
@@ -1867,7 +1882,6 @@ def kimi_k3_model(request: pytest.FixtureRequest) -> str:
 
 
 def test_kimi_k3_uses_native_defaults(kimi_k3_model: str) -> None:
-    """K3 omits fixed sampling params and uses the non-deprecated token limit field."""
     kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=None)
 
     assert "temperature" not in kw
@@ -1879,7 +1893,6 @@ def test_kimi_k3_uses_native_defaults(kimi_k3_model: str) -> None:
 
 @pytest.mark.parametrize("effort", ["low", "high", "max"])
 def test_kimi_k3_preserves_supported_reasoning_effort(kimi_k3_model: str, effort: str) -> None:
-    """K3 uses top-level reasoning_effort, never the K2.x thinking body."""
     kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=effort)
 
     assert kw["reasoning_effort"] == effort
@@ -1888,7 +1901,6 @@ def test_kimi_k3_preserves_supported_reasoning_effort(kimi_k3_model: str, effort
 
 
 def test_kimi_k3_normalizes_legacy_enabled_reasoning_effort(kimi_k3_model: str) -> None:
-    """Switching a K2.x preset to K3 must not send unsupported effort values."""
     kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort="medium")
 
     assert kw["reasoning_effort"] == "max"
@@ -1897,7 +1909,6 @@ def test_kimi_k3_normalizes_legacy_enabled_reasoning_effort(kimi_k3_model: str) 
 
 @pytest.mark.parametrize("effort", ["none", "minimal"])
 def test_kimi_k3_omits_disabled_reasoning_effort(kimi_k3_model: str, effort: str) -> None:
-    """K3 cannot disable reasoning, so disabled effort falls back to its default."""
     kw = _build_kwargs_for("moonshot", kimi_k3_model, reasoning_effort=effort)
 
     assert "reasoning_effort" not in kw
@@ -1923,7 +1934,6 @@ def test_openrouter_kimi_thinking_mapping(model, effort) -> None:
         "thinking": {"type": "enabled"},
         "reasoning": {"effort": effort},
     }
-    # Even via OR, reasoning_effort wire kwarg is dropped for kimi models
     assert "reasoning_effort" not in kw
 
 
@@ -1935,7 +1945,6 @@ def test_kimi_k27_code_thinking_none_omits_disabled() -> None:
 
 
 def test_kimi_k27_code_thinking_none_with_openrouter_prefix_omits_disabled() -> None:
-    """OpenRouter-routed Kimi K2.7 Code should not request disabled thinking."""
     kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.7-code", reasoning_effort="none")
     assert "extra_body" not in kw
     assert "reasoning_effort" not in kw
@@ -1946,35 +1955,26 @@ def test_kimi_k27_code_thinking_none_with_openrouter_prefix_omits_disabled() -> 
 def test_moonshot_kimi_k25_k26_omit_temperature(
     model: str, reasoning_effort: str | None,
 ) -> None:
-    """Moonshot chooses the valid temperature from the K2.5/K2.6 thinking mode."""
     kw = _build_kwargs_for("moonshot", model, reasoning_effort=reasoning_effort)
     assert "temperature" not in kw
 
 
 def test_moonshot_kimi_k27_code_temperature_override() -> None:
-    """Moonshot registry should force temperature 1.0 for Kimi K2.7 Code."""
     kw = _build_kwargs_for("moonshot", "kimi-k2.7-code", reasoning_effort=None)
     assert kw["temperature"] == 1.0
 
 
 def test_kimi_k2_series_no_thinking_injection() -> None:
-    """kimi-k2 (non-thinking) models must NOT receive extra_body.thinking."""
     kw = _build_kwargs_for("moonshot", "kimi-k2", reasoning_effort="high")
     assert "extra_body" not in kw
 
 
 def test_kimi_k2_thinking_series_no_thinking_injection() -> None:
-    """kimi-k2-thinking series models must NOT receive extra_body.thinking."""
     kw = _build_kwargs_for("moonshot", "kimi-k2-thinking", reasoning_effort="high")
     assert "extra_body" not in kw
 
 
-# ---------------------------------------------------------------------------
-# reasoning_effort="none" — treated as thinking disabled
-# ---------------------------------------------------------------------------
-
 def test_dashscope_thinking_disabled_for_none_string() -> None:
-    """reasoning_effort='none' disables thinking and must not emit reasoning_effort on DashScope."""
     kw = _build_kwargs_for("dashscope", "qwen3.6-plus", reasoning_effort="none")
     assert kw.get("extra_body") == {"enable_thinking": False}
     assert "reasoning_effort" not in kw
@@ -1996,7 +1996,6 @@ def test_qwen_thinking_disabled_via_model_level_mapping() -> None:
 
 
 def test_deepseek_no_backfill_when_reasoning_effort_none_string() -> None:
-    """reasoning_effort='none' must NOT trigger reasoning_content backfill (thinking inactive)."""
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)

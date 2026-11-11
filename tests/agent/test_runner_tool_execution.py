@@ -1,5 +1,3 @@
-"""Tests for AgentRunner tool execution: batching, concurrency, exclusive tools."""
-
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +13,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ToolContext
-from nanobot.agent.tools.execution import execute_tool_calls
+from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import AgentDefaults
@@ -377,7 +375,12 @@ async def test_tool_execution_batches_read_only_tools_before_exclusive_work():
     tools.register(read_b)
     tools.register(write_a)
 
-    results, events = await execute_tool_calls(
+    settled: list[ToolCallResult] = []
+
+    async def collect(results: list[ToolCallResult]) -> None:
+        settled.extend(results)
+
+    await execute_tool_calls(
         tools,
         [
             ToolCallRequest(id="ro1", name="read_a", arguments={}),
@@ -389,7 +392,10 @@ async def test_tool_execution_batches_read_only_tools_before_exclusive_work():
         workspace_violation_counts={},
         hook=AgentHook(),
         context=AgentHookContext(iteration=0, messages=[]),
+        on_settled=collect,
     )
+    results = [result.result for result in settled]
+    events = [result.event for result in settled]
 
     assert shared_events[0:2] == ["start:read_a", "start:read_b"]
     assert "end:read_a" in shared_events and "end:read_b" in shared_events

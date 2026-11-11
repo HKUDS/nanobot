@@ -1,5 +1,3 @@
-"""Session support for long-running exec workflows."""
-
 from __future__ import annotations
 
 import asyncio
@@ -269,7 +267,6 @@ class _ExecSession:
         )
 
     async def _watch_timeout(self) -> None:
-        """Supervise execution budgets independently of tool waits and log reads."""
         while not self._completion_task.done():
             now = time.monotonic()
             deadline = self.deadline

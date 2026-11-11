@@ -26,7 +26,7 @@ Continue in the WebUI from Quick Start. Start a new topic, select a practice fol
 - Choose a project folder for file work. Use [separate instances](../multiple-instances.md) when identity or long-term memory must be isolated.
 - Use `modelPresets` when you want stable names for fast, deep, local, or fallback models.
 - Keep `nanobot gateway` running for WebUI, chat apps, automations, and the WebSocket channel.
-- Use the Python SDK or OpenAI-compatible API when another program should call the agent.
+- Use the Python SDK when a Python application should call the agent.
 
 ## Security notes
 

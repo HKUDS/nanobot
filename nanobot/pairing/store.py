@@ -26,8 +26,8 @@ from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPr
 # sub-millisecond operations) the brief block is acceptable.
 _LOCK = threading.Lock()
 _ALPHABET = string.ascii_uppercase + string.digits
-_CODE_LENGTH = 8  # e.g. ABCD-EFGH
-_TTL_DEFAULT_S = 600  # 10 minutes
+_CODE_LENGTH = 8
+_TTL_DEFAULT_S = 600
 
 
 def _store_path() -> Path:
@@ -63,7 +63,6 @@ def _load() -> dict[str, Any]:
     pending = cast(dict[str, Any], raw_pending) if isinstance(raw_pending, dict) else {}
     data["pending"] = pending
 
-    # Convert approved lists to str sets for O(1) lookup.
     for channel, users in approved.items():
         if not isinstance(users, list):
             users = []
@@ -74,7 +73,6 @@ def _load() -> dict[str, Any]:
 def _save(data: dict[str, Any]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Convert sets back to lists for JSON serialization
     raw_approved = data.get("approved")
     approved = cast(dict[str, Any], raw_approved) if isinstance(raw_approved, dict) else {}
     raw_pending = data.get("pending")
@@ -97,7 +95,6 @@ def _notify_changed(on_change: Callable[[], object] | None) -> None:
 
 
 def _gc_pending(data: dict[str, Any]) -> None:
-    """Remove expired pending entries in-place."""
     now = time.time()
     pending: dict[str, Any] = data.get("pending") or {}
     expired: list[str] = []

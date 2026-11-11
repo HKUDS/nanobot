@@ -1,5 +1,3 @@
-"""Signal management contract."""
-
 from nanobot.channels._manifest import field, required
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin

@@ -1,5 +1,3 @@
-"""Spreadsheet grep locators follow cells, including literal tabs in cell values."""
-
 from pathlib import Path
 
 import pytest
@@ -34,6 +32,5 @@ async def test_grep_xlsx_literal_tabs_keep_source_cell(
     )
 
     assert f"sheet='Data',row=1,cell={expected_cell}" in result
-    # Metadata must not escape or otherwise change the original extracted text.
     extracted = "\t".join(cell if cell is not None else "" for cell in cells)
     assert f"> 2 [sheet='Data',row=1]| {extracted}" in result
