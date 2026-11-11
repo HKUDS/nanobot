@@ -85,23 +85,6 @@ class _WebsocketTurn:
 _WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
 
 
-def _validated_llm_runtime(value: object) -> LLMRuntime | None:
-    return value if isinstance(value, LLMRuntime) else None
-
-
-def _session_message_public_metadata(
-    envelope: SessionMessageEnvelope,
-) -> dict[str, Any]:
-    source = session_handle_for_name(
-        envelope["source_session_key"],
-        envelope["source_handle"],
-    )
-    return {
-        "message_id": envelope["message_id"],
-        "session": source.public_payload(),
-    }
-
-
 def _sync_websocket_turn_projection(chat_id: str) -> None:
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
     if not turns:
