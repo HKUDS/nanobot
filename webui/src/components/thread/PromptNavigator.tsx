@@ -176,7 +176,8 @@ export function PromptNavigator({
             </button>
             {tasks.unlinkedState === "error" ? <p role="alert" className="mt-2 text-destructive">{t("thread.subagents.loadUnlinkedFailed")}</p> : null}
             {tasks.unlinkedState === "loaded" ? (() => {
-              const unlinked = tasks.tasks.filter((task) => !isActiveSubagentTask(task) && !task.origin_message_id && !task.origin_turn_id);
+              const unlinked = tasks.tasks.filter((task) => !isActiveSubagentTask(task)
+                && ((!task.origin_message_id && !task.origin_turn_id) || tasks.unlinkedTaskIds.has(task.task_id)));
               return unlinked.length ? <ol className="mt-2 grid grid-cols-[1rem_minmax(0,1fr)_minmax(6rem,max-content)_3rem] gap-x-2.5">
                 {unlinked.map((task) => <li key={task.task_id} className="col-span-full grid grid-cols-subgrid"><SubagentTaskButton task={task} /></li>)}
               </ol> : <p className="mt-2 text-muted-foreground">{t("thread.subagents.noUnlinked")}</p>;

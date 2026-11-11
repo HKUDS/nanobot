@@ -9,6 +9,7 @@ import pytest
 
 from agent.session_helpers import save_completed_subagent
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.subagent_status import SubagentHistoryScope
 from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -275,6 +276,14 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         assert child.state == "done"
         assert child.origin_message_id == expected_origin["message_id"]
         assert child.origin_turn_id == expected_origin["turn_id"]
+        if late_result:
+            assert child.origin_turn_id.startswith("subagent:")
+            assert child.task_id in await loop.subagents.read_statuses_for_session(
+                request.session_key, SubagentHistoryScope("unlinked"),
+            )
+            assert child.task_id not in await loop.subagents.read_statuses_for_session(
+                request.session_key, SubagentHistoryScope("page"),
+            )
         assert persisted_origin == expected_origin
         assert continuation.metadata["webui_turn_id"] == f"recovery:{state['recovery_id']}"
         assert sessions.get_or_create(request.session_key).metadata[RECOVERY_METADATA_KEY]["status"] == "recovered"

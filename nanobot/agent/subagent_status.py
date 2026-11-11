@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Literal
@@ -8,6 +9,11 @@ from nanobot.providers.base import LLMUsage
 
 SubagentState = Literal["queued", "running", "stopping", "done", "incomplete", "error", "cancelled", "interrupted"]
 ACTIVE_SUBAGENT_STATES = frozenset({"queued", "running", "stopping"})
+_SYNTHETIC_ORIGIN_TURN = re.compile(r"(?:subagent|session-input):[0-9a-f]{32}\Z")
+
+
+def synthetic_origin_turn(turn_id: str | None) -> bool:
+    return bool(turn_id and _SYNTHETIC_ORIGIN_TURN.fullmatch(turn_id))
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,12 +21,17 @@ class SubagentHistoryScope:
     mode: Literal["page", "unlinked"]
     message_ids: frozenset[str] = frozenset()
     turn_ids: frozenset[str] = frozenset()
+    excluded_task_ids: frozenset[str] = frozenset()
 
     def includes(self, status: SubagentStatus) -> bool:
         if status.state in ACTIVE_SUBAGENT_STATES:
             return True
+        if status.task_id in self.excluded_task_ids:
+            return False
         if self.mode == "unlinked":
-            return not status.origin_message_id and not status.origin_turn_id
+            return not status.origin_message_id and (
+                not status.origin_turn_id or synthetic_origin_turn(status.origin_turn_id)
+            )
         return (status.origin_message_id in self.message_ids
                 or status.origin_turn_id in self.turn_ids)
 

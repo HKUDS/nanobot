@@ -237,6 +237,31 @@ describe("subagent result archives", () => {
     expect(screen.getByTestId("messages").querySelectorAll("[data-subagent-id]")).toHaveLength(2);
   });
 
+  it("queries and groups a session input by stable inputId after its display ID changes on replay", async () => {
+    const inputId = "session-message:received";
+    const result = task({ origin_message_id: inputId, origin_turn_id: "session-input:synthetic", label: "Session check" });
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const query = new URL(String(input), "http://localhost").searchParams;
+      return response(query.getAll("message_id").includes(inputId) ? [result] : []);
+    });
+    const user = userEvent.setup();
+    const live: UIMessage = { id: "session-message:received", inputId, role: "user", content: "Sent from another session", createdAt: 100_000 };
+    const view = render(layout({ threadMessages: [live], liveEvents: false, historyEnabled: true }));
+    let archive = await screen.findByRole("region", { name: "Subtasks" });
+    expectBefore(screen.getByText("Sent from another session"), archive);
+    await user.click(summary(archive));
+    expect(within(archive).getByRole("button", { name: "Session check Completed 4s" })).toBeVisible();
+
+    view.unmount();
+    render(layout({ threadMessages: [{ ...live, id: "persisted-projection-42" }], liveEvents: false, historyEnabled: true }));
+    archive = await screen.findByRole("region", { name: "Subtasks" });
+    await user.click(summary(archive));
+    expect(within(archive).getByRole("button", { name: "Session check Completed 4s" })).toBeVisible();
+    const queries = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url), "http://localhost").searchParams);
+    expect(queries.some((query) => query.getAll("message_id").includes("persisted-projection-42")
+      && query.getAll("message_id").includes(inputId))).toBe(true);
+  });
+
   it("loads older tasks only when their history page is loaded, and never treats a cached page as unlinked", async () => {
     const older = task({ task_id: "older", label: "Earlier check", origin_turn_id: "older-turn", origin_message_id: "older-prompt" });
     const active = task({ task_id: "active", label: "Live check", state: "running", completed_at: null,

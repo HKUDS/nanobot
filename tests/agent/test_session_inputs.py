@@ -6,19 +6,22 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.runner import AgentRunResult
+from nanobot.agent.subagent_status import SubagentHistoryScope
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.session_messages import SendSessionMessageTool
+from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.outbound_events import UserInputEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import UserInputAccepted
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
-from nanobot.providers.base import LLMResponse
+from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.runtime_context import public_history_message
 from nanobot.security.workspace_access import current_workspace_scope
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
-from nanobot.session.recovery import PENDING_FOLLOWUPS_KEY
+from nanobot.session.recovery import PENDING_FOLLOWUPS_KEY, request_origin_from_metadata
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
@@ -377,3 +380,39 @@ async def test_session_message_source_context_independent_of_tool_policy(
     assert content.startswith("Please review this")
     assert content.count("Message from @luma.") == 1
     assert ("Reply with send_session_message." in content) is expect_reply
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("valid_target", [True, False])
+async def test_independent_session_input_subagent_uses_stable_history_identity(
+    loop: AgentLoop, valid_target: bool,
+) -> None:
+    target = "websocket:target"
+    await loop.sessions.state.get(target)
+    await loop.sessions.state.update_metadata(target, {"webui": True, "title": "Existing title"})
+    loop.turn_delivery_factory = TurnDeliveryFactory(loop.bus, WebuiTurnRoutePolicy(loop.sessions))
+    coordinator = WebuiTurnCoordinator(loop.bus, loop.sessions, loop.schedule_background)
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            "child", "subagent", {"action": "create", "task": "Inspect", "wait": True},
+        )]),
+        LLMResponse(content="Completed"),
+    ])
+    loop.subagents.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Done"))
+    message = _message()
+    message.chat_id = target
+    message.session_key_override = target
+    message.metadata[SESSION_MESSAGE_METADATA_KEY]["target_session_key"] = target if valid_target else "websocket:other"
+    with coordinator.connected():
+        await loop._dispatch_inbound(message)
+        await asyncio.gather(*loop._active_tasks[target])
+    task, = loop.subagents.statuses_for_session(target).values()
+    input_id = "session-message:message-1" if valid_target else None
+    assert task.origin_message_id == input_id
+    assert task.origin_turn_id.startswith("session-input:")
+    session = loop.sessions.get_or_create(target)
+    assert session.messages[0]["input_id"] == input_id
+    assert request_origin_from_metadata(session.metadata).get("input_id") == input_id
+    scope = SubagentHistoryScope("page", frozenset({"session-message:message-1"}))
+    assert set(await loop.subagents.read_statuses_for_session(target, scope)) == ({task.task_id} if valid_target else set())
+    assert not await loop.subagents.read_statuses_for_session("websocket:source", scope)

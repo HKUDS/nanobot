@@ -71,6 +71,7 @@ interface TaskContext {
   readError: boolean;
   retryRead: () => void;
   unlinkedState: "idle" | "loading" | "loaded" | "error";
+  unlinkedTaskIds: ReadonlySet<string>;
   loadUnlinked: () => Promise<void>;
   open: (task: SubagentTaskSnapshot, trigger: HTMLButtonElement) => void;
   stop: (task: SubagentTaskSnapshot) => Promise<void>;
@@ -112,12 +113,13 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   const [stoppingId, setStoppingId] = useState<string | null>(null);
   const [stopError, setStopError] = useState<string | null>(null);
   const [unlinkedState, setUnlinkedState] = useState<TaskContext["unlinkedState"]>("idle");
+  const [unlinkedTaskIds, setUnlinkedTaskIds] = useState<ReadonlySet<string>>(() => new Set());
   const [readError, setReadError] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const scopeKey = useMemo(() => {
     const prompts = messages.filter((message) => message.role === "user");
     return JSON.stringify({
-      messageIds: [...new Set(prompts.map((message) => message.id))].sort(),
+      messageIds: [...new Set(prompts.flatMap((message) => message.inputId ? [message.id, message.inputId] : [message.id]))].sort(),
       turnIds: [...new Set(prompts.flatMap((message) => message.turnId ? [message.turnId] : []))].sort(),
     });
   }, [messages]);
@@ -134,6 +136,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     setStoppingId(null);
     setStopError(null);
     setUnlinkedState("idle");
+    setUnlinkedTaskIds(new Set());
     setReadError(false);
     return () => { scopeGeneration.current += 1; };
   }, [client, sessionKey]);
@@ -215,6 +218,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       const payload = await fetchSubagentTasks(token, sessionKey, "unlinked");
       if (!mounted.current || generation !== scopeGeneration.current) return;
       setTasks((current) => mergeSubagentTasks(current, payload.tasks));
+      setUnlinkedTaskIds(new Set(payload.tasks.filter((task) => !isActiveSubagentTask(task)).map((task) => task.task_id)));
       setUnlinkedState("loaded");
     } catch {
       if (mounted.current && generation === scopeGeneration.current) setUnlinkedState("error");
@@ -242,7 +246,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     sessionKey, available: enabled && active && paneVisible, detailOpen: !!selected,
     tasks: enabled ? tasks : [],
     stopError: enabled ? stopError : null, stoppingId,
-    readError, retryRead: () => setRefreshVersion((version) => version + 1), unlinkedState, loadUnlinked,
+    readError, retryRead: () => setRefreshVersion((version) => version + 1), unlinkedState, unlinkedTaskIds, loadUnlinked,
     open: (task, target) => { trigger.current = target; setSelectedId(task.task_id); }, stop,
     register: (key, button, previous) => {
       if (button) buttons.current.set(key, button);

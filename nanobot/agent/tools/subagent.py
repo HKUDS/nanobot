@@ -138,6 +138,7 @@ class SubagentTool(Tool):
             session_key=session_key,
             origin_message_id=request_ctx.message_id,
             origin_turn_id=request_ctx.turn_id,
+            **({"origin_input_id": request_ctx.input_id} if request_ctx.input_id else {}),
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
             session_policy=SessionPolicy(

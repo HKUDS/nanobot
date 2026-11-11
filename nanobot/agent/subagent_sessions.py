@@ -118,6 +118,7 @@ class SubagentSessions:
         else:
             rows = self.sessions.list_scoped_subagent_metadata(
                 owner, tuple(scope.message_ids), tuple(scope.turn_ids), unlinked=scope.mode == "unlinked",
+                excluded_keys=tuple(self.key(task_id) for task_id in scope.excluded_task_ids),
             )
         for row in rows:
             key = row["key"]
@@ -128,6 +129,9 @@ class SubagentSessions:
             if status is not None:
                 result[task_id] = status
         return result
+
+    def user_turn_ids(self, owner: str, turn_ids: tuple[str, ...]) -> set[str]:
+        return self.sessions.user_turn_ids(owner, turn_ids)
 
     async def interrupt_pending(self) -> None:
         """Seal abandoned work after the gateway acquires execution ownership."""

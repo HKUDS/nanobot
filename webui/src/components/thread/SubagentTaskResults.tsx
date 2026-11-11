@@ -9,17 +9,19 @@ import type { UIMessage } from "@/lib/types";
 
 export function useHasSubagentResults(messages: UIMessage[] = []): boolean {
   const context = useSubagentTasks();
-  const groups = groupResults(messages, context?.tasks ?? []);
+  const groups = groupResults(messages, context?.tasks ?? [], context?.unlinkedTaskIds);
   return groups.byMessage.size > 0 || groups.unlinked.length > 0;
 }
 
 /** Exact initiating prompts win; replayed IDs fall back to the turn's first user message. */
-function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
+function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[], unlinkedTaskIds?: ReadonlySet<string>) {
   const promptsById = new Map<string, UIMessage>();
+  const promptsByInputId = new Map<string, UIMessage>();
   const firstPromptByTurn = new Map<string, UIMessage>();
   for (const message of messages) {
     if (message.role !== "user") continue;
     promptsById.set(message.id, message);
+    if (message.inputId) promptsByInputId.set(message.inputId, message);
     if (message.turnId && !firstPromptByTurn.has(message.turnId)) {
       firstPromptByTurn.set(message.turnId, message);
     }
@@ -30,10 +32,11 @@ function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
   for (const task of tasks) {
     if (isActiveSubagentTask(task)) continue;
     const prompt = (task.origin_message_id ? promptsById.get(task.origin_message_id) : undefined)
+      ?? (task.origin_message_id ? promptsByInputId.get(task.origin_message_id) : undefined)
       ?? (task.origin_turn_id ? firstPromptByTurn.get(task.origin_turn_id) : undefined);
     if (!prompt) {
       // A known origin outside this render window is not an unlinked task.
-      if (!task.origin_message_id && !task.origin_turn_id) unlinked.push(task);
+      if ((!task.origin_message_id && !task.origin_turn_id) || unlinkedTaskIds?.has(task.task_id)) unlinked.push(task);
       continue;
     }
     const group = byMessage.get(prompt.id) ?? [];
@@ -46,7 +49,8 @@ function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
 export function SubagentThreadMessages(props: ComponentProps<typeof ThreadMessages>) {
   const context = useSubagentTasks();
   const sessionKey = context?.sessionKey;
-  const groups = useMemo(() => groupResults(props.messages, context?.tasks ?? []), [props.messages, context?.tasks]);
+  const groups = useMemo(() => groupResults(props.messages, context?.tasks ?? [], context?.unlinkedTaskIds),
+    [props.messages, context?.tasks, context?.unlinkedTaskIds]);
   const [archive, setArchive] = useState(() => ({ sessionKey, expanded: new Set<string>() }));
   // Reset only the disclosures; the outgoing transcript must not remount during handoff.
   if (archive.sessionKey !== sessionKey) {

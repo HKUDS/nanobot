@@ -180,6 +180,39 @@ describe("session-owned task UI", () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("scope=unlinked"))).toBe(true);
   });
 
+  it("shows synthetic origins as unlinked only when confirmed by the explicit response", async () => {
+    const linkedTurn = `subagent:${"a".repeat(32)}`;
+    const linked = task({ task_id: "linked", label: "Older linked", state: "done", completed_at: 102,
+      origin_message_id: null, origin_turn_id: linkedTurn });
+    const detached = task({ task_id: "detached", label: "Independent result", state: "done", completed_at: 102,
+      origin_message_id: null, origin_turn_id: `subagent:${"b".repeat(32)}` });
+    const legacy = task({ task_id: "legacy-input", label: "Legacy session input", state: "done", completed_at: 102,
+      origin_message_id: null, origin_turn_id: `session-input:${"c".repeat(32)}` });
+    const active = task({ task_id: "active-unconfirmed", label: "Active linked", state: "running",
+      origin_message_id: null, origin_turn_id: `subagent:${"d".repeat(32)}` });
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const query = new URL(String(input), "http://localhost").searchParams;
+      if (query.get("scope") === "unlinked") return response([detached, legacy, active]);
+      return response(query.getAll("turn_id").includes(linkedTurn) ? [linked] : []);
+    });
+    const user = userEvent.setup();
+    const older: UIMessage = { id: "older", role: "user", content: "Older real input", turnId: linkedTurn, createdAt: 1 };
+    const view = render(layout({ navigator: true, threadMessages: [older, ...messages] }));
+    expect(await within(screen.getByTestId("messages")).findByRole("region", { name: "Subtasks" })).toBeVisible();
+    view.rerender(layout({ navigator: true }));
+    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Message navigation" }));
+    await user.click(screen.getByRole("button", { name: "Load tasks without a linked request" }));
+    expect(await screen.findByRole("button", { name: /Independent result Completed/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Legacy session input Completed/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Older linked Completed/ })).not.toBeInTheDocument();
+    emitTask({ ...active, state: "done", revision: 2, completed_at: 103 });
+    expect(screen.queryByRole("button", { name: /Active linked Completed/ })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    const other = await openArchive(user, "Other tasks");
+    expect(taskIds(other)).toEqual(["detached", "legacy-input"]);
+  });
+
   it("keeps active work in one composer entry without mixing in a large terminal archive", async () => {
     const older = Array.from({ length: 40 }, (_, index) => task({
       task_id: `older-${index}`, label: `Archived check ${index}`, created_at: index + 1,

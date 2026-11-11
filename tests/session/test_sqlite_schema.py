@@ -325,6 +325,7 @@ def test_subagent_origin_indexes_upgrade_safely_and_filter_with_index_searches(t
         for index in ("subagent_active_state", "subagent_origin_message", "subagent_origin_turn"):
             assert f"USING INDEX {index}" in page_plan
         assert "USING INDEX subagent_origin_message" in unlinked_plan
+        assert "CORRELATED" not in unlinked_plan
         assert "SCAN sessions" not in page_plan + unlinked_plan
     assert {row["key"] for row in store.list_scoped_subagent_metadata(
         "websocket:a", ("message-a",), ("turn-a",), unlinked=False,

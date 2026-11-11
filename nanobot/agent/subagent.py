@@ -518,6 +518,21 @@ class SubagentManager:
     ) -> Mapping[str, SubagentStatus]:
         """Capture runtime observations on the owner loop; read stored metadata on a worker."""
         runtime = self._runtime_statuses_for_session(session_key, scope)
+        if scope is not None and scope.mode == "unlinked" and self.sessions is not None:
+            candidates = {tid: status for tid, status in runtime.items()
+                          if not status.origin_message_id and status.origin_turn_id}
+            linked = await asyncio.to_thread(
+                self.sessions.user_turn_ids, session_key,
+                tuple({status.origin_turn_id for status in candidates.values() if status.origin_turn_id}),
+            )
+            linked_ids = {tid for tid, status in candidates.items() if status.origin_turn_id in linked}
+            scope = replace(scope, excluded_task_ids=frozenset(
+                tid for tid in linked_ids if runtime[tid].state not in ACTIVE_SUBAGENT_STATES
+            ))
+            # Active linked tasks come from the indexed read. Do not re-read their
+            # child metadata after they may have finished during that read.
+            runtime = {tid: status for tid, status in runtime.items()
+                       if tid not in linked_ids and scope.includes(status)}
         excluded = self._excluded_terminal_revisions(session_key, scope) if scope is not None else None
         statuses = await asyncio.to_thread(
             self._merge_session_statuses, session_key, runtime, include_history=True, scope=scope, excluded=excluded,
@@ -540,6 +555,21 @@ class SubagentManager:
             if not finished:
                 break
             pending.difference_update(finished)
+            if scope.mode == "unlinked" and self.sessions is not None:
+                observations = {tid: status or statuses.get(tid) or runtime.get(tid)
+                                for tid, status in finished.items()}
+                candidates = {tid: status for tid, status in observations.items()
+                              if status is not None and not status.origin_message_id and status.origin_turn_id}
+                linked = await asyncio.to_thread(
+                    self.sessions.user_turn_ids, session_key,
+                    tuple({status.origin_turn_id for status in candidates.values() if status.origin_turn_id}),
+                )
+                for tid, status in candidates.items():
+                    if status.origin_turn_id in linked:
+                        statuses.pop(tid, None)
+                        finished.pop(tid, None)
+            if not finished:
+                continue
             refreshed = await asyncio.to_thread(self._refresh_finished_statuses, session_key, finished)
             if refreshed is None:
                 return {}
@@ -618,7 +648,7 @@ class SubagentManager:
         session_key: str | None, origin_message_id: str | None,
         temperature: float | None, workspace_scope: WorkspaceScope | None,
         runtime: LLMRuntime | None, *, announce: bool, origin_turn_id: str | None,
-        session_policy: SessionPolicy | None,
+        origin_input_id: str | None, session_policy: SessionPolicy | None,
     ) -> _SubagentTask:
         self.bus.admission.check()
         if runtime is None:
@@ -637,7 +667,7 @@ class SubagentManager:
             task_description=task,
             started_at=time.monotonic(),
             owner=owner,
-            origin_message_id=origin_message_id,
+            origin_message_id=origin_input_id or origin_message_id,
             origin_turn_id=origin_turn_id,
         )
         self._admitting += 1
@@ -697,6 +727,7 @@ class SubagentManager:
         *,
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
+        origin_input_id: str | None = None,
         session_policy: SessionPolicy | None = None,
     ) -> str:
         """Start background work and route its terminal result to the parent."""
@@ -704,7 +735,7 @@ class SubagentManager:
             record = await self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=True, origin_turn_id=origin_turn_id,
-                session_policy=session_policy,
+                origin_input_id=origin_input_id, session_policy=session_policy,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
@@ -724,6 +755,7 @@ class SubagentManager:
         *,
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
+        origin_input_id: str | None = None,
         session_policy: SessionPolicy | None = None,
     ) -> str:
         """Wait for the same task lifecycle without a background notice."""
@@ -731,7 +763,7 @@ class SubagentManager:
             record = await self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=False, origin_turn_id=origin_turn_id,
-                session_policy=session_policy,
+                origin_input_id=origin_input_id, session_policy=session_policy,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")

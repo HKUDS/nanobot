@@ -31,6 +31,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
     ToolCallRequest,
 )
+from nanobot.session.display_history import HistoryFact, HistoryKind
 from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
 from nanobot.session.location import SessionLocation
 from nanobot.session.manager import SessionManager
@@ -1265,6 +1266,146 @@ async def test_empty_scoped_page_refreshes_task_started_during_history_read(tmp_
         assert task_id in refreshed
     finally:
         query.set()
+        release.set()
+        finish.set()
+        if request is not None:
+            await asyncio.gather(request, return_exceptions=True)
+        await manager.close()
+        await sessions.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_unlinked_synthetic_turns_exclude_inputs_from_all_history_and_other_sessions(tmp_path, monkeypatch):
+    import nanobot.session.sqlite_store as sqlite_store
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    owner, other = "websocket:parent", "websocket:other"
+    history_turn = "subagent:" + "a" * 32
+    canonical_turn = "session-input:" + "b" * 32
+    detached_turn = "subagent:" + "c" * 32
+    legacy_turn = "session-input:" + "d" * 32
+    other_turn = "subagent:" + "e" * 32
+    parent = sessions.get_or_create(owner)
+    parent.add_message("user", "An older message", webui_turn_id=canonical_turn)
+    sessions.save(parent)
+    await sessions.state.append_history(owner, [HistoryFact(
+        HistoryKind.INPUT, {"input_id": f"user:{history_turn}"}, turn_id=history_turn,
+    )], expected_generation=parent.generation)
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Done"))
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    try:
+        ids = {}
+        for name, parent_key, turn in (
+            ("linked-history", owner, history_turn),
+            ("linked-canonical", owner, canonical_turn),
+            ("detached", owner, detached_turn),
+            ("legacy", owner, legacy_turn),
+            ("off-page", owner, "ordinary-old-turn"),
+            ("foreign", other, other_turn),
+        ):
+            await manager.run_inline(name, session_key=parent_key, origin_turn_id=turn, runtime=runtime)
+            ids[name] = next(tid for tid, status in manager._terminal_statuses.items()
+                             if status.task_description == name)
+        path = "/api/sessions/websocket%3Aparent/subagents"
+
+        async def read(query):
+            response = await gateway.http.dispatch(connection, Request(path + query, headers))
+            assert response.status_code == 200
+            return {item["task_id"] for item in json.loads(response.body)["tasks"]}
+
+        # Simulate a terminal runtime snapshot before its final persisted status is saved.
+        child_key = SubagentSessions.key(ids["linked-history"])
+        stale = sessions.read_session_metadata(child_key)["metadata"][TASK_METADATA_KEY]
+        stale.update(state="running", revision=stale["revision"] - 1)
+        blocked = {ids[name] for name in ("linked-history", "linked-canonical", "off-page", "foreign")}
+        object_, contains, status = sqlite_store._object, manager.sessions.contains, manager.sessions.status
+
+        def checked_object(raw):
+            assert not any(f'"task_id":"{task_id}"' in raw for task_id in blocked)
+            return object_(raw)
+
+        def checked_contains(task_id, parent_key):
+            assert task_id not in blocked
+            return contains(task_id, parent_key)
+
+        def checked_status(task_id, parent_key):
+            assert task_id not in blocked
+            return status(task_id, parent_key)
+
+        monkeypatch.setattr(sqlite_store, "_object", checked_object)
+        monkeypatch.setattr(manager.sessions, "contains", checked_contains)
+        monkeypatch.setattr(manager.sessions, "status", checked_status)
+        # The old messages are not on the current page, despite their valid synthetic-looking IDs.
+        assert await read("?scope=page&turn_id=current-turn") == set()
+        blocked.remove(ids["linked-history"])
+        await sessions.state.update_metadata(child_key, {TASK_METADATA_KEY: stale})
+        blocked.add(ids["linked-history"])
+        assert await read("?scope=unlinked") == {ids["detached"], ids["legacy"]}
+        # The indexed stored path must apply the same exclusions after process restart.
+        manager._terminal_statuses.clear()
+        # Stale active rows are intentionally included after a restart until startup recovery seals them.
+        stale.update(state="done", revision=stale["revision"] + 1)
+        blocked.remove(ids["linked-history"])
+        await sessions.state.update_metadata(child_key, {TASK_METADATA_KEY: stale})
+        blocked.add(ids["linked-history"])
+        assert await read("?scope=unlinked") == {ids["detached"], ids["legacy"]}
+        blocked.clear()
+        assert await read("?scope=page&turn_id=" + quote(history_turn, safe="")) == {ids["linked-history"]}
+        assert await read("?scope=page&turn_id=" + quote(canonical_turn, safe="")) == {ids["linked-canonical"]}
+    finally:
+        await manager.close()
+        await sessions.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_unlinked_read_does_not_reread_linked_task_that_finishes_during_query(tmp_path, monkeypatch):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    owner, turn = "websocket:parent", "subagent:" + "f" * 32
+    parent = await sessions.state.get(owner)
+    await sessions.state.append_history(owner, [HistoryFact(
+        HistoryKind.INPUT, {"input_id": f"user:{turn}"}, turn_id=turn,
+    )], expected_generation=parent.generation)
+    entered, finish, loaded = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    release = threading.Event()
+    event_loop = asyncio.get_running_loop()
+    original_load = manager.sessions.load
+
+    async def run(_spec):
+        entered.set()
+        await finish.wait()
+        return AgentRunResult(messages=[], final_content="Done")
+
+    def paused_load(parent_key, scope):
+        result = original_load(parent_key, scope)
+        event_loop.call_soon_threadsafe(loaded.set)
+        assert release.wait(10)
+        return result
+
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    manager.runner.run = run
+    request = None
+    try:
+        await manager.spawn("Linked task", session_key=owner, origin_turn_id=turn, runtime=runtime)
+        await asyncio.wait_for(entered.wait(), 10)
+        task_id, = manager._running_tasks
+        execution = manager._running_tasks[task_id]
+        monkeypatch.setattr(manager.sessions, "load", paused_load)
+        request = asyncio.create_task(gateway.http.dispatch(connection, Request(
+            "/api/sessions/websocket%3Aparent/subagents?scope=unlinked", headers,
+        )))
+        await asyncio.wait_for(loaded.wait(), 10)
+        finish.set()
+        await asyncio.wait_for(execution, 10)
+
+        def forbidden(*_args):
+            raise AssertionError("read persisted metadata of an off-page linked terminal task")
+
+        monkeypatch.setattr(manager.sessions, "contains", forbidden)
+        monkeypatch.setattr(manager.sessions, "status", forbidden)
+        release.set()
+        response = await asyncio.wait_for(request, 10)
+        assert response.status_code == 200
+        assert json.loads(response.body)["tasks"] == []
+    finally:
         release.set()
         finish.set()
         if request is not None:
