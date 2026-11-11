@@ -129,6 +129,9 @@ _SUBAGENT_PARENT = "json_extract(metadata, '$.parent_session_key')"
 _SUBAGENT_MESSAGE = "nullif(json_extract(metadata, '$.subagent_task.origin_message_id'), '')"
 _SUBAGENT_TURN = "nullif(json_extract(metadata, '$.subagent_task.origin_turn_id'), '')"
 _SUBAGENT_STATE = "json_extract(metadata, '$.subagent_task.state')"
+# Invalid JSON has a blob sentinel so filtered listings still surface corruption.
+_SESSION_LIST_TYPE = ("CASE WHEN json_valid(metadata) THEN CASE WHEN json_type(metadata, '$.session_type') IS NULL "
+                      "THEN 'conversation' ELSE json_extract(metadata, '$.session_type') END ELSE X'00' END")
 
 
 def _create_schema_v6(db: sqlite3.Connection) -> None:
@@ -138,6 +141,7 @@ def _create_schema_v6(db: sqlite3.Connection) -> None:
         ("subagent_active_state", f"{_SUBAGENT_PARENT}, {_SUBAGENT_STATE}"),
     ):
         db.execute(f"CREATE INDEX {name} ON sessions ({columns}) WHERE {_SUBAGENT_INDEX_PREDICATE}")
+    db.execute(f"CREATE INDEX session_list_type ON sessions ({_SESSION_LIST_TYPE})")
 
 
 def _scoped_subagent_query(
@@ -815,11 +819,14 @@ class SqliteSessionStore:
                 (session_key, ids, session_key, ids, session_key, ids))
             return {str(row[0]) for row in rows}
 
-    def list_metadata(self) -> list[dict[str, Any]]:
+    def list_metadata(self, *, session_types: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
         with self.transaction(write=False) as db:
             # Fetch one value so a large list does not cross the Python/SQLite
             # iterator boundary for every session while other workers are busy.
-            encoded = db.execute("""
+            where = (f"WHERE {_SESSION_LIST_TYPE} IN (SELECT value FROM json_each(?)) "
+                     f"OR {_SESSION_LIST_TYPE}=X'00'") if session_types is not None else ""
+            params = (_encode(session_types),) if session_types is not None else ()
+            encoded = db.execute(f"""
                 SELECT json_group_array(json_object(
                     'key', key, 'created_at', created_at, 'updated_at', updated_at,
                     'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
@@ -829,9 +836,10 @@ class SqliteSessionStore:
                     SELECT sessions.*, coalesce(history_heads.updated_at_ms, 0) AS history_updated_at_ms,
                            coalesce(nullif(history_heads.user_preview, ''), history_heads.preview, '') AS history_preview
                     FROM sessions LEFT JOIN history_heads ON history_heads.session_key=sessions.key
+                    {where}
                     ORDER BY sessions.updated_at DESC
                 )
-            """).fetchone()[0]
+            """, params).fetchone()[0]
             rows = cast(list[dict[str, Any]], json.loads(encoded))
             for row in rows:
                 row["path"] = str(self.path)

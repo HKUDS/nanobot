@@ -1039,7 +1039,8 @@ class GatewayHTTPHandler:
                 return None
             return _http_json_response(payload, accept_encoding=accept_encoding)
 
-        response = await self.session_manager.state.query_metadata(render)
+        session_types = self.session_manager.types.visible_or_handle_names()
+        response = await self.session_manager.state.query_metadata(render, session_types=session_types)
         if response is None:
             handles = await SessionHandleResolver(self.session_manager).alist_all_by_key()
 
@@ -1048,7 +1049,7 @@ class GatewayHTTPHandler:
                     self._sessions_list_payload(handles, stored), accept_encoding=accept_encoding,
                 )
 
-            response = await self.session_manager.state.query_metadata(render_allocated)
+            response = await self.session_manager.state.query_metadata(render_allocated, session_types=session_types)
         return response
 
     def _sessions_list_from_snapshot(

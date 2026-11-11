@@ -359,6 +359,36 @@ async def test_provider_hosted_activity_is_visible_before_response_and_replays_i
 
 
 @pytest.mark.asyncio
+async def test_sidebar_listing_and_handle_allocation_do_not_decode_child_tasks(tmp_path, monkeypatch):
+    import nanobot.session.sqlite_store as sqlite_store
+
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    owner = "websocket:parent"
+    await sessions.state.get(owner)
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="Private findings"))
+    try:
+        await manager.run_inline("Earlier task", session_key=owner, origin_turn_id="old-turn", runtime=runtime)
+        gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+        original = sqlite_store._object
+
+        def checked_object(raw):
+            assert '"subagent_task"' not in raw, "sidebar decoded a child task"
+            return original(raw)
+
+        monkeypatch.setattr(sqlite_store, "_object", checked_object)
+        response = await gateway.http.dispatch(connection, Request("/api/sessions", headers))
+        assert response.status_code == 200
+        rows = json.loads(response.body)["sessions"]
+        assert [row["key"] for row in rows] == [owner]
+        assert rows[0]["handle"]["name"]
+        response = await gateway.http.dispatch(connection, Request("/api/sessions", headers))
+        assert response.status_code == 200
+    finally:
+        await manager.close()
+        await sessions.state.aclose()
+
+
+@pytest.mark.asyncio
 async def test_task_changes_use_parent_chat_events_and_saved_child_observations(tmp_path):
     manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
     gateway, _, _ = gateway_for(manager, sessions, tmp_path / "agent")

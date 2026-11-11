@@ -885,7 +885,7 @@ class SessionState:
         return await self.query_metadata(lambda rows: rows)
 
     async def query_metadata(
-        self, project: Callable[[list[dict[str, Any]]], _T],
+        self, project: Callable[[list[dict[str, Any]]], _T], *, session_types: tuple[str, ...] | None = None,
     ) -> _T:
         """Read one committed display snapshot without waiting for active turns.
 
@@ -896,7 +896,8 @@ class SessionState:
         context = copy_context()
 
         def read() -> _T:
-            return context.run(project, self._store.list_metadata())
+            rows = self._store.list_metadata() if session_types is None else self._store.list_metadata(session_types=session_types)
+            return context.run(project, rows)
 
         async def query() -> _T:
             return await self._run_operation(read, write=False)
@@ -937,16 +938,18 @@ class SessionState:
             allocate_session_handles,
         )
 
+        session_types = self._types.visible_or_handle_names()
+
         def read() -> tuple[dict[str, str], dict[str, str]]:
             return self._store.run_read(
-                lambda: allocate_session_handles(self._store.list_metadata(), self._types),
+                lambda: allocate_session_handles(self._store.list_metadata(session_types=session_types), self._types),
             )
 
         def allocate() -> dict[str, str]:
             changed: list[str] = []
 
             def write() -> dict[str, str]:
-                names, updates = allocate_session_handles(self._store.list_metadata(), self._types)
+                names, updates = allocate_session_handles(self._store.list_metadata(session_types=session_types), self._types)
                 for key, name in updates.items():
                     if self._store.update_metadata(
                         key,
