@@ -44,10 +44,7 @@ from nanobot.config.schema import Config
 from nanobot.gateway.runtime import GatewayHealthIdentity, GatewayInstance, GatewayRuntime
 from nanobot.installation_lock import installation_access
 from nanobot.security.network import is_loopback_host
-from nanobot.session.keys import (
-    HEARTBEAT_SESSION_KEY,
-    RETIRED_SHARED_SESSION_KEY,
-)
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
@@ -274,7 +271,7 @@ def _pick_heartbeat_target_from_sessions(
     archived = set(archived_keys)
     for item in sessions:
         key = item.get("key") or ""
-        if key in archived or key == RETIRED_SHARED_SESSION_KEY:
+        if key in archived:
             continue
         if ":" not in key:
             continue

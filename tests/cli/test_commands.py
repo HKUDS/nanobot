@@ -1998,18 +1998,6 @@ def test_heartbeat_target_skips_archived_webui_sessions():
     assert target == ("websocket", "active")
 
 
-def test_heartbeat_target_skips_retired_shared_history():
-    from nanobot.cli.gateway_runtime import _pick_heartbeat_target_from_sessions
-
-    target = _pick_heartbeat_target_from_sessions(
-        enabled_channels=["telegram", "discord"],
-        archived_keys=[],
-        sessions=[{"key": "unified:default"}, {"key": "discord:active"}],
-    )
-
-    assert target == ("discord", "active")
-
-
 def _write_instance_config(tmp_path: Path) -> Path:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)

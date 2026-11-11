@@ -131,6 +131,37 @@ async def test_shared_history_remains_readable_after_retirement(tmp_path):
     assert config_path.read_bytes() == config_bytes
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_key", ["unifiedSession", "unified_session"])
+async def test_legacy_unified_config_keeps_runs_isolated(tmp_path, monkeypatch, legacy_key):
+    from nanobot.providers.base import LLMResponse
+
+    config_path = _write_config(tmp_path, {
+        "agents": {"defaults": {"model": "openai/gpt-4.1", legacy_key: True}},
+    })
+    original_config = config_path.read_bytes()
+    provider = _fake_provider("test-model")
+    provider.aclose = AsyncMock()
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="reply"))
+    monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda *_args: provider)
+
+    async with Nanobot.from_config(config_path, workspace=tmp_path / "workspace") as bot:
+        await bot.run("alice secret", session_key="sdk:alice")
+        await bot.run("bob secret", session_key="sdk:bob")
+        await bot.run("alice followup", session_key="sdk:alice")
+        alice = await bot.sessions.get("sdk:alice")
+        bob = await bot.sessions.get("sdk:bob")
+        assert [m["content"] for m in alice.messages] == [
+            "alice secret", "reply", "alice followup", "reply",
+        ]
+        assert [m["content"] for m in bob.messages] == ["bob secret", "reply"]
+        prompts = [str(call.kwargs["messages"]) for call in provider.chat_stream_with_retry.await_args_list]
+        assert "alice secret" not in prompts[1]
+        assert "alice secret" in prompts[2]
+        assert "bob secret" not in prompts[2]
+    assert config_path.read_bytes() == original_config
+
+
 def test_from_config_composes_configured_mcp_outside_agent_loop(tmp_path):
     config_path = _write_config(
         tmp_path,

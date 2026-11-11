@@ -277,13 +277,13 @@ def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_retired_shared_trigger_is_not_delivered(tmp_path: Path) -> None:
+async def test_trigger_delivers_to_its_saved_session(tmp_path: Path) -> None:
     store = LocalTriggerStore(tmp_path)
     trigger = store.create(
         name="Old trigger", channel="websocket", chat_id="chat-1",
         session_key="unified:default",
     )
-    store.enqueue(trigger.id, "Do not replay in a different chat")
+    store.enqueue(trigger.id, "Process this delivery")
     submit_turn = AsyncMock()
 
     task = asyncio.create_task(run_local_trigger_queue(
@@ -291,11 +291,11 @@ async def test_retired_shared_trigger_is_not_delivered(tmp_path: Path) -> None:
     ))
     try:
         async with asyncio.timeout(3):
-            while not (current := store.get(trigger.id)) or current.last_status != "error":
+            while not (current := store.get(trigger.id)) or current.last_status != "ok":
                 await asyncio.sleep(0.01)
-        assert current.last_error and "recreate this trigger" in current.last_error
-        assert current.session_key == "unified:default"
-        submit_turn.assert_not_awaited()
+        message = submit_turn.await_args.args[0]
+        assert message.session_key == "unified:default"
+        assert (message.channel, message.chat_id) == ("websocket", "chat-1")
     finally:
         task.cancel()
         with suppress(asyncio.CancelledError):

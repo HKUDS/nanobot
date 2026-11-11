@@ -10,7 +10,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import Config
 from nanobot.cron.binding import CronBinding, binding_revision
 from nanobot.cron.bound_runner import run_bound_cron_job
-from nanobot.cron.service import CronJobSkippedError, CronService
+from nanobot.cron.service import CronService
 from nanobot.cron.session_turns import CRON_TRIGGER_META
 from nanobot.cron.types import CronSchedule
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
@@ -18,7 +18,7 @@ from nanobot.session.manager import SessionManager
 
 
 @pytest.mark.asyncio
-async def test_retired_shared_job_requires_rebinding_before_execution(tmp_path):
+async def test_bound_job_runs_with_its_saved_session_key(tmp_path):
     cron = CronService(tmp_path / "jobs.json")
     job = cron.add_job(
         "Reminder", CronSchedule(kind="every", every_ms=86_400_000), "Take a break",
@@ -26,10 +26,10 @@ async def test_retired_shared_job_requires_rebinding_before_execution(tmp_path):
     )
     agent = MagicMock(submit_cron_turn=AsyncMock(return_value=None))
 
-    with pytest.raises(CronJobSkippedError, match="recreate this job from its destination chat"):
-        await run_bound_cron_job(job, agent=agent, cron=cron)
-    agent.submit_cron_turn.assert_not_awaited()
-    assert cron.list_jobs()[0].payload.session_key == "unified:default"
+    await run_bound_cron_job(job, agent=agent, cron=cron)
+    message = agent.submit_cron_turn.await_args.args[0]
+    assert message.session_key == "unified:default"
+    assert (message.channel, message.chat_id) == ("telegram", "old")
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-# Existing data remains addressable; never use this as an automatic route.
-RETIRED_SHARED_SESSION_KEY = "unified:default"
 HEARTBEAT_SESSION_KEY = "heartbeat"
 
 

@@ -64,13 +64,7 @@ To read old API conversations after updating, open the same configuration and wo
 
 ## Shared sessions removal
 
-Messages no longer share context across chats by default or through a global switch. The **Shared sessions** switch is gone. An old `agents.defaults.unifiedSession` or `unified_session` setting no longer has any effect and is omitted the next time nanobot saves the configuration.
-
-The upgrade does not delete, copy, or merge chat history. WebUI chats keep their own transcripts. The old shared model conversation is not imported into any chat. To read it on the gateway computer, stop writers and open the same config and workspace with [the Python SDK](./python-sdk.md#botsessions). Use `await bot.sessions.get("unified:default")` to read the saved messages.
-
-Scheduled jobs and local triggers still bound to the old shared session cannot run. If a scheduled job offers **Run and reply in**, [choose a chat](./automations.md#change-the-chat-for-a-scheduled-task) there. Otherwise, recreate the job or trigger from the destination chat and disable the old entry. Heartbeat no longer follows the last chat used by the shared session; it selects from eligible individual chats. An interrupted turn saved to the shared session is not resumed automatically.
-
-Before upgrading, finish active turns and back up the config and data. If you roll back, the old version can still read the old session. Reapply its setting if a newer config save removed it. Do not overwrite current chats or configuration with a stale backup.
+The shared sessions feature has been removed. The old `agents.defaults.unifiedSession` or `unified_session` setting is ignored.
 
 ## Recover an interrupted update
 

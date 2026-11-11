@@ -2595,10 +2595,6 @@ Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/Londo
 
 > Need another timezone? Browse the full [IANA Time Zone Database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
 
-## Unified Session
-
-The **Shared sessions** setting (`agents.defaults.unifiedSession`) has been removed. See [Shared sessions removal](./updating.md#shared-sessions-removal) for how to read existing shared history and check scheduled jobs after upgrading.
-
 ## Disabled Skills
 
 Open **Skills** in the sidebar, find the installed skill, and turn its switch off or on. This controls whether the agent can load it without deleting its files.
