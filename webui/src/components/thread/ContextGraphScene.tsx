@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
-import { Maximize2, X } from "lucide-react";
+import { Maximize2, Minimize2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -277,9 +277,9 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
       className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-background/90 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <X size={15} />
     </button>}
-    {!expanded && onExpand && <button type="button" onClick={onExpand} aria-label={t("thread.composer.context.expand")}
+    {onExpand && <button type="button" onClick={onExpand} aria-label={t(expanded ? "thread.composer.context.collapse" : "thread.composer.context.expand")}
       className="absolute right-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-background/90 text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      <Maximize2 size={15} />
+      {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
     </button>}
     {!graph.nodes.length && !frame.nodes.length && <p className="absolute inset-0 flex items-center justify-center px-6 text-center text-xs text-muted-foreground">{t("thread.composer.context.noFiles")}</p>}
     <canvas ref={canvas} aria-hidden="true" className="absolute inset-0 size-full" />

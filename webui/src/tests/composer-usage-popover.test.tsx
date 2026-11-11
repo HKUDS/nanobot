@@ -29,9 +29,7 @@ describe("Context sidebar", () => {
     const expanded = await screen.findByRole("dialog", { name: "Context usage" });
     expect(within(expanded).getByRole("button", { name: "b.md" })).toBeInTheDocument();
     expect(within(expanded).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "20");
-    expect(within(expanded).queryByRole("button", { name: "Expand context panel" })).not.toBeInTheDocument();
-    await user.click(within(expanded).getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument());
+    await user.click(within(expanded).getByRole("button", { name: "Collapse context panel" }));
     expect(within(sidebar).getByRole("button", { name: "Expand context panel" })).toBeVisible();
     await user.click(screen.getByTestId("composer-context-usage"));
     await waitFor(() => expect(screen.getByTestId("composer-context-usage")).toHaveFocus());

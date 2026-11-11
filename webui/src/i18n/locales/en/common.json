@@ -2148,6 +2148,7 @@
           "loaded": "Loaded",
           "unloaded": "Not loaded",
           "expand": "Expand context panel",
+          "collapse": "Collapse context panel",
           "noFiles": "No context recorded yet",
           "estimatedNodeTokens": "About {{value}} tokens",
           "openFile": "Open file",
