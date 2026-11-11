@@ -2,6 +2,8 @@
 
 The Python gateway owns agent execution, sessions, tools, memory, and security policy. WebUI and TUI share that runtime; keep execution and policy out of the clients.
 
+WebUI and its gateway must be deployed as a same-version pair, including remote gateways. Mixed-version WebUI/gateway operation is unsupported; do not add compatibility fallbacks or negotiation solely to support older gateways.
+
 ## Task-specific guidance
 
 | When working on | Read |
