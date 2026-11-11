@@ -1397,14 +1397,16 @@ function modelGenerationSettingsPayload(
 export async function createModelConfiguration(
   transport: WebUIMutationTransport,
   configuration: ModelConfigurationCreate,
-): Promise<SettingsPayload> {
-  return mutation<SettingsPayload>(
+  optimized = false,
+): Promise<Omit<SettingsPayload, "usage"> & Partial<Pick<SettingsPayload, "usage">>> {
+  return mutation<Omit<SettingsPayload, "usage">>(
     transport,
     "settings.model_configuration.create",
     {
       name: configuration.name,
       provider: configuration.provider,
       model: configuration.model,
+      ...(optimized ? { append_to_order: true, include_usage: false } : {}),
       ...modelGenerationSettingsPayload(configuration),
     },
   );
@@ -1413,12 +1415,14 @@ export async function createModelConfiguration(
 export async function updateModelConfiguration(
   transport: WebUIMutationTransport,
   configuration: ModelConfigurationUpdate,
-): Promise<SettingsPayload> {
-  return mutation<SettingsPayload>(
+  optimized = false,
+): Promise<Omit<SettingsPayload, "usage"> & Partial<Pick<SettingsPayload, "usage">>> {
+  return mutation<Omit<SettingsPayload, "usage">>(
     transport,
     "settings.model_configuration.update",
     {
       name: configuration.name,
+      ...(optimized ? { include_usage: false } : {}),
       ...(configuration.newName !== undefined ? { new_name: configuration.newName } : {}),
       ...(configuration.provider !== undefined ? { provider: configuration.provider } : {}),
       ...(configuration.model !== undefined ? { model: configuration.model } : {}),

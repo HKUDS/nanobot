@@ -1483,6 +1483,19 @@ def update_model_call_order(
         raise WebUISettingsError("model call order must contain at least one preset")
 
     normalized_order = [cast(str, name).strip() for name in cast(list[object], order)]
+    return _set_model_call_order(config, normalized_order, oauth_status=oauth_status)
+
+
+def append_model_call_order(config: Config, name: str, *, oauth_status: OAuthStatusReader) -> None:
+    order, _ = _model_call_order_state(config)
+    if name not in order:
+        order.append(name)
+    _set_model_call_order(config, order, oauth_status=oauth_status)
+
+
+def _set_model_call_order(
+    config: Config, normalized_order: list[str], *, oauth_status: OAuthStatusReader,
+) -> bool:
     unknown = [name for name in normalized_order if name not in config.model_presets]
     if unknown:
         raise WebUISettingsError(f"unknown model preset: {unknown[0]}")

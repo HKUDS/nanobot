@@ -10,7 +10,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, cast
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -100,7 +100,7 @@ class GatewayEnvironmentPayload(TypedDict):
 class SystemSettingsPayload(TypedDict):
     runtime_config: dict[str, Any]
     runtime: dict[str, Any]
-    usage: dict[str, Any]
+    usage: NotRequired[dict[str, Any]]
     advanced: dict[str, Any]
     version: dict[str, Any]
     environment: GatewayEnvironmentPayload
@@ -136,6 +136,7 @@ def system_settings_payload(
     *,
     config_path: Path,
     version: str,
+    include_usage: bool = True,
 ) -> SystemSettingsPayload:
     defaults = config.agents.defaults
     exec_config = config.tools.exec
@@ -143,7 +144,7 @@ def system_settings_payload(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         workspace=config.workspace_path,
     )
-    return {
+    payload: SystemSettingsPayload = {
         "runtime_config": runtime_config_payload(config),
         "runtime": {
             "config_path": str(config_path.expanduser()),
@@ -159,7 +160,6 @@ def system_settings_payload(
             },
             "unified_session": defaults.unified_session,
         },
-        "usage": llm_usage_payload(timezone_name=defaults.timezone),
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
             "workspace_sandbox": sandbox_status.as_dict(),
@@ -181,6 +181,9 @@ def system_settings_payload(
         },
         "docs": docs_payload(version),
     }
+    if include_usage:
+        payload["usage"] = llm_usage_payload(timezone_name=defaults.timezone)
+    return payload
 
 
 def settings_usage_payload(config: Config) -> dict[str, Any]:

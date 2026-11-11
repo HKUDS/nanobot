@@ -216,6 +216,66 @@ def _dynamic_provider_config(
     return Config.model_validate(raw_config)
 
 
+def test_create_model_configuration_appends_atomically_without_querying_usage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    config.model_presets["primary"] = ModelPresetConfig(model="openai/gpt-4o", provider="openai")
+    config.agents.defaults.model_preset = "primary"
+    save_config(config, config_path)
+    monkeypatch.setattr(
+        "nanobot.webui.settings_system.llm_usage_payload",
+        lambda **_kwargs: pytest.fail("model save must not query usage"),
+    )
+    query = {
+        "name": ["Writer"], "provider": ["openai"], "model": ["openai/gpt-4o-mini"],
+        "append_to_order": ["true"], "include_usage": ["false"],
+    }
+    result = create_model_configuration(query, config_path=config_path)
+    assert result["model_call_order"] == ["primary", "Writer"]
+    assert "usage" not in result
+    assert load_config(config_path).agents.defaults.fallback_models == ["Writer"]
+    updated = update_model_configuration(
+        {"name": ["Writer"], "temperature": ["0.5"], "include_usage": ["false"]},
+        config_path=config_path,
+    )
+    assert updated["model_call_order"] == ["primary", "Writer"]
+    assert "usage" not in updated
+
+
+def test_create_and_append_first_preset_is_primary_once(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    result = create_model_configuration(
+        {"name": ["Writer"], "provider": ["openai"], "model": ["openai/gpt-4o-mini"],
+         "append_to_order": ["true"]}, config_path=config_path,
+    )
+    assert result["model_call_order"] == ["Writer"]
+    saved = load_config(config_path)
+    assert saved.agents.defaults.model_preset == "Writer"
+    assert saved.agents.defaults.fallback_models == []
+
+
+def test_create_and_append_does_not_persist_when_legacy_order_needs_migration(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    config.agents.defaults.model = "openai/gpt-4o"
+    config.agents.defaults.provider = "openai"
+    save_config(config, config_path)
+    before = config_path.read_bytes()
+    with pytest.raises(WebUISettingsError, match="convert"):
+        create_model_configuration(
+            {"name": ["Writer"], "provider": ["openai"], "model": ["openai/gpt-4o-mini"],
+             "append_to_order": ["true"]}, config_path=config_path,
+        )
+    assert config_path.read_bytes() == before
+
+
 def test_create_model_configuration_accepts_legacy_label_without_changing_call_order(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
