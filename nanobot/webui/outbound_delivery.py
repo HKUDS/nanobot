@@ -363,10 +363,17 @@ class WebUIOutboundDelivery:
             if recipients:
                 task = self._session_projection.subagent_task(webui_session_key(msg.chat_id), event.task_id)
                 if task is not None:
-                    await self._send_payload(
-                        msg.chat_id, {"event": "subagent_task", "chat_id": msg.chat_id, "task": task},
-                        persistence="transient",
-                    )
+                    if task.get("state") in {"queued", "running", "stopping"}:
+                        payload: WebUIWirePayload = {"event": "subagent_task", "chat_id": msg.chat_id, "task": task}
+                    else:
+                        # A subscriber may be viewing a different history page. Send only
+                        # an invalidation; the page-scoped read owns terminal details.
+                        payload = {
+                            "event": "subagent_task_settled", "chat_id": msg.chat_id,
+                            "task_id": task.get("task_id"), "state": task.get("state"),
+                            "revision": task.get("revision"), "completed_at": task.get("completed_at"),
+                        }
+                    await self._send_payload(msg.chat_id, payload, persistence="transient")
             return
         if isinstance(event, SessionUpdatedEvent):
             if recipients:

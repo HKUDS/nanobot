@@ -21,9 +21,22 @@ import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import { cancelSubagentTask, fetchSubagentTasks } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import { isActiveSubagentTask, isSubagentTask, mergeSubagentTasks, type ObservedSubagentTask } from "@/lib/subagent-tasks";
-import type { SubagentTaskSnapshot, UIMessage } from "@/lib/types";
+import type { InboundEvent, SubagentTaskSnapshot, UIMessage } from "@/lib/types";
 
 type TaskScope = { messageIds: string[]; turnIds: string[] };
+type SettledNotice = Extract<InboundEvent, { event: "subagent_task_settled" }>;
+
+function settleObservedTasks(tasks: ObservedSubagentTask[], notices: ReadonlyMap<string, SettledNotice>): ObservedSubagentTask[] {
+  let changed = false;
+  const next = tasks.map((task) => {
+    const notice = notices.get(task.task_id);
+    if (!notice || !isActiveSubagentTask(task) || (task.revision ?? 0) > notice.revision) return task;
+    changed = true;
+    return { ...task, state: notice.state, revision: notice.revision, completed_at: notice.completed_at,
+      observedAtMs: performance.now(), needsRefresh: true };
+  });
+  return changed ? next : tasks;
+}
 
 /** Bounded requests also work when a user has opened many history pages. */
 function taskScopeBatches(scope: TaskScope): TaskScope[] {
@@ -139,6 +152,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     let cancelled = false;
     let refreshing = false;
     let refreshPending = false;
+    const settled = new Map<string, SettledNotice>();
     const refresh = async () => {
       if (refreshing) { refreshPending = true; return; }
       refreshing = true;
@@ -146,7 +160,10 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
         const batches = taskScopeBatches(JSON.parse(scopeKey) as TaskScope);
         await Promise.all(batches.map(async (batch) => {
           const payload = await fetchSubagentTasks(token, sessionKey, batch);
-          if (!cancelled) setTasks((current) => mergeSubagentTasks(current, payload.tasks));
+          if (!cancelled) {
+            const notices = new Map(settled);
+            setTasks((current) => settleObservedTasks(mergeSubagentTasks(current, payload.tasks), notices));
+          }
         }));
         if (!cancelled) setReadError(false);
       } catch {
@@ -160,9 +177,21 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       }
     };
     const unsubscribeChat = liveEvents ? client.onChat(sessionKey.slice("websocket:".length), (event) => {
-      if (cancelled || event.event !== "subagent_task") return;
-      if (!isSubagentTask(event.task)) return;
-      setTasks((current) => mergeSubagentTasks(current, [event.task]));
+      if (cancelled) return;
+      if (event.event === "subagent_task" && isSubagentTask(event.task)) {
+        const notices = new Map(settled);
+        setTasks((current) => settleObservedTasks(mergeSubagentTasks(current, [event.task]), notices));
+      } else if (event.event === "subagent_task_settled"
+        && typeof event.task_id === "string" && event.task_id.length > 0
+        && ["done", "incomplete", "error", "cancelled", "interrupted"].includes(event.state)
+        && Number.isSafeInteger(event.revision) && event.revision >= 0
+        && (event.completed_at === null || (typeof event.completed_at === "number" && Number.isFinite(event.completed_at)))) {
+        const previous = settled.get(event.task_id);
+        if (!previous || previous.revision <= event.revision) settled.set(event.task_id, event);
+        const notices = new Map(settled);
+        setTasks((current) => settleObservedTasks(current, notices));
+        void refresh();
+      }
     }) : undefined;
     const unsubscribeStatus = liveEvents ? client.onStatus((status) => {
       if (status === "open") void refresh();

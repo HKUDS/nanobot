@@ -1517,6 +1517,7 @@ interface InboundTurnMetadata {
 
 export type InboundEvent =
   | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
+  | { event: "subagent_task_settled"; chat_id: string; task_id: string; state: Exclude<SubagentTaskState, "queued" | "running" | "stopping">; revision: number; completed_at: number | null }
   | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
   | {
       event: "attached";

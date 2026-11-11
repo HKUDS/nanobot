@@ -34,6 +34,10 @@ const client = {
 function emitTask(snapshot: SubagentTaskSnapshot, chatId = "a") {
   act(() => { chatHandlers.get(chatId)?.forEach((handler) => handler({ event: "subagent_task", chat_id: chatId, task: snapshot })); });
 }
+function emitSettled(taskId = "task-1", chatId = "a") {
+  act(() => { chatHandlers.get(chatId)?.forEach((handler) => handler({ event: "subagent_task_settled", chat_id: chatId,
+    task_id: taskId, state: "done", revision: 2, completed_at: 102 })); });
+}
 const messages: UIMessage[] = [
   { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a", createdAt: 100_000 },
   { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a", createdAt: 101_000 },
@@ -120,6 +124,44 @@ describe("session-owned task UI", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("retrieves visible completion details through the scoped read", async () => {
+    let finished = false;
+    vi.mocked(fetch).mockImplementation(async () => response([finished
+      ? task({ revision: 2, state: "done", completed_at: 102, result: "Verified scoped result" }) : task()]));
+    const user = userEvent.setup();
+    render(layout());
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    finished = true;
+    emitSettled();
+    const archive = await openArchive(user);
+    await user.click(within(archive).getByRole("button", { name: /Config check Completed/ }));
+    expect(await within(screen.getByRole("dialog", { name: "Config check" })).findByText("Verified scoped result")).toBeVisible();
+  });
+
+  it("settles off-page active work without fetching its terminal details", async () => {
+    let finished = false;
+    vi.mocked(fetch).mockImplementation(async () => response(finished ? [] : [task({ origin_turn_id: "turn-old" })]));
+    render(layout());
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    finished = true;
+    emitSettled();
+    await waitFor(() => expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Completed: 1"));
+    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
+  });
+
+  it("does not resurrect off-page work when its completion precedes an active read", async () => {
+    let completeRead: (result: Response) => void = () => {};
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>((resolve) => { completeRead = resolve; }))
+      .mockImplementation(async () => response([]));
+    render(layout());
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    emitSettled();
+    await act(async () => { completeRead(response([task({ origin_turn_id: "turn-old" })])); });
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByTestId("subagent-task-dock-trigger")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
   });
 
   it("loads unlinked history only on request from message navigation", async () => {

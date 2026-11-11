@@ -416,14 +416,19 @@ async def test_task_changes_use_parent_chat_events_and_saved_child_observations(
             stopped = await manager.cancel(first, "websocket:parent")
             routed = await deliver()
             assert routed and all(conn is parent_connection for conn, _ in routed)
-            assert all(payload["task"]["state"] == "cancelled" for _, payload in routed)
+            assert all(payload["event"] == "subagent_task_settled" and payload["state"] == "cancelled"
+                       for _, payload in routed)
+            assert all(set(payload) == {"event", "chat_id", "task_id", "state", "revision", "completed_at"}
+                       for _, payload in routed)
             assert stopped.revision > previous_revision
             assert manager.check(sibling, "websocket:parent").state == "running"
             channel._safe_send_to.reset_mock()
             release.set()
             await asyncio.gather(*list(manager._running_tasks.values()), return_exceptions=True)
             routed = await deliver()
-            assert any(conn is parent_connection and payload["task"]["state"] == "done" for conn, payload in routed)
+            assert any(conn is parent_connection and payload["event"] == "subagent_task_settled"
+                       and payload["state"] == "done" for conn, payload in routed)
+            assert all("Private findings" not in json.dumps(payload) for _, payload in routed)
             assert parent.messages == original_messages
             saved = manager.sessions.status(sibling, "websocket:parent")
             assert saved.revision == manager.check(sibling, "websocket:parent").revision

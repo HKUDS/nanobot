@@ -124,6 +124,14 @@ class SubagentTaskWirePayload(_ChatWirePayload):
     task: dict[str, object]
 
 
+class SubagentTaskSettledWirePayload(_ChatWirePayload):
+    event: Literal["subagent_task_settled"]
+    task_id: object
+    state: object
+    revision: object
+    completed_at: object
+
+
 class MessageWirePayload(_ChatWirePayload):
     event: Literal["message"]
     text: str
@@ -197,7 +205,7 @@ class TurnModelWirePayload(_ChatWirePayload):
 WebUIWirePayload: TypeAlias = (
     ModelRequestWirePayload |
     RetryStatusWirePayload | ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
-    | SubagentTaskWirePayload | MessageWirePayload | StreamWirePayload | FileEditWirePayload
+    | SubagentTaskWirePayload | SubagentTaskSettledWirePayload | MessageWirePayload | StreamWirePayload | FileEditWirePayload
     | GoalStateWirePayload | GoalStatusWirePayload | SessionUpdatedWirePayload | UserInputWirePayload
     | PairingChangedWirePayload | RuntimeModelWirePayload | TurnModelWirePayload
 )
