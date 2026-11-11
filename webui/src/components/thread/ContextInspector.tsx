@@ -99,7 +99,7 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   return <LayoutGroup>
     {!expanded && content(false)}
     <Dialog open={expanded} onOpenChange={setExpanded}>
-      <DialogContent showCloseButton={false} aria-describedby={undefined} overlayClassName="context-expanded-overlay bg-background/30 backdrop-blur-md" className="w-[min(960px,calc(100vw-2rem))] max-w-none border-0 bg-transparent p-0 shadow-none !animate-none">
+      <DialogContent showCloseButton={false} aria-describedby={undefined} overlayClassName="context-expanded-overlay bg-background/30 backdrop-blur-md" className="w-[min(1440px,calc(100vw-2rem))] max-w-none border-0 bg-transparent p-0 shadow-none !animate-none">
         <DialogTitle className="sr-only">{t("thread.composer.context.panelTitle")}</DialogTitle>
         {content(true)}
       </DialogContent>

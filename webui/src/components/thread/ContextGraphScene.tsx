@@ -222,7 +222,7 @@ export const ContextGraphScene = memo(function ContextGraphScene({ graph, epoch,
         onBlur={() => { focused.current = null; setHovered(null); schedule(); }}
         onClick={() => setActive((path) => path === node.path ? null : node.path)}>{node.name}</button>)}
     </div>), [graph.nodes, active, schedule]);
-  return <div ref={container} className={cn(surface, "relative isolate overflow-clip touch-none cursor-grab active:cursor-grabbing", sidebar ? "min-h-0 flex-1" : expanded ? "h-[min(65dvh,600px)]" : "h-[300px]")}
+  return <div ref={container} className={cn(surface, "relative isolate overflow-clip touch-none cursor-grab active:cursor-grabbing", sidebar ? "min-h-0 flex-1" : expanded ? "h-[min(82dvh,900px)]" : "h-[300px]")}
     onPointerDown={(e) => {
       if (!(e.target instanceof Node) || !e.currentTarget.contains(e.target)) return;
       if (e.button !== 0 || !e.isPrimary || (e.target instanceof Element && e.target.closest("button"))) return;
