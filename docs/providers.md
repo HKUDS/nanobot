@@ -364,7 +364,7 @@ For a named custom provider serving Anthropic Messages, set `providers.<name>.ap
 
 </details>
 
-Replace the model with a model ID available to your account. Leave API selection on Auto unless you need to choose Chat Completions or Responses in the preset's **Advanced options**. See [preset API settings](./configuration.md#preset-request-api) for WebUI and JSON configuration. `providers.openai.api` sets the connection default; explicit presets override it. If your configuration still uses `apiType`, follow the [migration instructions](./configuration.md#legacy-openai-api-selector-migration).
+Replace the model with a model ID available to your account. Leave API selection on Auto unless you need to choose Chat Completions or Responses in the preset's **Advanced options**. See [preset API settings](./configuration.md#preset-request-api) for WebUI and JSON configuration. `providers.openai.api` sets the connection default; explicit presets override it.
 
 ### DeepSeek
 

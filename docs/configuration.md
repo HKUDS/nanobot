@@ -1463,14 +1463,6 @@ In `config.json`, set `providers.<name>.api` for the built-in `custom` provider 
 
 `supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Auto presets inherit this default; explicit presets can only use protocols in the connection's list. Before removing a protocol used by an explicit preset, update that preset first.
 
-### Legacy OpenAI API selector migration
-
-If your configuration uses `providers.openai.apiType` (or `api_type`), save it with a version that supports the migration before upgrading further. Saving replaces the old field with `api`: `chat_completions` or `responses` becomes a single-API declaration, while `auto` keeps automatic selection. If both fields are present, `api` takes precedence, including `api: null`.
-
-The migration also accepts the `NANOBOT_PROVIDERS__OPENAI__API_TYPE` and `NANOBOT_PROVIDERS__OPENAI__APITYPE` environment variables.
-
-The old field is accepted in the first release containing this migration and the immediately following release. The third release will require the current `api` format.
-
 ### Preset request API
 
 Leave API selection on **Auto** unless your service requires a specific protocol. To change it, open **Settings → Models → a preset → Advanced options → API connection**. Choose **Responses**, **Chat Completions**, or **Anthropic Messages** from the available options. Hover, focus, or tap a setting label for help. Credentials and endpoint URLs stay in the provider; two presets sharing a provider can select different APIs.

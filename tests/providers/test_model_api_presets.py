@@ -707,17 +707,20 @@ async def test_explicit_model_api_overrides_connection_default(bind_transport, p
     assert paths == [path]
 
 
-@pytest.mark.parametrize("legacy,path", [
+@pytest.mark.parametrize("selector,path", [
     ("auto", "/v1/chat/completions"),
     ("chat_completions", "/v1/chat/completions"),
     ("responses", "/v1/responses"),
 ])
-async def test_migrated_openai_default_routes_and_allows_model_override(bind_transport, tmp_path, legacy, path):
+async def test_openai_connection_api_round_trip_and_model_override(bind_transport, tmp_path, selector, path):
     from nanobot.config.loader import load_config, save_config
 
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({
-        "providers": {"openai": {"apiKey": "fixture", "apiType": legacy}},
+        "providers": {"openai": {
+            "apiKey": "fixture",
+            "api": None if selector == "auto" else {"supportedApis": [selector]},
+        }},
         "agents": {"defaults": {"model": "gpt-4o", "provider": "openai"}},
     }), encoding="utf-8")
     config = load_config(config_path)
@@ -733,9 +736,9 @@ async def test_migrated_openai_default_routes_and_allows_model_override(bind_tra
     assert (await provider.chat([{"role": "user", "content": "hello"}])).content == "ok"
     assert requests == [path]
     assert resolve_automatic_model_api(config, preset=config.resolve_preset())[1] == (
-        "responses" if legacy == "responses" else "chat_completions"
+        "responses" if selector == "responses" else "chat_completions"
     )
-    opposite = "chat_completions" if legacy == "responses" else "responses"
+    opposite = "chat_completions" if selector == "responses" else "responses"
     config.model_presets["override"] = ModelPresetConfig(
         model="gpt-4o", provider="openai", api=ModelAPIConfig(supported_apis=(opposite,)),
     )
@@ -744,18 +747,21 @@ async def test_migrated_openai_default_routes_and_allows_model_override(bind_tra
     assert requests[-1] == ("/v1/responses" if opposite == "responses" else "/v1/chat/completions")
 
 
-@pytest.mark.parametrize("env_field", ["API_TYPE", "APITYPE"])
-@pytest.mark.parametrize("legacy,path", [
+@pytest.mark.parametrize("selector,path", [
     ("auto", "/v1/chat/completions"),
     ("chat_completions", "/v1/chat/completions"),
     ("responses", "/v1/responses"),
 ])
-async def test_legacy_openai_environment_selector_keeps_request_api(
-    bind_transport, tmp_path, monkeypatch, env_field, legacy, path,
+async def test_openai_environment_api_object_selects_request_api(
+    bind_transport, tmp_path, monkeypatch, selector, path,
 ):
     from nanobot.config.loader import load_config
 
-    monkeypatch.setenv(f"NANOBOT_PROVIDERS__OPENAI__{env_field}", legacy)
+    if selector != "auto":
+        monkeypatch.setenv(
+            "NANOBOT_PROVIDERS__OPENAI__API",
+            json.dumps({"supportedApis": [selector]}),
+        )
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({
         "providers": {"openai": {"apiKey": "fixture", "apiBase": "https://tenant.test/v1"}},
