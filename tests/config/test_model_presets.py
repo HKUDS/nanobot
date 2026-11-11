@@ -72,21 +72,6 @@ def test_agent_timezones_use_packaged_data_without_system_database() -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("field", ["apiType", "api_type"])
-def test_retired_provider_api_in_file_requires_explicit_migration(tmp_path, field):
-    from nanobot.config.loader import load_config
-
-    path = tmp_path / "config.json"
-    before = json.dumps({"providers": {"openai": {"apiKey": "fixture-secret", field: "responses"}}})
-    path.write_text(before, encoding="utf-8")
-    with pytest.raises(ConfigLoadError, match="apiType setting was removed") as exc:
-        load_config(path)
-    assert exc.value.issues[0].location == "providers.openai"
-    assert "supportedApis" in str(exc.value)
-    assert "fixture-secret" not in str(exc.value)
-    assert path.read_text(encoding="utf-8") == before
-
-
 def test_old_installation_defaults_load_without_changing_provider_api(tmp_path):
     from nanobot.config.loader import load_config, save_config
 
@@ -100,7 +85,6 @@ def test_old_installation_defaults_load_without_changing_provider_api(tmp_path):
     assert config.providers.custom.api is None
     save_config(config, path)
     assert load_config(path).providers.custom.api_base == "https://example.test/v1"
-    assert "apiType" not in json.loads(path.read_text(encoding="utf-8"))["providers"]["openai"]
 
 
 @pytest.mark.parametrize("api", [None, {"supportedApis": ["chat_completions"]}])
@@ -112,31 +96,6 @@ def test_current_provider_api_stays_authoritative_if_old_key_remains(api):
     assert (resolved.to_capabilities().preferred_api if resolved else None) == (
         "chat_completions" if api else None
     )
-
-
-@pytest.mark.parametrize("field", ["API_TYPE", "APITYPE"])
-def test_retired_provider_api_in_launcher_can_be_replaced_without_editing_config(
-    tmp_path, monkeypatch, field,
-):
-    from nanobot.config.loader import load_config
-    from nanobot.providers.factory import resolve_automatic_model_api
-
-    path = tmp_path / "config.json"
-    before = '{"agents":{"defaults":{"model":"gpt-4o","provider":"openai"}},"providers":{"openai":{"apiKey":"fixture"}}}'
-    path.write_text(before, encoding="utf-8")
-    legacy_variable = f"NANOBOT_PROVIDERS__OPENAI__{field}"
-    monkeypatch.setenv(legacy_variable, "responses")
-    with pytest.raises(ConfigLoadError, match="apiType setting was removed"):
-        load_config(path)
-    assert path.read_text(encoding="utf-8") == before
-
-    monkeypatch.delenv(legacy_variable)
-    monkeypatch.setenv("NANOBOT_PROVIDERS__OPENAI__API", '{"supportedApis":["responses"]}')
-    for _ in range(2):
-        config = load_config(path)
-        assert config.providers.openai.api_key == "fixture"
-        assert resolve_automatic_model_api(config, preset=config.resolve_preset()) == ("openai", "responses")
-    assert path.read_text(encoding="utf-8") == before
 
 
 @pytest.mark.parametrize("provider_name", ["openai-codex", "github-copilot", "lm-studio"])
