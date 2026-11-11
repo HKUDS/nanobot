@@ -1969,8 +1969,8 @@ describe("NanobotClient", () => {
     const otherChat = vi.fn();
     client.onChat("other-chat", otherChat);
     const taskUpdate = {
-      event: "subagent_task", chat_id: "chat-canonical",
-      task: { task_id: "child", origin_turn_id: "turn-canonical", state: "done", revision: 4 },
+      event: "subagent_task_settled", chat_id: "chat-canonical", task_id: "child",
+      state: "done", revision: 4, completed_at: 12_350,
     };
     lastSocket().fakeMessage(taskUpdate);
     expect(chatHandler).toHaveBeenLastCalledWith(taskUpdate);
