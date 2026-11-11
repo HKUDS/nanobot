@@ -765,6 +765,25 @@ async def test_model_update_route_forwards_session_rename_dependency(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_older_client_does_not_partially_update_provider_settings(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    before = '{"providers":{"openai":{"apiKey":"fixture","api":{"supportedApis":["responses"]}}}}'
+    config_path.write_text(before, encoding="utf-8")
+    refresh = MagicMock()
+    router = _router(config_path=config_path, refresh_runtime_config=refresh)
+    path = "/api/settings/provider/update"
+    request = _mutation_request(path, {"provider": "openai", "apiType": "auto", "apiBase": "https://example.test/v1"})
+
+    response = await router.dispatch(None, request, path)
+
+    assert response is not None
+    assert response.status_code == 400
+    assert "Update the client" in json.loads(response.body)["error"]
+    assert config_path.read_text(encoding="utf-8") == before
+    refresh.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_settings_get_mutation_route_is_method_not_allowed() -> None:
     path = "/api/settings/provider/update"
     request = SimpleNamespace(
