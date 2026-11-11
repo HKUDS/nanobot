@@ -8,6 +8,7 @@ import { copyThreadCheckpoint, createThreadCheckpoint, type ThreadCheckpoint } f
 import { hasPendingAgentActivity } from "./activity-timeline";
 import { reconcileModelRequest } from "./model-request";
 import { joinThreadFragments } from "./thread-page-fragments";
+import { ThreadProjectionIndex } from "./thread-projection-index";
 import type { ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "./types";
 
 type Ranges = Array<[number, number]>;
@@ -87,8 +88,7 @@ export interface ThreadTranscriptSnapshot extends ThreadCheckpoint {
 function addRange(ranges: Ranges, first: number, last = first): void {
   let start = first;
   let end = last;
-  let index = 0;
-  while (index < ranges.length && ranges[index][1] + 1 < start) index++;
+  let index = rangeAt(ranges, start - 1);
   const from = index;
   while (index < ranges.length && ranges[index][0] <= end + 1) {
     start = Math.min(start, ranges[index][0]);
@@ -97,8 +97,20 @@ function addRange(ranges: Ranges, first: number, last = first): void {
   }
   ranges.splice(from, index - from, [start, end]);
 }
+function rangeAt(ranges: Ranges, seq: number): number {
+  let low = 0;
+  let high = ranges.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (ranges[mid][1] < seq) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
 function contains(ranges: Ranges | undefined, seq: number): boolean {
-  return ranges?.some(([first, last]) => first <= seq && seq <= last) === true;
+  if (!ranges) return false;
+  const index = rangeAt(ranges, seq);
+  return index < ranges.length && ranges[index][0] <= seq;
 }
 function mergeMembers(target: Members, source: Members): void {
   for (const [turn, ranges] of source) {
@@ -111,9 +123,11 @@ function copyMembers(value: Members): Members {
   return new Map(Array.from(value, ([key, ranges]) => [key, ranges.map(([a, b]) => [a, b])]));
 }
 function mergeCoveredMembers(target: Members, members: Members, coverage: Members): void {
-  for (const [turn, ranges] of members) for (const [first, last] of ranges) {
-    for (const [a, b] of coverage.get(turn) ?? []) {
-      if (first <= b && a <= last) {
+  for (const [turn, ranges] of members) {
+    const covered = coverage.get(turn) ?? [];
+    for (const [first, last] of ranges) {
+      for (let index = rangeAt(covered, first); index < covered.length && covered[index][0] <= last; index++) {
+        const [a, b] = covered[index];
         const kept = target.get(turn) ?? [];
         addRange(kept, Math.max(first, a), Math.min(last, b));
         target.set(turn, kept);
@@ -141,12 +155,62 @@ function coversText(certificate: TextSource, text: TextSource): boolean {
   return certificate.snapshot && certificate.after !== null && sameWire(certificate, text)
     && text.members.every(([first, last]) => first > certificate.after! && last <= certificate.through);
 }
-function sourcesOverlap(candidate: Unit, retained: Unit): boolean {
-  if (Array.from(candidate.sources).some((key) => !key.startsWith("text:") && retained.sources.has(key))) return true;
-  return candidate.text.some((left) => retained.text.some((right) => sameWire(left, right)
-    && ((left.phase === "answer" && left.stream !== "")
-      // Ordered canonical ends identify reset buffers even when attachment missed a prior end.
-      || right.members.some(([first, last]) => last > (left.after ?? -1) && first <= (left.end ?? Infinity)))));
+function matchUnits(candidates: Set<Unit>, retained: Set<Unit>): {
+  byOld: Map<Unit, Set<Unit>>; byNew: Map<Unit, Set<Unit>>;
+} {
+  const sources = new Map<string, Unit>();
+  type Interval = { unit: Unit; start: number; end: number; maxEnd: number };
+  const wires = new Map<string, Interval[]>();
+  const wireKey = (text: TextSource) => JSON.stringify([text.turn, text.phase, text.stream]);
+  for (const unit of candidates) {
+    for (const source of unit.sources) if (!source.startsWith("text:")) sources.set(source, unit);
+    for (const text of unit.text) {
+      const key = wireKey(text);
+      const intervals = wires.get(key) ?? [];
+      const namedAnswer = text.phase === "answer" && text.stream !== "";
+      intervals.push({ unit, start: namedAnswer ? -Infinity : text.after ?? -1,
+        end: namedAnswer ? Infinity : text.end ?? Infinity, maxEnd: -Infinity });
+      wires.set(key, intervals);
+    }
+  }
+  for (const intervals of wires.values()) {
+    intervals.sort((a, b) => a.start - b.start);
+    let max = -Infinity;
+    for (const interval of intervals) interval.maxEnd = max = Math.max(max, interval.end);
+  }
+  const byOld = new Map<Unit, Set<Unit>>();
+  const byNew = new Map<Unit, Set<Unit>>();
+  for (const old of retained) {
+    const matches = new Set<Unit>();
+    for (const source of old.sources) {
+      const unit = sources.get(source);
+      if (unit) matches.add(unit);
+    }
+    for (const text of old.text) {
+      const intervals = wires.get(wireKey(text));
+      if (!intervals) continue;
+      for (const [first, last] of text.members) {
+        let low = 0;
+        let high = intervals.length;
+        while (low < high) {
+          const mid = (low + high) >>> 1;
+          if (intervals[mid].start < last) low = mid + 1;
+          else high = mid;
+        }
+        for (let i = low - 1; i >= 0 && intervals[i].maxEnd >= first; i--) {
+          if (intervals[i].end >= first) matches.add(intervals[i].unit);
+        }
+      }
+    }
+    if (!matches.size) continue;
+    byOld.set(old, matches);
+    for (const unit of matches) {
+      const previous = byNew.get(unit) ?? new Set<Unit>();
+      previous.add(old);
+      byNew.set(unit, previous);
+    }
+  }
+  return { byOld, byNew };
 }
 function unitPosition(unit: Unit | undefined, turn: string): number | null {
   if (!unit) return null;
@@ -169,6 +233,8 @@ export class ThreadTranscript {
   private units = new Set<Unit>();
   private byRow = new Map<string, Unit>();
   private bySource = new Map<string, Unit>();
+  private projectionIndex = new ThreadProjectionIndex();
+  private historyReplay: { events: ThreadProjectionEvent[]; generation: string | null; owner: ThreadTranscript } | null = null;
   private installed: Members = new Map();
   private textCoverage: TextSource[] = [];
   private boundaries = new Map<string, number>();
@@ -300,7 +366,7 @@ export class ThreadTranscript {
 
   project(event: ThreadProjectionEvent, options: {
     createId: () => string; now: number; persisted?: boolean; sideChannel?: boolean; startSeq?: number;
-    contributions?: ThreadProjectionEvent[]; sourceRevision?: number;
+    contributions?: ThreadProjectionEvent[]; sourceRevision?: number; mutableCollections?: boolean;
   }): UIMessage[] {
     if (!options.persisted && event.event === "user_message" && !event.provenance?.session_message) {
       event = { turn_seq: 0, ...event };
@@ -367,7 +433,7 @@ export class ThreadTranscript {
       projection = { ...projection, messages: [...messages.slice(0, before), ...additions, ...messages.slice(before)],
         closedAssistantIds: scratch.closedAssistantIds, closedAnswerStreamIds: scratch.closedAnswerStreamIds };
     } else {
-      projection = projectThreadEvent(projection, event, { ...options, effects });
+      projection = projectThreadEvent(projection, event, { ...options, effects, index: this.projectionIndex });
     }
     if (event.event === "user_message" && projection.messages === this.messages) return this.messages;
     this.projection = projection;
@@ -461,6 +527,30 @@ export class ThreadTranscript {
     return true;
   }
 
+  private projectHistory(events: ThreadProjectionEvent[], generation: string | null): ThreadTranscript {
+    const previous = this.historyReplay;
+    const reuse = previous?.generation === generation && events.length >= previous.events.length
+      && previous.events.every((event, index) => event === events[index]
+        || JSON.stringify(event) === JSON.stringify(events[index]));
+    const candidate = new ThreadTranscript([], undefined, { recordLiveContributions: false });
+    if (reuse) {
+      const owner = previous.owner;
+      candidate.projection = copyThreadCheckpoint(owner).projection;
+      candidate.units = new Set(owner.units);
+      candidate.byRow = new Map(owner.byRow);
+      candidate.bySource = new Map(owner.bySource);
+      candidate.boundaries = new Map(owner.boundaries);
+      candidate.knownTurns = new Set(owner.knownTurns);
+      candidate.order = owner.order;
+    }
+    for (let index = reuse ? previous.events.length : 0; index < events.length; index++) {
+      candidate.project(events[index], { createId: () => `history-${index}`, now: 0, persisted: true, mutableCollections: true });
+    }
+    // Only canonical replay is reusable; live overlays and admission never enter this cache.
+    this.historyReplay = { events, generation, owner: candidate };
+    return candidate;
+  }
+
   accept(body: WebuiThreadPersistedPayload | null, read: ThreadRead): boolean {
     this.fragmentCompletedTurnIds = [];
     if (read.kind === "older" && (read.lineage !== this.paging.lineage || read.before !== this.paging.beforeCursor)) return false;
@@ -516,9 +606,7 @@ export class ThreadTranscript {
     const canonical = body ? persistedCanonicalRunState(body) : null;
     const completed = new Set(canonical?.completedTurnIds);
     const completeSnapshot = !body?.page?.truncated_oversized_turn && (!joined || groupRange?.start === 0);
-    let candidate = new ThreadTranscript();
-    for (const [index, event] of (body?.events ?? []).entries()) candidate.project(event,
-      { createId: () => `history-${index}`, now: 0, persisted: true });
+    let candidate = this.projectHistory(body?.events ?? [], generation);
     const durableText = new Map<string, TextSource>();
     for (const unit of candidate.units) {
       mergeMembers(candidate.installed, unit.members);
@@ -587,8 +675,8 @@ export class ThreadTranscript {
       const unit = this.bySource.get(source);
       return unit ? [unit] : [];
     }));
-    const overlaps = new Set([...withdrawn, ...Array.from(this.units).filter((old) =>
-      Array.from(candidate.units).some((unit) => sourcesOverlap(unit, old)))]);
+    const matches = matchUnits(candidate.units, this.units);
+    const overlaps = new Set([...withdrawn, ...matches.byOld.keys()]);
     const firstOverlap = this.messages.findIndex((row) => overlaps.has(this.byRow.get(row.id)!));
     const windowRows = new Set(this.messages.slice(Math.max(0, firstOverlap)).map((row) => row.id));
     const received = replacedHistory ? [] : Array.from(this.units).filter((unit) => unit.received > 0
@@ -610,23 +698,30 @@ export class ThreadTranscript {
       return false;
     }
     const held = new Set<Unit>();
-    for (const unit of candidate.units) {
-      if (protectedUnits.some((old) => sourcesOverlap(unit, old))) held.add(unit);
-      for (const old of protectedUnits) for (const turn of old.members.keys()) {
-        const at = unitPosition(unit, turn);
+    const protectedStarts = new Map<string, number>();
+    for (const old of protectedUnits) {
+      for (const unit of matches.byOld.get(old) ?? []) held.add(unit);
+      for (const turn of old.members.keys()) {
         const start = unitPosition(old, turn);
-        if (at !== null && start !== null && at >= start) held.add(unit);
+        if (start !== null) protectedStarts.set(turn, Math.min(start, protectedStarts.get(turn) ?? Infinity));
       }
+    }
+    for (const unit of candidate.units) for (const turn of unit.members.keys()) {
+      const start = protectedStarts.get(turn);
+      const at = start === undefined ? null : unitPosition(unit, turn);
+      if (at !== null && at >= start!) held.add(unit);
     }
     const rows = candidate.messages;
     let cut = rows.findIndex((row) => held.has(candidate.byRow.get(row.id)!));
     if (cut < 0) cut = rows.length;
+    const lastRow = new Map<Unit, number>();
+    rows.forEach((row, index) => lastRow.set(candidate.byRow.get(row.id)!, index));
     // A whole source can straddle several rows: never install only part of it.
     for (let changed = true; changed;) {
       changed = false;
       for (let index = 0; index < cut; index++) {
         const unit = candidate.byRow.get(rows[index].id)!;
-        if (rows.slice(cut).some((row) => unit.rows.has(row.id))) { cut = index; changed = true; break; }
+        if (lastRow.get(unit)! >= cut) { cut = index; changed = true; break; }
       }
     }
     const admittedRows = rows.slice(0, cut);
@@ -636,7 +731,7 @@ export class ThreadTranscript {
       if (unit.rows.size === 0 && unit.order < cutOrder && !held.has(unit)) admitted.add(unit);
     }
     if (read.kind === "older" && Array.from(candidate.units).some((unit) => !admitted.has(unit)
-      && !Array.from(this.units).some((old) => sourcesOverlap(unit, old)))) {
+      && !matches.byNew.has(unit))) {
       this.finishRead(read, "Could not place earlier history");
       return false;
     }
@@ -645,7 +740,7 @@ export class ThreadTranscript {
       && (this.messages.length === 0 || reset || overlaps.size > 0);
     const replaced = new Set<Unit>();
     for (const old of this.units) if ((reset && !protectedUnits.includes(old))
-      || ((withdrawn.has(old) || Array.from(admitted).some((unit) => sourcesOverlap(unit, old)))
+      || ((withdrawn.has(old) || Array.from(matches.byOld.get(old) ?? []).some((unit) => admitted.has(unit)))
         && (old.received === 0 || this.unitCovered(old, candidate)))) replaced.add(old);
     const previousCount = this.messages.length;
     const firstReplaced = this.messages.findIndex((row) => replaced.has(this.byRow.get(row.id)!));
@@ -656,8 +751,8 @@ export class ThreadTranscript {
     if (keepSuffix) for (const [index, row] of this.messages.entries()) {
       const old = this.byRow.get(row.id)!;
       if (!replaced.has(old)) continue;
-      for (const unit of admitted) {
-        if (!anchors.has(unit) && sourcesOverlap(unit, old)) anchors.set(unit, index);
+      for (const unit of matches.byOld.get(old) ?? []) {
+        if (admitted.has(unit) && !anchors.has(unit)) anchors.set(unit, index);
       }
     }
     const segments = new Map<string, string>();
@@ -758,12 +853,16 @@ export class ThreadTranscript {
         this.boundaries.set(key, Math.max(end, this.boundaries.get(key) ?? 0));
       }
     }
+    this.projection.closedTurnIds = new Set(this.projection.closedTurnIds);
+    this.projection.closedAssistantIds = new Set(this.projection.closedAssistantIds);
+    this.projection.closedAnswerStreamIds = new Set(this.projection.closedAnswerStreamIds);
     for (const event of body?.events ?? []) {
       if (event.event === "turn_end" && event.turn_id && event.turn_seq !== undefined
         && contains(this.installed.get(event.turn_id), event.turn_seq)) this.projection.closedTurnIds.add(event.turn_id);
     }
+    const admittedRowIds = new Set(admittedRows.map((row) => row.id));
     for (const id of candidate.projection.closedAssistantIds) {
-      if (admittedRows.some((row) => row.id === id)) this.projection.closedAssistantIds.add(id);
+      if (admittedRowIds.has(id)) this.projection.closedAssistantIds.add(id);
     }
     const admittedStreams = new Set(admittedRows.filter((row) => row.streamId)
       .map((row) => JSON.stringify([row.turnId ?? "", row.streamId])));
@@ -847,11 +946,14 @@ export class ThreadTranscript {
     const scratch = new ThreadTranscript();
     events.forEach((event, index) => scratch.project(event,
       { createId: () => `detail:${ref}:${index}`, now: 0, persisted: true }));
-    const unit = this.byRow.get(target.id)!;
+    const previous = this.byRow.get(target.id)!;
+    const unit = { ...previous, rows: new Set(previous.rows) };
+    this.units.delete(previous);
     unit.rows.delete(target.id);
     this.byRow.delete(target.id);
     const replacements = scratch.messages.map((row) => ({ ...row, activitySegmentId: target.activitySegmentId }));
-    for (const row of replacements) { unit.rows.add(row.id); this.byRow.set(row.id, unit); }
+    for (const row of replacements) unit.rows.add(row.id);
+    this.installUnit(unit);
     this.projection = { ...this.projection, messages: this.messages.flatMap((row) => row === target ? replacements : [row]) };
   }
 

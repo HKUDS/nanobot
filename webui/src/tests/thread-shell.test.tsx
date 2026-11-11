@@ -245,7 +245,7 @@ function streamedThreadPayload(
         projection_id: `answer:${row.turnId}:${row.streamId}:${endSeq}`,
         turn_id: row.turnId, turn_phase: "answer", turn_seq: endSeq,
         stream_id: row.streamId, text: row.content,
-        projection_receipts: [{ turn_id: row.turnId, ranges: [[textSeq, endSeq]] }],
+        text_from_seq: textSeq,
         ...(row.mergeNext ? { resuming: true, merge_next: true } : {}),
       });
     }
@@ -4569,7 +4569,7 @@ describe("ThreadShell", () => {
     ));
   });
 
-  it("keeps the live answer cursor when a resumed turn is still running", async () => {
+  it("catches up the active answer and keeps its cursor when a resumed turn is still running", async () => {
     const client = makeClient();
     let historyCalls = 0;
     const turnId = "turn-active-resume";
@@ -4645,6 +4645,7 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
     act(() => client._emitStatus("open"));
     await waitFor(() => expect(historyCalls).toBe(2));
+    await screen.findByText("partial answer missed");
     expect(client.sendMessage).not.toHaveBeenCalled();
 
     act(() => {
@@ -4656,7 +4657,7 @@ describe("ThreadShell", () => {
       });
     });
 
-    await waitFor(() => expect(screen.getByText("partial answer resumed")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("partial answer missed resumed")).toBeInTheDocument());
     expect(screen.queryByText(" resumed")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
 

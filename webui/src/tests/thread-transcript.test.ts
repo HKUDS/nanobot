@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadTranscript } from "@/lib/thread-transcript";
+import * as eventProjection from "@/lib/thread-event-projection";
 import type { ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
 
 const NOW = 1_800_000_000_000;
@@ -41,6 +42,43 @@ function receive(thread: ThreadTranscript, ...events: ThreadProjectionEvent[]): 
 }
 
 describe("ThreadTranscript admission", () => {
+  it("reuses an unchanged fragment prefix but replaces a revised answer with the same identity", () => {
+    const thread = new ThreadTranscript();
+    const events: ThreadProjectionEvent[] = [
+      input("append", "Question"),
+      { ...at("append", 2), event: "stream_end", stream_id: "first", text: "First", text_from_seq: 2 },
+      { ...at("append", 3), event: "message", kind: "tool_hint", text: "Tool" },
+      { ...at("append", 4), event: "stream_end", stream_id: "second", text: "Second", text_from_seq: 4 },
+    ];
+    const page = (start: number, end: number, values = events) => history(values.slice(start, end), {
+      completed_turn_ids: [], has_pending_tool_calls: true,
+      page: { record_range: { turn: 0, start, end }, history_generation: "append-generation",
+        truncated_oversized_turn: true, before_cursor: start ? `before-${start}` : null,
+        has_more_before: start > 0, user_message_offset: 0 },
+    });
+    expect(thread.accept(page(0, 3), thread.begin("initial"))).toBe(true);
+    const saved = thread.save();
+    const project = vi.spyOn(eventProjection, "projectThreadEvent");
+    try {
+      expect(thread.accept(page(2, 4), thread.begin("latest"))).toBe(true);
+      expect(thread.messages.map((row) => row.content)).toEqual(["Question", "First", "Tool", "Second"]);
+      expect(project).toHaveBeenCalledTimes(1);
+      expect(project.mock.calls[0][1]).toMatchObject({ event: "stream_end", text: "Second" });
+      project.mockClear();
+      expect(thread.accept(page(2, 4), thread.begin("latest"))).toBe(true);
+      expect(project).toHaveBeenCalledTimes(0);
+      const revised = events.map((event) => event.event === "stream_end" && event.stream_id === "second"
+        ? { ...event, text: "Corrected second" } : event);
+      expect(thread.accept(page(2, 4, revised), thread.begin("latest"))).toBe(true);
+      expect(thread.messages.map((row) => row.content)).toEqual(["Question", "First", "Tool", "Corrected second"]);
+      const restored = new ThreadTranscript([], saved);
+      expect(restored.accept(page(2, 4), restored.begin("latest"))).toBe(true);
+      expect(restored.messages.map((row) => row.content)).toEqual(["Question", "First", "Tool", "Second"]);
+    } finally {
+      project.mockRestore();
+    }
+  });
+
   it("updates a represented live input's final image URL without duplicating it", () => {
     const thread = new ThreadTranscript();
     const first: ThreadProjectionEvent = { ...at("upload", 1), event: "user_message", text: "look", starts_turn: true,
