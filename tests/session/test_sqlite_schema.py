@@ -286,18 +286,3 @@ def test_archive_reference_allows_atomic_session_replacement_but_not_orphan_comm
     assert store.archived_keys() == [original.key]
     assert store.delete(original.key)
     assert store.archived_keys() == []
-
-
-def test_database_from_earlier_subagent_pr_build_remains_readable(tmp_path, monkeypatch):
-    store = SqliteSessionStore(tmp_path)
-    workspace = tmp_path / "workspace"
-
-    def prior_v6(db: sqlite3.Connection) -> None:
-        db.execute("CREATE INDEX subagent_active_state ON sessions (key)")
-
-    with monkeypatch.context() as patch:
-        patch.setattr(sqlite_store, "_SCHEMA_MIGRATIONS", (*sqlite_store._SCHEMA_MIGRATIONS[:5], prior_v6))
-        store.initialize(workspace)
-        store.save(_session())
-    store.initialize(workspace)
-    assert store.load("chat:extensions").messages[0]["content"] == "hello"

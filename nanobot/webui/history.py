@@ -27,7 +27,6 @@ _EVENTS = {
     "fork_marker": HistoryKind.FORK_BOUNDARY,
     "context_compaction": HistoryKind.COMPACTION,
     "model_request": HistoryKind.MODEL_REQUEST,
-    "subagent_anchor": HistoryKind.SUBAGENT_ANCHOR,
     "delta": HistoryKind.ANSWER_FRAGMENT,
     "reasoning_delta": HistoryKind.REASONING_FRAGMENT,
 }

@@ -123,15 +123,9 @@ def _create_schema_v5(db: sqlite3.Connection) -> None:
     ) WHERE kind='input'""")
 
 
-def _create_schema_v6(db: sqlite3.Connection) -> None:
-    # Earlier PR builds created indexes at version 6; retain database compatibility.
-    pass
-
-
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4, _create_schema_v5,
-    _create_schema_v6,
 )
 
 

@@ -1291,18 +1291,3 @@ def test_model_request_persists_through_reconnect_projection(history, tmp_path, 
     assert {field: event[field] for field in record} == record
     assert len(event["round_usages"]) == 8
     assert event["usage"] == usage.to_turn_dict()
-
-
-def test_earlier_pr_task_markers_leave_conversation_readable(history, tmp_path):
-    from nanobot.session.manager import SessionManager
-
-    key = "websocket:old-task-marker"
-    history.append(key, {"event": "user", "text": "Inspect config"})
-    history.append(key, {"event": "subagent_anchor", "task_id": "old-task", "call_id": "old-call"})
-    history.append(key, {"event": "message", "text": "Inspection complete"})
-    history.append(key, {"event": "turn_end"})
-    reopened = SessionManager(tmp_path)
-    response = reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(key, history=snapshot))
-    assert [(event["event"], event.get("text")) for event in response["events"]] == [
-        ("user_message", "Inspect config"), ("message", "Inspection complete"), ("turn_end", None),
-    ]
