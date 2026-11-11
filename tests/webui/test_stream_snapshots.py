@@ -90,7 +90,10 @@ async def test_signed_snapshots_survive_http_pagination_and_restart_without_rewr
     stored = history.read("websocket:snapshots")
     ends = [row for row in stored if row["event"] == "stream_end"]
     assert [row["text"] for row in ends] == [first["text"], second["text"], "unrelated"]
-    assert next(row for row in stored if row["event"] == "reasoning_end")["text"] == "thinking"
+    reasoning = next(row for row in stored if row["event"] == "reasoning_end")
+    assert reasoning["text"] == "thinking"
+    assert [row["text_from_seq"] for row in ends] == [frames[0]["turn_seq"], frames[0]["turn_seq"], frames[2]["turn_seq"]]
+    assert reasoning["text_from_seq"] == next(frame["turn_seq"] for frame in live if frame["event"] == "reasoning_delta")
     assert all(row["event"] not in {"delta", "reasoning_delta"} for row in stored)
     records = _stored_records(history.sessions)
     assert "diagram.png" not in json.dumps(records)
@@ -129,3 +132,36 @@ async def test_signed_snapshots_survive_http_pagination_and_restart_without_rewr
         assert _stored_records(restarted_sessions) == records
     finally:
         await restarted_sessions.state.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reasoning", [False, True])
+async def test_snapshot_coverage_follows_buffer_resets_after_a_failed_append(history, tmp_path, monkeypatch, reasoning):
+    gateway, channel = _gateway(history, tmp_path, monkeypatch)
+    ws = AsyncMock()
+    channel._attach(ws, "reset")
+    metadata = await history.metadata("reset", {WEBUI_TURN_METADATA_KEY: "turn-reset"})
+
+    async def chunk(text):
+        if reasoning:
+            await channel.send_reasoning_delta("reset", text, metadata)
+        else:
+            await channel.send_delta("reset", text, metadata)
+
+    async def end():
+        if reasoning:
+            await channel.send_reasoning_end("reset", metadata)
+        else:
+            await channel.send_delta("reset", "", metadata, stream_end=True)
+
+    await chunk("not persisted")
+    with monkeypatch.context() as patch:
+        patch.setattr(gateway.transcripts, "append", AsyncMock(return_value=False))
+        await end()
+    await chunk("next buffer")
+    await end()
+    frames = _frames(ws)
+    snapshot = history.read("websocket:reset")[0]
+    assert snapshot["text"] == "next buffer"
+    assert snapshot["text_from_seq"] == frames[2]["turn_seq"] > frames[1]["turn_seq"]
+    assert frames[3]["text_from_seq"] == snapshot["text_from_seq"]

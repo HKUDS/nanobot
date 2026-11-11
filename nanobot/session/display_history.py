@@ -190,6 +190,21 @@ class HistoryReader:
             (self.key, input_id),
         ).fetchone() is not None
 
+    def has_missing_input_references(self, ordinal: int) -> bool:
+        """Detect backfill across page boundaries without loading answer bodies."""
+        return self._db.execute(
+            """SELECT 1 FROM history_entries AS answer,
+                          json_each(answer.record, '$.content.response_input_ids') AS reference
+               WHERE answer.session_key=? AND answer.turn_ordinal=? AND answer.kind IN (?, ?, ?)
+               AND reference.type='text' AND reference.value!=''
+               AND NOT EXISTS (
+                   SELECT 1 FROM history_entries AS input WHERE input.session_key=answer.session_key
+                   AND input.kind=? AND json_extract(input.record, '$.content.input_id')=reference.value
+               ) LIMIT 1""",
+            (self.key, ordinal, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT,
+             HistoryKind.ANSWER_FRAGMENT, HistoryKind.INPUT),
+        ).fetchone() is not None
+
     def unique_user_position(self, ordinal: int) -> int | None:
         positions = self._db.execute(
             """SELECT position FROM history_entries WHERE session_key=? AND turn_ordinal=?

@@ -385,6 +385,10 @@ function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet
     case "stream_end":
     case "reasoning_end":
       if (value.text !== undefined && typeof value.text !== "string") break;
+      if (value.text_from_seq !== undefined && (
+        !Number.isSafeInteger(value.text_from_seq) || Number(value.text_from_seq) < 0
+        || !Number.isSafeInteger(value.turn_seq) || Number(value.text_from_seq) > Number(value.turn_seq)
+      )) break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
       if (value.context_graph !== undefined && !validatedGraphs.has(value.context_graph) && !isContextGraph(value.context_graph)) break;

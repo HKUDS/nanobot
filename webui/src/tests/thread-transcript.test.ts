@@ -237,7 +237,7 @@ describe("ThreadTranscript admission", () => {
     const thread = new ThreadTranscript();
     const installed: ThreadProjectionEvent = {
       ...at("turn-history-first", 4), event: "stream_end", stream_id: "answer-first",
-      text: "Installed ", resuming: true, merge_next: true,
+      text: "Installed ", text_from_seq: 2, resuming: true, merge_next: true,
     };
     expect(thread.accept(history([input("turn-history-first", "Continue"), installed]), thread.begin("initial"))).toBe(true);
     const answerId = thread.messages[1].id;
@@ -281,9 +281,9 @@ describe("ThreadTranscript admission", () => {
     const thread = new ThreadTranscript();
     expect(thread.accept(history([
       input("turn-no-id", "Think in stages"),
-      { ...at("turn-no-id", 3), event: "reasoning_end", text: "First thought" },
+      { ...at("turn-no-id", 3), event: "reasoning_end", text: "First thought", text_from_seq: 2 },
       { ...at("turn-no-id", 4), event: "message", kind: "progress", text: "Read a file" },
-      { ...at("turn-no-id", 7), event: "reasoning_end", text: "Second thought" },
+      { ...at("turn-no-id", 7), event: "reasoning_end", text: "Second thought", text_from_seq: 6 },
     ]), thread.begin("initial"))).toBe(true);
 
     receive(thread,
@@ -407,8 +407,8 @@ describe("ThreadTranscript admission", () => {
     const original = new ThreadTranscript();
     expect(original.accept(history([
       input("turn-cached", "Continue after returning"),
-      { ...at("turn-cached", 3), event: "reasoning_end", text: "Plan." },
-      { ...at("turn-cached", 5), event: "stream_end", stream_id: "answer-cached", text: "First", resuming: true, merge_next: true },
+      { ...at("turn-cached", 3), event: "reasoning_end", text: "Plan.", text_from_seq: 2 },
+      { ...at("turn-cached", 5), event: "stream_end", stream_id: "answer-cached", text: "First", text_from_seq: 4, resuming: true, merge_next: true },
     ]), original.begin("initial"))).toBe(true);
     const sharedId = original.messages[1].id;
     expect(original.accept(history([
@@ -947,17 +947,17 @@ describe("ThreadTranscript admission", () => {
       .toEqual(Array(6).fill("First second"));
   });
 
-  it("prunes a continued wire using the previously installed cumulative snapshot as its prefix", () => {
+  it("retires covered deltas across successive cumulative stream snapshots", () => {
     const thread = new ThreadTranscript();
     const question = input("ordinary-resume", "Question");
     const a: ThreadProjectionEvent = { ...at("ordinary-resume", 2), event: "delta", stream_id: "wire", text: "A" };
     const first: ThreadProjectionEvent = { ...at("ordinary-resume", 3), event: "stream_end", stream_id: "wire",
-      resuming: true, merge_next: true };
+      text_from_seq: 2, resuming: true, merge_next: true };
     receive(thread, question, a, first);
     expect(thread.accept(history([question, { ...first, text: "A" }]), thread.begin("initial"))).toBe(true);
     expect(thread.save().live).toHaveLength(0);
     const b: ThreadProjectionEvent = { ...at("ordinary-resume", 4), event: "delta", stream_id: "wire", text: "B" };
-    const last: ThreadProjectionEvent = { ...at("ordinary-resume", 5), event: "stream_end", stream_id: "wire" };
+    const last: ThreadProjectionEvent = { ...at("ordinary-resume", 5), event: "stream_end", stream_id: "wire", text_from_seq: 2 };
     const done: ThreadProjectionEvent = { ...at("ordinary-resume", 6), event: "turn_end" };
     receive(thread, b, last, done);
     expect(thread.accept(history([question, { ...first, text: "A" }, { ...last, text: "AB" }, done], {
@@ -967,7 +967,7 @@ describe("ThreadTranscript admission", () => {
     expect(thread.save().live).toHaveLength(0);
   });
 
-  it("does not prune ordinary-turn chunks across an intervening tool even when the end text matches", () => {
+  it("retires completed legacy text without swallowing an intervening tool", () => {
     const thread = new ThreadTranscript();
     const question = input("ordinary-tool", "Question");
     const a: ThreadProjectionEvent = { ...at("ordinary-tool", 2), event: "delta", stream_id: "wire", text: "A" };
@@ -980,10 +980,38 @@ describe("ThreadTranscript admission", () => {
     expect(thread.accept(history([question, tool, { ...end, text: "AB" }, done], {
       completed_turn_ids: ["ordinary-tool"],
     }), read)).toBe(true);
-    expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([2, 4]);
+    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "tool()", "AB"]);
+    expect(thread.save().live).toEqual([]);
   });
 
-  it("prunes live deltas when the persisted stream snapshot exactly matches them", () => {
+  it("uses a partial snapshot's coverage without fetching its prefix or comparing signed text", () => {
+    const thread = new ThreadTranscript();
+    const turn = "explicit-coverage";
+    receive(thread,
+      input(turn, "Question"),
+      { ...at(turn, 2), event: "reasoning_delta", stream_id: "wire", text: "Unpersisted reasoning" },
+      { ...at(turn, 3), event: "delta", stream_id: "wire", text: "![image](local.png)" },
+      { ...at(turn, 4), event: "message", kind: "progress", text: "Unpersisted tool" },
+      { ...at(turn, 5), event: "delta", stream_id: "other", text: "Other stream" },
+    );
+    const read = thread.begin("initial");
+    receive(thread, { ...at(turn, 7), event: "delta", stream_id: "wire", text: " fresh tail" });
+    expect(thread.accept(history([
+      { ...at(turn, 6), event: "stream_end", stream_id: "wire", text_from_seq: 3,
+        text: "![image](/api/media/signed)", resuming: true, merge_next: true },
+    ], { active_turn_id: turn, page: { record_range: { turn: 0, start: 5, end: 6 },
+      truncated_oversized_turn: true, has_more_before: true, before_cursor: "older" } }), read)).toBe(true);
+    expect(thread.messages.filter((row) => row.streamId === "wire").map((row) => row.content))
+      .toEqual(["![image](/api/media/signed) fresh tail"]);
+    expect(thread.messages.some((row) => row.reasoning === "Unpersisted reasoning")).toBe(true);
+    expect(thread.messages.some((row) => row.content === "Unpersisted tool")).toBe(true);
+    expect(thread.messages.some((row) => row.content === "Other stream")).toBe(true);
+    expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([1, 2, 4, 5, 7]);
+    expect(thread.hasPendingFragmentGap).toBe(false);
+    expect(thread.paging).toMatchObject({ beforeCursor: "older", hasMoreBefore: true });
+  });
+
+  it("retires live deltas covered by persisted stream snapshots", () => {
     const thread = new ThreadTranscript();
     const events: ThreadProjectionEvent[] = [input("journal-snapshots", "Question")];
     const fragment = () => history(events, {
@@ -996,7 +1024,8 @@ describe("ThreadTranscript admission", () => {
       const stream_id = `wire-${index}`;
       const text = `piece-${index}`;
       const delta: ThreadProjectionEvent = { ...at("journal-snapshots", index * 2 + 2), event: "delta", stream_id, text };
-      const end: ThreadProjectionEvent = { ...at("journal-snapshots", index * 2 + 3), event: "stream_end", stream_id };
+      const end: ThreadProjectionEvent = { ...at("journal-snapshots", index * 2 + 3), event: "stream_end", stream_id,
+        text_from_seq: delta.turn_seq };
       receive(thread, delta, end);
       events.push({ ...end, text });
       expect(thread.accept(fragment(), thread.begin("latest"))).toBe(true);

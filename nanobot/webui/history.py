@@ -40,7 +40,7 @@ _CONTENT_FIELDS = frozenset({
     "session_message", "input_id", "response_input_ids", INBOUND_META_LOCAL_MEDIA, "tool_events", "edits", "source", "response_sources", "resuming",
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
-    "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason", "render_as",
+    "transcript_incomplete", "stream_id", "text_from_seq", "compaction_id", "phase", "reason", "render_as",
     "request_usage", "request_id", "run_id", "sequence", "context_graph", "context_snapshot",
 })
 
@@ -66,6 +66,10 @@ def fact_from_record(record: Mapping[str, Any]) -> HistoryFact:
     sequence = record.get("turn_seq")
     if sequence is not None and (isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0):
         raise ValueError("invalid history sequence")
+    start = record.get("text_from_seq")
+    if start is not None and (isinstance(start, bool) or not isinstance(start, int)
+                              or sequence is None or not 0 <= start <= sequence):
+        raise ValueError("invalid history text coverage")
     turn_id, phase = record.get("turn_id"), record.get("turn_phase")
     if turn_id is not None and (not isinstance(turn_id, str) or len(turn_id) > 128):
         raise ValueError("invalid history turn identity")

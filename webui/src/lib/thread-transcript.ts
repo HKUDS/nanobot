@@ -20,6 +20,7 @@ interface TextSource {
   through: number;
   end: number | null;
   snapshot: boolean;
+  certified: boolean;
   members: Ranges;
 }
 interface LiveContribution {
@@ -155,7 +156,11 @@ function unitPosition(unit: Unit | undefined, turn: string): number | null {
   return positions.length ? Math.min(...positions) : null;
 }
 
-/** One received projection and accepted history frontier. HTTP replay is scratch only. */
+/** One received projection and accepted history frontier. HTTP replay is scratch only.
+ * Record ranges identify stored pages; text_from_seq identifies the live text a
+ * stored end replaces, scoped to its turn, phase and stream. Neither range
+ * implies that intervening tools or the rest of the turn have been loaded.
+ */
 export class ThreadTranscript {
   projection: ThreadProjectionState;
   sideChannelTurnIds = new Set<string>();
@@ -259,7 +264,8 @@ export class ThreadTranscript {
       const phase = event.event.startsWith("reasoning") ? "reasoning" : "answer";
       const stream = event.stream_id ?? "";
       const boundaryKey = JSON.stringify([turn, phase, stream]);
-      let after = phase === "answer" && stream ? 0
+      let after = "text_from_seq" in event && event.text_from_seq !== undefined ? event.text_from_seq - 1
+        : phase === "answer" && stream ? 0
         : this.boundaries.get(boundaryKey) ?? (this.knownTurns.has(turn) ? 0 : null);
       if (after !== null && after >= seq) {
         after = this.knownTurns.has(turn) ? 0 : null;
@@ -275,6 +281,7 @@ export class ThreadTranscript {
       const text: TextSource = { turn, phase, stream, after, through: seq, end,
         snapshot: event.event.endsWith("end") && typeof event.text === "string"
           && (phase === "answer" || event.text.length > 0),
+        certified: "text_from_seq" in event && event.text_from_seq !== undefined,
         members: copyMembers(members).get(turn)! };
       return { source: `text:${textKey(text)}`, members, text };
     }
@@ -383,7 +390,11 @@ export class ThreadTranscript {
           if (prior.end !== null) matching.end = Math.max(matching.end ?? 0, prior.end);
           for (const [first, last] of prior.members) addRange(matching.members, first, last);
           if (prior.snapshot) {
-            matching.through = matching.snapshot ? Math.max(matching.through, prior.through) : prior.through;
+            if (!matching.snapshot || prior.through > matching.through) {
+              matching.through = prior.through;
+              matching.after = prior.after;
+              matching.certified = prior.certified;
+            }
             matching.snapshot = true;
           } else if (!matching.snapshot) matching.through = Math.max(matching.through, prior.through);
         } else unit.text.push(copyText(prior));
@@ -421,9 +432,10 @@ export class ThreadTranscript {
     if (unit.text.length === 0 && Array.from(unit.sources).every((source) => candidate.bySource.has(source))) return true;
     if (unit.members.size === 0) return false;
     const represented = copyMembers(candidate.installed);
-    for (const text of unit.text) {
-      if (Array.from(candidate.units).some((other) => other.text.some((certificate) => coversText(certificate, text)))) {
-        mergeMembers(represented, new Map([[text.turn, text.members]]));
+    for (const text of unit.text) for (const certificate of candidate.textCoverage) {
+      if (certificate.after !== null && sameWire(certificate, text)) {
+        mergeCoveredMembers(represented, new Map([[text.turn, text.members]]),
+          new Map([[text.turn, [[certificate.after + 1, certificate.through]]]]));
       }
     }
     return Array.from(unit.members).every(([turn, ranges]) => ranges.every(([first, last]) =>
@@ -496,68 +508,29 @@ export class ThreadTranscript {
       }
       return this.stageFragment(joined, read, { ...gap, front: groupRange.start });
     }
+    const canonical = body ? persistedCanonicalRunState(body) : null;
+    const completed = new Set(canonical?.completedTurnIds);
+    const completeSnapshot = !body?.page?.truncated_oversized_turn && (!joined || groupRange?.start === 0);
     let candidate = new ThreadTranscript();
     for (const [index, event] of (body?.events ?? []).entries()) candidate.project(event,
       { createId: () => `history-${index}`, now: 0, persisted: true });
     const durableText = new Map<string, TextSource>();
     for (const unit of candidate.units) {
       mergeMembers(candidate.installed, unit.members);
-      for (const text of unit.text) if (text.snapshot && text.after !== null) {
+      for (const text of unit.text) if (text.snapshot && text.after !== null
+        && (text.certified || (completeSnapshot && completed.has(text.turn)))) {
         const previous = durableText.get(textKey(text));
         if (!previous || text.through > previous.through) durableText.set(textKey(text), copyText(text));
       }
     }
     const durableMembers = joined ? candidate.installed : null;
-
-    // Stream deltas are normally persisted as one end snapshot. Match the
-    // whole observed segment, not just a sequence range or a text substring.
-    const snapshotCoverage = new Map<ThreadProjectionEvent, { turn: string; seq: number }>();
-    const anchoredTurns = new Set<string>();
-    for (const snapshot of body?.events ?? []) {
-      if (snapshot.event === "user_message" && snapshot.starts_turn && snapshot.turn_id) anchoredTurns.add(snapshot.turn_id);
-      if ((snapshot.event !== "stream_end" && snapshot.event !== "reasoning_end")
-        || !snapshot.turn_id || snapshot.turn_seq === undefined || !snapshot.text
-        || (joined ? groupRange?.start !== 0 : body?.page?.truncated_oversized_turn || !anchoredTurns.has(snapshot.turn_id))) continue;
-      const phase = snapshot.event === "stream_end" ? "answer" : "reasoning";
-      const certificate = Array.from(durableText.values()).find((text) => text.turn === snapshot.turn_id
-        && text.phase === phase && text.stream === (snapshot.stream_id ?? "")
-        && text.after !== null && text.through === snapshot.turn_seq);
-      if (!certificate || certificate.after === null) continue;
-      const entries = this.live.filter(({ event, sideChannel }) => !sideChannel && event.turn_id === snapshot.turn_id
-        && event.turn_seq !== undefined && event.turn_seq > certificate.after! && event.turn_seq < snapshot.turn_seq!
-        && !event.projection_receipts && ((phase === "answer" && event.event === "delta")
-          || (phase === "reasoning" && event.event === "reasoning_delta"))
-        && event.stream_id === snapshot.stream_id).sort((a, b) => a.event.turn_seq! - b.event.turn_seq!);
-      if (!entries.length || new Set(entries.map(({ event }) => event.turn_seq)).size !== entries.length) continue;
-      const observed = entries.map(({ event }) => event.event === "delta" || event.event === "reasoning_delta" ? event.text : "").join("");
-      let first = entries[0].event.turn_seq!;
-      if (observed !== snapshot.text) {
-        if (snapshot.event !== "stream_end") continue;
-        let previous: Extract<ThreadProjectionEvent, { event: "stream_end" }> | undefined;
-        for (const event of body?.events ?? []) if (event.event === "stream_end" && event.turn_id === snapshot.turn_id
-          && event.stream_id === snapshot.stream_id && event.turn_seq !== undefined && event.turn_seq < snapshot.turn_seq) previous = event;
-        if (!previous?.text || previous.resuming !== true || previous.merge_next !== true || previous.turn_seq === undefined
-          || !contains(this.installed.get(snapshot.turn_id), previous.turn_seq) || first <= previous.turn_seq
-          || previous.text + observed !== snapshot.text) continue;
-        first = previous.turn_seq + 1;
-      }
-      const intervenes = (event: ThreadProjectionEvent) => event.turn_id === snapshot.turn_id
-        && event.turn_seq !== undefined && event.turn_seq >= first && event.turn_seq < snapshot.turn_seq!
-        && event.event !== "model_request";
-      if (this.live.some(({ event }) => intervenes(event) && !entries.some((entry) => entry.event === event))
-        || (body?.events ?? []).some(intervenes)) continue;
-      if (snapshot.event === "stream_end" && entries.some(({ event }) => event.event === "delta"
-        && (JSON.stringify(event.source ?? null) !== JSON.stringify(snapshot.source ?? null)
-          || JSON.stringify(event.response_sources ?? null) !== JSON.stringify(snapshot.response_sources ?? null)))) continue;
-      for (const { event } of entries) snapshotCoverage.set(event, { turn: snapshot.turn_id, seq: snapshot.turn_seq });
-    }
+    candidate.textCoverage = Array.from(durableText.values());
     // Rebuild a fragment only when it has unpersisted contributions. Those
     // events join the same projection as history, rather than a second overlay.
     if (joined && body) {
       const turns = new Set(body.events.map((event) => event.turn_id));
       const remaining = this.live.filter(({ event }) => event.turn_id && event.turn_seq !== undefined
-        && turns.has(event.turn_id) && !contains(durableMembers?.get(event.turn_id), event.turn_seq)
-        && !snapshotCoverage.has(event));
+        && turns.has(event.turn_id) && !candidate.represented(event));
       if (remaining.length) {
         const replay: Array<{ event: ThreadProjectionEvent; live?: LiveContribution }> = body.events.map((event) => ({ event }));
         for (const entry of remaining) {
@@ -577,31 +550,20 @@ export class ThreadTranscript {
               startSeq: item.live.startSeq, sideChannel: item.live.sideChannel, sourceRevision: item.live.revision }
           : { createId: () => `history-${index}`, now: 0, persisted: true });
         for (const unit of candidate.units) mergeMembers(candidate.installed, unit.members);
+        candidate.textCoverage = Array.from(durableText.values());
       }
     }
-    // A fully assembled completed turn has the ordinary snapshot authority,
-    // including signed text and canonical messages that consume a live answer.
-    if (joined && groupRange?.start === 0 && !body?.page?.truncated_oversized_turn) {
-      const completedTurns = new Set(body?.completed_turn_ids ?? []);
-      for (const { event } of this.live) {
-        if (!event.turn_id || !completedTurns.has(event.turn_id)) continue;
-        const text = this.describe(event).text;
-        const certificate = text && Array.from(durableText.values()).find((item) => coversText(item, text));
-        if (certificate) {
-          snapshotCoverage.set(event, { turn: certificate.turn, seq: certificate.through });
-        } else if (event.event === "delta" && event.turn_seq !== undefined) {
-          const replacement = body?.events.find((item) => item.event === "message" && item.kind === undefined
-            && item.turn_id === event.turn_id && item.turn_seq !== undefined && item.turn_seq > event.turn_seq!
-            && contains(candidate.bySource.get(`fact:${item.turn_id}:${item.turn_seq}`)?.members.get(event.turn_id!), event.turn_seq!));
-          if (replacement?.turn_seq !== undefined) snapshotCoverage.set(event, { turn: event.turn_id, seq: replacement.turn_seq });
-        }
-      }
+    // Canonical recovery may replace an unfinished stream with a final message.
+    if (durableMembers && completeSnapshot) for (const event of body?.events ?? []) {
+      if (event.event !== "message" || event.kind !== undefined || !event.turn_id || !completed.has(event.turn_id)) continue;
+      const unit = candidate.bySource.get(this.describe(event).source);
+      if (unit) mergeMembers(durableMembers, unit.members);
     }
     // An unknown-left end may overwrite an unpersisted live buffer. Stage the
     // fragment before admission, keeping the visible projection until its prefix arrives.
     const overwritesLive = joined && candidate.live.some(({ event }) => {
       if ((event.event !== "delta" && event.event !== "reasoning_delta") || !event.turn_id
-        || event.turn_seq === undefined || snapshotCoverage.has(event)) return false;
+        || event.turn_seq === undefined || contains(durableMembers?.get(event.turn_id), event.turn_seq)) return false;
       return body?.events.some((end) => {
         if (end.turn_id !== event.turn_id || end.turn_seq === undefined || end.turn_seq <= event.turn_seq!) return false;
         if (event.event === "delta" && end.event === "message" && end.kind === undefined) return true;
@@ -621,16 +583,7 @@ export class ThreadTranscript {
     const windowRows = new Set(this.messages.slice(Math.max(0, firstOverlap)).map((row) => row.id));
     const received = replacedHistory ? [] : Array.from(this.units).filter((unit) => unit.received > 0
       && Array.from(unit.rows).some((id) => windowRows.has(id)));
-    const canonical = body ? persistedCanonicalRunState(body) : null;
-    const completed = new Set(canonical?.completedTurnIds);
-    const protectedUnits = received.filter((unit) => {
-      const covered = this.unitCovered(unit, candidate);
-      const snapshotReplayed = this.live.some(({ event }) => snapshotCoverage.has(event)
-        && event.turn_id !== undefined && event.turn_seq !== undefined
-        && contains(unit.members.get(event.turn_id), event.turn_seq));
-      return !covered || (!joined && unit.text.length > 0 && !snapshotReplayed
-        && (body?.page?.truncated_oversized_turn || unit.text.some((text) => !completed.has(text.turn))));
-    });
+    const protectedUnits = received.filter((unit) => !this.unitCovered(unit, candidate));
     const newTail = read.empty && protectedUnits.length > 0
       && protectedUnits.every((unit) => unit.received > read.revision);
     const appendedInputs = this.messages.filter((row) => row.role === "user" && row.turnId
@@ -763,7 +716,7 @@ export class ThreadTranscript {
       if (durableMembers) mergeCoveredMembers(installed, unit.members, durableMembers);
       else mergeMembers(installed, unit.members);
       for (const text of unit.text) {
-        const evidence = durableMembers ? durableText.get(textKey(text)) : text;
+        const evidence = durableText.get(textKey(text));
         if (!evidence?.snapshot || evidence.after === null) continue;
         const previous = certificates.get(textKey(evidence));
         if (!previous || evidence.through > previous.through) certificates.set(textKey(evidence), copyText(evidence));
@@ -771,11 +724,7 @@ export class ThreadTranscript {
     }
     this.installed = installed;
     this.textCoverage = Array.from(certificates.values());
-    this.live = this.live.filter(({ event }) => {
-      if (event.turn_id && event.turn_seq !== undefined && contains(this.installed.get(event.turn_id), event.turn_seq)) return false;
-      const snapshot = snapshotCoverage.get(event);
-      return !snapshot || !contains(this.installed.get(snapshot.turn), snapshot.seq);
-    });
+    this.live = this.live.filter(({ event }) => !this.represented(event));
     if (adoptProjection) {
       this.boundaries = new Map(candidate.boundaries);
       this.knownTurns = new Set(candidate.knownTurns);

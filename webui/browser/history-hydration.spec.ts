@@ -22,7 +22,7 @@ function delta(sequence: number, text: string, streamId = "live-wire"): ThreadPr
   return { ...at(TURN, sequence, "answer"), event: "delta", stream_id: streamId, text };
 }
 
-function end(sequence: number, text: string, streamId: string, merge = false): ThreadProjectionEvent {
+function end(sequence: number, text: string, streamId: string, merge = false): Extract<ThreadProjectionEvent, { event: "stream_end" }> {
   return { ...at(TURN, sequence, "answer"), event: "stream_end", stream_id: streamId, text,
     ...(merge ? { resuming: true, merge_next: true } : { resuming: true }) };
 }
@@ -207,10 +207,13 @@ test("prepending a fragment keeps the same answer at the reading position", asyn
   const older = await requestOlder(page, backend, body, "inside-turn");
   const anchor = body.getByText("Tail answer 5", { exact: true });
   await expect(anchor).toBeAttached();
-  await body.evaluate((node) => {
+  await body.evaluate(async (node) => {
     const unit = Array.from(node.querySelectorAll<HTMLElement>("[data-thread-display-unit]"))
       .find((item) => item.textContent?.includes("Tail answer 5"))!;
+    // Establish the reading anchor through the native scroll event before HTTP commits.
+    const scrolled = new Promise<void>((resolve) => node.addEventListener("scroll", () => resolve(), { once: true }));
     node.scrollTop += unit.getBoundingClientRect().top - node.getBoundingClientRect().top - 280;
+    await scrolled;
   });
   const position = () => anchor.evaluate((node) => node.getBoundingClientRect().top);
   const before = await position();
@@ -388,7 +391,8 @@ test("synthetic HTTP-first cumulative text suppresses delayed covered chunks but
   const { backend, body } = await openFixture(page);
   const latest = await backend.read();
   const canonical = "Canonical answer";
-  await backend.release(latest, history([input(TURN, "HTTP-first question"), end(3, canonical, "resume-wire", true)], { active: TURN }));
+  await backend.release(latest, history([input(TURN, "HTTP-first question"),
+    { ...end(3, canonical, "resume-wire", true), text_from_seq: 1 }], { active: TURN }));
   await expect(body.getByText(canonical, { exact: true })).toBeVisible();
 
   await backend.send(delta(1, "Canonical ", "resume-wire"));

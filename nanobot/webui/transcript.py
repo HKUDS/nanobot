@@ -1156,7 +1156,9 @@ def _recover_incomplete_turns(
     return recovered
 
 
-def _needs_user_event_backfill(lines: list[dict[str, Any]], history: HistoryReader) -> bool:
+def _needs_user_event_backfill(
+    lines: list[dict[str, Any]], history: HistoryReader, *, legacy: bool = True,
+) -> bool:
     referenced_inputs = {
         input_id
         for record in lines
@@ -1164,7 +1166,7 @@ def _needs_user_event_backfill(lines: list[dict[str, Any]], history: HistoryRead
         for input_id in cast(list[object], references)
         if isinstance(input_id, str) and input_id
     }
-    return any(not history.has_input(input_id) for input_id in referenced_inputs) or any(
+    return any(not history.has_input(input_id) for input_id in referenced_inputs) or legacy and any(
         not any(record.get("event") == "user" or isinstance(record.get("response_input_ids"), list) for record in turn)
         and _transcript_turn_signature(turn)
         for turn in _split_transcript_turns(lines)
@@ -1519,6 +1521,8 @@ def _client_projection_event(
 
     if event in {"delta", "stream_end", "reasoning_delta", "reasoning_end"}:
         projected = {"event": event, **common}
+        if record.get("text_from_seq") is not None:
+            projected["text_from_seq"] = record["text_from_seq"]
         stream_id = record.get("stream_id")
         if isinstance(stream_id, str) and stream_id:
             projected["stream_id"] = stream_id
@@ -1898,18 +1902,23 @@ def build_webui_thread_response(
             session_turns = _session_backfill_turns(session_key, session_messages or [])
         return session_turns
 
-    fragment = "record_range" in page
-    if _needs_user_event_backfill(lines, history):
+    record_range = page.get("record_range")
+    fragment = record_range is not None
+    ref = next(history.turns(after=record_range["turn"], before=record_range["turn"] + 1), None) if record_range else None
+    needs_backfill = (
+        history.has_missing_input_references(ref.ordinal)
+        or (ref.user_count == 0 and record_range["start"] == 0 and history.has_navigation_answer(ref.ordinal))
+    ) if ref is not None and record_range is not None else _needs_user_event_backfill(lines, history, legacy=not fragment)
+    if needs_backfill:
         view, _ = _prompt_view_snapshot(
             session_key, history=history, session_turns_loader=load_session_turns,
             session_version_loader=session_version_loader,
-            on_read=lambda size: _account_recovery_read(replay_stats, size),
         )
         recovered_lines: list[dict[str, Any]] = []
         for turn in _split_transcript_turns(lines):
             ordinal = int(turn[0][_WEBUI_REPLAY_IDENTITY_KEY].split(":")[1])
             for anchor, user in view.backfill_plan.get(ordinal, []):
-                if fragment and not page["record_range"]["start"] <= anchor < page["record_range"]["end"]:
+                if record_range is not None and not record_range["start"] <= anchor < record_range["end"]:
                     continue
                 index = next((i for i, record in enumerate(turn)
                               if (identity := record.get(_WEBUI_REPLAY_IDENTITY_KEY, "")).startswith(f"turn:{ordinal}:record:")
@@ -1917,12 +1926,10 @@ def build_webui_thread_response(
                 turn.insert(index, dict(user))
             recovered_lines.extend(turn)
         lines = recovered_lines
-    if fragment:
-        record_range = page["record_range"]
-        ordinal, start, end = record_range["turn"], record_range["start"], record_range["end"]
-        ref = next(history.turns(after=ordinal, before=ordinal + 1), None)
+    if record_range is not None:
         if ref is not None and ref.user_count == 1:
-            terminal = end == ref.record_count
+            ordinal = ref.ordinal
+            terminal = record_range["end"] == ref.record_count
             if terminal:
                 incomplete = bool(lines and lines[-1].get("event") == "turn_end"
                                   and lines[-1].get(WEBUI_TRANSCRIPT_INCOMPLETE_KEY) is True)
@@ -2093,13 +2100,11 @@ def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
             signature[0][:240] if signature else "", has_user,
             tuple(dict.fromkeys(response_inputs[ordinal])) if ordinal in response_inputs else None,
         ))
-        seen_turns: set[str] = set()
         seen_messages: set[str] = set()
         for index, record in enumerate(records):
             if record.get("event") != "user":
                 continue
             position = int(record[_WEBUI_REPLAY_IDENTITY_KEY].rsplit(":", 1)[1])
-            turn_id = str(record.get("turn_id") or "")
             input_id = record.get("input_id")
             if isinstance(input_id, str) and input_id:
                 input_ids.add(input_id)
@@ -2111,10 +2116,6 @@ def _history_prompt_summaries(history: HistoryReader) -> _ChunkPromptView:
                 if message_id in seen_messages:
                     continue
                 seen_messages.add(message_id)
-            elif turn_id:
-                if turn_id in seen_turns:
-                    continue
-                seen_turns.add(turn_id)
             answer = ""
             for following in records[index + 1:]:
                 if following.get("event") == "user":
@@ -2217,9 +2218,15 @@ def _build_prompt_view(
                 event_id = _client_projection_event_id(record)
                 order[(ordinal, event_id)] = position
                 if event_id in recovered_ids:
-                    reverse_plan.append((next_anchor, record))
+                    anchor = next_anchor if any("response_input_ids" in item for item in records) else 0
+                    reverse_plan.append((anchor, record))
         if reverse_plan:
             plan[ordinal] = list(reversed(reverse_plan))
+    for ordinal, prompt, user in entries:
+        if user is not None:
+            anchor = next(anchor for anchor, record in plan[ordinal]
+                          if _client_projection_event_id(record) == prompt["id"])
+            prompt["cursor"] = _encode_page_cursor(ordinal, anchor)
     entries.sort(key=lambda entry: (entry[0], order.get((entry[0], entry[1]["id"]), 0)))
     return _PromptView(tuple(prompt for _, prompt, _ in entries), plan, needs_canonical)
 
