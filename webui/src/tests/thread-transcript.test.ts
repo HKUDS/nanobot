@@ -12,7 +12,7 @@ function at(turn_id: string, turn_seq: number) {
   return { chat_id: "hydration-chat", turn_id, turn_seq };
 }
 
-function input(turnId: string, text: string): ThreadProjectionEvent {
+function input(turnId: string, text: string): Extract<ThreadProjectionEvent, { event: "user_message" }> {
   return { ...at(turnId, 1), event: "user_message", text, starts_turn: true };
 }
 
