@@ -1463,20 +1463,6 @@ In `config.json`, set `providers.<name>.api` for the built-in `custom` provider 
 
 `supportedApis` must contain at least one of `chat_completions`, `responses`, or `anthropic_messages`. `preferredApi` must belong to that list and defaults to its first entry. Auto presets inherit this default; explicit presets can only use protocols in the connection's list. Before removing a protocol used by an explicit preset, update that preset first.
 
-### Legacy OpenAI API selector migration
-
-If `providers.openai.apiType` (or `api_type`) is set to `responses` or `chat_completions`, replace it with `api` as shown below. The old `auto` default needs no action. If `api` is already present, including `null`, it takes precedence; keep it and remove the old field.
-
-| Old value | Current configuration under `providers.openai` |
-| --- | --- |
-| `auto` | No change required, or remove the old field. |
-| `responses` | Replace the old field with `"api": {"supportedApis": ["responses"]}`. |
-| `chat_completions` | Replace the old field with `"api": {"supportedApis": ["chat_completions"]}`. |
-
-If your launcher sets `NANOBOT_PROVIDERS__OPENAI__API_TYPE` or `NANOBOT_PROVIDERS__OPENAI__APITYPE` to `responses` or `chat_completions`, replace it with `NANOBOT_PROVIDERS__OPENAI__API` set to a JSON object such as `{"supportedApis":["responses"]}`. After changing the variable, restart the gateway through that launcher before updating through the WebUI.
-
-If you already upgraded, edit the configuration or launcher environment and restart the gateway.
-
 ### Preset request API
 
 Leave API selection on **Auto** unless your service requires a specific protocol. To change it, open **Settings → Models → a preset → Advanced options → API connection**. Choose **Responses**, **Chat Completions**, or **Anthropic Messages** from the available options. Hover, focus, or tap a setting label for help. Credentials and endpoint URLs stay in the provider; two presets sharing a provider can select different APIs.

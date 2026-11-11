@@ -281,7 +281,7 @@ class ProviderConfig(Base):
             raise PydanticCustomError(
                 "retired_provider_api_selector",
                 "The apiType setting was removed. Replace it with an api object that declares supportedApis, "
-                "or remove it for Auto. See the OpenAI API selector migration in the configuration guide.",
+                "or remove it for Auto.",
             )
         return provider
 

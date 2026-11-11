@@ -2,8 +2,6 @@
 
 Use the update method that owns your installation. If your version does not include the WebUI updater, first upgrade through the original installer or package manager. This does not convert an existing installation into an installer-managed one.
 
-If you use the old OpenAI `apiType` setting to select Responses or Chat Completions, [migrate it](./configuration.md#legacy-openai-api-selector-migration) before updating past 0.4.1.
-
 ## Upgrade older JSONL installations
 
 The 0.4.x releases retain automatic import of legacy model JSONL history, WebUI JSONL / segments and per-feature proxy settings. You can upgrade an older installation directly to 0.4.1 through its original installation method; an intermediate 0.4.0 installation is not required. These importers are scheduled for removal in 0.5.0.
