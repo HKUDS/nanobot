@@ -206,23 +206,6 @@ def test_session_owner_registration_controls_handle_allocation(tmp_path: Path) -
     assert resolver.handle_for_session("websocket:conversation") == before
 
 
-async def test_runtime_listing_and_handles_respect_registered_session_types(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
-    for kind, needs_handle, public in (("review", True, False), ("published", False, True), ("scratch", False, False)):
-        manager.types.register(SessionType(kind, needs_handle=needs_handle, public_history=public))
-        session = manager.get_or_create(f"internal:{kind}")
-        session.metadata[SESSION_TYPE_KEY] = kind
-        manager.save(session)
-    try:
-        rows = await manager.state.query_metadata(
-            lambda values: values, session_types=manager.types.visible_or_handle_names(),
-        )
-        assert {row["key"] for row in rows} == {"internal:review", "internal:published"}
-        assert set(await manager.state.ensure_session_handles()) == {"internal:review"}
-    finally:
-        await manager.state.aclose()
-
-
 def test_private_type_cannot_be_resolved_through_an_existing_handle(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
     _persist(manager, "internal:private")

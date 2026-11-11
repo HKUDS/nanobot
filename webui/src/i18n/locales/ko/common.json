@@ -1798,8 +1798,6 @@
       },
       "interruptedHelp": "작업이 완료되기 전에 서버가 다시 시작되었습니다. 작업은 자동으로 다시 실행되지 않았습니다.",
       "workTitle": "하위 작업",
-      "readFailed": "하위 작업을 불러오지 못했습니다.",
-      "retryRead": "다시 시도",
       "progress": "{{total}}개 중 {{completed}}개 완료",
       "running": "진행 중: {{count}}",
       "finished": "종료: {{count}}",

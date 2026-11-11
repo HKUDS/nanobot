@@ -99,7 +99,6 @@ from nanobot.session.recovery import (
     restore_pending_interruption,
     restore_runtime_checkpoint,
 )
-from nanobot.session.session_messages import session_message_input
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.state import SessionOperationQueueFullError
 from nanobot.session.summary import (
@@ -764,10 +763,6 @@ class AgentLoop:
         }
         if turn_continuation.internal_continuation_inbound(ctx.msg.metadata):
             origin = request_origin_from_metadata(ctx.msg.metadata) or origin
-        else:
-            envelope = session_message_input(ctx.msg)
-            if envelope is not None and envelope["target_session_key"] == ctx.session_key:
-                origin["input_id"] = f"session-message:{envelope['message_id']}"
         if origin != request_origin_from_metadata(ctx.session.metadata):
             ctx.session.metadata[REQUEST_ORIGIN_METADATA_KEY] = origin
             if ctx.original_user_text is None:
@@ -787,7 +782,6 @@ class AgentLoop:
             channel=ctx.delivery.route.channel,
             chat_id=ctx.delivery.route.chat_id,
             message_id=origin["message_id"],
-            input_id=origin.get("input_id"),
             session_key=ctx.session_key,
             session_generation=ctx.session.generation,
             original_user_text=ctx.original_user_text,

@@ -33,7 +33,6 @@ import {
   fetchSkills,
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
-  fetchSubagentTasks,
   fetchSubagentThread,
   fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
@@ -96,15 +95,6 @@ describe("webui API helpers", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
-  });
-
-  it("requests only tasks anchored in the loaded history", async () => {
-    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ tasks: [] }) } as Response);
-    await fetchSubagentTasks("tok", "websocket:chat-1", { taskIds: ["task/1", "task 2"] });
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/subagents?scope=page&task_id=task%2F1&task_id=task+2",
-      expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
-    );
   });
 
   it("fetches a subagent thread from its parent session", async () => {

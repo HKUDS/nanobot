@@ -7,12 +7,8 @@ from typing import Any, cast
 from loguru import logger
 from pydantic import TypeAdapter, ValidationError
 
-from nanobot.agent.subagent_status import (
-    ACTIVE_SUBAGENT_STATES,
-    SubagentHistoryScope,
-    SubagentStatus,
-)
 from nanobot.agent.subagent_status import SubagentSessionError as SubagentSessionError
+from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.session.manager import Session, SessionManager, SessionPolicy
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionType
@@ -20,6 +16,7 @@ from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionT
 SUBAGENT = SessionType("subagent", needs_handle=False, public_history=False)
 TASK_METADATA_KEY = "subagent_task"
 _STATUS = TypeAdapter(SubagentStatus)
+_ACTIVE_STATES = {"queued", "running", "stopping"}
 
 
 class SubagentSessions:
@@ -111,15 +108,9 @@ class SubagentSessions:
             raise SubagentSessionError("invalid task ownership")
         return status
 
-    def load(self, owner: str, scope: SubagentHistoryScope | None = None) -> dict[str, SubagentStatus]:
+    def load(self, owner: str) -> dict[str, SubagentStatus]:
         result: dict[str, SubagentStatus] = {}
-        if scope is None:
-            rows = self.sessions.list_child_session_metadata(owner)
-        else:
-            rows = self.sessions.list_scoped_subagent_metadata(
-                owner, tuple(self.key(task_id) for task_id in scope.task_ids),
-            )
-        for row in rows:
+        for row in self.sessions.list_child_session_metadata(owner):
             key = row["key"]
             task_id = key.removeprefix("subagent:")
             if key != self.key(task_id):
@@ -142,7 +133,7 @@ class SubagentSessions:
                 continue
             try:
                 status = self.status(key.removeprefix("subagent:"), owner)
-                if status is None or status.state not in ACTIVE_SUBAGENT_STATES:
+                if status is None or status.state not in _ACTIVE_STATES:
                     continue
                 status.state = status.phase = "interrupted"
                 status.revision += 1

@@ -896,8 +896,7 @@ export function useNanobotStream(
         }
         return;
       }
-      if (ev.event === "file_edit" || ev.event === "subagent_anchor") {
-        flushPendingStreamEvents();
+      if (ev.event === "file_edit") {
         applyProjectionEvent(ev);
         return;
       }

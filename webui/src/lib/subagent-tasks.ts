@@ -2,8 +2,6 @@ import type { SubagentTaskSnapshot, UIMessage } from "./types";
 
 export interface ObservedSubagentTask extends SubagentTaskSnapshot {
   observedAtMs: number;
-  /** A scoped read must replace the result-free completion notice. */
-  needsRefresh?: boolean;
 }
 
 export function isActiveSubagentTask(task: SubagentTaskSnapshot): boolean {
@@ -37,7 +35,6 @@ export function isSubagentTask(value: unknown): value is SubagentTaskSnapshot {
     && typeof value.created_at === "number" && Number.isFinite(value.created_at)
     && (value.completed_at === null || (typeof value.completed_at === "number" && Number.isFinite(value.completed_at)))
     && nullableText(value.origin_turn_id) && nullableText(value.origin_message_id)
-    && (value.origin_call_id === undefined || nullableText(value.origin_call_id))
     && nullableText(value.result) && nullableText(value.error) && nullableText(value.stop_reason)
     && typeof value.partial === "boolean"
     && Array.isArray(value.tool_events) && value.tool_events.every((entry: unknown) => isRecord(entry) && typeof entry.name === "string" && typeof entry.status === "string")
@@ -55,7 +52,7 @@ export function mergeSubagentTasks(
     if (previous) {
       const revision = task.revision ?? 0;
       const previousRevision = previous.revision ?? 0;
-      if (revision < previousRevision || (revision > 0 && revision === previousRevision && !previous.needsRefresh)) continue;
+      if (revision < previousRevision || (revision > 0 && revision === previousRevision)) continue;
       // Read-only hosts predating events have no revision. Their late reads
       // must still respect cancellation and the immutable terminal outcome.
       if (revision === 0 && previousRevision === 0) {

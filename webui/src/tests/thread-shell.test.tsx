@@ -554,7 +554,7 @@ describe("ThreadShell", () => {
       usage: null, receipts: {}, result: null, partial: false, stop_reason: null, error: null,
     };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).includes("/subagents?scope=page")) return httpJson({ tasks: [snapshot] });
+      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [snapshot] });
       if (String(input).includes("/webui-thread")) return httpJson(transcriptFromSimpleMessages([
         { role: "user", content: "Delegate inspection", turnId: "parent-turn" },
       ]));
@@ -581,20 +581,19 @@ describe("ThreadShell", () => {
     expect(list).toBeVisible();
   });
 
-  it("renders one persisted task entry at its invocation position through the full shell", async () => {
+  it("renders one persisted task entry at the initiating prompt through the full shell", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).includes("/subagents?scope=page")) return httpJson({ tasks: [{
+      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [{
         task_id: "completed-task", label: "Inspect settings", task_description: "Inspect settings",
-        origin_turn_id: "delegation-turn", origin_message_id: null, origin_call_id: "call-completed", created_at: 100, completed_at: 102,
+        origin_turn_id: "delegation-turn", origin_message_id: null, created_at: 100, completed_at: 102,
         state: "done", phase: "done", elapsed_seconds: 2, iteration: 1, tool_events: [],
         usage: null, receipts: {}, result: "Verified", partial: false, stop_reason: "completed", error: null,
       }] });
-      if (String(input).includes("/webui-thread")) return httpJson({ schemaVersion: 3, projection: "events", events: [
-        { event: "user_message", chat_id: "persisted-tasks", projection_id: "prompt", starts_turn: true, text: "Delegate inspection", turn_id: "delegation-turn", turn_seq: 1 },
-        { event: "subagent_anchor", chat_id: "persisted-tasks", projection_id: "anchor", task_id: "completed-task", call_id: "call-completed", turn_id: "delegation-turn", turn_seq: 2 },
-        { event: "message", chat_id: "persisted-tasks", projection_id: "answer", text: "Parent conclusion", turn_id: "delegation-turn", turn_seq: 3 },
-      ] });
+      if (String(input).includes("/webui-thread")) return httpJson(transcriptFromSimpleMessages([
+        { role: "user", content: "Delegate inspection", turnId: "delegation-turn" },
+        { role: "assistant", content: "Parent conclusion", turnId: "delegation-turn" },
+      ]));
       return { ok: false, status: 404, json: async () => ({}) };
     }));
     const shell = () => wrap(client, <ThreadShell session={session("persisted-tasks")} title="Task history"

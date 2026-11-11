@@ -71,7 +71,6 @@ export type SubagentTaskState = "queued" | "running" | "stopping" | "done" | "in
 
 export interface SubagentTaskSnapshot {
   task_id: string;
-  origin_call_id?: string | null;
   revision?: number;
   origin_message_id: string | null;
   origin_turn_id: string | null;
@@ -137,8 +136,6 @@ export interface UIMessage {
   /** Oversized persisted trace content that can be fetched when activity is expanded. */
   traceDetail?: UITraceDetail;
   fileEdits?: UIFileEdit[];
-  /** Durable position of a task in the parent conversation. */
-  subagentAnchor?: { taskId: string; callId: string };
   /** Activity rows created during the same agent phase share one collapsible block. */
   activitySegmentId?: string;
   /** Internal projection marker for assistant text emitted before a later tool.
@@ -1520,7 +1517,6 @@ interface InboundTurnMetadata {
 
 export type InboundEvent =
   | { event: "subagent_task"; chat_id: string; task: SubagentTaskSnapshot }
-  | { event: "subagent_task_settled"; chat_id: string; task_id: string; state: Exclude<SubagentTaskState, "queued" | "running" | "stopping">; revision: number; completed_at: number | null }
   | { event: "ready"; chat_id: string; client_id: string; upload?: unknown }
   | {
       event: "attached";
@@ -1583,12 +1579,6 @@ export type InboundEvent =
       event: "file_edit";
       chat_id: string;
       edits: UIFileEdit[];
-    } & InboundTurnMetadata)
-  | ({
-      event: "subagent_anchor";
-      chat_id: string;
-      task_id: string;
-      call_id: string;
     } & InboundTurnMetadata)
   | ({
       event: "delta";
@@ -1727,7 +1717,6 @@ type ThreadProjectionEventName =
   | "user_message"
   | "message"
   | "file_edit"
-  | "subagent_anchor"
   | "delta"
   | "stream_end"
   | "reasoning_delta"

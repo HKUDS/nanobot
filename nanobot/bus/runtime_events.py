@@ -90,14 +90,6 @@ class GoalStateChanged(AgentEvent):
 
 
 @dataclass(frozen=True)
-class SubagentAnchor(AgentEvent):
-    """A durable position linking a tool invocation to its child task."""
-
-    task_id: str
-    call_id: str
-
-
-@dataclass(frozen=True)
 class SubagentTaskChanged(AgentEvent):
     """A parent-owned task observation changed."""
 

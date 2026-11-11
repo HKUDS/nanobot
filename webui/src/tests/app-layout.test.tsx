@@ -71,7 +71,7 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
     vi.fn(async (input: RequestInfo | URL) => {
       const route = routes[String(input)]
         ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
-        ?? (/^\/api\/sessions\/[^/]+\/subagents\?/.test(String(input)) ? { tasks: [] } : undefined);
+        ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(String(input)) ? { tasks: [] } : undefined);
       const body =
         typeof route === "function"
           ? await (route as () => unknown | Promise<unknown>)()
@@ -413,7 +413,7 @@ describe("App layout", () => {
       terminal: { webui: { capabilities: supported ? ["webui.core.v1", "webui.subagents.v1"] : ["webui.core.v1"] } },
     });
     mockFetchRoutes({
-      "/api/sessions/websocket%3Achat-a/subagents?scope=page": { tasks: [{
+      "/api/sessions/websocket%3Achat-a/subagents": { tasks: [{
         task_id: "task-1", label: "Config check", task_description: "Inspect configuration",
         state: "running", phase: "awaiting_model", elapsed_seconds: 2, iteration: 1,
         tool_events: [], usage: null, receipts: {}, result: null, partial: false,
@@ -432,7 +432,7 @@ describe("App layout", () => {
       await userEvent.setup().click(trigger);
       expect(await screen.findByRole("button", { name: /Config check Running/ })).toBeVisible();
     } else expect(screen.queryByRole("button", { name: /Subtasks/ })).not.toBeInTheDocument();
-    const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/subagents?"));
+    const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/subagents"));
     expect(reads).toHaveLength(supported ? 1 : 0);
     expect(requestMutationSpy).not.toHaveBeenCalled();
   });

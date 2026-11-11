@@ -42,7 +42,7 @@ _CONTENT_FIELDS = frozenset({
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
     "transcript_incomplete", "stream_id", "text_from_seq", "compaction_id", "phase", "reason", "render_as",
-    "task_id", "call_id", "request_usage", "request_id", "run_id", "sequence", "context_graph", "context_snapshot",
+    "request_usage", "request_id", "run_id", "sequence", "context_graph", "context_snapshot",
 })
 
 

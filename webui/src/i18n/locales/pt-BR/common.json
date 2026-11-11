@@ -1800,8 +1800,6 @@
       },
       "interruptedHelp": "O servidor reiniciou antes de concluir esta tarefa. Ela não foi executada novamente automaticamente.",
       "workTitle": "Subtarefas",
-      "readFailed": "Não foi possível carregar as subtarefas.",
-      "retryRead": "Tentar novamente",
       "progress": "{{completed}} de {{total}} concluídas",
       "running": "Em andamento: {{count}}",
       "finished": "Encerradas: {{count}}",

@@ -26,7 +26,6 @@ interface ThreadMessagesProps {
   beforeUnit?: { key: string; content: ReactNode };
   topInset?: number;
   afterUserMessage?: (message: UIMessage) => ReactNode;
-  renderSubagentAnchor?: (anchor: NonNullable<UIMessage["subagentAnchor"]>) => ReactNode;
   afterMessages?: ReactNode;
   temporary?: boolean;
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
@@ -87,7 +86,6 @@ export function ThreadMessages({
   beforeUnit,
   topInset = 0,
   afterUserMessage,
-  renderSubagentAnchor,
   afterMessages,
   temporary = false,
   isStreaming = false,
@@ -254,7 +252,7 @@ export function ThreadMessages({
         return [
           prelude,
           <Fragment key={`unit:${unitKeys[index]}`}>
-          {unit.type === "message" && unit.message.subagentAnchor ? renderSubagentAnchor?.(unit.message.subagentAnchor) : <ThreadDisplayUnit
+          <ThreadDisplayUnit
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
             scrollAnchor={scrollAnchors[index]}
@@ -295,7 +293,7 @@ export function ThreadMessages({
             onContextBlockActiveChange={setContextBlockPointed}
             onContextBlockFocusChange={setContextBlockFocused}
             onContextBlockMenuOpenChange={setContextBlockMenuOpen}
-          />}
+          />
           {unit.type === "message" && unit.message.role === "user" ? (
             afterUserMessage?.(unit.message)
           ) : null}

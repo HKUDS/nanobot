@@ -35,10 +35,6 @@ class SessionTypes:
         name = metadata.get(SESSION_TYPE_KEY, CONVERSATION.name)
         return self._types.get(name) if isinstance(name, str) else None
 
-    def visible_or_handle_names(self) -> tuple[str, ...]:
-        """Types needed for a public session list or its handle allocation."""
-        return tuple(name for name, kind in self._types.items() if kind.public_history or kind.needs_handle)
-
     def needs_handle(self, metadata: Mapping[str, object]) -> bool:
         kind = self.resolve(metadata)
         return kind is not None and kind.needs_handle

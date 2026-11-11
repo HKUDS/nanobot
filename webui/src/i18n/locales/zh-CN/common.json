@@ -1983,8 +1983,6 @@
       },
       "interruptedHelp": "后端重启时此任务尚未结束，任务没有自动恢复或重新执行。",
       "workTitle": "子任务",
-      "readFailed": "无法加载子任务。",
-      "retryRead": "重试",
       "progress": "已完成 {{completed}} / {{total}} 项",
       "running": "{{count}} 项进行中",
       "finished": "{{count}} 项已结束",

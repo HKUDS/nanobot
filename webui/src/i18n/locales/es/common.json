@@ -1798,8 +1798,6 @@
       },
       "interruptedHelp": "El servidor se reinició antes de terminar esta tarea. No se ha vuelto a ejecutar automáticamente.",
       "workTitle": "Subtareas",
-      "readFailed": "No se pudieron cargar las subtareas.",
-      "retryRead": "Reintentar",
       "progress": "{{completed}} de {{total}} completadas",
       "running": "En curso: {{count}}",
       "finished": "Finalizadas: {{count}}",

@@ -24,7 +24,7 @@ from nanobot.bus.outbound_events import (
     UserInputEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import SubagentAnchor, SubagentTaskChanged
+from nanobot.bus.runtime_events import SubagentTaskChanged
 from nanobot.context_graph import ContextGraph, ContextGraphParts, graph_from_parts
 from nanobot.context_sources import PromptSourcesEvent
 from nanobot.events import ModelRequestEvent
@@ -359,27 +359,14 @@ class WebUIOutboundDelivery:
             )
             await self.session_updated(msg.chat_id, scope=scope)
             return
-        if isinstance(event, SubagentAnchor):
-            body: dict[str, Any] = {"event": "subagent_anchor", "chat_id": msg.chat_id,
-                                    "task_id": event.task_id, "call_id": event.call_id}
-            await self._persist_turn_transcript_event(msg.chat_id, body, metadata=msg.metadata, phase="activity")
-            await self._fanout(recipients, body, label=" subagent_anchor ")
-            return
         if isinstance(event, SubagentTaskChanged):
             if recipients:
                 task = self._session_projection.subagent_task(webui_session_key(msg.chat_id), event.task_id)
                 if task is not None:
-                    if task.get("state") in {"queued", "running", "stopping"}:
-                        payload: WebUIWirePayload = {"event": "subagent_task", "chat_id": msg.chat_id, "task": task}
-                    else:
-                        # A subscriber may be viewing a different history page. Send only
-                        # an invalidation; the page-scoped read owns terminal details.
-                        payload = {
-                            "event": "subagent_task_settled", "chat_id": msg.chat_id,
-                            "task_id": task.get("task_id"), "state": task.get("state"),
-                            "revision": task.get("revision"), "completed_at": task.get("completed_at"),
-                        }
-                    await self._send_payload(msg.chat_id, payload, persistence="transient")
+                    await self._send_payload(
+                        msg.chat_id, {"event": "subagent_task", "chat_id": msg.chat_id, "task": task},
+                        persistence="transient",
+                    )
             return
         if isinstance(event, SessionUpdatedEvent):
             if recipients:

@@ -123,34 +123,9 @@ def _create_schema_v5(db: sqlite3.Connection) -> None:
     ) WHERE kind='input'""")
 
 
-# The CASE also makes the partial indexes safe to build over damaged metadata.
-_SUBAGENT_INDEX_PREDICATE = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.session_type')='subagent' ELSE 0 END"
-_SUBAGENT_PARENT = "json_extract(metadata, '$.parent_session_key')"
-_SUBAGENT_STATE = "json_extract(metadata, '$.subagent_task.state')"
-# Invalid JSON has a blob sentinel so filtered listings still surface corruption.
-_SESSION_LIST_TYPE = ("CASE WHEN json_valid(metadata) THEN CASE WHEN json_type(metadata, '$.session_type') IS NULL "
-                      "THEN 'conversation' ELSE json_extract(metadata, '$.session_type') END ELSE X'00' END")
-
-
 def _create_schema_v6(db: sqlite3.Connection) -> None:
-    for name, columns in (
-        ("subagent_active_state", f"{_SUBAGENT_PARENT}, {_SUBAGENT_STATE}"),
-    ):
-        db.execute(f"CREATE INDEX {name} ON sessions ({columns}) WHERE {_SUBAGENT_INDEX_PREDICATE}")
-    db.execute(f"CREATE INDEX session_list_type ON sessions ({_SESSION_LIST_TYPE})")
-
-
-def _scoped_subagent_query(
-    parent_key: str, task_keys: tuple[str, ...],
-) -> tuple[str, tuple[str, ...]]:
-    base = "SELECT key, created_at, updated_at, metadata FROM sessions"
-    predicate = f"{_SUBAGENT_INDEX_PREDICATE} AND {_SUBAGENT_PARENT}=?"
-    queries = [f"{base} WHERE {predicate} AND {_SUBAGENT_STATE} IN ('queued', 'running', 'stopping')"]
-    params = [parent_key]
-    if task_keys:
-        queries.append(f"{base} WHERE {predicate} AND key IN (SELECT value FROM json_each(?))")
-        params.extend((parent_key, _encode(task_keys)))
-    return " UNION ".join(queries) + " ORDER BY updated_at DESC", tuple(params)
+    # Earlier PR builds created indexes at version 6; retain database compatibility.
+    pass
 
 
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
@@ -759,23 +734,11 @@ class SqliteSessionStore:
                         (parent_key,),
                     )]
 
-    def list_scoped_subagent_metadata(
-        self, parent_key: str, task_keys: tuple[str, ...],
-    ) -> list[SessionMetadataPayload]:
-        """Read matching child headers and active tasks using the owner index."""
-        query, params = _scoped_subagent_query(parent_key, task_keys)
-        with self.transaction(write=False) as db:
-            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
-                     "metadata": _object(row[3])} for row in db.execute(query, params)]
-
-    def list_metadata(self, *, session_types: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+    def list_metadata(self) -> list[dict[str, Any]]:
         with self.transaction(write=False) as db:
             # Fetch one value so a large list does not cross the Python/SQLite
             # iterator boundary for every session while other workers are busy.
-            where = (f"WHERE {_SESSION_LIST_TYPE} IN (SELECT value FROM json_each(?)) "
-                     f"OR {_SESSION_LIST_TYPE}=X'00'") if session_types is not None else ""
-            params = (_encode(session_types),) if session_types is not None else ()
-            encoded = db.execute(f"""
+            encoded = db.execute("""
                 SELECT json_group_array(json_object(
                     'key', key, 'created_at', created_at, 'updated_at', updated_at,
                     'title', title, 'preview', preview, 'visible_updated_at', visible_updated_at,
@@ -785,10 +748,9 @@ class SqliteSessionStore:
                     SELECT sessions.*, coalesce(history_heads.updated_at_ms, 0) AS history_updated_at_ms,
                            coalesce(nullif(history_heads.user_preview, ''), history_heads.preview, '') AS history_preview
                     FROM sessions LEFT JOIN history_heads ON history_heads.session_key=sessions.key
-                    {where}
                     ORDER BY sessions.updated_at DESC
                 )
-            """, params).fetchone()[0]
+            """).fetchone()[0]
             rows = cast(list[dict[str, Any]], json.loads(encoded))
             for row in rows:
                 row["path"] = str(self.path)

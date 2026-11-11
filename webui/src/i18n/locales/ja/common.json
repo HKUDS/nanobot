@@ -1798,8 +1798,6 @@
       },
       "interruptedHelp": "タスクの完了前にサーバーが再起動しました。タスクは自動的に再実行されていません。",
       "workTitle": "サブタスク",
-      "readFailed": "サブタスクを読み込めませんでした。",
-      "retryRead": "再試行",
       "progress": "{{total}} 件中 {{completed}} 件完了",
       "running": "実行中: {{count}}",
       "finished": "終了: {{count}}",

@@ -7,15 +7,6 @@ from typing import Literal
 from nanobot.providers.base import LLMUsage
 
 SubagentState = Literal["queued", "running", "stopping", "done", "incomplete", "error", "cancelled", "interrupted"]
-ACTIVE_SUBAGENT_STATES = frozenset({"queued", "running", "stopping"})
-
-
-@dataclass(frozen=True, slots=True)
-class SubagentHistoryScope:
-    task_ids: frozenset[str] = frozenset()
-
-    def includes(self, status: SubagentStatus) -> bool:
-        return status.state in ACTIVE_SUBAGENT_STATES or status.task_id in self.task_ids
 
 
 class SubagentSessionError(ValueError):
@@ -45,7 +36,6 @@ class SubagentStatus:
     error: str | None = None
     origin_message_id: str | None = None
     origin_turn_id: str | None = None
-    origin_call_id: str | None = None
     created_at: float = field(default_factory=time.time)
     completed_at: float | None = None
     revision: int = 0
@@ -58,7 +48,6 @@ class SubagentStatus:
             "revision": self.revision,
             "origin_message_id": self.origin_message_id,
             "origin_turn_id": self.origin_turn_id,
-            "origin_call_id": self.origin_call_id,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
             "label": self.label,

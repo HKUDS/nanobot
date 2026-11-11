@@ -4,7 +4,7 @@ import asyncio
 import json
 from collections.abc import Iterable, Mapping
 from datetime import datetime
-from typing import Any, NotRequired, Protocol, TypedDict, cast
+from typing import Any, Protocol, TypedDict, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -34,7 +34,6 @@ KNOWN_CHECKPOINT_PHASES = frozenset(
 class RequestOrigin(TypedDict):
     message_id: str | None
     turn_id: str
-    input_id: NotRequired[str]
 
 
 def request_origin_from_metadata(metadata: Mapping[str, Any]) -> RequestOrigin | None:
@@ -49,11 +48,7 @@ def request_origin_from_metadata(metadata: Mapping[str, Any]) -> RequestOrigin |
         return None
     if not isinstance(turn_id, str) or not turn_id:
         return None
-    result: RequestOrigin = {"message_id": message_id, "turn_id": turn_id}
-    input_id = origin.get("input_id")
-    if isinstance(input_id, str) and input_id.startswith("session-message:") and len(input_id) > len("session-message:"):
-        result["input_id"] = input_id
-    return result
+    return {"message_id": message_id, "turn_id": turn_id}
 
 
 class RecoveryAdmission(Protocol):

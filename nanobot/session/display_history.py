@@ -27,7 +27,7 @@ class HistoryKind(StrEnum):
     FORK_BOUNDARY = "fork_boundary"
     COMPACTION = "compaction"
     MODEL_REQUEST = "model_request"
-    SUBAGENT_ANCHOR = "subagent_anchor"
+    SUBAGENT_ANCHOR = "subagent_anchor"  # Read compatibility for earlier PR builds.
     # Only old transcripts can contain unfinished transport fragments.
     ANSWER_FRAGMENT = "answer_fragment"
     REASONING_FRAGMENT = "reasoning_fragment"

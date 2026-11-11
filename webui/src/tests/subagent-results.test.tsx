@@ -3,11 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
-import { SubagentThreadMessages, useHasSubagentResults } from "@/components/thread/SubagentTaskResults";
+import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { setAppLanguage } from "@/i18n";
-import { projectThreadEvents } from "@/lib/thread-event-projection";
-import type { ThreadProjectionEvent } from "@/lib/types";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
 import type { InboundEvent, SubagentTaskSnapshot, UIMessage } from "@/lib/types";
 
@@ -23,8 +21,6 @@ const client = {
 };
 const messages: UIMessage[] = [
   { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a", createdAt: 100_000 },
-  { id: "anchor-a", role: "tool", content: "", turnId: "turn-a", createdAt: 100_500,
-    subagentAnchor: { taskId: "task-1", callId: "call-1" } },
   { id: "answer-a", role: "assistant", content: "Main answer", turnId: "turn-a", createdAt: 101_000 },
 ];
 
@@ -33,7 +29,7 @@ function task(overrides: Partial<SubagentTaskSnapshot> = {}): SubagentTaskSnapsh
     task_id: "task-1", revision: 1, label: "Config check", task_description: "Check configuration values",
     state: "done", phase: "finished", elapsed_seconds: 4, iteration: 1,
     tool_events: [], usage: null, receipts: {}, result: null, partial: false,
-    stop_reason: null, error: null, origin_turn_id: "turn-a", origin_message_id: "prompt-a", origin_call_id: "call-1",
+    stop_reason: null, error: null, origin_turn_id: "turn-a", origin_message_id: "prompt-a",
     created_at: 100, completed_at: 104, ...overrides,
   };
 }
@@ -51,9 +47,6 @@ function emitTask(snapshot: SubagentTaskSnapshot) {
     chatHandlers.forEach((handler) => handler({ event: "subagent_task", chat_id: "a", task: snapshot }));
   });
 }
-function ResultsPresence({ threadMessages }: { threadMessages: UIMessage[] }) {
-  return <output data-testid="has-results">{useHasSubagentResults(threadMessages) ? "yes" : "no"}</output>;
-}
 function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEvents = true, historyEnabled = false, onActivityToggle }: {
   threadMessages?: UIMessage[];
   sessionKey?: string;
@@ -61,14 +54,13 @@ function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEve
   historyEnabled?: boolean;
   onActivityToggle?: () => void;
 } = {}) {
-  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled} messages={threadMessages}>
-    <ResultsPresence threadMessages={threadMessages} />
+  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled}>
     <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} onActivityToggle={onActivityToggle} /></div>
     <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock /><textarea aria-label="Message" /></div>
   </SubagentTasksProvider>;
 }
 function summary(region: HTMLElement) {
-  return within(region).getByRole("button", { name: /^(Subtasks|Other tasks) (Completed|Finished):/ });
+  return within(region).getByRole("button", { name: /^Subtasks (Completed|Finished):/ });
 }
 function expectBefore(first: Node, second: Node) {
   expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -91,53 +83,59 @@ describe("subagent result archives", () => {
     localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY);
   });
 
-  it("does not count an unanchored legacy completion as a visible history result", async () => {
-    vi.mocked(fetch).mockImplementation(async () => response([]));
-    render(layout({ threadMessages: [] }));
-    emitTask(task({ origin_call_id: undefined, origin_turn_id: null, origin_message_id: null }));
-    expect(screen.getByTestId("has-results")).toHaveTextContent("no");
-  });
-
-  it("shows active work in the dock and its terminal result at the independent anchor", async () => {
-    const anchoredMessages = projectThreadEvents([
-      { event: "user_message", chat_id: "a", projection_id: "prompt-a", turn_id: "turn-a", starts_turn: true, text: "Inspect config", turn_seq: 1 },
-      { event: "subagent_anchor", chat_id: "a", projection_id: "anchor-a", turn_id: "turn-a", task_id: "task-1", call_id: "call-1", turn_seq: 2 },
-      { event: "message", chat_id: "a", projection_id: "answer-a", turn_id: "turn-a", text: "Main answer", turn_seq: 3 },
-    ] as ThreadProjectionEvent[]);
+  it("keeps queued, running and stopping work out of chat until a terminal result arrives", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
-      task({ origin_call_id: "call-1", state: "running", phase: "awaiting_model", completed_at: null }),
-      task({ task_id: "queued", label: "Waiting check", state: "queued", completed_at: null }),
+      task({ state: "running", phase: "awaiting_model", completed_at: null }),
+      task({ task_id: "queued", label: "Waiting check", state: "queued", completed_at: null, created_at: 101 }),
+      task({ task_id: "stopping", label: "Stopping check", state: "stopping", completed_at: null,
+        origin_message_id: null, origin_turn_id: null, created_at: 102 }),
     ]));
-    render(layout({ threadMessages: anchoredMessages }));
-    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 2");
+    const user = userEvent.setup();
+    render(layout());
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 3");
     const transcript = screen.getByTestId("messages");
-    expect(transcript.querySelector('[data-subagent-id="task-1"]')).toBeNull();
-    emitTask(task({ origin_call_id: "call-1", revision: 2, result: "Full findings stay in details" }));
-    await waitFor(() => expect(transcript.querySelector('[data-subagent-id="task-1"]')).not.toBeNull());
-    const result = transcript.querySelector('[data-subagent-id="task-1"]')!;
-    expectBefore(screen.getByText("Inspect config"), result);
-    expectBefore(result, screen.getByText("Main answer"));
-    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    expect(transcript.querySelector("[data-subagent-results]")).toBeNull();
+    expect(transcript).not.toHaveTextContent("Config check");
     expect(transcript).not.toHaveTextContent("Waiting check");
+    expect(transcript).not.toHaveTextContent("Stopping check");
+
+    emitTask(task({ revision: 2, result: "Full findings stay in details" }));
+    const archive = screen.getByRole("region", { name: "Subtasks" });
+    expect(summary(archive)).toHaveTextContent("Completed: 1");
+    expect(summary(archive).querySelector("img")).toHaveAttribute("src", "/brand/nanobot_mark.svg");
+    expect(summary(archive).querySelector("img")).toHaveAttribute("alt", "");
+    expect(summary(archive)).toHaveAttribute("aria-expanded", "false");
+    await user.click(summary(archive));
+    expect(within(archive).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
+    expect(within(archive).getAllByRole("listitem")).toHaveLength(1);
+    expect(transcript).not.toHaveTextContent("Waiting check");
+    expect(transcript).not.toHaveTextContent("Stopping check");
     expect(transcript).not.toHaveTextContent("Full findings stay in details");
   });
 
-  it("groups consecutive terminal states and keeps cancellation distinct from failures", async () => {
-    const states = [task(), task({ task_id: "cancelled", label: "Cancelled check", state: "cancelled" }),
-      task({ task_id: "failed", label: "Failed check", state: "error", error: "Unreadable file" })];
-    vi.mocked(fetch).mockImplementation(async () => response(states));
+  it("counts finished work truthfully and keeps cancellation distinct from failures", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ task_id: "cancelled", label: "Cancelled check", state: "cancelled", created_at: 102 }),
+      task({ task_id: "interrupted", label: "Interrupted check", state: "interrupted", created_at: 104 }),
+      task({ task_id: "incomplete", label: "Incomplete check", state: "incomplete", created_at: 103 }),
+      task({ task_id: "failed", label: "Failed check", state: "error", error: "Unreadable file", created_at: 101 }),
+      task(),
+    ]));
     const user = userEvent.setup();
-    render(layout({ threadMessages: [messages[0], ...states.map((t) => ({
-      id: `anchor-${t.task_id}`, role: "tool" as const, content: "", turnId: "turn-a", createdAt: 100_500,
-      subagentAnchor: { taskId: t.task_id, callId: "call-1" },
-    })), messages[2]] }));
-    const archives = await screen.findAllByRole("region", { name: "Subtasks" });
-    expect(archives).toHaveLength(1);
-    expect(summary(archives[0])).toHaveTextContent("Finished: 3");
-    expect(summary(archives[0])).toHaveTextContent("Review needed: 1");
-    await user.click(summary(archives[0]));
-    expect(within(archives[0]).getByRole("button", { name: "Cancelled check Cancelled 4s" })).toBeVisible();
-    await user.click(within(archives[0]).getByRole("button", { name: "Failed check Failed 4s" }));
+    render(layout());
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    const header = summary(archive);
+    expect(header).toHaveTextContent("Finished: 5");
+    expect(header).toHaveTextContent("Review needed: 3");
+    expect(header).not.toHaveTextContent("Completed: 5");
+    await user.click(header);
+    expect(within(archive).getByRole("button", { name: "Cancelled check Cancelled 4s" })).toBeVisible();
+    expect(within(archive).getByRole("button", { name: "Failed check Failed 4s" })).toBeVisible();
+    expect(within(archive).getByRole("button", { name: "Incomplete check Incomplete 4s" })).toBeVisible();
+    expect(within(archive).getByRole("button", { name: "Interrupted check Interrupted 4s" })).toBeVisible();
+    expect([...archive.querySelectorAll("[data-subagent-id]")].map((row) => row.getAttribute("data-subagent-id")))
+      .toEqual(["task-1", "failed", "cancelled", "incomplete", "interrupted"]);
+    await user.click(within(archive).getByRole("button", { name: "Failed check Failed 4s" }));
     expect(within(screen.getByRole("dialog", { name: "Failed check" })).getByRole("alert")).toHaveTextContent("Unreadable file");
     expect(requestMutation).not.toHaveBeenCalled();
   });
@@ -172,7 +170,7 @@ describe("subagent result archives", () => {
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
-  it("keeps the outgoing transcript until the new session anchors arrive", async () => {
+  it("resets task disclosures across sessions without remounting the outgoing transcript", async () => {
     vi.mocked(fetch).mockImplementation(async (input) => response([
       task(String(input).includes("websocket%3Ab") ? { task_id: "task-b", label: "Other check" } : {}),
     ]));
@@ -180,106 +178,94 @@ describe("subagent result archives", () => {
     const view = render(layout());
     const archive = await screen.findByRole("region", { name: "Subtasks" });
     await user.click(summary(archive));
+    expect(summary(archive)).toHaveAttribute("aria-expanded", "true");
     const outgoingPrompt = screen.getByText("Inspect config");
+
+    // The selected session changes before useNanobotStream hands over its messages.
     view.rerender(layout({ sessionKey: "websocket:b" }));
     expect(screen.getByText("Inspect config")).toBe(outgoingPrompt);
-    await waitFor(() => expect(screen.queryByRole("region", { name: "Subtasks" })).not.toBeInTheDocument());
-    const otherMessages: UIMessage[] = [
-      { ...messages[0], id: "prompt-b", content: "Other request" },
-      { ...messages[1], id: "anchor-b", subagentAnchor: { taskId: "task-b", callId: "call-1" } },
-      { ...messages[2], id: "answer-b", content: "Other answer" },
-    ];
-    view.rerender(layout({ sessionKey: "websocket:b", threadMessages: otherMessages }));
     const other = await screen.findByRole("region", { name: "Subtasks" });
     expect(summary(other)).toHaveAttribute("aria-expanded", "false");
     await user.click(summary(other));
     expect(within(other).getByRole("button", { name: "Other check Completed 4s" })).toBeVisible();
-    expectBefore(screen.getByText("Other request"), other);
-    expectBefore(other, screen.getByText("Other answer"));
+
+    view.rerender(layout({ sessionKey: "websocket:b", threadMessages: [
+      { ...messages[0], id: "prompt-b", content: "Other request" },
+      { ...messages[1], id: "answer-b", content: "Other answer" },
+    ] }));
+    expect(await screen.findByText("Other answer")).toBeVisible();
+    expect(summary(screen.getByRole("region", { name: "Subtasks" }))).toHaveAttribute("aria-expanded", "true");
+
     view.rerender(layout());
     const restored = await screen.findByRole("region", { name: "Subtasks" });
     expect(summary(restored)).toHaveAttribute("aria-expanded", "false");
     await user.click(summary(restored));
     expect(within(restored).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
+    view.rerender(layout({ sessionKey: "websocket:b" }));
+    expect(summary(await screen.findByRole("region", { name: "Subtasks" }))).toHaveAttribute("aria-expanded", "false");
+    view.rerender(layout());
+    expect(summary(await screen.findByRole("region", { name: "Subtasks" }))).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("places multiple independent anchors at their exact transcript positions", async () => {
-    vi.mocked(fetch).mockImplementation(async () => response([task(), task({ task_id: "second", label: "Second check" })]));
+  it("prefers the exact initiating prompt and falls back once to the first user message of its turn", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ task_id: "exact", label: "Exact check", origin_message_id: "followup", created_at: 101 }),
+      task({ task_id: "fallback", label: "Turn fallback", origin_message_id: "replayed-original-id" }),
+    ]));
     const user = userEvent.setup();
-    render(layout({ threadMessages: [...messages, { ...messages[1], id: "anchor-second", subagentAnchor: { taskId: "second", callId: "call-1" } },
-      { ...messages[2], id: "answer-second", content: "Second answer" }] }));
+    render(layout({ threadMessages: [
+      ...messages,
+      { id: "followup", role: "user", content: "Check the follow-up", turnId: "turn-a", createdAt: 102_000 },
+      { id: "followup-answer", role: "assistant", content: "Follow-up answer", turnId: "turn-a", createdAt: 103_000 },
+    ] }));
     const archives = await screen.findAllByRole("region", { name: "Subtasks" });
     expect(archives).toHaveLength(2);
     expectBefore(screen.getByText("Inspect config"), archives[0]);
     expectBefore(archives[0], screen.getByText("Main answer"));
-    expectBefore(screen.getByText("Main answer"), archives[1]);
-    expectBefore(archives[1], screen.getByText("Second answer"));
+    expectBefore(screen.getByText("Check the follow-up"), archives[1]);
+    expectBefore(archives[1], screen.getByText("Follow-up answer"));
     await user.click(summary(archives[0]));
-    expect(summary(archives[1])).toHaveAttribute("aria-expanded", "false");
     await user.click(summary(archives[1]));
-    expect(within(archives[0]).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
-    expect(within(archives[1]).getByRole("button", { name: "Second check Completed 4s" })).toBeVisible();
+    expect(within(archives[0]).getByRole("button", { name: "Turn fallback Completed 4s" })).toBeVisible();
+    expect(within(archives[1]).getByRole("button", { name: "Exact check Completed 4s" })).toBeVisible();
+    expect(screen.getByTestId("messages").querySelectorAll("[data-subagent-id]")).toHaveLength(2);
   });
 
-  it("queries stable anchor task IDs after the prompt display ID changes on replay", async () => {
-    const user = userEvent.setup();
-    const view = render(layout({ liveEvents: false, historyEnabled: true }));
-    let archive = await screen.findByRole("region", { name: "Subtasks" });
-    await user.click(summary(archive));
-    view.unmount();
-    render(layout({ threadMessages: [{ ...messages[0], id: "persisted-projection-42" }, messages[1], messages[2]], liveEvents: false, historyEnabled: true }));
-    archive = await screen.findByRole("region", { name: "Subtasks" });
-    await user.click(summary(archive));
-    expect(within(archive).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
-    const queries = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url), "http://localhost").searchParams);
-    expect(queries.some((query) => query.getAll("task_id").includes("task-1"))).toBe(true);
-    expect(queries.every((query) => !query.has("message_id") && !query.has("turn_id"))).toBe(true);
-  });
-
-  it("loads older tasks only when their history page is loaded, and never treats a cached page as unlinked", async () => {
-    const older = task({ task_id: "older", label: "Earlier check", origin_turn_id: "older-turn", origin_message_id: "older-prompt" });
-    const active = task({ task_id: "active", label: "Live check", state: "running", completed_at: null,
-      origin_message_id: "different-prompt", origin_turn_id: "different-turn" });
-    vi.mocked(fetch).mockImplementation(async (input) => {
-      const query = new URL(String(input), "http://localhost").searchParams;
-      return response(query.getAll("task_id").includes("older") ? [active, older] : [active]);
-    });
+  it("shows older results only with their loaded prompt and preserves details through history navigation", async () => {
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ task_id: "older", label: "Earlier check", origin_turn_id: "older-turn", origin_message_id: "older-prompt",
+        result: "## Earlier findings\n\nThe saved result remains available" }),
+      task({ task_id: "unlinked-active", label: "Unlinked live check", state: "running", completed_at: null,
+        origin_message_id: null, origin_turn_id: null, created_at: 200 }),
+    ]));
     const user = userEvent.setup();
     const view = render(layout());
     expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
-    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
-    expect(vi.mocked(fetch).mock.calls.every(([url]) => !String(url).includes("older"))).toBe(true);
-
+    expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
     const olderMessages: UIMessage[] = [
       { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
-      { ...messages[1], id: "older-anchor", subagentAnchor: { taskId: "older", callId: "call-1" } },
       ...messages,
     ];
     view.rerender(layout({ threadMessages: olderMessages }));
-    const linked = await screen.findByRole("region", { name: "Subtasks" });
-    expectBefore(screen.getByText("Inspect earlier work"), linked);
+    let linked = screen.getByRole("region", { name: "Subtasks" });
+    expect(summary(linked)).toHaveAttribute("aria-expanded", "false");
     await user.click(summary(linked));
+    await user.click(within(linked).getByRole("button", { name: "Earlier check Completed 4s" }));
+    const detail = screen.getByRole("dialog", { name: "Earlier check" });
+    expect(await within(detail).findByRole("heading", { name: "Earlier findings" })).toBeVisible();
+    view.rerender(layout());
+    expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
+    expect(within(detail).getByText("The saved result remains available")).toBeVisible();
+    view.rerender(layout({ threadMessages: olderMessages }));
+    await user.keyboard("{Escape}");
+    linked = screen.getByRole("region", { name: "Subtasks" });
+    expect(summary(linked)).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(within(linked).getByRole("button", { name: "Earlier check Completed 4s" })).toHaveFocus());
+    expect(screen.getByTestId("messages").querySelectorAll('[data-subagent-id="older"]')).toHaveLength(1);
+    expectBefore(screen.getByText("Inspect earlier work"), linked);
+    expectBefore(linked, screen.getByText("Inspect config"));
     expect(within(linked).getByRole("button", { name: "Earlier check Completed 4s" })).toBeVisible();
-
-    view.rerender(layout());
-    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Subtasks" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
-  });
-
-  it("ignores a late response from a history page that was left", async () => {
-    const older: UIMessage[] = [{ id: "older-prompt", role: "user", content: "Older request", turnId: "older-turn", createdAt: 99_000 }, { ...messages[1], id: "older-anchor", subagentAnchor: { taskId: "older", callId: "call-1" } }];
-    let finishOlder!: (value: Response) => void;
-    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finishOlder = resolve; }));
-    vi.mocked(fetch).mockImplementation(async () => response([]));
-    const view = render(layout({ threadMessages: older }));
-    await waitFor(() => expect(finishOlder).toBeDefined());
-    view.rerender(layout());
-    await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(1));
-    await act(async () => { finishOlder(response([task({ task_id: "older", origin_message_id: "older-prompt", origin_turn_id: "older-turn" })])); });
-    view.rerender(layout({ threadMessages: older }));
-    await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(2));
-    expect(screen.queryByRole("region", { name: "Subtasks" })).not.toBeInTheDocument();
+    expect(requestMutation).not.toHaveBeenCalled();
   });
 
   it("yields reading control before expanding and keeps the archive open when its prompt display id changes", async () => {
@@ -298,29 +284,37 @@ describe("subagent result archives", () => {
     expect(within(replayed).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
   });
 
-  it("preserves independent disclosures through task outcomes, history prepends and Activity preference changes", async () => {
+  it("preserves disclosure through off-page task outcomes, history prepends and Activity preference changes", async () => {
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
-    vi.mocked(fetch).mockImplementation(async () => response([task(), task({ task_id: "second", label: "Second check", state: "running", completed_at: null })]));
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task(),
+      task({ task_id: "second", label: "Second check", created_at: 101 }),
+      task({ task_id: "other", label: "Other check", state: "running", completed_at: null, origin_message_id: null, origin_turn_id: null, created_at: 102 }),
+    ]));
     const user = userEvent.setup();
-    const threadMessages: UIMessage[] = [...messages, { ...messages[1], id: "second-anchor", subagentAnchor: { taskId: "second", callId: "call-1" } }];
-    const view = render(layout({ threadMessages }));
-    const first = await screen.findByRole("region", { name: "Subtasks" });
-    await user.click(summary(first));
+    const view = render(layout());
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    expect(summary(archive)).toHaveAttribute("aria-expanded", "false");
+    await user.click(summary(archive));
     act(() => { writeLocalPreferences(DEFAULT_LOCAL_PREFS); });
-    emitTask(task({ task_id: "second", label: "Second check", revision: 2, state: "error", error: "Other work failed" }));
-    const archives = await screen.findAllByRole("region", { name: "Subtasks" });
-    expect(summary(archives[0])).toHaveAttribute("aria-expanded", "true");
-    expect(summary(archives[1])).toHaveAttribute("aria-expanded", "false");
-    await user.click(summary(archives[1]));
-    view.rerender(layout({ threadMessages: [{ id: "prepended", role: "user", content: "Earlier request", turnId: "older", createdAt: 90_000 }, ...threadMessages] }));
-    const retained = screen.getAllByRole("region", { name: "Subtasks" });
-    expect(summary(retained[0])).toHaveAttribute("aria-expanded", "true");
-    expect(summary(retained[1])).toHaveAttribute("aria-expanded", "true");
-    expect(within(retained[0]).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
-    expect(within(retained[1]).getByRole("button", { name: "Second check Failed 4s" })).toBeVisible();
-    await user.click(summary(retained[0]));
+    expect(summary(archive)).toHaveAttribute("aria-expanded", "true");
+
+    emitTask(task({ task_id: "other", label: "Other check", revision: 2, state: "error", error: "Other work failed",
+      origin_message_id: null, origin_turn_id: null, created_at: 102 }));
+    expect(summary(archive)).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("messages").querySelector('[data-subagent-id="other"]')).toBeNull();
+    view.rerender(layout({ threadMessages: [
+      { id: "prepended", role: "user", content: "Earlier request from this turn", turnId: "turn-a", createdAt: 99_000 },
+      ...messages,
+    ] }));
+    const retained = screen.getByRole("region", { name: "Subtasks" });
+    expect(summary(retained)).toHaveAttribute("aria-expanded", "true");
+    expect(within(retained).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
+    expect([...retained.querySelectorAll("[data-subagent-id]")].map((row) => row.getAttribute("data-subagent-id")))
+      .toEqual(["task-1", "second"]);
+    await user.click(summary(retained));
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
-    expect(summary(retained[0])).toHaveAttribute("aria-expanded", "false");
-    expect(summary(retained[1])).toHaveAttribute("aria-expanded", "true");
+    expect(summary(retained)).toHaveAttribute("aria-expanded", "false");
+    expect(within(retained).queryByRole("button", { name: "Config check Completed 4s" })).not.toBeInTheDocument();
   });
 });

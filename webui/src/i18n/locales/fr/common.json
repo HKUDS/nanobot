@@ -1798,8 +1798,6 @@
       },
       "interruptedHelp": "Le serveur a redémarré avant la fin de cette tâche. Elle n’a pas été relancée automatiquement.",
       "workTitle": "Sous-tâches",
-      "readFailed": "Impossible de charger les sous-tâches.",
-      "retryRead": "Réessayer",
       "progress": "{{completed}} sur {{total}} terminées",
       "running": "En cours : {{count}}",
       "finished": "Terminées : {{count}}",

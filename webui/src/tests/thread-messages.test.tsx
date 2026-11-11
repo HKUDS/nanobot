@@ -9,6 +9,7 @@ import {
   unitKeysForDisplay,
 } from "@/components/thread/ThreadMessages";
 import { preloadMarkdownText } from "@/components/MarkdownText";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
 import type { UIMessage } from "@/lib/types";
 
 // These DOM tests exercise disclosure/source contracts; the real shadow renderer runs in browser tests.
@@ -1177,6 +1178,26 @@ describe("ThreadMessages", () => {
     const branchPromptIndex = rows.findIndex((row) => row.textContent?.includes("branch prompt"));
     expect(dividerIndex).toBeGreaterThan(0);
     expect(dividerIndex).toBe(branchPromptIndex - 1);
+  });
+
+  it("hides redundant task creation while retaining failed creates and other tool activity", async () => {
+    const messages = projectThreadEvents([
+      { event: "user_message", chat_id: "a", starts_turn: true, turn_id: "turn", text: "Inspect" },
+      { event: "message", chat_id: "a", turn_id: "turn", kind: "progress", text: "Tools", tool_events: [
+        { call_id: "create", name: "subagent", phase: "end", arguments: { action: "create" } },
+        { call_id: "failed", name: "subagent", phase: "error", arguments: { action: "create" }, error: "Creation failed" },
+        { call_id: "check", name: "subagent", phase: "end", arguments: { action: "check" } },
+        { call_id: "exec", name: "exec", phase: "end", arguments: { command: "pwd" } },
+      ] },
+      { event: "message", chat_id: "a", turn_id: "turn", text: "Done" },
+    ]);
+    render(<ThreadMessages messages={messages} />);
+    openAssistantBlockMenu();
+    fireEvent.click(await screen.findByRole("button", { name: /worked/i }));
+    expect(screen.getByText(/could not create subtask/i)).toBeVisible();
+    expect(screen.getByText(/subtask status retrieved/i)).toBeVisible();
+    expect(screen.getByText(/ran command/i)).toBeVisible();
+    expect(screen.queryByText(/^subtask created/i)).not.toBeInTheDocument();
   });
 
   it("keeps the fork boundary after a hidden subagent create activity", () => {

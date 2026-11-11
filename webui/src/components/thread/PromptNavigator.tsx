@@ -166,7 +166,6 @@ export function PromptNavigator({
               </div>
             )}
           </div>
-
         </DialogContent>
       </Dialog>
     </>

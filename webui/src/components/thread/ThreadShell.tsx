@@ -16,7 +16,7 @@ import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { SandboxNotice } from "@/components/thread/SandboxNotice";
 import { useSandboxNotice } from "@/components/thread/useSandboxNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
-import { SubagentReadNotice, SubagentTasksProvider } from "@/components/thread/SubagentTasks";
+import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
 import { latestSubagentInputKey } from "@/lib/subagent-tasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
@@ -1368,7 +1368,6 @@ export function ThreadShell({
       {restoredFirstDraft?.chatId === chatId && restoredFirstDraft.error ? (
         <p role="alert" className="px-3 text-sm text-destructive">{restoredFirstDraft.error}</p>
       ) : null}
-      <SubagentReadNotice />
       <SubagentTaskDock inputKey={latestSubagentInputKey(displayMessages)} />
       {session ? (
         <ThreadComposer
@@ -1528,7 +1527,6 @@ export function ThreadShell({
       sessionKey={session?.key ?? null}
       liveEvents={webuiCapabilities.includes("webui.subagents.events.v1")}
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
-      messages={messagesReady ? promptNavigation.window?.messages ?? displayMessages : []}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
     <section ref={setSidebarHost} style={{ "--sidebar-enter-width": `${sidebarEnterWidth}px`, "--sidebar-enter-mobile-width": sidebarEnterWidth ? "100%" : "0px" } as CSSProperties} data-preview-open={sidebarOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">

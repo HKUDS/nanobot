@@ -516,12 +516,6 @@ class SessionManager:
         """Read persisted child headers without transcripts, checkpoints, or pending inputs."""
         return self._store.list_child_session_metadata(parent_key)
 
-    def list_scoped_subagent_metadata(
-        self, parent_key: str, task_keys: tuple[str, ...],
-    ) -> list[SessionMetadataPayload]:
-        """Read indexed subagent headers without loading unrelated child sessions."""
-        return self._store.list_scoped_subagent_metadata(parent_key, task_keys)
-
     def save(self, session: Session) -> None:
         """Commit an offline administrative snapshot, rejecting obsolete history."""
         self._require_offline_mutation()

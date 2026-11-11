@@ -288,48 +288,16 @@ def test_archive_reference_allows_atomic_session_replacement_but_not_orphan_comm
     assert store.archived_keys() == []
 
 
-def test_subagent_indexes_upgrade_safely_and_filter_with_index_searches(tmp_path, monkeypatch):
+def test_database_from_earlier_subagent_pr_build_remains_readable(tmp_path, monkeypatch):
     store = SqliteSessionStore(tmp_path)
     workspace = tmp_path / "workspace"
+
+    def prior_v6(db: sqlite3.Connection) -> None:
+        db.execute("CREATE INDEX subagent_active_state ON sessions (key)")
+
     with monkeypatch.context() as patch:
-        patch.setattr(sqlite_store, "_SCHEMA_MIGRATIONS", sqlite_store._SCHEMA_MIGRATIONS[:5])
+        patch.setattr(sqlite_store, "_SCHEMA_MIGRATIONS", (*sqlite_store._SCHEMA_MIGRATIONS[:5], prior_v6))
         store.initialize(workspace)
-        for key, parent, message, turn, state in (
-            ("subagent:message", "websocket:a", "message-a", "turn-other", "done"),
-            ("subagent:turn", "websocket:a", "legacy-replay", "turn-a", "done"),
-            ("subagent:unlinked", "websocket:a", None, None, "done"),
-            ("subagent:active", "websocket:a", "off-page", "off-page", "running"),
-            ("subagent:other", "websocket:b", "message-a", "turn-a", "done"),
-        ):
-            store.save(Session(key=key, metadata={
-                "session_type": "subagent", "parent_session_key": parent,
-                "subagent_task": {"origin_message_id": message, "origin_turn_id": turn, "state": state},
-            }))
-        store.save(Session(key="chat:damaged"))
-        with store.transaction() as db:
-            db.execute("UPDATE sessions SET metadata='not JSON' WHERE key='chat:damaged'")
-        assert _database_snapshot(store.path)[0] == 5
+        store.save(_session())
     store.initialize(workspace)
-    store.initialize(workspace)
-    assert _database_snapshot(store.path)[0] == len(sqlite_store._SCHEMA_MIGRATIONS)
-    page_query, page_params = sqlite_store._scoped_subagent_query(
-        "websocket:a", ("subagent:message", "subagent:other"),
-    )
-    with store.transaction(write=False) as db:
-        assert db.execute("SELECT metadata FROM sessions WHERE key='chat:damaged'").fetchone()[0] == "not JSON"
-        page_plan = "\n".join(row[3] for row in db.execute("EXPLAIN QUERY PLAN " + page_query, page_params))
-        list_plan = "\n".join(row[3] for row in db.execute(f"""EXPLAIN QUERY PLAN
-            SELECT sessions.key FROM sessions
-            LEFT JOIN history_heads ON history_heads.session_key=sessions.key
-            WHERE {sqlite_store._SESSION_LIST_TYPE} IN (SELECT value FROM json_each(?))
-               OR {sqlite_store._SESSION_LIST_TYPE}=X'00'
-            ORDER BY sessions.updated_at DESC""", ('["conversation"]',)))
-        assert "USING INDEX subagent_active_state" in page_plan
-        assert "USING INDEX session_list_type" in list_plan
-        assert "SCAN sessions" not in page_plan + list_plan
-    assert {row["key"] for row in store.list_scoped_subagent_metadata(
-        "websocket:a", ("subagent:message", "subagent:other"),
-    )} == {"subagent:message", "subagent:active"}
-    assert {row["key"] for row in store.list_scoped_subagent_metadata(
-        "websocket:a", (),
-    )} == {"subagent:active"}
+    assert store.load("chat:extensions").messages[0]["content"] == "hello"

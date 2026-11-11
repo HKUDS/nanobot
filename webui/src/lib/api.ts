@@ -378,9 +378,6 @@ function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet
     case "file_edit":
       if (!Array.isArray(value.edits) || !value.edits.every(isProjectionFileEdit)) break;
       return value as unknown as ThreadProjectionEvent;
-    case "subagent_anchor":
-      if (typeof value.task_id !== "string" || !value.task_id || typeof value.call_id !== "string" || !value.call_id) break;
-      return value as unknown as ThreadProjectionEvent;
     case "delta":
     case "reasoning_delta":
       if (typeof value.text !== "string") break;
@@ -699,16 +696,12 @@ export async function updateAutomation(
   return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
 }
 
-export async function fetchSubagentTasks(
-  token: string, sessionKey: string,
-  scope: { taskIds: string[] },
-): Promise<SubagentTasksPayload> {
-  const query = new URLSearchParams({ scope: "page" });
-  for (const id of scope.taskIds) query.append("task_id", id);
+export async function fetchSubagentTasks(token: string, sessionKey: string): Promise<SubagentTasksPayload> {
   const payload = await request<unknown>(
-    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents?${query}`, token, undefined, API_READ_TIMEOUT_MS,
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`, token, undefined, API_READ_TIMEOUT_MS,
   );
-  if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)) {
+  if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)
+    || new Set(payload.tasks.map((task) => task.task_id)).size !== payload.tasks.length) {
     throw new Error("Invalid subagent tasks response");
   }
   return { tasks: payload.tasks };
