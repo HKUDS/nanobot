@@ -1465,19 +1465,17 @@ In `config.json`, set `providers.<name>.api` for the built-in `custom` provider 
 
 ### Legacy OpenAI API selector migration
 
-Versions 0.4.0 and 0.4.1 can convert `providers.openai.apiType` (or `api_type`). Later releases reject an explicit selection in the old field unless the current `api` object is already present. They ignore the old default `auto`, which was saved even for unused providers. OpenAI connections, Responses, and Chat Completions are still supported.
-
-Back up the configuration before upgrading. Update the existing configuration by hand:
+If `providers.openai.apiType` (or `api_type`) is set to `responses` or `chat_completions`, replace it with `api` as shown below. The old `auto` default needs no action. If `api` is already present, including `null`, it takes precedence; keep it and remove the old field.
 
 | Old value | Current configuration under `providers.openai` |
 | --- | --- |
-| `auto` | Remove the old field; leave `api` unset or set it to `null`. |
+| `auto` | No change required, or remove the old field. |
 | `responses` | Replace the old field with `"api": {"supportedApis": ["responses"]}`. |
 | `chat_completions` | Replace the old field with `"api": {"supportedApis": ["chat_completions"]}`. |
 
-If `api` is already present, keep it and remove the old field. If your launcher sets `NANOBOT_PROVIDERS__OPENAI__API_TYPE` or `NANOBOT_PROVIDERS__OPENAI__APITYPE`, remove the old variable there too. For an explicit selection, set `NANOBOT_PROVIDERS__OPENAI__API` to the JSON object from the table. For Auto, leave it unset. Do not change credentials, model names, or the workspace.
+If your launcher sets `NANOBOT_PROVIDERS__OPENAI__API_TYPE` or `NANOBOT_PROVIDERS__OPENAI__APITYPE` to `responses` or `chat_completions`, replace it with `NANOBOT_PROVIDERS__OPENAI__API` set to a JSON object such as `{"supportedApis":["responses"]}`. After changing the variable, restart the gateway through that launcher before updating through the WebUI.
 
-If you already upgraded, edit the same configuration or launcher environment and restart the gateway. If a separate older client cannot save provider settings, update that client or open the WebUI served by the gateway.
+If you already upgraded, edit the configuration or launcher environment and restart the gateway.
 
 ### Preset request API
 
