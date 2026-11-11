@@ -696,9 +696,17 @@ export async function updateAutomation(
   return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
 }
 
-export async function fetchSubagentTasks(token: string, sessionKey: string): Promise<SubagentTasksPayload> {
+export async function fetchSubagentTasks(
+  token: string, sessionKey: string,
+  scope: { messageIds: string[]; turnIds: string[] } | "unlinked",
+): Promise<SubagentTasksPayload> {
+  const query = new URLSearchParams({ scope: scope === "unlinked" ? "unlinked" : "page" });
+  if (scope !== "unlinked") {
+    for (const id of scope.messageIds) query.append("message_id", id);
+    for (const id of scope.turnIds) query.append("turn_id", id);
+  }
   const payload = await request<unknown>(
-    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`, token, undefined, API_READ_TIMEOUT_MS,
+    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents?${query}`, token, undefined, API_READ_TIMEOUT_MS,
   );
   if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)
     || new Set(payload.tasks.map((task) => task.task_id)).size !== payload.tasks.length) {

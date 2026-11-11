@@ -460,7 +460,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       },
     });
   }
-  const hasTaskResults = useHasSubagentResults();
+  const hasTaskResults = useHasSubagentResults(messages);
   const hasMessages = messages.length > 0 || (hasTaskResults && conversationReady);
   const hasThreadLayout = hasMessages || initialLoading;
   useLayoutEffect(() => {

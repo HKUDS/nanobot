@@ -554,14 +554,14 @@ describe("ThreadShell", () => {
       usage: null, receipts: {}, result: null, partial: false, stop_reason: null, error: null,
     };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [snapshot] });
+      if (String(input).includes("/subagents?scope=page")) return httpJson({ tasks: [snapshot] });
       if (String(input).includes("/webui-thread")) return httpJson(transcriptFromSimpleMessages([
         { role: "user", content: "Delegate inspection", turnId: "parent-turn" },
       ]));
       return Response.json({}, { status: 404 });
     }));
     render(wrap(client, <ThreadShell session={session("background-work")} title="Background work" onToggleSidebar={() => {}} />,
-      null, "tok", ["webui.core.v1", "webui.subagents.v1", "webui.subagents.events.v1"]));
+      null, "tok", ["webui.core.v1", "webui.subagents.v1", "webui.subagents.events.v1", "webui.subagents.scoped-history.v1"]));
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
     act(() => client._emitChat("background-work", { event: "goal_status", chat_id: "background-work", turn_id: "parent-turn", status: "running", started_at: 100 }));
     expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
@@ -584,7 +584,7 @@ describe("ThreadShell", () => {
   it("renders one persisted task entry at the initiating prompt through the full shell", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [{
+      if (String(input).includes("/subagents?scope=page")) return httpJson({ tasks: [{
         task_id: "completed-task", label: "Inspect settings", task_description: "Inspect settings",
         origin_turn_id: "delegation-turn", origin_message_id: null, created_at: 100, completed_at: 102,
         state: "done", phase: "done", elapsed_seconds: 2, iteration: 1, tool_events: [],
@@ -597,7 +597,7 @@ describe("ThreadShell", () => {
       return { ok: false, status: 404, json: async () => ({}) };
     }));
     const shell = () => wrap(client, <ThreadShell session={session("persisted-tasks")} title="Task history"
-      onToggleSidebar={() => {}} />, null, "tok", ["webui.core.v1", "webui.subagents.v1"]);
+      onToggleSidebar={() => {}} />, null, "tok", ["webui.core.v1", "webui.subagents.v1", "webui.subagents.scoped-history.v1"]);
     const view = render(shell());
     await screen.findByText("Delegate inspection");
     fireEvent.click(await screen.findByRole("button", { name: /Subtasks Completed: 1/ }));

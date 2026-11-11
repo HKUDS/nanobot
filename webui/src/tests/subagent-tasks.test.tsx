@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { preloadMarkdownText } from "@/components/MarkdownText";
-import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
+import { SubagentCompatibilityNotice, SubagentTasksProvider } from "@/components/thread/SubagentTasks";
+import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
 import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
 import { buildDisplayUnits, unitKeysForDisplay } from "@/components/thread/ThreadMessages";
@@ -64,15 +65,19 @@ interface LayoutOptions {
   enabled?: boolean;
   liveEvents?: boolean;
   historyEnabled?: boolean;
+  scopedHistory?: boolean;
+  navigator?: boolean;
   sessionKey?: string;
   visible?: boolean;
   active?: boolean;
   inputKey?: string | null;
   threadMessages?: UIMessage[];
 }
-function layout({ enabled = true, liveEvents = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, active = true, inputKey = null, threadMessages = messages }: LayoutOptions = {}) {
+function layout({ enabled = true, liveEvents = true, historyEnabled = false, scopedHistory = true, navigator = false, sessionKey = "websocket:a", visible = true, active = true, inputKey = null, threadMessages = messages }: LayoutOptions = {}) {
   return <ThreadVisibilityContext.Provider value={visible}>
-    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled} active={active}>
+    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled} scopedHistory={scopedHistory} messages={threadMessages} active={active}>
+      <SubagentCompatibilityNotice />
+      {navigator ? <PromptNavigator messages={threadMessages} onJumpToPrompt={() => {}} /> : null}
       <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} /></div>
       <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock inputKey={inputKey ?? latestSubagentInputKey(threadMessages)} /><textarea aria-label="Message" /></div>
     </SubagentTasksProvider>
@@ -105,6 +110,44 @@ describe("session-owned task UI", () => {
   });
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
 
+  it("asks for a host update without falling back to an unscoped read", async () => {
+    render(layout({ scopedHistory: false }));
+    expect(screen.getByRole("status")).toHaveTextContent("Update nanobot on this server");
+    expect(fetch).not.toHaveBeenCalled();
+    emitTask(task());
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed scoped read and restores the task list after retry", async () => {
+    let failed = true;
+    vi.mocked(fetch).mockImplementation(async () => failed
+      ? new Response("unavailable", { status: 503 }) : response([task()]));
+    const user = userEvent.setup();
+    render(layout());
+    expect(await screen.findByRole("status")).toHaveTextContent("Could not load subtasks.");
+    failed = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("loads unlinked history only on request from message navigation", async () => {
+    const legacy = task({ task_id: "legacy", label: "Earlier check", state: "done", completed_at: 102,
+      origin_message_id: null, origin_turn_id: null, result: "Saved result" });
+    vi.mocked(fetch).mockImplementation(async (input) => response(String(input).includes("scope=unlinked") ? [legacy] : []));
+    const user = userEvent.setup();
+    render(layout({ navigator: true }));
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("scope=unlinked"))).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Message navigation" }));
+    await user.click(screen.getByRole("button", { name: "Load tasks without a linked request" }));
+    const row = await screen.findByRole("button", { name: /Earlier check Completed/ });
+    await user.click(row);
+    expect(within(screen.getByRole("dialog", { name: "Earlier check" })).getByText("Saved result")).toBeVisible();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("scope=unlinked"))).toBe(true);
+  });
+
   it("keeps active work in one composer entry without mixing in a large terminal archive", async () => {
     const older = Array.from({ length: 40 }, (_, index) => task({
       task_id: `older-${index}`, label: `Archived check ${index}`, created_at: index + 1,
@@ -112,12 +155,11 @@ describe("session-owned task UI", () => {
     }));
     vi.mocked(fetch).mockImplementation(async () => response([
       ...older, task(),
-      task({ task_id: "legacy", label: "Earlier check", created_at: 91, origin_turn_id: null, origin_message_id: "missing-prompt", state: "done", completed_at: 92, result: "Saved result" }),
     ]));
     const user = userEvent.setup();
     render(layout());
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
-    expect(fetch).toHaveBeenCalledWith("/api/sessions/websocket%3Aa/subagents", expect.any(Object));
+    expect(fetch).toHaveBeenCalledWith("/api/sessions/websocket%3Aa/subagents?scope=page&message_id=prompt-a&turn_id=turn-a", expect.any(Object));
     expect(screen.getAllByTestId("subagent-task-dock-trigger")).toEqual([trigger]);
     expect(screen.getByTestId("composer")).toContainElement(trigger);
     expect(trigger).toHaveTextContent("Running: 1");
@@ -138,9 +180,7 @@ describe("session-owned task UI", () => {
     const archive = await openArchive(user);
     expect(taskIds(archive)).toEqual(older.map(saved => saved.task_id));
     expect(within(archive).queryByRole("button", { name: /Config check Running/ })).not.toBeInTheDocument();
-    const other = await openArchive(user, "Other tasks");
-    await user.click(within(other).getByRole("button", { name: /Earlier check Completed/ }));
-    expect(within(screen.getByRole("dialog", { name: "Earlier check" })).getByText("Saved result")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
@@ -904,7 +944,7 @@ describe("session-owned task UI", () => {
   it("keeps legacy work separate after refresh and preserves its disclosure through local history prepends", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "legacy", revision: 0, label: "Nanjing weather", state: "done", completed_at: 102,
-        origin_turn_id: "websocket:a:1791046873588004336", result: "## Nanjing\n\n- **Rain**" }),
+        origin_turn_id: null, origin_message_id: null, result: "## Nanjing\n\n- **Rain**" }),
       task({ created_at: 200 }),
     ]));
     const user = userEvent.setup();
@@ -938,31 +978,29 @@ describe("session-owned task UI", () => {
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
-  it("reattaches archived work when its prompt loads without duplicating it, closing details or losing focus", async () => {
+  it("keeps details open when navigating away and restores focus when returning to the task's page", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "older", label: "Earlier check", state: "done", completed_at: 102, result: "Earlier finding", origin_turn_id: "older-turn", origin_message_id: "older-prompt" }),
       task({ created_at: 200 }),
     ]));
-    const user = userEvent.setup();
-    const view = render(layout());
-    const otherWork = await openArchive(user, "Other tasks");
-    await user.click(within(otherWork).getByRole("button", { name: /Earlier check Completed/ }));
-    const detail = screen.getByRole("dialog", { name: "Earlier check" });
-    view.rerender(layout({ threadMessages: [
+    const olderMessages: UIMessage[] = [
       { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
       ...messages,
-    ] }));
+    ];
+    const user = userEvent.setup();
+    const view = render(layout({ threadMessages: olderMessages }));
+    const archive = await openArchive(user);
+    await user.click(within(archive).getByRole("button", { name: /Earlier check Completed/ }));
+    const detail = screen.getByRole("dialog", { name: "Earlier check" });
+    view.rerender(layout());
     expect(detail).toBeVisible();
     expect(within(detail).getByText("Earlier finding")).toBeVisible();
-    await user.keyboard("{Escape}");
     expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
-    const archive = screen.getByRole("region", { name: "Subtasks" });
-    const summary = within(archive).getByRole("button", { name: /Subtasks/ });
-    expect(summary).toHaveAttribute("aria-expanded", "true");
+    view.rerender(layout({ threadMessages: olderMessages }));
+    await user.keyboard("{Escape}");
+    const restored = screen.getByRole("region", { name: "Subtasks" });
     expect(taskIds(screen.getByTestId("messages"))).toEqual(["older"]);
-    expect(screen.getByText("Inspect earlier work").compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText("Inspect config").compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-    const row = within(archive).getByRole("button", { name: /Earlier check Completed/ });
+    const row = within(restored).getByRole("button", { name: /Earlier check Completed/ });
     await waitFor(() => expect(row).toHaveFocus());
     expect(row).toBeVisible();
   });

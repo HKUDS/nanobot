@@ -6,6 +6,8 @@ import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { SubagentTaskButton, useSubagentTasks } from "@/components/thread/SubagentTasks";
+import { isActiveSubagentTask } from "@/lib/subagent-tasks";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   type PromptAnchor,
@@ -31,6 +33,7 @@ export function PromptNavigator({
   shortcutEnabled = true,
 }: PromptNavigatorProps) {
   const { i18n, t } = useTranslation();
+  const tasks = useSubagentTasks();
   const prompts = useMemo(() => suppliedPrompts ?? userPromptAnchors(messages), [suppliedPrompts, messages]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -64,7 +67,7 @@ export function PromptNavigator({
   const firstRow = Math.max(0, Math.floor(listTop / ROW_HEIGHT) - 2);
   const lastRow = firstRow + Math.ceil(window.innerHeight / ROW_HEIGHT) + 5;
 
-  if (prompts.length === 0) return null;
+  if (prompts.length === 0 && !tasks?.available) return null;
 
   const jump = (promptId: string) => {
     setOpen(false);
@@ -166,6 +169,19 @@ export function PromptNavigator({
               </div>
             )}
           </div>
+          {tasks?.available && tasks.scopedHistory ? <div className="shrink-0 border-t border-border px-4 py-3 text-sm">
+            <button type="button" className="text-muted-foreground underline hover:text-foreground"
+              disabled={tasks.unlinkedState === "loading"} onClick={() => void tasks.loadUnlinked()}>
+              {t("thread.subagents.loadUnlinked")}
+            </button>
+            {tasks.unlinkedState === "error" ? <p role="alert" className="mt-2 text-destructive">{t("thread.subagents.loadUnlinkedFailed")}</p> : null}
+            {tasks.unlinkedState === "loaded" ? (() => {
+              const unlinked = tasks.tasks.filter((task) => !isActiveSubagentTask(task) && !task.origin_message_id && !task.origin_turn_id);
+              return unlinked.length ? <ol className="mt-2 grid grid-cols-[1rem_minmax(0,1fr)_minmax(6rem,max-content)_3rem] gap-x-2.5">
+                {unlinked.map((task) => <li key={task.task_id} className="col-span-full grid grid-cols-subgrid"><SubagentTaskButton task={task} /></li>)}
+              </ol> : <p className="mt-2 text-muted-foreground">{t("thread.subagents.noUnlinked")}</p>;
+            })() : null}
+          </div> : null}
         </DialogContent>
       </Dialog>
     </>

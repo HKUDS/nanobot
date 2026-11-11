@@ -47,8 +47,8 @@ function emitTask(snapshot: SubagentTaskSnapshot) {
     chatHandlers.forEach((handler) => handler({ event: "subagent_task", chat_id: "a", task: snapshot }));
   });
 }
-function ResultsPresence() {
-  return <output data-testid="has-results">{useHasSubagentResults() ? "yes" : "no"}</output>;
+function ResultsPresence({ threadMessages }: { threadMessages: UIMessage[] }) {
+  return <output data-testid="has-results">{useHasSubagentResults(threadMessages) ? "yes" : "no"}</output>;
 }
 function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEvents = true, historyEnabled = false, onActivityToggle }: {
   threadMessages?: UIMessage[];
@@ -57,8 +57,8 @@ function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEve
   historyEnabled?: boolean;
   onActivityToggle?: () => void;
 } = {}) {
-  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled}>
-    <ResultsPresence />
+  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled} scopedHistory messages={threadMessages}>
+    <ResultsPresence threadMessages={threadMessages} />
     <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} onActivityToggle={onActivityToggle} /></div>
     <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock /><textarea aria-label="Message" /></div>
   </SubagentTasksProvider>;
@@ -237,42 +237,49 @@ describe("subagent result archives", () => {
     expect(screen.getByTestId("messages").querySelectorAll("[data-subagent-id]")).toHaveLength(2);
   });
 
-  it("keeps unmatched terminal work before the chat and preserves open details when its source is loaded", async () => {
-    vi.mocked(fetch).mockImplementation(async () => response([
-      task({ task_id: "older", label: "Earlier check", origin_turn_id: "older-turn", origin_message_id: "older-prompt",
-        result: "## Earlier findings\n\nThe saved result remains available" }),
-      task({ task_id: "unlinked-active", label: "Unlinked live check", state: "running", completed_at: null,
-        origin_message_id: null, origin_turn_id: null, created_at: 200 }),
-    ]));
+  it("loads older tasks only when their history page is loaded, and never treats a cached page as unlinked", async () => {
+    const older = task({ task_id: "older", label: "Earlier check", origin_turn_id: "older-turn", origin_message_id: "older-prompt" });
+    const active = task({ task_id: "active", label: "Live check", state: "running", completed_at: null,
+      origin_message_id: "different-prompt", origin_turn_id: "different-turn" });
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const query = new URL(String(input), "http://localhost").searchParams;
+      return response(query.getAll("message_id").includes("older-prompt") ? [active, older] : [active]);
+    });
     const user = userEvent.setup();
     const view = render(layout());
-    const unlinked = await screen.findByRole("region", { name: "Other tasks" });
-    expectBefore(unlinked, screen.getByText("Inspect config"));
-    expect(summary(unlinked)).toHaveAttribute("aria-expanded", "false");
-    await user.click(summary(unlinked));
-    expect(within(unlinked).getByText("These tasks have no matching request in the displayed messages.")).toBeVisible();
-    expect(unlinked).not.toHaveTextContent("Unlinked live check");
-    await user.click(within(unlinked).getByRole("button", { name: "Earlier check Completed 4s" }));
-    const detail = screen.getByRole("dialog", { name: "Earlier check" });
-    expect(await within(detail).findByRole("heading", { name: "Earlier findings" })).toBeVisible();
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.every(([url]) => !String(url).includes("older-prompt"))).toBe(true);
 
-    view.rerender(layout({ threadMessages: [
+    const olderMessages: UIMessage[] = [
       { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
       ...messages,
-    ] }));
-    expect(screen.getByRole("dialog", { name: "Earlier check" })).toBe(detail);
-    expect(within(detail).getByText("The saved result remains available")).toBeVisible();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
-    const linked = screen.getByRole("region", { name: "Subtasks" });
-    const header = summary(linked);
-    expect(header).toHaveAttribute("aria-expanded", "true");
-    await waitFor(() => expect(within(linked).getByRole("button", { name: "Earlier check Completed 4s" })).toHaveFocus());
-    expect(screen.getByTestId("messages").querySelectorAll('[data-subagent-id="older"]')).toHaveLength(1);
+    ];
+    view.rerender(layout({ threadMessages: olderMessages }));
+    const linked = await screen.findByRole("region", { name: "Subtasks" });
     expectBefore(screen.getByText("Inspect earlier work"), linked);
-    expectBefore(linked, screen.getByText("Inspect config"));
+    await user.click(summary(linked));
     expect(within(linked).getByRole("button", { name: "Earlier check Completed 4s" })).toBeVisible();
-    expect(requestMutation).not.toHaveBeenCalled();
+
+    view.rerender(layout());
+    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Subtasks" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+  });
+
+  it("ignores a late response from a history page that was left", async () => {
+    const older: UIMessage[] = [{ id: "older-prompt", role: "user", content: "Older request", turnId: "older-turn", createdAt: 99_000 }];
+    let finishOlder!: (value: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finishOlder = resolve; }));
+    vi.mocked(fetch).mockImplementation(async () => response([]));
+    const view = render(layout({ threadMessages: older }));
+    await waitFor(() => expect(finishOlder).toBeDefined());
+    view.rerender(layout());
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(1));
+    await act(async () => { finishOlder(response([task({ origin_message_id: "older-prompt", origin_turn_id: "older-turn" })])); });
+    view.rerender(layout({ threadMessages: older }));
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(2));
+    expect(screen.queryByRole("region", { name: "Subtasks" })).not.toBeInTheDocument();
   });
 
   it("yields reading control before expanding and keeps the archive open when its prompt display id changes", async () => {

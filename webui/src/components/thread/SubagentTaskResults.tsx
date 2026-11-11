@@ -7,9 +7,10 @@ import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { isActiveSubagentTask, type ObservedSubagentTask } from "@/lib/subagent-tasks";
 import type { UIMessage } from "@/lib/types";
 
-export function useHasSubagentResults(): boolean {
+export function useHasSubagentResults(messages: UIMessage[] = []): boolean {
   const context = useSubagentTasks();
-  return context?.tasks.some((task) => !isActiveSubagentTask(task)) ?? false;
+  const groups = groupResults(messages, context?.tasks ?? []);
+  return groups.byMessage.size > 0 || groups.unlinked.length > 0;
 }
 
 /** Exact initiating prompts win; replayed IDs fall back to the turn's first user message. */
@@ -31,7 +32,8 @@ function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
     const prompt = (task.origin_message_id ? promptsById.get(task.origin_message_id) : undefined)
       ?? (task.origin_turn_id ? firstPromptByTurn.get(task.origin_turn_id) : undefined);
     if (!prompt) {
-      unlinked.push(task);
+      // A known origin outside this render window is not an unlinked task.
+      if (!task.origin_message_id && !task.origin_turn_id) unlinked.push(task);
       continue;
     }
     const group = byMessage.get(prompt.id) ?? [];
