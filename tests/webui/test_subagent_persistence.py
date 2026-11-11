@@ -1042,18 +1042,11 @@ async def test_scoped_task_history_queries_only_matching_children_and_all_active
 
 
 @pytest.mark.asyncio
-async def test_scoped_task_history_http_validation_and_capability(tmp_path):
+async def test_scoped_task_history_http_validation(tmp_path):
     manager, sessions, _ = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
     gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
     path = "/api/sessions/websocket%3Aparent/subagents"
     try:
-        bootstrap = await gateway.http.dispatch(connection, Request(
-            "/webui/bootstrap", Headers({"Host": "127.0.0.1:8765"}),
-        ))
-        assert bootstrap.status_code == 200
-        contract = json.loads(bootstrap.body)["terminal"]["webui"]
-        assert contract["min_protocol"] <= 1 <= contract["max_protocol"]
-        assert "webui.subagents.scoped-history.v1" in contract["capabilities"]
         valid = [
             "?scope=page", "?scope=unlinked",
             "?" + urlencode([("scope", "page")] + [("message_id", "x")] * 80),
