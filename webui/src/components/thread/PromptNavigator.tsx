@@ -169,7 +169,7 @@ export function PromptNavigator({
               </div>
             )}
           </div>
-          {tasks?.available && tasks.scopedHistory ? <div className="shrink-0 border-t border-border px-4 py-3 text-sm">
+          {tasks?.available ? <div className="shrink-0 border-t border-border px-4 py-3 text-sm">
             <button type="button" className="text-muted-foreground underline hover:text-foreground"
               disabled={tasks.unlinkedState === "loading"} onClick={() => void tasks.loadUnlinked()}>
               {t("thread.subagents.loadUnlinked")}

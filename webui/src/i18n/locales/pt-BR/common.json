@@ -1805,7 +1805,6 @@
       "loadUnlinked": "Carregar tarefas sem solicitação vinculada",
       "loadUnlinkedFailed": "Não foi possível carregar essas tarefas. Tente novamente.",
       "noUnlinked": "Não há tarefas sem solicitação vinculada.",
-      "upgradeHost": "Atualize o nanobot neste servidor para recuperar subtarefas em andamento e concluídas.",
       "readFailed": "Não foi possível carregar as subtarefas.",
       "retryRead": "Tentar novamente",
       "progress": "{{completed}} de {{total}} concluídas",

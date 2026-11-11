@@ -1803,7 +1803,6 @@
       "loadUnlinked": "연결된 요청이 없는 작업 불러오기",
       "loadUnlinkedFailed": "작업을 불러오지 못했습니다. 다시 시도하세요.",
       "noUnlinked": "연결된 요청이 없는 작업이 없습니다.",
-      "upgradeHost": "진행 중이거나 완료된 하위 작업을 복원하려면 이 서버의 nanobot을 업데이트하세요.",
       "readFailed": "하위 작업을 불러오지 못했습니다.",
       "retryRead": "다시 시도",
       "progress": "{{total}}개 중 {{completed}}개 완료",

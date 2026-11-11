@@ -55,7 +55,6 @@ interface TaskContext {
   tasks: ObservedSubagentTask[];
   stopError: string | null;
   stoppingId: string | null;
-  scopedHistory: boolean;
   readError: boolean;
   retryRead: () => void;
   unlinkedState: "idle" | "loading" | "loaded" | "error";
@@ -70,13 +69,12 @@ export function useSubagentTasks() {
   return useContext(TasksContext);
 }
 
-export function SubagentCompatibilityNotice() {
+export function SubagentReadNotice() {
   const context = useSubagentTasks();
   const { t } = useTranslation("common");
-  if (!context?.available || (context.scopedHistory && !context.readError)) return null;
+  if (!context?.available || !context.readError) return null;
   return <p role="status" className="mx-auto max-w-2xl px-3 pb-2 text-xs text-muted-foreground">
-    {t(context.scopedHistory ? "thread.subagents.readFailed" : "thread.subagents.upgradeHost")}
-    {context.scopedHistory ? <> <button type="button" className="underline hover:text-foreground" onClick={context.retryRead}>{t("thread.subagents.retryRead")}</button></> : null}
+    {t("thread.subagents.readFailed")} <button type="button" className="underline hover:text-foreground" onClick={context.retryRead}>{t("thread.subagents.retryRead")}</button>
   </p>;
 }
 
@@ -87,13 +85,12 @@ interface SubagentTasksProviderProps {
   enabled: boolean;
   liveEvents: boolean;
   historyEnabled?: boolean;
-  scopedHistory?: boolean;
   messages?: UIMessage[];
   active?: boolean;
   children: ReactNode;
 }
 
-export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, scopedHistory = false, messages = [], active = true, children }: SubagentTasksProviderProps) {
+export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, messages = [], active = true, children }: SubagentTasksProviderProps) {
   const { t } = useTranslation("common");
   const pageVisible = usePageVisibility();
   const paneVisible = useThreadVisibility();
@@ -143,7 +140,6 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     let refreshing = false;
     let refreshPending = false;
     const refresh = async () => {
-      if (!scopedHistory) return;
       if (refreshing) { refreshPending = true; return; }
       refreshing = true;
       try {
@@ -180,10 +176,10 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       unsubscribeStatus?.();
       window.removeEventListener("focus", focus);
     };
-  }, [client, enabled, liveEvents, scopedHistory, scopeKey, refreshVersion, active, sessionKey, token, pageVisible, paneVisible]);
+  }, [client, enabled, liveEvents, scopeKey, refreshVersion, active, sessionKey, token, pageVisible, paneVisible]);
 
   const loadUnlinked = async () => {
-    if (!scopedHistory || !sessionKey || unlinkedState === "loading") return;
+    if (!sessionKey || unlinkedState === "loading") return;
     const generation = scopeGeneration.current;
     setUnlinkedState("loading");
     try {
@@ -217,7 +213,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     sessionKey, available: enabled && active && paneVisible, detailOpen: !!selected,
     tasks: enabled ? tasks : [],
     stopError: enabled ? stopError : null, stoppingId,
-    scopedHistory, readError, retryRead: () => setRefreshVersion((version) => version + 1), unlinkedState, loadUnlinked,
+    readError, retryRead: () => setRefreshVersion((version) => version + 1), unlinkedState, loadUnlinked,
     open: (task, target) => { trigger.current = target; setSelectedId(task.task_id); }, stop,
     register: (key, button, previous) => {
       if (button) buttons.current.set(key, button);

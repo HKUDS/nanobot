@@ -1803,7 +1803,6 @@
       "loadUnlinked": "Muat tugas tanpa permintaan terkait",
       "loadUnlinkedFailed": "Tugas tidak dapat dimuat. Coba lagi.",
       "noUnlinked": "Tidak ada tugas tanpa permintaan terkait.",
-      "upgradeHost": "Perbarui nanobot di server ini untuk memulihkan subtugas yang sedang berjalan dan selesai.",
       "readFailed": "Subtugas tidak dapat dimuat.",
       "retryRead": "Coba lagi",
       "progress": "{{completed}} dari {{total}} selesai",

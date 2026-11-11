@@ -57,7 +57,7 @@ function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEve
   historyEnabled?: boolean;
   onActivityToggle?: () => void;
 } = {}) {
-  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled} scopedHistory messages={threadMessages}>
+  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled} messages={threadMessages}>
     <ResultsPresence threadMessages={threadMessages} />
     <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} onActivityToggle={onActivityToggle} /></div>
     <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock /><textarea aria-label="Message" /></div>

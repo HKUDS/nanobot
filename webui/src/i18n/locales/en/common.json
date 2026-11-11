@@ -1988,7 +1988,6 @@
       "loadUnlinked": "Load tasks without a linked request",
       "loadUnlinkedFailed": "Could not load these tasks. Try again.",
       "noUnlinked": "No tasks without a linked request.",
-      "upgradeHost": "Update nanobot on this server to restore running and completed subtasks.",
       "readFailed": "Could not load subtasks.",
       "retryRead": "Retry",
       "progress": "{{completed}} of {{total}} completed",

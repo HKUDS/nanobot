@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { preloadMarkdownText } from "@/components/MarkdownText";
-import { SubagentCompatibilityNotice, SubagentTasksProvider } from "@/components/thread/SubagentTasks";
+import { SubagentReadNotice, SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
 import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
@@ -65,7 +65,6 @@ interface LayoutOptions {
   enabled?: boolean;
   liveEvents?: boolean;
   historyEnabled?: boolean;
-  scopedHistory?: boolean;
   navigator?: boolean;
   sessionKey?: string;
   visible?: boolean;
@@ -73,10 +72,10 @@ interface LayoutOptions {
   inputKey?: string | null;
   threadMessages?: UIMessage[];
 }
-function layout({ enabled = true, liveEvents = true, historyEnabled = false, scopedHistory = true, navigator = false, sessionKey = "websocket:a", visible = true, active = true, inputKey = null, threadMessages = messages }: LayoutOptions = {}) {
+function layout({ enabled = true, liveEvents = true, historyEnabled = false, navigator = false, sessionKey = "websocket:a", visible = true, active = true, inputKey = null, threadMessages = messages }: LayoutOptions = {}) {
   return <ThreadVisibilityContext.Provider value={visible}>
-    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled} scopedHistory={scopedHistory} messages={threadMessages} active={active}>
-      <SubagentCompatibilityNotice />
+    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled} messages={threadMessages} active={active}>
+      <SubagentReadNotice />
       {navigator ? <PromptNavigator messages={threadMessages} onJumpToPrompt={() => {}} /> : null}
       <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} /></div>
       <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock inputKey={inputKey ?? latestSubagentInputKey(threadMessages)} /><textarea aria-label="Message" /></div>
@@ -109,15 +108,6 @@ describe("session-owned task UI", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response([task()])));
   });
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
-
-  it("asks for a host update without falling back to an unscoped read", async () => {
-    render(layout({ scopedHistory: false }));
-    expect(screen.getByRole("status")).toHaveTextContent("Update nanobot on this server");
-    expect(fetch).not.toHaveBeenCalled();
-    emitTask(task());
-    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
-    expect(fetch).not.toHaveBeenCalled();
-  });
 
   it("reports a failed scoped read and restores the task list after retry", async () => {
     let failed = true;

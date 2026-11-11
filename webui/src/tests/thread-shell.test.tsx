@@ -561,7 +561,7 @@ describe("ThreadShell", () => {
       return Response.json({}, { status: 404 });
     }));
     render(wrap(client, <ThreadShell session={session("background-work")} title="Background work" onToggleSidebar={() => {}} />,
-      null, "tok", ["webui.core.v1", "webui.subagents.v1", "webui.subagents.events.v1", "webui.subagents.scoped-history.v1"]));
+      null, "tok", ["webui.core.v1", "webui.subagents.v1", "webui.subagents.events.v1"]));
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
     act(() => client._emitChat("background-work", { event: "goal_status", chat_id: "background-work", turn_id: "parent-turn", status: "running", started_at: 100 }));
     expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
@@ -597,7 +597,7 @@ describe("ThreadShell", () => {
       return { ok: false, status: 404, json: async () => ({}) };
     }));
     const shell = () => wrap(client, <ThreadShell session={session("persisted-tasks")} title="Task history"
-      onToggleSidebar={() => {}} />, null, "tok", ["webui.core.v1", "webui.subagents.v1", "webui.subagents.scoped-history.v1"]);
+      onToggleSidebar={() => {}} />, null, "tok", ["webui.core.v1", "webui.subagents.v1"]);
     const view = render(shell());
     await screen.findByText("Delegate inspection");
     fireEvent.click(await screen.findByRole("button", { name: /Subtasks Completed: 1/ }));

@@ -1803,7 +1803,6 @@
       "loadUnlinked": "Charger les tâches sans demande associée",
       "loadUnlinkedFailed": "Impossible de charger ces tâches. Réessayez.",
       "noUnlinked": "Aucune tâche sans demande associée.",
-      "upgradeHost": "Mettez à jour nanobot sur ce serveur pour retrouver les sous-tâches en cours et terminées.",
       "readFailed": "Impossible de charger les sous-tâches.",
       "retryRead": "Réessayer",
       "progress": "{{completed}} sur {{total}} terminées",

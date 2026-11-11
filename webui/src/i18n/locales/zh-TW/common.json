@@ -1803,7 +1803,6 @@
       "loadUnlinked": "載入沒有關聯請求的任務",
       "loadUnlinkedFailed": "載入任務失敗，請重試。",
       "noUnlinked": "沒有未關聯請求的任務。",
-      "upgradeHost": "請更新伺服器上的 nanobot，以恢復查看執行中和已完成的子任務。",
       "readFailed": "無法載入子任務。",
       "retryRead": "重試",
       "progress": "已完成 {{completed}} / {{total}} 項",

@@ -1988,7 +1988,6 @@
       "loadUnlinked": "加载没有关联请求的任务",
       "loadUnlinkedFailed": "加载任务失败，请重试。",
       "noUnlinked": "没有未关联请求的任务。",
-      "upgradeHost": "请更新服务器上的 nanobot，以恢复查看运行中和已完成的子任务。",
       "readFailed": "无法加载子任务。",
       "retryRead": "重试",
       "progress": "已完成 {{completed}} / {{total}} 项",

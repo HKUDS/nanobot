@@ -410,7 +410,7 @@ describe("App layout", () => {
     window.history.replaceState(null, "", "/#/chat/websocket%3Achat-a");
     vi.mocked(fetchBootstrap).mockResolvedValue({
       token: "tok", api_token: "api-tok", ws_path: "/", expires_in: 300,
-      terminal: { webui: { capabilities: supported ? ["webui.core.v1", "webui.subagents.v1", "webui.subagents.scoped-history.v1"] : ["webui.core.v1"] } },
+      terminal: { webui: { capabilities: supported ? ["webui.core.v1", "webui.subagents.v1"] : ["webui.core.v1"] } },
     });
     mockFetchRoutes({
       "/api/sessions/websocket%3Achat-a/subagents?scope=page": { tasks: [{

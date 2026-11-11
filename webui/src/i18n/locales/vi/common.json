@@ -1803,7 +1803,6 @@
       "loadUnlinked": "Tải các tác vụ không có yêu cầu liên kết",
       "loadUnlinkedFailed": "Không thể tải tác vụ. Hãy thử lại.",
       "noUnlinked": "Không có tác vụ nào không có yêu cầu liên kết.",
-      "upgradeHost": "Hãy cập nhật nanobot trên máy chủ này để khôi phục các tác vụ con đang chạy và đã hoàn thành.",
       "readFailed": "Không thể tải các tác vụ con.",
       "retryRead": "Thử lại",
       "progress": "Hoàn thành {{completed}} / {{total}}",
