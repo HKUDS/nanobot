@@ -42,10 +42,10 @@ from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
-from nanobot.session.session_handles import session_handle_for_name
 from nanobot.session.session_messages import (
-    SessionMessageEnvelope,
+    SESSION_MESSAGE_METADATA_KEY,
     session_message_envelope,
+    session_message_public_metadata,
 )
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.utils.helpers import strip_think, truncate_text
@@ -58,7 +58,7 @@ from nanobot.webui.metadata import (
 from nanobot.webui.recovery import RecoveryCoordinator
 from nanobot.webui.session_identity import is_webui_session_key, webui_session_key
 from nanobot.webui.star_prompt import update_star_prompt
-from nanobot.webui.transcript import append_session_message_input
+from nanobot.webui.transcript import WebUITranscriptRecorder
 
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
@@ -83,19 +83,6 @@ class _WebsocketTurn:
 # All in-flight lifecycle owners per chat, in admission order. The three maps
 # above remain the latest-owner projection consumed by the HTTP API.
 _WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
-
-
-def _session_message_public_metadata(
-    envelope: SessionMessageEnvelope,
-) -> dict[str, Any]:
-    source = session_handle_for_name(
-        envelope["source_session_key"],
-        envelope["source_handle"],
-    )
-    return {
-        "message_id": envelope["message_id"],
-        "session": source.public_payload(),
-    }
 
 
 def _validated_llm_runtime(value: object) -> LLMRuntime | None:
@@ -672,20 +659,16 @@ class WebuiTurnCoordinator:
         )
         if metadata is None or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
             return
-        public_metadata = _session_message_public_metadata(envelope)
-        try:
-            await append_session_message_input(
-                session_key,
-                sessions=self.sessions,
-                content=event.content,
-                created_at_ms=envelope["created_at_ms"],
-                session_message=public_metadata,
-            )
-        except (OSError, TypeError, ValueError, SessionConflictError):
-            logger.opt(exception=True).warning(
-                "Failed to persist session input {}",
-                envelope["message_id"],
-            )
+        public_metadata = session_message_public_metadata(envelope)
+        revision = await self.sessions.state.project_history(session_key, lambda history: history.revision)
+        if revision is None:
+            return
+        generation = event.context.session_generation or revision[0]
+        metadata = {SESSION_MESSAGE_METADATA_KEY: envelope, HISTORY_GENERATION_METADATA_KEY: generation}
+        if not await WebUITranscriptRecorder(self.sessions).append_user_message(
+            session_key.split(":", 1)[1], event.content, metadata=metadata,
+        ):
+            logger.warning("Failed to persist session input {}", envelope["message_id"])
             return
         await self.bus.publish_outbound(outbound_message_for_event(
             channel="websocket",
@@ -693,6 +676,7 @@ class WebuiTurnCoordinator:
             event=UserInputEvent(
                 content=event.content,
                 created_at_ms=envelope["created_at_ms"],
+                input_id=f"session-message:{envelope['message_id']}",
                 provenance={"session_message": public_metadata},
             ),
         ))

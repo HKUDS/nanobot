@@ -581,6 +581,7 @@ function appendAnswerText(
     ...(event.stream_id ? { streamId: event.stream_id } : {}),
     ...(event.source ? { source: event.source } : {}),
     ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+    ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
   };
   state.closedAssistantIds.delete(merged.id);
   state.activeAssistantId = merged.id;
@@ -896,28 +897,46 @@ export function projectThreadEvent(
   }
 
   if (event.event === "user_message") {
+    const sessionMessageId = event.provenance?.session_message?.message_id?.trim();
     if (event.provenance?.session_message) {
-      const messageId = event.provenance.session_message.message_id?.trim();
-      if (!messageId || state.messages.some(
-        (message) => message.sessionMessage?.message_id === messageId,
+      if (!sessionMessageId || state.messages.some(
+        (message) => message.sessionMessage?.message_id === sessionMessageId,
       )) return state;
-    } else if (event.turn_id && state.messages.some(
-      (message) => message.role === "user" && message.turnId === event.turn_id,
-    )) return state;
-    if (state.activeAssistantId) {
-      state.messages = state.messages.map((message) => (
-        message.id === state.activeAssistantId ? { ...message, isStreaming: false } : message
-      ));
+    } else if (event.turn_id) {
+      const existing = state.messages.findIndex((message) => message.role === "user" && message.turnId === event.turn_id);
+      if (existing >= 0) {
+        if (!options.persisted && event.media_urls?.length) {
+          const message = state.messages[existing];
+          const media = event.media_urls.map((item) => toMediaAttachment(item));
+          state.messages = replaceMessageAt(state.messages, existing, {
+            ...message,
+            media,
+            images: media.every((item) => item.kind === "image")
+              ? media.map(({ url, name }) => ({ url, name })) : undefined,
+          });
+          options.effects?.bodyWrites.add(message.id);
+        }
+        return state;
+      }
     }
-    state.messages = closeReasoningStream(
-      state.messages,
-      options.persisted ? undefined : options.now,
-    );
-    Object.assign(state, resetThreadProjectionCursor(state, state.messages));
+    // Live input admission does not end the answer currently being generated.
+    // Historical records retain their existing implicit segment boundaries.
+    if (options.persisted) {
+      if (state.activeAssistantId) {
+        state.messages = state.messages.map((message) => (
+          message.id === state.activeAssistantId ? { ...message, isStreaming: false } : message
+        ));
+      }
+      state.messages = closeReasoningStream(state.messages);
+      Object.assign(state, resetThreadProjectionCursor(state, state.messages));
+    } else if (sessionMessageId) {
+      Object.assign(state, clearThreadProjectionActivity(state));
+    }
     const media = event.media_urls?.map((item) => toMediaAttachment(item));
     const turn = turnFieldsFromEvent(event, "user");
     const row: UIMessage = {
-      id: projectionMessageId(event, options),
+      id: !options.persisted && sessionMessageId ? `session-message:${sessionMessageId}` : projectionMessageId(event, options),
+      inputId: event.input_id,
       role: "user",
       content: event.text,
       createdAt: projectionCreatedAt(event, options),
@@ -985,11 +1004,13 @@ export function projectThreadEvent(
         ...(event.stream_id ? { streamId: event.stream_id } : {}),
         ...(event.source ? { source: event.source } : {}),
         ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+        ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
         createdAt: projectionCreatedAt(event, options),
       }];
       options.effects?.bodyWrites.add(id);
       targetIndex = state.messages.length - 1;
-    } else if (targetIndex !== null && (typeof text === "string" || event.source || event.response_sources !== undefined)) {
+    } else if (targetIndex !== null && (typeof text === "string" || event.source
+      || event.response_sources !== undefined || event.response_input_ids !== undefined)) {
       const target = state.messages[targetIndex];
       state.messages = replaceMessageAt(state.messages, targetIndex, {
         ...target,
@@ -998,6 +1019,7 @@ export function projectThreadEvent(
         ...(event.stream_id ? { streamId: event.stream_id } : {}),
         ...(event.source ? { source: event.source } : {}),
         ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+        ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
       });
       if (typeof text === "string") options.effects?.bodyWrites.add(target.id);
     }
@@ -1101,6 +1123,7 @@ export function projectThreadEvent(
       ...(latencyMs !== undefined ? { latencyMs } : {}),
       ...(event.source ? { source: event.source } : {}),
       ...(event.response_sources !== undefined ? { responseSources: event.response_sources } : {}),
+      ...(event.response_input_ids !== undefined ? { responseInputIds: event.response_input_ids } : {}),
       ...positionedTurnFields(
         options.sideChannel ? undefined : state.messages.find((message) => message.id === state.activeAssistantId),
         turnFieldsForProjection(state, event, "answer"),

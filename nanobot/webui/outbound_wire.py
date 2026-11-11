@@ -172,6 +172,7 @@ class UserInputWirePayload(_ChatWirePayload):
     created_at_ms: int
     starts_turn: bool
     provenance: NotRequired[dict[str, Any]]
+    input_id: NotRequired[str]
 
 
 class PairingChangedWirePayload(TypedDict):

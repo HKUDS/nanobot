@@ -295,6 +295,7 @@ class WebUIOutboundDelivery:
                 body: UserInputWirePayload = {
                     "event": "user_message", "chat_id": msg.chat_id, "text": event.content,
                     "created_at_ms": event.created_at_ms, "starts_turn": False,
+                    "input_id": event.input_id,
                 }
                 if event.provenance:
                     body["provenance"] = event.provenance

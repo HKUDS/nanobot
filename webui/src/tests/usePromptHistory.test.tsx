@@ -221,3 +221,31 @@ it("keeps the request operation with failures and retries", async () => {
   act(() => result.current.cancel());
   expect(result.current.operation).toBeNull();
 });
+
+
+it("associates live answers and merges the persisted directory by input ID across turns", async () => {
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: [], revision: "empty" });
+  const users: UIMessage[] = [
+    { id: "local-original", inputId: "user:original", role: "user", content: "same", createdAt: 1 },
+    { id: "local-session", inputId: "session-message:received", role: "user", content: "same", createdAt: 2 },
+  ];
+  const { result, rerender } = renderHook(({ messages, version }) => usePromptHistory("a", version, messages), {
+    wrapper: wrapper(), initialProps: { messages: users, version: 1 },
+  });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2));
+  const messages: UIMessage[] = [...users,
+    { id: "original-answer", role: "assistant", content: "Original answer", createdAt: 3, responseInputIds: ["user:original"] },
+  ];
+  rerender({ messages, version: 1 });
+  expect(result.current.prompts.map((prompt) => prompt.answerPreview)).toEqual(["Original answer", ""]);
+  messages.push({ id: "session-answer", role: "assistant", content: "Session answer", createdAt: 4,
+    responseInputIds: ["session-message:received"] });
+  rerender({ messages: [...messages], version: 1 });
+  expect(result.current.prompts.map((prompt) => prompt.answerPreview)).toEqual(["Original answer", "Session answer"]);
+  const persisted = result.current.prompts.map((prompt, index) => ({ ...prompt, id: `persisted-${index}`,
+    cursor: String(index), turnId: `execution-${index}` }));
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: persisted, revision: "persisted" });
+  rerender({ messages, version: 2 });
+  await waitFor(() => expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["persisted-0", "persisted-1"]));
+  expect(result.current.prompts.map((prompt) => prompt.answerPreview)).toEqual(["Original answer", "Session answer"]);
+});

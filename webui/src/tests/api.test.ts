@@ -134,7 +134,7 @@ describe("webui API helpers", () => {
   });
 
   it("revalidates prompt summaries and replaces only the changed suffix", async () => {
-    const prompt = { id: "u1", preview: "question", answerPreview: "", cursor: "cursor", turnId: "t1", createdAt: 1 };
+    const prompt = { id: "u1", inputId: "user:t1", preview: "question", answerPreview: "", cursor: "cursor", turnId: "t1", createdAt: 1 };
     const cached = { revision: "first", prompts: [prompt] };
     const signal = new AbortController().signal;
     vi.mocked(fetch).mockResolvedValueOnce({ status: 304 } as Response);
@@ -146,6 +146,7 @@ describe("webui API helpers", () => {
     }) } as Response);
     const appended = await fetchPromptIndex("tok", "websocket:chat-1", signal, cached);
     expect(appended.prompts.map((item) => item.id)).toEqual(["u1", "u2"]);
+    expect(appended.prompts[1].inputId).toBe("user:t1");
     expect(appended.prompts[0]).toBe(prompt);
     vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ revision: "third", replaceFrom: 1, prompts: [] }) } as Response);
     expect((await fetchPromptIndex("tok", "websocket:chat-1", signal, appended)).prompts).toEqual([prompt]);
@@ -259,7 +260,7 @@ describe("webui API helpers", () => {
     [{ provider: "xai", model: "grok", preset: "snapshot", fallback: true }],
     [{ provider: "xai", model: "grok", preset: "legacy snapshot" }],
   ])("accepts optional recorded response sources: %j", async (response_sources) => {
-    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", response_sources };
+    const event = { event: "stream_end", chat_id: "chat-1", text: "Reply", response_sources, response_input_ids: ["session-message:received"] };
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
       status: 200,

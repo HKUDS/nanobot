@@ -611,16 +611,12 @@ async def test_checkpoint2_preserves_final_response_in_history_before_followup()
     assert call_count["n"] == 2
     assert captured_messages[-1] == [
         {"role": "user", "content": "hello"},
-        {"role": "assistant", "content": "first answer"},
+        {"role": "assistant", "content": "first answer", "_meta": {"response_input_ids": []}},
         {"role": "user", "content": "follow-up question"},
     ]
-    assert [
-        {"role": message["role"], "content": message["content"]}
-        for message in result.messages
-        if message.get("role") == "assistant"
-    ] == [
-        {"role": "assistant", "content": "first answer"},
-        {"role": "assistant", "content": "second answer"},
+    assert [message for message in result.messages if message.get("role") == "assistant"] == [
+        {"role": "assistant", "content": "first answer", "_meta": {"response_input_ids": []}},
+        {"role": "assistant", "content": "second answer", "_meta": {"response_input_ids": []}},
     ]
 
 

@@ -769,10 +769,11 @@ class SessionState:
         )
 
     async def queue_followup(self, key: str, message: InboundMessage) -> str | None:
-        if message.channel != "websocket":
-            return None
-
         from nanobot.session.recovery import record_pending_followup
+        from nanobot.session.session_messages import session_message_input
+
+        if message.channel != "websocket" and session_message_input(message) is None:
+            return None
 
         payload = deepcopy(message)
 

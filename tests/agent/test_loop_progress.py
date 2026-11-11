@@ -819,6 +819,7 @@ class TestToolEventProgress:
             chat_id="chat-a",
             content="Can you include the key detail?",
             session_key_override=session_key,
+            metadata={WEBUI_TURN_METADATA_KEY: "followup"},
         ))
         release_first_request.set()
         # Events synchronize injection; the deadline only guards against a stuck worker.
@@ -855,6 +856,11 @@ class TestToolEventProgress:
             for message in outbound
             if isinstance(message.event, StreamDeltaEvent)
         ] == ["Checking", "The late result is ready"]
+        assert [
+            message.metadata["response_input_ids"]
+            for message in outbound
+            if isinstance(message.event, StreamDeltaEvent)
+        ] == [[], ["user:followup"]]
         assert any(isinstance(message.event, ProgressEvent) for message in outbound)
         assert len([
             message for message in outbound if isinstance(message.event, TurnEndEvent)
@@ -902,6 +908,7 @@ class TestToolEventProgress:
                 WEBUI_TURN_METADATA_KEY,
                 "_history_generation",
                 "latency_ms",
+                "response_input_ids",
             }
             for message in visible_events
         )

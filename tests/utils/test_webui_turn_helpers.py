@@ -311,8 +311,8 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
         "source_session_key": "websocket:source",
         "target_session_key": "websocket:target",
     }
-    append_input = AsyncMock(side_effect=None if write_succeeds else OSError("write failed"))
-    monkeypatch.setattr(wth, "append_session_message_input", append_input)
+    append_input = AsyncMock(return_value=write_succeeds)
+    monkeypatch.setattr(wth.WebUITranscriptRecorder, "append_user_message", append_input)
     coordinator = wth.WebuiTurnCoordinator(
         bus=bus,
         sessions=sessions,
@@ -343,6 +343,36 @@ async def test_session_input_is_projected_by_the_webui_coordinator(
         "id": source.id,
         "name": source.name,
     }
+
+
+@pytest.mark.asyncio
+async def test_session_input_rejects_replaced_target_generation(tmp_path) -> None:
+    bus = MessageBus()
+    bus.publish_outbound = AsyncMock()
+    sessions = SessionManager(tmp_path)
+    target = sessions.get_or_create("websocket:target")
+    target.metadata["webui"] = True
+    sessions.save(target)
+    source = session_handle_for_name("websocket:source", "luma")
+    coordinator = wth.WebuiTurnCoordinator(
+        bus=bus, sessions=sessions, schedule_background=lambda coro: coro.close(),
+    )
+    coordinator.subscribe()
+    await bus.publish(UserInputAccepted(
+        context=RuntimeEventContext(
+            channel="system", chat_id="websocket:target", session_key="websocket:target",
+            session_generation="replaced-generation",
+            metadata={SESSION_MESSAGE_METADATA_KEY: {
+                "message_id": "message-1", "created_at_ms": 123, "expect_reply": False,
+                "source_handle": source.name, "source_session_key": "websocket:source",
+                "target_session_key": "websocket:target",
+            }},
+        ),
+        content="Review this",
+    ))
+    bus.publish_outbound.assert_not_awaited()
+    records = await sessions.state.project_history("websocket:target", lambda h: list(h.all_facts()))
+    assert records == []
 
 
 @pytest.mark.asyncio

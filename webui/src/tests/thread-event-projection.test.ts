@@ -167,14 +167,15 @@ describe("canonical thread event projection", () => {
     expect(messages[0]).toMatchObject({ content: "Complete answer", projectionStartSeq: 1, turnSeq: 3 });
   });
 
-  it.each(["message", "stream_end"] as const)("preserves recorded sources in %s replay", (event) => {
+  it.each(["message", "stream_end"] as const)("preserves recorded response metadata in %s replay", (event) => {
     const source = { provider: "xai", model: "grok", preset: "saved backup", fallback: true };
     const messages = projectThreadEvents([
-      { event, chat_id: "chat", text: "Recovered", response_sources: [source] },
+      { event, chat_id: "chat", text: "Recovered", response_sources: [source], response_input_ids: ["session-message:received"] },
       { event: "turn_end", chat_id: "chat" },
       { event: "message", chat_id: "chat", text: "Legacy response" },
     ]);
     expect(messages[0].responseSources).toEqual([source]);
+    expect(messages[0].responseInputIds).toEqual(["session-message:received"]);
     expect(messages[1].responseSources).toBeUndefined();
   });
 

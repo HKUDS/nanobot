@@ -26,7 +26,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
 from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent
+from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent, ResponseInputsEvent
 from nanobot.llm_usage.context import (
     LLMUsageSource,
     bind_llm_usage_source,
@@ -176,6 +176,31 @@ class AgentRunner:
     ) -> None:
         """Append injected messages without rewriting the raw transcript."""
         messages.extend(injections)
+
+    @staticmethod
+    def _response_input_ids(messages: list[dict[str, Any]]) -> tuple[str, ...]:
+        """Consecutive inputs share an answer; tool rounds keep their input owner."""
+        identifiers: list[str] = []
+        for message in reversed(messages):
+            if message.get("role") != "user":
+                if identifiers:
+                    break
+                continue
+            marker = message.get(HIDDEN_HISTORY_META)
+            if isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
+                if identifiers:
+                    break
+                continue
+            metadata: dict[str, Any] = message.get("_meta") or {}
+            input_id = metadata.get("input_id")
+            if not isinstance(input_id, str) or not input_id:
+                break
+            identifiers.append(input_id)
+        return tuple(reversed(identifiers))
+
+    @staticmethod
+    def _with_response_inputs(input_ids: tuple[str, ...], response: dict[str, Any]) -> dict[str, Any]:
+        return {**response, "_meta": {**response.get("_meta", {}), "response_input_ids": list(input_ids)}}
 
     async def _try_drain_injections(
         self,
@@ -426,11 +451,15 @@ class AgentRunner:
             if interrupted:
                 length_recovery_parts.clear()
             else:
-                messages.append(build_length_recovery_message(segment_content))
+                messages.append({
+                    **build_length_recovery_message(segment_content),
+                    HIDDEN_HISTORY_META: {"kind": "internal_continuation"},
+                })
             if hook.wants_streaming():
                 segment_context.stream_continues_current_message = not interrupted
                 await hook.on_stream_end(segment_context, resuming=True)
 
+        response_input_ids: tuple[str, ...] = ()
         iteration = -1
         followup_requested = False
         while (
@@ -454,6 +483,9 @@ class AgentRunner:
             if drained_before_request:
                 had_injections = True
             await end_length_segment(interrupted=drained_before_request)
+            response_input_ids = self._response_input_ids(messages)
+            if spec.events.accepts(ResponseInputsEvent):
+                await spec.events.emit(ResponseInputsEvent(response_input_ids))
             context = AgentHookContext(
                 iteration=iteration,
                 messages=messages,
@@ -513,6 +545,7 @@ class AgentRunner:
                     assistant_message,
                     response,
                 )
+                assistant_message = self._with_response_inputs(response_input_ids, assistant_message)
                 messages.append(assistant_message)
                 await self._emit_checkpoint(
                     spec,
@@ -669,14 +702,14 @@ class AgentRunner:
                         len(length_recovery_parts),
                         _MAX_LENGTH_RECOVERIES,
                     )
-                    messages.append(conversation_state.project_response_message(
+                    messages.append(self._with_response_inputs(response_input_ids, conversation_state.project_response_message(
                         build_assistant_message(
                             clean,
                             reasoning_content=response.reasoning_content,
                             thinking_blocks=response.thinking_blocks,
                         ),
                         response,
-                    ))
+                    )))
                     # The next input snapshot decides whether to continue this
                     # answer or close its stream before answering a new question.
                     pending_length_segment = (context, clean or "")
@@ -711,6 +744,7 @@ class AgentRunner:
                     assistant_message,
                     response,
                 )
+                assistant_message = self._with_response_inputs(response_input_ids, assistant_message)
                 messages.append(assistant_message)
                 await self._emit_checkpoint(
                     spec,
@@ -738,10 +772,10 @@ class AgentRunner:
                 if not is_blank_text(interrupted_content):
                     # This is unsynchronized output, not a completed response or
                     # provider-owned projection. Keep it in the next native delta.
-                    messages.append({
+                    messages.append(self._with_response_inputs(response_input_ids, {
                         **build_assistant_message(interrupted_content),
                         "_interrupted": True,
-                    })
+                    }))
 
             # Check for mid-turn injections BEFORE signaling stream end.
             # If injections are found we keep the stream alive (resuming=True)
@@ -808,7 +842,7 @@ class AgentRunner:
                 final_content = EMPTY_FINAL_RESPONSE_MESSAGE
                 stop_reason = "empty_final_response"
                 error = final_content
-                self._append_final_message(messages, final_content)
+                self._append_final_message(messages, final_content, response_input_ids)
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
@@ -868,7 +902,7 @@ class AgentRunner:
                 pending_stream_content = terminal_tail
             else:
                 final_content = terminal_content
-            self._append_final_message(messages, terminal_content)
+            self._append_final_message(messages, terminal_content, response_input_ids)
 
         return AgentRunResult(
             final_content=final_content,
@@ -1496,7 +1530,9 @@ class AgentRunner:
             })
 
     @staticmethod
-    def _append_final_message(messages: list[dict[str, Any]], content: str | None) -> None:
+    def _append_final_message(
+        messages: list[dict[str, Any]], content: str | None, input_ids: tuple[str, ...],
+    ) -> None:
         if not content:
             return
         if (
@@ -1506,9 +1542,9 @@ class AgentRunner:
         ):
             if messages[-1].get("content") == content:
                 return
-            messages[-1] = build_assistant_message(content)
+            messages[-1] = AgentRunner._with_response_inputs(input_ids, build_assistant_message(content))
             return
-        messages.append(build_assistant_message(content))
+        messages.append(AgentRunner._with_response_inputs(input_ids, build_assistant_message(content)))
 
     @staticmethod
     def _append_model_error_placeholder(messages: list[dict[str, Any]]) -> None:

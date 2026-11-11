@@ -303,6 +303,12 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
+            if include_runtime_context and "input_id" in message and not is_hidden_history_message(message):
+                entry["_meta"] = {"input_id": message["input_id"]}
+            marker = message.get(HIDDEN_HISTORY_META)
+            if include_runtime_context and isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
+                # Attribution must distinguish persisted continuations from no-ID automation inputs.
+                entry[HIDDEN_HISTORY_META] = {"kind": "internal_continuation"}
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]

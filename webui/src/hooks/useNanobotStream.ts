@@ -41,7 +41,7 @@ import type {
 } from "@/lib/types";
 
 type PendingStreamEvent =
-  | { kind: "delta"; text: string; turn: UIMessageTurnFields; streamId?: string; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"] }
+  | { kind: "delta"; text: string; turn: UIMessageTurnFields; streamId?: string; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"]; responseInputIds?: string[] }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields; streamId?: string };
 
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
@@ -105,29 +105,6 @@ function transitionTurnDelivery(
     return { ...message, deliveryStatus: status };
   });
   return changed ? next : messages;
-}
-
-function appendProjectedSessionInput(
-  messages: UIMessage[],
-  event: Extract<InboundEvent, { event: "user_message" }>,
-): UIMessage[] {
-  const sessionMessage = event.provenance?.session_message;
-  const messageId = sessionMessage?.message_id?.trim();
-  if (!sessionMessage || !messageId) return messages;
-  if (messages.some((message) => message.sessionMessage?.message_id === messageId)) return messages;
-
-  const row: UIMessage = {
-    id: `session-message:${messageId}`,
-    role: "user",
-    content: event.text,
-    createdAt: typeof event.created_at_ms === "number"
-      && Number.isFinite(event.created_at_ms)
-      ? event.created_at_ms
-      : Date.now(),
-    sessionMessage,
-    ...turnFieldsFromEvent(event, "user"),
-  };
-  return [...messages, row];
 }
 
 function createTranscript(messages: UIMessage[], saved: ThreadTranscriptSnapshot | undefined, historyKey: string | null) {
@@ -343,7 +320,8 @@ export function useNanobotStream(
             || nextEvent.streamId !== event.streamId
             || (nextEvent.kind === "delta" && event.kind === "delta"
               && (nextEvent.source !== event.source
-                || JSON.stringify(nextEvent.responseSources) !== JSON.stringify(event.responseSources)))) break;
+                || JSON.stringify(nextEvent.responseSources) !== JSON.stringify(event.responseSources)
+                || JSON.stringify(nextEvent.responseInputIds) !== JSON.stringify(event.responseInputIds)))) break;
           chunks.push(nextEvent.text);
           if (nextEvent.turn.turnSeq !== undefined) members.push(nextEvent.turn.turnSeq);
           turn = { ...turn, ...nextEvent.turn };
@@ -360,6 +338,8 @@ export function useNanobotStream(
               turn_seq: turn.turnSeq,
               source: event.source,
               response_sources: event.responseSources,
+              response_input_ids: event.responseInputIds,
+              stream_id: event.streamId,
             }
           : {
               event: "reasoning_delta",
@@ -679,47 +659,8 @@ export function useNanobotStream(
         return;
       }
       if (ev.event === "user_message") {
-        if (ev.provenance?.session_message) {
-          flushPendingStreamEvents();
-          closeActiveAssistantStream();
-          clearActivitySegment();
-          setMessages((prev) => {
-            const next = appendProjectedSessionInput(prev, ev);
-            if (next !== prev) transcriptRef.current.registerInput(next[next.length - 1]);
-            return next;
-          });
-          return;
-        }
-        setMessages((prev) => {
-          if (ev.turn_id && prev.some((message) => (
-            message.role === "user" && message.turnId === ev.turn_id
-          ))) return ev.media_urls?.length ? prev.map((message) => (
-            message.role === "user" && message.turnId === ev.turn_id
-              ? { ...message, media: ev.media_urls }
-              : message
-          )) : prev;
-          const row: UIMessage = {
-              id: crypto.randomUUID(),
-              role: "user",
-              content: ev.text,
-              ...(ev.turn_id ? { turnId: ev.turn_id } : {}),
-              turnPhase: "user",
-              turnSeq: 0,
-              deliveryStatus: "accepted",
-              createdAt: typeof ev.created_at_ms === "number"
-                && Number.isFinite(ev.created_at_ms)
-                ? ev.created_at_ms
-                : Date.now(),
-              ...(ev.media_urls?.length ? { media: ev.media_urls } : {}),
-              ...(ev.cli_apps?.length ? { cliApps: ev.cli_apps } : {}),
-              ...(ev.mcp_presets?.length ? { mcpPresets: ev.mcp_presets } : {}),
-              ...(ev.session_mentions?.length
-                ? { sessionMentions: ev.session_mentions }
-                : {}),
-          };
-          transcriptRef.current.registerInput(row);
-          return [...prev, row];
-        });
+        flushPendingStreamEvents();
+        applyProjectionEvent(ev);
         return;
       }
       if (ev.event === "model_request") {
@@ -754,6 +695,7 @@ export function useNanobotStream(
           streamId: ev.stream_id,
           source: ev.source,
           responseSources: ev.response_sources,
+          responseInputIds: ev.response_input_ids,
         });
         schedulePendingStreamFlush();
         return;
@@ -1004,6 +946,7 @@ export function useNanobotStream(
           ...base,
           {
             id: userMessageId,
+            inputId: `user:${turnId}`,
             role: "user" as const,
             content: outboundContent,
             turnId,

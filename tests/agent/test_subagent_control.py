@@ -263,7 +263,7 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
         assert initial_reply.metadata["slack"] == slack_route
         assert saved_route == {"channel": "slack", "chat_id": "C1", "metadata": thread_metadata}
         assert (late_reply.channel, late_reply.chat_id) == ("slack", "C1")
-        assert late_reply.metadata == thread_metadata
+        assert late_reply.metadata == {**thread_metadata, "response_input_ids": []}
     finally:
         release_child.set()
         loop.stop()

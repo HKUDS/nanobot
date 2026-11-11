@@ -64,6 +64,7 @@ class TranscriptInput:
     current_role: str = "user"
     session_summary: SessionSummary | None = None
     runtime_context_blocks: Sequence[RuntimeContextBlock] | None = None
+    input_metadata: Mapping[str, Any] | None = None
 
     @property
     def message_count(self) -> int:
@@ -295,6 +296,8 @@ class ContextBuilder:
                 current_role=transcript.current_role,
                 runtime_context_blocks=transcript.runtime_context_blocks,
             )
+            if transcript.input_metadata:
+                current["_meta"] = {**current.get("_meta", {}), **transcript.input_metadata}
             messages.append(current)
             return messages
 

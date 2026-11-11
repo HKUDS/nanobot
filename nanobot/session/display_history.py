@@ -167,6 +167,13 @@ class HistoryReader:
             (self.key, ordinal),
         ).fetchone()[0])
 
+    def has_input(self, input_id: str) -> bool:
+        return self._db.execute(
+            """SELECT 1 FROM history_entries WHERE session_key=? AND kind='input'
+               AND json_extract(record, '$.content.input_id')=?""",
+            (self.key, input_id),
+        ).fetchone() is not None
+
     def navigation(self) -> Iterator[tuple[int, int, HistoryFact]]:
         """Read input/answer records only, never file diffs or tool result bodies."""
         kinds = (HistoryKind.INPUT, HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT,

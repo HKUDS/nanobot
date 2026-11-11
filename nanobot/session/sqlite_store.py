@@ -117,9 +117,15 @@ def _create_schema_v4(db: sqlite3.Connection) -> None:
     db.execute("ALTER TABLE session_archives_v4 RENAME TO session_archives")
 
 
+def _create_schema_v5(db: sqlite3.Connection) -> None:
+    db.execute("""CREATE UNIQUE INDEX history_input_identity ON history_entries (
+        session_key, json_extract(record, '$.content.input_id')
+    ) WHERE kind='input'""")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
-    _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4,
+    _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4, _create_schema_v5,
 )
 
 
@@ -589,7 +595,15 @@ class SqliteSessionStore:
             ).fetchone()
             ordinal, position = (int(tail[0]), int(tail[1])) if tail is not None else (0, 0)
             completed = tail is not None and bool(tail[2])
+            appended = False
             for kind, created_at_ms, record, preview in encoded:
+                if kind is HistoryKind.INPUT and db.execute(
+                    """SELECT 1 FROM history_entries WHERE session_key=? AND kind='input'
+                       AND json_extract(record, '$.content.input_id')=json_extract(?, '$.content.input_id')""",
+                    (key, record),
+                ).fetchone() is not None:
+                    continue
+                appended = True
                 if completed:
                     ordinal, position = ordinal + 1, 0
                 if position == 0:
@@ -612,7 +626,7 @@ class SqliteSessionStore:
                     db.execute(f"UPDATE history_heads SET {field}=? WHERE session_key=? AND {field}=''", (preview, key))
                 db.execute("UPDATE history_heads SET updated_at_ms=max(updated_at_ms, ?) WHERE session_key=?",
                            (created_at_ms, key))
-            if encoded:
+            if appended:
                 db.execute("UPDATE history_heads SET revision=revision+1 WHERE session_key=?", (key,))
         return errors
 
