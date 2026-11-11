@@ -16,7 +16,13 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
+from nanobot.agent.tools.context import (
+    RequestContext,
+    current_request_context,
+    current_tool_call_id,
+    request_context,
+    tool_call_context,
+)
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.subagent import SubagentTool
@@ -159,6 +165,17 @@ async def test_sdk_ephemeral_delegation_never_persists_on_later_flush(
 
 
 @pytest.mark.asyncio
+async def test_tool_call_context_isolated_between_concurrent_calls():
+    async def call(call_id):
+        with tool_call_context(call_id):
+            await asyncio.sleep(0)
+            return current_tool_call_id()
+
+    assert await asyncio.gather(call("a"), call("b")) == ["a", "b"]
+    assert current_tool_call_id() is None
+
+
+@pytest.mark.asyncio
 async def test_child_origin_uses_the_channel_turn_identity(loop_factory):
     loop = loop_factory()
     loop.provider.provider_name = "test"
@@ -176,6 +193,10 @@ async def test_child_origin_uses_the_channel_turn_identity(loop_factory):
         await loop._process_message(message)
         status = next(iter(loop.subagents.statuses_for_session(message.session_key).values()))
         assert status.origin_turn_id == "visible-parent-turn"
+        assert status.origin_call_id == "delegate"
+        assert status.as_dict()["origin_call_id"] == "delegate"
+        stored = loop.subagents.sessions.status(status.task_id, message.session_key)
+        assert stored is not None and stored.origin_call_id == "delegate"
     finally:
         await loop.subagents.close()
 

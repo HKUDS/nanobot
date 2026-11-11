@@ -38,7 +38,10 @@ export function useSubagentActivity(tasks: ObservedSubagentTask[], inputKey: str
   const byId = new Map(tasks.map(task => [task.task_id, task]));
   return {
     open: view.open,
-    tasks: visibleIds.map(id => byId.get(id)!),
+    tasks: visibleIds.flatMap(id => {
+      const task = byId.get(id);
+      return task ? [task] : [];
+    }),
     setOpen: (open: boolean, { preserveFeedback = false }: { preserveFeedback?: boolean } = {}) => setView(current => {
       const currentActive = current.observed.filter(isActiveSubagentTask).map(task => task.task_id);
       return {

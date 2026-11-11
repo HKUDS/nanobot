@@ -288,7 +288,7 @@ def test_archive_reference_allows_atomic_session_replacement_but_not_orphan_comm
     assert store.archived_keys() == []
 
 
-def test_subagent_origin_indexes_upgrade_safely_and_filter_with_index_searches(tmp_path, monkeypatch):
+def test_subagent_indexes_upgrade_safely_and_filter_with_index_searches(tmp_path, monkeypatch):
     store = SqliteSessionStore(tmp_path)
     workspace = tmp_path / "workspace"
     with monkeypatch.context() as patch:
@@ -313,30 +313,23 @@ def test_subagent_origin_indexes_upgrade_safely_and_filter_with_index_searches(t
     store.initialize(workspace)
     assert _database_snapshot(store.path)[0] == len(sqlite_store._SCHEMA_MIGRATIONS)
     page_query, page_params = sqlite_store._scoped_subagent_query(
-        "websocket:a", ("message-a",), ("turn-a",), unlinked=False,
-    )
-    unlinked_query, unlinked_params = sqlite_store._scoped_subagent_query(
-        "websocket:a", (), (), unlinked=True,
+        "websocket:a", ("subagent:message", "subagent:other"),
     )
     with store.transaction(write=False) as db:
         assert db.execute("SELECT metadata FROM sessions WHERE key='chat:damaged'").fetchone()[0] == "not JSON"
         page_plan = "\n".join(row[3] for row in db.execute("EXPLAIN QUERY PLAN " + page_query, page_params))
-        unlinked_plan = "\n".join(row[3] for row in db.execute("EXPLAIN QUERY PLAN " + unlinked_query, unlinked_params))
         list_plan = "\n".join(row[3] for row in db.execute(f"""EXPLAIN QUERY PLAN
             SELECT sessions.key FROM sessions
             LEFT JOIN history_heads ON history_heads.session_key=sessions.key
             WHERE {sqlite_store._SESSION_LIST_TYPE} IN (SELECT value FROM json_each(?))
                OR {sqlite_store._SESSION_LIST_TYPE}=X'00'
             ORDER BY sessions.updated_at DESC""", ('["conversation"]',)))
-        for index in ("subagent_active_state", "subagent_origin_message", "subagent_origin_turn"):
-            assert f"USING INDEX {index}" in page_plan
-        assert "USING INDEX subagent_origin_message" in unlinked_plan
+        assert "USING INDEX subagent_active_state" in page_plan
         assert "USING INDEX session_list_type" in list_plan
-        assert "CORRELATED" not in unlinked_plan
-        assert "SCAN sessions" not in page_plan + unlinked_plan + list_plan
+        assert "SCAN sessions" not in page_plan + list_plan
     assert {row["key"] for row in store.list_scoped_subagent_metadata(
-        "websocket:a", ("message-a",), ("turn-a",), unlinked=False,
-    )} == {"subagent:message", "subagent:turn", "subagent:active"}
+        "websocket:a", ("subagent:message", "subagent:other"),
+    )} == {"subagent:message", "subagent:active"}
     assert {row["key"] for row in store.list_scoped_subagent_metadata(
-        "websocket:a", (), (), unlinked=True,
-    )} == {"subagent:unlinked", "subagent:active"}
+        "websocket:a", (),
+    )} == {"subagent:active"}

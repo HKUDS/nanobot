@@ -18,7 +18,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 from urllib.parse import parse_qs, quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
@@ -912,8 +912,11 @@ class GatewayHTTPHandler:
 
     @staticmethod
     def _subagent_history_scope(path: str) -> SubagentHistoryScope | None:
-        # Unscoped requests retain the original behavior, including ignored query parameters.
-        if "scope" not in _parse_query(path):
+        # Legacy origin identifiers cannot establish ownership of a displayed task.
+        parsed = _parse_query(path)
+        if "scope" not in parsed:
+            if "message_id" in parsed or "turn_id" in parsed or "task_id" in parsed:
+                raise ValueError("subagent history IDs require page scope")
             return None
         raw = urlsplit(path).query
         if re.search(r"%(?![0-9a-fA-F]{2})", raw):
@@ -921,19 +924,18 @@ class GatewayHTTPHandler:
         try:
             query = parse_qs(raw, keep_blank_values=True, errors="strict")
             modes = query.get("scope", [])
-            if (len(modes) != 1 or modes[0] not in {"page", "unlinked"}
-                    or set(query) - {"scope", "message_id", "turn_id", "token"}):
+            if (len(modes) != 1 or modes[0] != "page"
+                    or set(query) - {"scope", "task_id", "token"}):
                 raise ValueError("invalid subagent history scope")
-            message_ids, turn_ids = query.get("message_id", []), query.get("turn_id", [])
-            ids = message_ids + turn_ids
-            if (len(ids) > 80 or (modes[0] == "unlinked" and ids)
+            task_ids = query.get("task_id", [])
+            ids = task_ids
+            if (len(ids) > 80
                     or any(not item.strip() or len(item.encode("utf-8")) > 512
                            or any(ord(char) < 32 or ord(char) == 127 for char in item) for item in ids)):
                 raise ValueError("invalid subagent history IDs")
         except (UnicodeDecodeError, UnicodeEncodeError) as exc:
             raise ValueError("invalid subagent history query") from exc
-        mode = cast(Literal["page", "unlinked"], modes[0])
-        return SubagentHistoryScope(mode, frozenset(message_ids), frozenset(turn_ids))
+        return SubagentHistoryScope(task_ids=frozenset(task_ids))
 
     async def _handle_subagents_get(self, request: WsRequest, key: str) -> Response:
         if not self.check_api_token(request):

@@ -37,6 +37,7 @@ export function isSubagentTask(value: unknown): value is SubagentTaskSnapshot {
     && typeof value.created_at === "number" && Number.isFinite(value.created_at)
     && (value.completed_at === null || (typeof value.completed_at === "number" && Number.isFinite(value.completed_at)))
     && nullableText(value.origin_turn_id) && nullableText(value.origin_message_id)
+    && (value.origin_call_id === undefined || nullableText(value.origin_call_id))
     && nullableText(value.result) && nullableText(value.error) && nullableText(value.stop_reason)
     && typeof value.partial === "boolean"
     && Array.isArray(value.tool_events) && value.tool_events.every((entry: unknown) => isRecord(entry) && typeof entry.name === "string" && typeof entry.status === "string")

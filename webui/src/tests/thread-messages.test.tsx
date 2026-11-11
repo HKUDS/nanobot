@@ -1179,6 +1179,20 @@ describe("ThreadMessages", () => {
     expect(dividerIndex).toBe(branchPromptIndex - 1);
   });
 
+  it("keeps the fork boundary after a hidden subagent create activity", () => {
+    const messages: UIMessage[] = [
+      { id: "original", role: "user", content: "original", createdAt: 1 },
+      { id: "created", role: "tool", kind: "trace", content: 'subagent({"action":"create"})',
+        traces: ['subagent({"action":"create"})'], createdAt: 2,
+        toolEvents: [{ call_id: "call-1", name: "subagent", phase: "end", arguments: { action: "create" } }] },
+      { id: "branch", role: "user", content: "branch prompt", createdAt: 3 },
+    ];
+    render(<ThreadMessages messages={messages} forkBoundaryMessageCount={2} />);
+    const divider = screen.getByText("Forked from history");
+    expect(divider.compareDocumentPosition(screen.getByText("branch prompt")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText(/subtask created/i)).not.toBeInTheDocument();
+  });
+
   it("keeps turn unit keys stable across replayed ids and mutable turn sequence", () => {
     const liveUnits = buildDisplayUnits([
       { id: "optimistic-user", role: "user", content: "go", turnId: "turn-1", turnPhase: "user", turnSeq: 0, createdAt: 1 },

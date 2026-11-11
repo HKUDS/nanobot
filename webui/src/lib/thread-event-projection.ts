@@ -1200,6 +1200,21 @@ function reduceThreadEvent(
     return state;
   }
 
+  if (event.event === "subagent_anchor") {
+    if (state.messages.some((message) => message.subagentAnchor?.taskId === event.task_id)) return state;
+    Object.assign(state, closeThreadProjectionAnswer(state));
+    state.activitySegmentId = null;
+    state.fileEditSegmentId = null;
+    const id = projectionMessageId(event, options);
+    state.messages = [...state.messages, {
+      id, role: "tool", content: "", createdAt: projectionCreatedAt(event, options),
+      subagentAnchor: { taskId: event.task_id, callId: event.call_id },
+      ...positionedTurnFields(undefined, turnFieldsForProjection(state, event, "activity"), options),
+    }];
+    options.effects?.bodyWrites.add(id);
+    return state;
+  }
+
   const turn = turnFieldsForProjection(state, event, "complete");
   state.suppressUntilTurnEnd = false;
   state.activitySegmentId = null;

@@ -883,14 +883,14 @@ async def test_temporary_parent_never_persists_task_content(tmp_path, monkeypatc
         gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
         path = "/api/sessions/websocket%3Atemporary/subagents"
         empty = await gateway.http.dispatch(connection, Request(path + "?scope=page", headers))
-        unlinked = await gateway.http.dispatch(connection, Request(path + "?scope=unlinked", headers))
+        selected = await gateway.http.dispatch(connection, Request(path + f"?scope=page&task_id={task_id}", headers))
         assert json.loads(empty.body)["tasks"] == []
-        assert [task["task_id"] for task in json.loads(unlinked.body)["tasks"]] == [task_id]
+        assert [task["task_id"] for task in json.loads(selected.body)["tasks"]] == [task_id]
         reopened, _, _ = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
         assert reopened.statuses_for_session(parent.key) == {}
         await reopened.close()
         await sessions.state.delete(parent.key)
-        deleted = await gateway.http.dispatch(connection, Request(path + "?scope=unlinked", headers))
+        deleted = await gateway.http.dispatch(connection, Request(path + f"?scope=page&task_id={task_id}", headers))
         assert json.loads(deleted.body)["tasks"] == []
     finally:
         await manager.close()
@@ -1053,18 +1053,18 @@ async def test_scoped_task_history_queries_only_matching_children_and_all_active
             return {task["task_id"]: task for task in json.loads(response.body)["tasks"]}
 
         blocked.update(ids[name] for name in ("old", "unlinked", "unlinked-empty", "half-linked", "foreign"))
-        page = await read("?scope=page&message_id=prompt-in&turn_id=turn-in")
+        page = await read(f"?scope=page&task_id={ids['exact']}&task_id={ids['fallback']}")
         assert set(page) == active | {ids["exact"], ids["fallback"]}
         assert {page[ids[name]]["state"] for name in ("running", "stopping", "queued")} == {
             "running", "stopping", "queued",
         }
         blocked.update(ids[name] for name in ("exact", "fallback"))
         assert set(await read("?scope=page")) == active
-        blocked.difference_update({ids["unlinked"], ids["unlinked-empty"]})
-        assert set(await read("?scope=unlinked")) == active | {ids["unlinked"], ids["unlinked-empty"]}
+        blocked.remove(ids["old"])
+        assert set(await read(f"?scope=page&task_id={ids['old']}&task_id={ids['foreign']}")) == active | {ids["old"]}
+        blocked.add(ids["old"])
         blocked.clear()
         assert set(await read("")) == set(ids.values()) - {ids["foreign"]}
-        assert set(await read("?message_id=ignored&extra=legacy")) == set(ids.values()) - {ids["foreign"]}
         denied = await gateway.http.dispatch(connection, Request(path + "?scope=page", Headers()))
         assert denied.status_code == 401
     finally:
@@ -1082,16 +1082,16 @@ async def test_scoped_task_history_http_validation(tmp_path):
     path = "/api/sessions/websocket%3Aparent/subagents"
     try:
         valid = [
-            "?scope=page", "?scope=unlinked",
-            "?" + urlencode([("scope", "page")] + [("message_id", "x")] * 80),
-            "?" + urlencode({"scope": "page", "turn_id": "é" * 256}),
+            "?scope=page", "?scope=page&task_id=x",
+            "?" + urlencode([("scope", "page")] + [("task_id", "x")] * 80),
+            "?" + urlencode({"scope": "page", "task_id": "é" * 256}),
         ]
         invalid = [
             "?scope=unknown", "?scope=", "?scope=page&scope=page", "?scope=unlinked&message_id=x",
             "?scope=page&message_id=", "?scope=page&turn_id=%20", "?scope=page&message_id=%00",
             "?scope=page&message_id=%FF", "?scope=page&message_id=%ZZ", "?scope=page&unknown=x",
-            "?" + urlencode([("scope", "page")] + [("message_id", "x")] * 80 + [("turn_id", "x")]),
-            "?" + urlencode({"scope": "page", "message_id": "é" * 257}),
+            "?" + urlencode([("scope", "page")] + [("task_id", "x")] * 80 + [("task_id", "x")]),
+            "?" + urlencode({"scope": "page", "task_id": "é" * 257}),
         ]
         for query in valid:
             assert (await gateway.http.dispatch(connection, Request(path + query, headers))).status_code == 200
@@ -1107,13 +1107,13 @@ async def test_scoped_task_history_http_validation(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome,query", [
-    ("finish", "?scope=page&turn_id=off-page"),
-    ("finish", "?scope=page"),
-    ("newer-persisted", "?scope=page&turn_id=off-page"),
-    ("delete", "?scope=page&turn_id=off-page"),
+@pytest.mark.parametrize("outcome,selected", [
+    ("finish", True),
+    ("finish", False),
+    ("newer-persisted", True),
+    ("delete", True),
 ])
-async def test_scoped_active_completion_after_index_read_is_refreshed(tmp_path, monkeypatch, outcome, query):
+async def test_scoped_active_completion_after_index_read_is_refreshed(tmp_path, monkeypatch, outcome, selected):
     manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
     gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
     entered, finish = asyncio.Event(), asyncio.Event()
@@ -1149,7 +1149,7 @@ async def test_scoped_active_completion_after_index_read_is_refreshed(tmp_path, 
         monkeypatch.setattr(manager.sessions, "load", paused_load)
         monkeypatch.setattr(manager.sessions, "status", observed_status)
         request = asyncio.create_task(gateway.http.dispatch(connection, Request(
-            "/api/sessions/websocket%3Aparent/subagents" + query, headers,
+            "/api/sessions/websocket%3Aparent/subagents?scope=page" + (f"&task_id={task_id}" if selected else ""), headers,
         )))
         await asyncio.wait_for(loaded.wait(), 15)
         finish.set()
@@ -1169,7 +1169,7 @@ async def test_scoped_active_completion_after_index_read_is_refreshed(tmp_path, 
             assert tasks == []
         else:
             assert task_id in refreshed
-            if query == "?scope=page":
+            if not selected:
                 assert tasks == []
             else:
                 task, = tasks
@@ -1220,7 +1220,7 @@ async def test_scoped_read_handles_completion_before_terminal_status_is_saved(tm
         monkeypatch.setattr(manager.sessions, "load", paused_load)
         path = "/api/sessions/websocket%3Aparent/subagents"
         request = asyncio.create_task(gateway.http.dispatch(connection, Request(
-            path + "?scope=page&turn_id=off-page", headers,
+            path + f"?scope=page&task_id={task_id}", headers,
         )))
         await asyncio.wait_for(loaded.wait(), 15)
         finish.set()
@@ -1305,7 +1305,7 @@ async def test_empty_scoped_page_refreshes_task_started_during_history_read(tmp_
 
 
 @pytest.mark.asyncio
-async def test_unlinked_synthetic_turns_exclude_inputs_from_all_history_and_other_sessions(tmp_path, monkeypatch):
+async def test_page_selection_ignores_synthetic_origins_and_other_sessions(tmp_path, monkeypatch):
     import nanobot.session.sqlite_store as sqlite_store
     manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
     owner, other = "websocket:parent", "websocket:other"
@@ -1364,30 +1364,26 @@ async def test_unlinked_synthetic_turns_exclude_inputs_from_all_history_and_othe
         monkeypatch.setattr(sqlite_store, "_object", checked_object)
         monkeypatch.setattr(manager.sessions, "contains", checked_contains)
         monkeypatch.setattr(manager.sessions, "status", checked_status)
-        # The old messages are not on the current page, despite their valid synthetic-looking IDs.
-        assert await read("?scope=page&turn_id=current-turn") == set()
+        # Origins do not select tasks, even when old turns resemble synthetic IDs.
+        assert await read("?scope=page") == set()
         blocked.remove(ids["linked-history"])
         await sessions.state.update_metadata(child_key, {TASK_METADATA_KEY: stale})
-        blocked.add(ids["linked-history"])
-        assert await read("?scope=unlinked") == {ids["detached"], ids["legacy"]}
-        # The indexed stored path must apply the same exclusions after process restart.
+        assert await read("?scope=page") == set()
         manager._terminal_statuses.clear()
-        # Stale active rows are intentionally included after a restart until startup recovery seals them.
         stale.update(state="done", revision=stale["revision"] + 1)
-        blocked.remove(ids["linked-history"])
         await sessions.state.update_metadata(child_key, {TASK_METADATA_KEY: stale})
         blocked.add(ids["linked-history"])
-        assert await read("?scope=unlinked") == {ids["detached"], ids["legacy"]}
+        assert await read("?scope=page") == set()
         blocked.clear()
-        assert await read("?scope=page&turn_id=" + quote(history_turn, safe="")) == {ids["linked-history"]}
-        assert await read("?scope=page&turn_id=" + quote(canonical_turn, safe="")) == {ids["linked-canonical"]}
+        assert await read(f"?scope=page&task_id={ids['linked-history']}") == {ids["linked-history"]}
+        assert await read(f"?scope=page&task_id={ids['linked-canonical']}&task_id={ids['foreign']}") == {ids["linked-canonical"]}
     finally:
         await manager.close()
         await sessions.state.aclose()
 
 
 @pytest.mark.asyncio
-async def test_unlinked_read_does_not_reread_linked_task_that_finishes_during_query(tmp_path, monkeypatch):
+async def test_empty_page_refreshes_active_task_that_finishes_during_query(tmp_path, monkeypatch):
     manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
     owner, turn = "websocket:parent", "subagent:" + "f" * 32
     parent = await sessions.state.get(owner)
@@ -1420,25 +1416,90 @@ async def test_unlinked_read_does_not_reread_linked_task_that_finishes_during_qu
         execution = manager._running_tasks[task_id]
         monkeypatch.setattr(manager.sessions, "load", paused_load)
         request = asyncio.create_task(gateway.http.dispatch(connection, Request(
-            "/api/sessions/websocket%3Aparent/subagents?scope=unlinked", headers,
+            "/api/sessions/websocket%3Aparent/subagents?scope=page", headers,
         )))
         await asyncio.wait_for(loaded.wait(), 10)
         finish.set()
         await asyncio.wait_for(execution, 10)
 
-        def forbidden(*_args):
-            raise AssertionError("read persisted metadata of an off-page linked terminal task")
+        original_status = manager.sessions.status
+        refreshed = []
 
-        monkeypatch.setattr(manager.sessions, "contains", forbidden)
-        monkeypatch.setattr(manager.sessions, "status", forbidden)
+        def observed_status(refreshed_id, parent):
+            refreshed.append(refreshed_id)
+            return original_status(refreshed_id, parent)
+
+        monkeypatch.setattr(manager.sessions, "status", observed_status)
         release.set()
         response = await asyncio.wait_for(request, 10)
         assert response.status_code == 200
         assert json.loads(response.body)["tasks"] == []
+        assert task_id in refreshed
     finally:
         release.set()
         finish.set()
         if request is not None:
             await asyncio.gather(request, return_exceptions=True)
+        await manager.close()
+        await sessions.state.aclose()
+
+@pytest.mark.asyncio
+async def test_task_creation_persists_and_sends_independent_anchor(tmp_path):
+    from nanobot.agent.tools.context import tool_call_context
+    from nanobot.bus.runtime_events import SubagentAnchor
+    from nanobot.webui.transcript import build_webui_thread_response
+
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    owner = "websocket:parent"
+    parent = await sessions.state.get(owner)
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="done"))
+    try:
+        with request_context(RequestContext(
+            channel="websocket", chat_id="parent", session_key=owner,
+            session_generation=parent.generation, runtime=runtime, turn_id="turn-one",
+            metadata={"_history_generation": parent.generation, "webui_turn_id": "turn-one"},
+        )), tool_call_context("call-one"):
+            await SubagentTool(manager).execute(action="create", task="inspect", wait=True)
+        msg = await asyncio.wait_for(manager.bus.outbound.get(), 2)
+        assert isinstance(msg.event, SubagentAnchor)
+        assert msg.event.call_id == "call-one"
+        task_id = msg.event.task_id
+        before = sessions.project_history(owner, lambda snapshot: build_webui_thread_response(owner, history=snapshot))
+        assert before is None or not any(event["event"] == "subagent_anchor" for event in before["events"])
+        gateway, _, _ = gateway_for(manager, sessions, tmp_path / "agent")
+        channel = WebSocketChannel(WebSocketConfig(), manager.bus, gateway=gateway)
+        transport = MagicMock()
+        channel._outbound._transport = transport
+        transport.webui_recipients.return_value = (object(),)
+        transport.webui_send_raw = AsyncMock()
+        await channel._outbound.send(msg)
+        sent = json.loads(transport.webui_send_raw.await_args.args[1])
+        assert sent == {"event": "subagent_anchor", "chat_id": "parent", "task_id": task_id, "call_id": "call-one",
+                        "turn_id": "turn-one", "turn_phase": "activity", "turn_seq": 1}
+        response = sessions.project_history(owner, lambda snapshot: build_webui_thread_response(owner, history=snapshot))
+        event = next(event for event in response["events"] if event["event"] == "subagent_anchor")
+        assert (event["task_id"], event["call_id"]) == (task_id, "call-one")
+    finally:
+        await manager.close()
+        await sessions.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_task_anchor_is_not_sent_to_a_different_webui_session(tmp_path):
+    from nanobot.agent.tools.context import tool_call_context
+
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    owner = "websocket:parent"
+    await sessions.state.get(owner)
+    manager.runner.run = AsyncMock(return_value=AgentRunResult(messages=[], final_content="done"))
+    try:
+        with request_context(RequestContext(
+            channel="websocket", chat_id="different", session_key=owner,
+            runtime=runtime, turn_id="turn-one",
+        )), tool_call_context("call-one"):
+            await SubagentTool(manager).execute(action="create", task="inspect", wait=True)
+        assert manager.bus.outbound.empty()
+        assert len(manager.statuses_for_session(owner)) == 1
+    finally:
         await manager.close()
         await sessions.state.aclose()

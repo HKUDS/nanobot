@@ -98,16 +98,12 @@ describe("webui API helpers", () => {
     vi.unstubAllGlobals();
   });
 
-  it("requests only the loaded subagent scope or explicitly unlinked tasks", async () => {
+  it("requests only tasks anchored in the loaded history", async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ tasks: [] }) } as Response);
-    await fetchSubagentTasks("tok", "websocket:chat-1", { messageIds: ["prompt a", "prompt/b"], turnIds: ["turn:1"] });
+    await fetchSubagentTasks("tok", "websocket:chat-1", { taskIds: ["task/1", "task 2"] });
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/subagents?scope=page&message_id=prompt+a&message_id=prompt%2Fb&turn_id=turn%3A1",
+      "/api/sessions/websocket%3Achat-1/subagents?scope=page&task_id=task%2F1&task_id=task+2",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
-    );
-    await fetchSubagentTasks("tok", "websocket:chat-1", "unlinked");
-    expect(fetch).toHaveBeenLastCalledWith(
-      "/api/sessions/websocket%3Achat-1/subagents?scope=unlinked", expect.any(Object),
     );
   });
 

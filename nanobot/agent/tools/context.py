@@ -21,6 +21,23 @@ if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
     from nanobot.utils.llm_runtime import LLMRuntime
 
+_CURRENT_TOOL_CALL_ID: ContextVar[str | None] = ContextVar("nanobot_tool_call_id", default=None)
+
+
+@contextmanager
+def tool_call_context(call_id: str):
+    """Bind the actual provider call to this execution, including concurrent calls."""
+    token = _CURRENT_TOOL_CALL_ID.set(call_id or None)
+    try:
+        yield
+    finally:
+        _CURRENT_TOOL_CALL_ID.reset(token)
+
+
+def current_tool_call_id() -> str | None:
+    return _CURRENT_TOOL_CALL_ID.get()
+
+
 _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
     "nanobot_tool_request_context",
     default=None,

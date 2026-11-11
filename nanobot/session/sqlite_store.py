@@ -126,8 +126,6 @@ def _create_schema_v5(db: sqlite3.Connection) -> None:
 # The CASE also makes the partial indexes safe to build over damaged metadata.
 _SUBAGENT_INDEX_PREDICATE = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.session_type')='subagent' ELSE 0 END"
 _SUBAGENT_PARENT = "json_extract(metadata, '$.parent_session_key')"
-_SUBAGENT_MESSAGE = "nullif(json_extract(metadata, '$.subagent_task.origin_message_id'), '')"
-_SUBAGENT_TURN = "nullif(json_extract(metadata, '$.subagent_task.origin_turn_id'), '')"
 _SUBAGENT_STATE = "json_extract(metadata, '$.subagent_task.state')"
 # Invalid JSON has a blob sentinel so filtered listings still surface corruption.
 _SESSION_LIST_TYPE = ("CASE WHEN json_valid(metadata) THEN CASE WHEN json_type(metadata, '$.session_type') IS NULL "
@@ -136,8 +134,6 @@ _SESSION_LIST_TYPE = ("CASE WHEN json_valid(metadata) THEN CASE WHEN json_type(m
 
 def _create_schema_v6(db: sqlite3.Connection) -> None:
     for name, columns in (
-        ("subagent_origin_message", f"{_SUBAGENT_PARENT}, {_SUBAGENT_MESSAGE}, {_SUBAGENT_TURN}"),
-        ("subagent_origin_turn", f"{_SUBAGENT_PARENT}, {_SUBAGENT_TURN}"),
         ("subagent_active_state", f"{_SUBAGENT_PARENT}, {_SUBAGENT_STATE}"),
     ):
         db.execute(f"CREATE INDEX {name} ON sessions ({columns}) WHERE {_SUBAGENT_INDEX_PREDICATE}")
@@ -145,41 +141,15 @@ def _create_schema_v6(db: sqlite3.Connection) -> None:
 
 
 def _scoped_subagent_query(
-    parent_key: str, message_ids: tuple[str, ...], turn_ids: tuple[str, ...], *, unlinked: bool,
-    excluded_keys: tuple[str, ...] = (),
+    parent_key: str, task_keys: tuple[str, ...],
 ) -> tuple[str, tuple[str, ...]]:
     base = "SELECT key, created_at, updated_at, metadata FROM sessions"
     predicate = f"{_SUBAGENT_INDEX_PREDICATE} AND {_SUBAGENT_PARENT}=?"
-    query_params = [parent_key]
-    if excluded_keys:
-        predicate += " AND key NOT IN (SELECT value FROM json_each(?))"
-        query_params.append(_encode(excluded_keys))
     queries = [f"{base} WHERE {predicate} AND {_SUBAGENT_STATE} IN ('queued', 'running', 'stopping')"]
-    params = list(query_params)
-    if unlinked:
-        # These turn IDs are minted for independent system inputs, not ordinary
-        # user turns. Client-provided turn IDs may collide, so check both stored
-        # display inputs and canonical user messages before treating one as unlinked.
-        synthetic = " OR ".join(
-            f"(substr({_SUBAGENT_TURN}, 1, {len(prefix)})='{prefix}' "
-            f"AND length({_SUBAGENT_TURN})={len(prefix) + 32} "
-            f"AND substr({_SUBAGENT_TURN}, {len(prefix) + 1}) NOT GLOB '*[^0-9a-f]*')"
-            for prefix in ("subagent:", "session-input:")
-        )
-        user_turns = """SELECT coalesce(json_extract(record, '$.turn_id'), '') FROM history_entries
-            WHERE session_key=? AND kind='input'
-            UNION SELECT substr(json_extract(record, '$.content.input_id'), 6) FROM history_entries
-            WHERE session_key=? AND kind='input' AND json_extract(record, '$.content.input_id') LIKE 'user:%'
-            UNION SELECT coalesce(json_extract(record, '$.webui_turn_id'), '') FROM messages
-            WHERE session_key=? AND json_extract(record, '$.role')='user'"""
-        queries.append(f"{base} WHERE {predicate} AND {_SUBAGENT_MESSAGE} IS NULL "
-                       f"AND ({_SUBAGENT_TURN} IS NULL OR (({synthetic}) AND {_SUBAGENT_TURN} NOT IN ({user_turns})))")
-        params.extend((*query_params, parent_key, parent_key, parent_key))
-    else:
-        for expression, ids in ((_SUBAGENT_MESSAGE, message_ids), (_SUBAGENT_TURN, turn_ids)):
-            if ids:
-                queries.append(f"{base} WHERE {predicate} AND {expression} IN (SELECT value FROM json_each(?))")
-                params.extend((*query_params, _encode(ids)))
+    params = [parent_key]
+    if task_keys:
+        queries.append(f"{base} WHERE {predicate} AND key IN (SELECT value FROM json_each(?))")
+        params.extend((parent_key, _encode(task_keys)))
     return " UNION ".join(queries) + " ORDER BY updated_at DESC", tuple(params)
 
 
@@ -790,34 +760,13 @@ class SqliteSessionStore:
                     )]
 
     def list_scoped_subagent_metadata(
-        self, parent_key: str, message_ids: tuple[str, ...], turn_ids: tuple[str, ...], *, unlinked: bool,
-        excluded_keys: tuple[str, ...] = (),
+        self, parent_key: str, task_keys: tuple[str, ...],
     ) -> list[SessionMetadataPayload]:
-        """Read only matching child headers and active tasks, without decoding other sessions."""
-        query, params = _scoped_subagent_query(
-            parent_key, message_ids, turn_ids, unlinked=unlinked, excluded_keys=excluded_keys,
-        )
+        """Read matching child headers and active tasks using the owner index."""
+        query, params = _scoped_subagent_query(parent_key, task_keys)
         with self.transaction(write=False) as db:
             return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
                      "metadata": _object(row[3])} for row in db.execute(query, params)]
-
-    def user_turn_ids(self, session_key: str, turn_ids: tuple[str, ...]) -> set[str]:
-        """Find candidate turns with user inputs, including pre-display-history messages."""
-        if not turn_ids:
-            return set()
-        ids = _encode(turn_ids)
-        with self.transaction(write=False) as db:
-            rows = db.execute("""SELECT json_extract(record, '$.turn_id') FROM history_entries
-                WHERE session_key=? AND kind='input'
-                AND json_extract(record, '$.turn_id') IN (SELECT value FROM json_each(?))
-                UNION SELECT substr(json_extract(record, '$.content.input_id'), 6) FROM history_entries
-                WHERE session_key=? AND kind='input' AND json_extract(record, '$.content.input_id')
-                IN (SELECT 'user:' || value FROM json_each(?))
-                UNION SELECT json_extract(record, '$.webui_turn_id') FROM messages
-                WHERE session_key=? AND json_extract(record, '$.role')='user'
-                AND json_extract(record, '$.webui_turn_id') IN (SELECT value FROM json_each(?))""",
-                (session_key, ids, session_key, ids, session_key, ids))
-            return {str(row[0]) for row in rows}
 
     def list_metadata(self, *, session_types: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
         with self.transaction(write=False) as db:

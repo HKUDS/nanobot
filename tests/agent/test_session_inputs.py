@@ -413,6 +413,7 @@ async def test_independent_session_input_subagent_uses_stable_history_identity(
     session = loop.sessions.get_or_create(target)
     assert session.messages[0]["input_id"] == input_id
     assert request_origin_from_metadata(session.metadata).get("input_id") == input_id
-    scope = SubagentHistoryScope("page", frozenset({"session-message:message-1"}))
-    assert set(await loop.subagents.read_statuses_for_session(target, scope)) == ({task.task_id} if valid_target else set())
+    scope = SubagentHistoryScope(task_ids=frozenset({task.task_id}))
+    assert set(await loop.subagents.read_statuses_for_session(target, scope)) == {task.task_id}
+    assert not await loop.subagents.read_statuses_for_session(target, SubagentHistoryScope())
     assert not await loop.subagents.read_statuses_for_session("websocket:source", scope)

@@ -24,7 +24,7 @@ from nanobot.bus.outbound_events import (
     UserInputEvent,
 )
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import SubagentTaskChanged
+from nanobot.bus.runtime_events import SubagentAnchor, SubagentTaskChanged
 from nanobot.context_graph import ContextGraph, ContextGraphParts, graph_from_parts
 from nanobot.context_sources import PromptSourcesEvent
 from nanobot.events import ModelRequestEvent
@@ -358,6 +358,12 @@ class WebUIOutboundDelivery:
                 turn_owner=turn_owner if isinstance(turn_owner, str) else None,
             )
             await self.session_updated(msg.chat_id, scope=scope)
+            return
+        if isinstance(event, SubagentAnchor):
+            body: dict[str, Any] = {"event": "subagent_anchor", "chat_id": msg.chat_id,
+                                    "task_id": event.task_id, "call_id": event.call_id}
+            await self._persist_turn_transcript_event(msg.chat_id, body, metadata=msg.metadata, phase="activity")
+            await self._fanout(recipients, body, label=" subagent_anchor ")
             return
         if isinstance(event, SubagentTaskChanged):
             if recipients:

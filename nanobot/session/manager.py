@@ -517,16 +517,10 @@ class SessionManager:
         return self._store.list_child_session_metadata(parent_key)
 
     def list_scoped_subagent_metadata(
-        self, parent_key: str, message_ids: tuple[str, ...], turn_ids: tuple[str, ...], *, unlinked: bool,
-        excluded_keys: tuple[str, ...] = (),
+        self, parent_key: str, task_keys: tuple[str, ...],
     ) -> list[SessionMetadataPayload]:
         """Read indexed subagent headers without loading unrelated child sessions."""
-        return self._store.list_scoped_subagent_metadata(
-            parent_key, message_ids, turn_ids, unlinked=unlinked, excluded_keys=excluded_keys,
-        )
-
-    def user_turn_ids(self, session_key: str, turn_ids: tuple[str, ...]) -> set[str]:
-        return self._store.user_turn_ids(session_key, turn_ids)
+        return self._store.list_scoped_subagent_metadata(parent_key, task_keys)
 
     def save(self, session: Session) -> None:
         """Commit an offline administrative snapshot, rejecting obsolete history."""

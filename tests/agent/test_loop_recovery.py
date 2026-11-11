@@ -278,11 +278,11 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         assert child.origin_turn_id == expected_origin["turn_id"]
         if late_result:
             assert child.origin_turn_id.startswith("subagent:")
-            assert child.task_id in await loop.subagents.read_statuses_for_session(
-                request.session_key, SubagentHistoryScope("unlinked"),
-            )
             assert child.task_id not in await loop.subagents.read_statuses_for_session(
-                request.session_key, SubagentHistoryScope("page"),
+                request.session_key, SubagentHistoryScope(),
+            )
+            assert child.task_id in await loop.subagents.read_statuses_for_session(
+                request.session_key, SubagentHistoryScope(task_ids=frozenset({child.task_id})),
             )
         assert persisted_origin == expected_origin
         assert continuation.metadata["webui_turn_id"] == f"recovery:{state['recovery_id']}"

@@ -1291,3 +1291,28 @@ def test_model_request_persists_through_reconnect_projection(history, tmp_path, 
     assert {field: event[field] for field in record} == record
     assert len(event["round_usages"]) == 8
     assert event["usage"] == usage.to_turn_dict()
+
+
+def test_subagent_anchor_survives_trace_deferral_and_reopen(history, tmp_path):
+    from nanobot.session.manager import SessionManager
+
+    key = "websocket:anchor-test"
+    history.append(key, {"event": "user", "chat_id": "anchor-test", "text": "run"})
+    for task in ("first", "second"):
+        history.append(key, {"event": "message", "chat_id": "anchor-test",
+                             "kind": "progress", "text": "x" * 40000})
+        history.append(key, {"event": "subagent_anchor", "chat_id": "anchor-test",
+                             "task_id": task, "call_id": "call-" + task,
+                             "turn_id": "turn-one", "turn_phase": "activity"})
+    history.append(key, {"event": "turn_end", "chat_id": "anchor-test"})
+    _append_numbered_turn(history, key, "anchor-test", 2)
+    reopened = SessionManager(tmp_path)
+    def build(**kwargs):
+        return reopened.project_history(key, lambda snapshot: transcript_module.build_webui_thread_response(
+            key, history=snapshot, **kwargs))
+    latest = build(limit=2, direction="latest")
+    older = build(limit=2, before=latest["page"]["before_cursor"])
+    anchors = [event for event in older["events"] if event["event"] == "subagent_anchor"]
+    assert [(event["task_id"], event["call_id"]) for event in anchors] == [
+        ("first", "call-first"), ("second", "call-second")]
+    assert all(event["turn_id"] == "turn-one" for event in anchors)

@@ -16,6 +16,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
 import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
@@ -25,6 +26,7 @@ interface ThreadMessagesProps {
   beforeUnit?: { key: string; content: ReactNode };
   topInset?: number;
   afterUserMessage?: (message: UIMessage) => ReactNode;
+  renderSubagentAnchor?: (anchor: NonNullable<UIMessage["subagentAnchor"]>) => ReactNode;
   afterMessages?: ReactNode;
   temporary?: boolean;
   /** When true, agent turn still in flight — keeps activity timeline expanded. */
@@ -85,6 +87,7 @@ export function ThreadMessages({
   beforeUnit,
   topInset = 0,
   afterUserMessage,
+  renderSubagentAnchor,
   afterMessages,
   temporary = false,
   isStreaming = false,
@@ -107,10 +110,12 @@ export function ThreadMessages({
   const { activityMode } = useLocalPreferences();
   const messageListRef = useRef<HTMLDivElement>(null);
   const mobileActions = useMediaQuery("(max-width: 767px)");
-  const units = useMemo(
-    () => buildDisplayUnits(messages),
-    [messages],
-  );
+  const rawUnits = useMemo(() => buildDisplayUnits(messages), [messages]);
+  const units = useMemo(() => rawUnits.map((unit) => unit.type === "activity"
+    ? { ...unit, messages: unit.messages.flatMap((message) => {
+      const visible = withoutSubagentCreateActivity(message);
+      return visible ? [visible] : [];
+    }) } : unit), [rawUnits]);
   const forkBoundaryAfterUnitIndex = useMemo(
     () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
     [forkBoundaryMessageCount, units],
@@ -135,8 +140,8 @@ export function ThreadMessages({
   const currentTurnStartIndex = isStreaming
     ? activeTurnStartIndex(units, activeTurnId)
     : units.length;
-  const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
-  const scrollAnchors = useMemo(() => scrollAnchorsForUnits(units), [units]);
+  const unitKeys = useMemo(() => unitKeysForDisplay(rawUnits), [rawUnits]);
+  const scrollAnchors = useMemo(() => scrollAnchorsForUnits(rawUnits), [rawUnits]);
   const messageBlocks = useMemo(
     () => completedMessageBlocks(
       units,
@@ -249,7 +254,7 @@ export function ThreadMessages({
         return [
           prelude,
           <Fragment key={`unit:${unitKeys[index]}`}>
-          <ThreadDisplayUnit
+          {unit.type === "message" && unit.message.subagentAnchor ? renderSubagentAnchor?.(unit.message.subagentAnchor) : <ThreadDisplayUnit
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
             scrollAnchor={scrollAnchors[index]}
@@ -290,7 +295,7 @@ export function ThreadMessages({
             onContextBlockActiveChange={setContextBlockPointed}
             onContextBlockFocusChange={setContextBlockFocused}
             onContextBlockMenuOpenChange={setContextBlockMenuOpen}
-          />
+          />}
           {unit.type === "message" && unit.message.role === "user" ? (
             afterUserMessage?.(unit.message)
           ) : null}
@@ -920,6 +925,7 @@ function currentActivityClusterIndices(
   for (let i = units.length - 1; i >= 0; i -= 1) {
     const unit = units[i];
     if (unit.type === "activity") {
+      if (!unit.messages.length) continue;
       if (!markedCurrentActivity) {
         indices.add(i);
         markedCurrentActivity = true;
@@ -1046,7 +1052,8 @@ function completedMessageBlocks(
   const result: CompletedMessageBlocks = {
     blockKeys: new Array<string | undefined>(units.length),
     blockIndices: new Set<number>(),
-    suppressedActivityIndices: new Set<number>(),
+    suppressedActivityIndices: new Set(units.flatMap((unit, index) =>
+      unit.type === "activity" && !unit.messages.length ? [index] : [])),
     activityByBlock: new Map(),
   };
   let groupStart = 0;
@@ -1077,7 +1084,7 @@ function completedMessageBlocks(
     const activityByBlock = new Map<number, Array<Extract<DisplayUnit, { type: "activity" }>>>();
     for (const index of indices) {
       const unit = units[index];
-      if (unit.type !== "activity") continue;
+      if (unit.type !== "activity" || !unit.messages.length) continue;
       const blockIndex = blockIndices.find((candidate) => candidate > index) ?? blockIndices.at(-1);
       if (blockIndex === undefined) continue;
       result.suppressedActivityIndices.add(index);

@@ -91,6 +91,7 @@ _TURN_DISPLAY_EVENTS: frozenset[str] = frozenset({
     "message",
     "file_edit",
     "model_request",
+    "subagent_anchor",
     "turn_end",
 })
 MAX_SESSION_MENTIONS = 8
@@ -1345,6 +1346,7 @@ def has_pending_tool_calls(
             "reasoning_delta",
             "reasoning_end",
             "file_edit",
+            "subagent_anchor",
         }:
             return True
         if ev in {WEBUI_FORK_MARKER_EVENT}:
@@ -1480,6 +1482,8 @@ def _client_projection_event(
             common["response_sources"] = _response_sources(record["response_sources"])
         if "response_input_ids" in record:
             common["response_input_ids"] = record["response_input_ids"]
+    if event == "subagent_anchor":
+        return {"event": event, **common, "task_id": record.get("task_id"), "call_id": record.get("call_id")}
     if event == "user":
         projected: dict[str, Any] = {
             "event": "user_message",
@@ -1727,6 +1731,7 @@ def _client_projection_page_event_count(turn: list[dict[str, Any]]) -> int:
         "file_edit",
         "context_compaction",
         "model_request",
+        "subagent_anchor",
         "turn_end",
     }
     return max(1, sum(record.get("event") in supported for record in turn))
