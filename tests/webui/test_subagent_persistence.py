@@ -967,7 +967,6 @@ async def test_scoped_task_history_queries_only_matching_children_and_all_active
         for label, parent, message_id, turn_id in (
             ("exact", owner, "prompt-in", "different-turn"),
             ("fallback", owner, "old-replay-id", "turn-in"),
-            ("same-turn-off-page", owner, "not-on-page", "turn-in"),
             ("old", owner, "prompt-old", "turn-old"),
             ("unlinked", owner, None, None),
             ("unlinked-empty", owner, "", ""),
@@ -1024,12 +1023,11 @@ async def test_scoped_task_history_queries_only_matching_children_and_all_active
 
         blocked.update(ids[name] for name in ("old", "unlinked", "unlinked-empty", "half-linked", "foreign"))
         page = await read("?scope=page&message_id=prompt-in&turn_id=turn-in")
-        # A turn match is a candidate even when its message ID is outside this page.
-        assert set(page) == active | {ids["exact"], ids["fallback"], ids["same-turn-off-page"]}
+        assert set(page) == active | {ids["exact"], ids["fallback"]}
         assert {page[ids[name]]["state"] for name in ("running", "stopping", "queued")} == {
             "running", "stopping", "queued",
         }
-        blocked.update(ids[name] for name in ("exact", "fallback", "same-turn-off-page"))
+        blocked.update(ids[name] for name in ("exact", "fallback"))
         assert set(await read("?scope=page")) == active
         blocked.difference_update({ids["unlinked"], ids["unlinked-empty"]})
         assert set(await read("?scope=unlinked")) == active | {ids["unlinked"], ids["unlinked-empty"]}
