@@ -385,6 +385,10 @@ function parseThreadProjectionEvent(value: unknown, validatedGraphs: ReadonlySet
     case "stream_end":
     case "reasoning_end":
       if (value.text !== undefined && typeof value.text !== "string") break;
+      if (value.text_from_seq !== undefined && (
+        !Number.isSafeInteger(value.text_from_seq) || Number(value.text_from_seq) < 0
+        || !Number.isSafeInteger(value.turn_seq) || Number(value.text_from_seq) > Number(value.turn_seq)
+      )) break;
       return value as unknown as ThreadProjectionEvent;
     case "context_compaction":
       if (value.context_graph !== undefined && !validatedGraphs.has(value.context_graph) && !isContextGraph(value.context_graph)) break;
@@ -420,6 +424,21 @@ export function parseWebuiThreadPayload(value: unknown): WebuiThreadPersistedPay
   }
   if (value.projection !== "events" || !Array.isArray(value.events)) {
     throw new Error("Invalid WebUI thread events");
+  }
+  if (isRecord(value.page) && value.page.history_generation != null
+    && (typeof value.page.history_generation !== "string" || !value.page.history_generation)) {
+    throw new Error("Invalid WebUI thread history generation");
+  }
+  if (isRecord(value.page) && value.page.record_range !== undefined) {
+    const range = value.page.record_range;
+    if (!isRecord(range) || !Number.isSafeInteger(range.turn) || Number(range.turn) < 0
+      || !Number.isSafeInteger(range.start) || Number(range.start) < 0
+      || !Number.isSafeInteger(range.end) || Number(range.end) <= Number(range.start)) {
+      throw new Error("Invalid WebUI thread record range");
+    }
+  }
+  if (isRecord(value.page) && value.page.recovered_answers !== undefined && typeof value.page.recovered_answers !== "boolean") {
+    throw new Error("Invalid WebUI thread answer recovery");
   }
   const graphs = new Map<string, ContextGraph>();
   if (value.context_graphs !== undefined) {

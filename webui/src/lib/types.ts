@@ -1595,6 +1595,8 @@ export type InboundEvent =
       chat_id: string;
       stream_id?: string;
       text?: string;
+      /** Inclusive first turn sequence covered by this stream's cumulative text. */
+      text_from_seq?: number;
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
       response_sources?: ResponseSource[];
@@ -1614,8 +1616,8 @@ export type InboundEvent =
       event: "reasoning_end";
       chat_id: string;
       stream_id?: string;
-      /** Legacy persisted transcripts may carry the final reasoning text here. */
       text?: string;
+      text_from_seq?: number;
     } & InboundTurnMetadata)
   | { event: "pairing_changed" }
   | {
@@ -1762,7 +1764,17 @@ export interface OutboundMcpPresetMention {
   brand_color?: string | null;
 }
 
+export interface WebuiThreadRecordRange {
+  turn: number;
+  start: number;
+  end: number;
+}
+
 interface WebuiThreadPagePayload {
+  history_generation?: string | null;
+  record_range?: WebuiThreadRecordRange;
+  /** The fragment includes the canonical replacement for this turn's stored answers. */
+  recovered_answers?: boolean;
   before_cursor?: string | null;
   has_more_before?: boolean;
   after_cursor?: string | null;

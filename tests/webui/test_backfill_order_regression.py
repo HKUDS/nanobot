@@ -1,4 +1,18 @@
+import pytest
+
 from nanobot.webui.transcript import TranscriptReplayStats
+
+
+def _paged_events(history, key, messages):
+    pages = [history.build(key, limit=10, session_messages_loader=lambda: messages)]
+    assert pages[0]["page"]["truncated_oversized_turn"]
+    while pages[-1]["page"]["has_more_before"]:
+        pages.append(history.build(key, limit=10, before=pages[-1]["page"]["before_cursor"],
+                                   session_messages_loader=lambda: messages))
+        assert len(pages) < 30
+    events = [event for page in reversed(pages) for event in page["events"]]
+    assert len({event["projection_id"] for event in events}) == len(events)
+    return events
 
 
 def test_grouped_backfill_keeps_response_input_order_in_page_and_index(history, tmp_path, monkeypatch):
@@ -75,10 +89,11 @@ def test_empty_response_inputs_do_not_use_legacy_answer_matching(history, tmp_pa
     assert [event["projection_id"] for event in latest["events"] if event["event"] == "user_message"] == [index[0]["id"]]
 
 
-def test_truncated_turn_applies_plan_when_reference_anchor_is_dropped(history, tmp_path, monkeypatch):
+@pytest.mark.parametrize("budget", [1, 5])
+def test_fragmented_turn_preserves_backfill_order_across_reference_anchors(history, tmp_path, monkeypatch, budget):
     from nanobot.webui import transcript
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(transcript, "_MAX_TRANSCRIPT_PAGE_RECORDS", 5)
+    monkeypatch.setattr(transcript, "_MAX_TRANSCRIPT_PAGE_RECORDS", budget)
     key = "websocket:truncated-backfill"
     ids = ["input:a", "input:b", "input:c"]
     messages = [{"role": "user", "content": text, "input_id": ident}
@@ -90,15 +105,16 @@ def test_truncated_turn_applies_plan_when_reference_anchor_is_dropped(history, t
     history.append(key, {"event": "message", "text": "last", "response_input_ids": ids[2:]})
     history.append(key, {"event": "turn_end"})
     index = history.prompts(key, session_messages_loader=lambda: messages)
-    page = history.build(key, limit=10, session_messages_loader=lambda: messages)
-    users = [event for event in page["events"] if event["event"] == "user_message"]
-    assert page["page"]["truncated_oversized_turn"]
-    assert not page["page"]["has_more_before"]
+    events = _paged_events(history, key, messages)
+    users = [event for event in events if event["event"] == "user_message"]
     assert [event["text"] for event in users] == ["A", "B", "C"]
     assert [event["projection_id"] for event in users] == [prompt["id"] for prompt in index]
+    for prompt in index:
+        page = history.build(key, after=prompt["cursor"], session_messages_loader=lambda: messages)
+        assert prompt["id"] in [event["projection_id"] for event in page["events"]]
 
 
-def test_truncated_turn_recovers_even_if_all_missing_references_were_dropped(history, tmp_path, monkeypatch):
+def test_older_pages_recover_inputs_whose_references_are_outside_latest_page(history, tmp_path, monkeypatch):
     from nanobot.webui import transcript
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     monkeypatch.setattr(transcript, "_MAX_TRANSCRIPT_PAGE_RECORDS", 4)
@@ -111,14 +127,13 @@ def test_truncated_turn_recovers_even_if_all_missing_references_were_dropped(his
     history.append(key, {"event": "message", "text": "new"})
     history.append(key, {"event": "turn_end"})
     index = history.prompts(key, session_messages_loader=lambda: messages)
-    page = history.build(key, limit=10, session_messages_loader=lambda: messages)
-    users = [event for event in page["events"] if event["event"] == "user_message"]
-    assert page["page"]["truncated_oversized_turn"]
+    events = _paged_events(history, key, messages)
+    users = [event for event in events if event["event"] == "user_message"]
     assert [event["text"] for event in users] == ["A", "B"]
     assert [event["projection_id"] for event in users] == [prompt["id"] for prompt in index]
 
 
-def test_completed_stream_compaction_and_truncation_keep_shared_backfill_anchor(history, tmp_path, monkeypatch):
+def test_completed_stream_compaction_and_record_pages_keep_shared_backfill_anchor(history, tmp_path, monkeypatch):
     from nanobot.webui import transcript
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
@@ -142,13 +157,12 @@ def test_completed_stream_compaction_and_truncation_keep_shared_backfill_anchor(
     full = history.build(key, limit=10, session_messages_loader=loader, stats=stats)
     assert stats.compacted_delta_records == 3
     monkeypatch.setattr(transcript, "_MAX_TRANSCRIPT_PAGE_RECORDS", 8)
-    truncated_stats = TranscriptReplayStats()
-    truncated = history.build(key, limit=10, session_messages_loader=loader, stats=truncated_stats)
-    assert truncated["page"]["truncated_oversized_turn"]
-    assert truncated_stats.compacted_delta_records == 3
+    events = _paged_events(history, key, messages)
+    assert [event["text"] for event in events if event["event"] == "delta"] == ["one", "two", "three"]
+    assert [event["text"] for event in events if event["event"] == "stream_end"] == ["onetwothree"]
     expected_ids = [prompt["id"] for prompt in index]
     assert [prompt["inputId"] for prompt in index] == ids
-    for page in (full, truncated):
-        users = [event for event in page["events"] if event["event"] == "user_message"]
+    for replay in (full["events"], events):
+        users = [event for event in replay if event["event"] == "user_message"]
         assert [event["text"] for event in users] == ["A", "B", "C"]
         assert [event["projection_id"] for event in users] == expected_ids

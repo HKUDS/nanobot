@@ -202,6 +202,7 @@ describe("webui API helpers", () => {
   it.each([
     {},
     { stream_id: "answer-1" },
+    { stream_id: "answer-1", text_from_seq: 2 },
     { projection_receipts: [] },
     { stream_id: "answer-1", projection_receipts: [{ turn_id: "turn-1", ranges: [[1, 3], [5, 5]] }] },
   ])("accepts optional stream identity and projection receipts: %j", async (metadata) => {
@@ -231,6 +232,25 @@ describe("webui API helpers", () => {
     await expect(fetchWebuiThread("tok", "websocket:chat-1")).rejects.toThrow(
       "Invalid WebUI thread event metadata",
     );
+  });
+
+  it("preserves the fragment answer-recovery declaration at the HTTP boundary", () => {
+    const payload = { schemaVersion: 3, projection: "events", events: [],
+      page: { record_range: { turn: 0, start: 2, end: 4002 }, recovered_answers: true } };
+    expect(parseWebuiThreadPayload(payload).page).toEqual(payload.page);
+    expect(() => parseWebuiThreadPayload({ ...payload, page: { ...payload.page, recovered_answers: "true" } }))
+      .toThrow("Invalid WebUI thread answer recovery");
+  });
+
+  it.each(["stream_end", "reasoning_end"])("validates %s text snapshot coverage", (event) => {
+    const payload = (fields: Record<string, unknown>) => ({ schemaVersion: 3, projection: "events",
+      events: [{ event, chat_id: "chat-1", turn_id: "turn-1", turn_seq: 6, text: "Reply", ...fields }] });
+    expect(parseWebuiThreadPayload(payload({ text_from_seq: 2 })).events[0])
+      .toMatchObject({ text_from_seq: 2, turn_seq: 6 });
+    for (const fields of [{ text_from_seq: -1 }, { text_from_seq: 7 }, { text_from_seq: 2.5 },
+      { text_from_seq: 2, turn_seq: undefined }]) {
+      expect(() => parseWebuiThreadPayload(payload(fields))).toThrow(`Invalid WebUI thread projection event: ${event}`);
+    }
   });
 
   it.each([

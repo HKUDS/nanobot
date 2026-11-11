@@ -92,12 +92,24 @@ export const INITIAL_HISTORY_WINDOW = 120;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
 interface HistoryScrollAnchor {
-  key: string;
+  sources: string[];
+  fallback?: string;
   offsetTop: number;
   scrollTop: number;
 }
 
 const THREAD_DISPLAY_UNIT_SELECTOR = "[data-thread-display-unit]";
+
+function scrollSourceKind(source: string): string {
+  return (JSON.parse(source) as string[])[1];
+}
+
+function scrollSourcesDisagree(left: string[], right: string[], kind: string): boolean {
+  const leftKeys = left.filter((source) => scrollSourceKind(source) === kind);
+  const rightKeys = right.filter((source) => scrollSourceKind(source) === kind);
+  return leftKeys.length > 0 && rightKeys.length > 0
+    && !leftKeys.some((source) => rightKeys.includes(source));
+}
 
 function promptTopInset(scroller: HTMLElement): number {
   const padding = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop);
@@ -500,13 +512,19 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     }
     const viewport = scroller.getBoundingClientRect();
     const element = visibleHistoryUnit(content, viewport);
-    const key = element?.dataset.threadDisplayUnit;
-    if (!element || !key) {
+    if (!element?.dataset.threadScrollSources) {
+      historyScrollAnchorRef.current = null;
+      return false;
+    }
+    const sources = JSON.parse(element.dataset.threadScrollSources) as string[];
+    const fallback = element.dataset.threadScrollFallback;
+    if (sources.length === 0 && !fallback) {
       historyScrollAnchorRef.current = null;
       return false;
     }
     historyScrollAnchorRef.current = {
-      key,
+      sources,
+      fallback,
       scrollTop: scroller.scrollTop,
       // Normalize out the reveal lease, even when reading above its inline slot.
       offsetTop: element.getBoundingClientRect().top - viewport.top
@@ -524,9 +542,26 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (Math.abs(scroller.scrollTop - Math.min(anchor.scrollTop, maxScrollTop)) >= 0.5) {
       return captureHistoryScrollAnchor();
     }
-    const element = Array.from(
-      content.querySelectorAll<HTMLElement>("[data-thread-display-unit]"),
-    ).find((candidate) => candidate.dataset.threadDisplayUnit === anchor.key);
+    const candidates = Array.from(content.querySelectorAll<HTMLElement>(THREAD_DISPLAY_UNIT_SELECTOR));
+    const bySource = new Map<string, { element: HTMLElement; sources: string[] }>();
+    for (const candidate of candidates) {
+      const sources = JSON.parse(candidate.dataset.threadScrollSources ?? "[]") as string[];
+      for (const source of sources) bySource.set(source, { element: candidate, sources });
+    }
+    let element: HTMLElement | undefined;
+    for (const source of anchor.sources) {
+      const candidate = bySource.get(source);
+      if (!candidate) continue;
+      const kind = scrollSourceKind(source);
+      // An index-generated replay id can be reused by a different message.
+      if (kind !== "stream" && scrollSourcesDisagree(anchor.sources, candidate.sources, "stream")) continue;
+      if (kind === "id" && scrollSourcesDisagree(anchor.sources, candidate.sources, "sequence")) continue;
+      element = candidate.element;
+      break;
+    }
+    if (!element && anchor.fallback) {
+      element = candidates.find((candidate) => candidate.dataset.threadScrollFallback === anchor.fallback);
+    }
     if (!element) {
       historyScrollAnchorRef.current = null;
       return false;

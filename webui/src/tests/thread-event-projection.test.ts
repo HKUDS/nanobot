@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createThreadProjectionState, projectThreadEvent, projectThreadEvents } from "@/lib/thread-event-projection";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
+import { ThreadProjectionIndex } from "@/lib/thread-projection-index";
 import type { ThreadProjectionEvent, UIMessage } from "@/lib/types";
 import projectionFixture from "./fixtures/live-replay-event-projection.json";
 
@@ -77,8 +78,9 @@ function normalizeProjection(messages: UIMessage[]): Array<Record<string, unknow
 describe("canonical thread event projection", () => {
   it("routes late snapshots by stream without moving same-text answers or stealing the active cursor", () => {
     let state = createThreadProjectionState();
+    const index = new ThreadProjectionIndex();
     const emit = (event: ThreadProjectionEvent) => {
-      state = projectThreadEvent(state, event, { createId: () => `live-${state.messages.length}`, now: 100 });
+      state = projectThreadEvent(state, event, { createId: () => `live-${state.messages.length}`, now: 100, index });
     };
     emit({ event: "delta", chat_id: "chat", turn_id: "turn", stream_id: "first", turn_seq: 1, text: "Same answer" });
     emit({ event: "stream_end", chat_id: "chat", turn_id: "turn", stream_id: "first", turn_seq: 2, resuming: true });
@@ -95,6 +97,28 @@ describe("canonical thread event projection", () => {
       .toEqual(["Same answer", "read_file(first)", "Same answer continued"]);
     expect(state.messages[0]).toMatchObject({ projectionStartSeq: 1, turnSeq: 5, responseSources: [source] });
     expect(state.messages[2]).toMatchObject({ projectionStartSeq: 4, turnSeq: 6, streamId: "second" });
+  });
+
+  it("can resume an earlier checkpoint after another branch closes the same stream", () => {
+    const index = new ThreadProjectionIndex();
+    const options = { createId: () => "answer", now: 100, index };
+    const initial = createThreadProjectionState();
+    const open = projectThreadEvent(initial, {
+      event: "delta", chat_id: "chat", turn_id: "turn", stream_id: "wire", text: "Prefix",
+    }, options);
+    const ended = projectThreadEvent(open, {
+      event: "stream_end", chat_id: "chat", turn_id: "turn", stream_id: "wire", text: "Prefix final",
+    }, options);
+    expect(ended.closedAnswerStreamIds.size).toBe(1);
+    expect(open.closedAnswerStreamIds.size).toBe(0);
+    expect(open.closedAssistantIds.size).toBe(0);
+    const resumed = projectThreadEvent(open, {
+      event: "delta", chat_id: "chat", turn_id: "turn", stream_id: "wire", text: " continues",
+    }, options);
+    expect(initial.messages).toEqual([]);
+    expect(open.messages.map((row) => row.content)).toEqual(["Prefix"]);
+    expect(ended.messages.map((row) => row.content)).toEqual(["Prefix final"]);
+    expect(resumed.messages.map((row) => row.content)).toEqual(["Prefix continues"]);
   });
 
   it("updates an identified reasoning snapshot without duplicating it or closing another phase", () => {
