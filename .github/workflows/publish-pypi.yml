@@ -109,3 +109,10 @@ jobs:
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+      - name: Show safe retry instructions
+        if: failure()
+        shell: bash
+        run: |
+          message='To resume, choose "Re-run all jobs" or start a new run with the same version and destination. Do not choose "Re-run failed jobs" or rerun only "publish": those skip the index recheck. Preserve the original approved release files.'
+          echo "::notice title=Retry the complete publication workflow::$message"
+          printf '### Resume publication\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
