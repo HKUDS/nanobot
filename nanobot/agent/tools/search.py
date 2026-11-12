@@ -783,7 +783,7 @@ class GrepTool(_SearchTool):
                         with suppress(ValueError):
                             display_path = file_path.relative_to(workspace).as_posix()
 
-                    source_iterator: Iterator[LocatedDocumentLine] | None = None
+                    source: DocumentLineSource | None = None
                     is_document = file_path.suffix.lower() in _DOCUMENT_EXTENSIONS
                     file_matches = 0
                     try:
@@ -811,12 +811,11 @@ class GrepTool(_SearchTool):
                         if source is None:
                             skipped_binary += 1
                             continue
-                        source_iterator = source.lines
                         if source.continuation and len(document_continuations) < 10:
                             document_continuations.append(
                                 f"({display_path}: continue PDF search with {source.continuation})"
                             )
-                        source_lines = checked_lines(source_iterator)
+                        source_lines = checked_lines(source.lines)
 
                         if output_mode == "content":
                             content_page.scan(display_path, source_lines, regex, context_before, context_after)
@@ -845,9 +844,8 @@ class GrepTool(_SearchTool):
                             document_error = f"{display_path}: {e!s}"
                         continue
                     finally:
-                        close = getattr(source_iterator, "close", None)
-                        if close is not None:
-                            close()
+                        if source is not None:
+                            source.close()
                         # A document can fail after yielding matches. Keep the count
                         # of those lines even though the failed file is not ranked.
                         if file_matches and output_mode == "count":
