@@ -8,12 +8,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urljoin
 
 import httpx
 from loguru import logger
 
 from nanobot.config.schema import ProviderConfig, ProvidersConfig
+from nanobot.execution.http import RedirectLimitError, open_redirected_get
 from nanobot.providers.registry import find_by_name
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -29,7 +29,6 @@ _OPENROUTER_ATTRIBUTION_HEADERS = {
 }
 _DEFAULT_TIMEOUT_S = 120.0
 _IMAGE_DOWNLOAD_MAX_BYTES = 32 * 1024 * 1024
-_IMAGE_DOWNLOAD_MAX_REDIRECTS = 5
 _AIHUBMIX_TIMEOUT_S = 300.0
 _AIHUBMIX_ASPECT_RATIO_SIZES = {
     "1:1": "1024x1024",
@@ -152,6 +151,11 @@ async def _download_image_data_url(
     proxy: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> str:
+    def check_proxy_target(target: str) -> tuple[bool, str]:
+        # The configured provider proxy owns final DNS and egress.
+        ok, error, _ = resolve_url_target(target, trust_remote_dns=True)
+        return ok, error
+
     try:
         client_kwargs: dict[str, Any] = {
             "follow_redirects": False,
@@ -159,64 +163,45 @@ async def _download_image_data_url(
             "trust_env": False,
         }
         if proxy:
-            # An explicit provider proxy is a user-selected trusted egress boundary.
-            # Validate each URL locally, while the proxy owns final DNS resolution.
             client_kwargs["proxy"] = proxy
         else:
             client_kwargs["transport"] = PinnedDNSAsyncTransport(inner=transport)
 
         async with httpx.AsyncClient(**client_kwargs) as client:
-            current_url = url
-            for _ in range(_IMAGE_DOWNLOAD_MAX_REDIRECTS + 1):
-                if proxy:
-                    ok, error, _ = resolve_url_target(
-                        current_url,
-                        trust_remote_dns=True,
-                    )
-                    if not ok:
-                        raise ImageGenerationError(
-                            f"blocked unsafe generated image URL: {error}"
-                        )
-                async with client.stream("GET", current_url) as response:
-                    if response.is_redirect:
-                        location = response.headers.get("location")
-                        if not location:
-                            raise ImageGenerationError(
-                                "generated image URL redirected without a location"
-                            )
-                        current_url = urljoin(str(response.url), location)
-                        continue
+            async with open_redirected_get(
+                client, url, check_target=check_proxy_target if proxy else None,
+            ) as (response, _):
+                if response.is_redirect:
+                    raise ImageGenerationError("generated image URL redirected without a location")
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    raise ImageGenerationError(
+                        f"failed to download generated image (HTTP {response.status_code})"
+                    ) from exc
 
+                declared_size = response.headers.get("content-length")
+                if declared_size:
                     try:
-                        response.raise_for_status()
-                    except httpx.HTTPStatusError as exc:
-                        raise ImageGenerationError(
-                            f"failed to download generated image (HTTP {response.status_code})"
-                        ) from exc
-
-                    declared_size = response.headers.get("content-length")
-                    if declared_size:
-                        try:
-                            if int(declared_size) > _IMAGE_DOWNLOAD_MAX_BYTES:
-                                raise ImageGenerationError(
-                                    "generated image exceeded the 32 MiB download limit"
-                                )
-                        except ValueError:
-                            pass
-
-                    chunks: list[bytes] = []
-                    total = 0
-                    async for chunk in response.aiter_bytes():
-                        total += len(chunk)
-                        if total > _IMAGE_DOWNLOAD_MAX_BYTES:
+                        if int(declared_size) > _IMAGE_DOWNLOAD_MAX_BYTES:
                             raise ImageGenerationError(
                                 "generated image exceeded the 32 MiB download limit"
                             )
-                        chunks.append(chunk)
-                    raw = b"".join(chunks)
-                    break
-            else:
-                raise ImageGenerationError("generated image URL exceeded the redirect limit")
+                    except ValueError:
+                        pass
+
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in response.aiter_bytes():
+                    total += len(chunk)
+                    if total > _IMAGE_DOWNLOAD_MAX_BYTES:
+                        raise ImageGenerationError(
+                            "generated image exceeded the 32 MiB download limit"
+                        )
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+    except RedirectLimitError as exc:
+        raise ImageGenerationError("generated image URL exceeded the redirect limit") from exc
     except UnsafeURLRequestError as exc:
         raise ImageGenerationError(f"blocked unsafe generated image URL: {exc}") from exc
     except httpx.RequestError as exc:

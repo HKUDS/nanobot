@@ -12,9 +12,10 @@ import pytest
 
 from nanobot.agent.tools import web as web_module
 from nanobot.agent.tools.registry import is_tool_error_result
-from nanobot.agent.tools.web import WebFetchTool, _get_with_safe_redirects
+from nanobot.agent.tools.web import WebFetchTool
 from nanobot.config.schema import WebFetchConfig
-from nanobot.security.network import PinnedDNSAsyncTransport
+from nanobot.execution.http import open_redirected_get
+from nanobot.security.network import PinnedDNSAsyncTransport, validate_url_target
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
     build_workspace_scope,
@@ -173,11 +174,12 @@ async def test_safe_redirect_requests_use_independent_pinned_dns_concurrently(mo
             seen[str(request.url)] = infos[0][4][0]
             return httpx.Response(200, request=request)
 
-    async def _fetch(url: str) -> tuple[httpx.Response | None, str | None]:
+    async def _fetch(url: str) -> int:
         async with httpx.AsyncClient(
             transport=PinnedDNSAsyncTransport(inner=ResolvingTransport())
         ) as client:
-            return await _get_with_safe_redirects(client, url)
+            async with open_redirected_get(client, url, check_target=validate_url_target) as (response, _):
+                return response.status_code
 
     monkeypatch.setattr("nanobot.security.network.socket.getaddrinfo", _rebinding_resolver)
 
@@ -186,7 +188,7 @@ async def test_safe_redirect_requests_use_independent_pinned_dns_concurrently(mo
         _fetch("https://b.example/"),
     )
 
-    assert all(error is None and response is not None for response, error in results)
+    assert results == [200, 200]
     assert seen == {
         "https://a.example/": "93.184.216.34",
         "https://b.example/": "93.184.216.35",
@@ -293,101 +295,77 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
         config=WebFetchConfig(use_jina_reader=False),
         user_agent="nanobot-test-agent",
     )
-    seen_headers: list[dict] = []
+    seen_headers: list[str] = []
+    bodies_read: list[int] = []
 
     async def _fail_jina(*args, **kwargs):
         raise AssertionError("Jina Reader should be skipped when disabled")
 
-    class FakeStreamResponse:
-        status_code = 200
-        headers = {"content-type": "text/html"}
-        url = "https://example.com/page"
+    class HTMLBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            bodies_read.append(len(seen_headers))
+            yield b"<html><body>Hello world</body></html>"
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def aread(self):
-            raise AssertionError("non-image prefetch body should not be read")
-
-    class FakeResponse:
-        status_code = 200
-        url = "https://example.com/page"
-        text = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
-        headers = {"content-type": "text/html"}
-        is_redirect = False
-
-        def raise_for_status(self):
-            return None
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        def stream(self, method, url, headers=None, **kwargs):
-            seen_headers.append(headers or {})
-            return FakeStreamResponse()
-
-        async def get(self, url, headers=None, **kwargs):
-            seen_headers.append(headers or {})
-            return FakeResponse()
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_headers.append(request.headers["User-Agent"])
+        return httpx.Response(200, headers={"content-type": "text/html"}, stream=HTMLBody())
 
     monkeypatch.setattr(tool, "_fetch_jina", _fail_jina)
     monkeypatch.setattr(tool, "_extract_readable_html", lambda html, mode: "Hello world")
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url="https://example.com/page")
 
     data = json.loads(result)
     assert data["extractor"] == "readability"
-    assert [headers["User-Agent"] for headers in seen_headers] == [
-        "nanobot-test-agent",
-        "nanobot-test-agent",
-    ]
+    assert seen_headers == ["nanobot-test-agent", "nanobot-test-agent"]
+    assert bodies_read == [2]
+
+
+async def test_web_fetch_closes_redirect_bodies_without_reading_them(monkeypatch):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    events: list[str] = []
+
+    class RedirectBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            events.append("read redirect")
+            yield b"unneeded body"
+
+        async def aclose(self):
+            events.append("closed redirect")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/start":
+            events.append("start")
+            return httpx.Response(302, headers={"location": "/end"}, stream=RedirectBody())
+        events.append("end")
+        return httpx.Response(200, text="page contents")
+
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/start")
+
+    data = json.loads(result)
+    assert data["finalUrl"] == "https://example.com/end"
+    assert "page contents" in data["text"]
+    assert events == ["start", "closed redirect", "end"] * 2
 
 
 @pytest.mark.asyncio
 async def test_web_fetch_falls_back_when_readability_dependency_is_missing(monkeypatch):
     tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
 
-    class FakeResponse:
-        status_code = 200
-        url = "https://example.com/page"
-        text = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
-        headers = {"content-type": "text/html"}
-
-        def raise_for_status(self):
-            return None
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def get(self, url, headers=None, follow_redirects=False, **kwargs):
-            return FakeResponse()
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, headers={"content-type": "text/html"}, text="<html><body>Hello world</body></html>",
+        )
 
     def _missing_readability(*args, **kwargs):
         raise ModuleNotFoundError("No module named 'lxml_html_clean'")
 
     monkeypatch.setattr(tool, "_extract_readable_html", _missing_readability)
-    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool._fetch_readability("https://example.com/page", "markdown", 5000)
@@ -403,49 +381,13 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
     tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
     requested: list[str] = []
 
-    class FakeStreamResponse:
-        status_code = 200
-        headers = {"content-type": "text/html"}
-        url = "https://attacker.example/start"
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if len(requested) == 1:
+            return httpx.Response(200, headers={"content-type": "text/html"})
+        return httpx.Response(302, headers={"location": "http://127.0.0.1:8765/metadata"})
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def aread(self):
-            raise AssertionError("non-image prefetch body should not be read")
-
-    class FakeRedirectResponse:
-        status_code = 302
-        headers = {"location": "http://127.0.0.1:8765/metadata"}
-        url = "https://attacker.example/start"
-
-        async def aclose(self):
-            return None
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        def stream(self, method, url, headers=None, **kwargs):
-            return FakeStreamResponse()
-
-        async def get(self, url, headers=None, **kwargs):
-            requested.append(url)
-            if url == "http://127.0.0.1:8765/metadata":
-                raise AssertionError("private redirect target should not be requested")
-            return FakeRedirectResponse()
-
-    monkeypatch.setattr(web_module.httpx, "AsyncClient", FakeClient)
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
 
     def resolve_public_start_only(hostname, port, family=0, type_=0):
         if hostname == "attacker.example":
@@ -459,7 +401,7 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
     assert is_tool_error_result(result)
     assert "error" in data
     assert "redirect blocked" in data["error"].lower()
-    assert requested == ["https://attacker.example/start"]
+    assert requested == ["https://attacker.example/start"] * 2
 
 
 @pytest.mark.asyncio

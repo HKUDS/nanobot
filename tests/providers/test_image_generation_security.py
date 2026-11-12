@@ -158,7 +158,7 @@ async def test_generated_image_download_delegates_unresolved_host_to_provider_pr
         async def __aexit__(self, exc_type, exc, traceback) -> None:
             return None
 
-        def stream(self, method: str, url: str) -> _StreamContext:
+        def stream(self, method: str, url: str, **kwargs) -> _StreamContext:
             captured["request"] = (method, url)
             request = httpx.Request(method, url)
             return _StreamContext(httpx.Response(200, content=PNG_BYTES, request=request))
@@ -205,7 +205,7 @@ async def test_proxied_generated_image_download_revalidates_redirects(
         async def __aexit__(self, exc_type, exc, traceback) -> None:
             return None
 
-        def stream(self, method: str, url: str) -> _StreamContext:
+        def stream(self, method: str, url: str, **kwargs) -> _StreamContext:
             requested.append(url)
             request = httpx.Request(method, url)
             return _StreamContext(

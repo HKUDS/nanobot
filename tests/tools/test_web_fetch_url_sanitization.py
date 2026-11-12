@@ -1,53 +1,19 @@
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
 from unittest.mock import patch
 
+import httpx
 import pytest
 
+from nanobot.agent.tools import web
 from nanobot.agent.tools.web import WebFetchTool, _validate_url
+from nanobot.agent.tools.web_config import WebFetchConfig
 
 
 def _fake_resolve_public(hostname, port, family=0, type_=0):
     import socket
     return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
-
-
-class FakeResponse:
-    status_code = 200
-    url = "https://example.com/page"
-    text = "<html><head><title>T</title></head><body><p>ok</p></body></html>"
-    headers = {"content-type": "text/html"}
-    def raise_for_status(self): pass
-    def json(self): return {}
-
-
-class FakeStreamResponse:
-    headers = {"content-type": "text/html"}
-    url = "https://example.com/page"
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
-
-
-class FakeClient:
-    def __init__(self, *a, **kw): pass
-    async def __aenter__(self): return self
-    async def __aexit__(self, *a): return False
-    def stream(self, method, url, **kw):
-        return FakeStreamResponse()
-    async def get(self, url, **kw):
-        return FakeResponse()
-
-
-@contextmanager
-def _patched_web_fetch():
-    with (
-        patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public),
-        patch("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient),
-        patch("nanobot.agent.tools.web._pinned_dns_transport", lambda: object()),
-    ):
-        yield
 
 
 @pytest.mark.parametrize("dirty_url", [
@@ -79,12 +45,20 @@ def test_clean_url_passes_validation():
         pytest.param("HTTPS://example.com/page", id="uppercase-scheme"),
     ],
 )
-async def test_execute_accepts_cleanable_http_urls(url):
-    tool = WebFetchTool()
-    with _patched_web_fetch():
+async def test_execute_accepts_cleanable_http_urls(url, monkeypatch):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://example.com/page"
+        return httpx.Response(200, text="page contents")
+
+    monkeypatch.setattr(web, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr("nanobot.security.network.getproxies", lambda: {})
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url=url)
     data = json.loads(result)
     assert data["status"] == 200
+    assert "page contents" in data["text"]
 
 
 @pytest.mark.asyncio
@@ -107,13 +81,22 @@ async def test_execute_rejects_invalid_url_after_cleaning(url):
 async def test_web_fetch_accepts_json_integer_character_limit(monkeypatch):
     from nanobot.agent.tools.registry import ToolRegistry
 
-    monkeypatch.setattr(FakeResponse, "headers", {"content-type": "text/plain"})
-    monkeypatch.setattr(FakeResponse, "text", "x" * 200)
+    async_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/plain"}, text="x" * 200)
+
+    def mock_client(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return async_client(*args, **kwargs)
+
+    monkeypatch.setattr(web.httpx, "AsyncClient", mock_client)
+    monkeypatch.setattr("nanobot.security.network.getproxies", lambda: {})
     registry = ToolRegistry()
-    registry.register(WebFetchTool())
+    registry.register(WebFetchTool(config=WebFetchConfig(use_jina_reader=False)))
     arguments = {"url": "https://example.com/page", "maxChars": 100.0}
 
-    with _patched_web_fetch():
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await registry.execute("web_fetch", arguments)
 
     data = json.loads(result)
