@@ -2494,6 +2494,25 @@ describe("ThreadViewport", () => {
     expect(visible).toHaveLength(INITIAL_HISTORY_WINDOW + 2);
   });
 
+  it.each([false, true])("keeps an activity cluster together across an empty answer frame (streaming=%s)", (isStreaming) => {
+    const activity: UIMessage[] = [
+      { id: "prompt", role: "user", content: "question", createdAt: 1 },
+      { id: "first", role: "tool", kind: "trace", content: "first()", createdAt: 2 },
+      { id: "empty", role: "assistant", content: "", turnPhase: "answer", isStreaming, createdAt: 3 },
+      { id: "second", role: "tool", kind: "trace", content: "second()", createdAt: 4 },
+    ];
+    expect(windowMessages(activity, 1).map((message) => message.id)).toEqual(["first", "empty", "second"]);
+  });
+
+  it("keeps compaction notices as activity window boundaries", () => {
+    const activity: UIMessage[] = [
+      { id: "first", role: "tool", kind: "trace", content: "first()", createdAt: 1 },
+      { id: "compact", role: "assistant", kind: "compaction", content: "", compaction: { id: "compact", phase: "started" }, createdAt: 2 },
+      { id: "second", role: "tool", kind: "trace", content: "second()", createdAt: 3 },
+    ];
+    expect(windowMessages(activity, 1).map((message) => message.id)).toEqual(["second"]);
+  });
+
   it("resets to the bottom when opening a different conversation", async () => {
     const scrollTo = vi.fn();
     const { container, rerender } = render(

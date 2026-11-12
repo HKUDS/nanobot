@@ -15,7 +15,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
-import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { leadingDisplayNoopCount, projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
 import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
@@ -114,10 +114,11 @@ export function ThreadMessages({
       const visible = withoutSubagentCreateActivity(message);
       return visible ? [visible] : [];
     }) } : unit), [rawUnits]);
-  const forkBoundaryAfterUnitIndex = useMemo(
-    () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
-    [forkBoundaryMessageCount, units],
-  );
+  const forkBoundaryAfterUnitIndex = useMemo(() => {
+    if (forkBoundaryMessageCount != null && forkBoundaryMessageCount > 0
+      && forkBoundaryMessageCount <= leadingDisplayNoopCount(messages)) return -1;
+    return unitIndexAfterMessageCount(units, forkBoundaryMessageCount);
+  }, [forkBoundaryMessageCount, messages, units]);
   const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming
@@ -251,6 +252,9 @@ export function ThreadMessages({
         const prelude = index === preludeIndex ? renderPrelude(prefix, marginTop) : null;
         return [
           prelude,
+          index === 0 && forkBoundaryAfterUnitIndex === -1
+            ? <ForkBoundaryDivider key="leading-fork-boundary" label={t("thread.forkedFromHistory")} />
+            : null,
           <Fragment key={`unit:${unitKeys[index]}`}>
           <ThreadDisplayUnit
             key={unitKeys[index]}
@@ -273,6 +277,7 @@ export function ThreadMessages({
             contextBlockMenuOpen={contextBlockKey === openContextBlockKey}
             deferOffscreenRender={deferOffscreenRender}
             isTurnStreaming={unitTurnStreaming}
+            runStartedAtMs={unit.type === "activity" && unitTurnStreaming && runStartedAt != null ? runStartedAt * 1000 : undefined}
             retryStatus={
               unit.type === "activity" && liveActivityClusterIndices.has(index)
                 ? retryStatus
@@ -340,23 +345,25 @@ function pendingTurnProjection(
       break;
     }
   }
-  if (promptIndex < 0) return null;
+  if (promptIndex < 0 && activeTurnId === null) return null;
 
   const prompt = messages[promptIndex];
   const hasVisibleOutput = messages.slice(promptIndex + 1).some((message) => {
     if (message.role === "user") return false;
-    if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false;
-    return (
-      message.content.trim().length > 0
-      || !!message.reasoning?.trim()
-      || !!message.reasoningStreaming
-      || message.kind === "trace"
-      || !!message.media?.length
+    // Assistant-only runs have no prompt boundary; only their own turn's rows count.
+    if (activeTurnId && (message.turnId ? message.turnId !== activeTurnId : promptIndex < 0)) return false;
+    const visible = withoutSubagentCreateActivity(message);
+    return visible !== null && (
+      visible.content.trim().length > 0
+      || !!visible.reasoning?.trim()
+      || !!visible.reasoningStreaming
+      || visible.kind === "trace"
+      || !!visible.media?.length
     );
   });
 
   return {
-    ...(typeof prompt.createdAt === "number" && Number.isFinite(prompt.createdAt)
+    ...(typeof prompt?.createdAt === "number" && Number.isFinite(prompt.createdAt)
       ? { startedAtMs: prompt.createdAt }
       : {}),
     hasVisibleOutput,
@@ -380,6 +387,7 @@ interface ThreadDisplayUnitProps {
   contextBlockMenuOpen: boolean;
   deferOffscreenRender: boolean;
   isTurnStreaming: boolean;
+  runStartedAtMs?: number;
   retryStatus: RetryStatus | null;
   forkIndex?: number;
   showForkBoundary: boolean;
@@ -582,6 +590,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   contextBlockMenuOpen,
   deferOffscreenRender,
   isTurnStreaming,
+  runStartedAtMs,
   retryStatus,
   forkIndex,
   showForkBoundary,
@@ -723,7 +732,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
               retryStatus={retryStatus}
               hasBodyBelow={hasBodyBelow}
               turnLatencyMs={unit.turnLatencyMs}
-              startedAtMs={unit.startedAtMs}
+              startedAtMs={unit.startedAtMs ?? (isTurnStreaming ? runStartedAtMs : undefined)}
               cliApps={cliApps}
               mcpPresets={mcpPresets}
               traceDetailScope={traceDetailScope}
@@ -802,6 +811,7 @@ function threadDisplayUnitPropsEqual(
     && previous.contextBlockMenuOpen === next.contextBlockMenuOpen
     && previous.deferOffscreenRender === next.deferOffscreenRender
     && previous.isTurnStreaming === next.isTurnStreaming
+    && previous.runStartedAtMs === next.runStartedAtMs
     && previous.retryStatus === next.retryStatus
     && previous.forkIndex === next.forkIndex
     && previous.showForkBoundary === next.showForkBoundary
@@ -922,6 +932,8 @@ function currentActivityClusterIndices(
   let markedCurrentActivity = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
     const unit = units[i];
+    const turnId = displayUnitTurnId(unit);
+    if (activeTurnId && turnId && turnId !== activeTurnId) break;
     if (unit.type === "activity") {
       if (!unit.messages.length) continue;
       if (!markedCurrentActivity) {

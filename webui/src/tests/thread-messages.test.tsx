@@ -523,7 +523,7 @@ describe("ThreadMessages", () => {
     expect(document.querySelectorAll("[data-block-context-rail]")).toHaveLength(0);
   });
 
-  it("ignores a completed empty answer frame without splitting contiguous activity", () => {
+  it.each([false, true])("ignores an empty answer frame without splitting contiguous activity (streaming=%s)", (isStreaming) => {
     const turnId = "turn-empty-answer-frame";
     const segmentId = "activity-1";
     const messages: UIMessage[] = [
@@ -574,7 +574,7 @@ describe("ThreadMessages", () => {
         id: "empty-answer-frame",
         role: "assistant",
         content: "",
-        isStreaming: false,
+        isStreaming,
         turnId,
         turnPhase: "answer",
         turnSeq: 10,
@@ -637,12 +637,12 @@ describe("ThreadMessages", () => {
     expect(screen.getByTestId("agent-activity-content")).toHaveTextContent("Completed Second");
   });
 
-  it("keeps empty frame source counts on the nearest visible unit", () => {
+  it.each([false, true])("keeps empty frame source counts on the nearest visible unit (streaming=%s)", (isStreaming) => {
     const emptyFrame: UIMessage = {
       id: "empty",
       role: "assistant",
       content: "",
-      isStreaming: false,
+      isStreaming,
       turnPhase: "answer",
       createdAt: 2,
     };
@@ -667,16 +667,72 @@ describe("ThreadMessages", () => {
       sourceMessageCount: 2,
     }]);
 
-    const streamingUnits = buildDisplayUnits([{
-      ...emptyFrame,
-      id: "streaming-placeholder",
-      isStreaming: true,
-    }]);
-    expect(streamingUnits).toMatchObject([{
-      type: "activity",
-      messages: [{ id: "streaming-placeholder" }],
-      sourceMessageCount: 1,
-    }]);
+    const leadingFrameUnits = buildDisplayUnits([
+      { ...emptyFrame, turnId: "original" },
+      { id: "guidance", role: "user", content: "also check", turnId: "guidance", createdAt: 3 },
+      { id: "answer", role: "assistant", content: "done", turnId: "guidance", createdAt: 4 },
+    ]);
+    expect(leadingFrameUnits).toMatchObject([
+      { type: "message", message: { id: "guidance" }, sourceMessageCount: 2 },
+      { type: "message", message: { id: "answer" }, sourceMessageCount: 1 },
+    ]);
+
+    const afterNoticeUnits = buildDisplayUnits([
+      { id: "user", role: "user", content: "check", createdAt: 1 },
+      { id: "compact", role: "assistant", kind: "compaction", content: "", compaction: { id: "compact", phase: "started" }, createdAt: 2 },
+      emptyFrame,
+    ]);
+    expect(afterNoticeUnits).toMatchObject([
+      { type: "message", message: { id: "user" }, sourceMessageCount: 1 },
+      { type: "message", message: { id: "compact" }, sourceMessageCount: 2 },
+    ]);
+  });
+
+  it("keeps generic turn progress while an empty answer frame has no reasoning", () => {
+    const messages: UIMessage[] = [
+      { id: "user", role: "user", content: "check", turnId: "turn", createdAt: 1 },
+      { id: "empty", role: "assistant", content: "", isStreaming: true, turnId: "turn", turnPhase: "answer", createdAt: 2 },
+    ];
+    render(<ThreadMessages messages={messages} isStreaming activeTurnId="turn" />);
+    expect(screen.getByRole("status", { name: /^Working for / })).toBeInTheDocument();
+    expect(screen.queryByTestId("activity-reasoning-marker")).not.toBeInTheDocument();
+  });
+
+  it("keeps generic progress for an active turn without a user prompt", () => {
+    vi.useFakeTimers();
+    const now = 1_800_000_000_000;
+    vi.setSystemTime(now);
+    const messages: UIMessage[] = [
+      { id: "old-tool", role: "tool", kind: "trace", content: "old_search()", turnId: "old-turn", createdAt: now - 11_000 },
+      { id: "previous", role: "assistant", content: "Previous answer", turnId: "old-turn", createdAt: now - 10_000 },
+      { id: "empty", role: "assistant", content: "", isStreaming: true, turnId: "automation", turnPhase: "answer", createdAt: now },
+    ];
+    const { rerender } = render(
+      <ThreadMessages messages={messages} isStreaming activeTurnId="automation" runStartedAt={(now - 3_000) / 1000} />,
+    );
+    expect(screen.getByRole("status", { name: "Working for 3s" })).toBeInTheDocument();
+    expect(screen.queryByTestId("activity-reasoning-marker")).not.toBeInTheDocument();
+
+    rerender(<ThreadMessages messages={[
+      ...messages,
+      { id: "tool", role: "tool", kind: "trace", content: "web_search(query)", turnId: "automation", createdAt: now },
+    ]} isStreaming activeTurnId="automation" runStartedAt={(now - 3_000) / 1000} />);
+    expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Working for 3s/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("activity-reasoning-marker")).not.toBeInTheDocument();
+  });
+
+  it("keeps generic progress when the only activity is a hidden subagent create", () => {
+    const messages: UIMessage[] = [
+      { id: "user", role: "user", content: "check", turnId: "turn", createdAt: 1 },
+      { id: "empty", role: "assistant", content: "", isStreaming: true, turnId: "turn", createdAt: 2 },
+      { id: "create", role: "tool", kind: "trace", content: 'subagent({"action":"create"})',
+        traces: ['subagent({"action":"create"})'], turnId: "turn", createdAt: 3,
+        toolEvents: [{ call_id: "call-1", name: "subagent", phase: "end", arguments: { action: "create" } }] },
+    ];
+    render(<ThreadMessages messages={messages} isStreaming activeTurnId="turn" />);
+    expect(screen.getByRole("status", { name: /^Working for / })).toBeInTheDocument();
+    expect(screen.queryByTestId("activity-reasoning-marker")).not.toBeInTheDocument();
   });
 
   it("offers a follow-up action for text selected within one completed answer", async () => {
@@ -1178,6 +1234,17 @@ describe("ThreadMessages", () => {
     const branchPromptIndex = rows.findIndex((row) => row.textContent?.includes("branch prompt"));
     expect(dividerIndex).toBeGreaterThan(0);
     expect(dividerIndex).toBe(branchPromptIndex - 1);
+  });
+
+  it("keeps a fork boundary before a prompt when the visible window starts with an empty frame", () => {
+    const messages: UIMessage[] = [
+      { id: "empty", role: "assistant", content: "", isStreaming: true, turnId: "original", createdAt: 1 },
+      { id: "branch", role: "user", content: "branch prompt", turnId: "branch", createdAt: 2 },
+      { id: "answer", role: "assistant", content: "branch answer", turnId: "branch", createdAt: 3 },
+    ];
+    render(<ThreadMessages messages={messages} forkBoundaryMessageCount={1} />);
+    const divider = screen.getByText("Forked from history");
+    expect(divider.compareDocumentPosition(screen.getByText("branch prompt")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("hides redundant task creation while retaining failed creates and other tool activity", async () => {

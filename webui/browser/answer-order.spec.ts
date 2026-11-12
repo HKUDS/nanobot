@@ -6,7 +6,7 @@ const turnId = "answer-order-turn";
 const source = { provider: "fixture", model: "fixture", preset: "fixture" };
 const base = { chat_id: chatId, turn_id: turnId };
 
-async function openThread(page: Page, events: ThreadProjectionEvent[] = [], locale = "en") {
+async function openThread(page: Page, events: ThreadProjectionEvent[] = [], locale = "en", reconnect = false) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript((language) => { localStorage.setItem("nanobot.locale", language); }, locale);
@@ -21,6 +21,7 @@ async function openThread(page: Page, events: ThreadProjectionEvent[] = [], loca
     } });
   });
   let socket!: WebSocketRoute;
+  let attachmentCount = 0;
   const attached = new Set<string>();
   await page.routeWebSocket("**/answer-order-socket", (route) => {
     socket = route;
@@ -28,14 +29,23 @@ async function openThread(page: Page, events: ThreadProjectionEvent[] = [], loca
       const frame = JSON.parse(String(raw));
       if (frame.type === "attach") {
         attached.add(frame.chat_id);
+        if (frame.chat_id === chatId) attachmentCount += 1;
         route.send(JSON.stringify({ event: "attached", chat_id: frame.chat_id }));
       }
     });
   });
-  await page.goto("/browser/fixture.html?case=answer-order");
+  await page.goto(`/browser/fixture.html?case=answer-order${reconnect ? "&reconnect=1" : ""}`);
   await expect.poll(() => attached.has(chatId)).toBe(true);
   await expect(page.getByRole("status", { name: "Loading conversation…" })).toHaveCount(0);
-  return { emit: (...frames: InboundEvent[]) => frames.forEach((frame) => socket.send(JSON.stringify(frame))), errors };
+  return {
+    emit: (...frames: InboundEvent[]) => frames.forEach((frame) => socket.send(JSON.stringify(frame))),
+    dropAndReconnect: async () => {
+      const previous = attachmentCount;
+      await socket.close({ code: 1011, reason: "fixture disconnect" });
+      await expect.poll(() => attachmentCount).toBeGreaterThan(previous);
+    },
+    errors,
+  };
 }
 
 async function expectAnswerOrder(page: Page) {
@@ -114,6 +124,92 @@ test.describe("answer order", () => {
       expect(errors).toEqual([]);
     });
   }
+
+  test("shows only real reasoning through restored history, live tools, and reconnect", async ({ page }) => {
+    const history: ThreadProjectionEvent[] = [
+      { event: "user_message", ...base, turn_seq: 1, text: "检查工具", starts_turn: true },
+      { event: "stream_end", ...base, stream_id: "empty", turn_seq: 2, text: "", resuming: true },
+    ];
+    const { emit, dropAndReconnect, errors } = await openThread(page, history, "zh-CN", true);
+    await expect(page.getByText("检查工具", { exact: true })).toHaveCount(1);
+    emit(
+      { event: "goal_status", ...base, status: "running", started_at: 100 },
+      { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search({\"query\":\"alpha\"})" },
+      { event: "stream_end", ...base, stream_id: "live-empty", turn_seq: 4, resuming: true },
+      { event: "message", ...base, turn_seq: 5, kind: "tool_hint", text: "read_file({\"path\":\"beta\"})" },
+    );
+    await expect(page.getByTestId("agent-activity-content")).toContainText("网页");
+    await expect(page.getByText("思考过程", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
+    await page.getByRole("button", { name: "Switch topic" }).click();
+    await expect(page.getByText("检查工具", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Switch topic" }).click();
+    await expect(page.getByTestId("agent-activity-content")).toContainText("网页");
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
+    await dropAndReconnect();
+    await expect(page.getByTestId("agent-activity-content")).toContainText("网页");
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
+
+    emit(
+      { event: "delta", ...base, stream_id: "empty", turn_seq: 6, text: "过期内容" },
+      { event: "reasoning_delta", ...base, stream_id: "thought", turn_seq: 7, text: "真正的推理" },
+      { event: "reasoning_end", ...base, stream_id: "thought", turn_seq: 8, text: "真正的推理" },
+      { event: "delta", ...base, stream_id: "answer", turn_seq: 9, text: "最终答案" },
+    );
+    await expect(page.getByText("最终答案", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("真正的推理", { exact: true })).toHaveCount(1);
+    const activity = await page.getByTestId("agent-activity-content").textContent();
+    expect(activity).toContain("网页");
+    expect(activity).toContain("真正的推理");
+    expect(activity!.indexOf("网页")).toBeLessThan(activity!.indexOf("真正的推理"));
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(1);
+    await expect(page.getByText("过期内容", { exact: true })).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("keeps an assistant-only run visible after an older completed activity", async ({ page }) => {
+    const previous = { chat_id: chatId, turn_id: "previous-turn" };
+    const history: ThreadProjectionEvent[] = [
+      { event: "message", ...previous, turn_seq: 1, kind: "tool_hint", text: "read_file(previous)" },
+      { event: "message", ...previous, turn_seq: 2, text: "Previous automation answer" },
+      { event: "turn_end", ...previous, turn_seq: 3 },
+      { event: "stream_end", ...base, stream_id: "empty", turn_seq: 1, text: "", resuming: true },
+    ];
+    const { emit, errors } = await openThread(page, history);
+    await expect(page.getByText("Previous automation answer", { exact: true })).toHaveCount(1);
+    emit({ event: "goal_status", ...base, status: "running", started_at: Date.now() / 1000 });
+    await expect(page.getByRole("status", { name: /^Working for / })).toBeVisible();
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
+    emit({ event: "message", ...base, turn_seq: 2, kind: "tool_hint", text: "web_search({\"query\":\"alpha\"})" });
+    await expect(page.getByTestId("agent-activity-content")).toContainText("web");
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("replays an empty tool-only answer without a reasoning row", async ({ page }) => {
+    const events: ThreadProjectionEvent[] = [
+      { event: "user_message", ...base, turn_seq: 1, text: "恢复工具", starts_turn: true },
+      { event: "stream_end", ...base, stream_id: "empty", turn_seq: 2, text: "", resuming: true },
+      { event: "message", ...base, turn_seq: 3, kind: "tool_hint", text: "web_search({\"query\":\"beta\"})" },
+    ];
+    const { emit, errors } = await openThread(page, events, "zh-CN");
+    await page.getByRole("button", { name: "已处理" }).click();
+    await expect(page.getByTestId("agent-activity-content")).toContainText("网页");
+    await expect(page.getByText("思考过程", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
+    await page.getByRole("button", { name: "Rebuild subscription" }).click();
+    await expect(page.getByTestId("agent-activity-content")).toContainText("网页");
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
+    emit(
+      { event: "goal_status", ...base, status: "running", started_at: 100 },
+      { event: "delta", ...base, stream_id: "empty", turn_seq: 4, text: "过期内容" },
+      { event: "delta", ...base, stream_id: "answer", turn_seq: 5, text: "恢复后的答案" },
+    );
+    await expect(page.getByText("恢复后的答案", { exact: true })).toHaveCount(1);
+    await expect(page.getByText("过期内容", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
 
   test("keeps hosted-tool answer segments after a cached return", async ({ page }) => {
     const { emit, errors } = await openThread(page);

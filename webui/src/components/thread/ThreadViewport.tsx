@@ -17,7 +17,7 @@ import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults"
 import { DiagramScope } from "@/components/markdown-diagrams/context";
 import { DiffViewportContext } from "./activity/DiffViewportContext";
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
-import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
+import { isActivityWindowMember } from "@/lib/activity-timeline";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { HISTORY_HOLD_PX, ThreadHistorySpring, type HistoryRevealPhase } from "@/components/thread/thread-history-spring";
 import {
@@ -160,8 +160,8 @@ export function windowMessages(messages: UIMessage[], visibleCount: number): UIM
   let start = Math.max(0, messages.length - visibleCount);
   while (
     start > 0
-    && isAgentActivityMember(messages[start])
-    && isAgentActivityMember(messages[start - 1])
+    && isActivityWindowMember(messages[start])
+    && isActivityWindowMember(messages[start - 1])
   ) {
     start -= 1;
   }
