@@ -31,32 +31,20 @@ _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
 _T = TypeVar("_T")
 
-# These expressions define the v6 partial indexes and must remain stable for upgrades.
-_SUBAGENT_ORIGINS = ("origin_message_id", "origin_turn_id")
+# The expression below defines the v6 partial index and must stay stable for upgrades.
+_SUBAGENT_ORIGIN = "origin_turn_id"
 _SUBAGENT_PARENT = f"json_extract(metadata, '$.{PARENT_SESSION_KEY}')"
-
-
-def _subagent_origin(field: str) -> str:
-    return f"json_extract(metadata, '$.subagent_task.{field}')"
-
-
-def _subagent_origin_filter(field: str) -> str:
-    # Keep the partial-index predicate identical to the lookup predicate.
-    return (
-        f"json_extract(metadata, '$.{SESSION_TYPE_KEY}')='subagent' "
-        f"AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text' "
-        f"AND json_type(metadata, '$.subagent_task.{field}')='text'"
-    )
-
+_SUBAGENT_ORIGIN_FILTER = (
+    f"json_extract(metadata, '$.{SESSION_TYPE_KEY}')='subagent' "
+    f"AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text' "
+    f"AND json_type(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}')='text'"
+)
 
 # Field names above are fixed by the schema; all caller-supplied values are bound.
-_SUBAGENT_METADATA_QUERY = """SELECT key, created_at, updated_at, metadata FROM sessions
-    WHERE key IN (""" + " UNION ".join(
-        f"""SELECT key FROM sessions WHERE {_subagent_origin_filter(field)}
-            AND {_SUBAGENT_PARENT}=?
-            AND {_subagent_origin(field)} IN (SELECT value FROM json_each(?))"""
-        for field in _SUBAGENT_ORIGINS
-    ) + ")"
+_SUBAGENT_METADATA_QUERY = f"""SELECT key, created_at, updated_at, metadata FROM sessions
+    WHERE {_SUBAGENT_ORIGIN_FILTER}
+    AND {_SUBAGENT_PARENT}=?
+    AND json_extract(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}') IN (SELECT value FROM json_each(?))"""
 
 
 def _encode(value: object) -> str:
@@ -151,10 +139,9 @@ def _create_schema_v5(db: sqlite3.Connection) -> None:
 
 
 def _create_schema_v6(db: sqlite3.Connection) -> None:
-    for field in _SUBAGENT_ORIGINS:
-        db.execute(f"""CREATE INDEX sessions_subagent_{field} ON sessions (
-            {_SUBAGENT_PARENT}, {_subagent_origin(field)}
-        ) WHERE {_subagent_origin_filter(field)}""")
+    db.execute(f"""CREATE INDEX sessions_subagent_{_SUBAGENT_ORIGIN} ON sessions (
+        {_SUBAGENT_PARENT}, json_extract(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}')
+    ) WHERE {_SUBAGENT_ORIGIN_FILTER}""")
 
 
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
@@ -764,17 +751,16 @@ class SqliteSessionStore:
                     )]
 
     def list_subagent_session_metadata(
-        self, parent_key: str, *, message_ids: Sequence[str], turn_ids: Sequence[str],
+        self, parent_key: str, *, turn_ids: Sequence[str],
     ) -> list[SessionMetadataPayload]:
-        """Read only subagent headers attributed to the requested parent messages."""
-        origins = [[value for value in ids if value] for ids in (message_ids, turn_ids)]
-        if not any(origins):
+        """Read only subagent headers attributed to the requested parent turns."""
+        turns = [value for value in turn_ids if value]
+        if not turns:
             return []
-        params = tuple(value for ids in origins for value in (parent_key, _encode(ids)))
         with self.transaction(write=False) as db:
             return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
                      "metadata": _object(row[3])}
-                    for row in db.execute(_SUBAGENT_METADATA_QUERY, params)]
+                    for row in db.execute(_SUBAGENT_METADATA_QUERY, (parent_key, _encode(turns)))]
 
     def read_child_session_metadata(
         self, parent_key: str, child_keys: Sequence[str],

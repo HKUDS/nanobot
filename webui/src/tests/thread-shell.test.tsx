@@ -591,7 +591,6 @@ describe("ThreadShell", () => {
     })));
     await screen.findByText("new prompt 4");
     await waitFor(() => expect(seen).toHaveLength(1));
-    expect(seen[0].searchParams.getAll("message_id")).toEqual(rows("new", 5).map(row => row.id));
     expect(seen[0].searchParams.getAll("turn_id")).toEqual(rows("new", 5).map(row => row.turnId));
     expect(seen[0].searchParams.getAll("track")).toEqual(["live-during-load"]);
 
@@ -603,14 +602,12 @@ describe("ThreadShell", () => {
     fireEvent.keyDown(scroller, { key: "Home" });
     await screen.findByText("old prompt 0");
     await waitFor(() => expect(seen).toHaveLength(2));
-    expect(seen[1].searchParams.getAll("message_id")).toEqual(rows("old", 5).map(row => row.id));
     expect(seen[1].searchParams.getAll("turn_id")).toEqual(rows("old", 5).map(row => row.turnId));
 
     fireEvent.click(await screen.findByRole("button", { name: "Message navigation" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Jump to message: nav prompt 2" }));
     await screen.findByText("nav prompt 2");
     await waitFor(() => expect(seen).toHaveLength(3));
-    expect(seen[2].searchParams.getAll("message_id")).toEqual(rows("nav", 3).map(row => row.id));
     expect(seen[2].searchParams.getAll("turn_id")).toEqual(rows("nav", 3).map(row => row.turnId));
     fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
     await screen.findByText("new prompt 4");
@@ -619,7 +616,6 @@ describe("ThreadShell", () => {
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(seen).toHaveLength(4));
     const latest = [...rows("old", 5), ...rows("new", 5)];
-    expect(seen[3].searchParams.getAll("message_id")).toEqual(latest.map(row => row.id));
     expect(seen[3].searchParams.getAll("turn_id")).toEqual(latest.map(row => row.turnId));
   });
 

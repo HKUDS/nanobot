@@ -517,12 +517,10 @@ class SessionManager:
         return self._store.list_child_session_metadata(parent_key)
 
     def list_subagent_session_metadata(
-        self, parent_key: str, *, message_ids: Sequence[str], turn_ids: Sequence[str],
+        self, parent_key: str, *, turn_ids: Sequence[str],
     ) -> list[SessionMetadataPayload]:
-        """Read persisted subagent headers whose origin appears in the requested window."""
-        return self._store.list_subagent_session_metadata(
-            parent_key, message_ids=message_ids, turn_ids=turn_ids,
-        )
+        """Read persisted subagent headers attributed to the requested parent turns."""
+        return self._store.list_subagent_session_metadata(parent_key, turn_ids=turn_ids)
 
     def read_child_session_metadata(
         self, parent_key: str, child_keys: Sequence[str],

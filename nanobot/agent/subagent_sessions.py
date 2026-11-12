@@ -10,7 +10,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from nanobot.agent.subagent_status import SubagentSessionError as SubagentSessionError
 from nanobot.agent.subagent_status import SubagentStatus
-from nanobot.session.manager import Session, SessionManager, SessionPolicy
+from nanobot.session.manager import (
+    Session,
+    SessionManager,
+    SessionMetadataPayload,
+    SessionPolicy,
+)
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionType
 
@@ -111,39 +116,27 @@ class SubagentSessions:
         return status
 
     def load(self, owner: str) -> dict[str, SubagentStatus]:
-        result: dict[str, SubagentStatus] = {}
-        for row in self.sessions.list_child_session_metadata(owner):
-            key = row["key"]
-            task_id = key.removeprefix("subagent:")
-            if key != self.key(task_id):
-                continue
-            status = self._status_from_metadata(task_id, owner, row["metadata"])
-            if status is not None:
-                result[task_id] = status
-        return result
+        return self._statuses(owner, self.sessions.list_child_session_metadata(owner))
 
-    def load_window(
-        self, owner: str, *, message_ids: list[str], turn_ids: list[str],
-    ) -> dict[str, SubagentStatus]:
-        result: dict[str, SubagentStatus] = {}
-        for row in self.sessions.list_subagent_session_metadata(
-            owner, message_ids=message_ids, turn_ids=turn_ids,
-        ):
-            key = row["key"]
-            task_id = key.removeprefix("subagent:")
-            if key != self.key(task_id):
-                continue
-            status = self._status_from_metadata(task_id, owner, row["metadata"])
-            if status is not None:
-                result[task_id] = status
-        return result
+    def load_turns(self, owner: str, *, turn_ids: Sequence[str]) -> dict[str, SubagentStatus]:
+        """Read subagent headers attributed to the requested parent turns."""
+        return self._statuses(
+            owner, self.sessions.list_subagent_session_metadata(owner, turn_ids=turn_ids),
+        )
 
     def load_tracked(self, owner: str, task_ids: Sequence[str]) -> dict[str, SubagentStatus]:
-        """Read already observed tasks in one query when they fall outside the window."""
+        """Read already observed tasks in one query when they fall outside the loaded turns."""
+        return self._statuses(
+            owner, self.sessions.read_child_session_metadata(
+                owner, [self.key(task_id) for task_id in task_ids],
+            ),
+        )
+
+    def _statuses(
+        self, owner: str, rows: Sequence[SessionMetadataPayload],
+    ) -> dict[str, SubagentStatus]:
         result: dict[str, SubagentStatus] = {}
-        for row in self.sessions.read_child_session_metadata(
-            owner, [self.key(task_id) for task_id in task_ids],
-        ):
+        for row in rows:
             key = row["key"]
             task_id = key.removeprefix("subagent:")
             if key != self.key(task_id):

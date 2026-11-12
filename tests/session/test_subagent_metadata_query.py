@@ -7,10 +7,9 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 
-def test_subagent_metadata_matches_only_window_origins(tmp_path, monkeypatch):
+def test_subagent_metadata_matches_only_requested_turns(tmp_path, monkeypatch):
     manager = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "storage")
     parent = "chat:项目'\"\\root"
-    message_id = "message-雪'\"\\"
     turn_id = "turn-雪'\"\\"
 
     def save(key, task, *, owner=parent, kind="subagent", second=0):
@@ -23,19 +22,15 @@ def test_subagent_metadata_matches_only_window_origins(tmp_path, monkeypatch):
             },
         ))
 
-    save("subagent:message", {"origin_message_id": message_id, "origin_turn_id": "other"}, second=1)
-    save("subagent:turn", {"origin_message_id": "replayed", "origin_turn_id": turn_id}, second=2)
-    save("subagent:both", {"origin_message_id": message_id, "origin_turn_id": turn_id, "state": "running"}, second=3)
-    save("subagent:unmatched", {"origin_message_id": "unmatched"}, second=4)
-    save("subagent:other-parent", {
-        "origin_message_id": message_id, "origin_turn_id": turn_id,
-    }, owner="chat:other", second=5)
-    save("extension:child", {
-        "origin_message_id": message_id, "origin_turn_id": turn_id,
-    }, kind="extension", second=6)
-    save("subagent:grandchild", {"origin_message_id": message_id}, owner="subagent:message", second=7)
-    save("subagent:blank", {"origin_message_id": "", "origin_turn_id": ""}, second=8)
-    save("subagent:no-origin", {"state": "running"}, second=9)
+    save("subagent:turn", {"origin_turn_id": turn_id, "state": "running"}, second=1)
+    save("subagent:unmatched", {"origin_turn_id": "unmatched"}, second=2)
+    save("subagent:other-parent", {"origin_turn_id": turn_id}, owner="chat:other", second=3)
+    save("extension:child", {"origin_turn_id": turn_id}, kind="extension", second=4)
+    save("subagent:grandchild", {"origin_turn_id": turn_id}, owner="subagent:turn", second=5)
+    save("subagent:blank", {"origin_turn_id": ""}, second=6)
+    save("subagent:no-origin", {"state": "running"}, second=7)
+    # Message-only attribution is not a turn and must not match the turn read.
+    save("subagent:message-only", {"origin_message_id": turn_id}, second=8)
 
     def prohibit_listing(*_args, **_kwargs):
         raise AssertionError("filtered metadata must not load all child or session headers")
@@ -51,69 +46,52 @@ def test_subagent_metadata_matches_only_window_origins(tmp_path, monkeypatch):
         return metadata
 
     monkeypatch.setattr(sqlite_store, "_object", track_decode)
-    rows = manager.list_subagent_session_metadata(
-        parent, message_ids=[message_id, message_id], turn_ids=[turn_id],
-    )
-    assert {row["key"] for row in rows} == {"subagent:both", "subagent:turn", "subagent:message"}
+    rows = manager.list_subagent_session_metadata(parent, turn_ids=[turn_id, turn_id])
+    assert {row["key"] for row in rows} == {"subagent:turn"}
     assert len(decoded) == len(rows)
-    both = next(row for row in rows if row["key"] == "subagent:both")
-    assert both["updated_at"] == "2026-01-01T00:00:03"
-    assert both["metadata"]["subagent_task"]["state"] == "running"
-    assert all("runtime_checkpoint" not in row["metadata"] for row in rows)
-    assert all("pending_user_followups" not in row["metadata"] for row in rows)
-    both["metadata"]["subagent_task"]["state"] = "changed"
-    assert next(
-        row for row in manager.list_subagent_session_metadata(
-            parent, message_ids=[message_id], turn_ids=[],
-        ) if row["key"] == "subagent:both"
-    )["metadata"]["subagent_task"]["state"] == "running"
+    only = rows[0]
+    assert only["updated_at"] == "2026-01-01T00:00:01"
+    assert only["metadata"]["subagent_task"]["state"] == "running"
+    assert "runtime_checkpoint" not in only["metadata"]
+    assert "pending_user_followups" not in only["metadata"]
+    only["metadata"]["subagent_task"]["state"] = "changed"
+    assert manager.list_subagent_session_metadata(parent, turn_ids=[turn_id])[0]["metadata"][
+        "subagent_task"
+    ]["state"] == "running"
 
-    assert {row["key"] for row in manager.list_subagent_session_metadata(
-        parent, message_ids=[message_id], turn_ids=[],
-    )} == {"subagent:message", "subagent:both"}
-    assert {row["key"] for row in manager.list_subagent_session_metadata(
-        parent, message_ids=[], turn_ids=[turn_id],
-    )} == {"subagent:turn", "subagent:both"}
+    assert manager.list_subagent_session_metadata(parent, turn_ids=[]) == []
+    assert manager.list_subagent_session_metadata(parent, turn_ids=[""]) == []
     assert manager.list_subagent_session_metadata(
-        parent, message_ids=[], turn_ids=[],
-    ) == []
-    assert manager.list_subagent_session_metadata(
-        parent, message_ids=[""], turn_ids=[""],
-    ) == []
-    assert manager.list_subagent_session_metadata(
-        "chat:missing' OR 1=1 --", message_ids=[message_id], turn_ids=[turn_id],
+        "chat:missing' OR 1=1 --", turn_ids=[turn_id],
     ) == []
 
 
-def test_subagent_origin_indexes_follow_metadata_updates(tmp_path):
+def test_subagent_origin_index_follows_metadata_updates(tmp_path):
     manager = SessionManager(tmp_path / "workspace", sessions_root=tmp_path / "storage")
     key, parent, other = "subagent:task", "chat:parent", "chat:other"
     manager.save(Session(key=key, metadata={
         SESSION_TYPE_KEY: "subagent", PARENT_SESSION_KEY: parent,
-        "subagent_task": {"origin_message_id": "message", "origin_turn_id": "turn"},
+        "subagent_task": {"origin_turn_id": "turn"},
     }))
 
     def keys(owner):
         return [row["key"] for row in manager.list_subagent_session_metadata(
-            owner, message_ids=["message"], turn_ids=["turn"],
+            owner, turn_ids=["turn"],
         )]
 
     assert keys(parent) == [key]
-    assert manager.update_session_metadata(key, {"subagent_task": {"origin_turn_id": "turn"}})
-    assert keys(parent) == [key]
     assert manager.update_session_metadata(key, {"subagent_task": {"state": "running"}})
     assert keys(parent) == []
-    assert manager.update_session_metadata(key, {"subagent_task": {
-        "origin_message_id": "message", "origin_turn_id": "turn",
-    }, PARENT_SESSION_KEY: other})
+    assert manager.update_session_metadata(key, {
+        "subagent_task": {"origin_turn_id": "turn"}, PARENT_SESSION_KEY: other,
+    })
     assert keys(parent) == []
     assert keys(other) == [key]
 
 
-def test_subagent_origin_indexes_upgrade_and_support_large_batches(tmp_path, monkeypatch):
+def test_subagent_origin_index_upgrades_and_supports_large_batches(tmp_path, monkeypatch):
     workspace, root = tmp_path / "workspace", tmp_path / "storage"
     parent = "chat:upgrade"
-    message_ids = [f"message-{i}" for i in range(4000)]
     turn_ids = [f"turn-{i}" for i in range(4000)]
     with monkeypatch.context() as patch:
         patch.setattr(sqlite_store, "_SCHEMA_MIGRATIONS", sqlite_store._SCHEMA_MIGRATIONS[:5])
@@ -121,11 +99,10 @@ def test_subagent_origin_indexes_upgrade_and_support_large_batches(tmp_path, mon
 
         def seed():
             for key, owner, task in (
-                ("subagent:message", parent, {"origin_message_id": message_ids[-1]}),
                 ("subagent:turn", parent, {"origin_turn_id": turn_ids[-1]}),
                 ("subagent:no-origin", parent, {"state": "done"}),
                 *(
-                    (f"subagent:unrelated-{i}", parent, {"origin_message_id": f"not-in-page-{i}"})
+                    (f"subagent:unrelated-{i}", parent, {"origin_turn_id": f"not-in-page-{i}"})
                     for i in range(150)
                 ),
             ):
@@ -142,22 +119,18 @@ def test_subagent_origin_indexes_upgrade_and_support_large_batches(tmp_path, mon
     upgraded = SessionManager(workspace, sessions_root=root)
     with upgraded._store.transaction(write=False) as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == len(sqlite_store._SCHEMA_MIGRATIONS)
-        params = tuple(value for ids in (message_ids, turn_ids)
-                       for value in (parent, json.dumps(ids)))
-        plan = [row[3] for row in db.execute("EXPLAIN QUERY PLAN " + sqlite_store._SUBAGENT_METADATA_QUERY, params)]
-        for field in ("origin_message_id", "origin_turn_id"):
-            assert any(
-                f"SEARCH sessions USING INDEX sessions_subagent_{field}" in detail
-                and "<expr>=? AND <expr>=?" in detail
-                for detail in plan
-            ), plan
+        plan = [row[3] for row in db.execute(
+            "EXPLAIN QUERY PLAN " + sqlite_store._SUBAGENT_METADATA_QUERY,
+            (parent, json.dumps(turn_ids)),
+        )]
+        assert any(
+            "SEARCH sessions USING INDEX sessions_subagent_origin_turn_id" in detail
+            and "<expr>=? AND <expr>=?" in detail
+            for detail in plan
+        ), plan
         # The API must not consume one SQLite variable per requested ID.
         db.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 10)
-        rows = upgraded.list_subagent_session_metadata(
-            parent, message_ids=message_ids, turn_ids=turn_ids,
-        )
+        rows = upgraded.list_subagent_session_metadata(parent, turn_ids=turn_ids)
 
-    assert {row["key"] for row in rows} == {"subagent:message", "subagent:turn"}
-    assert next(row for row in rows if row["key"] == "subagent:message")["metadata"]["subagent_task"] == {
-        "origin_message_id": message_ids[-1],
-    }
+    assert {row["key"] for row in rows} == {"subagent:turn"}
+    assert rows[0]["metadata"]["subagent_task"] == {"origin_turn_id": turn_ids[-1]}

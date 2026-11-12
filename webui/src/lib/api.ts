@@ -697,7 +697,6 @@ export async function updateAutomation(
 }
 
 export interface SubagentTaskWindow {
-  messageIds: string[];
   turnIds: string[];
   trackedIds: string[];
 }
@@ -713,14 +712,14 @@ export async function fetchSubagentTasks(
     let length = query.toString().length;
     let count = 0;
     for (const [key, values] of [
-      ["message_id", window.messageIds], ["turn_id", window.turnIds], ["track", window.trackedIds],
+      ["turn_id", window.turnIds], ["track", window.trackedIds],
     ] as const) {
       for (const value of values) {
         const pair = new URLSearchParams({ [key]: value }).toString();
         // Keep request targets bounded, including percent-encoded identifiers.
         if (count && (length + 1 + pair.length > 5000 || count >= 400)) {
           queries.push(query);
-          query = new URLSearchParams({ scope: "window", active: "0" });
+          query = new URLSearchParams({ scope: "window" });
           length = query.toString().length;
           count = 0;
         }

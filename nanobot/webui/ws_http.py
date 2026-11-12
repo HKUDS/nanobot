@@ -924,17 +924,15 @@ class GatewayHTTPHandler:
         scope = query.get("scope")
         if scope is not None and scope != ["window"]:
             return _http_error(400, "invalid task scope")
-        active = query.get("active", ["1"])
-        groups = [query.get(key, []) for key in ("message_id", "turn_id", "track")]
-        if scope == ["window"] and (active not in (["0"], ["1"])
-                or sum(map(len, groups)) > 512
-                or any(not value or len(value) > 512 for group in groups for value in group)):
+        turns = query.get("turn_id", [])
+        tracked = query.get("track", [])
+        if scope == ["window"] and (len(turns) + len(tracked) > 512
+                or any(not value or len(value) > 512 for value in (*turns, *tracked))):
             return _http_error(400, "invalid task window")
         try:
             if scope == ["window"]:
-                statuses = await self.subagent_manager.read_window_statuses_for_session(
-                    session_key, message_ids=groups[0], turn_ids=groups[1],
-                    tracked_ids=groups[2], include_active=active == ["1"],
+                statuses = await self.subagent_manager.read_statuses_for_session(
+                    session_key, turns=turns, tracked=tracked,
                 )
             else:
                 statuses = await self.subagent_manager.read_statuses_for_session(session_key)

@@ -21,7 +21,7 @@ import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import { cancelSubagentTask, fetchSubagentTasks } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import { isActiveSubagentTask, isSubagentTask, mergeSubagentTasks, type ObservedSubagentTask } from "@/lib/subagent-tasks";
-import type { SubagentTaskSnapshot, UIMessage } from "@/lib/types";
+import type { SubagentTaskSnapshot } from "@/lib/types";
 
 interface TaskContext {
   sessionKey: string | null;
@@ -48,13 +48,13 @@ interface SubagentTasksProviderProps {
   liveEvents: boolean;
   historyEnabled?: boolean;
   scopedHistory?: boolean;
-  messages?: UIMessage[];
+  turnIds?: string[];
   windowReady?: boolean;
   active?: boolean;
   children: ReactNode;
 }
 
-export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, scopedHistory = false, messages = [], windowReady = true, active = true, children }: SubagentTasksProviderProps) {
+export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, scopedHistory = false, turnIds = [], windowReady = true, active = true, children }: SubagentTasksProviderProps) {
   const { t } = useTranslation("common");
   const pageVisible = usePageVisibility();
   const paneVisible = useThreadVisibility();
@@ -69,19 +69,14 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   const detailPanel = useRef<HTMLDivElement | null>(null);
   const taskRef = useRef(tasks);
   taskRef.current = tasks;
-  const userMessages = messages.filter((message) => message.role === "user");
-  const windowScope = {
-    messageIds: [...new Set(userMessages.map((message) => message.id))],
-    turnIds: [...new Set(userMessages.flatMap((message) => message.turnId ? [message.turnId] : []))],
-  };
+  const windowScope = { turnIds };
   const windowKey = scopedHistory ? JSON.stringify(windowScope) : "";
   const windowRef = useRef(windowScope);
   windowRef.current = windowScope;
   const windowKeyRef = useRef(windowKey);
   windowKeyRef.current = windowKey;
   const readState = useMemo(() => ({
-    messageIds: new Set<string>(), turnIds: new Set<string>(),
-    inFlight: false, force: false, epoch: 0,
+    turnIds: new Set<string>(), inFlight: false, force: false, epoch: 0,
   }), [client, sessionKey]);
   const readStateRef = useRef(readState);
   readStateRef.current = readState;
@@ -134,10 +129,9 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       const full = readState.force;
       const current = windowRef.current;
       const requested = {
-        messageIds: current.messageIds.filter((id) => full || !readState.messageIds.has(id)),
         turnIds: current.turnIds.filter((id) => full || !readState.turnIds.has(id)),
       };
-      if (!full && (!scopedHistory || !Object.values(requested).some((ids) => ids.length))) return;
+      if (!full && (!scopedHistory || requested.turnIds.length === 0)) return;
       readState.force = false;
       readState.inFlight = true;
       const requestedKey = windowKeyRef.current;
@@ -151,9 +145,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
         if (!mounted.current || readStateRef.current !== readState) return;
         succeeded = true;
         if (requestedEpoch === readState.epoch) {
-          for (const key of ["messageIds", "turnIds"] as const) {
-            for (const id of requested[key]) readState[key].add(id);
-          }
+          for (const id of requested.turnIds) readState.turnIds.add(id);
         }
         mergeTasks(payload.tasks);
       }).catch(() => {
@@ -170,7 +162,6 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
         // Events may have been missed on any previously viewed page. Mark all
         // pages stale, then refresh only the current one and revisit others lazily.
         readState.epoch += 1;
-        readState.messageIds.clear();
         readState.turnIds.clear();
       }
       if (force) readState.force = true;

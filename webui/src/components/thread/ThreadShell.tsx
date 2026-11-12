@@ -485,13 +485,16 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
-  const [visibleWindow, setVisibleWindow] = useState<{ key: string | null; messages: UIMessage[]; hasMessages: boolean } | null>(null);
+  const [visibleWindow, setVisibleWindow] = useState<{ key: string | null; turnIds: string[]; hasMessages: boolean } | null>(null);
   const reportVisibleMessages = useCallback((messages: UIMessage[]) => {
-    const users = messages.filter((message) => message.role === "user");
+    // Saved results attach to turns, so only the rendered user turns matter here.
+    const turnIds = [...new Set(messages.flatMap((message) => (
+      message.role === "user" && message.turnId ? [message.turnId] : []
+    )))];
     setVisibleWindow((current) => current?.key === historyKey && current.hasMessages === (messages.length > 0)
-      && current.messages.length === users.length && current.messages.every((message, index) => message.id === users[index].id
-        && message.inputId === users[index].inputId && message.turnId === users[index].turnId)
-      ? current : { key: historyKey, messages: users, hasMessages: messages.length > 0 });
+      && current.turnIds.length === turnIds.length
+      && current.turnIds.every((turnId, index) => turnId === turnIds[index])
+      ? current : { key: historyKey, turnIds, hasMessages: messages.length > 0 });
   }, [historyKey]);
   const previewSessionKey = session?.key ?? null;
   const mentionSessions = useMemo(
@@ -1536,7 +1539,7 @@ export function ThreadShell({
       liveEvents={webuiCapabilities.includes("webui.subagents.events.v1")}
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
       scopedHistory={webuiCapabilities.includes("webui.subagents.window.v1")}
-      messages={visibleWindow?.key === historyKey ? visibleWindow.messages : []}
+      turnIds={visibleWindow?.key === historyKey ? visibleWindow.turnIds : []}
       windowReady={messagesReady && visibleWindow?.key === historyKey && (!initialHistoryLoading || visibleWindow.hasMessages)}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>

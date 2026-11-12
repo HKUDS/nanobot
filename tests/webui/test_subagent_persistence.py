@@ -73,11 +73,11 @@ async def test_windowed_task_reads_limit_history_and_reconcile_active_work(tmp_p
     await sessions.state.get("websocket:parent")
     await sessions.state.get("websocket:other")
 
-    async def saved(task_id, owner, *, message_id="msg-a", turn_id="turn-a"):
+    async def saved(task_id, owner, *, turn_id="turn-a"):
         status = SubagentStatus(
             task_id=task_id, label=task_id, task_description=task_id, owner=owner,
             started_at=0, finished_at=1, state="done", completed_at=1,
-            origin_message_id=message_id, origin_turn_id=turn_id,
+            origin_turn_id=turn_id,
         )
         await sessions.state.create_child(
             owner, SubagentSessions.key(task_id),
@@ -86,10 +86,9 @@ async def test_windowed_task_reads_limit_history_and_reconcile_active_work(tmp_p
         )
 
     await saved("a", "websocket:parent")
-    await saved("b", "websocket:parent", message_id="msg-b", turn_id="turn-b")
-    # Turn-only matches stay visible; a task with no origin is only reachable by tracking.
-    await saved("turn-only", "websocket:parent", message_id=None)
-    await saved("unknown", "websocket:parent", message_id=None, turn_id=None)
+    await saved("b", "websocket:parent", turn_id="turn-b")
+    # A task with no origin is only reachable while the caller still tracks it.
+    await saved("unknown", "websocket:parent", turn_id=None)
     await saved("foreign", "websocket:other")
     entered = asyncio.Event()
 
@@ -105,22 +104,22 @@ async def test_windowed_task_reads_limit_history_and_reconcile_active_work(tmp_p
     path = "/api/sessions/websocket%3Aparent/subagents"
     try:
         response = await gateway.http.dispatch(
-            connection, Request(path + "?scope=window&message_id=msg-a&turn_id=turn-a", headers),
+            connection, Request(path + "?scope=window&turn_id=turn-a", headers),
         )
         assert response.status_code == 200
-        assert {task["task_id"] for task in json.loads(response.body)["tasks"]} == {
-            "a", "turn-only", active_id,
-        }
+        assert {task["task_id"] for task in json.loads(response.body)["tasks"]} == {"a", active_id}
         tracked = await gateway.http.dispatch(
-            connection, Request(path + "?scope=window&track=b&track=foreign&active=0", headers),
+            connection, Request(path + "?scope=window&track=b&track=foreign", headers),
         )
-        assert {task["task_id"] for task in json.loads(tracked.body)["tasks"]} == {"b"}
+        # Live work is always included; tracked tasks outside the loaded turns come along.
+        assert {task["task_id"] for task in json.loads(tracked.body)["tasks"]} == {active_id, "b"}
         legacy_read = await gateway.http.dispatch(connection, Request(path, headers))
         assert {task["task_id"] for task in json.loads(legacy_read.body)["tasks"]} == {
-            "a", "b", "turn-only", "unknown", active_id,
+            "a", "b", "unknown", active_id,
         }
-        malformed = await gateway.http.dispatch(connection, Request(path + "?scope=window&active=no", headers))
-        assert malformed.status_code == 400
+        for invalid in ("?scope=window&turn_id=", "?scope=everything"):
+            malformed = await gateway.http.dispatch(connection, Request(path + invalid, headers))
+            assert malformed.status_code == 400, invalid
     finally:
         await manager.close()
 
@@ -129,16 +128,16 @@ async def test_windowed_task_reads_limit_history_and_reconcile_active_work(tmp_p
 async def test_windowed_task_read_opens_one_store_connection(tmp_path, monkeypatch):
     manager, sessions, _runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
     await sessions.state.get("websocket:parent")
-    for task_id, message_id, turn_id in (
-        ("in-window", "msg-window", "turn-window"),
-        ("tracked-1", "msg-old", "turn-old"),
-        ("tracked-2", "msg-old", "turn-old"),
-        ("tracked-3", "msg-old", "turn-old"),
+    for task_id, turn_id in (
+        ("in-window", "turn-window"),
+        ("tracked-1", "turn-old"),
+        ("tracked-2", "turn-old"),
+        ("tracked-3", "turn-old"),
     ):
         status = SubagentStatus(
             task_id=task_id, label=task_id, task_description=task_id, owner="websocket:parent",
             started_at=0, finished_at=1, state="done", completed_at=1,
-            origin_message_id=message_id, origin_turn_id=turn_id,
+            origin_turn_id=turn_id,
         )
         await sessions.state.create_child(
             "websocket:parent", SubagentSessions.key(task_id),
@@ -156,9 +155,9 @@ async def test_windowed_task_read_opens_one_store_connection(tmp_path, monkeypat
 
     monkeypatch.setattr(SqliteSessionStore, "_open_connection", counting)
     try:
-        statuses = await manager.read_window_statuses_for_session(
-            "websocket:parent", message_ids=["msg-window"], turn_ids=["turn-window"],
-            tracked_ids=["tracked-1", "tracked-2", "tracked-3"], include_active=False,
+        statuses = await manager.read_statuses_for_session(
+            "websocket:parent", turns=["turn-window"],
+            tracked=["tracked-1", "tracked-2", "tracked-3"],
         )
         # Tracked work outside the window stays visible, and the whole read shares
         # one connection instead of one per tracked task.

@@ -62,7 +62,9 @@ function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEve
   active?: boolean;
   onActivityToggle?: () => void;
 } = {}) {
-  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled} scopedHistory={scopedHistory} active={active} messages={threadMessages}>
+  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled} scopedHistory={scopedHistory} active={active}
+    turnIds={[...new Set(threadMessages.filter((message) => message.role === "user" && message.turnId)
+      .map((message) => message.turnId as string))]}>
     <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} onActivityToggle={onActivityToggle} /></div>
     <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock /><textarea aria-label="Message" /></div>
   </SubagentTasksProvider>;
@@ -248,7 +250,7 @@ describe("subagent result archives", () => {
       seen.push(url);
       return response([
         task({ task_id: "live", label: "Live", state: "running", completed_at: null, origin_message_id: "elsewhere", origin_turn_id: "elsewhere" }),
-        ...(url.searchParams.getAll("message_id").includes("old")
+        ...(url.searchParams.getAll("turn_id").includes("old")
           ? [task({ task_id: "old", label: "Earlier check", origin_message_id: "old", origin_turn_id: "old" })] : []),
       ]);
     });
@@ -257,12 +259,12 @@ describe("subagent result archives", () => {
     expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
     expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
     expect(seen[0].searchParams.get("scope")).toBe("window");
-    expect(seen[0].searchParams.getAll("message_id")).toEqual(["prompt-a"]);
+    expect(seen[0].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
     view.rerender(layout({ scopedHistory: true, threadMessages: [old, messages[0]] }));
     const archive = await screen.findByRole("region", { name: "Subtasks" });
     await user.click(summary(archive));
     expect(within(archive).getByRole("button", { name: /Earlier check/ })).toBeVisible();
-    expect(seen.some((url) => url.searchParams.getAll("message_id").includes("old"))).toBe(true);
+    expect(seen.some((url) => url.searchParams.getAll("turn_id").includes("old"))).toBe(true);
     expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
   });
 
@@ -288,7 +290,7 @@ describe("subagent result archives", () => {
     emitTask({ ...running, revision: 2, label: "Live revision 2" });
     await act(async () => resolveFirst(response([running])));
     await waitFor(() => expect(seen).toHaveLength(2));
-    expect(seen[1].searchParams.getAll("message_id")).toEqual(["second"]);
+    expect(seen[1].searchParams.getAll("turn_id")).toEqual(["turn-second"]);
     expect(seen[1].searchParams.getAll("track")).toEqual(["task-1"]);
     const user = userEvent.setup();
     await user.click(screen.getByTestId("subagent-task-dock-trigger"));
@@ -298,20 +300,20 @@ describe("subagent result archives", () => {
     // Focus invalidated the first page while its original read was in flight;
     // revisiting it must not treat that old response as fresh.
     await waitFor(() => expect(seen).toHaveLength(3));
-    expect(seen[2].searchParams.getAll("message_id")).toEqual(["prompt-a"]);
+    expect(seen[2].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
     expect(seen[2].searchParams.getAll("track")).toEqual(["task-1"]);
     expect(await screen.findByRole("button", { name: /Live revision 3 Completed/ })).toBeVisible();
     act(() => statusHandlers.forEach((handler) => handler("open")));
     await waitFor(() => expect(seen).toHaveLength(4));
-    expect(seen[3].searchParams.getAll("message_id")).toEqual(["prompt-a"]);
+    expect(seen[3].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
     expect(seen[3].searchParams.getAll("track")).toEqual([]);
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(seen).toHaveLength(5));
-    expect(seen[4].searchParams.getAll("message_id")).toEqual(["prompt-a"]);
+    expect(seen[4].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
     view.rerender(tree([first], false));
     view.rerender(tree([first]));
     await waitFor(() => expect(seen).toHaveLength(6));
-    expect(seen[5].searchParams.getAll("message_id")).toEqual(["prompt-a"]);
+    expect(seen[5].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
   });
 
   it("retries a failed history page when revisited without rereading a cached page", async () => {
@@ -322,7 +324,7 @@ describe("subagent result archives", () => {
       const url = new URL(String(input), "http://localhost");
       seen.push(url);
       if (seen.length === 2) return new Response("unavailable", { status: 503 });
-      return response(url.searchParams.getAll("message_id").includes("second")
+      return response(url.searchParams.getAll("turn_id").includes("turn-second")
         ? [task({ origin_message_id: "second", origin_turn_id: "turn-second", label: "Recovered result" })] : []);
     });
     const view = render(layout({ scopedHistory: true, threadMessages: [first] }));
@@ -337,7 +339,7 @@ describe("subagent result archives", () => {
     await userEvent.setup().click(summary(archive));
     expect(within(archive).getByRole("button", { name: /Recovered result/ })).toBeVisible();
     expect(seen).toHaveLength(3);
-    expect(seen[2].searchParams.getAll("message_id")).toEqual(["second"]);
+    expect(seen[2].searchParams.getAll("turn_id")).toEqual(["turn-second"]);
   });
 
   it("revalidates a cached off-window page after reconnect misses a completed task", async () => {
@@ -348,7 +350,7 @@ describe("subagent result archives", () => {
     vi.mocked(fetch).mockImplementation(async (input) => {
       const url = new URL(String(input), "http://localhost");
       seen.push(url);
-      return response(completedWhileOffline && url.searchParams.getAll("message_id").includes("prompt-a")
+      return response(completedWhileOffline && url.searchParams.getAll("turn_id").includes("turn-a")
         ? [task({ origin_message_id: "prompt-a", label: "Completed while offline" })] : []);
     });
     const view = render(layout({ scopedHistory: true, threadMessages: [first] }));
@@ -358,12 +360,12 @@ describe("subagent result archives", () => {
     completedWhileOffline = true;
     act(() => statusHandlers.forEach((handler) => handler("open")));
     await waitFor(() => expect(seen).toHaveLength(3));
-    expect(seen[2].searchParams.getAll("message_id")).toEqual(["second"]);
+    expect(seen[2].searchParams.getAll("turn_id")).toEqual(["turn-second"]);
     view.rerender(layout({ scopedHistory: true, threadMessages: [first] }));
     const archive = await screen.findByRole("region", { name: "Subtasks" });
     await userEvent.setup().click(summary(archive));
     expect(within(archive).getByRole("button", { name: /Completed while offline/ })).toBeVisible();
-    expect(seen[3].searchParams.getAll("message_id")).toEqual(["prompt-a"]);
+    expect(seen[3].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
   });
 
   it("does not let an old session's delayed scoped read contaminate the new session", async () => {

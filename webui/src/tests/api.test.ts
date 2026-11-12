@@ -106,18 +106,17 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("splits a large subagent window into bounded reads and requests active work once", async () => {
+  it("splits a large subagent window into bounded reads", async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ tasks: [] }) } as Response);
-    const messageIds = Array.from({ length: 400 }, (_, index) => `message-${index}-${"x".repeat(32)}`);
+    const turnIds = Array.from({ length: 400 }, (_, index) => `turn-${index}-${"x".repeat(32)}`);
     await expect(fetchSubagentTasks("tok", "websocket:chat-1", {
-      messageIds, turnIds: ["turn-a"], trackedIds: ["task-1"],
+      turnIds, trackedIds: ["task-1"],
     })).resolves.toEqual({ tasks: [] });
     const urls = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url), "http://localhost"));
     expect(urls.length).toBeGreaterThan(1);
     expect(urls.every((url) => url.search.length <= 5001)).toBe(true);
-    expect(urls[0].searchParams.get("active")).toBeNull();
-    expect(urls.slice(1).every((url) => url.searchParams.get("active") === "0")).toBe(true);
-    expect(urls.flatMap((url) => url.searchParams.getAll("message_id"))).toEqual(messageIds);
+    expect(urls.every((url) => url.searchParams.get("active") === null)).toBe(true);
+    expect(urls.flatMap((url) => url.searchParams.getAll("turn_id"))).toEqual(turnIds);
     expect(urls.flatMap((url) => url.searchParams.getAll("track"))).toEqual(["task-1"]);
   });
 
