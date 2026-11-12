@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from typing import Any, cast
 
 from nanobot.agent.tools.base import ToolResult, tool_parameters
@@ -19,7 +20,9 @@ class _PatchError(ValueError):
     pass
 
 
-def _validate_patch_path(path: str) -> str:
+def _validate_patch_path(path: object) -> str:
+    if not isinstance(path, str):
+        raise _PatchError("path required for edit")
     normalized = path.strip()
     if not normalized:
         raise _PatchError("patch path cannot be empty")
@@ -88,6 +91,17 @@ class ApplyPatchTool(_WritableFsTool):
             "Use edit_file only for small exact replacements on a single file."
         )
 
+    def _file_edit_paths(self, params: Mapping[str, object]) -> Iterator[str]:
+        edits = params.get("edits")
+        if params.get("dry_run") is True or not isinstance(edits, list):
+            return
+        for edit in cast(list[object], edits):
+            if isinstance(edit, dict):
+                try:
+                    yield _validate_patch_path(cast(dict[str, object], edit).get("path"))
+                except _PatchError:
+                    continue
+
     async def execute(
         self,
         edits: list[object] | None = None,
@@ -106,14 +120,11 @@ class ApplyPatchTool(_WritableFsTool):
                 if not isinstance(edit_value, dict):
                     raise _PatchError("each edit must be an object")
                 edit = cast(dict[str, Any], edit_value)
-                raw_path = edit.get("path")
-                if not isinstance(raw_path, str):
-                    raise _PatchError("path required for edit")
-                path = _validate_patch_path(raw_path)
+                path = _validate_patch_path(edit.get("path"))
                 action = edit.get("action")
                 if not isinstance(action, str):
                     raise _PatchError(f"action required for edit: {path}")
-                source = self.file_edit_target(path)
+                source = self._files.edit_target(path)
 
                 if action == "add":
                     new_text = edit.get("new_text")

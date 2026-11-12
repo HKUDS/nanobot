@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from itertools import groupby, islice
 from pathlib import Path
@@ -11,7 +11,6 @@ from rapidfuzz.distance import Indel, Opcode, Opcodes
 
 from nanobot.execution.files import FileSnapshot, WritableFile
 
-TRACKED_FILE_EDIT_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 _MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 _MAX_DIFF_LINES = 500
 _MAX_DIFF_LINE_CHARS = 1200
@@ -20,7 +19,9 @@ _DIFF_CONTEXT_LINES = 3
 
 @runtime_checkable
 class FileEditSource(Protocol):
-    def file_edit_target(self, path: str) -> WritableFile: ...
+    """A tool that exposes its authorized mutation targets for activity snapshots."""
+
+    def file_edit_targets(self, params: Mapping[str, object]) -> Iterable[WritableFile]: ...
 
     @property
     def file_edit_workspace(self) -> Path | None: ...
@@ -142,10 +143,6 @@ class FileEditResult(str):
     def __reduce__(self) -> tuple[type[str], tuple[str]]:
         # Transcript copies and persistence carry only the model observation.
         return str, (str(self),)
-
-
-def is_file_edit_tool(tool_name: str | None) -> bool:
-    return bool(tool_name) and tool_name in TRACKED_FILE_EDIT_TOOLS
 
 
 def display_file_edit_path(path: Path, workspace: Path | None) -> str:
@@ -302,22 +299,16 @@ def prepare_file_edit_trackers(
     *,
     call_id: str,
     tool_name: str,
-    tool: Any,
+    tool: object,
     workspace: Path | None,
-    params: dict[str, Any] | None,
+    params: object,
 ) -> list[FileEditTracker]:
-    if not isinstance(params, dict) or not is_file_edit_tool(tool_name):
-        return []
-    if not isinstance(tool, FileEditSource):
+    if not isinstance(params, dict) or not isinstance(tool, FileEditSource):
         return []
     display_workspace = tool.file_edit_workspace or workspace
     trackers: list[FileEditTracker] = []
     seen: set[Path] = set()
-    for raw_path in _file_edit_paths(tool_name, params):
-        try:
-            target = tool.file_edit_target(raw_path)
-        except (OSError, RuntimeError, ValueError):
-            continue
+    for target in tool.file_edit_targets(cast(dict[str, object], params)):
         if target.path in seen:
             continue
         seen.add(target.path)
@@ -329,22 +320,6 @@ def prepare_file_edit_trackers(
             before=target.snapshot(_MAX_SNAPSHOT_BYTES),
         ))
     return trackers
-
-
-def _file_edit_paths(tool_name: str, params: dict[str, Any]) -> Iterator[str]:
-    if tool_name != "apply_patch":
-        path = params.get("path")
-        if isinstance(path, str) and path.strip():
-            yield path
-        return
-    edits = params.get("edits")
-    if params.get("dry_run") is True or not isinstance(edits, list):
-        return
-    for edit in cast(list[object], edits):
-        if isinstance(edit, dict):
-            path = cast(dict[str, object], edit).get("path")
-            if isinstance(path, str) and (path := path.strip()) and "\0" not in path:
-                yield path
 
 
 def build_file_edit_start_event(tracker: FileEditTracker) -> dict[str, Any]:

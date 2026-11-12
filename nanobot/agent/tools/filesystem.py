@@ -4,6 +4,7 @@ import codecs
 import difflib
 import hashlib
 import mimetypes
+from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,8 +101,17 @@ class _FsTool(Tool):
 class _WritableFsTool(_FsTool):
     """Expose the same write target to execution and edit activity tracking."""
 
-    def file_edit_target(self, path: str) -> WritableFile:
-        return self._files.edit_target(path)
+    def _file_edit_paths(self, params: Mapping[str, object]) -> Iterator[str]:
+        path = params.get("path")
+        if isinstance(path, str) and path.strip():
+            yield path
+
+    def file_edit_targets(self, params: Mapping[str, object]) -> Iterator[WritableFile]:
+        for path in self._file_edit_paths(params):
+            try:
+                yield self._files.edit_target(path)
+            except (OSError, RuntimeError, ValueError):
+                continue  # Execution reports the error; activity must not read this target.
 
     @property
     def file_edit_workspace(self) -> Path | None:
@@ -598,7 +608,7 @@ class WriteFileTool(_WritableFsTool):
                 raise ValueError("Unknown path")
             if content is None:
                 raise ValueError("Unknown content")
-            target = self.file_edit_target(path)
+            target = self._files.edit_target(path)
             target.write(content, create_parents=True)
             self._file_states.record_write(target.path)
             return f"Successfully wrote {len(content)} characters to {target.path}"
@@ -950,7 +960,7 @@ class EditFileTool(_WritableFsTool):
             if expected_replacements is not None and expected_replacements < 1:
                 return ToolResult.error("Error: expected_replacements must be >= 1.")
 
-            target = self.file_edit_target(path)
+            target = self._files.edit_target(path)
             fp = target.path
             file_exists = target.exists()
             if file_exists and old_text == new_text:
