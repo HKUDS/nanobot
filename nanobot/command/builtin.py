@@ -1,23 +1,22 @@
-"""Built-in slash command handlers."""
-
 from __future__ import annotations
 
 import asyncio
 import os
 import subprocess
 import sys
-import time
 from contextlib import suppress
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, cast
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
 from nanobot import __version__
-from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
-from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
+from nanobot.bus.events import OutboundMessage
+from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.command.spec import BuiltinCommandSpec
+from nanobot.command.spec import CommandLifecycle as CommandLifecycle
+from nanobot.command.user_shell import cmd_user_shell
 from nanobot.providers.base import LLMUsage
-from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
@@ -28,46 +27,10 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session
     from nanobot.utils.gitstore import CommitInfo
 
-# WebUI protocol contract for how a slash command participates in turn state:
-# - side_channel: returns control text without starting or ending an agent turn.
-# - finalize_active_turn: side-channel command that also closes the active UI turn.
-# - stop_active_turn: cancels the active turn; WebUI may intercept exact submits.
-# - agent_turn: always enters the normal agent path.
-# - agent_turn_with_args: no args is side-channel usage; args enter the agent path.
-CommandLifecycle = Literal[
-    "side_channel",
-    "finalize_active_turn",
-    "stop_active_turn",
-    "agent_turn",
-    "agent_turn_with_args",
-]
-
 USER_SHELL_COMMAND = "/__shell"
 
 
-@dataclass(frozen=True)
-class BuiltinCommandSpec:
-    command: str
-    title: str
-    description: str
-    icon: str
-    arg_hint: str = ""
-    lifecycle: CommandLifecycle = "side_channel"
-    accepts_args: bool = False
-
-    def as_dict(self) -> dict[str, str | bool]:
-        return {
-            "command": self.command,
-            "title": self.title,
-            "description": self.description,
-            "icon": self.icon,
-            "arg_hint": self.arg_hint,
-            "lifecycle": self.lifecycle,
-            "accepts_args": self.accepts_args,
-        }
-
-
-BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
+CORE_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     BuiltinCommandSpec(
         "/new",
         "New chat",
@@ -114,15 +77,6 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Print the last N persisted conversation messages.",
         "history",
         "[n]",
-        accepts_args=True,
-    ),
-    BuiltinCommandSpec(
-        "/goal",
-        "Start long-running goal",
-        "Tell the agent to treat the request as a long-running goal.",
-        "activity",
-        "<goal>",
-        lifecycle="agent_turn_with_args",
         accepts_args=True,
     ),
     BuiltinCommandSpec(
@@ -190,26 +144,6 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         accepts_args=True,
     ),
 )
-
-
-def builtin_command_palette() -> list[dict[str, str | bool]]:
-    """Return structured command metadata for UI command palettes."""
-    return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
-
-
-def builtin_command_starts_agent_turn(text: str) -> bool:
-    """Return whether WebUI ingress should expect a normal agent lifecycle."""
-    normalized = normalize_command_text(text)
-    command, separator, args = normalized.partition(" ")
-    spec = next(
-        (item for item in BUILTIN_COMMAND_SPECS if item.command == command.lower()),
-        None,
-    )
-    if spec is None or (separator and not spec.accepts_args):
-        return True
-    if spec.lifecycle == "agent_turn":
-        return True
-    return spec.lifecycle == "agent_turn_with_args" and bool(args.strip())
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
@@ -640,7 +574,6 @@ def _format_dream_no_input_message() -> str:
 
 
 def _extract_changed_files(diff: str) -> list[str]:
-    """Extract changed file paths from a unified diff."""
     files: list[str] = []
     seen: set[str] = set()
     for line in diff.splitlines():
@@ -744,7 +677,6 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
     args = ctx.args.strip()
 
     if args:
-        # Show diff of a specific commit
         sha = args.split()[0]
         result = git.show_commit_diff(sha)
         if not result:
@@ -757,7 +689,6 @@ async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
             commit, diff = result
             content = _format_dream_log_content(commit, diff, requested_sha=sha)
     else:
-        # Default: show the latest Dream commit's diff
         commits = git.log(max_entries=1, message_prefix=_DREAM_COMMIT_PREFIX)
         result = (
             git.show_commit_diff(
@@ -799,7 +730,6 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
 
     args = ctx.args.strip()
     if not args:
-        # Show recent Dream commits for the user to pick
         commits = git.log(max_entries=10, message_prefix=_DREAM_COMMIT_PREFIX)
         if not commits:
             content = "Dream memory has no saved versions to restore yet."
@@ -841,7 +771,6 @@ _HISTORY_MAX_CONTENT_CHARS = 200
 
 
 def _format_history_message(msg: dict[str, Any]) -> str | None:
-    """Format a single history message for display. Returns None to skip."""
     role = msg.get("role")
     if role not in ("user", "assistant"):
         return None
@@ -898,41 +827,6 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content=header + "\n".join(recent),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-    )
-
-
-async def cmd_goal(ctx: CommandContext) -> InboundMessage | OutboundMessage:
-    """Expand an explicit goal command into model-only input."""
-    goal = ctx.args.strip()
-    if not goal:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Usage: /goal <long-running task description>",
-            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-        )
-    if not ctx.is_user_turn:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Goal mode can only be started by a user `/goal <task>` command.",
-            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-        )
-
-    session = ctx.session or await ctx.loop.sessions.state.get(ctx.key)
-    session.add_message("user", ctx.msg.content, _command=True, media=list(ctx.msg.media))
-    await ctx.loop.sessions.state.prepare_input(session)
-    return replace(
-        ctx.msg,
-        content=goal,
-        metadata={
-            **ctx.msg.metadata,
-            "original_command": "/goal",
-            "original_content": ctx.msg.content,
-            "goal_requested": True,
-            "goal_started_at": time.time(),
-            HIDDEN_HISTORY_META: {"kind": "goal_request"},
-        },
     )
 
 
@@ -1026,39 +920,15 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        content=build_help_text(),
+        content=build_help_text(ctx.loop.commands.specs),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
-async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
-    """Run a trusted local ``!command`` through nanobot's exec policy."""
-    metadata = dict(ctx.msg.metadata or {})
-    if (
-        ctx.msg.channel != "websocket"
-        or metadata.get("webui") is not True
-        or metadata.get(INBOUND_META_USER_SHELL) is not True
-    ):
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Shell commands are only available from a trusted local client.",
-            metadata={**metadata, "render_as": "text"},
-        )
-    if not ctx.args.strip():
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Type a command after `!`, for example `!pwd`.",
-            metadata={**metadata, "render_as": "text"},
-        )
-    return await ctx.loop.execute_user_shell_command(ctx)
-
-
-def build_help_text() -> str:
-    """Build canonical help text shared across channels."""
+def build_help_text(specs: tuple[BuiltinCommandSpec, ...] = CORE_COMMAND_SPECS) -> str:
+    """Build help text for the commands registered in one application."""
     lines = ["🐈 nanobot commands:"]
-    for spec in BUILTIN_COMMAND_SPECS:
+    for spec in specs:
         command = spec.command
         if spec.arg_hint:
             command = f"{command} {spec.arg_hint}"
@@ -1066,8 +936,10 @@ def build_help_text() -> str:
     return "\n".join(lines)
 
 
-def register_builtin_commands(router: CommandRouter) -> None:
-    """Register the default set of slash commands."""
+def register_core_commands(router: CommandRouter) -> None:
+    """Register slash commands owned by the core runtime."""
+    for spec in CORE_COMMAND_SPECS:
+        router.add_spec(spec)
     router.priority("/stop", cmd_stop)
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
@@ -1078,8 +950,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/model ", cmd_model)
     router.exact("/history", cmd_history)
     router.prefix("/history ", cmd_history)
-    router.exact("/goal", cmd_goal)
-    router.prefix("/goal ", cmd_goal)
     router.exact("/trigger", cmd_trigger)
     router.prefix("/trigger ", cmd_trigger)
     router.exact("/dream", cmd_dream)

@@ -1,5 +1,3 @@
-"""Connection-local outbound delivery guarantees for the WebSocket channel."""
-
 from __future__ import annotations
 
 import asyncio
@@ -17,6 +15,7 @@ from nanobot.channels.websocket import runtime
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.schema import Config
 from nanobot.runtime_admission import RuntimeBusyError
+from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -64,7 +63,7 @@ class _RecordingConnection:
             await self.release_close.wait()
 
 
-def _channel() -> WebSocketChannel:
+def _channel(session_manager: SessionManager | None = None) -> WebSocketChannel:
     bus = MessageBus()
     config = WebSocketConfig(
         enabled=True,
@@ -74,7 +73,7 @@ def _channel() -> WebSocketChannel:
     gateway = build_gateway_services(
         config=config,
         bus=bus,
-        session_manager=None,
+        session_manager=session_manager,
         static_dist_path=None,
         workspace_path=Path.cwd(),
         default_restrict_to_workspace=False,
@@ -82,10 +81,7 @@ def _channel() -> WebSocketChannel:
         runtime_surface="tui",
         runtime_capabilities_overrides=None,
     )
-    channel = WebSocketChannel(config, bus, gateway=gateway)
-    # Keep disk latency out of every connection delivery synchronization check.
-    channel._persist_turn_transcript_event = AsyncMock(return_value=True)
-    return channel
+    return WebSocketChannel(config, bus, gateway=gateway)
 
 
 def _message(chat_id: str, text: str) -> OutboundMessage:
@@ -216,6 +212,49 @@ async def test_slow_tui_does_not_block_same_topic_fanout() -> None:
         slow.release_send.set()
         await channel._cleanup_connection(cast(Any, slow))
         await channel._cleanup_connection(cast(Any, healthy))
+
+
+@pytest.mark.asyncio
+async def test_message_recipients_are_snapshotted_before_history_append(history, monkeypatch) -> None:
+    channel = _channel(history.sessions)
+    first_connection = _RecordingConnection()
+    late_connection = _RecordingConnection()
+    channel._attach(cast(Any, first_connection), "chat-snapshot")
+    first_message = await history.message(
+        channel="websocket", chat_id="chat-snapshot", content="first",
+    )
+    append_started = asyncio.Event()
+    release_append = asyncio.Event()
+    append_history = history.sessions.state.append_history
+
+    async def blocked_append(*args, **kwargs):
+        append_started.set()
+        await release_append.wait()
+        return await append_history(*args, **kwargs)
+
+    monkeypatch.setattr(history.sessions.state, "append_history", blocked_append)
+    sending = asyncio.create_task(channel.send(first_message))
+    try:
+        await asyncio.wait_for(append_started.wait(), timeout=1)
+        channel._attach(cast(Any, late_connection), "chat-snapshot")
+        release_append.set()
+        await asyncio.wait_for(sending, timeout=1)
+        assert await _next_text(first_connection) == "first"
+
+        await channel.send(await history.message(
+            channel="websocket", chat_id="chat-snapshot", content="second",
+        ))
+        assert await _next_text(first_connection) == "second"
+        assert await _next_text(late_connection) == "second"
+        assert late_connection.sent.empty()
+        assert [record["text"] for record in history.read("websocket:chat-snapshot")] == [
+            "first", "second",
+        ]
+    finally:
+        release_append.set()
+        await asyncio.gather(sending, return_exceptions=True)
+        await channel._cleanup_connection(cast(Any, first_connection))
+        await channel._cleanup_connection(cast(Any, late_connection))
 
 
 @pytest.mark.asyncio
@@ -483,15 +522,15 @@ async def test_normal_cleanup_can_overlap_connection_retirement(monkeypatch) -> 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("user_shell", [True, False])
 async def test_shell_output_is_literal_without_changing_other_command_replies(
-    user_shell: bool, monkeypatch: pytest.MonkeyPatch,
+    history, user_shell: bool, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    channel = _channel()
+    channel = _channel(history.sessions)
     connection = _RecordingConnection()
     channel._attach(cast(Any, connection), "shell-output")
     output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)\n"
     rewritten = output.replace("local.png", "/api/media/signed")
-    monkeypatch.setattr(channel._media, "rewrite_local_markdown_images", lambda text: rewritten)
-    message = OutboundMessage(
+    monkeypatch.setattr(channel.gateway.media, "rewrite_local_markdown_images", lambda text: rewritten)
+    message = await history.message(
         channel="websocket", chat_id="shell-output", content=output,
         metadata={"render_as": "text", INBOUND_META_USER_SHELL: user_shell},
     )
@@ -500,9 +539,290 @@ async def test_shell_output_is_literal_without_changing_other_command_replies(
         payload = json.loads(await asyncio.wait_for(connection.sent.get(), timeout=1))
         assert payload["text"] == (output if user_shell else rewritten)
         assert payload.get("render_as") == ("text" if user_shell else None)
-        persisted = channel._persist_turn_transcript_event.await_args
-        assert persisted.args[1] == payload
-        assert persisted.kwargs["transcript_overrides"] == {"text": output}
+        [persisted] = history.read("websocket:shell-output")
+        assert persisted["event"] == "message"
+        assert persisted["text"] == output
+        assert persisted.get("render_as") == ("text" if user_shell else None)
         assert message.content == output
     finally:
         await channel._cleanup_connection(cast(Any, connection))
+
+
+@pytest.mark.asyncio
+async def test_ready_activity_group_commits_before_ordered_fanout(history, monkeypatch, tmp_path) -> None:
+    from nanobot.bus.outbound_events import ProgressEvent, RetryStatusEvent, TurnEndEvent
+    from nanobot.events import ModelRequestEvent
+    from nanobot.providers.base import LLMUsage
+
+    channel = _channel(history.sessions)
+    manager = ChannelManager(
+        Config.model_validate({"channels": {"websocket": {"enabled": False}}}), channel.bus,
+        config_path=tmp_path / "config.json",
+    )
+    manager.channels["websocket"] = channel
+    chat = "group-commit"
+    metadata = await history.metadata(chat, {"webui_turn_id": "turn-group"})
+    connection, late = _RecordingConnection(), _RecordingConnection()
+    channel._attach(cast(Any, connection), chat)
+    entered, release = [asyncio.Event(), asyncio.Event()], [asyncio.Event(), asyncio.Event()]
+    append = history.sessions.state.append_history
+    writes = []
+
+    async def gated_append(key, facts, **kwargs):
+        index = len(writes)
+        writes.append(list(facts))
+        if index < 2:
+            entered[index].set()
+            await release[index].wait()
+        return await append(key, facts, **kwargs)
+
+    monkeypatch.setattr(history.sessions.state, "append_history", gated_append)
+    usage = LLMUsage.reported(input_tokens=100, output_tokens=20)
+    from nanobot.context_graph import graph_from_sources
+    from nanobot.context_sources import PromptSource, PromptSourcesEvent
+    from nanobot.file_references import source_receipt
+    source = PromptSource(tmp_path / "guide.md", "Guide content")
+    graph = graph_from_sources([source_receipt(source.path, source.content)])
+    await channel.send(OutboundMessage(
+        "websocket", chat, "", metadata=metadata, event=PromptSourcesEvent((source,)),
+    ))
+    events = [
+        ModelRequestEvent("request", "run", 1, "started"),
+        RetryStatusEvent(state="cleared", attempt=1, max_attempts=None, error_kind="unknown"),
+        ModelRequestEvent("request", "run", 2, "completed", usage=usage, round_usages=(usage,)),
+        ProgressEvent(tool_hint=True, tool_events=[{"call_id": "tool", "name": "read", "phase": "start"}]),
+        ProgressEvent(tool_events=[{"call_id": "tool", "name": "read", "phase": "end", "result": "complete"}]),
+    ]
+    try:
+        await manager._queue_outbound(channel, OutboundMessage(
+            "websocket", chat, "seed", metadata=metadata, event=ProgressEvent(content="seed"),
+        ))
+        await asyncio.wait_for(entered[0].wait(), 1)
+        for event in events:
+            await manager._queue_outbound(channel, OutboundMessage("websocket", chat, "", metadata=metadata, event=event))
+        await manager._queue_outbound(channel, OutboundMessage("websocket", chat, "answer", metadata=metadata))
+        await manager._queue_outbound(channel, OutboundMessage(
+            "websocket", chat, "", metadata=metadata, event=TurnEndEvent(usage=usage),
+        ))
+        assert connection.sent.empty()
+        release[0].set()
+        await asyncio.wait_for(entered[1].wait(), 1)
+        assert await _next_text(connection) == "seed"
+        assert connection.sent.empty()
+        assert [row["text"] for row in history.read(f"websocket:{chat}")] == ["seed"]
+        channel._attach(cast(Any, late), chat)
+        release[1].set()
+        async with asyncio.timeout(2):
+            while manager.has_pending_delivery:
+                await asyncio.sleep(0)
+        frames = [json.loads(connection.sent.get_nowait()) for _ in range(connection.sent.qsize())]
+        assert [frame["event"] for frame in frames] == [
+            "model_request", "retry_status", "model_request", "message", "message", "message", "turn_end", "session_updated",
+        ]
+        assert frames[2]["usage"] == usage.to_turn_dict()
+        assert frames[0]["context_graph"] == frames[2]["context_graph"] == graph
+        assert frames[4]["tool_events"][0]["result"] == "complete"
+        assert [len(facts) for facts in writes] == [1, 4, 1, 1]
+        durable = history.read(f"websocket:{chat}")
+        assert [row["turn_seq"] for row in durable] == list(range(1, 8))
+        assert durable[4]["tool_events"][0]["result"] == "complete"
+        assert durable[-1]["event"] == "turn_end"
+        assert all(row["context_graph"] == graph for row in durable if row["event"] == "model_request")
+        late_frames = [json.loads(late.sent.get_nowait()) for _ in range(late.sent.qsize())]
+        assert [frame["event"] for frame in late_frames] == ["message", "turn_end", "session_updated"]
+        assert late_frames[0]["text"] == "answer"
+    finally:
+        for gate in release:
+            gate.set()
+        await manager.stop_all()
+
+
+@pytest.mark.asyncio
+async def test_activity_batches_keep_replaced_session_generations_separate(history, tmp_path) -> None:
+    from nanobot.bus.outbound_events import ProgressEvent
+
+    channel = _channel(history.sessions)
+    manager = ChannelManager(
+        Config.model_validate({"channels": {"websocket": {"enabled": False}}}), channel.bus,
+        config_path=tmp_path / "config.json",
+    )
+    manager.channels["websocket"] = channel
+    chat = "replaced-batch"
+    key = f"websocket:{chat}"
+    old = await history.metadata(chat, {"webui_turn_id": "reused-turn"})
+    await history.sessions.state.reset(key)
+    fresh = await history.metadata(chat, {"webui_turn_id": "reused-turn"})
+    try:
+        for metadata, prefix in ((old, "stale"), (fresh, "current")):
+            for index in range(2):
+                text = f"{prefix}-{index}"
+                await manager._queue_outbound(channel, OutboundMessage(
+                    "websocket", chat, text, metadata=metadata, event=ProgressEvent(content=text),
+                ))
+        async with asyncio.timeout(2):
+            while manager.has_pending_delivery:
+                await asyncio.sleep(0)
+        assert [row["text"] for row in history.read(key)] == ["current-0", "current-1"]
+    finally:
+        await manager.stop_all()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_activity_batch_settles_admitted_write_without_fanout(history, monkeypatch) -> None:
+    import threading
+
+    from nanobot.bus.outbound_events import ProgressEvent
+
+    channel = _channel(history.sessions)
+    chat = "cancelled-batch"
+    metadata = await history.metadata(chat, {"webui_turn_id": "turn-cancel"})
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), chat)
+    entered = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+    append = history.sessions._store.append_history
+
+    def gated_append(*args, **kwargs):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(2), "test did not release admitted write"
+        return append(*args, **kwargs)
+
+    monkeypatch.setattr(history.sessions._store, "append_history", gated_append)
+    sending = asyncio.create_task(channel.send_batch([
+        OutboundMessage("websocket", chat, text, metadata=metadata, event=ProgressEvent(content=text))
+        for text in ("one", "two")
+    ]))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        sending.cancel()
+        await asyncio.sleep(0)
+        assert not sending.done()
+        assert connection.sent.empty()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await sending
+        assert [row["text"] for row in history.read(f"websocket:{chat}")] == ["one", "two"]
+        assert connection.sent.empty()
+    finally:
+        release.set()
+        await asyncio.gather(sending, return_exceptions=True)
+        await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_activity_batch_byte_limit_preserves_large_progress(history, monkeypatch) -> None:
+    from nanobot.bus.outbound_events import ProgressEvent
+    from nanobot.webui import outbound_delivery
+
+    monkeypatch.setattr(outbound_delivery, "_ACTIVITY_BATCH_BYTES", 1024)
+    channel = _channel(history.sessions)
+    chat = "large-batch"
+    metadata = await history.metadata(chat, {"webui_turn_id": "turn-large"})
+    append = AsyncMock(wraps=history.sessions.state.append_history)
+    monkeypatch.setattr(history.sessions.state, "append_history", append)
+    texts = ["a" * 600, "b" * 1500, "c" * 100, "d" * 100]
+    await channel.send_batch([
+        OutboundMessage("websocket", chat, text, metadata=metadata, event=ProgressEvent(content=text))
+        for text in texts
+    ])
+    assert [len(call.args[1]) for call in append.await_args_list] == [1, 1, 2]
+    assert [row["text"] for row in history.read(f"websocket:{chat}")] == texts
+
+
+@pytest.mark.asyncio
+async def test_oversized_activity_does_not_poison_valid_batch_neighbors(history, monkeypatch) -> None:
+    from nanobot.bus.outbound_events import ProgressEvent
+    from nanobot.session import display_history
+
+    monkeypatch.setattr(display_history, "MAX_HISTORY_FACT_BYTES", 1024)
+    channel = _channel(history.sessions)
+    chat = "invalid-batch-member"
+    metadata = await history.metadata(chat, {"webui_turn_id": "turn-size"})
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), chat)
+    texts = ["first", "x" * 1500, "last"]
+    try:
+        await channel.send_batch([
+            OutboundMessage("websocket", chat, text, metadata=metadata, event=ProgressEvent(content=text))
+            for text in texts
+        ])
+        assert [await _next_text(connection) for _ in texts] == texts
+        assert [row["text"] for row in history.read(f"websocket:{chat}")] == ["first", "last"]
+    finally:
+        await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_unencodable_tool_argument_does_not_discard_neighboring_activity(history) -> None:
+    from nanobot.bus.outbound_events import ProgressEvent
+
+    channel = _channel(history.sessions)
+    chat = "invalid-tool-argument"
+    metadata = await history.metadata(chat, {"webui_turn_id": "turn-encoding"})
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), chat)
+    # JSON decoding accepts this provider argument, but UTF-8 transport cannot.
+    arguments = json.loads('{"query":"\\ud800"}')
+    messages = [
+        OutboundMessage("websocket", chat, "first", metadata=metadata, event=ProgressEvent(content="first")),
+        OutboundMessage("websocket", chat, "", metadata=metadata, event=ProgressEvent(tool_events=[{
+            "call_id": "bad", "name": "search", "phase": "start", "arguments": arguments,
+        }])),
+        OutboundMessage("websocket", chat, "last", metadata=metadata, event=ProgressEvent(content="last")),
+    ]
+    try:
+        await channel.send_batch(messages)
+        assert [await _next_text(connection) for _ in range(2)] == ["first", "last"]
+        assert connection.sent.empty()
+        assert [row["text"] for row in history.read(f"websocket:{chat}")] == ["first", "last"]
+    finally:
+        await channel.stop()
+
+
+@pytest.mark.parametrize("batched", [False, True])
+async def test_context_observer_orders_reads_requests_and_compaction(history, tmp_path, batched):
+    from nanobot.agent.tools.filesystem import ReadFileTool
+    from nanobot.bus.outbound_events import ContextCompactionEvent, ProgressEvent, TurnEndEvent
+    from nanobot.events import ModelRequestEvent
+    from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
+
+    (tmp_path / "guide.md").write_text("[Reference](reference.md)")
+    result = await ReadFileTool(workspace=tmp_path).execute(path="guide.md")
+    tool = {"name": "read_file", "call_id": "read", "phase": "end",
+            "arguments": {"path": "guide.md"}, "result": result}
+    channel = _channel(history.sessions)
+    chat = "observed-context"
+
+    async def message(event):
+        return await history.message(channel="websocket", chat_id=chat, content="", event=event,
+                                     metadata={WEBUI_TURN_METADATA_KEY: "turn"})
+
+    events = [
+        ModelRequestEvent("before", "run", 1, "started"),
+        ProgressEvent(tool_events=[{**tool, "working_directory": str(tmp_path)}]),
+        ModelRequestEvent("after", "run", 2, "started"),
+    ]
+    messages = [await message(event) for event in events]
+    if batched:
+        await channel.send_batch(messages)
+    else:
+        for msg in messages:
+            await channel.send(msg)
+    requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
+    assert requests[0]["context_graph"] == {"nodes": [], "edges": []}
+    graph = requests[-1]["context_graph"]
+    assert [(node["name"], node["state"]) for node in graph["nodes"]] == [
+        ("guide.md", "loaded"), ("reference.md", "discovered"),
+    ]
+    # End-of-turn cleanup and a fresh delivery service must recover display state.
+    await channel.send(await message(TurnEndEvent()))
+    channel = _channel(history.sessions)
+    await channel.send(await message(ContextCompactionEvent("failed", "failed")))
+    await channel.send(await message(ModelRequestEvent("restored", "run", 3, "started")))
+    requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
+    assert requests[-1]["context_graph"] == graph
+    await channel.send(await message(ContextCompactionEvent("done", "succeeded")))
+    await channel.send(await message(ModelRequestEvent("reset", "run", 4, "started")))
+    requests = [row for row in history.read(f"websocket:{chat}") if row["event"] == "model_request"]
+    assert requests[-1]["context_graph"] == {"nodes": [], "edges": []}

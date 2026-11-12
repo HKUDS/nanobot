@@ -1,5 +1,3 @@
-"""Bind native acceptance to the exact wheel produced by this workflow run."""
-
 from __future__ import annotations
 
 import hashlib

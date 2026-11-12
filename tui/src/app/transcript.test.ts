@@ -255,7 +255,7 @@ describe("NanobotTui transcript", () => {
     app.accept({
       event: "message",
       chat_id: "chat",
-      text: "running shell",
+      text: "",
       kind: "tool_hint",
       tool_events: [{ phase: "start", name: "exec", arguments: { cmd: "pwd" } }],
     })

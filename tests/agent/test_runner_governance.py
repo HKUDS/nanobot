@@ -1,5 +1,3 @@
-"""Tests for AgentRunner context governance, repair, and compaction."""
-
 from __future__ import annotations
 
 import asyncio
@@ -99,7 +97,7 @@ async def test_provider_can_emit_without_an_event_specific_runner_callback():
         initial_messages=[{"role": "user", "content": "hello"}],
         events=EventSink(observe),
     ))
-    assert received == [event]
+    assert received.count(event) == 1
 
 
 async def test_runner_propagates_context_governance_failure():
@@ -349,7 +347,8 @@ async def test_native_compaction_uses_provider_request_boundary(
     compaction_events: list[ContextCompactionEvent] = []
 
     async def observe_compaction(event: ContextCompactionEvent) -> None:
-        compaction_events.append(event)
+        if isinstance(event, ContextCompactionEvent):
+            compaction_events.append(event)
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -532,7 +531,8 @@ async def test_repeated_pressure_advances_summary_boundary(monkeypatch):
     compaction_events: list[ContextCompactionEvent] = []
 
     async def observe_compaction(event: ContextCompactionEvent) -> None:
-        compaction_events.append(event)
+        if isinstance(event, ContextCompactionEvent):
+            compaction_events.append(event)
 
     result = await AgentRunner().run(make_run_spec(
         provider,
@@ -647,7 +647,6 @@ async def test_runner_recovers_oversized_file_read_delta(
         })
         for index, path in enumerate(paths)
     ]
-    # Retrying the omitted file alone must return its content, not "unchanged".
     provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content=None, tool_calls=calls, provider_state=provider_state),
         LLMResponse(content=None, tool_calls=[ToolCallRequest(
@@ -1447,7 +1446,6 @@ async def test_runner_refuses_oversized_request_without_compactor(
 
 
 async def test_backfill_missing_tool_results_inserts_error():
-    """Orphaned tool_use (no matching tool_result) should get a synthetic error."""
 
     messages = [
         {"role": "user", "content": "hi"},
@@ -1505,7 +1503,6 @@ def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
 
 @pytest.mark.asyncio
 async def test_backfill_noop_when_complete():
-    """Complete message chains should not be modified."""
     messages = [
         {"role": "user", "content": "hi"},
         {
@@ -1519,7 +1516,7 @@ async def test_backfill_noop_when_complete():
         {"role": "assistant", "content": "all good"},
     ]
     result = ContextGovernor.backfill_missing_tool_results(messages)
-    assert result is messages  # same object — no copy
+    assert result is messages
 
 
 @pytest.mark.asyncio
@@ -1563,7 +1560,6 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
 
 @pytest.mark.asyncio
 async def test_backfill_repairs_model_context_without_shifting_save_turn_boundary(tmp_path):
-    """Historical backfill should not duplicate old tail messages on persist."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -1645,7 +1641,6 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
 
 @pytest.mark.asyncio
 async def test_runner_backfill_only_mutates_model_context_not_returned_messages():
-    """Runner should repair orphaned tool calls for the model without rewriting result.messages."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock()
@@ -1721,14 +1716,11 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
     ]
 
 
-# ---------------------------------------------------------------------------
 # Malformed tool_call name guard (missing/non-string name wedges the session
 # upstream: messages.content.N.tool_use.name: Input should be a valid string)
-# ---------------------------------------------------------------------------
 
 
 def test_drop_malformed_tool_calls_trims_response():
-    """LLM response tool_calls with a missing/empty name are dropped in place."""
     from nanobot.agent.runner import AgentRunner
 
     candidate_state = ProviderConversationState(
@@ -1760,7 +1752,6 @@ def test_drop_malformed_tool_calls_trims_response():
 
 
 def test_drop_malformed_tool_calls_all_bad_disables_execution():
-    """If every tool call is malformed, execution is disabled (no empty exec)."""
     from nanobot.agent.runner import AgentRunner
 
     response = LLMResponse(
@@ -1778,7 +1769,6 @@ def test_drop_malformed_tool_calls_all_bad_disables_execution():
 
 
 def test_drop_malformed_returns_tuple_no_calls():
-    """No tool calls returns (0, False, current_finish_reason)."""
     from nanobot.agent.runner import AgentRunner
 
     response = LLMResponse(content="hi", finish_reason="stop")
@@ -1789,7 +1779,6 @@ def test_drop_malformed_returns_tuple_no_calls():
 
 
 def test_strip_malformed_tool_calls_keeps_valid_calls_in_history():
-    """A mixed assistant turn keeps only its valid tool_calls."""
     messages = [
         {"role": "user", "content": "hi"},
         {
@@ -1803,8 +1792,8 @@ def test_strip_malformed_tool_calls_keeps_valid_calls_in_history():
         {"role": "tool", "tool_call_id": "ok", "name": "exec", "content": "done"},
     ]
     result = ContextGovernor.strip_malformed_tool_calls(messages)
-    assert result is not messages  # copied, original untouched
-    assert len(messages[1]["tool_calls"]) == 2  # original preserved
+    assert result is not messages
+    assert len(messages[1]["tool_calls"]) == 2
     kept = result[1]["tool_calls"]
     assert [tc["function"]["name"] for tc in kept] == ["exec"]
 
@@ -1831,7 +1820,6 @@ def test_strip_malformed_tool_calls_drops_empty_assistant_turn():
 
 
 def test_strip_malformed_tool_calls_noop_when_clean():
-    """Clean history is returned unchanged (same object)."""
     messages = [
         {"role": "user", "content": "hi"},
         {
@@ -1847,7 +1835,6 @@ def test_strip_malformed_tool_calls_noop_when_clean():
 
 
 def test_strip_placeholder_assistant_messages_removes_omitted():
-    """Placeholder assistant messages are removed; real messages kept."""
     messages = [
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "real response"},
@@ -1865,7 +1852,6 @@ def test_strip_placeholder_assistant_messages_removes_omitted():
 
 
 def test_strip_placeholder_noop_when_clean():
-    """Clean history is returned unchanged (same object)."""
     messages = [
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "hello back"},
@@ -1874,7 +1860,6 @@ def test_strip_placeholder_noop_when_clean():
 
 
 def test_strip_placeholder_keeps_assistant_with_tool_calls():
-    """A placeholder assistant that also carries tool_calls is kept."""
     messages = [
         {"role": "user", "content": "hi"},
         {

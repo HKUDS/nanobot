@@ -12,6 +12,9 @@ export const modalOverlayClassName =
 export const modalSurfaceClassName =
   "outline-none bg-background text-foreground shadow-[0_12px_36px_rgba(15,23,42,0.12)] dark:bg-popover dark:shadow-[0_18px_44px_rgba(0,0,0,0.32)]";
 
+export const sidePanelSurfaceClassName =
+  "side-panel-surface outline-none bg-background text-foreground dark:bg-popover overflow-hidden rounded-[24px]";
+
 export const floatingSurfaceClassName =
   `${floatingSurfaceVisualClassName} z-50 overflow-x-hidden overflow-y-auto overscroll-contain scrollbar-thin`;
 

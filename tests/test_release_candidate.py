@@ -1,5 +1,3 @@
-"""Candidate preparation uses real isolated Git repositories, never a live install."""
-
 import subprocess
 import tomllib
 from types import SimpleNamespace
@@ -149,8 +147,6 @@ def test_candidate_verifies_bundled_documentation_against_its_tracked_source(sou
     payload = _source_payload(root, packaged, prefix)
     assert payload[reference] == (root / "docs/README.md").read_bytes()
 
-    # Both the shipped reference and the source used to rebuild the sdist must
-    # match the reviewed documentation, not merely match each other.
     for name in (reference, "docs/README.md"):
         with pytest.raises(ValueError, match="differs from the candidate"):
             _source_payload(root, {**packaged, prefix + name: b"Unchecked instructions"}, prefix)
@@ -169,8 +165,6 @@ def test_retained_source_survives_file_only_artifact_transport(tmp_path, source,
     for artifact in manifest.artifacts:
         (artifacts / artifact.filename).write_bytes(b"structurally verified elsewhere")
     (artifacts / "release-manifest.json").write_text(manifest.model_dump_json(), encoding="utf-8")
-    # Exercise actual Git retention and ZIP transport; packaging has independent
-    # real-archive coverage and is not the contract under test here.
     monkeypatch.setattr(release_candidate, "verify_candidate", lambda *args, **kwargs: manifest)
     monkeypatch.setattr(release_candidate, "write_install_guide", lambda *args, **kwargs: None)
     retained = tmp_path / "retained"

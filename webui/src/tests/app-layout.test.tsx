@@ -1134,7 +1134,6 @@ describe("App layout", () => {
     window.history.replaceState(null, "", "/#/chat/websocket%3Aexisting-chat");
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    // Wait for the existing chat's lazy composer before opening its sidebar menu.
     await screen.findByRole("button", { name: "Workspace access mode: Full Access" });
     const projectSection = screen.getByRole("region", { name: "selected-project" });
     fireEvent.contextMenu(within(projectSection).getByRole("button", { name: "selected-project" }));
@@ -2375,11 +2374,12 @@ describe("App layout", () => {
     expect(document.body.style.pointerEvents).not.toBe("none");
   }, 15_000);
 
-  it("archives selected topics in one sidebar update and navigates outside the full selection", async () => {
+  it.each([false, true])("archives only persisted selected topics in one sidebar update (draft=%s)", async (includeDraft) => {
     mockSessions = ["a", "b", "c"].map((id) => ({
       key: `websocket:chat-${id}`, channel: "websocket", chatId: `chat-${id}`,
       createdAt: "2026-04-16T10:00:00Z", updatedAt: "2026-04-16T10:00:00Z",
-      title: `Topic ${id}`, preview: `Message ${id}`,
+      title: `Topic ${id}`, preview: "",
+      projectLocked: includeDraft && id === "a" ? false : undefined,
     }));
     mockFetchRoutes({
       "/api/webui/sidebar-state": { pinned_keys: ["websocket:chat-a", "websocket:chat-b"] },
@@ -2394,17 +2394,21 @@ describe("App layout", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
     fireEvent.click(within(sidebar).getByRole("button", { name: "Topic b" }));
     fireEvent.click(within(sidebar).getByRole("button", { name: "Archive" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Archive 2 topics?" });
+    const dialog = await screen.findByRole("alertdialog", {
+      name: includeDraft ? "Archive this topic?" : "Archive 2 topics?",
+    });
     expect(setSidebarStateSpy).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
 
     await waitFor(() => expect(setSidebarStateSpy).toHaveBeenCalledTimes(1));
     expect(setSidebarStateSpy).toHaveBeenCalledWith(expect.objectContaining({
-      archived_keys: ["websocket:chat-a", "websocket:chat-b"], pinned_keys: [],
+      archived_keys: includeDraft ? ["websocket:chat-b"] : ["websocket:chat-a", "websocket:chat-b"],
+      pinned_keys: includeDraft ? ["websocket:chat-a"] : [],
     }));
-    expect(window.location.hash).toBe("#/chat/websocket%3Achat-c");
+    expect(window.location.hash).toBe(includeDraft ? "#/chat/websocket%3Achat-a" : "#/chat/websocket%3Achat-c");
     expect(within(sidebar).getByRole("button", { name: "Topic c" })).toBeInTheDocument();
-    expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
+    if (includeDraft) expect(within(sidebar).getByRole("button", { name: "Topic a" })).toBeInTheDocument();
+    else expect(within(sidebar).queryByRole("button", { name: "Topic a" })).not.toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: "Topic b" })).not.toBeInTheDocument();
     expect(deleteChatSpy).not.toHaveBeenCalled();
   });
@@ -4084,6 +4088,13 @@ describe("App layout", () => {
       .toEqual(["Alpha"]);
     expect(screen.queryByRole("button", { name: "Layout" }))
       .not.toBeInTheDocument();
+    const alphaInput = screen.getByRole("textbox", { name: "Message Alpha" });
+    expect(screen.getByTestId("workbench-pane-websocket:chat-alpha")).toContainElement(alphaInput);
+    fireEvent.change(alphaInput, { target: { value: "keep this Alpha draft" } });
+    fireEvent.change(alphaInput.closest(".thread-composer-surface")!.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["notes"], "alpha-notes.txt", { type: "text/plain" })] },
+    });
+    expect(within(await screen.findByTestId("composer-chip")).getByRole("button", { name: "alpha-notes.txt" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Add pane" }));
     expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument();
@@ -4159,6 +4170,11 @@ describe("App layout", () => {
       name: "Remove",
     }));
     await waitFor(() => expect(screen.getByTestId("pane-grid").children).toHaveLength(1));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Alpha" }));
+    const restoredInput = await screen.findByRole("textbox", { name: "Message Alpha" });
+    expect(screen.getByTestId("workbench-pane-websocket:chat-alpha")).toContainElement(restoredInput);
+    expect(restoredInput).toHaveValue("keep this Alpha draft");
+    expect(within(await screen.findByTestId("composer-chip")).getByRole("button", { name: "alpha-notes.txt" })).toBeVisible();
     const researchGroup = within(sidebar).getByRole("button", {
       name: "Group: Research",
     }).closest("[data-sidebar-tab-group]") as HTMLElement;
@@ -4655,6 +4671,25 @@ describe("App layout", () => {
     expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
     expect(within(popup).queryByRole("alert")).not.toBeInTheDocument();
     expect(within(popup).getByText("2 pending")).toBeVisible();
+  });
+
+  it("shows a dismissed pairing request again when its snooze expires", async () => {
+    vi.useFakeTimers();
+    mockFetchRoutes({ "/api/settings/pairing": { requests: [{
+      code: "ABCD-EFGH", channel: "feishu", sender_id: "alice", delivery_status: "sent",
+    }] } });
+    render(<App />);
+    await act(async () => {});
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Pair account" }))
+      .getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    expect(screen.queryByRole("dialog", { name: "Pair account" })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    const popup = screen.getByRole("dialog", { name: "Pair account" });
+    expect(popup).toBeVisible();
+    expect(within(popup).getByRole("textbox", { name: "Pairing code" })).toBeEnabled();
   });
 
   it("shows a recovered pairing reply even after its failure notice was dismissed", async () => {

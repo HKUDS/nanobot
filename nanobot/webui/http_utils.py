@@ -1,5 +1,3 @@
-"""Shared HTTP helpers for the embedded WebUI gateway."""
-
 from __future__ import annotations
 
 import email.utils

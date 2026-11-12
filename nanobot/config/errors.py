@@ -1,5 +1,3 @@
-"""User-safe configuration diagnostics."""
-
 from __future__ import annotations
 
 import re

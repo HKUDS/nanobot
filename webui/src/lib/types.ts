@@ -8,6 +8,9 @@ type Role = "user" | "assistant" | "tool" | "system";
 type MessageKind = "message" | "trace" | "compaction";
 
 export interface UIContextCompaction extends ContextCompaction {
+  contextSnapshot?: ContextSnapshot;
+  /** Lifecycle event sequence, independent of the row's display position. */
+  turnSeq?: number;
   /** Live wire transitions announce; hydrated transcript rows stay silent. */
   announce?: boolean;
 }
@@ -128,7 +131,6 @@ export interface UIMessage {
   toolEvents?: ToolProgressEvent[];
   /** Oversized persisted trace content that can be fetched when activity is expanded. */
   traceDetail?: UITraceDetail;
-  /** Activity rows: explicit file edits emitted by edit tools. */
   fileEdits?: UIFileEdit[];
   /** Activity rows created during the same agent phase share one collapsible block. */
   activitySegmentId?: string;
@@ -141,7 +143,6 @@ export interface UIMessage {
   compactReply?: "empty" | "failed";
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
-  /** Signed or local UI-renderable media attachments. */
   media?: UIMediaAttachment[];
   /** App-specific CLI adapters explicitly attached to this user turn. */
   cliApps?: UICliAppAttachment[];
@@ -153,8 +154,6 @@ export interface UIMessage {
    * incrementally from ``reasoning_delta`` frames; finalized when
    * ``reasoning_end`` arrives. */
   reasoning?: string;
-  /** True while ``reasoning_delta`` frames are still arriving for this turn.
-   * Drives the shimmer header on ``ReasoningBubble``. */
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
@@ -181,8 +180,51 @@ export interface UIMessage {
   reasoningStreamId?: string;
   /** Ephemeral delivery lifecycle for optimistic user messages. */
   deliveryStatus?: MessageDeliveryStatus;
-  /** Structured rejection reason shown with a failed optimistic message. */
   deliveryErrorKind?: MessageDeliveryErrorKind;
+}
+
+/** Turn-owned telemetry, not a transcript row or body-history source. */
+export interface ContextGraphNode {
+  path: string;
+  name: string;
+  state: "loaded" | "discovered";
+  tokens: number;
+}
+
+export interface ContextGraph {
+  nodes: ContextGraphNode[];
+  edges: { source: string; target: string }[];
+}
+
+export interface ContextInspection {
+  graph: ContextGraph;
+  estimated_tokens: number;
+  context_window_tokens: number;
+}
+
+export interface ContextSnapshot {
+  turnSeq?: number;
+  estimatedTokens?: number;
+  id: string;
+  graph: ContextGraph;
+  usage?: TurnUsage;
+  contextWindowTokens?: number;
+}
+
+export interface UIModelRequestSnapshot {
+  contextSnapshots?: ContextSnapshot[];
+  runId: string;
+  sequence: number;
+  turnSeq?: number;
+  retiredRunIds: string[];
+  createdAt: number;
+  completedAt?: number;
+  /** Last turn sequence reporting fresh context usage. */
+  usageTurnSeq?: number;
+  ended?: boolean;
+  usage?: TurnUsage;
+  roundUsages?: RoundUsage[];
+  contextWindowTokens?: number;
 }
 
 export interface UICliAppAttachment {
@@ -352,6 +394,7 @@ export interface MarketplaceSkillSummary {
   downloads?: number;
   url: string;
   installed: boolean;
+  installation_status?: "available" | "installed" | "conflict" | "unknown";
   install_supported: boolean;
   metric: "installs_24h" | "installs_total";
   version?: string;
@@ -394,7 +437,6 @@ interface AgentUIBlob {
   data?: unknown;
 }
 
-/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
 export interface GoalStateWsPayload {
   active: boolean;
   status?: "active" | "blocked";
@@ -457,7 +499,7 @@ export interface ChatSummary {
   /** Durable recovery state that needs attention after an interrupted turn. */
   recoveryState?: RecoveryState | null;
   workspaceScope?: WorkspaceScopePayload | null;
-  /** Server-owned project binding after the first accepted user message. */
+  /** Persisted sessions keep their project; only unpersisted drafts can change it. */
   projectLocked?: boolean;
   /** Stable, server-owned @handle for this session. */
   handle?: SessionHandle | null;
@@ -1534,7 +1576,8 @@ export type InboundEvent =
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
-  | (NotificationEvent & InboundTurnMetadata)
+  | (Exclude<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata)
+  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection })
   | ({
       event: "file_edit";
       chat_id: string;
@@ -1589,6 +1632,19 @@ export type InboundEvent =
       fallback?: boolean;
       reauth_provider?: string;
     }
+  | ({
+      event: "model_request";
+      request_usage?: TurnUsage | null;
+      context_graph?: ContextGraph;
+      chat_id: string;
+      request_id: string;
+      run_id: string;
+      sequence: number;
+      phase: "started" | "completed" | "failed" | "cancelled";
+      usage?: TurnUsage;
+      round_usages?: RoundUsage[];
+      context_window_tokens?: number;
+    } & InboundTurnMetadata)
   | ({
       event: "turn_end";
       chat_id: string;
@@ -1656,6 +1712,7 @@ export type InboundEvent =
     };
 
 type ThreadProjectionEventName =
+  | "model_request"
   | "user_message"
   | "message"
   | "file_edit"
@@ -1706,7 +1763,6 @@ export interface OutboundMcpPresetMention {
   brand_color?: string | null;
 }
 
-/** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
 interface WebuiThreadPagePayload {
   before_cursor?: string | null;
   has_more_before?: boolean;

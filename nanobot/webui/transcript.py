@@ -1,5 +1,3 @@
-"""WebUI history projection over durable SQLite session facts."""
-
 from __future__ import annotations
 
 import base64
@@ -29,6 +27,12 @@ from nanobot.session.display_history import (
     HISTORY_GENERATION_METADATA_KEY,
     HistoryFact,
     HistoryReader,
+)
+from nanobot.session.history_graph import (
+    decode_graph,
+    decode_snapshot,
+    graph_decoding,
+    graph_size_adjustment,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
@@ -83,6 +87,7 @@ _TURN_DISPLAY_EVENTS: frozenset[str] = frozenset({
     "stream_end",
     "message",
     "file_edit",
+    "model_request",
     "turn_end",
 })
 MAX_SESSION_MENTIONS = 8
@@ -91,7 +96,6 @@ _SESSION_HANDLE_ID_RE = re.compile(r"^handle_[0-9a-f]{32}$")
 
 
 def _response_sources(value: object) -> list[dict[str, str | bool]]:
-    """Allow only recorded display identity, never settings or credential blobs."""
     if not isinstance(value, list):
         return []
     result: list[dict[str, str | bool]] = []
@@ -236,7 +240,7 @@ def _record_json_line(record: dict[str, Any]) -> str:
 def _records_bytes(records: list[dict[str, Any]]) -> int:
     total = 0
     for record in records:
-        total += len(_record_json_line(record).encode("utf-8")) + 1
+        total += len(_record_json_line(record).encode("utf-8")) + graph_size_adjustment(record) + 1
     return total
 
 
@@ -251,7 +255,6 @@ def _stream_key(record: dict[str, Any], stream: str) -> tuple[str, str, str]:
 
 
 def _projection_receipts(records: Sequence[Mapping[str, Any]]) -> list[_ProjectionReceipt]:
-    """Compress actual represented facts by turn, without covering missing sequences."""
     members: dict[str, set[int]] = {}
     for record in records:
         turn_id, sequence = record.get("turn_id"), record.get("turn_seq")
@@ -277,7 +280,6 @@ def _compact_completed_stream_deltas(
     *,
     include_projection_receipts: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Fold transport deltas into canonical end records for a completed turn."""
     if not turn or turn[-1].get("event") != "turn_end":
         return turn, 0
 
@@ -594,20 +596,39 @@ class WebUITranscriptRecorder:
     async def append(
         self, chat_id: str, event: dict[str, Any], *, metadata: dict[str, Any] | None,
     ) -> bool:
+        return await self.append_many(chat_id, [event], metadata=metadata)
+
+    async def append_many(
+        self, chat_id: str, events: Sequence[dict[str, Any]], *, metadata: dict[str, Any] | None,
+    ) -> bool:
         if self.sessions is None:
             return True  # A transport-only channel has no durable session service.
         generation = (metadata or {}).get(HISTORY_GENERATION_METADATA_KEY)
         if not isinstance(generation, str) or not generation:
             self._log.warning("history event has no admitted generation for {}", chat_id)
             return False
+        facts: list[HistoryFact] = []
+        valid = True
+        for event in events:
+            try:
+                fact = fact_from_record(_record_for_append(event))
+                facts.append(fact)
+            except (ValueError, TypeError) as exc:
+                self._log.warning("history append failed for {}: {}", chat_id, exc)
+                valid = False
+        if not facts:
+            return False
         try:
-            fact = fact_from_record(_record_for_append(event))
-            await self.sessions.state.append_history(webui_session_key(chat_id), [fact],
-                                                     expected_generation=generation)
+            errors = await self.sessions.state.append_history(webui_session_key(chat_id), facts,
+                                                              expected_generation=generation,
+                                                              skip_invalid=len(events) > 1)
+            for error in errors:
+                self._log.warning("history append failed for {}: {}", chat_id, error)
+            valid = valid and not errors
         except (OSError, ValueError, TypeError, sqlite3.Error, SessionConflictError, SessionOperationQueueFullError) as exc:
             self._log.warning("history append failed for {}: {}", chat_id, exc)
             return False
-        return True
+        return valid
 
     def _next_turn_seq(self, chat_id: str, turn_id: str) -> int:
         key = (chat_id, turn_id)
@@ -929,7 +950,6 @@ def _stable_record_digest(record: dict[str, Any]) -> str:
 
 
 def _ensure_replay_identities(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Give backfilled/recovered rows a stable identity beside persisted rows."""
     annotated: list[dict[str, Any]] = []
     for fallback_turn_index, turn in enumerate(_split_transcript_turns(lines)):
         anchor = next(
@@ -970,7 +990,6 @@ def _ensure_replay_identities(lines: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def _transcript_turn_signature(records: list[dict[str, Any]]) -> tuple[str, ...]:
-    """Return durable assistant answer texts used only for backfill matching."""
     texts: list[str] = []
     stream_parts: list[str] = []
 
@@ -1324,7 +1343,7 @@ def build_webui_trace_detail_response(
         events = [
             event
             for record in lines[group.start:group.stop]
-            if (
+            if record.get("event") != "model_request" and (
                 event := _client_projection_event(
                     record,
                     augment_user_media=None,
@@ -1523,13 +1542,30 @@ def _client_projection_event(
             "compaction_id": compaction_id,
             "phase": phase,
         }
+        if (snapshot := decode_snapshot(record.get("context_snapshot"))) is not None:
+            projected["context_snapshot"] = snapshot
         reason = record.get("reason")
         if isinstance(reason, str) and reason in {"idle", "context_pressure", "manual", "provider_native"}:
             projected["reason"] = reason
         return projected
 
-    if event == "turn_end":
-        projected = {"event": "turn_end", **common}
+    if event in {"turn_end", "model_request"}:
+        projected = {"event": event, **common}
+        if event == "model_request":
+            request_id, run_id = record.get("request_id"), record.get("run_id")
+            sequence, phase = record.get("sequence"), record.get("phase")
+            if (
+                not isinstance(request_id, str) or not request_id
+                or not isinstance(run_id, str) or not run_id
+                or not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1
+                or phase not in ("started", "completed", "failed", "cancelled")
+            ):
+                return None
+            projected.update(request_id=request_id, run_id=run_id, sequence=sequence, phase=phase)
+            if "request_usage" in record:
+                projected["request_usage"] = _sanitize_turn_usage(record["request_usage"]) or None
+            if (graph := decode_graph(record.get("context_graph"))) is not None:
+                projected["context_graph"] = graph
         latency_ms = record.get("latency_ms")
         if isinstance(latency_ms, int | float) and latency_ms >= 0:
             projected["latency_ms"] = int(latency_ms)
@@ -1543,8 +1579,8 @@ def _client_projection_event(
                 for item in cast(list[object], raw_round_usages)
                 if (sanitized := _sanitize_turn_usage(item)) is not None
             ]
-            if round_usages:
-                projected["round_usages"] = round_usages
+            if round_usages or event == "model_request":
+                projected["round_usages"] = round_usages[-8:] if event == "model_request" else round_usages
         context_window = record.get("context_window_tokens")
         if isinstance(context_window, int | float) and context_window >= 0:
             projected["context_window_tokens"] = int(context_window)
@@ -1562,7 +1598,6 @@ def _client_projection_event(
 def _client_projection_deferred_trace_groups(
     lines: list[dict[str, Any]],
 ) -> dict[int, _DeferredTraceGroup]:
-    """Group oversized consecutive activity events behind one stable detail ref."""
     groups: dict[int, _DeferredTraceGroup] = {}
     start: int | None = None
     detail_bytes = 0
@@ -1585,6 +1620,10 @@ def _client_projection_deferred_trace_groups(
         trace_count = 0
 
     for index, record in enumerate(lines):
+        # Usage belongs to the turn, not the activity body. It must not split
+        # one deferred tool group into many eagerly loaded fragments.
+        if record.get("event") == "model_request":
+            continue
         is_activity = (
             record.get("event") == "message"
             and record.get("kind") in {"tool_hint", "progress"}
@@ -1615,7 +1654,6 @@ def _client_projection_deferred_trace_groups(
 
 
 def _client_projection_page_event_count(turn: list[dict[str, Any]]) -> int:
-    """Apply the soft page limit in canonical protocol events, not UI rows."""
     supported = {
         "user",
         "delta",
@@ -1625,6 +1663,7 @@ def _client_projection_page_event_count(turn: list[dict[str, Any]]) -> int:
         "message",
         "file_edit",
         "context_compaction",
+        "model_request",
         "turn_end",
     }
     return max(1, sum(record.get("event") in supported for record in turn))
@@ -1642,7 +1681,7 @@ def _client_projection_events(
     deferred_groups = _client_projection_deferred_trace_groups(lines)
     deferred_until = 0
     for index, record in enumerate(lines):
-        if index < deferred_until:
+        if index < deferred_until and record.get("event") != "model_request":
             continue
         if record.get("event") == WEBUI_FORK_MARKER_EVENT:
             if fork_boundary_event_index is None:
@@ -1669,7 +1708,10 @@ def _client_projection_events(
             )
             event["text"] = _trace_summary(last_text)
             event.pop("tool_events", None)
-            receipts = _projection_receipts(lines[group.start:group.stop])
+            receipts = _projection_receipts([
+                grouped for grouped in lines[group.start:group.stop]
+                if grouped.get("event") != "model_request"
+            ])
             if receipts:
                 event["projection_receipts"] = receipts
             if detail_ref is not None:
@@ -1753,6 +1795,7 @@ def build_session_thread_response(
             "active_turn_id": turn_id if active else None}
 
 
+@graph_decoding()
 def build_webui_thread_response(
     session_key: str,
     *,
@@ -1771,8 +1814,9 @@ def build_webui_thread_response(
     before: str | None = None,
     after: str | None = None,
     stats: TranscriptReplayStats | None = None,
+    include_model_requests: bool = False,
 ) -> dict[str, Any] | None:
-    """Return canonical transcript events for the WebUI projector."""
+    """Return canonical events, hiding additive request events from old clients."""
     replay_stats = stats or TranscriptReplayStats()
     lines, page = _select_transcript_page(
         history=history,
@@ -1855,6 +1899,14 @@ def build_webui_thread_response(
         augment_assistant_media=augment_assistant_media,
         augment_assistant_text=augment_assistant_text,
     )
+    if not include_model_requests:
+        # Select pages and stable identities before capability filtering, so an
+        # older client's cursors still navigate the same durable transcript.
+        if fork_boundary_event_index is not None:
+            fork_boundary_event_index = sum(
+                event["event"] != "model_request" for event in events[:fork_boundary_event_index]
+            )
+        events = [event for event in events if event["event"] != "model_request"]
     replay_stats.replay_ms += int((time.perf_counter() - replay_started) * 1000)
     payload["projection"] = "events"
     payload["events"] = events

@@ -1,5 +1,3 @@
-"""Tests for nanobot.agent.tools.sandbox."""
-
 import shlex
 from pathlib import Path
 
@@ -136,7 +134,6 @@ class TestBwrapBackend:
         assert "/etc/ssl/certs" in try_targets
 
     def test_media_dir_ro_bind(self, tmp_path, monkeypatch):
-        """Media directory should be read-only mounted inside the sandbox."""
         fake_media = tmp_path / "media"
         fake_media.mkdir()
         monkeypatch.setattr(
@@ -298,7 +295,6 @@ class TestSeatbeltBackend:
         assert parent_deny < workspace_allow
 
     def test_no_parent_deny_when_workspace_is_the_root(self):
-        """Denying `/` would override the root read rule and break startup."""
         profile = self._profile(wrap_command("seatbelt", "ls", "/", "/"))
 
         assert "(deny file-read*" not in profile
@@ -316,7 +312,6 @@ class TestSeatbeltBackend:
         assert f"(literal {self._quote(ws.parent)})" in self._metadata_rule(profile)
 
     def test_config_dir_is_searchable_but_not_listable(self, tmp_path):
-        """Metadata only: `cd workspace` works, `ls ..` and `cat ../config.json` do not."""
         ws = (tmp_path / "project").resolve()
         profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
 
@@ -456,7 +451,6 @@ class TestSeatbeltBackend:
         assert f"(allow file-read* file-write* (subpath {self._quote(cache_dir)}))" in profile
 
     def test_custom_workspace_parent_binds_are_ignored(self, tmp_path):
-        """A bind must not uncover the masked config directory."""
         ws = tmp_path / "private" / "project"
         parent = ws.parent.resolve(strict=False)
 
@@ -481,7 +475,6 @@ class TestSeatbeltBackend:
         assert f'(allow file-read* file-write* (subpath "{escaped}"))' in profile
 
     def test_sbpl_quote_escapes_special_characters(self):
-        """Backslashes and double quotes must be escaped with C-style escaping."""
         assert _sbpl_quote(r'path\with"quotes') == r'"path\\with\"quotes"'
 
 

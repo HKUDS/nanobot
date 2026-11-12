@@ -1,1 +1,0 @@
-"""QQ channel package."""

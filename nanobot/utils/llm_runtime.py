@@ -1,5 +1,3 @@
-"""Immutable execution settings for one LLM turn."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, replace

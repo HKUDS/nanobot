@@ -1,4 +1,3 @@
-"""Optional nanobot feature discovery and enablement."""
 from __future__ import annotations
 
 import json
@@ -664,11 +663,6 @@ def _install_feature_dependencies(
     allow_install: bool,
     runner: Any,
 ) -> bool:
-    """Ensure one feature's declared dependencies are present.
-
-    Returns ``True`` only when this call ran an installer. Package-install
-    authorization belongs here so every WebUI action gets the same policy.
-    """
     if not dependencies or extra_installed(name, dependencies):
         return False
     if not allow_install:
@@ -869,7 +863,6 @@ def ensure_enabled_channel_dependencies(
 
 
 def _feature_requires_restart(name: str, *, is_channel: bool) -> bool:
-    """Return whether an installed feature needs the running engine rebuilt."""
     if is_channel:
         return True
     # These libraries are imported lazily or used by a newly spawned service.

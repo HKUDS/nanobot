@@ -1,5 +1,3 @@
-"""WebUI projection of durable session facts and strict legacy transcript import."""
-
 from __future__ import annotations
 
 import json
@@ -13,6 +11,7 @@ from typing import Any, cast
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA
 from nanobot.config.paths import get_webui_dir
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
+from nanobot.session.history_graph import expand_graph_fields
 from nanobot.session.manager import SessionInfo, SessionManager
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_chat_id, webui_session_key
 
@@ -27,6 +26,7 @@ _EVENTS = {
     "turn_end": HistoryKind.COMPLETION,
     "fork_marker": HistoryKind.FORK_BOUNDARY,
     "context_compaction": HistoryKind.COMPACTION,
+    "model_request": HistoryKind.MODEL_REQUEST,
     "delta": HistoryKind.ANSWER_FRAGMENT,
     "reasoning_delta": HistoryKind.REASONING_FRAGMENT,
 }
@@ -41,6 +41,7 @@ _CONTENT_FIELDS = frozenset({
     "merge_next", "latency_ms", "usage", "round_usages", "context_window_tokens", "goal_state",
     "outcome", "failure_kind", "failure_error_kind", "failure_attempts", "failure_message",
     "transcript_incomplete", "stream_id", "compaction_id", "phase", "reason", "render_as",
+    "request_usage", "request_id", "run_id", "sequence", "context_graph", "context_snapshot",
 })
 
 
@@ -75,14 +76,14 @@ def fact_from_record(record: Mapping[str, Any]) -> HistoryFact:
     return fact
 
 
-def record_from_fact(fact: HistoryFact, key: str) -> dict[str, Any]:
+def record_from_fact(fact: HistoryFact, key: str, *, expand_graphs: bool = True) -> dict[str, Any]:
     if fact.kind in _MESSAGE_KINDS.values():
         event = "message"
         message_kind = next(name for name, kind in _MESSAGE_KINDS.items() if kind is fact.kind)
     else:
         event = next(name for name, kind in _EVENTS.items() if kind is fact.kind)
         message_kind = None
-    record = {"event": event, "chat_id": webui_chat_id(key), **fact.content,
+    record = {"event": event, "chat_id": webui_chat_id(key), **(expand_graph_fields(fact.content) if expand_graphs else fact.content),
               "created_at_ms": fact.created_at_ms}
     if message_kind:
         record["kind"] = message_kind
@@ -98,7 +99,7 @@ def record_from_fact(fact: HistoryFact, key: str) -> dict[str, Any]:
 def turn_records(
     history: HistoryReader, ordinal: int, *, max_records: int | None = None, max_bytes: int | None = None,
 ) -> list[dict[str, Any]]:
-    return [{**record_from_fact(fact, history.key),
+    return [{**record_from_fact(fact, history.key, expand_graphs=False),
              "_webui_replay_identity": f"turn:{ordinal}:record:{position}"}
             for position, fact in history.read_entries(ordinal, max_records=max_records, max_bytes=max_bytes)]
 
@@ -158,20 +159,27 @@ def collect_legacy_history(
         keys_by_stem.setdefault(SessionManager.safe_key(session["key"]), set()).add(session["key"])
     foreign_owners: dict[str, list[Path]] = {}
     if namespace is not None and groups:
-        for database in namespace.parent.glob("*/sessions.sqlite3"):
-            if database.parent == namespace:
+        for other_namespace in namespace.parent.iterdir():
+            if other_namespace == namespace or not other_namespace.is_dir():
                 continue
-            if database.is_symlink() or database.parent.is_symlink():
-                raise ValueError(f"invalid session namespace for history migration: {database}")
-            with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
-                owned = {str(row[0]) for row in db.execute("SELECT key FROM sessions")}
-                prefix = f"{HISTORY_IMPORT_MARKER}:"
-                owned.update(str(row[0])[len(prefix):] for row in db.execute(
-                    "SELECT key FROM storage_meta WHERE key LIKE ? AND value='complete'",
-                    (prefix + "%",),
-                ))
-                for key in owned:
-                    foreign_owners.setdefault(key, []).append(database)
+            database = other_namespace / "sessions.sqlite3"
+            if database.is_symlink() or other_namespace.is_symlink():
+                raise ValueError(f"invalid session namespace for history migration: {other_namespace}")
+            if database.exists():
+                # SQLite and deletion receipts take precedence over retained JSONL backups.
+                with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+                    owned = {str(row[0]) for row in db.execute("SELECT key FROM sessions")}
+                    prefix = f"{HISTORY_IMPORT_MARKER}:"
+                    owned.update(str(row[0])[len(prefix):] for row in db.execute(
+                        "SELECT key FROM storage_meta WHERE key LIKE ? AND value='complete'",
+                        (prefix + "%",),
+                    ))
+            else:
+                from nanobot.session.jsonl_migration import read_jsonl
+
+                owned = {read_jsonl(path)[0].key for path in other_namespace.glob("*.jsonl")}
+            for key in owned:
+                foreign_owners.setdefault(key, []).append(other_namespace)
     imports: list[HistoryImport] = []
     for stem, paths in groups.items():
         records = [record for path in paths for record in _read_legacy_file(path)]
@@ -206,6 +214,7 @@ def collect_legacy_history(
     return imports
 
 
+# TODO(0.5.0): Remove legacy WebUI history import and startup hooks; retain throughout 0.4.x.
 async def initialize_history(sessions: SessionManager) -> None:
     """Finish the once-only import before recovery or transport admission."""
     await sessions.state.migrate_history(

@@ -1,5 +1,3 @@
-"""Retain runner activity on Session messages without changing model input."""
-
 from __future__ import annotations
 
 from copy import deepcopy

@@ -504,5 +504,12 @@
     "view": "View invitation",
     "dismissed": "Never remind again selected in preview",
     "starred": "GitHub link selected in preview"
+  },
+  "sidebarPanel": {
+    "title": "Sidebar panel",
+    "toggle": "Toggle sidebar",
+    "content": "Details stay inside the current pane.",
+    "description": "A nonmodal side panel with a shared opening transition.",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

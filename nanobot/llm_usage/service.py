@@ -1,5 +1,3 @@
-"""Unified, content-free LLM usage backend."""
-
 from __future__ import annotations
 
 import threading

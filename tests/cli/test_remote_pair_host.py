@@ -1,5 +1,3 @@
-"""Pairing knows whose public IP it needs, without querying arbitrary metadata."""
-
 import http.client
 from pathlib import Path
 from unittest.mock import Mock

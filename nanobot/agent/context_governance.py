@@ -101,7 +101,6 @@ def _request_extends_measured(
     measured: list[dict[str, Any]],
     current: list[dict[str, Any]],
 ) -> bool:
-    """Return whether measured messages are an unchanged prefix of the request."""
     return len(current) >= len(measured) and all(
         current[index] == measured[index] for index in range(len(measured))
     )
@@ -257,6 +256,11 @@ class ModelRequestState:
     provider_compaction_applied: bool = False
     compacted_tool_results: set[str] = field(default_factory=set)
     events: EventSink = NO_EVENTS
+    request_run_id: str = field(default_factory=lambda: uuid4().hex)
+    request_sequence: int = 0
+    request_usage: LLMUsage | None = None
+    # Reported usage per runner round; recovery requests update the same slot.
+    recent_round_usages: list[LLMUsage | None] = field(default_factory=list)
 
 
 class ContextGovernor:
@@ -463,7 +467,6 @@ class ContextGovernor:
         *,
         tool_definitions: list[dict[str, Any]] | None,
     ) -> tuple[list[dict[str, Any]], dict[str, str]]:
-        """Make oversized, unread file results recoverable after history compaction."""
         notice = (
             "Error: read_file result was not sent because the combined request exceeds "
             "the context budget. No file was modified by this recovery. Read one file at a time "
@@ -629,7 +632,6 @@ class ContextGovernor:
         *,
         tool_definitions: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
-        """Replace accepted history H with a checkpoint while preserving delta."""
         measured, _source = pressure
         compaction_id = uuid4().hex
         await state.events.emit(

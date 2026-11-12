@@ -1,6 +1,3 @@
-"""Tests for core AgentRunner behavior: message passing, iteration limits,
-empty-response handling, usage accumulation, and config passthrough."""
-
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -11,6 +8,7 @@ from agent.runner_helpers import make_run_spec
 from nanobot.agent.context import TranscriptInput
 from nanobot.agent.context_governance import ContextWindowExceededError
 from nanobot.config.schema import AgentDefaults
+from nanobot.events import EventSink, ModelRequestEvent
 from nanobot.providers.base import (
     LLMProvider,
     LLMResponse,
@@ -612,6 +610,7 @@ async def test_runner_returns_max_iterations_fallback():
 async def test_runner_uses_no_tools_finalization_after_max_iterations():
     from nanobot.agent.runner import AgentRunner
 
+    publish = AsyncMock()
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
@@ -647,6 +646,7 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        events=EventSink(publish),
     ))
 
     assert result.stop_reason == "max_iterations"
@@ -667,6 +667,10 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
         (1, 1),
         (10, 7),
     ]
+    completed = [call.args[0] for call in publish.await_args_list
+                 if isinstance(call.args[0], ModelRequestEvent) and call.args[0].phase == "completed"]
+    assert completed[-1].round_usages == tuple(result.round_usages)
+    assert completed[-1].usage == result.usage
 
 
 @pytest.mark.asyncio
@@ -674,6 +678,7 @@ async def test_runner_accounts_for_malformed_retry_and_no_tools_recovery():
     from nanobot.agent.hook import AgentHook
     from nanobot.agent.runner import AgentRunner
 
+    publish = AsyncMock()
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
@@ -706,6 +711,7 @@ async def test_runner_accounts_for_malformed_retry_and_no_tools_recovery():
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         hook=hook,
+        events=EventSink(publish),
     ))
 
     assert result.final_content == "recovered answer"
@@ -725,6 +731,11 @@ async def test_runner_accounts_for_malformed_retry_and_no_tools_recovery():
     assert result.usage is not None
     assert (result.usage.input_tokens, result.usage.output_tokens) == (60, 6)
     assert [(item.input_tokens, item.output_tokens) for item in result.round_usages] == [(60, 6)]
+    completed = [call.args[0] for call in publish.await_args_list
+                 if isinstance(call.args[0], ModelRequestEvent) and call.args[0].phase == "completed"]
+    assert [len(event.round_usages) for event in completed] == [1, 1, 1]
+    assert completed[-1].round_usages == tuple(result.round_usages)
+    assert completed[-1].usage == result.usage
 
 
 @pytest.mark.asyncio
@@ -767,9 +778,9 @@ async def test_runner_replaces_empty_tool_result_with_marker():
 
 @pytest.mark.asyncio
 async def test_runner_retries_empty_final_response_with_summary_prompt():
-    """Empty responses get 2 silent retries before finalization kicks in."""
     from nanobot.agent.runner import AgentRunner
 
+    publish = AsyncMock()
     provider = MagicMock(spec=LLMProvider)
     calls: list[dict] = []
 
@@ -798,10 +809,10 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        events=EventSink(publish),
     ))
 
     assert result.final_content == "final answer"
-    # 2 silent retries (iterations 0,1) + finalization on iteration 1
     assert len(calls) == 3
     assert calls[0]["tools"] is not None
     assert calls[1]["tools"] is not None
@@ -814,6 +825,10 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
         (5, 1),
         (3, 7),
     ]
+    completed = [call.args[0] for call in publish.await_args_list
+                 if isinstance(call.args[0], ModelRequestEvent) and call.args[0].phase == "completed"]
+    assert completed[-1].round_usages == tuple(result.round_usages)
+    assert completed[-1].usage == result.usage
 
 
 @pytest.mark.asyncio
@@ -869,7 +884,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        continuation_callback=AsyncMock(return_value="Continue working."),
+        continuation_callback=AsyncMock(return_value="Continue the goal."),
         terminal_injection_callback=terminal_injection_callback,
     ))
 
@@ -881,7 +896,6 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
 
 @pytest.mark.asyncio
 async def test_runner_uses_specific_message_after_empty_finalization_retry():
-    """After silent retries + finalization all return empty, stop_reason is empty_final_response."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -959,7 +973,6 @@ async def test_empty_finalization_retry_discards_candidate_provider_state():
 
 @pytest.mark.asyncio
 async def test_runner_length_recovery_returns_all_segments():
-    """Recovered output segments are returned together instead of only the tail."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -991,7 +1004,6 @@ async def test_runner_length_recovery_returns_all_segments():
 
 @pytest.mark.asyncio
 async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
-    """Budget exhaustion must not replace output already produced by recovery."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -1013,6 +1025,7 @@ async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
         max_iterations_message="limit reached",
     ))
 
+    assert provider.chat_stream_with_retry.await_count == 1
     assert result.stop_reason == "max_iterations"
     assert result.final_content == "partial answer\n\nlimit reached"
     assert result.pending_stream_content == "\n\nlimit reached"
@@ -1025,7 +1038,6 @@ async def test_runner_length_recovery_preserves_prefix_at_max_iterations():
 
 @pytest.mark.asyncio
 async def test_runner_length_recovery_does_not_leak_across_tool_calls():
-    """A recovered prefix belongs only to its contiguous response chain."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -1116,7 +1128,6 @@ async def test_runner_empty_response_does_not_break_tool_chain():
 
 @pytest.mark.asyncio
 async def test_runner_accumulates_usage_and_preserves_cache_reads():
-    """Runner accumulates usage across iterations, including cache reads."""
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -1150,11 +1161,10 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    # Usage should be accumulated across iterations
     assert result.usage is not None
-    assert result.usage.input_tokens == 300  # 100 + 200
-    assert result.usage.output_tokens == 30  # 10 + 20
-    assert result.usage.cache_read_tokens == 230  # 80 + 150
+    assert result.usage.input_tokens == 300
+    assert result.usage.output_tokens == 30
+    assert result.usage.cache_read_tokens == 230
     assert result.usage.context_tokens == 200
     assert result.usage.request_count == 2
     assert [
@@ -1168,7 +1178,6 @@ async def test_runner_accumulates_usage_and_preserves_cache_reads():
 
 @pytest.mark.asyncio
 async def test_runner_carries_retry_notifications_in_provider_context():
-    """The runner carries a generic scope, not an event-specific callback."""
     from nanobot.agent.runner import AgentRunner
     from nanobot.events import EventSink, RetryWaitEvent
 
@@ -1201,17 +1210,11 @@ async def test_runner_carries_retry_notifications_in_provider_context():
     assert "on_retry_wait" not in captured
     event = RetryWaitEvent("waiting")
     await captured["provider_context"].events.emit(event)
-    retry_wait_cb.assert_awaited_once_with(event)
-
-
-# ---------------------------------------------------------------------------
-# Config passthrough tests
-# ---------------------------------------------------------------------------
+    retry_wait_cb.assert_any_await(event)
 
 
 @pytest.mark.asyncio
 async def test_runner_passes_generation_settings_to_provider():
-    """Non-default generation settings should reach provider.chat_stream_with_retry."""
     from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}

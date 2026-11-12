@@ -111,6 +111,10 @@ Tasks in persistent topics can continue while the connection is lost. Status and
 
 The context indicator beside the model badge shows context-window usage. **Recent rounds** includes token usage, generation time and KV cache hits when reported. Provider figures may be estimated or unavailable and are not a billing statement.
 
+Open the file graph to see files used since the latest compaction and local Markdown references discovered in those files. Click a node to see its estimated token count or open the file, and drag across the usage bar or use replay to review earlier rounds. A loaded node means the file was read or supplied during this phase; it does not guarantee that the whole file, or its original text, remains in the model's current request. Compaction starts a new replay phase; its graph appears with the next request. Previously saved snapshots remain readable, but missing historical snapshots are not reconstructed from current files.
+
+Switching topics closes the previous topic's graph. Reopen it from the context indicator for the selected topic. Large or continuously growing graphs may be less responsive on slower devices.
+
 During compaction, the model switches to a summary plus subsequent messages; the original messages remain in chat history. Use `/compact` to compact the current topic manually. See [Memory](./memory.md) for compaction and Dream consolidation.
 
 ### File and diagram previews
@@ -161,7 +165,13 @@ Temporary does not mean consequence-free. Requests still go to the configured mo
 
 ## Workspace and Access
 
+Project selection and Full Access controls require an owner-authenticated WebUI connection. Ordinary WebSocket clients stay within the workspace and access mode configured by the operator; an owner's saved topic scope or WebUI preference does not grant a client additional access. Existing topics remain available to the owner, while clients attempting to resume a topic outside their configured authority receive an error instead of silently changing its scope. Legacy plain-text clients use the same permission boundary. Keep the configured `tokenIssueSecret` (or fallback `token`) private: it can issue owner credentials. Share short-lived client connection tokens, not that owner secret.
+
+With unified sessions, inputs with different workspace permissions wait for the active turn to finish, then run with their own permissions. Inputs with the same scope can still join the active turn.
+
 Use the workspace picker to browse folders on the connected nanobot host, enter an absolute path, or return to recent and starred projects; favorites persist across gateway restarts. The host name appears above saved locations. Project paths refer to that machine, not the browser's filesystem.
+
+Choose the project when starting a new topic. Saved topics, including forks, keep their project directory fixed. Start a new topic for another project. You can still change access mode within the same project while the topic is idle.
 
 Browsing does not change the topic's workspace until you choose **Confirm**. **Filter this folder** searches only the current directory. **Cmd/Ctrl+Shift+G** opens host-path entry, with Tab completion; **Last visited folder** returns to the previous location.
 
@@ -175,7 +185,7 @@ Selecting a project does not replace the configured agent workspace. The two pat
 | Relative file paths and shell working directory | Long-term memory and history |
 | The normal read/write boundary in Restricted mode | Custom skills and instance state |
 
-A new topic separates conversation history; a project selection changes the file working directory. Neither creates a separate long-term memory store. Project switching can therefore carry preferences and facts learned in other topics into the new project. Use [separate instances](./multiple-instances.md) when client or user data must stay separate; see [Memory](./memory.md) for how shared memory is maintained.
+A new topic separates conversation history; a project selection changes the file working directory. Neither creates a separate long-term memory store. Choosing another project for a new topic can therefore carry preferences and facts learned in other topics into the new project. Use [separate instances](./multiple-instances.md) when client or user data must stay separate; see [Memory](./memory.md) for how shared memory is maintained.
 
 Project-local `SOUL.md` and `USER.md` files are ignored, and the agent workspace's `AGENTS.md` is not inherited by a separately selected project. When the selected project is the configured agent workspace, both roles naturally use the same directory.
 
@@ -240,6 +250,8 @@ Open **Skills → Installed** to review built-in and workspace-provided skills. 
 Open **Skills → Discover** to browse or search skills from skills.sh and SkillHub. A marketplace skill is copied into the active agent workspace after you confirm the installation. skills.sh installation requires Node.js with `npx`; SkillHub installation does not.
 
 Marketplace skills are third-party instructions and may include executable scripts. Review the source and instructions before installing one, and enable only skills you trust with the same files, tools, and credentials available to your agent.
+
+Discover marks a skill as installed only when its recorded marketplace source matches. A skill with the same name from another source is a name conflict, not another installed copy. Older or manually copied skills without a source record remain usable and show “Installed source unknown.” Review the existing skill in **Installed** before removing it if you want a different source; installation never replaces it automatically. New installs keep a small `.nanobot-origin.json` receipt beside `SKILL.md`. Keep that receipt with the skill when moving or backing up the workspace. Older nanobot versions ignore it; no skill-directory rename or history migration is required.
 
 ## Automations
 

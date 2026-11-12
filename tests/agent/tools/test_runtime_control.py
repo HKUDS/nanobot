@@ -1,5 +1,3 @@
-"""Contract and security regressions for the MyTool runtime boundary."""
-
 from __future__ import annotations
 
 import asyncio
@@ -73,7 +71,6 @@ def wire_request(request):
             max_tokens=100, temperature=0.7, reasoning_effort=None,
             tool_choice=call.get("tool_choice"),
         )
-        # Keep the protocol's real item shape, but use one name for prefix comparisons.
         if "input" in body:
             body["messages"] = body.pop("input")
         return body
@@ -302,7 +299,6 @@ async def test_workspace_inspection_matches_registered_file_tool(
     definitions = json.dumps(loop.tools.get_definitions(), sort_keys=True)
     token = bind_workspace_scope(build_workspace_scope(project, mode))
     try:
-        # Legacy display writes must not spoof the effective directory or permission.
         await tool.execute(action="set", key="workspace", value=str(outside.parent))
         status = tool._runtime_control.snapshot().workspace_sandbox
         assert status["workspace_root"] == str(project.resolve())
@@ -320,7 +316,6 @@ async def test_workspace_inspection_matches_registered_file_tool(
         assert "project marker" in await loop.tools.execute("read_file", {"path": "marker.txt"})
         result = await loop.tools.execute("read_file", {"path": str(outside)})
         assert ("outside allowed directory" if restricted else "outside marker") in result
-        # The directory and permission enter tool results, not the reusable tool schemas.
         assert json.dumps(loop.tools.get_definitions(), sort_keys=True) == definitions
         status["workspace_root"] = "changed snapshot"
         assert tool._runtime_control.snapshot().workspace_sandbox["workspace_root"] == str(project.resolve())
@@ -429,7 +424,6 @@ async def test_workspace_context_uses_request_scope_not_active_tool_scope(
     loop = _make_loop(tmp_path / "agent", sandbox=sandbox)
     control = _my_tool(loop)._runtime_control
     scope = build_workspace_scope(tmp_path / "new-project", mode)
-    # Pending user inputs are prepared while the earlier turn is still bound.
     token = bind_workspace_scope(build_workspace_scope(tmp_path / "old-project", "restricted"))
     try:
         block = await control.workspace_context(RequestContext("websocket", "chat", workspace_scope=scope))
@@ -486,7 +480,6 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
         )
     calls = provider.chat_stream_with_retry.await_args_list
     first, second, third = [LLMProvider._sanitize_empty_content(call.kwargs["messages"]) for call in calls]
-    # Access changes belong to the new request, not a rewrite of the cached history.
     assert json.dumps(second[:len(first)]) == json.dumps(first)
     assert "File access: project and tool-specific allowed paths only." in first[-1]["content"]
     assert "File access: no workspace restriction." in second[-1]["content"]
@@ -507,7 +500,8 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) -> None:
+@pytest.mark.parametrize("same_scope", [True, False])
+async def test_followup_only_joins_matching_tool_scope(tmp_path: Path, same_scope: bool) -> None:
     project = tmp_path / "project"
     project.mkdir()
     (project / "marker.txt").write_text("active project", encoding="utf-8")
@@ -524,7 +518,8 @@ async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) 
     session.add_message("user", "Start")
     await loop.sessions.state.prepare_input(session)
     pending = asyncio.Queue()
-    await pending.put(InboundMessage("telegram", "user", "chat", "Read marker.txt"))
+    followup = InboundMessage("websocket" if same_scope else "telegram", "user", "chat", "Read marker.txt")
+    await pending.put(followup)
     await loop._run_agent_loop(
         TranscriptInput(history=session.get_history(), current_message=None),
         runtime=loop.llm_runtime(), session=session, pending_queue=pending,
@@ -532,8 +527,14 @@ async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) 
     )
     calls = loop.provider.chat_stream_with_retry.await_args_list
     context = calls[0].kwargs["messages"][-1]["content"]
-    assert json.dumps(str(project.resolve())) in context
-    assert "File access: project and tool-specific allowed paths only." in context
+    if same_scope:
+        assert json.dumps(str(project.resolve())) in context
+        assert "File access: project and tool-specific allowed paths only." in context
+        assert pending.empty()
+    else:
+        assert context == "Start"
+        assert pending.get_nowait() is followup
+        assert pending.empty()
     assert any(message.get("role") == "tool" and "active project" in message["content"]
                for message in calls[1].kwargs["messages"])
 
@@ -586,7 +587,6 @@ async def test_workspace_context_compaction_reuses_serialized_prefix(
     assert compact_wire[:len(first_wire)] == first_wire
     assert compact["tools"] == first["tools"]
     before, after = wire_request(first), wire_request(compact)
-    # JSON object field order is not model input; preserve every value and array order.
     assert json.dumps(
         after["messages"][:len(before["messages"])], sort_keys=True,
     ) == json.dumps(before["messages"], sort_keys=True)
@@ -616,7 +616,6 @@ async def test_workspace_context_transient_retry_keeps_exact_wire_request(
             )
         return LLMResponse(content="done")
 
-    # Keep the production retry policy; replace only transport and backoff waiting.
     monkeypatch.setattr(provider, "chat_stream_with_context", respond)
     monkeypatch.setattr(provider, "_sleep_with_heartbeat", AsyncMock())
     loop.provider.chat_stream_with_retry = provider.chat_stream_with_retry
@@ -653,7 +652,6 @@ async def test_subagent_rejects_missing_action_inputs(tmp_path, runtime, params)
 async def test_subagent_check_is_session_scoped(tmp_path, single_task, runtime):
     loop = _make_loop(tmp_path)
     manager = loop.subagents
-    # Queued tasks must be scoped before their runner starts.
     for _ in range(manager.max_concurrent_subagents):
         await manager._run_slots.acquire()
     await manager.spawn("ALPHA_PRIVATE_TASK", label="ALPHA_LABEL", session_key="owner:a", runtime=runtime)

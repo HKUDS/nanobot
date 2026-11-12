@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -11,6 +11,21 @@ beforeEach(() => {
 });
 
 afterEach(() => restoreBrowserFocus());
+
+it("opens Ctrl+F only in the active pane and selects a filtered message with Enter", async () => {
+  const user = userEvent.setup();
+  const jump = vi.fn();
+  const props = { messages: [{ id: "one", role: "user" as const, content: "alpha", createdAt: 1 }], onJumpToPrompt: jump };
+  const view = render(<PromptNavigator {...props} shortcutEnabled={false} />);
+  fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  view.rerender(<PromptNavigator {...props} shortcutEnabled />);
+  fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+  const input = await screen.findByRole("textbox", { name: "Search messages" });
+  await waitFor(() => expect(input).toHaveFocus());
+  await user.keyboard("alpha{Enter}");
+  expect(jump).toHaveBeenCalledWith("one");
+});
 
 it("keeps a long searchable index windowed and keyboard-reachable", async () => {
   const user = userEvent.setup();

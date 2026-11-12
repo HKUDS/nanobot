@@ -1,5 +1,3 @@
-"""Ordered session operations with detached reads and durable acknowledgements."""
-
 from __future__ import annotations
 
 import asyncio
@@ -56,12 +54,16 @@ class SessionState:
         workers: int = _DEFAULT_WORKERS,
         on_delete: Callable[[str], None] | None = None,
         types: SessionTypes | None = None,
+        generation_exclusions: set[str] | None = None,
     ) -> None:
         if capacity < 1:
             raise ValueError("session operation capacity must be positive")
         if workers < 1:
             raise ValueError("session operation worker count must be positive")
         self._types = types if types is not None else SessionTypes()
+        self._generation_exclusions: set[str] = (
+            generation_exclusions if generation_exclusions is not None else set()
+        )
         self._store = store
         self._on_delete = on_delete
         self._snapshots: dict[str, Session] = {}
@@ -86,6 +88,8 @@ class SessionState:
             thread_name_prefix="session-write",
         )
         self._closed = False
+        # Import completion is permanent; archive contents are never cached.
+        self._archives_imported = False
         self._close_task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -124,12 +128,14 @@ class SessionState:
         *,
         operation_name: str | None = None,
         write: bool = True,
+        barrier: bool = True,
     ) -> _T:
         async def run() -> _T:
             return await self._run_operation(operation, write=write)
 
         return await self._submit(
             key, run, operation_name=operation_name or getattr(operation, "__name__", "session operation"),
+            barrier=barrier,
         )
 
     async def _submit(
@@ -140,7 +146,6 @@ class SessionState:
         operation_name: str,
         barrier: bool = True,
     ) -> _T:
-        """Admit bounded work with FIFO key affinity or a global barrier."""
         self._bind_loop()
         name = operation_name
         if key is None:
@@ -426,6 +431,15 @@ class SessionState:
             return self._draft(session)
         return await self._execute(key, read, write=False)
 
+    async def read_header(self, key: str) -> Session | None:
+        """Read committed identity and metadata without creating a session."""
+        def read() -> Session | None:
+            session = self._load(key, history=False)
+            if session is None:
+                return None
+            return replace(session, messages=[], provider_state=None, _baseline=None)
+        return await self._execute(key, read, write=False)
+
     async def get(self, key: str) -> Session:
         """Read an existing conversation; create missing state on the writer."""
         return await self._get(key, history=True)
@@ -617,8 +631,9 @@ class SessionState:
         updates: Mapping[str, Any],
         *,
         expected_generation: str | None = None,
+        validate_existing: Callable[[Mapping[str, Any]], None] | None = None,
     ) -> tuple[str, bool]:
-        """Open one generation and atomically attach admission metadata."""
+        """Open one generation and atomically validate and attach admission metadata."""
         values = deepcopy(dict(updates))
         if _RESERVED_KEYS.intersection(values):
             raise ValueError("turn state must be changed through turn operations")
@@ -638,6 +653,8 @@ class SessionState:
                     and session.generation != expected_generation
                 ):
                     raise SessionConflictError("session admission belongs to a replaced session")
+                if not created and validate_existing is not None:
+                    validate_existing(session.metadata)
                 session.metadata.update(values)
                 header_only = session.policy.persist and session.persisted
                 if header_only:
@@ -658,7 +675,7 @@ class SessionState:
         await self._submit_draft(session)
 
     async def finish_turn(self, session: Session) -> None:
-        """Commit the assembled transcript and clear its recovery markers."""
+        """Commit the assembled transcript and clear its recovery checkpoint."""
         session.metadata.pop(_PENDING_KEY, None)
         session.metadata.pop(_CHECKPOINT_KEY, None)
         await self._submit_draft(session)
@@ -716,12 +733,14 @@ class SessionState:
 
     async def append_history(
         self, key: str, facts: Sequence[HistoryFact], *, expected_generation: str | None,
-    ) -> None:
-        """Append to an existing session; None selects its current generation."""
+        skip_invalid: bool = False,
+    ) -> list[str]:
+        """Serialize owned facts in the worker; None selects the current generation."""
         records = list(facts)
-        await self._execute(
+        return await self._execute(
             key,
-            lambda: self._store.append_history(key, deepcopy(records), expected_generation=expected_generation),
+            lambda: self._store.append_history(key, records, expected_generation=expected_generation,
+                                               skip_invalid=skip_invalid),
             operation_name="append_history",
         )
 
@@ -823,6 +842,34 @@ class SessionState:
             lambda: self._store.has_unarchived_messages(key),
             operation_name="has_unarchived_messages",
             write=False,
+        )
+
+    async def archives_imported(self) -> bool:
+        if not self._archives_imported and await self._execute(
+            None, self._store.archives_imported, operation_name="archives_imported",
+            write=False, barrier=False,
+        ):
+            self._archives_imported = True
+        return self._archives_imported
+
+    async def archived_keys(self) -> list[str]:
+        return await self._execute(
+            None, self._store.archived_keys, operation_name="archived_keys",
+            write=False, barrier=False,
+        )
+
+    async def import_archives(self, keys: Sequence[str]) -> list[str]:
+        values = list(keys)
+        imported = await self._execute(
+            None, lambda: self._store.import_archives(values), operation_name="import_archives",
+        )
+        self._archives_imported = True
+        return imported
+
+    async def set_archived_keys(self, keys: Sequence[str]) -> list[str]:
+        values = list(dict.fromkeys(keys))
+        return await self._execute(
+            None, lambda: self._store.set_archived_keys(values), operation_name="set_archived_keys",
         )
 
     async def list_sessions(self) -> list[dict[str, Any]]:
@@ -973,7 +1020,9 @@ class SessionState:
                 source = self._load(source_key)
                 if source is None:
                     return None
-                target = fork_session(source, target_key, before_user_index)
+                target = fork_session(
+                    source, target_key, before_user_index, exclude_metadata=frozenset(self._generation_exclusions),
+                )
                 if target is None:
                     return None
                 if title:
@@ -1121,8 +1170,10 @@ class SessionState:
                     session.metadata = deepcopy(old.metadata)
                 for name in (*_RESERVED_KEYS, "webui_recovery", "_last_summary", "_stopped_at_iteration_limit"):
                     session.metadata.pop(name, None)
+                for name in self._generation_exclusions:
+                    session.metadata.pop(name, None)
                 if session.policy.persist:
-                    self._store.delete(key)
+                    self._store.delete(key, preserve_archive=True)
                 self._commit(session)
                 return session
 

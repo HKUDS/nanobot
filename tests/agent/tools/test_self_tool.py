@@ -1,5 +1,3 @@
-"""Tests for MyTool — runtime state inspection and configuration."""
-
 from __future__ import annotations
 
 import time
@@ -17,9 +15,6 @@ from nanobot.agent.tools.web import WebSearchConfig, WebToolsConfig
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMUsage
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _make_mock_loop(**overrides):
     """Build a lightweight mock AgentLoop with the attributes MyTool reads."""
@@ -47,18 +42,15 @@ def _make_mock_loop(**overrides):
         value,
     )
 
-    # web_config mock — needed for check tests
     loop.web_config = WebToolsConfig()
     loop.web_config.search.api_key = "sk-secret-key-12345"
 
-    # Tools registry mock
     loop.tools = MagicMock()
     loop.tools.tool_names = ["read_file", "write_file", "exec", "web_search", "self"]
     loop.tools.has.side_effect = lambda n: n in loop.tools.tool_names
     loop.tools.get.return_value = None
     loop.tool_names = loop.tools.tool_names
 
-    # SubagentManager mock
     loop.subagents = MagicMock()
 
     for k, v in overrides.items():
@@ -72,10 +64,6 @@ def _make_tool(loop=None):
         loop = _make_mock_loop()
     return MyTool(runtime_control=AgentRuntimeControl(loop))
 
-
-# ---------------------------------------------------------------------------
-# check — no key (summary)
-# ---------------------------------------------------------------------------
 
 class TestInspectSummary:
 
@@ -98,10 +86,6 @@ class TestInspectSummary:
         result = await tool.execute(action="check")
         assert "task" in result
 
-
-# ---------------------------------------------------------------------------
-# check — single key (direct)
-# ---------------------------------------------------------------------------
 
 class TestInspectSingleKey:
 
@@ -131,15 +115,10 @@ class TestInspectSingleKey:
         assert "not found" in result
 
 
-# ---------------------------------------------------------------------------
-# check — dot-path navigation
-# ---------------------------------------------------------------------------
-
 class TestInspectPathNavigation:
 
     @pytest.mark.asyncio
     async def test_inspect_config_subfield(self):
-        """Positive control for sensitive-field blocking: ordinary config stays inspectable."""
         loop = _make_mock_loop()
         tool = _make_tool(loop=loop)
         result = await tool.execute(action="check", key="web_config.enable")
@@ -153,7 +132,6 @@ class TestInspectPathNavigation:
 
     @pytest.mark.asyncio
     async def test_inspect_tools_returns_blocked(self):
-        """tools is BLOCKED — check should return access error."""
         tool = _make_tool()
         result = await tool.execute(action="check", key="tools")
         assert "not accessible" in result
@@ -173,11 +151,6 @@ class TestInspectPathNavigation:
         assert "sk-test-secret" not in result
         assert "api_key" not in result.lower()
 
-
-
-# ---------------------------------------------------------------------------
-# set — restricted (with validation)
-# ---------------------------------------------------------------------------
 
 class TestModifyRestricted:
 
@@ -236,10 +209,6 @@ class TestModifyRestricted:
         assert "Error" in result
 
 
-# ---------------------------------------------------------------------------
-# set — blocked (minimal set)
-# ---------------------------------------------------------------------------
-
 class TestModifyBlocked:
 
     @pytest.mark.asyncio
@@ -268,7 +237,6 @@ class TestModifyBlocked:
 
     @pytest.mark.asyncio
     async def test_modify_dotpath_leaf_dunder_blocked(self):
-        """Fix 3.1: leaf segment of dot-path must also be validated."""
         tool = _make_tool()
         result = await tool.execute(
             action="set",
@@ -279,7 +247,6 @@ class TestModifyBlocked:
 
     @pytest.mark.asyncio
     async def test_modify_dotpath_leaf_denied_attr_blocked(self):
-        """Fix 3.1: leaf segment matching _DENIED_ATTRS must be rejected."""
         tool = _make_tool()
         result = await tool.execute(
             action="set",
@@ -289,15 +256,10 @@ class TestModifyBlocked:
         assert "not accessible" in result
 
 
-# ---------------------------------------------------------------------------
-# set — free tier (setattr priority)
-# ---------------------------------------------------------------------------
-
 class TestRuntimeSettingsAndScratchpad:
 
     @pytest.mark.asyncio
     async def test_set_updates_runtime_setting(self):
-        """Set a runtime setting through the runtime-control capability."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="provider_retry_mode", value="persistent")
         assert "Set provider_retry_mode" in result
@@ -305,7 +267,6 @@ class TestRuntimeSettingsAndScratchpad:
 
     @pytest.mark.asyncio
     async def test_modify_new_key_stores_in_scratchpad(self):
-        """Modifying an unknown key should store it in the scratchpad."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="my_custom_var", value="hello")
         assert "my_custom_var" in result
@@ -368,7 +329,6 @@ class TestRuntimeSettingsAndScratchpad:
 
     @pytest.mark.asyncio
     async def test_modify_existing_attr_type_mismatch_rejected(self):
-        """Setting a string attr to int should be rejected."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="provider_retry_mode", value=42)
         assert "Error" in result
@@ -377,22 +337,16 @@ class TestRuntimeSettingsAndScratchpad:
 
     @pytest.mark.asyncio
     async def test_modify_existing_int_attr_wrong_type_rejected(self):
-        """Setting an int attr to string should be rejected."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="max_tool_result_chars", value="big")
         assert "Error" in result
         assert tool._runtime_control.snapshot().max_tool_result_chars == 16000
 
 
-# ---------------------------------------------------------------------------
-# set — previously BLOCKED/READONLY now open
-# ---------------------------------------------------------------------------
-
 class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_tools_blocked(self):
-        """tools is BLOCKED — cannot be replaced."""
         tool = _make_tool()
         new_registry = MagicMock()
         result = await tool.execute(action="set", key="tools", value=new_registry)
@@ -400,7 +354,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_subagents_blocked(self):
-        """Subagent control is outside the self-inspection capability."""
         tool = _make_tool()
         new_subagents = MagicMock()
         result = await tool.execute(action="set", key="subagents", value=new_subagents)
@@ -408,7 +361,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_runner_blocked(self):
-        """runner is BLOCKED — cannot be replaced."""
         tool = _make_tool()
         new_runner = MagicMock()
         result = await tool.execute(action="set", key="runner", value=new_runner)
@@ -416,7 +368,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_sessions_blocked(self):
-        """sessions is BLOCKED — cannot be replaced."""
         tool = _make_tool()
         new_sessions = MagicMock()
         result = await tool.execute(action="set", key="sessions", value=new_sessions)
@@ -424,7 +375,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_consolidator_blocked(self):
-        """consolidator is BLOCKED — cannot be replaced."""
         tool = _make_tool()
         new_consolidator = MagicMock()
         result = await tool.execute(action="set", key="consolidator", value=new_consolidator)
@@ -432,7 +382,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_dream_blocked(self):
-        """dream is BLOCKED — cannot be replaced."""
         tool = _make_tool()
         new_dream = MagicMock()
         result = await tool.execute(action="set", key="dream", value=new_dream)
@@ -440,7 +389,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_auto_compact_blocked(self):
-        """auto_compact is BLOCKED — cannot be replaced."""
         tool = _make_tool()
         new_auto_compact = MagicMock()
         result = await tool.execute(action="set", key="auto_compact", value=new_auto_compact)
@@ -448,7 +396,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_context_blocked(self):
-        """context is BLOCKED — cannot be replaced."""
         tool = _make_tool()
         new_context = MagicMock()
         result = await tool.execute(action="set", key="context", value=new_context)
@@ -456,7 +403,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_commands_blocked(self):
-        """commands is BLOCKED — cannot be replaced."""
         tool = _make_tool()
         new_commands = MagicMock()
         result = await tool.execute(action="set", key="commands", value=new_commands)
@@ -464,7 +410,6 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_workspace_preserves_display_compatibility(self):
-        """The compatibility value is isolated from filesystem security boundaries."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="workspace", value="/new/path")
         assert "Set workspace" in result
@@ -486,29 +431,22 @@ class TestProtectedRuntimeState:
 
     @pytest.mark.asyncio
     async def test_modify_background_tasks_blocked(self):
-        """_background_tasks tracks background tasks — must be blocked."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="_background_tasks", value=[])
         assert "protected" in result
 
     @pytest.mark.asyncio
     async def test_modify_wrapped_denied(self):
-        """__wrapped__ allows decorator bypass — must be denied."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="__wrapped__", value="evil")
         assert "protected" in result
 
     @pytest.mark.asyncio
     async def test_modify_closure_denied(self):
-        """__closure__ exposes function internals — must be denied."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="__closure__", value="evil")
         assert "protected" in result
 
-
-# ---------------------------------------------------------------------------
-# validate_json_safe — element counting
-# ---------------------------------------------------------------------------
 
 class TestValidateJsonSafe:
 
@@ -520,10 +458,6 @@ class TestValidateJsonSafe:
         assert MyTool._validate_json_safe(value) is None
 
 
-# ---------------------------------------------------------------------------
-# unknown action
-# ---------------------------------------------------------------------------
-
 class TestUnknownAction:
 
     @pytest.mark.asyncio
@@ -532,10 +466,6 @@ class TestUnknownAction:
         result = await tool.execute(action="explode")
         assert "Unknown action" in result
 
-
-# ---------------------------------------------------------------------------
-# scratchpad limits
-# ---------------------------------------------------------------------------
 
 class TestScratchpadLimits:
 
@@ -558,10 +488,6 @@ class TestScratchpadLimits:
         assert tool._runtime_control.snapshot().scratchpad["key_0"] == "updated"
 
 
-# ---------------------------------------------------------------------------
-# denied attrs (non-dunder)
-# ---------------------------------------------------------------------------
-
 class TestDeniedAttrs:
 
     @pytest.mark.asyncio
@@ -572,15 +498,10 @@ class TestDeniedAttrs:
             assert "protected" in result, f"{attr} should be blocked"
 
 
-# ---------------------------------------------------------------------------
-# _SubagentHook after_iteration updates status
-# ---------------------------------------------------------------------------
-
 class TestSubagentHookStatus:
 
     @pytest.mark.asyncio
     async def test_after_iteration_updates_status(self):
-        """after_iteration should copy iteration, tool_events, usage to status."""
         from nanobot.agent.hook import AgentHookContext
         from nanobot.agent.subagent import SubagentStatus, _SubagentHook
 
@@ -607,7 +528,6 @@ class TestSubagentHookStatus:
 
     @pytest.mark.asyncio
     async def test_after_iteration_with_error(self):
-        """after_iteration should set status.error when context has an error."""
         from nanobot.agent.hook import AgentHookContext
         from nanobot.agent.subagent import SubagentStatus, _SubagentHook
 
@@ -628,10 +548,6 @@ class TestSubagentHookStatus:
 
         assert status.error == "something went wrong"
 
-
-# ---------------------------------------------------------------------------
-# read-only mode (tools.my.allow_set=False)
-# ---------------------------------------------------------------------------
 
 class TestReadOnlyMode:
 
@@ -659,15 +575,10 @@ class TestReadOnlyMode:
         assert "READ-ONLY MODE" in tool.description
 
 
-# ---------------------------------------------------------------------------
-# scratchpad inspection
-# ---------------------------------------------------------------------------
-
 class TestScratchpadInspection:
 
     @pytest.mark.asyncio
     async def test_inspect_scratchpad_value_after_modify(self):
-        """Design doc scenario: set then check should return the value."""
         tool = _make_tool()
         await tool.execute(action="set", key="user_prefers_concise", value=True)
         result = await tool.execute(action="check", key="user_prefers_concise")
@@ -688,22 +599,17 @@ class TestScratchpadInspection:
         assert "step" in result
         assert "2" in result
 
-# ---------------------------------------------------------------------------
-# sensitive sub-field blocking (Fix #3: API key leak prevention)
-# ---------------------------------------------------------------------------
 
 class TestSensitiveSubFieldBlocking:
 
     @pytest.mark.asyncio
     async def test_inspect_api_key_blocked(self):
-        """web_config.search.api_key must not be accessible."""
         tool = _make_tool()
         result = await tool.execute(action="check", key="web_config.search.api_key")
         assert "not accessible" in result
 
     @pytest.mark.asyncio
     async def test_inspect_password_blocked(self):
-        """Any field named 'password' must be blocked."""
         loop = _make_mock_loop()
         loop.some_config = MagicMock()
         loop.some_config.password = "hunter2"
@@ -731,10 +637,8 @@ class TestSensitiveSubFieldBlocking:
 
     @pytest.mark.asyncio
     async def test_modify_api_key_blocked(self):
-        """web_config is READ_ONLY, so any set under it is blocked."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="web_config.search.api_key", value="evil")
-        # Blocked either by READ_ONLY (web_config) or sensitive name (api_key)
         assert "read-only" in result or "not accessible" in result
 
     @pytest.mark.asyncio
@@ -747,84 +651,69 @@ class TestSensitiveSubFieldBlocking:
 
     @pytest.mark.asyncio
     async def test_modify_sensitive_top_level_blocked(self):
-        """Top-level key matching sensitive name must be blocked for set."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="api_key", value="evil")
         assert "protected" in result
 
 
-# ---------------------------------------------------------------------------
-# security-sensitive attribute protection (Fix #4)
-# ---------------------------------------------------------------------------
-
 class TestSecurityAttributeProtection:
 
     @pytest.mark.asyncio
     async def test_modify_restrict_to_workspace_blocked(self):
-        """restrict_to_workspace is BLOCKED — cannot be toggled."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="restrict_to_workspace", value=True)
         assert "protected" in result
 
     @pytest.mark.asyncio
     async def test_modify_exec_config_blocked(self):
-        """exec_config is READ_ONLY — cannot be modified."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="exec_config", value=MagicMock())
         assert "read-only" in result
 
     @pytest.mark.asyncio
     async def test_modify_web_config_blocked(self):
-        """web_config is READ_ONLY — cannot be modified."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="web_config", value=MagicMock())
         assert "read-only" in result
 
     @pytest.mark.asyncio
     async def test_modify_channels_config_blocked(self):
-        """channels_config is BLOCKED — cannot be modified."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="channels_config", value={})
         assert "protected" in result
 
     @pytest.mark.asyncio
     async def test_inspect_restrict_to_workspace_blocked(self):
-        """restrict_to_workspace is BLOCKED — cannot be inspected."""
         tool = _make_tool()
         result = await tool.execute(action="check", key="restrict_to_workspace")
         assert "not accessible" in result
 
     @pytest.mark.asyncio
     async def test_inspect_exec_config_allowed(self):
-        """exec_config is READ_ONLY — check should work."""
         tool = _make_tool()
         result = await tool.execute(action="check", key="exec_config")
         assert "Error" not in result
 
     @pytest.mark.asyncio
     async def test_inspect_web_config_allowed(self):
-        """web_config is READ_ONLY — check should work."""
         tool = _make_tool()
         result = await tool.execute(action="check", key="web_config")
         assert "Error" not in result
 
     @pytest.mark.asyncio
     async def test_modify_exec_config_dotpath_blocked(self):
-        """exec_config.enable = False should be blocked because exec_config is READ_ONLY."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="exec_config.enable", value=False)
         assert "read-only" in result
 
     @pytest.mark.asyncio
     async def test_modify_web_config_dotpath_blocked(self):
-        """web_config.enable = False should be blocked because web_config is READ_ONLY."""
         tool = _make_tool()
         result = await tool.execute(action="set", key="web_config.enable", value=False)
         assert "read-only" in result
 
     @pytest.mark.asyncio
     async def test_modify_model_presets_dotpath_blocked(self):
-        """The config-derived model preset catalog is inspectable but not mutable."""
         presets = {"fast": ModelPresetConfig(model="fast-model")}
         tool = _make_tool(loop=_make_mock_loop(model_presets=presets))
 
@@ -848,10 +737,6 @@ class TestSecurityAttributeProtection:
 
         assert result == "model_presets.fast.model: 'fast-model'"
 
-
-# ---------------------------------------------------------------------------
-# request context (audit session tracking)
-# ---------------------------------------------------------------------------
 
 class TestRequestContext:
 

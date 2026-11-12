@@ -1,5 +1,3 @@
-"""Installation-owned update preference, separate from versions and consent."""
-
 from __future__ import annotations
 
 from pathlib import Path

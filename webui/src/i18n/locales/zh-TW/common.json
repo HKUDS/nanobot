@@ -1614,6 +1614,10 @@
       "marketplaceNpxRequired": "需要安裝包含 npx 的 Node.js",
       "marketplaceInstalling": "正在安裝",
       "marketplaceInstalled": "已安裝",
+      "marketplaceNameConflict": "技能名稱已使用",
+      "marketplaceOriginUnknown": "已裝技能來源不明",
+      "marketplaceConflictHelp": "請先在「已安裝」檢查同名技能；如需更換來源，再移除原技能。",
+      "marketplaceInstallConflict": "安裝衝突。請等待目前的安裝完成，再到「已安裝」檢查同名技能。",
       "marketplaceInstall": "安裝",
       "marketplaceNoTrend": "暫無趨勢",
       "marketplaceTrendLabel": "近 8 週安裝趨勢",
@@ -1858,8 +1862,6 @@
       "sessionInfo": "對話詳細資料"
     },
     "sessionInfo": {
-      "title": "對話",
-      "untitled": "未命名話題",
       "automations": "自動任務",
       "count": "{{count}}",
       "loading": "正在載入自動任務…",
@@ -1884,8 +1886,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "輸入訊息…",
-      "placeholderHero": "描述你想做的事",
+      "placeholder": "輸入 / 查看命令，@ 引用對話或應用程式，$ 選擇技能",
+      "placeholderCompact": "輸入訊息…",
       "placeholderOpening": "正在開啟新話題…",
       "inputAria": "訊息輸入框",
       "goalStateStrip": "目標：{{label}}",
@@ -1912,15 +1914,21 @@
       "reauthFallback": "本次已由備用模型繼續回覆。",
       "reauthSettings": "開啟模型設定",
       "context": {
+          "loaded": "已載入",
+          "unloaded": "未載入",
+          "expand": "展開上下文面板",
+          "collapse": "收合上下文面板",
+          "noFiles": "暫無上下文紀錄",
+          "estimatedNodeTokens": "約 {{value}} tokens",
+          "openFile": "開啟檔案",
+          "history": "上下文歷史",
+          "playHistory": "播放上下文演變",
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "開啟上下文用量",
         "panelTitle": "上下文用量",
         "contextTitle": "上下文",
-        "recentRounds": "最近輪次",
-        "inputTrend": "輸入 Token",
-        "input": "輸入 Token",
-        "cacheHitRate": "KV Cache 命中率",
-        "output": "輸出 Token",
+        "cacheHitRate": "快取命中率",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "生成耗時"
       },
       "queued": {
@@ -2147,8 +2155,7 @@
     "fileEditDiffTruncated": "僅顯示部分差異，請開啟檔案查看完整內容。",
     "usage": {
       "context": "目前上下文：{{tokens}}{{capacity}} tokens",
-      "requests": "{{count}} 次模型請求",
-      "estimated": "包含估算用量"
+      "requests": "{{count}} 次模型請求"
     },
     "activityThinkingFor": "思考中，已 {{duration}}",
     "activityThought": "已思考",

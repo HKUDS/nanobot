@@ -1,5 +1,3 @@
-"""Automation payloads for the embedded WebUI."""
-
 from __future__ import annotations
 
 from collections.abc import Collection
@@ -10,8 +8,8 @@ from nanobot.cron.session_turns import is_bound_cron_job
 from nanobot.cron.types import CronJob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
-    message_preview_text,  # pyright: ignore[reportPrivateUsage]
-    metadata_title,  # pyright: ignore[reportPrivateUsage]
+    message_preview_text,
+    metadata_title,
 )
 from nanobot.triggers.local_types import LocalTrigger
 from nanobot.webui.session_identity import is_webui_session_key

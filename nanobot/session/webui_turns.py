@@ -1,5 +1,3 @@
-"""Session turn helpers for WebUI-capable WebSocket sessions."""
-
 from __future__ import annotations
 
 import re
@@ -42,7 +40,6 @@ from nanobot.providers.base import LLMProvider, LLMUsage
 from nanobot.providers.fallback_provider import FallbackModelObserver, FallbackModelSelection
 from nanobot.runtime_context import public_history_message
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
-from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.session_handles import session_handle_for_name
@@ -53,6 +50,7 @@ from nanobot.session.session_messages import (
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.utils.helpers import strip_think, truncate_text
 from nanobot.utils.llm_runtime import LLMRuntime
+from nanobot.webui.goal_state import goal_state_ws_blob
 from nanobot.webui.metadata import (
     WEBSOCKET_TURN_OWNER_METADATA_KEY,
     WEBUI_TURN_METADATA_KEY,
@@ -101,7 +99,6 @@ def _session_message_public_metadata(
 
 
 def _validated_llm_runtime(value: object) -> LLMRuntime | None:
-    """Keep runtime-event consumers defensive if an external publisher violates the contract."""
     return value if isinstance(value, LLMRuntime) else None
 
 
@@ -172,7 +169,6 @@ def _title_inputs(session: Session) -> tuple[str, str]:
 
 
 def _latest_title_inputs(session: Session) -> tuple[str, str]:
-    """Latest user/assistant texts, for turns executed on a shared session."""
     user_text = ""
     assistant_text = ""
     for message in reversed(session.messages):

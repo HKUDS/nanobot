@@ -1,5 +1,3 @@
-"""Tests for Anthropic provider thinking / reasoning_effort modes."""
-
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -88,7 +86,6 @@ def test_opus_4_7_high_uses_adaptive_effort() -> None:
 
 
 def test_opus_4_7_omits_temperature_none() -> None:
-    """Without thinking, opus-4-7 must still omit temperature (API rejects it)."""
     kw = _build(_make_provider("claude-opus-4-7"), None)
     assert "temperature" not in kw
     assert "thinking" not in kw
@@ -197,7 +194,6 @@ def test_ordinary_model_sends_temperature() -> None:
 
 
 def test_reasoning_effort_string_none_does_not_enable_thinking() -> None:
-    """reasoning_effort='none' must not enable thinking — treated same as disabled."""
     kw = _build(_make_provider(), "none")
     assert "thinking" not in kw
     assert kw["temperature"] == 0.7

@@ -289,7 +289,6 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   await expect(body.locator(".thread-history-slot")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("history-prepend-stable.png") });
 
-  // The reclaimed boundary scrolls as ordinary message flow, with no retained spacer.
   const beforeScroll = await body.evaluate((node) => node.scrollTop);
   const anchorBeforeScroll = await anchorTop(body, "Question 40");
   await body.hover();
@@ -715,7 +714,10 @@ for (const elapsedMs of [0, 80]) test(`fast responses reclaim completed slots an
   expect(nextHeld.anchorTop - atNewHead.anchorTop).toBeCloseTo(48, 0);
   await completePrepend(history, body, "Question 16", "Question 28", nextHeld.anchorTop);
   await expect(body.locator(".thread-history-slot")).toHaveCount(0);
-  expect(history.reads).toEqual(["?limit=120&before=40", "?limit=120&before=28"]);
+  expect(history.reads).toEqual([
+    "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=120&before=28&include_model_requests=1&context_graph_encoding=references-v1",
+  ]);
 });
 
 test("ordinary middle reading never reveals an exhausted overlay, even when the complete beginning is cached", async ({ page }) => {
@@ -921,7 +923,12 @@ test("navigation-window loading and errors remain visible and retry uses the nav
   expect(Math.abs(navigationSpacing.boundaryGap! - navigationSpacing.referenceGap!)).toBeLessThan(1);
   await positionAtTop(body);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
-  expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&after=50", "?limit=24&before=38", "?limit=24&before=38"]);
+  expect(history.reads).toEqual([
+    "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=50&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+  ]);
 });
 
 async function jumpViaRail(page: Page, index: number) {
@@ -953,7 +960,6 @@ test("failed Blocks animate without visible error text; pulling retries once and
   await expectCoordinates(body, "Question 40", held);
   expect(history.reads).toHaveLength(1);
 
-  // This is a fresh pull at the failed boundary, not a ready-button-only path.
   await requestOlderWithWheel(body, history, 2);
   await expect(header).toHaveAttribute("data-state", "loading");
   await page.mouse.wheel(0, -120);
@@ -965,7 +971,10 @@ test("failed Blocks animate without visible error text; pulling retries once and
   await expect.poll(() => displacement(body)).toBe(0);
   expect((await historyGeometry(body, "Question 40")).slotBeforeKey).toBe("u40");
   await expectCoordinates(body, "Question 40", held);
-  expect(history.reads).toEqual(["?limit=120&before=40", "?limit=120&before=40"]);
+  expect(history.reads).toEqual([
+    "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+  ]);
 
   history.complete();
   await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
@@ -1005,7 +1014,11 @@ test("cross-path unloaded rail jump has visible navigation feedback outside a sc
   await retry.click();
   await expect.poll(() => history.reads.length).toBe(3);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
-  expect(history.reads).toEqual(["?limit=120&before=40", "?limit=24&after=10", "?limit=24&after=10"]);
+  expect(history.reads).toEqual([
+    "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=10&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=10&include_model_requests=1&context_graph_encoding=references-v1",
+  ]);
   history.complete();
   await expect(body.getByText("Question 10", { exact: true })).toBeInViewport();
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
@@ -1046,7 +1059,12 @@ test("cross-path newer has visible navigation feedback and forward input retries
   await page.mouse.wheel(0, 120);
   await expect.poll(() => history.reads.length).toBe(4);
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toBeInViewport();
-  expect(history.reads).toEqual(["?limit=24&after=10", "?limit=24&before=10", "?limit=24&after=22", "?limit=24&after=22"]);
+  expect(history.reads).toEqual([
+    "?limit=24&after=10&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=10&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=22&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&after=22&include_model_requests=1&context_graph_encoding=references-v1",
+  ]);
   history.complete();
   await expect(body.getByText("Question 33", { exact: true })).toBeAttached();
   await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
@@ -1090,7 +1108,10 @@ test("cross-path older errors never float after latest or a loaded rail jump, bu
       expect(history.reads).toHaveLength(initialReads + 1);
       await retry.click();
       await expect.poll(() => history.reads.length).toBe(initialReads + 2);
-      expect(history.reads.slice(initialReads)).toEqual(["?limit=120&before=40", "?limit=120&before=40"]);
+      expect(history.reads.slice(initialReads)).toEqual([
+        "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+        "?limit=120&before=40&include_model_requests=1&context_graph_encoding=references-v1",
+      ]);
       history.complete();
       await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
       await expect(body.locator(".thread-history-slot")).toHaveCount(0);
@@ -1127,7 +1148,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   const header = page.locator(".thread-history-status");
   const slot = body.locator(".thread-history-slot");
   const approachNextHead = async (text: string) => {
-    // Real scrolling stops just short of the boundary, before it can request.
     const scrollTop = await body.evaluate((node) => node.scrollTop);
     expect(scrollTop).toBeGreaterThan(120);
     await body.hover();
@@ -1145,7 +1165,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await stableLayout(body);
   expect(history.reads).toHaveLength(0);
 
-  // An unloaded rail destination replaces latest with P0 (38..49).
   await jumpViaRail(page, 38);
   await expect.poll(() => history.reads.length).toBe(1);
   history.complete();
@@ -1162,7 +1181,6 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   expect((await historyGeometry(body, "Question 38")).slotBeforeKey).toBeNull();
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(24);
 
-  // Reach each prepended page head instead of loading from the old reading slot.
   const atSecondHead = await approachNextHead("Question 26");
   expect(atSecondHead.firstKey).toBe("u26");
   expect(atSecondHead.slotBeforeKey).toBeNull();
@@ -1177,14 +1195,17 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   expect((await historyGeometry(body, "Question 26")).slotBeforeKey).toBeNull();
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(36);
 
-  // Completed feedback is removed and cannot add a fourth cached page.
   await expect(header).toHaveCount(0);
   await stableLayout(body);
   await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
   await expect(slot).toHaveCount(0);
   await expectAnchorCoordinate(body, "Question 26", secondHeld.anchorTop);
   expect((await historyGeometry(body, "Question 26")).slotBeforeKey).toBeNull();
-  expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&before=38", "?limit=24&before=26"]);
+  expect(history.reads).toEqual([
+    "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+  ]);
 
   const atNewHead = await approachNextHead("Question 14");
   expect(atNewHead.firstKey).toBe("u14");
@@ -1207,9 +1228,13 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(36);
   await expect(header).toHaveCount(0);
   await expect(page.getByText("No earlier messages", { exact: true })).toHaveCount(0);
-  expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&before=38", "?limit=24&before=26", "?limit=24&before=14"]);
+  expect(history.reads).toEqual([
+    "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=14&include_model_requests=1&context_graph_encoding=references-v1",
+  ]);
 
-  // A real Home key reaches the next boundary and rebinds without a wheel pull.
   const atKeyboardHead = await approachNextHead("Question 2");
   expect(atKeyboardHead.firstKey).toBe("u2");
   expect(atKeyboardHead.slotBeforeKey).toBeNull();
@@ -1235,7 +1260,13 @@ test("bounded navigation retains three pages and reclaims each completed wheel o
   await expect(body.getByText("Question 25", { exact: true })).toBeAttached();
   await expect(body.getByText("Question 26", { exact: true })).toHaveCount(0);
   await expect(body.locator('[data-thread-display-unit^="u"]')).toHaveCount(26);
-  expect(history.reads).toEqual(["?limit=24&after=38", "?limit=24&before=38", "?limit=24&before=26", "?limit=24&before=14", "?limit=24&before=2"]);
+  expect(history.reads).toEqual([
+    "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=14&include_model_requests=1&context_graph_encoding=references-v1",
+    "?limit=24&before=2&include_model_requests=1&context_graph_encoding=references-v1",
+  ]);
 });
 
 

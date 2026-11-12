@@ -1,5 +1,3 @@
-"""File-edit activity helpers for WebUI progress events."""
-
 from __future__ import annotations
 
 import re
@@ -220,7 +218,6 @@ def _limit_unified_diff_lines(
     max_lines: int,
     max_line_chars: int,
 ) -> tuple[list[str], bool, int]:
-    """Limit unified diff body lines without inventing a wire-level hunk schema."""
     body_limit = max(0, int(max_lines))
     line_char_limit = max(0, int(max_line_chars))
     limited: list[str] = []

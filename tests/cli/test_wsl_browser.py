@@ -1,5 +1,3 @@
-"""Exercise the Windows file boundary used by the WSL browser handoff."""
-
 import base64
 import os
 import shutil

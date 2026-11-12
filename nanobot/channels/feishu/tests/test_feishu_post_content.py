@@ -1,4 +1,3 @@
-# Check optional Feishu dependencies before running tests
 try:
     from nanobot.channels.feishu import runtime as feishu
     FEISHU_AVAILABLE = getattr(feishu, "FEISHU_AVAILABLE", False)

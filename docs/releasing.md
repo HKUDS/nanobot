@@ -6,13 +6,27 @@ Use this checklist with the [Release Packaging Contract](../CONTRIBUTING.md#rele
 
 Stable is the default feed; Preview is opt-in. Both use one update flow and require confirmation before installation. Neither a faster cadence nor a subscription permits stopping tasks or restarting a gateway automatically. See [Updating nanobot](./updating.md) for user instructions.
 
-| Release | When to prepare it | Public destination | User experience |
+| Release | Trigger | Public destination | Documentation |
 | --- | --- | --- | --- |
-| Stable feature release | At the planned feature milestone | Final GitHub Release and PyPI; also index its manifest for Preview subscribers | Normal update notice |
-| Stable patch | When a reviewed fix or small, compatible improvement is ready; do not wait for the next monthly milestone | Same stable destinations and checks | Normal update notice, no Preview opt-in required |
-| Preview | On maintainer request, from reviewed changes with passing checks; potentially daily | GitHub prerelease and protected `release-index` catalogue; not PyPI | Same update notice for subscribers, with risk shown before installation |
+| Stable feature release | Manual, when needed | Final GitHub Release and PyPI; also index its manifest for Preview subscribers | Full version documentation and any planned announcement |
+| Stable patch | Manual, when a reviewed fix is ready; do not wait for a feature milestone | Same stable destinations and checks | Generated change notes and necessary upgrade instructions; update only affected documentation |
+| Preview / dev | Daily workflow, after maintainers enable it | GitHub prerelease and protected `release-index` catalogue; not PyPI | Generated change notes; no new documentation edition for each build |
 
-Packaging is maintainer-triggered, not scheduled or push-triggered. Record the requested channel, exact source and candidate identity; preparation does not authorize publication. Unchanged source, failed checks, missing assets, incomplete acceptance or absent approval leaves the last verified release in place. There is no daily-release promise. Acceptance must cover the supported stable baseline and an earlier Preview, including skipped previews, not just the previous build.
+These are three publication lines, not three build systems. Feature and patch releases both use `channel=stable`; dev uses the existing `preview` channel. A patch does not require a Preview first or a complete wiki and promotional refresh. Preserve necessary tests and release checks, and reuse unaffected evidence under the [verification guidance](../.agent/workflow.md).
+
+Implementation status: **Verify Release Candidate** supports manual preparation and opt-in daily Preview preparation. It generates draft notes and reuses the same five-platform build and acceptance jobs. It does not publish. Automatic prerelease upload, signing handoff and catalogue advancement are not connected yet; PyPI publication remains manual. Daily preparation is disabled by default. Do not describe this first step as an available daily public release channel.
+
+Record the requested channel, exact source and candidate identity. Unchanged source, failed checks, missing assets, incomplete acceptance or absent approval leaves the last verified release in place. Scheduled execution can be delayed; there is no promise of a new release every day. Acceptance must cover the supported stable baseline and an earlier Preview, including skipped previews, not just the previous build.
+
+### Shared preparation entry
+
+Run **Verify Release Candidate** at the chosen source ref with the existing `next_stable`, `channel` and optional `retain_installable` inputs. Both Stable release sizes use the same entry. The workflow generates `release-notes.md` from commit subjects and includes it in candidate reports and an explicitly retained installable handoff. Review necessary upgrade instructions and security wording before publication. These notes are local artifacts, not a GitHub Release, including a draft Release.
+
+Stable notes start at the preceding final release on the selected source line, ignoring Preview tags. Preview notes can start at the preceding Preview's source. Neither uses an unrelated branch's newest tag. The planned source is the event SHA throughout the run; preparation does not follow a moving branch.
+
+For daily preparation, maintainers can later set `NANOBOT_PREVIEW_BASE` to the next unreleased final version and explicitly enable `NANOBOT_DAILY_CANDIDATES_ENABLED=true`. The schedule is currently 00:17 UTC. Only the official repository's `main` can use it. It requires successful latest push CI for that exact SHA and skips a source/base already accepted by this workflow. Failed candidates can run again; manual dispatch remains available to retain a new handoff. Both paths share the existing workflow run number for `.devN`. Update the base after its final release; an already tagged base is refused.
+
+Daily runs retain small reports only, not the optional installable handoff. They still use the existing five native runners and temporary wheel transfers, so review the runner and storage cost before enabling the variable. This is a preparation switch, not permission to sign or publish. No repository variable or protection setting is changed by adding this workflow code.
 
 ### Stable patch procedure
 
@@ -21,10 +35,10 @@ Packaging is maintainer-triggered, not scheduled or push-triggered. Record the r
 3. Publish approved immutable files in order: GitHub, PyPI, public-download checks, then the catalogue's `stable` pointer. Preserve `preview` and withdrawal history. A stable patch older than an installed Preview must not be offered as a downgrade.
 4. Publish concise fix notes and required operator actions. Users without this updater need their original installation method for the first upgrade; external package/deployment owners retain their route.
 
-### Maintainer-triggered Preview procedure
+### Preview procedure
 
 1. Select an exact reviewed `main` commit with passing required CI; skip it if its source SHA matches the last accepted candidate. Record the next unreleased stable base and an unused increasing Preview sequence.
-2. Run **Verify Release Candidate** for that ref and base. It prepares a version-only candidate, builds the WebUI and five native TUI bundles once, and runs macOS arm64/x64, Linux arm64/x64 and Windows x64 clean-install and packaged update/recovery acceptance against the exact manifest-bound wheels without publication. Ordinary PR CI keeps its Linux x64/Windows x64 matrix; the manually requested candidate pays for all five native runners. Require the **Candidate required** check to pass; build-only reports are insufficient. Users receive built packages, not a checkout requiring Bun.
+2. Use **Verify Release Candidate** for that ref and base, manually or through enabled daily preparation. It prepares a version-only candidate, builds the WebUI and five native TUI bundles once, and runs macOS arm64/x64, Linux arm64/x64 and Windows x64 clean-install and packaged update/recovery acceptance against the exact manifest-bound wheels without publication. Ordinary PR CI keeps its Linux x64/Windows x64 matrix; candidate preparation uses all five native runners. Require the **Candidate required** check to pass; build-only reports are insufficient. Users receive built packages, not a checkout requiring Bun.
 3. Select `retain_installable` and preserve the accepted `installable-candidate` handoff before expiry. Temporary `candidate-native` inputs and `prepared-candidate` artifacts are not accepted handoffs. Complete real historical-baseline and interactive acceptance against those exact bytes; the automated fault-injection fixtures do not establish compatibility with a previously published version or interactive desktop behavior. Keep candidate SHA, manifest hash, coverage, known issues and source-offer approval together; CI reports alone are neither installable artifacts nor publication consent.
 4. With separate approval, publish immutable `v<version>` at the **candidate** commit and a GitHub prerelease, never the latest stable release. Upload the complete verified set, manifest and notes; make the pinned installer source publicly reachable.
 5. Verify all public sizes/hashes and clean public install/update acceptance before advancing `preview` with a new catalogue generation. Validate against the latest catalogue, preserve `stable` and withdrawals, and serialize stable, Preview and withdrawal writes. A stale publisher must reread and revalidate.
@@ -36,17 +50,17 @@ Use Python version ordering: `0.3.6.dev42 < 0.3.6.dev43 < 0.3.6 < 0.3.7.dev1` (i
 
 Before offering public Preview, obtain approval for index ownership/protection, publication credentials, source retention and exact packaged/public-download acceptance. Candidate preparation does not activate a public channel, schedule, protected publisher or PyPI upload. Preserve approved release bytes and source outside expiring CI storage for their required lifetime.
 
-Automate steps within an explicitly requested run, not the decision to build or publish. Keep builds read-only, publication permissions in a protected stage, the last accepted source/version recorded and one serialized catalogue writer. Announce Preview availability only after verifying its public feed. Any discovery hint must be dismissible; do not show an update badge for an unavailable channel or enroll users merely because they check.
+Stable releases remain manual. Daily Preview preparation requires the explicit opt-in above; automatic publication needs a separate reviewed implementation and activation. Keep builds read-only and publication permissions in the protected stage. Keep one serialized catalogue writer. Announce Preview availability only after verifying its public feed. Any discovery hint must be dismissible; do not show an update badge for an unavailable channel or enroll users merely because they check.
 
 ## Prepare a candidate
 
 1. Choose the previous release and exact candidate commit. Use a clean worktree without local configuration, sessions, credentials or unrelated changes.
 2. Update `project.version` in `pyproject.toml` and the final source-only fallback in `nanobot/__init__.py`. Private WebUI/TUI versions are not the Python release version.
-3. Review the final tag range; prepare highlights, upgrade/rollback guidance, acknowledgements and full changelog. Verify counts: commits are not merged PRs. Coordinate security disclosures separately.
+3. Review the generated change notes and add required upgrade/rollback instructions. Feature releases can add highlights and acknowledgements; ordinary patches do not need a full announcement. Verify counts: commits are not merged PRs. Coordinate security disclosures separately.
 4. Run Python, WebUI and TUI CI checks against the final commit, not an earlier PR head. Review installation, configuration, session and API changes.
 5. Run `uv build --out-dir <artifact-directory>` in a clean output directory without `NANOBOT_SKIP_WEBUI_BUILD`. The build hook bundles WebUI in sdist and wheel; the wheel is built from the sdist.
 6. Run `twine check` on intermediates, inspect contents and record SHA-256 hashes. Test installation in an isolated environment outside the checkout and upgrade from previous stable with disposable configuration/sessions, never a maintainer's live workspace.
-7. Prepare the documentation PR in `Re-bin/nanobot-web` under its `MAINTAINING.md`: review English and all nine translations, preserve Nightly and previous releases, update latest-version redirects and run the full site quality gate. Pin source links to the candidate and confirm they match the eventual tag. Do not advertise an unpublished version.
+7. For feature releases, prepare the version documentation in `Re-bin/nanobot-web` under its `MAINTAINING.md`. For patches, update only affected instructions and translations; do not require a new complete manual or promotional page when the existing documentation still applies. Preserve existing URLs and previous versions, and verify affected site routes. Pin source references where applicable and never advertise an unpublished package. Preview notes cover development changes without creating a documentation edition each day.
 8. Review pinned Bun/OpenTUI licenses, corresponding source and relinking instructions. Check upstream revision availability and runtime/lockfile/notice agreement. Obtain the maintainer's commitment to the [source offer](../tui/SOURCE_OFFER.md) for its full stated period, at least three years after release; tests cannot grant it.
 9. Build all five native targets with publication scripts, ad-hoc signing macOS before packaging.
    - Verify archive checksums, manifests, architecture, licenses/notices and embedded source, including checkout-matching bytes for `tui/scripts/targets.ts` and `tui/scripts/target-bindings.ts`. Run supported native smoke tests, record coverage and exact-head CI evidence, and label cross-compiled-only targets.
@@ -59,6 +73,12 @@ Automate steps within an explicitly requested run, not the decision to build or 
 Restart-capable packages include `nanobot/update_contract.json`: schema version 1, with `handoff_protocols` listing positive integer protocol IDs. Protocol 1's request, protected startup and activation requirements are defined in the [update protocol](./update-protocol.md), independently of package and WebUI versions.
 
 Before advertising protocol 1, run preparation, frozen-worker and actual-gateway restart tests against packaged code; verify the declaration is in both sdist and wheel. Retain an ID only while its entire contract is supported; incompatible request, startup or activation behavior needs a new ID. Older updaters may install a future package only if protocols overlap. Missing, malformed or non-overlapping declarations must be refused before shutdown and require the installation owner's external update route.
+
+### Legacy history and proxy compatibility window
+
+Retain legacy model JSONL, WebUI JSONL / segments and per-feature proxy migration throughout **0.4.x**. Removing them before the next minor release would prevent older installations from migrating through a 0.4.x patch release.
+
+**TODO(0.5.0):** Remove the legacy importers, proxy conversion, startup hooks and migration-specific tests; update upgrade fixtures and current documentation for SQLite history and `network.proxy` / `useProxy` only. Preserve SQLite schema upgrades and current-format behavior. The OpenAI API selector has its own compatibility window below.
 
 ### OpenAI API selector compatibility window
 
@@ -138,7 +158,7 @@ The proof authenticates release approval, not reproducible builds or harmless co
 5. Make the release and complete artifact set public. Verify every file against the accepted manifest, including native fallback/source-install archives. Platform-wheel TUI startup must not need downloads.
 6. Upload only the checked `nanobot_ai-X.Y.Z.tar.gz` and five final wheels to PyPI, not the universal intermediate or stale shared `dist/` files. There is no automatic PyPI publication workflow.
 7. Verify clean PyPI installation, bundled WebUI and download-free TUI startup. After all public GitHub/PyPI files pass, advance `stable`, preserving Preview and withdrawals; check discovery for both subscriptions. Only then merge the wiki PR: its `main` deploys automatically. Confirm all localized `/docs/latest/` routes select the new version and old-version links still work.
-8. Announce the release, add its dated [Release Archive](./release-archive.md) entry, complete coordinated advisories/reporter notifications, and record links/status in the release tracking issue.
+8. Add the dated [Release Archive](./release-archive.md) entry and record publication links/status. Feature releases can include a separate announcement; ordinary patches can use the generated notes with necessary additions. Complete any coordinated advisory and reporter notifications separately.
 
 ## If a gate fails
 
@@ -212,7 +232,7 @@ Discovery grants no installation authority. Only the official managed venv and s
 
 ## Non-publishing preview preflight
 
-**Verify Release Candidate** is manual, read-only preparation: no tags/releases, PyPI or catalogue writes. It builds/checks five platform wheels, sdist and licensed fallback archives. Cross-compilation is neither native execution nor release approval.
+**Verify Release Candidate** is read-only preparation, either manually requested or explicitly enabled for daily Preview: no tags/releases, PyPI or catalogue writes. It builds/checks five platform wheels, sdist and licensed fallback archives. Cross-compilation is neither native execution nor release approval.
 
 Default retention is small identity/manifest/probe reports and installation guide for **three days**, without installable binaries. `retain_installable` preserves those exact checked artifacts plus a self-contained shallow Git repository for **one day** (about 400 MB). Keep this storage exception off for routine preflight or schedules; assess storage and call it out explicitly in workflow-change PRs before merge. Preserve approved handoffs before expiry; rebuilding expired files cannot reuse their verification. The source contains only candidate/source-parent history, not configuration or untracked files. `handoff.json` is written only after copied artifacts verify; interruption is not an accepted handoff.
 

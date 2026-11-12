@@ -1,5 +1,3 @@
-"""Tests for length-recovery prompt construction."""
-
 from nanobot.utils.runtime import build_length_recovery_message
 
 

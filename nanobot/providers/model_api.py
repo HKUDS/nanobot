@@ -1,5 +1,3 @@
-"""Declarative request API capabilities and automatic model defaults."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,7 +19,6 @@ def is_direct_openai_base(api_base: str | None) -> bool:
 
 
 def _api_base_identity(api_base: str) -> tuple[str, str | None, int | None, str]:
-    """Normalize an endpoint's origin and optional OpenAI-compatible /v1 suffix."""
     parsed = urlsplit(api_base.strip())
     port = parsed.port
     return (

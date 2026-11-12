@@ -1,5 +1,3 @@
-"""Dispatch OAuth model discovery to the owning provider."""
-
 from __future__ import annotations
 
 from nanobot.providers.oauth_catalog_cache import (

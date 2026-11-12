@@ -67,6 +67,75 @@ describe("ChatList", () => {
     expect(onTogglePin).toHaveBeenCalledWith("websocket:review");
   });
 
+  it.each([false, true, undefined])("uses persistence, not preview, for topic archive actions (%s)", async (projectLocked) => {
+    const onToggleArchive = vi.fn();
+    render(<ChatList
+      sessions={[session({ chatId: "empty", title: "Empty topic", projectLocked })]}
+      activeKey={null}
+      onSelect={vi.fn()}
+      onRequestDelete={vi.fn()}
+      onTogglePin={vi.fn()}
+      onRequestRename={vi.fn()}
+      onToggleArchive={onToggleArchive}
+    />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Empty topic" }).closest("[data-chat-row]")!);
+    await screen.findByRole("menuitem", { name: "Delete" });
+    if (projectLocked === false) {
+      expect(screen.queryByRole("menuitem", { name: "Archive" })).not.toBeInTheDocument();
+    } else {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+      expect(onToggleArchive).toHaveBeenCalledWith("websocket:empty");
+    }
+  });
+
+  it.each([
+    { archivedPaneKeys: [], projectLocked: false },
+    { archivedPaneKeys: ["websocket:saved"], projectLocked: false },
+    { archivedPaneKeys: [], projectLocked: undefined },
+  ])("archives only persisted panes in a mixed selection ($archivedPaneKeys, draft=$projectLocked)", async ({ archivedPaneKeys, projectLocked }) => {
+    const onArchiveMany = vi.fn();
+    const onRequestDeleteMany = vi.fn();
+    render(<ChatList
+      sessions={[session({ chatId: "draft", title: "Draft", projectLocked: false })]}
+      paneGroups={{
+        "websocket:draft": {
+          tabKey: "tab", title: "Mixed group", activePaneKey: "websocket:draft",
+          panes: [
+            { key: "websocket:draft", chatId: "draft", title: "Draft", projectLocked },
+            { key: "websocket:saved", chatId: "saved", title: "Empty fork", projectLocked: true },
+          ],
+        },
+      }}
+      archivedPaneKeys={archivedPaneKeys}
+      activeKey="websocket:draft"
+      onSelect={vi.fn()}
+      onRequestDelete={vi.fn()}
+      onRequestDeleteMany={onRequestDeleteMany}
+      onTogglePin={vi.fn()}
+      onRequestRename={vi.fn()}
+      onToggleArchive={vi.fn()}
+      onArchiveMany={onArchiveMany}
+    />);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Draft pane actions" }), { button: 0 });
+    await screen.findByRole("menuitem", { name: "Delete" });
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Select" }));
+    const bar = screen.getByTestId("delete-selection-bar");
+    expect(within(bar).queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+    fireEvent.click(within(bar).getByRole("button", { name: "Delete" }));
+    expect(onRequestDeleteMany).toHaveBeenCalledWith([
+      { key: "websocket:draft", label: "Draft" },
+    ], expect.any(Function));
+    act(() => onRequestDeleteMany.mock.calls[0][1](false));
+    fireEvent.click(screen.getByRole("button", { name: "Empty fork" }));
+    const action = archivedPaneKeys.length ? "Unarchive" : "Archive";
+    fireEvent.click(within(bar).getByRole("button", { name: action }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveAccessibleName(`${action} this topic?`);
+    fireEvent.click(within(dialog).getByRole("button", { name: action }));
+    expect(onArchiveMany).toHaveBeenCalledWith(["websocket:saved"], !archivedPaneKeys.length);
+  });
+
   it("restores the colored handle underline and animated active track", () => {
     render(
       <ChatList
@@ -827,8 +896,8 @@ describe("ChatList", () => {
           title: "Root topic",
           activePaneKey: "websocket:root",
           panes: [
-            { key: "websocket:root", chatId: "root", title: "Root topic" },
-            { key: "websocket:child", chatId: "child", title: "Research pane" },
+            { key: "websocket:root", chatId: "root", title: "Root topic", projectLocked: true },
+            { key: "websocket:child", chatId: "child", title: "Research pane", projectLocked: true },
           ],
         },
       }}
@@ -1563,8 +1632,6 @@ describe("ChatList", () => {
     const allRegions = screen.getAllByRole("region");
     const regionNames = allRegions.map((r) => r.getAttribute("aria-label") ?? r.textContent);
 
-    // The most recently updated conversation ("Recent chat" at 12:00) must be
-    // in the first group — Topics should come before both projects.
     const chatsIdx = regionNames.findIndex((n) => n?.includes("Topics"));
     const projAIdx = regionNames.findIndex((n) => n?.includes("project-a"));
     const projBIdx = regionNames.findIndex((n) => n?.includes("project-b"));

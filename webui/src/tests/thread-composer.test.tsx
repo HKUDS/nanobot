@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ComposerUsagePopover } from "@/components/thread/ComposerUsagePopover";
 import { ComposerDraftStore } from "@/lib/composer-draft";
 import { encodeImage } from "@/lib/imageEncode";
 import { SESSION_DRAG_TYPE } from "@/lib/session-drag";
@@ -648,17 +649,16 @@ describe("ThreadComposer", () => {
 
   it("shows a compact context meter beside the model selector", async () => {
     render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        modelLabel="gpt-5.6-sol"
-        modelPreset="gpt-5-6-sol"
-        modelProvider="openai_codex"
-        contextUsage={{
-          contextTokens: 74_900,
-          contextWindowTokens: 1_000_000,
-        }}
-        placeholder="Ask anything..."
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 74_900, contextWindowTokens: 1_000_000 }} rounds={[]}>
+        {(renderContextUsage) => <ThreadComposer
+          onSend={vi.fn()}
+          modelLabel="gpt-5.6-sol"
+          modelPreset="gpt-5-6-sol"
+          modelProvider="openai_codex"
+          renderContextUsage={renderContextUsage}
+          placeholder="Ask anything..."
+        />}
+      </ComposerUsagePopover>,
     );
 
     const context = screen.getByTestId("composer-context-usage");
@@ -672,130 +672,58 @@ describe("ThreadComposer", () => {
     fireEvent.focus(context);
     const tooltip = await screen.findByRole("tooltip");
     expect(tooltip).toHaveTextContent("Context 7%");
-    expect(tooltip.parentElement).toHaveClass("rounded-full", "px-2.5", "py-1");
     expect(tooltip.parentElement).not.toHaveTextContent("Available");
   });
 
-  it("opens an input-token chart with one bar for each logical round", () => {
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        modelLabel="gpt-5.6-sol"
-        modelPreset="gpt-5-6-sol"
-        modelProvider="openai_codex"
-        contextUsage={{
-          contextTokens: 14_700,
-          contextWindowTokens: 200_000,
-        }}
-        recentRoundUsage={[
-          {
-            id: "turn-1",
-            timestamp: Date.UTC(2026, 8, 3, 7, 20),
-            inputTokens: 18_000,
-            outputTokens: 280,
-            cachedTokens: 12_000,
-            generationMs: 12_000,
-          },
-          {
-            id: "turn-2",
-            timestamp: Date.UTC(2026, 8, 3, 8, 22),
-            inputTokens: 29_400,
-            outputTokens: 416,
-            cachedTokens: 26_180,
-            generationMs: 40_000,
-          },
-        ]}
-        placeholder="Ask anything..."
-      />,
-    );
-
+  it("opens the current graph and replays its request snapshots from the beginning", async () => {
+    // Happy DOM has no canvas renderer; supply the operations used by graph paint
+    // so replay can receive the same painted-frame acknowledgement as a browser.
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      setTransform: vi.fn(), clearRect: vi.fn(), setLineDash: vi.fn(), beginPath: vi.fn(),
+      moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(), arc: vi.fn(), fill: vi.fn(),
+      roundRect: vi.fn(), fillText: vi.fn(), measureText: (text: string) => ({ width: text.length * 6 }),
+    } as unknown as CanvasRenderingContext2D);
+    render(<ComposerUsagePopover context={{ contextTokens: 200, contextWindowTokens: 1000 }} rounds={[]}
+      snapshots={[
+        { id: "first", contextWindowTokens: 1000, usage: { prompt_tokens: 100 }, graph: { nodes: [{ path: "/a.md", name: "a.md", state: "loaded", tokens: 40 }], edges: [] } },
+        { id: "second", contextWindowTokens: 1000, usage: { prompt_tokens: 200 }, graph: { nodes: [{ path: "/b.md", name: "b.md", state: "loaded", tokens: 60 }], edges: [] } },
+      ]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
-
-    expect(screen.getByText("Context")).toBeInTheDocument();
-    expect(screen.getByText("14.7K / 200K")).toBeInTheDocument();
-    expect(screen.getByText("Recent rounds")).toBeInTheDocument();
-    expect(screen.getByText("Input tokens")).toBeInTheDocument();
-    expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(2);
-    const [smallerBar, largerBar] = screen.getAllByTestId("round-usage-bar");
-    expect(
-      Number.parseFloat(smallerBar.style.height) / Number.parseFloat(largerBar.style.height),
-    ).toBeCloseTo(18_000 / 29_400, 5);
-    expect(largerBar.querySelector(".kv-cache-reused")).toBeInTheDocument();
-    expect(largerBar.querySelector(".kv-cache-not-reused")).toBeInTheDocument();
-    expect(screen.queryByText("Reused")).not.toBeInTheDocument();
-    expect(screen.queryByText("Not reused")).not.toBeInTheDocument();
-    expect(screen.getByRole("img", {
-      name: /input tokens 29,400.*KV cache hit rate 89%.*output tokens 416.*generation time 40/i,
-    })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "b.md" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
+    const replay = screen.getByRole("button", { name: "Play context history" });
+    fireEvent.click(replay);
+    expect(replay).toBeDisabled();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "10");
+    expect(await screen.findByRole("button", { name: "a.md" })).toBeInTheDocument();
+    await waitFor(() => expect(replay).toBeEnabled(), { timeout: 2500 });
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
   });
 
-  it("uses each visible bar as its round detail trigger", async () => {
-    const user = userEvent.setup();
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        contextUsage={{ contextTokens: 14_700, contextWindowTokens: 200_000 }}
-        recentRoundUsage={[
-          {
-            id: "turn-1",
-            timestamp: Date.UTC(2026, 8, 3, 7, 20),
-            inputTokens: 18_000,
-            outputTokens: 280,
-            cachedTokens: 12_000,
-          },
-          {
-            id: "turn-2",
-            timestamp: Date.UTC(2026, 8, 3, 8, 22),
-            inputTokens: 29_400,
-            outputTokens: 416,
-            cachedTokens: 26_180,
-          },
-        ]}
-        placeholder="Ask anything..."
-      />,
-    );
-
-    await user.click(screen.getByTestId("composer-context-usage"));
-    const firstBar = screen.getByRole("img", { name: /input tokens 18,000/i });
-    const secondBar = screen.getByRole("img", { name: /input tokens 29,400/i });
-    expect(firstBar).toHaveAttribute("data-testid", "round-usage-bar");
-    expect(secondBar).toHaveAttribute("data-testid", "round-usage-bar");
-    await user.hover(firstBar);
-    const firstTooltip = await screen.findByRole("tooltip");
-    expect(within(firstTooltip).getByText("Input tokens")).toBeInTheDocument();
-    expect(within(firstTooltip).getByText("18,000")).toBeInTheDocument();
-    await user.click(firstBar);
-    await user.unhover(firstBar);
-    await user.hover(secondBar);
-    const secondTooltip = await screen.findByRole("tooltip");
-    expect(within(secondTooltip).getByText("Input tokens")).toBeInTheDocument();
-    expect(within(secondTooltip).getByText("29,400")).toBeInTheDocument();
+  it("shows the latest round cache metrics when inspecting legacy history", () => {
+    render(<ComposerUsagePopover context={{ contextTokens: 14700, contextWindowTokens: 200000 }}
+      rounds={[{ inputTokens: 18000, cachedTokens: 12000 }, { inputTokens: 29400, cachedTokens: 26180 }]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+    const meter = screen.getByRole("progressbar", { name: "Context" });
+    fireEvent.pointerEnter(meter.parentElement!.parentElement!);
+    expect(screen.getByText("Cache hit rate")).toBeInTheDocument();
+    expect(screen.getByText("89%")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
   });
 
   it("keeps context usage visible when the provider omits cache metrics", () => {
-    render(
-      <ThreadComposer
-        onSend={() => {}}
-        contextUsage={{ contextTokens: 14_700, contextWindowTokens: 200_000 }}
-        recentRoundUsage={[{
-          id: "turn-without-cache-metrics",
-          timestamp: new Date(2026, 8, 3, 16, 22).getTime(),
-          inputTokens: 29_400,
-          outputTokens: 416,
-        }]}
-        placeholder="Ask anything..."
-      />,
-    );
-
+    render(<ComposerUsagePopover context={{ contextTokens: 14700, contextWindowTokens: 200000 }} rounds={[{ inputTokens: 29400 }]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     fireEvent.click(screen.getByTestId("composer-context-usage"));
-
-    expect(screen.getByRole("progressbar", { name: "Context 7%" })).toHaveAttribute(
-      "aria-valuenow",
-      "7",
-    );
-    const [bar] = screen.getAllByTestId("round-usage-bar");
-    expect(bar.firstElementChild).toHaveClass("bg-muted-foreground/25");
-    expect(screen.queryByText("Reused")).not.toBeInTheDocument();
+    const meter = screen.getByRole("progressbar", { name: "Context" });
+    expect(meter).toHaveAttribute("aria-valuenow", "7");
+    fireEvent.pointerEnter(meter.parentElement!.parentElement!);
+    expect(screen.queryByText("Cache hit rate")).not.toBeInTheDocument();
   });
 
   it("keeps the thread composer compact while matching the hero style", () => {
@@ -1292,21 +1220,24 @@ describe("ThreadComposer", () => {
 
   it.each(["thread", "hero"] as const)("keeps narrow %s permissions inline and usage below without losing the draft", async (variant) => {
     let width = 390;
+    vi.stubGlobal("innerWidth", width);
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
       () => rect({ width, height: 160 }),
     );
     const onSend = vi.fn();
     const onWorkspaceScopeChange = vi.fn();
     const { container } = render(
-      <ThreadComposer
-        variant={variant}
-        compactWhenIdle
-        onSend={onSend}
-        modelLabel="codex"
-        workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: "full", restrict_to_workspace: false }}
-        onWorkspaceScopeChange={onWorkspaceScopeChange}
-        contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }}
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+        {(renderContextUsage) => <ThreadComposer
+          variant={variant}
+          compactWhenIdle
+          onSend={onSend}
+          modelLabel="codex"
+          workspaceScope={{ project_path: "/tmp/project", project_name: "project", access_mode: "full", restrict_to_workspace: false }}
+          onWorkspaceScopeChange={onWorkspaceScopeChange}
+          renderContextUsage={renderContextUsage}
+        />}
+      </ComposerUsagePopover>,
     );
     const form = container.querySelector("form")!;
     const input = screen.getByRole("textbox");
@@ -1323,6 +1254,7 @@ describe("ThreadComposer", () => {
 
     // A narrow desktop panel uses the same layout; resizing must not replace the textarea.
     width = 800;
+    vi.stubGlobal("innerWidth", width);
     fireEvent(window, new Event("resize"));
     expect(form).not.toHaveAttribute("data-compact-controls");
     expect(primary).toContainElement(access);
@@ -1350,9 +1282,11 @@ describe("ThreadComposer", () => {
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(rect({ width: 320, height: 160 }));
     const scope = { project_path: "/srv/workspace", project_name: "workspace", access_mode: "full" as const };
     const onWorkspaceScopeChange = vi.fn();
-    const { container } = render(<ThreadComposer variant={variant} onSend={vi.fn()} workspaceScope={scope}
-      workspaceDefaultScope={scope} {...workspacePickerProps(scope)} workspaceControls={{ can_change_project: true }}
-      onWorkspaceScopeChange={onWorkspaceScopeChange} contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }} />);
+    const { container } = render(<ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+      {(renderContextUsage) => <ThreadComposer variant={variant} onSend={vi.fn()} workspaceScope={scope}
+        workspaceDefaultScope={scope} {...workspacePickerProps(scope)} workspaceControls={{ can_change_project: true }}
+        onWorkspaceScopeChange={onWorkspaceScopeChange} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     const meta = container.querySelector(".thread-composer-meta")!;
     const workspace = screen.getByRole("button", { name: "Switch directory" });
     const access = screen.getByRole("button", { name: "Workspace access mode: Full Access" });
@@ -1374,30 +1308,23 @@ describe("ThreadComposer", () => {
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue(
       rect({ width: 390, height: 160 }),
     );
+    vi.stubGlobal("innerWidth", 390);
     const user = userEvent.setup();
     const onSend = vi.fn();
     render(
-      <ThreadComposer
-        onSend={onSend}
-        contextUsage={{ contextTokens: 10000, contextWindowTokens: 200000 }}
-        recentRoundUsage={[{
-          id: "turn-1",
-          timestamp: Date.UTC(2026, 8, 13, 7, 20),
-          inputTokens: 10000,
-          outputTokens: 280,
-          cachedTokens: 8000,
-        }]}
-      />,
+      <ComposerUsagePopover context={{ contextTokens: 10000, contextWindowTokens: 200000 }}
+        rounds={[{ inputTokens: 10000, cachedTokens: 8000 }]}>
+        {(renderContextUsage) => <ThreadComposer onSend={onSend} renderContextUsage={renderContextUsage} />}
+      </ComposerUsagePopover>,
     );
     const trigger = screen.getByTestId("composer-context-usage");
     await user.click(trigger);
     const sheet = screen.getByRole("dialog", { name: "Context usage" });
-    expect(sheet).toHaveClass("bottom-0", "max-h-[60dvh]");
-    expect(sheet).toHaveFocus();
-    expect(within(sheet).getByRole("heading", { name: "Context usage" })).toBeVisible();
-    expect(within(sheet).getByText("10K / 200K")).toBeVisible();
-    expect(within(sheet).getByTestId("round-usage-bar")).toBeVisible();
-    expect(sheet).toContainElement(within(sheet).getByRole("group", { name: "Input tokens" }));
+    expect(sheet).toHaveClass("mt-auto", "h-[85%]");
+    expect(sheet.contains(document.activeElement)).toBe(true);
+    expect(within(sheet).getByRole("heading", { name: "Context usage" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "5");
+    expect(within(sheet).getByRole("button", { name: "Play context history" })).toBeDisabled();
     expect(document.body).toHaveStyle({ pointerEvents: "none" });
 
     if (dismissal === "Escape") await user.keyboard("{Escape}");
@@ -1410,23 +1337,26 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith("still works", undefined, undefined);
   });
 
-  it("releases the mobile sheet when resizing to desktop and keeps the desktop popover", async () => {
+  it("releases the mobile modal lock when resizing and keeps the desktop sidebar open", async () => {
     let width = 390;
+    vi.stubGlobal("innerWidth", width);
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(
       () => rect({ width, height: 160 }),
     );
     const user = userEvent.setup();
-    render(<ThreadComposer onSend={vi.fn()} contextUsage={{ contextTokens: 500, contextWindowTokens: 1000 }} />);
+    render(<ComposerUsagePopover context={{ contextTokens: 500, contextWindowTokens: 1000 }} rounds={[]}>
+      {(renderContextUsage) => <ThreadComposer onSend={vi.fn()} renderContextUsage={renderContextUsage} />}
+    </ComposerUsagePopover>);
     await user.click(screen.getByTestId("composer-context-usage"));
-    expect(screen.getByRole("dialog")).toHaveClass("bottom-0");
+    expect(screen.getByRole("dialog")).toHaveClass("mt-auto");
 
     width = 800;
+    vi.stubGlobal("innerWidth", width);
     fireEvent(window, new Event("resize"));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(document.body).not.toHaveStyle({ pointerEvents: "none" });
-    await user.click(screen.getByTestId("composer-context-usage"));
-    expect(screen.getByRole("dialog", { name: "Context usage" })).not.toHaveClass("bottom-0");
-    expect(screen.getByRole("progressbar", { name: "Context 50%" })).toBeVisible();
+    expect(screen.getByRole("complementary", { name: "Context usage" })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "50");
   });
 
   it.each([
@@ -1640,6 +1570,7 @@ describe("ThreadComposer", () => {
 
   it("keeps the inline permission menu and directory picker mounted across composer widths", () => {
     let width = 390;
+    vi.stubGlobal("innerWidth", width);
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockImplementation(() => rect({ width, height: 160 }));
     const defaultScope = { project_path: "/srv/workspace", project_name: "workspace", access_mode: "full" as const };
     const { container } = render(<ThreadComposer variant="hero" onSend={vi.fn()} workspaceScope={defaultScope}
@@ -1652,6 +1583,7 @@ describe("ThreadComposer", () => {
     expect(row.querySelector(".thread-composer-workspace-group")).toContainElement(trigger);
     expect(container.querySelector(".thread-composer-footer-primary")).toContainElement(access);
     width = 800;
+    vi.stubGlobal("innerWidth", width);
     fireEvent(window, new Event("resize"));
     expect(container.querySelector(".thread-composer-meta")).toBe(row);
     expect(screen.getByRole("button", { name: "Switch directory" })).toBe(trigger);
@@ -2833,7 +2765,6 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText("MCP servers")).not.toBeInTheDocument();
     const gimp = screen.getByRole("option", { name: /@gimp GIMP .* CLI/i });
     const browserbase = screen.getByRole("option", { name: /@browserbase Browserbase .* MCP/i });
-    // Reuse the app's 44px coarse-pointer targets without changing desktop density.
     expect(gimp).toHaveClass("touch-target");
     expect(browserbase).toHaveClass("touch-target");
     expect(within(gimp).getByText("CLI")).toBeInTheDocument();
@@ -3214,7 +3145,6 @@ describe("ThreadComposer", () => {
     expect(palette).toHaveStyle({ maxHeight: "84px" });
     expect(input.closest("form")).toHaveAttribute("data-palette-beside", "true");
 
-    // Rotation restores the ordinary floating menu, without changing the draft.
     landscape = false;
     document.getElementById("root")!.classList.remove("short-visual-viewport");
     Object.assign(window.visualViewport!, { height: 396, offsetTop: 350 });
@@ -3620,7 +3550,6 @@ describe("ThreadComposer", () => {
     const keyEvent = createEvent.keyDown(input, { key: "Enter" });
     fireEvent(input, keyEvent);
 
-    // Enter inserts a newline on touch; the send button is the interject path.
     expect(keyEvent.defaultPrevented).toBe(false);
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
@@ -4537,6 +4466,7 @@ describe("session composer drafts", () => {
     view.rerender(composer("unchanged-draft"));
     expect(screen.getByRole("textbox")).toHaveValue("send once");
     if (attachment) await screen.findByRole("img", { name: "draft.png" });
+    fireEvent.click(screen.getByRole("textbox"));
     await act(async () => resolveSend(true));
     view.unmount();
     expect(new ComposerDraftStore().get("unchanged-draft", true)).toBeUndefined();

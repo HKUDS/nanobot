@@ -1,8 +1,7 @@
 """Session metadata helpers for explicit sustained goals.
 
 Tools set ``metadata[GOAL_STATE_KEY]``. Reads accept the legacy session key ``thread_goal``
-for older sessions. Callers use ``goal_state_runtime_lines`` and ``goal_state_ws_blob`` without
-importing tool implementations.
+for older sessions. Callers can read the goal without importing tool implementations.
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ GOAL_COMMAND = "/goal"
 MAX_GOAL_OBJECTIVE_CHARS = 4000
 # Older builds stored the same JSON blob under this key.
 _LEGACY_GOAL_STATE_SESSION_KEY = "thread_goal"
-_MAX_OBJECTIVE_WS = 600
 
 
 def _session_goal_raw(metadata: Mapping[str, Any] | None) -> Any:
@@ -51,15 +49,6 @@ def explicit_goal_requested(message_metadata: Mapping[str, Any] | None) -> bool:
     return str(message_metadata.get("original_command") or "").strip() == GOAL_COMMAND
 
 
-def sustained_goal_turn(
-    metadata: Mapping[str, Any] | None,
-    *,
-    message_metadata: Mapping[str, Any] | None = None,
-) -> bool:
-    """True when this turn should use sustained-goal runtime limits."""
-    return sustained_goal_active(metadata) or explicit_goal_requested(message_metadata)
-
-
 def parse_goal_state(blob: Any) -> dict[str, Any] | None:
     if blob is None:
         return None
@@ -91,24 +80,3 @@ def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
     if hint:
         out.append(f"Summary: {hint}")
     return out
-
-
-def goal_state_ws_blob(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
-    """JSON-safe snapshot for WebSocket ``goal_state`` events (one chat_id per frame)."""
-    goal = parse_goal_state(_session_goal_raw(metadata)) if metadata else None
-    if isinstance(goal, dict) and goal.get("status") in {"active", "blocked"}:
-        status = str(goal.get("status"))
-        objective = str(goal.get("objective") or "").strip()
-        if len(objective) > _MAX_OBJECTIVE_WS:
-            objective = objective[:_MAX_OBJECTIVE_WS].rstrip() + "…"
-        summary = str(goal.get("ui_summary") or "").strip()[:120]
-        blob: dict[str, Any] = {"active": status == "active", "status": status}
-        if summary:
-            blob["ui_summary"] = summary
-        if objective:
-            blob["objective"] = objective
-        recap = str(goal.get("recap") or "").strip()[:240]
-        if recap:
-            blob["recap"] = recap
-        return blob
-    return {"active": False}

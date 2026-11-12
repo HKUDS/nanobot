@@ -1,5 +1,3 @@
-"""Tests for the application-owned MCP provider lifecycle."""
-
 from __future__ import annotations
 
 import asyncio
@@ -541,7 +539,7 @@ async def test_reload_mcp_servers_skips_oauth_server_waiting_for_authorization(
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_reconnects_after_session_terminated(
+async def test_mcp_tool_reconnects_before_submission_after_session_terminated(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -560,11 +558,13 @@ async def test_mcp_tool_reconnects_after_session_terminated(
             self.index = index
             self.call_count = 0
 
+        async def send_ping(self) -> None:
+            if self.index == 1:
+                raise McpError(ErrorData(code=-32000, message="Session terminated"))
+
         async def call_tool(self, _name: str, arguments: dict[str, Any]) -> Any:
             self.call_count += 1
             assert arguments == {"symbol": "AAPL"}
-            if self.index == 1:
-                raise McpError(ErrorData(code=-32000, message="Session terminated"))
             return SimpleNamespace(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
@@ -599,7 +599,7 @@ async def test_mcp_tool_reconnects_after_session_terminated(
     assert output == "recovered"
     assert connect_count == 2
     assert closed == ["remote"]
-    assert sessions[0].call_count == 1
+    assert sessions[0].call_count == 0
     assert sessions[1].call_count == 1
     assert provider.connected_server_names == {"remote"}
     assert registry.get("mcp_remote_quote") is not old_tool
@@ -619,10 +619,12 @@ async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
         def __init__(self, index: int) -> None:
             self.index = index
 
-        async def call_tool(self, _name: str, arguments: dict[str, Any]) -> Any:
-            assert arguments == {}
+        async def send_ping(self) -> None:
             if self.index == 1:
                 raise McpError(ErrorData(code=-32000, message="Session terminated"))
+
+        async def call_tool(self, _name: str, arguments: dict[str, Any]) -> Any:
+            assert arguments == {}
             return SimpleNamespace(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
@@ -740,9 +742,11 @@ async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_i
     class Session:
         expired = False
 
-        async def call_tool(self, _name: str, arguments: dict[str, Any]) -> Any:
+        async def send_ping(self) -> None:
             if self.expired:
                 raise McpError(ErrorData(code=-32000, message="Session terminated"))
+
+        async def call_tool(self, _name: str, arguments: dict[str, Any]) -> Any:
             return SimpleNamespace(content=[mcp_types.TextContent(type="text", text="ok")])
 
     async def mark_closed(name: str) -> None:
@@ -777,7 +781,6 @@ async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_i
             ("independent", "http://proxy-a.example:8080", None),
         ]
 
-        # Mutating the caller's config must not reroute a live provider's reconnect.
         config.network.proxy = "http://not-live.example:8080"
         sessions["proxied"].expired = True
         old_tool = registry.get("mcp_proxied_echo")
@@ -798,7 +801,6 @@ async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_i
         assert closed == ["proxied", "proxied"]
         assert registry.get("mcp_independent_echo") is independent_tool
 
-        # Reload also captures a copy, rather than retaining the loader's mutable model.
         next_network.proxy = "http://proxy-c.example:8080"
         sessions["proxied"].expired = True
         current_tool = registry.get("mcp_proxied_echo")

@@ -1,14 +1,15 @@
-"""Base channel interface for chat platforms."""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.network import NetworkConfig
 from nanobot.pairing import (
@@ -19,6 +20,7 @@ from nanobot.pairing import (
     record_delivery,
 )
 from nanobot.pairing.events import PairingChanged
+from nanobot.utils.tool_hints import format_tool_event_hints
 
 
 class BaseChannel(ABC):
@@ -35,6 +37,7 @@ class BaseChannel(ABC):
     uses_shared_proxy: bool = False
     send_progress: bool = True
     send_tool_hints: bool = True
+    tool_hint_max_length: int = 40
     show_reasoning: bool = True
     show_compaction_notices: bool = False
 
@@ -114,6 +117,35 @@ class BaseChannel(ABC):
         A normal return confirms this adapter completed, not a recipient read receipt.
         """
         pass
+
+    def can_batch_send(self, previous: OutboundMessage, following: OutboundMessage) -> bool:
+        """Opt in to sending adjacent, unscheduled envelopes together.
+
+        The synchronous predicate must preserve channel-owned event, turn and
+        generation boundaries. Returning True requires implementing ``send_batch``.
+        """
+        return False
+
+    async def send_batch(self, messages: Sequence[OutboundMessage]) -> None:
+        """Send an ordered batch approved by ``can_batch_send``.
+
+        The manager does not retry a batch: a failure may follow partial delivery.
+        Like ``send``, returning confirms completion of the adapter's work.
+        """
+        raise NotImplementedError("Channels opting into batching must implement send_batch")
+
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        """Project tool activity once before delivery; override for native UI.
+
+        Keep the core event unchanged and reuse the returned envelope throughout
+        retries, including adapters that track already-sent multipart messages.
+        """
+        event = msg.event
+        if isinstance(event, ProgressEvent) and event.tool_hint and event.tool_events:
+            return replace(msg, content=format_tool_event_hints(
+                event.tool_events, max_length=self.tool_hint_max_length,
+            ))
+        return msg
 
     @property
     def has_pending_delivery(self) -> bool:

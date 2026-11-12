@@ -1,5 +1,3 @@
-"""SQLite persistence and chart queries for LLM usage records."""
-
 from __future__ import annotations
 
 import os

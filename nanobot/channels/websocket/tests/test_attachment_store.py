@@ -1,5 +1,3 @@
-"""Binary staging regressions; these do not exercise the gateway HTTP listener."""
-
 import asyncio
 import re
 from pathlib import Path
@@ -28,10 +26,10 @@ async def test_binary_larger_than_websocket_limit_preserves_layout(tmp_path):
     paths = store.resolve([ref], owner="owner")
     assert re.fullmatch(r"[0-9a-f]{12}\.png", Path(paths[0]).name)
     assert Path(paths[0]).read_bytes() == raw
-    assert store.resolve([ref], owner="owner") == paths  # a failed send is retryable
+    assert store.resolve([ref], owner="owner") == paths
     assert store.commit([ref], owner="owner") == paths
     store.clear()
-    assert Path(paths[0]).read_bytes() == raw  # cleanup must not delete session media
+    assert Path(paths[0]).read_bytes() == raw
     with pytest.raises(AttachmentUploadError):
         store.resolve([ref], owner="owner")
 

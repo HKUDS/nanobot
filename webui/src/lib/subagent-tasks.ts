@@ -42,7 +42,6 @@ export function isSubagentTask(value: unknown): value is SubagentTaskSnapshot {
     && (value.usage === null || (isRecord(value.usage) && Object.values(value.usage).every((entry) => entry === null || typeof entry === "string" || (typeof entry === "number" && Number.isFinite(entry)))));
 }
 
-/** Merge observations from initial reads, live events and control replies. */
 export function mergeSubagentTasks(
   current: ObservedSubagentTask[], incoming: SubagentTaskSnapshot[],
 ): ObservedSubagentTask[] {

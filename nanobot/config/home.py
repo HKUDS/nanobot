@@ -1,5 +1,3 @@
-"""Default instance paths selected by the global --home option."""
-
 from pathlib import Path
 
 _home_path: Path | None = None

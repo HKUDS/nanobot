@@ -27,7 +27,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -44,6 +44,11 @@ TWO_JOURNEY_SCENARIOS = {"upgrade-again", "import-failure", "restart-failure", "
 # Each lane retains the existing per-command deadlines and cleanup. This outer
 # bound also covers a stuck controller; it is not permission to leave it running.
 LANE_TIMEOUT = 30 * 60
+PREFLIGHT_MODULES = {"update_handoff.py", "update_worker.py", "update_plan.py", "update_stop.py",
+                     "update_profiles.py", "release_feed.py", "installation_lock.py", "data_access.py"}
+STOP_STATES = {"ready", "busy", "released", "stopping", "refused"}
+BUSY_FLAGS = {"paused", "active", "inbound", "events", "pending_queues", "active_tasks",
+              "background_tasks", "deferred_automation_turns", "channel_delivery", "registered_work"}
 
 
 def digest(path: Path) -> str:
@@ -57,6 +62,41 @@ def read(path: Path):
 
 def write(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def phase_failure(root: Path, phase: str, error: Exception) -> None:
+    """Export a failed probe location, not exception values or private journals."""
+    lines = []
+    traceback = error.__traceback__
+    while traceback is not None:
+        if traceback.tb_frame.f_code.co_filename == __file__:
+            lines.append(traceback.tb_lineno)
+        traceback = traceback.tb_next
+    record = {"phase": phase, "error_type": type(error).__name__, "probe_lines": lines}
+    # Read with stdlib only: the target package can be deliberately unimportable.
+    # Messages, commands, paths, identifiers and arbitrary phase values stay local.
+    with suppress(OSError, ValueError, KeyError, TypeError):
+        directory = Path(read(root / "launch.json")["directory"])
+        status = read(directory / "status.json")
+        record["update_phase"] = (status["phase"] if status["phase"] in {
+            "succeeded", "restored", "failed", "restart_failed", "handoff_failed",
+        } else "incomplete")
+        record["mutation_started"] = status["mutation_started"] is True
+        record["recovery_needs_attention"] = read(directory / "supervision.json").get("state") == "needs_attention"
+        preflight = read(directory / "acceptance-preflight.json")
+        record["preflight_error"] = (preflight["error_type"] if preflight["error_type"] in {
+            "ValueError", "OSError", "RuntimeError", "ReleaseFeedError", "InstallationBusyError",
+            "TimeoutError", "CalledProcessError", "FileNotFoundError", "PermissionError",
+        } else "OtherException")
+        record["preflight_frames"] = [[row[0], row[1]] for row in preflight["frames"]
+                                      if isinstance(row, list) and len(row) >= 2
+                                      and row[0] in PREFLIGHT_MODULES and type(row[1]) is int]
+        record["stop_states"] = sorted({value for value in preflight.get("stop_states", [])
+                                        if isinstance(value, str) and value in STOP_STATES})
+        busy = read(directory / "acceptance-busy.json")
+        record["busy_flags"] = {key: value for key, value in busy.items()
+                                if key in BUSY_FLAGS and type(value) is bool}
+    write(root / "phase-failure.json", record)
 
 
 class Timings:
@@ -168,6 +208,48 @@ def transport():
                     raise OSError('Injected backup write failure')
 '''.encode() + needle)
         files["nanobot/update_worker.py"] = worker
+        # Observe an old-runtime preflight refusal without changing its decision,
+        # shutdown, worker or recovery semantics. Never export exception values.
+        handoff = files["nanobot/update_handoff.py"].replace(b"\r\n", b"\n")
+        files["nanobot/update_handoff.py"] = replace_once(handoff, b"    except Exception:\n", f'''    except Exception as acceptance_error:
+        from nanobot.update_worker import read_record, write_record
+        acceptance_trace = acceptance_error.__traceback__
+        acceptance_frames = []
+        while acceptance_trace is not None:
+            acceptance_name = Path(acceptance_trace.tb_frame.f_code.co_filename).name
+            if acceptance_name in {sorted(PREFLIGHT_MODULES)!r}:
+                acceptance_frames.append([acceptance_name, acceptance_trace.tb_lineno])
+            acceptance_trace = acceptance_trace.tb_next
+        write_record(directory / 'acceptance-preflight.json', {{
+            'error_type': type(acceptance_error).__name__, 'frames': acceptance_frames,
+            'stop_states': [value for path in (directory / 'stop-replies').glob('*.json')
+                            if (value := read_record(path).get('state')) in {sorted(STOP_STATES)!r}],
+        }})
+'''.encode())
+        # Diagnose a real idle-admission refusal in the disposable old gateway.
+        # Observe booleans only, after the original guard has already refused.
+        stop = files.get("nanobot/update_stop.py")
+        if stop is not None:
+            needle = b"        except (RuntimeBusyError, RuntimeMaintenanceError):\n"
+            files["nanobot/update_stop.py"] = replace_once(stop.replace(b"\r\n", b"\n"), needle, needle + b'''            try:
+                from nanobot.update_worker import write_record
+                acceptance_owner = maintenance.__self__
+                acceptance_bus = acceptance_owner.bus
+                acceptance_flags = {
+                    'paused': acceptance_bus.admission.paused,
+                    'active': bool(acceptance_bus.admission._active),
+                    'inbound': bool(acceptance_bus.inbound_size),
+                    'events': bool(acceptance_bus.has_pending_events),
+                    **{name.removeprefix('_'): bool(getattr(acceptance_owner, name)) for name in (
+                        '_pending_queues', '_active_tasks', '_background_tasks', '_deferred_automation_turns')},
+                    'channel_delivery': any(check() for check in acceptance_bus.admission._pending_checks
+                        if getattr(check, '__qualname__', '').startswith('ChannelManager.')),
+                    'registered_work': any(check() for check in acceptance_bus.admission._pending_checks),
+                }
+                write_record(directory / 'acceptance-busy.json', acceptance_flags)
+            except Exception:
+                pass  # Diagnostic failure must not alter the existing refusal.
+''')
         if scenario == "restore-interruption":
             needle = b"    os.rename(original, environment)\n"
             files["nanobot/update_fallback.py"] = replace_once(files["nanobot/update_fallback.py"].replace(b"\r\n", b"\n"), needle, b'''    if not (directory / 'restore-fault-fired').exists():
@@ -192,7 +274,7 @@ def transport():
         for name, content in files.items():
             if name in info:
                 item = info[name]
-                item.filename = name  # Retain native executable permissions.
+                item.filename = name
                 archive.writestr(item, content)
             else:
                 archive.writestr(name, content)
@@ -253,7 +335,6 @@ def _dock_supported(root: Path) -> bool:
 
 
 def _desktop_webui(root: Path) -> None:
-    # The real managed receipt must select automatic detachment, not a test flag.
     subprocess.run([sys.executable, "-I", "-m", "nanobot", "webui", "--yes", "--no-open",
                     "--config", str(root / "account/.nanobot/config.json")], check=True, timeout=60)
 
@@ -588,8 +669,6 @@ def verify_data(root: Path, expected: str) -> bool:
         from nanobot.gateway.runtime import GatewayInstance
 
         instance = GatewayInstance.resolve(config_path=root / "account/.nanobot/config.json")
-        # A historical package without this feature cannot record desktop intent.
-        # After that first upgrade, exercise the real new launcher, then restart.
         if not instance.paths.state_path.with_suffix(".dock").exists():
             _desktop_webui(root)
         _wait_dock(_dock_socket(root), present=True)
@@ -722,7 +801,7 @@ def run_parallel(args, root: Path, target: Path, version: str, original_hash: st
             for worker, selected in enumerate(groups, 1):
                 lane = root / f"lane-{worker}"
                 lane.mkdir(mode=0o700)
-                output = lane / "run"  # The child exclusively creates this root.
+                output = lane / "run"
                 env = isolated_environment(lane)
                 # Controller dependencies are shared read-only; do not write
                 # bytecode into their environment from either lane.
@@ -767,8 +846,6 @@ def run_parallel(args, root: Path, target: Path, version: str, original_hash: st
                     print(f"FAIL lane-{worker}: controller exited with status {status}", flush=True)
         finally:
             cleanup_failed = False
-            # Finish or terminate every owned controller before importing JSON.
-            # An ordinary failing lane does not interrupt another lane's cleanup.
             for _, selected, output, process, owner in jobs:
                 try:
                     stop_controller(process, owner)
@@ -808,8 +885,6 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
     if args.baseline_wheel:
         baseline_version = str(parse_wheel_filename(baseline_source.name)[1])
     else:
-        # A version-only fixture, not a claim about a published predecessor.
-        # Minor/major releases have a zero patch component (e.g. 0.4.0).
         base = list(Version(version).release)
         for index in reversed(range(len(base))):
             if base[index]:
@@ -917,8 +992,6 @@ def run_serial(args, root: Path, target: Path, version: str, original_hash: str,
                         if config_file.exists():
                             config = read(config_file)
                             _wait_for_closed_listeners((config["gateway"]["port"], config["channels"]["websocket"]["port"]))
-                        # No journey result exists on failure; successful journeys
-                        # also retain the existing native Dock shutdown assertion.
                         if results and results[-1]["scenario"] == scenario:
                             results[-1]["gateway_process_stopped"] = True
                             dock_address = results[-1].get("dock_socket")
@@ -988,10 +1061,14 @@ def main() -> None:
     if args.phase:
         if sys.prefix == sys.base_prefix:
             parser.error("Product phases must run in the disposable installation")
-        if args.phase == "prepare":
-            prepare(args.output)
-        else:
-            write(args.output / "result.json", verify(args.output))
+        try:
+            if args.phase == "prepare":
+                prepare(args.output)
+            else:
+                write(args.output / "result.json", verify(args.output))
+        except Exception as error:
+            phase_failure(args.output, args.phase, error)
+            raise
         return
     if not args.wheel or not args.commit:
         parser.error("--wheel and --commit are required")

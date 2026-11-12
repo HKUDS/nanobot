@@ -49,7 +49,6 @@ async function expectFileDetails(page: Page, card: Locator, filename: string, wi
 for (const width of [1024, 360]) {
   for (const theme of ["light", "dark"]) {
     test(`mixed attachments stay compact, aligned and readable at ${width}px in ${theme}`, async ({ page }, testInfo) => {
-      // The two widths also cover both localized download names, without a second matrix.
       const chinese = width === 360;
       await page.route("**/fixture/retry.webm", (route) => route.fulfill({ status: 503, body: "Temporarily unavailable" }));
       await openAttachments(page, width, theme, chinese ? "zh-CN" : "en");

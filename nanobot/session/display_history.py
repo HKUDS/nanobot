@@ -1,5 +1,3 @@
-"""Durable display facts, separate from provider/model messages and transports."""
-
 from __future__ import annotations
 
 import json
@@ -9,6 +7,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, cast
+
+from nanobot.session.history_graph import encode_graph_fields, graph_size_adjustment
 
 MAX_HISTORY_FACT_BYTES = 8 * 1024 * 1024
 HISTORY_GENERATION_METADATA_KEY = "_history_generation"
@@ -26,6 +26,7 @@ class HistoryKind(StrEnum):
     COMPLETION = "completion"
     FORK_BOUNDARY = "fork_boundary"
     COMPACTION = "compaction"
+    MODEL_REQUEST = "model_request"
     # Only old transcripts can contain unfinished transport fragments.
     ANSWER_FRAGMENT = "answer_fragment"
     REASONING_FRAGMENT = "reasoning_fragment"
@@ -41,13 +42,23 @@ class HistoryFact:
     created_at_ms: int = 0
 
     def encode(self) -> str:
-        record = json.dumps({
-            "kind": self.kind.value, "content": dict(self.content),
+        content = encode_graph_fields(self.content)
+        payload = {
+            "kind": self.kind.value, "content": content,
             "turn_id": self.turn_id, "phase": self.phase,
             "sequence": self.sequence, "created_at_ms": self.created_at_ms,
-        }, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-        if len(record.encode("utf-8")) > MAX_HISTORY_FACT_BYTES:
+        }
+        record = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        stored_bytes = len(record.encode("utf-8"))
+        adjustment = graph_size_adjustment(content)
+        logical_bytes = stored_bytes + adjustment
+        if max(stored_bytes, logical_bytes) > MAX_HISTORY_FACT_BYTES:
             raise ValueError("history fact exceeds the 8 MiB storage limit")
+        if adjustment:
+            payload["uncompressed_bytes"] = logical_bytes
+            record = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+            if len(record.encode("utf-8")) > MAX_HISTORY_FACT_BYTES:
+                raise ValueError("history fact exceeds the 8 MiB storage limit")
         return record
 
     @classmethod
@@ -125,14 +136,14 @@ class HistoryReader:
                                  ((HistoryKind.COMPLETION,), "DESC"),
                                  ((HistoryKind.ANSWER, HistoryKind.ANSWER_SEGMENT, HistoryKind.ANSWER_FRAGMENT), "DESC")):
                 row = self._db.execute(
-                    f"SELECT position, length(CAST(record AS BLOB)) FROM history_entries WHERE {clause} "
+                    f"SELECT position, coalesce(json_extract(record, '$.uncompressed_bytes'), length(CAST(record AS BLOB))) FROM history_entries WHERE {clause} "
                     f"AND kind IN ({','.join('?' for _ in kinds)}) ORDER BY position {order} LIMIT 1",
                     (*params, *kinds),
                 ).fetchone()
                 if row is not None:
                     priorities.append((row[0], row[1]))
             candidates = self._db.execute(
-                f"SELECT position, length(CAST(record AS BLOB)) FROM history_entries WHERE {clause} ORDER BY position DESC LIMIT ?",
+                f"SELECT position, coalesce(json_extract(record, '$.uncompressed_bytes'), length(CAST(record AS BLOB))) FROM history_entries WHERE {clause} ORDER BY position DESC LIMIT ?",
                 (*params, max_records),
             )
             positions: set[int] = set()

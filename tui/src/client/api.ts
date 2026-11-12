@@ -137,7 +137,6 @@ async function fetchThreadPage(
   throw new Error("Unsupported history response format")
 }
 
-/** Same recent model-call samples and context boundary as the WebUI usage popover. */
 export async function fetchSessionUsage(
   apiUrl: string,
   apiToken: string,

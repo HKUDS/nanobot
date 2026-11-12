@@ -1,5 +1,3 @@
-"""Setup validation for Linear's public callback requirements."""
-
 from typing import Any
 
 from pydantic import ValidationError

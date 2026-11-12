@@ -947,7 +947,7 @@ describe("ThreadShell", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("renders each logical round in a completed turn as its own usage bar", async () => {
+  it("shows legacy history usage and clears it after successful compaction", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       if (String(input).includes("websocket%3Ausage-chart/webui-thread")) {
@@ -1013,10 +1013,8 @@ describe("ThreadShell", () => {
 
     const trigger = await screen.findByTestId("composer-context-usage");
     fireEvent.click(trigger);
-    expect(await screen.findAllByTestId("round-usage-bar")).toHaveLength(4);
-    expect(screen.getByRole("img", {
-      name: /input tokens 16,400.*KV cache hit rate 99%.*output tokens 236/i,
-    })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "22");
+    expect(screen.getByRole("button", { name: "Play context history" })).toBeDisabled();
     expect(screen.getByTestId("composer-context-meter")).toBeInTheDocument();
     for (const phase of ["started", "failed"] as const) {
       act(() => client._emitChat("usage-chart", {
@@ -1028,8 +1026,153 @@ describe("ThreadShell", () => {
       event: "context_compaction", chat_id: "usage-chart",
       compaction_id: "success", phase: "succeeded",
     }));
-    expect(trigger).toHaveAccessibleName("Open context usage");
-    expect(screen.getAllByTestId("round-usage-bar")).toHaveLength(4);
+    expect(screen.getByTestId("composer-context-usage")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("progressbar", { name: "Context" })).not.toHaveAttribute("aria-valuenow");
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+    await waitFor(() => expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument());
+  });
+
+  it.each([false, true])("switches context in the same side slot unless multiple panes are visible (%s)", async (multiplePanes) => {
+    const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const bottom = this.classList.contains("thread-preview-layout") ? 900
+        : this.classList.contains("thread-composer-surface") && this.isConnected ? 880 : 0;
+      return DOMRect.fromRect({ x: 0, y: 0, width: 1000, height: bottom });
+    });
+    const client = makeClient();
+    const envelope = { chat_id: "live-usage", turn_id: "live-turn" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Alive-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, projection: "events", active_turn_id: "live-turn", has_pending_tool_calls: true,
+            events: [{ ...envelope, event: "user_message", text: "Waiting for answer", starts_turn: true, turn_seq: 0 }] })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    const footer = document.createElement("div");
+    document.body.append(footer);
+    const view = render(wrap(client, <ThreadShell
+      composerPortalTarget={footer} multiplePanes={multiplePanes}
+      session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />));
+    await screen.findByText("Waiting for answer");
+    act(() => client._emitChat("live-usage", { ...envelope, event: "model_request", request_id: "first", run_id: "run",
+      phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
+      usage: { prompt_tokens: 100, completion_tokens: 10, context_tokens: 100, request_count: 1 },
+      round_usages: [{ prompt_tokens: 100, completion_tokens: 10 }],
+      context_graph: { nodes: [{ path: "/first.md", name: "first.md", state: "loaded", tokens: 40 }], edges: [] },
+    }));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    const input = screen.getByRole("textbox");
+    expect(footer).toContainElement(input);
+    const host = document.querySelector(".thread-preview-layout")!;
+    Object.defineProperty(host, "clientWidth", { value: 1000 });
+    fireEvent(window, new Event("resize"));
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("button", { name: "first.md" })).toBeInTheDocument();
+    expect((host as HTMLElement).style.getPropertyValue("--sidebar-bottom-inset")).toBe("20px");
+    const sidebar = screen.getByTestId("context-sidebar");
+    await act(async () => view.rerender(wrap(client, <ThreadShell
+      composerPortalTarget={footer} multiplePanes={multiplePanes}
+      session={session("other-usage")} title="Other usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />)));
+    expect(screen.queryByRole("button", { name: "first.md" })).not.toBeInTheDocument();
+    if (!multiplePanes) {
+      expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
+      expect(screen.getByRole("progressbar", { name: "Context" })).not.toHaveAttribute("aria-valuenow");
+      expect((host as HTMLElement).style.getPropertyValue("--sidebar-bottom-inset")).toBe("20px");
+    }
+    act(() => client._emitChat("other-usage", {
+      event: "model_request", chat_id: "other-usage", turn_id: "other-turn", request_id: "other", run_id: "other-run",
+      phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
+      usage: { prompt_tokens: 200, context_tokens: 200 },
+      request_usage: { prompt_tokens: 200, context_tokens: 200 },
+      context_graph: { nodes: [{ path: "/other.md", name: "other.md", state: "loaded", tokens: 60 }], edges: [] },
+    }));
+    const newInput = screen.getByRole("textbox");
+    expect(newInput).not.toBe(input);
+    if (multiplePanes) {
+      await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+      expect(host).not.toHaveAttribute("data-preview-open");
+      expect(footer).toContainElement(newInput);
+      fireEvent.click(screen.getByTestId("composer-context-usage"));
+    } else {
+      expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
+    }
+    expect(await screen.findByRole("button", { name: "other.md" })).toBeInTheDocument();
+    expect((host as HTMLElement).style.getPropertyValue("--sidebar-bottom-inset")).toBe("20px");
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
+    expect(host.querySelector(".thread-conversation")).toContainElement(newInput);
+    fireEvent.click(screen.getByTestId("composer-context-usage"));
+    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+    await act(async () => view.rerender(wrap(client, <ThreadShell
+      composerPortalTarget={footer} multiplePanes={multiplePanes}
+      session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />)));
+    expect(host).not.toHaveAttribute("data-preview-open");
+    expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument();
+    view.unmount();
+    footer.remove();
+    geometry.mockRestore();
+  });
+
+  it("updates composer usage from active model snapshots without changing the body", async () => {
+    const client = makeClient();
+    const envelope = { chat_id: "live-usage", turn_id: "live-turn" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Alive-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, projection: "events", active_turn_id: "live-turn", has_pending_tool_calls: true,
+            events: [{ ...envelope, event: "user_message", text: "Waiting for answer", starts_turn: true, turn_seq: 0 }] })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    const footer = document.createElement("div");
+    document.body.append(footer);
+    const view = render(wrap(client, <ThreadShell
+      composerPortalTarget={footer}
+      session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")}
+    />));
+    await screen.findByText("Waiting for answer");
+    act(() => client._emitChat("live-usage", { ...envelope, event: "model_request", request_id: "first", run_id: "run",
+      phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
+      usage: { prompt_tokens: 100, completion_tokens: 10, context_tokens: 100, request_count: 1 },
+      round_usages: [{ prompt_tokens: 100, completion_tokens: 10 }],
+      context_graph: { nodes: [{ path: "/first.md", name: "first.md", state: "loaded", tokens: 40 }], edges: [] },
+    }));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    expect(trigger).toHaveAccessibleName("Context 10%. Open context usage");
+    act(() => client._emitChat("live-usage", { ...envelope, event: "model_request", request_id: "second", run_id: "run",
+      phase: "completed", sequence: 2, turn_seq: 2, context_window_tokens: 1000,
+      usage: { prompt_tokens: 300, completion_tokens: 20, context_tokens: 200, request_count: 2 },
+      round_usages: [{ prompt_tokens: 100, completion_tokens: 10 }, { prompt_tokens: 200, completion_tokens: 10 }],
+      context_graph: { nodes: [{ path: "/second.md", name: "second.md", state: "loaded", tokens: 60 }], edges: [] },
+    }));
+    expect(trigger).toHaveAccessibleName("Context 20%. Open context usage");
+    const input = screen.getByRole("textbox");
+    expect(footer).toContainElement(input);
+    fireEvent.change(input, { target: { value: "Preserve this draft" } });
+    const host = document.querySelector(".thread-preview-layout")!;
+    Object.defineProperty(host, "clientWidth", { value: 1000 });
+    fireEvent(window, new Event("resize"));
+    act(() => input.focus());
+    fireEvent.click(trigger);
+    expect(host.querySelector(".thread-conversation")).toContainElement(input);
+    expect(footer).not.toContainElement(input);
+    expect(input).toHaveValue("Preserve this draft");
+    expect(input).toHaveFocus();
+    expect(screen.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "20");
+    expect(await screen.findByRole("button", { name: "second.md" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play context history" })).toBeEnabled();
+    expect(screen.getByText("Waiting for answer")).toBeInTheDocument();
+    const sidebar = screen.getByTestId("context-sidebar");
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
+    expect(sidebar).toHaveAttribute("data-closing");
+    expect(footer).toContainElement(input);
+    expect(input).toHaveValue("Preserve this draft");
+    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+    view.unmount();
+    footer.remove();
   });
 
   it.each([false, true])("restores context after compaction only with newer usage (%s)", async (newReply) => {
@@ -1058,11 +1201,12 @@ describe("ThreadShell", () => {
       session={session("compact-usage")} title="Compact usage" onToggleSidebar={() => {}}
       settingsSnapshot={modelSettings("test-model", "deepseek")}
     />));
-    const trigger = await screen.findByTestId("composer-context-usage");
+    await screen.findByText("Before compact");
     if (newReply) {
+      const trigger = await screen.findByTestId("composer-context-usage");
       expect(trigger).toHaveAccessibleName("Context 2%. Open context usage");
     } else {
-      expect(trigger).toHaveAccessibleName("Open context usage");
+      expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument();
     }
   });
 
@@ -1555,7 +1699,6 @@ describe("ThreadShell", () => {
     expect(client.sendSystemCommand).not.toHaveBeenCalled();
     emit("notice-a", true);
     expect(notice()).not.toBeInTheDocument();
-    // A new turn can notify again; it does not inherit the previous dismissal.
     emit("notice-a", false);
     emit("notice-a", true);
     expect(notice()).toBeVisible();
@@ -2427,7 +2570,7 @@ describe("ThreadShell", () => {
       expect(screen.getByRole("textbox")).toBeInTheDocument(),
     );
     const input = screen.getByRole("textbox");
-    expect(input).toHaveAttribute("placeholder", "Describe what you’d like to do");
+    expect(input).toHaveAttribute("placeholder", "Type / for commands, @ for chats or apps, $ for skills");
     expect(input.className).toContain("min-h-[78px]");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });
@@ -5157,7 +5300,6 @@ describe("ThreadShell", () => {
       ),
     );
 
-    // No banner yet: only appears once the client emits a matching error.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     await act(async () => {});
@@ -5724,7 +5866,7 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("option", { name: /Other project/i })).toBeInTheDocument();
   });
 
-  it("allows project selection before first input and locks it after acceptance without duplicating the sidebar label", async () => {
+  it.each([true, undefined])("locks saved topics with projectLocked=%s independently of displayed history", async (projectLocked) => {
     const client = makeClient();
     const scope = { project_path: "/srv/alpha", project_name: "alpha", access_mode: "restricted" as const };
     const props = {
@@ -5736,7 +5878,7 @@ describe("ThreadShell", () => {
     expect(await screen.findByRole("button", { name: "Switch directory" })).toBeEnabled();
     expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
 
-    rerender(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked: true }} />));
+    rerender(wrap(client, <ThreadShell {...props} session={{ ...session("project-chat"), projectLocked }} />));
     expect(screen.queryByRole("button", { name: "Switch directory" })).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-header")).not.toHaveTextContent("alpha");
     expect(screen.getByRole("button", { name: "Workspace access mode: Default Permission" })).toBeEnabled();

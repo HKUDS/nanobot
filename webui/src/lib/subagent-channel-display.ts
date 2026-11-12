@@ -44,7 +44,6 @@ export function scrubSubagentAnnounceBody(
   return header || body || stripped;
 }
 
-/** Apply scrub to assistant rows that look like subagent inject announcements. */
 export function scrubSubagentUiMessages(messages: UIMessage[]): UIMessage[] {
   return messages.map((m) => {
     if (m.role !== "assistant" || m.renderAs === "text" || typeof m.content !== "string") {

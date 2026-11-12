@@ -1,5 +1,3 @@
-"""A restarted host replays task observations without recovering execution."""
-
 import asyncio
 import hashlib
 import json
@@ -20,7 +18,7 @@ from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentControlError, SubagentManager
 from nanobot.agent.subagent_sessions import SUBAGENT, TASK_METADATA_KEY, SubagentSessions
 from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
-from nanobot.agent.tools.session_messages import ListSessionsTool, SendSessionMessageTool
+from nanobot.agent.tools.session_messages import SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
 from nanobot.agent.tools.subagent import SubagentTool
 from nanobot.bus.queue import MessageBus
@@ -65,6 +63,27 @@ def gateway_for(manager, sessions, workspace):
     )
     token = gateway.tokens.issue_api_token(60)
     return gateway, SimpleNamespace(remote_address=("127.0.0.1", 12345)), Headers({"Authorization": f"Bearer {token}"})
+
+
+async def wait_for_model_requests(manager, task_id, requests, count):
+    task = manager._running_tasks[task_id]
+    for _ in range(count):
+        request = asyncio.create_task(requests.get())
+        try:
+            done, _ = await asyncio.wait(
+                (request, task), timeout=5, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if task in done:
+                result = task.result()
+                status = manager.check(task_id, "websocket:parent")
+                pytest.fail(
+                    "subagent ended before its activity was ready: "
+                    f"state={status.state}, error={status.error!r}, result={result!r}"
+                )
+            assert request in done, "subagent made no progress to its next model request"
+        finally:
+            request.cancel()
+            await asyncio.gather(request, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -124,18 +143,18 @@ async def test_child_thread_reads_real_session_through_parent_without_new_persis
     workspace.mkdir()
     (workspace / "config.txt").write_text("configured value", encoding="utf-8")
     manager, sessions, runtime = manager_with_storage(workspace, root)
-    entered, release = asyncio.Event(), asyncio.Event()
+    model_requests, release = asyncio.Queue(), asyncio.Event()
     final_text = ("## Findings\n\n" + "Verified configuration.\n" * 1000).rstrip()
     calls = 0
 
     async def respond(**_kwargs):
         nonlocal calls
         calls += 1
+        model_requests.put_nowait(None)
         if calls == 1:
             return LLMResponse(content="Inspecting configuration", tool_calls=[
                 ToolCallRequest("read-config", "read_file", {"path": "config.txt"}),
             ])
-        entered.set()
         await release.wait()
         return LLMResponse(content=final_text)
 
@@ -143,8 +162,9 @@ async def test_child_thread_reads_real_session_through_parent_without_new_persis
     gateway, connection, headers = gateway_for(manager, sessions, workspace)
     try:
         await manager.spawn("Inspect configuration", session_key="websocket:parent", runtime=runtime)
-        await asyncio.wait_for(entered.wait(), 5)
         task_id, = manager.statuses_for_session("websocket:parent")
+        # Bound each round, rather than the combined startup/tool/persistence work.
+        await wait_for_model_requests(manager, task_id, model_requests, 2)
         child_key = SubagentSessions.key(task_id)
         path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
         files_before = set(root.rglob("*"))
@@ -249,25 +269,7 @@ async def test_child_activity_replays_real_tool_errors_and_file_diffs(tmp_path):
     try:
         await manager.spawn("Edit and inspect files", session_key="websocket:parent", runtime=runtime)
         task_id, = manager.statuses_for_session("websocket:parent")
-        task = manager._running_tasks[task_id]
-        # Each tool's persisted activity completes before the next model request.
-        for _ in range(4):
-            request = asyncio.create_task(model_requests.get())
-            try:
-                done, _ = await asyncio.wait(
-                    (request, task), timeout=5, return_when=asyncio.FIRST_COMPLETED,
-                )
-                if task in done:
-                    result = task.result()
-                    status = manager.check(task_id, "websocket:parent")
-                    pytest.fail(
-                        "subagent ended before its activity was ready: "
-                        f"state={status.state}, error={status.error!r}, result={result!r}"
-                    )
-                assert request in done, "subagent made no progress to its next model request"
-            finally:
-                request.cancel()
-                await asyncio.gather(request, return_exceptions=True)
+        await wait_for_model_requests(manager, task_id, model_requests, 4)
         path = f"/api/sessions/websocket%3Aparent/subagents/{task_id}/webui-thread"
 
         async def assert_activity(gateway, connection, headers):
@@ -392,7 +394,8 @@ async def test_task_changes_use_parent_chat_events_and_saved_child_observations(
                     "Investigate configuration", origin_channel="websocket", origin_chat_id=chat,
                     session_key=f"websocket:{chat}", origin_turn_id="finished-parent-turn", runtime=runtime,
                 )
-                await asyncio.wait_for(entered.get(), 2)
+                # The checkpoint uses real storage; this checks routing, not disk latency.
+                await asyncio.wait_for(entered.get(), 30)
             first, sibling = manager.statuses_for_session("websocket:parent")
             foreign, = manager.statuses_for_session("websocket:other")
             parent = await sessions.state.read("websocket:parent")
@@ -548,7 +551,7 @@ async def test_child_preserves_transcript_provider_state_and_summary_in_common_s
         assert request.session_key == spec.session_key
         assert spec.session_key.startswith("subagent:")
         assert spec.initial_messages[-1] == {"role": "user", "content": "Inspect the config"}
-        assert {"subagent", "send_session_message", "list_sessions"}.isdisjoint(
+        assert {"subagent", "send_session_message"}.isdisjoint(
             definition["function"]["name"] for definition in spec.tools.get_definitions()
         )
         return AgentRunResult(
@@ -594,8 +597,6 @@ async def test_child_is_unavailable_to_public_session_tools(tmp_path):
         with request_context(RequestContext(channel="websocket", chat_id="other", session_key="websocket:other")):
             assert json.loads(await SearchSessionsTool(sessions).execute(query="Private investigation"))["results"] == []
             assert "not found" in await ReadSessionTool(sessions).execute(session_key=child_key)
-            handles = json.loads(await ListSessionsTool(sessions).execute())
-            assert len(handles) == 1
             assert "Error:" in await sender.execute(to=child_key, content="bypass parent", expect_reply=False)
         with request_context(RequestContext(channel="websocket", chat_id="parent", session_key=child_key)):
             assert "Error:" in await sender.execute(to=public_handle.name, content="bypass parent", expect_reply=False)

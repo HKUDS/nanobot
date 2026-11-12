@@ -1,5 +1,3 @@
-"""Tests for the Ant Ling provider registration."""
-
 from unittest.mock import patch
 
 from nanobot.config.schema import Config, ProvidersConfig

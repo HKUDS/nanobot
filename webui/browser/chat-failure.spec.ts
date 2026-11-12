@@ -61,9 +61,7 @@ for (const width of [1440, 390]) {
       const bubble = page.locator("[data-user-text-bubble]");
       const text = bubble.locator("p");
       const trigger = page.locator("[data-message-block-menu-trigger]");
-      const fontSize = width === 390
-        ? { small: 15, standard: 16, large: 18 }[size]
-        : { small: 16, standard: 18, large: 20 }[size];
+      const fontSize = { small: 15, standard: 16, large: 18 }[size];
       await expect(text).toHaveCSS("font-size", `${fontSize}px`);
       await bubble.hover();
       await expect(trigger).toBeVisible();
@@ -72,7 +70,6 @@ for (const width of [1440, 390]) {
       const imageBox = (await image.boundingBox())!;
       expect(imageBox.y + imageBox.height).toBeLessThan(bubbleBox.y);
       if (width === 390) {
-        // Narrow screens use a touch action row below the message, not a hover rail.
         await expect(page.locator("[data-message-mobile-actions]")).toBeVisible();
         expect(triggerBox.y).toBeGreaterThanOrEqual(bubbleBox.y + bubbleBox.height);
         expect(triggerBox.height).toBeGreaterThanOrEqual(44);

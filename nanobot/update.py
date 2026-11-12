@@ -1,5 +1,3 @@
-"""Update the current installation from PyPI or an editable source checkout."""
-
 from __future__ import annotations
 
 import importlib

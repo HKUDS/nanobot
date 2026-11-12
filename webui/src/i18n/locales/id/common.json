@@ -1614,6 +1614,10 @@
       "marketplaceNpxRequired": "Node.js dengan npx diperlukan",
       "marketplaceInstalling": "Memasang",
       "marketplaceInstalled": "Terpasang",
+      "marketplaceNameConflict": "Nama sudah digunakan",
+      "marketplaceOriginUnknown": "Sumber instalasi tidak diketahui",
+      "marketplaceConflictHelp": "Periksa skill bernama sama di Terpasang sebelum menghapusnya untuk memakai sumber lain.",
+      "marketplaceInstallConflict": "Konflik instalasi. Tunggu instalasi selesai, lalu periksa skill bernama sama di Terpasang.",
       "marketplaceInstall": "Pasang",
       "marketplaceNoTrend": "Belum ada tren",
       "marketplaceTrendLabel": "Tren pemasangan 8 minggu",
@@ -1858,8 +1862,6 @@
       "sessionInfo": "Detail sesi"
     },
     "sessionInfo": {
-      "title": "Sesi",
-      "untitled": "Topik tanpa judul",
       "automations": "Otomasi",
       "count": "{{count}}",
       "loading": "Memuat otomasi...",
@@ -1884,8 +1886,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "Ketik pesan Anda…",
-      "placeholderHero": "Jelaskan apa yang ingin Anda lakukan",
+      "placeholder": "Ketik / untuk melihat perintah, @ untuk memilih percakapan atau aplikasi, $ untuk memilih keterampilan",
+      "placeholderCompact": "Ketik pesan…",
       "placeholderOpening": "Membuka topik baru…",
       "inputAria": "Input pesan",
       "goalStateStrip": "Tujuan: {{label}}",
@@ -1912,15 +1914,21 @@
       "reauthFallback": "Model cadangan menangani respons ini.",
       "reauthSettings": "Buka pengaturan model",
       "context": {
+          "loaded": "Dimuat",
+          "unloaded": "Belum dimuat",
+          "expand": "Perbesar konteks",
+          "collapse": "Perkecil konteks",
+          "noFiles": "Belum ada konteks yang tercatat",
+          "estimatedNodeTokens": "Sekitar {{value}} token",
+          "openFile": "Buka berkas",
+          "history": "Riwayat konteks",
+          "playHistory": "Putar riwayat konteks",
         "tooltip": "Konteks {{percent}}%",
         "detailsLabel": "Buka penggunaan konteks",
         "panelTitle": "Penggunaan konteks",
         "contextTitle": "Konteks",
-        "recentRounds": "Putaran terbaru",
-        "inputTrend": "Token masukan",
-        "input": "Token masukan",
-        "cacheHitRate": "Rasio hit KV cache",
-        "output": "Token keluaran",
+        "cacheHitRate": "Rasio cache hit",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "Waktu pembuatan"
       },
       "queued": {
@@ -2148,8 +2156,7 @@
     "fileEditDiffTruncated": "Perbedaan dipotong. Buka file untuk melihat perubahan lengkap.",
     "usage": {
       "context": "Konteks terbaru: {{tokens}}{{capacity}} token",
-      "requests": "{{count}} permintaan model",
-      "estimated": "Termasuk penggunaan perkiraan"
+      "requests": "{{count}} permintaan model"
     },
     "activityThinkingFor": "Berpikir selama {{duration}}",
     "activityThought": "Selesai berpikir",

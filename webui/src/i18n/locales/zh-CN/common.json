@@ -1820,6 +1820,10 @@
       "marketplaceNpxRequired": "请先安装包含 npx 的 Node.js",
       "marketplaceInstalling": "正在安装",
       "marketplaceInstalled": "已安装",
+      "marketplaceNameConflict": "技能名称已占用",
+      "marketplaceOriginUnknown": "已装技能来源未知",
+      "marketplaceConflictHelp": "请先在“已安装”中检查同名技能；如需更换来源，再移除原技能。",
+      "marketplaceInstallConflict": "安装冲突。请等待当前安装完成，再到“已安装”中检查同名技能。",
       "marketplaceInstall": "安装",
       "marketplaceNoTrend": "暂无趋势",
       "marketplaceTrendLabel": "近 8 周安装趋势",
@@ -2064,8 +2068,6 @@
       "sessionInfo": "会话详情"
     },
     "sessionInfo": {
-      "title": "会话",
-      "untitled": "未命名话题",
       "automations": "自动任务",
       "count": "{{count}}",
       "loading": "正在加载自动任务...",
@@ -2090,8 +2092,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "输入消息…",
-      "placeholderHero": "描述你想做的事",
+      "placeholder": "输入 / 查看命令，@ 引用会话或应用，$ 选择技能",
+      "placeholderCompact": "输入消息…",
       "placeholderOpening": "正在打开新话题…",
       "inputAria": "消息输入框",
       "goalStateStrip": "目标：{{label}}",
@@ -2117,15 +2119,21 @@
       "reauthFallback": "本次已由备用模型继续回复。",
       "reauthSettings": "打开模型设置",
       "context": {
+          "loaded": "已加载",
+          "unloaded": "未加载",
+          "expand": "展开上下文面板",
+          "collapse": "收起上下文面板",
+          "noFiles": "暂无上下文记录",
+          "estimatedNodeTokens": "约 {{value}} tokens",
+          "openFile": "打开文件",
+          "history": "上下文历史",
+          "playHistory": "播放上下文演变",
         "tooltip": "上下文 {{percent}}%",
         "detailsLabel": "打开上下文用量",
         "panelTitle": "上下文用量",
         "contextTitle": "上下文",
-        "recentRounds": "最近轮次",
-        "inputTrend": "输入 Token",
-        "input": "输入 Token",
-        "cacheHitRate": "KV Cache 命中率",
-        "output": "输出 Token",
+        "cacheHitRate": "缓存命中率",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "生成耗时"
       },
       "queued": {
@@ -2534,8 +2542,7 @@
     "fileEditDiffTruncated": "仅显示部分差异，打开文件可查看完整内容。",
     "usage": {
       "context": "当前上下文：{{tokens}}{{capacity}}",
-      "requests": "本轮 {{count}} 次模型调用",
-      "estimated": "包含估算用量"
+      "requests": "本轮 {{count}} 次模型调用"
     }
   },
   "recovery": {

@@ -136,7 +136,6 @@ def _identity(result):
 
 
 def _expose(sandbox, name):
-    # Explicit overrides let local verification use disposable manager installations.
     source = os.environ.get(f"NANOBOT_TEST_{name.upper()}") or shutil.which(name)
     if not source:
         pytest.skip(f"{name} is required for this real installer check")
@@ -156,7 +155,6 @@ def sandbox(tmp_path):
     command_bin.mkdir()
     wheels = root / "wheels"
     wheels.mkdir()
-    # A checkout and PYTHONPATH must not replace the package just installed.
     checkout = root / "checkout"
     (checkout / "nanobot").mkdir(parents=True)
     (checkout / "nanobot/__init__.py").write_text('raise RuntimeError("wrong checkout imported")\n')
@@ -213,7 +211,6 @@ def test_powershell_manager_discovery_keeps_session_functions_without_importing_
     _wheel(sandbox["wheels"], "0.0.1")
     _run([str(uv), "tool", "install", "--python", BASE_PYTHON, "nanobot-ai"], sandbox)
     prefix = sandbox["root"] / "uv-tools/nanobot-ai"
-    # The session function is the only uv command; its real executable is not on PATH.
     native = sandbox["root"] / "native"
     native.mkdir()
     uv = uv.rename(native / "uv.exe")
@@ -366,7 +363,6 @@ def test_python_install_uses_same_environment_and_quoted_launcher(sandbox, activ
 @pytest.mark.parametrize("manager", ["uv", "pipx"])
 def test_failed_default_install_does_not_fall_through_to_available_manager(sandbox, manager):
     _expose(sandbox, manager)
-    # Offline and no candidate: only the default dedicated environment is tried.
     result = _installer(sandbox, check=False)
     assert result.returncode != 0
     assert (sandbox["root"] / "managed").exists()
@@ -877,7 +873,7 @@ def test_release_bootstrap_preserves_explicit_manager_pin(sandbox, release_https
     result = _installer(sandbox, *_release_arguments(manifest.version, digest), check=False)
     assert result.returncode != 0
     assert "INSTALLER_PROBE" not in result.stdout
-    assert len(requests) == 2  # Pin enforcement follows successful selection/download.
+    assert len(requests) == 2
     assert receipt.read_bytes() == before
     assert _verify_owner(sandbox, owner, prefix)["version"] == "0.0.1"
     assert not (sandbox["root"] / "managed").exists()

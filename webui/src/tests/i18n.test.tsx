@@ -508,7 +508,7 @@ describe("webui i18n", () => {
     );
 
     expect(
-      screen.getByPlaceholderText("Type your message…"),
+      screen.getByPlaceholderText("Type / for commands, @ for chats or apps, $ for skills"),
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");
 
@@ -519,7 +519,7 @@ describe("webui i18n", () => {
       expect(document.documentElement.lang).toBe("zh-CN");
     });
     expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
-    expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("输入 / 查看命令，@ 引用会话或应用，$ 选择技能")).toBeInTheDocument();
   });
 
   it("updates the composer aria label when the language changes", async () => {

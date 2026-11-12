@@ -50,13 +50,14 @@ function emitTask(snapshot: SubagentTaskSnapshot) {
 function ResultsPresence() {
   return <output data-testid="has-results">{useHasSubagentResults() ? "yes" : "no"}</output>;
 }
-function layout({ threadMessages = messages, liveEvents = true, historyEnabled = false, onActivityToggle }: {
+function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEvents = true, historyEnabled = false, onActivityToggle }: {
   threadMessages?: UIMessage[];
+  sessionKey?: string;
   liveEvents?: boolean;
   historyEnabled?: boolean;
   onActivityToggle?: () => void;
 } = {}) {
-  return <SubagentTasksProvider client={client} sessionKey="websocket:a" token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled}>
+  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled}>
     <ResultsPresence />
     <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} onActivityToggle={onActivityToggle} /></div>
     <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock /><textarea aria-label="Message" /></div>
@@ -173,6 +174,43 @@ describe("subagent result archives", () => {
     await user.click(within(restored).getByRole("button", { name: "Config check Completed 4s" }));
     expect(await within(screen.getByRole("dialog", { name: "Config check" })).findByRole("heading", { name: "Saved findings" })).toBeVisible();
     expect(requestMutation).not.toHaveBeenCalled();
+  });
+
+  it("resets task disclosures across sessions without remounting the outgoing transcript", async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => response([
+      task(String(input).includes("websocket%3Ab") ? { task_id: "task-b", label: "Other check" } : {}),
+    ]));
+    const user = userEvent.setup();
+    const view = render(layout());
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    await user.click(summary(archive));
+    expect(summary(archive)).toHaveAttribute("aria-expanded", "true");
+    const outgoingPrompt = screen.getByText("Inspect config");
+
+    // The selected session changes before useNanobotStream hands over its messages.
+    view.rerender(layout({ sessionKey: "websocket:b" }));
+    expect(screen.getByText("Inspect config")).toBe(outgoingPrompt);
+    const other = await screen.findByRole("region", { name: "Subtasks" });
+    expect(summary(other)).toHaveAttribute("aria-expanded", "false");
+    await user.click(summary(other));
+    expect(within(other).getByRole("button", { name: "Other check Completed 4s" })).toBeVisible();
+
+    view.rerender(layout({ sessionKey: "websocket:b", threadMessages: [
+      { ...messages[0], id: "prompt-b", content: "Other request" },
+      { ...messages[1], id: "answer-b", content: "Other answer" },
+    ] }));
+    expect(await screen.findByText("Other answer")).toBeVisible();
+    expect(summary(screen.getByRole("region", { name: "Subtasks" }))).toHaveAttribute("aria-expanded", "true");
+
+    view.rerender(layout());
+    const restored = await screen.findByRole("region", { name: "Subtasks" });
+    expect(summary(restored)).toHaveAttribute("aria-expanded", "false");
+    await user.click(summary(restored));
+    expect(within(restored).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
+    view.rerender(layout({ sessionKey: "websocket:b" }));
+    expect(summary(await screen.findByRole("region", { name: "Subtasks" }))).toHaveAttribute("aria-expanded", "false");
+    view.rerender(layout());
+    expect(summary(await screen.findByRole("region", { name: "Subtasks" }))).toHaveAttribute("aria-expanded", "false");
   });
 
   it("prefers the exact initiating prompt and falls back once to the first user message of its turn", async () => {

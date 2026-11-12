@@ -76,7 +76,7 @@ jobs:
             # scheduling below so one file cannot serialize all real venv work.
             # Bound real persistence contention: six workers can delay session
             # startup beyond its watchdog. Keep every assertion and test enabled.
-            pytest_args: "-n 4 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
+            pytest_args: "-n 4 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py --ignore=tests/test_update_stop.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -136,10 +136,13 @@ jobs:
 
       - name: Check Windows update coordination before the full suite
         if: runner.os == 'Windows'
+        # Real gateway startup/stop must not compete with the parallel package
+        # and session-index fixtures. Keep its startup and lease assertions intact.
         run: >-
           uv run --no-sync python -m pytest
           tests/test_installation_lock.py
           tests/test_update_profiles.py
+          tests/test_update_stop.py
           tests/utils/test_helpers.py::test_atomic_record_reader_does_not_block_concurrent_replacement
           tests/gateway/test_runtime.py::test_runtime_state_publish_keeps_existing_snapshot_readable
           tests/gateway/test_runtime.py::test_runtime_state_reader_does_not_block_publish_while_decoding
@@ -148,12 +151,13 @@ jobs:
       # Each update job owns its venv, HOME, profile and lock directory. Preserve
       # the real installation/restore checks, but avoid a loadfile straggler and
       # disk contention with timing-sensitive runtime-registration checks.
-      # Keep three update workers; the six-worker trial exceeded supervisor deadlines.
+      # Three concurrent offline pip fixture installs exceeded their 60s bounds.
+      # Reduce startup contention; keep every command deadline and lease assertion.
       - name: Run Windows isolated update jobs
         if: runner.os == 'Windows' && github.event_name != 'push' && needs.changes.outputs.native_required == 'true'
         run: >-
           uv run --no-sync python -m pytest tests/test_update_jobs.py
-          -n 3 --dist load -vv --durations=25 --durations-min=1.0
+          -n 2 --dist load -vv --durations=25 --durations-min=1.0
           --junitxml=test-results/update-jobs.xml --timing-report=test-results/update-jobs.json
 
       - name: Run tests with coverage
@@ -257,9 +261,9 @@ jobs:
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.python_required == 'true' && needs.changes.outputs.native_required == 'true'
     runs-on: windows-latest
-    # The real installer matrix took 18m06s alone; process checks and teardown
-    # previously pushed the combined job beyond its 20-minute bound.
-    timeout-minutes: 25
+    # Two installer workers retain the per-command 90s deadline without four
+    # concurrent PowerShell/venv cold starts competing on the same Windows VM.
+    timeout-minutes: 40
     env:
       PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed -p scripts.pytest_timing"
     steps:
@@ -279,12 +283,12 @@ jobs:
           uv tool install pipx==1.17.12
           uv tool dir --bin >> "$GITHUB_PATH"
 
-      # Each case owns an isolated manager/config root. Keep four workers:
-      # eight-way installer startup exceeded the existing command deadlines in CI.
+      # Each case owns an isolated manager/config root. Four concurrent starts
+      # exceeded the command deadlines; reduce contention, not test coverage.
       - name: Run Windows installer checks
         run: >-
           uv run --no-sync python -m pytest tests/test_install_scripts.py
-          -n 4 --dist load -x -vv --durations=10
+          -n 2 --dist load -x -vv --durations=10
           --junitxml=test-results/installers.xml --timing-report=test-results/installers.json
 
       - name: Upload Windows process test timings
@@ -376,7 +380,6 @@ jobs:
     timeout-minutes: 1
 
     steps:
-      # Keep the existing check name dependent on every WebUI acceptance check.
       - name: Require both WebUI jobs to pass
         env:
           CHECKS_RESULT: ${{ needs.webui_checks.result }}

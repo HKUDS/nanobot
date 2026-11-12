@@ -1,5 +1,3 @@
-"""Typer commands for foreground and background gateway control."""
-
 from __future__ import annotations
 
 import subprocess
@@ -38,7 +36,6 @@ WebUIBundlePreparer = Callable[[Config, BuildMode], None]
 
 
 def _resolved_config_selector(config: str | None) -> Path:
-    """Return the one canonical config identity used by every local client."""
     if config:
         return Path(config).expanduser().resolve(strict=False)
     from nanobot.config.loader import get_config_path

@@ -1,5 +1,3 @@
-"""Tests for WebSocket turn timing strip bookkeeping."""
-
 import sqlite3
 from unittest.mock import AsyncMock, MagicMock
 
@@ -375,7 +373,6 @@ async def test_turn_end_reads_goal_without_loading_conversation_history(
     })
     await sessions.state.aclose()
 
-    # A new owner has no cached history to hide an accidental full draft read.
     sessions = SessionManager(tmp_path)
 
     def deny_history(action, table, *_args):

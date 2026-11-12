@@ -504,5 +504,12 @@
     "view": "Lihat undangan",
     "dismissed": "Jangan ingatkan lagi dipilih dalam pratinjau",
     "starred": "Tautan GitHub dipilih dalam pratinjau"
+  },
+  "sidebarPanel": {
+    "title": "Panel samping",
+    "toggle": "Tampilkan atau sembunyikan panel",
+    "content": "Detail tetap berada di panel saat ini.",
+    "description": "Panel samping nonmodal dengan transisi pembukaan bersama.",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

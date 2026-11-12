@@ -26,6 +26,7 @@ UPDATE_RETRY_CAPABILITY = "webui.update-jobs.retry-handoff.v1"
 UPDATE_SETTLE_HANDOFF_CAPABILITY = "webui.update-jobs.settle-handoff.v1"
 UPDATE_FLOW_CAPABILITY = "webui.update-flow.v1"
 UPDATE_CHANNEL_CAPABILITY = "webui.update-channels.v1"
+CONTEXT_GRAPH_REFERENCES_CAPABILITY = "webui.context-graph.references.v1"
 PROMPT_NAVIGATION_CAPABILITY = "webui.prompt-navigation.v1"
 
 
@@ -46,7 +47,7 @@ def webui_contract() -> dict[str, object]:
             BINARY_ATTACHMENTS_CAPABILITY, UPDATE_PLAN_CAPABILITY,
             UPDATE_JOB_CAPABILITY, UPDATE_PREPARATION_CAPABILITY, UPDATE_EXECUTION_CAPABILITY,
             UPDATE_RETRY_CAPABILITY, UPDATE_SETTLE_HANDOFF_CAPABILITY, UPDATE_FLOW_CAPABILITY, UPDATE_CHANNEL_CAPABILITY,
-            PROMPT_NAVIGATION_CAPABILITY,
+            PROMPT_NAVIGATION_CAPABILITY, CONTEXT_GRAPH_REFERENCES_CAPABILITY,
         ],
     }
 
@@ -63,7 +64,6 @@ def assess_webui_contract(value: object) -> Compatibility:
     }
     if not isinstance(value, dict):
         return result
-    # Only the mapping shape is established here; validate each value below.
     data = cast(dict[object, object], value)
     version = data.get("version")
     if isinstance(version, str) and len(version) <= 80 and version.isprintable():

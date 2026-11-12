@@ -1614,6 +1614,10 @@
       "marketplaceNpxRequired": "npx を含む Node.js が必要です",
       "marketplaceInstalling": "インストール中",
       "marketplaceInstalled": "インストール済み",
+      "marketplaceNameConflict": "同名のスキルがあります",
+      "marketplaceOriginUnknown": "インストール元が不明です",
+      "marketplaceConflictHelp": "別の提供元に変更する場合は、「インストール済み」で同名のスキルを確認してから削除してください。",
+      "marketplaceInstallConflict": "インストールが競合しています。処理の完了を待ってから、「インストール済み」で同名のスキルを確認してください。",
       "marketplaceInstall": "インストール",
       "marketplaceNoTrend": "トレンドなし",
       "marketplaceTrendLabel": "8週間のインストール推移",
@@ -1858,8 +1862,6 @@
       "sessionInfo": "セッション詳細"
     },
     "sessionInfo": {
-      "title": "セッション",
-      "untitled": "無題のトピック",
       "automations": "自動タスク",
       "count": "{{count}}",
       "loading": "自動タスクを読み込み中...",
@@ -1884,8 +1886,8 @@
       }
     },
     "composer": {
-      "placeholderThread": "メッセージを入力…",
-      "placeholderHero": "やりたいことを入力",
+      "placeholder": "/ でコマンド、@ で会話やアプリ、$ でスキルを選択",
+      "placeholderCompact": "メッセージを入力…",
       "placeholderOpening": "新しいトピックを開いています…",
       "inputAria": "メッセージ入力欄",
       "goalStateStrip": "目標: {{label}}",
@@ -1912,15 +1914,21 @@
       "reauthFallback": "今回の応答には代替モデルを使用しました。",
       "reauthSettings": "モデル設定を開く",
       "context": {
+          "loaded": "読み込み済み",
+          "unloaded": "未読み込み",
+          "expand": "コンテキストを拡大",
+          "collapse": "コンテキストを縮小",
+          "noFiles": "コンテキストはまだ記録されていません",
+          "estimatedNodeTokens": "約 {{value}} トークン",
+          "openFile": "ファイルを開く",
+          "history": "コンテキスト履歴",
+          "playHistory": "コンテキストの変化を再生",
         "tooltip": "コンテキスト {{percent}}%",
         "detailsLabel": "コンテキスト使用量を開く",
         "panelTitle": "コンテキスト使用量",
         "contextTitle": "コンテキスト",
-        "recentRounds": "最近のラウンド",
-        "inputTrend": "入力トークン",
-        "input": "入力トークン",
-        "cacheHitRate": "KV キャッシュヒット率",
-        "output": "出力トークン",
+        "cacheHitRate": "キャッシュヒット率",
+        "tokenUsage": "{{used}} / {{limit}}",
         "duration": "生成時間"
       },
       "queued": {
@@ -2148,8 +2156,7 @@
     "fileEditDiffTruncated": "差分は切り詰められました。完全な変更はファイルを開いて確認してください。",
     "usage": {
       "context": "最新のコンテキスト: {{tokens}}{{capacity}} トークン",
-      "requests": "モデルリクエスト {{count}} 回",
-      "estimated": "推定使用量を含みます"
+      "requests": "モデルリクエスト {{count}} 回"
     },
     "activityThinkingFor": "{{duration}}考えています",
     "activityThought": "思考しました",

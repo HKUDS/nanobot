@@ -41,11 +41,8 @@ from nanobot.config_base import Base
 from nanobot.events import ContextCompactionEvent
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
-# ---------------------------------------------------------------------------
 # Protocol constants (from openclaw-weixin types.ts)
-# ---------------------------------------------------------------------------
 
-# MessageItemType
 ITEM_TEXT = 1
 ITEM_IMAGE = 2
 ITEM_VOICE = 3
@@ -66,7 +63,6 @@ ILINK_APP_ID = "bot"
 
 
 def _build_client_version(version: str) -> int:
-    """Encode semantic version as 0x00MMNNPP (major/minor/patch in one uint32)."""
     parts = version.split(".")
 
     def _as_int(idx: int) -> int:
@@ -125,7 +121,6 @@ UPLOAD_MEDIA_VIDEO = 2
 UPLOAD_MEDIA_FILE = 3
 UPLOAD_MEDIA_VOICE = 4
 
-# File extensions considered as images / videos for outbound media
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ico", ".svg"}
 _VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
 _VOICE_EXTS = {".mp3", ".wav", ".amr", ".silk", ".ogg", ".m4a", ".aac", ".flac"}
@@ -173,7 +168,7 @@ def split_weixin_message(
     in_fence = False
     while remaining:
         prefix = "```\n" if in_fence else ""
-        suffix_budget = 4  # ``\n``` `` when the raw slice leaves a fence open.
+        suffix_budget = 4
         available = max_len - len(prefix) - suffix_budget
         if available <= 0:
             return [content]
@@ -209,7 +204,7 @@ class WeixinConfig(Base):
     route_tag: str | int | None = None
     token: str = ""  # Manually set token, or obtained via QR login
     state_dir: str = ""  # Default: ~/.nanobot/weixin/
-    poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
+    poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S
     # Extra progress messages consume the same undocumented iLink send quota as
     # final replies. Keep them off unless an operator explicitly opts in.
     send_progress: bool = False
@@ -313,10 +308,9 @@ class WeixinChannel(BaseChannel):
         super().__init__(config, bus)
         self.config: WeixinConfig = config
 
-        # State
         self._client: httpx.AsyncClient | None = None
         self._get_updates_buf: str = ""
-        self._context_tokens: dict[str, str] = {}  # from_user_id -> context_token
+        self._context_tokens: dict[str, str] = {}
         self._processed_ids: OrderedDict[str, None] = OrderedDict()
         self._state_dir: Path | None = None
         self._token: str = ""
@@ -364,9 +358,6 @@ class WeixinChannel(BaseChannel):
             trust_env=False,
         )
 
-    # ------------------------------------------------------------------
-    # State persistence
-    # ------------------------------------------------------------------
 
     def _get_state_dir(self) -> Path:
         if self._state_dir:
@@ -384,7 +375,6 @@ class WeixinChannel(BaseChannel):
         return hashlib.sha256(token.encode()).hexdigest() if token else ""
 
     def _load_state(self, *, required_replaced_config_token: str | None = None) -> bool:
-        """Load saved account state. Returns True if a valid token was found."""
         state_file = self._get_state_dir() / "account.json"
         if not state_file.exists():
             return False
@@ -517,9 +507,7 @@ class WeixinChannel(BaseChannel):
         except Exception:
             self.logger.exception("Failed to persist WeChat credentials to config.json")
 
-    # ------------------------------------------------------------------
     # HTTP helpers  (matches api.ts buildHeaders / apiFetch)
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _random_wechat_uin() -> str:
@@ -532,7 +520,6 @@ class WeixinChannel(BaseChannel):
         return base64.b64encode(str(uint32).encode()).decode()
 
     def _make_headers(self, *, auth: bool = True) -> dict[str, str]:
-        """Build per-request headers (new UIN each call, matching reference)."""
         headers: dict[str, str] = {
             "X-WECHAT-UIN": self._random_wechat_uin(),
             "Content-Type": "application/json",
@@ -685,7 +672,6 @@ class WeixinChannel(BaseChannel):
         auth: bool = True,
         extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """GET helper that allows overriding base_url for QR redirect polling."""
         assert self._client is not None
         url = f"{base_url.rstrip('/')}/{endpoint}"
         hdrs = self._make_headers(auth=auth)
@@ -716,12 +702,9 @@ class WeixinChannel(BaseChannel):
             headers=self._make_headers(auth=auth),
         )
 
-    # ------------------------------------------------------------------
     # QR Code Login  (matches login-qr.ts)
-    # ------------------------------------------------------------------
 
     def _local_token_list(self) -> list[str]:
-        """Return known local bot tokens, newest first, without exposing them."""
         candidates = [self._token, self.config.token]
         state_file = self._get_state_dir() / "account.json"
         if state_file.exists():
@@ -740,7 +723,6 @@ class WeixinChannel(BaseChannel):
         return tokens
 
     async def _fetch_qr_code(self, *, force: bool = False) -> tuple[str, str]:
-        """Fetch a QR code without existing credentials when forced."""
         local_tokens = [] if force else self._local_token_list()
         data = await self._api_post(
             "ilink/bot/get_bot_qrcode?bot_type=3",
@@ -769,7 +751,6 @@ class WeixinChannel(BaseChannel):
         return qrcode_id, (qrcode_img_content or qrcode_id)
 
     async def _qr_login(self, *, force: bool = False) -> bool:
-        """Perform QR login; forced flows accept only newly confirmed credentials."""
         try:
             refresh_count = 0
             qrcode_id, scan_url = await self._fetch_qr_code(force=force)
@@ -869,7 +850,6 @@ class WeixinChannel(BaseChannel):
                     verify_code = ""
                     self._print_qr_code(scan_url)
                     continue
-                # status == "wait" — keep polling
 
                 await asyncio.sleep(1)
 
@@ -956,9 +936,6 @@ class WeixinChannel(BaseChannel):
         except ImportError:
             print(f"\nLogin URL: {url}\n")
 
-    # ------------------------------------------------------------------
-    # Channel lifecycle
-    # ------------------------------------------------------------------
 
     async def login(self, force: bool = False) -> bool:
         """Perform QR code login and save token. Returns True on success."""
@@ -968,7 +945,6 @@ class WeixinChannel(BaseChannel):
         if self._token or (not force and self._load_state()):
             return True
 
-        # Initialize HTTP client for the login flow
         self._client = self._new_http_client(httpx.Timeout(60, connect=30))
         self._running = True  # Enable polling loop in _qr_login()
         try:
@@ -1052,7 +1028,6 @@ class WeixinChannel(BaseChannel):
         self._save_state()
 
     async def _notify_lifecycle(self, action: str) -> None:
-        """Best-effort upstream online-state reconciliation."""
         if not self._client or not self._token:
             return
         endpoint = f"ilink/bot/msg/notify{action}"
@@ -1062,9 +1037,7 @@ class WeixinChannel(BaseChannel):
         except Exception as exc:
             self.logger.warning("WeChat notify{} failed (ignored): {}", action, exc)
 
-    # ------------------------------------------------------------------
     # Polling  (matches monitor.ts monitorWeixinProvider)
-    # ------------------------------------------------------------------
 
     def _assert_session_active(self) -> None:
         if self._auth_required:
@@ -1075,7 +1048,6 @@ class WeixinChannel(BaseChannel):
             )
 
     def _reload_replacement_token(self) -> bool:
-        """Reload credentials only when QR login persisted a newer token."""
         previous_token = self._token
         loaded = (
             self._load_state(required_replaced_config_token=self.config.token)
@@ -1117,7 +1089,6 @@ class WeixinChannel(BaseChannel):
         if server_timeout_ms and server_timeout_ms > 0:
             self._next_poll_timeout_s = max(server_timeout_ms // 1000, 5)
 
-        # Update cursor
         new_buf = data.get("get_updates_buf", "")
         if new_buf:
             self._get_updates_buf = new_buf
@@ -1131,13 +1102,9 @@ class WeixinChannel(BaseChannel):
             except Exception:
                 self.logger.exception("Failed to process WeChat message")
 
-    # ------------------------------------------------------------------
     # Inbound message processing  (matches inbound.ts + process-message.ts)
-    # ------------------------------------------------------------------
 
     async def _process_message(self, msg: dict[str, Any]) -> None:
-        """Process a single WeixinMessage from getUpdates."""
-        # Skip bot's own messages (message_type 2 = BOT)
         if msg.get("message_type") == MESSAGE_TYPE_BOT:
             return
 
@@ -1149,7 +1116,6 @@ class WeixinChannel(BaseChannel):
         if not from_user_id:
             return
 
-        # Deduplication by message_id
         if msg_id in self._processed_ids:
             return
         self._processed_ids[msg_id] = None
@@ -1230,7 +1196,6 @@ class WeixinChannel(BaseChannel):
                             dict[str, Any] | None,
                             ref.get("message_item"),
                         )
-                        # If quoted message is media, just pass the text
                         if ref_item and ref_item.get("type", 0) in (
                             ITEM_IMAGE,
                             ITEM_VOICE,
@@ -1394,9 +1359,7 @@ class WeixinChannel(BaseChannel):
             metadata={"message_id": msg_id},
         )
 
-    # ------------------------------------------------------------------
     # Media download  (matches media-download.ts + pic-decrypt.ts)
-    # ------------------------------------------------------------------
 
     async def _download_media_item(
         self,
@@ -1404,7 +1367,6 @@ class WeixinChannel(BaseChannel):
         media_type: str,
         filename: str | None = None,
     ) -> str | None:
-        """Download + AES-decrypt a media item. Returns local path or None."""
         try:
             media = cast(dict[str, Any], typed_item.get("media") or {})
             encrypt_query_param = str(media.get("encrypt_query_param", "") or "")
@@ -1491,9 +1453,7 @@ class WeixinChannel(BaseChannel):
             self.logger.exception("Error downloading media")
             return None
 
-    # ------------------------------------------------------------------
     # Outbound  (matches send.ts buildTextMessageReq + sendMessageWeixin)
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _delivery_id(msg: OutboundMessage) -> str:
@@ -1628,7 +1588,6 @@ class WeixinChannel(BaseChannel):
             self._deferred_outbound.pop(chat_id, None)
 
     async def _get_typing_ticket(self, user_id: str, context_token: str = "") -> str:
-        """Get typing ticket with per-user refresh + failure backoff cache."""
         now = time.time()
         entry = self._typing_tickets.get(user_id)
         if entry and now < float(entry.get("next_fetch_at", 0)):
@@ -1760,7 +1719,6 @@ class WeixinChannel(BaseChannel):
             )
 
     async def _send_typing(self, user_id: str, typing_ticket: str, status: int) -> None:
-        """Best-effort sendtyping wrapper."""
         if not typing_ticket:
             return
         body: dict[str, Any] = {
@@ -1864,6 +1822,11 @@ class WeixinChannel(BaseChannel):
         data = await self._api_post("ilink/bot/sendmessage", {"msg": weixin_msg})
         self._raise_for_api_error("sendmessage", data)
         self._record_context_send(context_token)
+
+    def prepare_tool_events(self, msg: OutboundMessage) -> OutboundMessage:
+        if self.config.reply_progress_messages:
+            return msg
+        return super().prepare_tool_events(msg)
 
     async def send(self, msg: OutboundMessage) -> None:
         event = getattr(msg, "event", None)
@@ -1976,7 +1939,6 @@ class WeixinChannel(BaseChannel):
                 )
 
             run_id = self._reply_run_ids.get(msg.chat_id, "")
-            # --- Send media files first (following Telegram channel pattern) ---
             for media_index, media_path in enumerate(msg.media or []):
                 media_part = f"media:{media_index}"
                 if media_part in delivery_state.completed_parts:
@@ -2068,7 +2030,6 @@ class WeixinChannel(BaseChannel):
                     )
                     delivery_state.completed_parts.add(media_part)
 
-            # --- Send text content ---
             for chunk_index, chunk in enumerate(split_weixin_message(content)):
                 text_part = f"text:{chunk_index}"
                 if text_part in delivery_state.completed_parts:
@@ -2185,7 +2146,6 @@ class WeixinChannel(BaseChannel):
             self._reply_progress_counts.pop(chat_id, None)
 
     async def _flush_stream_block(self, chat_id: str, buffer_key: str) -> None:
-        """Optionally send one bounded live block while reserving the final slot."""
         if not self.config.block_streaming or buffer_key in self._stream_live_disabled:
             return
         sent = self._stream_sent_counts.get(buffer_key, 0)
@@ -2228,7 +2188,6 @@ class WeixinChannel(BaseChannel):
         self._stream_sent_counts[buffer_key] = sent + 1
 
     async def _start_typing(self, chat_id: str, context_token: str = "") -> None:
-        """Start typing indicator immediately when a message is received."""
         if not self._client or not self._token or not chat_id:
             return
         await self._stop_typing(chat_id, clear_remote=False)
@@ -2259,7 +2218,6 @@ class WeixinChannel(BaseChannel):
         self._typing_tasks[chat_id] = task
 
     async def _stop_typing(self, chat_id: str, *, clear_remote: bool) -> None:
-        """Stop typing indicator for a chat."""
         task = self._typing_tasks.pop(chat_id, None)
         if task and not task.done():
             stop_event = getattr(task, "_typing_stop_event", None)
@@ -2288,7 +2246,6 @@ class WeixinChannel(BaseChannel):
         client_id: str | None = None,
         run_id: str = "",
     ) -> None:
-        """Send a text message matching the exact protocol from send.ts."""
         options = _SEND_OPTIONS.get()
         self._ensure_context_budget(
             context_token,
@@ -2354,7 +2311,6 @@ class WeixinChannel(BaseChannel):
         raw_size = len(raw_data)
         raw_md5 = hashlib.md5(raw_data).hexdigest()
 
-        # Determine upload media type from extension
         ext = p.suffix.lower()
         if ext in _IMAGE_EXTS:
             upload_type = UPLOAD_MEDIA_IMAGE
@@ -2373,7 +2329,6 @@ class WeixinChannel(BaseChannel):
             item_type = ITEM_FILE
             item_key = "file_item"
 
-        # Generate client-side AES-128 key (16 random bytes)
         options = _SEND_OPTIONS.get()
         aes_key_raw = aes_key_raw or (options.aes_key_raw if options else None)
         aes_key_raw = aes_key_raw or os.urandom(16)
@@ -2383,7 +2338,6 @@ class WeixinChannel(BaseChannel):
         # Matches aesEcbPaddedSize: Math.ceil((size + 1) / 16) * 16
         padded_size = ((raw_size + 1 + 15) // 16) * 16
 
-        # Step 1: Get upload URL from server (prefer upload_full_url, fallback to upload_param)
         file_key = file_key or (options.file_key if options else None)
         file_key = file_key or os.urandom(16).hex()
         upload_body: dict[str, Any] = {
@@ -2409,7 +2363,6 @@ class WeixinChannel(BaseChannel):
                 f"(need upload_full_url or upload_param): {upload_resp}"
             )
 
-        # Step 2: AES-128-ECB encrypt and POST to CDN
         aes_key_b64 = base64.b64encode(aes_key_raw).decode()
         encrypted_data = _encrypt_aes_ecb(raw_data, aes_key_b64)
 
@@ -2437,7 +2390,6 @@ class WeixinChannel(BaseChannel):
                 f"status={cdn_resp.status_code} headers={dict(cdn_resp.headers)}"
             )
 
-        # Step 3: Send message with the media item
         # aes_key for CDNMedia is the hex key encoded as base64
         # (matches: Buffer.from(uploaded.aeskey).toString("base64"))
         cdn_aes_key_b64 = base64.b64encode(aes_key_hex.encode()).decode()
@@ -2490,9 +2442,7 @@ class WeixinChannel(BaseChannel):
         self._record_context_send(context_token)
 
 
-# ---------------------------------------------------------------------------
 # AES-128-ECB encryption / decryption  (matches pic-decrypt.ts / aes-ecb.ts)
-# ---------------------------------------------------------------------------
 
 
 def _parse_aes_key(aes_key_b64: str) -> bytes:
@@ -2518,7 +2468,6 @@ def _parse_aes_key(aes_key_b64: str) -> bytes:
 
 
 def _encrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
-    """Encrypt data with AES-128-ECB and PKCS7 padding for CDN upload."""
     try:
         key = _parse_aes_key(aes_key_b64)
     except Exception as e:
@@ -2551,10 +2500,6 @@ def _encrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
 
 
 def _decrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
-    """Decrypt AES-128-ECB media data.
-
-    ``aes_key_b64`` is always base64-encoded (caller converts hex keys first).
-    """
     try:
         key = _parse_aes_key(aes_key_b64)
     except Exception as e:
@@ -2588,7 +2533,6 @@ def _decrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
 
 
 def _pkcs7_unpad_safe(data: bytes, block_size: int = 16) -> bytes:
-    """Safely remove PKCS7 padding when valid; otherwise return original bytes."""
     if not data:
         return data
     if len(data) % block_size != 0:

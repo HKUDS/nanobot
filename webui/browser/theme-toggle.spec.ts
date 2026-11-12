@@ -106,14 +106,14 @@ test("reduced motion keeps the canvas fade but switches the icon directly", asyn
 
 for (const width of [1440, 390]) {
   for (const initial of ["light", "dark"] as const) {
-    test(`reduced motion fades existing chat surfaces together from ${initial} at ${width}px`, async ({ page }) => {
+    test(`reduced motion fades shared-composer chat surfaces together from ${initial} at ${width}px`, async ({ page }) => {
       await page.emulateMedia({ reducedMotion: "reduce" });
       await page.setViewportSize({ width, height: 844 });
       await page.addInitScript((theme) => {
         localStorage.setItem("nanobot.locale", "en");
         localStorage.setItem("nanobot-webui.theme", theme);
       }, initial);
-      await page.goto("/browser/fixture.html?case=theme-toggle&chat");
+      await page.goto("/browser/fixture.html?case=theme-toggle&chat&split");
       const input = page.getByRole("textbox");
       await input.fill("Keep this draft while changing theme");
       const inputBox = await input.boundingBox();
@@ -152,7 +152,6 @@ for (const width of [1440, 390]) {
         expect(middle.paint[index], `${selector} must not snap to the target palette`).not.toBe(after[index]);
         expect(middle.paint[index], `${selector} must leave the old palette`).not.toBe(before[index]);
       }
-      // These in-flow wrappers now reveal their painted parent instead of adding a second canvas.
       expect(middle.footer).toBe("rgba(0, 0, 0, 0)");
       expect(middle.sidebarFooter).toBe("rgba(0, 0, 0, 0)");
       expect(middle.gradient).toBe(middle.paint[0]);
@@ -216,7 +215,6 @@ for (const width of [1440, 390]) {
       await expect(toggle).toBeFocused();
       expect(await input.boundingBox()).toEqual(box);
       await page.screenshot({ path: test.info().outputPath(`crossfade-${width}-${initial}-mid.png`), animations: "allow" });
-      // Keyboard input still reaches the live DOM while the native snapshots are paused.
       await page.keyboard.press("Space");
       for (let step = 0; step < 20 && !await input.evaluate(node => node === document.activeElement); step++) {
         await page.keyboard.press("Tab");

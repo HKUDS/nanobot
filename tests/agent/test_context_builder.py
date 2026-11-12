@@ -1,5 +1,3 @@
-"""Tests for ContextBuilder — system prompt and message assembly."""
-
 from pathlib import Path
 
 import pytest
@@ -7,17 +5,9 @@ import pytest
 from nanobot.agent.context import ContextBuilder, TranscriptInput
 from nanobot.runtime_context import RuntimeContextBlock
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _builder(tmp_path: Path, **kw) -> ContextBuilder:
     return ContextBuilder(workspace=tmp_path, **kw)
-
-
-# ---------------------------------------------------------------------------
-# _merge_message_content (static)
-# ---------------------------------------------------------------------------
 
 
 class TestMergeMessageContent:
@@ -66,11 +56,6 @@ class TestMergeMessageContent:
     def test_list_items_not_dicts_wrapped(self):
         result = ContextBuilder._merge_message_content(["raw_item"], None)
         assert result == [{"type": "text", "text": "raw_item"}]
-
-
-# ---------------------------------------------------------------------------
-# _load_bootstrap_files
-# ---------------------------------------------------------------------------
 
 
 class TestLoadBootstrapFiles:
@@ -176,11 +161,6 @@ class TestLoadBootstrapFiles:
         assert "User prefers Chinese." in result
 
 
-# ---------------------------------------------------------------------------
-# _is_template_content (static)
-# ---------------------------------------------------------------------------
-
-
 class TestIsTemplateContent:
     def test_nonexistent_template_returns_false(self):
         assert ContextBuilder._is_template_content("anything", "nonexistent/path.md") is False
@@ -201,11 +181,6 @@ class TestIsTemplateContent:
         assert ContextBuilder._is_template_content("totally different", "memory/MEMORY.md") is False
 
 
-# ---------------------------------------------------------------------------
-# Bundled bootstrap templates
-# ---------------------------------------------------------------------------
-
-
 class TestBundledToolContract:
     def test_tool_contract_contains_shared_execution_policy(self):
         from importlib.resources import files as pkg_files
@@ -224,11 +199,6 @@ class TestBundledToolContract:
 
         assert "# Tool Usage Notes" in prompt
         assert "clear user request as authorization" in prompt
-
-
-# ---------------------------------------------------------------------------
-# build_user_content
-# ---------------------------------------------------------------------------
 
 
 class TestBuildUserContent:
@@ -292,11 +262,6 @@ class TestBuildUserContent:
         assert result[1]["_meta"]["path"] == str(png)
 
 
-# ---------------------------------------------------------------------------
-# build_system_prompt
-# ---------------------------------------------------------------------------
-
-
 class TestBuildSystemPrompt:
     def test_includes_identity_section(self, tmp_path):
         builder = _builder(tmp_path)
@@ -358,11 +323,6 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt()
         assert "## AGENTS.md" not in result
         assert "[Archived Context Summary]" not in result
-
-
-# ---------------------------------------------------------------------------
-# build_messages
-# ---------------------------------------------------------------------------
 
 
 class TestBuildMessages:
@@ -475,7 +435,7 @@ class TestBuildMessages:
         builder = _builder(tmp_path)
         history = [{"role": "user", "content": "previous user message"}]
         messages = builder.build_messages(history, "new message")
-        assert len(messages) == 2  # system + merged user
+        assert len(messages) == 2
         assert "previous user message" in str(messages[1]["content"])
         assert "new message" in str(messages[1]["content"])
 
@@ -511,7 +471,7 @@ class TestBuildMessages:
         builder = _builder(tmp_path)
         history = [{"role": "assistant", "content": "previous response"}]
         messages = builder.build_messages(history, "new message")
-        assert len(messages) == 3  # system + assistant + user
+        assert len(messages) == 3
 
     def test_media_with_history(self, tmp_path):
         png = tmp_path / "img.png"

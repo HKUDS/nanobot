@@ -1,5 +1,3 @@
-"""Shared isolation for WebSocket tests that persist runtime state."""
-
 from pathlib import Path
 
 import pytest

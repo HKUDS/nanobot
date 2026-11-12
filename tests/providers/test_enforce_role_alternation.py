@@ -1,10 +1,7 @@
-"""Tests for LLMProvider._enforce_role_alternation."""
-
 from nanobot.providers.base import _SYNTHETIC_USER_CONTENT, LLMProvider
 
 
 class TestEnforceRoleAlternation:
-    """Verify trailing-assistant removal and consecutive same-role merging."""
 
     def test_empty_messages(self):
         assert LLMProvider._enforce_role_alternation([]) == []
@@ -184,7 +181,6 @@ class TestEnforceRoleAlternation:
         assert "Subagent completed successfully." in result[1]["content"]
 
     def test_trailing_assistant_not_recovered_when_user_message_present(self):
-        """Recovery should NOT happen when a user message already exists."""
         msgs = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hi"},
@@ -243,7 +239,6 @@ class TestEnforceRoleAlternation:
         non_system = [m for m in result if m["role"] != "system"]
         assert non_system[0]["role"] == "user"
         assert non_system[0]["content"] == _SYNTHETIC_USER_CONTENT
-        # The original assistant should follow.
         assert non_system[1]["role"] == "assistant"
 
     def test_leading_assistant_with_tool_calls_not_patched(self):
@@ -258,12 +253,10 @@ class TestEnforceRoleAlternation:
         ]
         result = LLMProvider._enforce_role_alternation(msgs)
         non_system = [m for m in result if m["role"] != "system"]
-        # The assistant has tool_calls so it should NOT be patched.
         assert non_system[0]["role"] == "assistant"
         assert non_system[0].get("tool_calls") is not None
 
     def test_user_after_system_not_patched(self):
-        """Normal system→user sequence is not modified."""
         msgs = [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hello"},

@@ -1,10 +1,9 @@
-"""Execute tool calls and turn their outcomes into model observations."""
-
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
+from dataclasses import dataclass, replace
 from functools import cache
 from typing import Any, cast
 
@@ -35,7 +34,6 @@ _SSRF_BOUNDARY_NOTE = (
     "If the user explicitly trusts this private URL, ask them to whitelist "
     "the exact IP/CIDR via tools.ssrfWhitelist."
 )
-# Non-SSRF boundary markers returned to the model as recoverable tool errors.
 _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
     "outside the configured workspace",
     "outside allowed directory",
@@ -44,6 +42,13 @@ _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
     "path outside working dir",
     "path traversal detected",
 )
+
+
+@dataclass(frozen=True)
+class ToolCallResult:
+    tool_call: ToolCallRequest
+    result: Any
+    event: dict[str, str]
 
 
 async def execute_tool_calls(
@@ -57,8 +62,9 @@ async def execute_tool_calls(
     context: AgentHookContext,
     model_messages: list[dict[str, Any]] | None = None,
     compacted_tool_results: set[str] | None = None,
-) -> tuple[list[Any], list[dict[str, str]]]:
-    """Execute one model response's tool calls in stable result order."""
+    on_settled: Callable[[list[ToolCallResult]], Awaitable[None]] | None = None,
+) -> None:
+    """Own tool tasks through settlement, including results whose notification failed."""
     @cache
     def read_results() -> dict[str, str]:
         """Index once, on the first read-dedup check in this batch."""
@@ -70,41 +76,63 @@ async def execute_tool_calls(
             and isinstance(message.get("content"), str)
             and message["tool_call_id"] not in (compacted_tool_results or ())
         }
-    tool_results: list[tuple[Any, dict[str, str]]] = []
-    for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
-        if concurrent and len(batch) > 1:
-            batch_results = await asyncio.gather(*(
-                _execute_tool_call(
-                    tools,
-                    tool_call,
-                    external_lookup_counts,
-                    workspace_violation_counts,
-                    hook,
-                    context,
-                    read_results,
-                )
-                for tool_call in batch
-            ))
-            tool_results.extend(batch_results)
-        else:
-            for tool_call in batch:
-                result = await _execute_tool_call(
-                    tools,
-                    tool_call,
-                    external_lookup_counts,
-                    workspace_violation_counts,
-                    hook,
-                    context,
-                    read_results,
-                )
-                tool_results.append(result)
+    tool_results: list[ToolCallResult | None] = [None] * len(tool_calls)
 
-    results = [result for result, _event in tool_results]
-    events = [event for _result, event in tool_results]
-    return results, events
+    async def execute(index: int, tool_call: ToolCallRequest) -> None:
+        call_context = replace(context, tool_calls=[tool_call], tool_results=[], tool_events=[])
+        try:
+            await hook.on_tool_execution_event(call_context)
+            result, event = await _execute_tool_call_inner(
+                tools, tool_call, external_lookup_counts, workspace_violation_counts,
+                hook, context, read_results,
+            )
+        except asyncio.CancelledError:
+            cancelled = replace(call_context, tool_results=["Tool execution cancelled"], tool_events=[{
+                "name": tool_call.name, "status": "error", "detail": "cancelled",
+            }])
+            # Give immediate consumers a terminal event, but do not wait for a
+            # blocked consumer during cancellation. Own and drain the attempt.
+            notification = asyncio.create_task(hook.on_tool_execution_event(cancelled))
+            try:
+                await asyncio.sleep(0)
+            finally:
+                notification.cancel()
+                await asyncio.gather(notification, return_exceptions=True)
+            raise
+        # Notification failure or cancellation must not discard an actual result.
+        tool_results[index] = ToolCallResult(tool_call, result, event)
+        await hook.on_tool_execution_event(replace(
+            call_context, tool_results=[result], tool_events=[event],
+        ))
+
+    try:
+        offset = 0
+        for batch in _partition_tool_batches(tools, tool_calls, concurrent=concurrent):
+            if concurrent and len(batch) > 1:
+                tasks = [
+                    asyncio.create_task(execute(offset + index, tool_call))
+                    for index, tool_call in enumerate(batch)
+                ]
+                try:
+                    await asyncio.gather(*tasks)
+                except BaseException:
+                    # gather propagates ordinary errors before siblings finish.
+                    # The run must not release ownership while they can act.
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+            else:
+                for index, tool_call in enumerate(batch):
+                    await execute(offset + index, tool_call)
+            offset += len(batch)
+    finally:
+        settled = [result for result in tool_results if result is not None]
+        if settled and on_settled is not None:
+            await on_settled(settled)
 
 
-async def _execute_tool_call(
+async def _execute_tool_call_inner(
     tools: ToolRegistry,
     tool_call: ToolCallRequest,
     external_lookup_counts: dict[str, int],
@@ -225,7 +253,6 @@ def is_ssrf_violation(text: str) -> bool:
 
 
 def _is_workspace_violation(text: str) -> bool:
-    """Return whether text describes any workspace or network boundary rejection."""
     if not text:
         return False
     lowered = text.lower()

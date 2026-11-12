@@ -1,5 +1,3 @@
-"""Real HTTP, AgentLoop, tools and storage with a deterministic offline model."""
-
 from __future__ import annotations
 
 import asyncio
@@ -111,7 +109,6 @@ async def post(client, session_id, text, stream=False):
 def assert_route(result, chat_id):
     assert result["session_key"] == f"api:{chat_id}"
     assert result["chat_id"] == chat_id
-    # This is the real my tool result, not a mocked process_direct argument.
     assert result["tool_result"] == f"request.chat_id: {chat_id!r}"
 
 
@@ -138,7 +135,6 @@ async def test_concurrent_requests_keep_routes_history_and_order(tmp_path, strea
             tasks.append(second)
             await asyncio.wait_for(received.wait(), 10)
             if second_id == "alpha":
-                # The second HTTP request reached the handler, but its session is busy.
                 assert len(provider.calls) == 1
                 assert not second.done()
                 provider.release.set()
@@ -159,7 +155,6 @@ async def test_concurrent_requests_keep_routes_history_and_order(tmp_path, strea
 @pytest.mark.parametrize("session_id", ["alpha", " alpha ", "  ", None])
 async def test_old_history_survives_route_fix_restart_and_rollback(tmp_path, session_id):
     workspace = tmp_path / "workspace"
-    # The pre-fix adapter passed this exact identity and the shared default route.
     old_key = f"api:{session_id}" if session_id else API_SESSION_KEY
     old_provider = RouteProvider()
     async with runtime(workspace, old_provider) as (agent, _):
@@ -172,11 +167,9 @@ async def test_old_history_survives_route_fix_restart_and_rollback(tmp_path, ses
         result = await post(client, session_id, "UPGRADED_TURN")
         assert_route(result, session_id or "default")
         assert "LEGACY_HISTORY" in json.dumps(upgraded.calls[0]["messages"])
-        # The ordinary prefix is byte-stable; replay also keeps structured tool history.
         assert_prefix(old_provider.calls[0], upgraded.calls[0])
         old_tool_prefix = old_provider.calls[1]["messages"]
         assert old_tool_prefix == upgraded.calls[0]["messages"][:len(old_tool_prefix)]
-        # A live tool continuation appends to, rather than rebuilds, the request prefix.
         assert_prefix(upgraded.calls[0], upgraded.calls[1])
 
     reopened = RouteProvider()
@@ -184,7 +177,6 @@ async def test_old_history_survives_route_fix_restart_and_rollback(tmp_path, ses
         assert_route(await post(client, session_id, "AFTER_RESTART"), session_id or "default")
         replay = json.dumps(reopened.calls[0]["messages"])
         assert "LEGACY_HISTORY" in replay and "UPGRADED_TURN" in replay
-        # Restoring the old adapter route still reads all post-upgrade messages.
         await agent.process_direct(
             "ROLLBACK_TURN", session_key=old_key, channel="api", chat_id=API_CHAT_ID,
         )

@@ -1,5 +1,3 @@
-"""Provider used while an application is waiting for model setup."""
-
 from __future__ import annotations
 
 from typing import Any

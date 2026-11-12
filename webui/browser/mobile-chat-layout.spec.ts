@@ -26,7 +26,7 @@ for (const { width, dark } of [{ width: 360, dark: false }, { width: 314, dark: 
 
       await usage.click();
       const details = page.getByRole("dialog", { name: "Context usage" });
-      await expect(details.getByRole("progressbar", { name: "Context 22%" })).toHaveAttribute("aria-valuenow", "22");
+      await expect(details.getByRole("progressbar", { name: "Context" })).toHaveAttribute("aria-valuenow", "22");
       await page.keyboard.press("Escape");
       await expect(usage).toBeFocused();
 

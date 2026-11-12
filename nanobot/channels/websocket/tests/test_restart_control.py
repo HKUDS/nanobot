@@ -1,5 +1,3 @@
-"""Settings restarts are controls, not persisted chat turns."""
-
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,7 +51,6 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
     before_files = {p: p.read_bytes() for p in tmp_path.rglob("*.jsonl")}
     before_transcript = history.read(key)
 
-    # Use each new connection's default ID, then an existing chat when present.
     chat_ids = ["ready-default-1", "ready-default-2"]
     if existing != "none":
         chat_ids.append("existing")
@@ -65,7 +62,6 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
         await channel._dispatch_envelope(connection, "browser", envelope)
         message = bus.publish_inbound.await_args.args[0]
         assert message.metadata[WEBUI_RESTART_CONTROL_METADATA_KEY] is True
-        # Exercise the real command response, but never execute a process restart.
         def discard_restart_task(coro):
             coro.close()
         with monkeypatch.context() as patch:
@@ -74,7 +70,6 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
                 msg=message, session=None, key=message.session_key, raw=message.content, loop=MagicMock(),
             ))
         await channel.send(response)
-        # A lost ACK retry must not enqueue a second restart.
         calls = bus.publish_inbound.await_count
         await channel._dispatch_envelope(connection, "browser", envelope)
         assert bus.publish_inbound.await_count == calls
@@ -86,7 +81,6 @@ async def test_settings_restart_does_not_create_or_change_chat_history(history, 
     assert all(frame["text"] == "Restarting..." and frame["turn_id"].startswith("webui-system:") for frame in replies)
     assert {p: p.read_bytes() for p in tmp_path.rglob("*.jsonl")} == before_files
     assert history.read(key) == before_transcript
-    # A fresh manager uses the public sidebar discovery path, not a cached count.
     fresh = SessionManager(sessions.workspace)
     assert list_webui_sessions(fresh) == before_rows
     if existing in {"canonical", "both"}:

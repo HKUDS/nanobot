@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { FallbackResponseSources } from "@/components/ResponseSourceBadge";
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { ComposerUsagePopover, type ComposerRoundUsage } from "@/components/thread/ComposerUsagePopover";
+import type { ContextSnapshot } from "@/lib/types";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { ModelPresetBadge, type ModelPresetOption } from "@/components/thread/ModelPresetBadge";
@@ -30,9 +31,9 @@ const presets: ModelPresetOption[] = [
   { name: "推理", provider: "anthropic", model: "claude-sonnet-4", reasoningEffort: "high", contextWindowTokens: 200_000 },
 ];
 const rounds: ComposerRoundUsage[] = [
-  { id: "gallery-round-1", timestamp: createdAt, inputTokens: 8_200, cachedTokens: 6_000, outputTokens: 620, generationMs: 3_100 },
-  { id: "gallery-round-2", timestamp: createdAt + 60_000, inputTokens: 12_000, cachedTokens: 8_200, outputTokens: 980, generationMs: 5_400 },
-  { id: "gallery-round-3", timestamp: createdAt + 120_000, inputTokens: 18_500, cachedTokens: 12_000, outputTokens: 1_240, generationMs: 7_200 },
+  { inputTokens: 8_200, cachedTokens: 6_000, generationMs: 3_100 },
+  { inputTokens: 12_000, cachedTokens: 8_200, generationMs: 5_400 },
+  { inputTokens: 18_500, cachedTokens: 12_000, generationMs: 7_200 },
 ];
 const commands: SlashCommand[] = [
   { command: "/status", title: "previews.composer.statusCommand", description: "previews.composer.statusDescription", icon: "activity", lifecycle: "side_channel", acceptsArgs: false },
@@ -71,14 +72,16 @@ function ComposerPreview() {
   return <div className="space-y-4">
     <StatePicker label={t("previews.composer.state")} value={mode} options={["thread", "hero", "streaming", "disabled"]} onChange={setMode} />
     <Button variant="outline" size="sm" onClick={() => setQuoted("组件接收状态，并把操作交给调用方。")}>{t("previews.composer.addQuote")}</Button>
-    <ThreadComposer disabled={mode === "disabled"} isStreaming={mode === "streaming"} variant={mode === "hero" ? "hero" : "thread"}
-      inputAriaLabel={t("previews.composer.input")} placeholder={t("previews.composer.placeholder")}
-      modelLabel={selected.name} modelDetail={selected.model} modelProvider={selected.provider} modelPreset={preset}
-      modelPresets={presets} onModelPresetChange={setPreset} slashCommands={commands.map((command) => ({ ...command, title: t(command.title), description: t(command.description) }))}
-      contextUsage={{ contextTokens: 18_500, contextWindowTokens: 200_000 }} recentRoundUsage={rounds}
-      workspaceScope={projectScope} workspaceControlsHidden quotedContext={quoted} onQuotedContextChange={setQuoted}
-      onStop={() => { setMode("thread"); setSent({ kind: "stopped" }); }}
-      onSend={(content, attachments) => { setSent({ kind: "sent", content, attachments: attachments?.length ?? 0 }); return true; }} />
+    <ComposerUsagePopover context={{ contextTokens: 18_500, contextWindowTokens: 200_000 }} rounds={rounds}>
+      {(renderContextUsage) => <ThreadComposer disabled={mode === "disabled"} isStreaming={mode === "streaming"} variant={mode === "hero" ? "hero" : "thread"}
+        inputAriaLabel={t("previews.composer.input")} placeholder={t("previews.composer.placeholder")}
+        modelLabel={selected.name} modelDetail={selected.model} modelProvider={selected.provider} modelPreset={preset}
+        modelPresets={presets} onModelPresetChange={setPreset} slashCommands={commands.map((command) => ({ ...command, title: t(command.title), description: t(command.description) }))}
+        renderContextUsage={renderContextUsage}
+        workspaceScope={projectScope} workspaceControlsHidden quotedContext={quoted} onQuotedContextChange={setQuoted}
+        onStop={() => { setMode("thread"); setSent({ kind: "stopped" }); }}
+        onSend={(content, attachments) => { setSent({ kind: "sent", content, attachments: attachments?.length ?? 0 }); return true; }} />}
+    </ComposerUsagePopover>
     <p role="status" className="text-sm text-muted-foreground">{sent?.kind === "stopped" ? t("previews.composer.stopped")
       : sent ? t("previews.composer.sent", { content: sent.content, attachments: sent.attachments ? t("previews.composer.attachments", { amount: sent.attachments }) : "" })
         : t("previews.composer.hint")}</p>
@@ -102,14 +105,30 @@ function ModelPresetPreview() {
   </div>;
 }
 
+const contextSnapshots: ContextSnapshot[] = [0, 1, 2].map((round) => ({
+  id: `context-example-${round}`, contextWindowTokens: 128000,
+  usage: { prompt_tokens: 28000 + round * 7300, context_tokens: 28000 + round * 7300, cached_tokens: 20000 + round * 7000, generation_ms: 8200 },
+  graph: {
+    nodes: [
+      { path: "/workspace/MEMORY.md", name: "MEMORY.md", state: "loaded", tokens: 2100 },
+      { path: "/workspace/SOUL.md", name: "SOUL.md", state: "loaded", tokens: 380 },
+      { path: "/workspace/AGENTS.md", name: "AGENTS.md", state: "loaded", tokens: 1400 },
+      { path: "/workspace/skills/nanobot-document/SKILL.md", name: "nanobot-document", state: "loaded", tokens: 550 },
+      { path: "/workspace/skills/nanobot-document/references/architecture.md", name: "architecture.md", state: round ? "loaded" : "discovered", tokens: round * 1600 },
+      { path: "/workspace/skills/nanobot-document/references/configuration.md", name: "configuration.md", state: "discovered", tokens: 0 },
+    ],
+    edges: ["architecture.md", "configuration.md"].map((name) => ({ source: "/workspace/skills/nanobot-document/SKILL.md", target: `/workspace/skills/nanobot-document/references/${name}` })),
+  },
+}));
+
 function UsagePreview() {
   const { t } = useGalleryTranslation();
-  const [mode, setMode] = useState<"normal" | "caution" | "critical" | "rounds_only" | "sheet">("normal");
+  const [mode, setMode] = useState<"normal" | "caution" | "critical" | "rounds_only">("normal");
   const tokens = mode === "critical" ? 192_000 : mode === "caution" ? 162_000 : 18_500;
   return <div className="space-y-4">
-    <StatePicker label={t("previews.usage.state")} value={mode} options={["normal", "caution", "critical", "rounds_only", "sheet"]} onChange={setMode} />
+    <StatePicker label={t("previews.usage.state")} value={mode} options={["normal", "caution", "critical", "rounds_only"]} onChange={setMode} />
     <ComposerUsagePopover context={mode === "rounds_only" ? null : { contextTokens: tokens, contextWindowTokens: 200_000 }}
-      rounds={rounds} showLabel bottomSheet={mode === "sheet"} />
+      rounds={rounds} snapshots={contextSnapshots} showLabel />
     <p className="text-sm text-muted-foreground">{t("previews.usage.hint")}</p>
   </div>;
 }

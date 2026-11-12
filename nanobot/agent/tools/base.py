@@ -1,4 +1,3 @@
-"""Base class for agent tools."""
 from __future__ import annotations
 
 import json
@@ -17,7 +16,6 @@ if typing.TYPE_CHECKING:
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
 
-# Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
 _JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
     "string": str,
     "integer": int,
@@ -35,7 +33,6 @@ def _is_json_integer(value: object) -> bool:
 
 
 def _json_values_equal(left: Any, right: Any) -> bool:
-    """Compare JSON values without treating booleans as numbers."""
     if isinstance(left, bool) or isinstance(right, bool):
         return left is right
     if isinstance(left, list) and isinstance(right, list):
@@ -257,7 +254,6 @@ class Tool(ABC):
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
 
-    # --- Plugin metadata ---
 
     config_key: str = ""
     _plugin_discoverable: bool = True

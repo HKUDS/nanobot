@@ -1,8 +1,7 @@
-"""Agent hook that adapts runner events into channel progress UI."""
-
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -10,13 +9,12 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.bus.outbound_events import ProgressEvent, StreamDeltaEvent, StreamEndEvent
 from nanobot.events import NO_EVENTS, EventSink
-from nanobot.providers.base import ToolCallRequest
+from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.utils.helpers import IncrementalThinkExtractor, strip_think
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
 )
-from nanobot.utils.tool_hints import format_tool_hints
 
 
 class AgentProgressHook(AgentHook):
@@ -28,15 +26,16 @@ class AgentProgressHook(AgentHook):
         *,
         streaming: bool = False,
         session_key: str | None = None,
-        tool_hint_max_length: int = 40,
         log_content: bool = True,
+        workspace: Path | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._publish = events.publish
         self._streaming = streaming
         self._session_key = session_key
-        self._tool_hint_max_length = tool_hint_max_length
         self._log_content = log_content
+        self._workspace = workspace
+        self._tool_workspaces: dict[str, str] = {}
         self._stream_buf = ""
         self._think_extractor = IncrementalThinkExtractor()
         self._reasoning_open = False
@@ -49,9 +48,6 @@ class AgentProgressHook(AgentHook):
         if not text:
             return None
         return strip_think(text) or None
-
-    def _tool_hint(self, tool_calls: list[Any]) -> str:
-        return format_tool_hints(tool_calls, max_length=self._tool_hint_max_length)
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         prev_clean = strip_think(self._stream_buf)
@@ -118,11 +114,7 @@ class AgentProgressHook(AgentHook):
         }
         if phase == "start":
             await self.on_stream_end(context, resuming=True)
-            tool_call = ToolCallRequest(id=str(call_id), name=name, arguments=arguments)
-            tool_hint = self._strip_think(self._tool_hint([tool_call])) or name
-            await self._publish(ProgressEvent(
-                content=tool_hint, tool_hint=True, tool_events=[payload],
-            ))
+            await self._publish(ProgressEvent(tool_hint=True, tool_events=[payload]))
             logger.info(
                 "Provider-hosted tool call: {}({})",
                 name,
@@ -138,11 +130,7 @@ class AgentProgressHook(AgentHook):
                 thought = self._strip_think(context.response.content if context.response else None)
                 if thought:
                     await self._publish(ProgressEvent(content=thought))
-            tool_hint = self._strip_think(self._tool_hint(context.tool_calls))
-            tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
-            await self._publish(ProgressEvent(
-                content=tool_hint or "", tool_hint=True, tool_events=tool_events,
-            ))
+
         for tc in context.tool_calls:
             args_str = (
                 json.dumps(tc.arguments, ensure_ascii=False)[:200]
@@ -164,15 +152,25 @@ class AgentProgressHook(AgentHook):
         else:
             self._reasoning_open = False
 
+    async def on_tool_execution_event(self, context: AgentHookContext) -> None:
+        if self._publish:
+            finished = bool(context.tool_events)
+            if not finished:
+                directory = str(current_tool_workspace(self._workspace).project_path or Path.cwd())
+                for call in context.tool_calls:
+                    self._tool_workspaces[call.id] = directory
+            payloads = (
+                build_tool_event_finish_payloads(context) if finished
+                else [build_tool_event_start_payload(tc) for tc in context.tool_calls]
+            )
+            for payload in payloads:
+                call_id = payload["call_id"]
+                directory = self._tool_workspaces.pop(call_id, None) if finished else self._tool_workspaces.get(call_id)
+                if directory is not None:
+                    payload["working_directory"] = directory
+            await self._publish(ProgressEvent(tool_hint=not finished, tool_events=payloads))
+
     async def after_iteration(self, context: AgentHookContext) -> None:
-        if (
-            self._publish
-            and context.tool_calls
-            and context.tool_events
-        ):
-            tool_events = build_tool_event_finish_payloads(context)
-            if tool_events:
-                await self._publish(ProgressEvent(tool_events=tool_events))
         u = context.usage
         logger.debug(
             "LLM usage: input={} output={} cache_read={} cache_write={} source={}",

@@ -1,5 +1,3 @@
-"""WebUI OAuth connection flow for Linear workspace installations."""
-
 from __future__ import annotations
 
 import asyncio

@@ -1,5 +1,3 @@
-"""One shared address, explicit feature opt-in, and legacy config migration."""
-
 import json
 
 import httpx

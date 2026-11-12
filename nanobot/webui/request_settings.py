@@ -1,5 +1,3 @@
-"""Shared validation and secret handling for request settings editors."""
-
 from __future__ import annotations
 
 import json

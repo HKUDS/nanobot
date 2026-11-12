@@ -33,11 +33,17 @@ for (const narrow of [false, true]) {
     await expect(group.getByRole("radio", { name: "阅读字号：标准", exact: true })).toBeChecked();
     await expect(group.getByRole("radio")).toHaveCount(3);
     const stable = await metrics(page.locator(".settings-row").first().locator(".text-control-label"));
+    const tables = page.getByTestId("markdown-data-table");
+    const formulaTable = tables.last();
+    await expect(tables).toHaveCount(2);
+    await expect(formulaTable.locator(".katex")).toHaveCount(7);
+    await page.evaluate(() => document.fonts.ready);
+    expect(await page.evaluate(() => Array.from(document.fonts).some((font) => font.family === "Open Sans" && font.status === "loaded"))).toBe(true);
     const observations = [];
     for (const [size, label, bodySize] of [
-      ["small", "阅读字号：小", narrow ? 15 : 16],
-      ["standard", "阅读字号：标准", narrow ? 16 : 18],
-      ["large", "阅读字号：大", narrow ? 18 : 20],
+      ["small", "阅读字号：小", 15],
+      ["standard", "阅读字号：标准", 16],
+      ["large", "阅读字号：大", 18],
     ] as const) {
       await group.getByRole("radio", { name: label, exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("data-reading-text-size", size);
@@ -45,19 +51,49 @@ for (const narrow of [false, true]) {
       await expect(paragraph).toHaveCSS("font-size", `${bodySize}px`);
       const body = await metrics(paragraph);
       expect(body.size).toBe(bodySize);
-      expect(body.line).toBeCloseTo(bodySize * 1.8);
+      expect(body.line).toBeCloseTo(bodySize * 1.6);
       expect(body.weight).toBe("400");
+      expect(body.family).toContain("Open Sans");
       expect((await metrics(page.locator("[data-user-text-bubble] p"))).size).toBe(bodySize);
       for (const selector of ["blockquote", "ol > li", ".task-list-item"]) {
         expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBe(bodySize);
       }
-      for (const [selector, ratio] of [["h1", 1.5], ["h2", 1.25], ["h3", 1.125], ["h4", 1]] as const) {
+      for (const [selector, ratio] of [["h1", 2], ["h2", 1.5], ["h3", 1.25], ["h4", 1.125]] as const) {
         const heading = await metrics(page.locator(`.markdown-content ${selector}`));
         expect(heading.size).toBeCloseTo(bodySize * ratio);
         expect(heading.weight).toBe("600");
       }
       for (const selector of ["table", "th", "td"]) {
         expect((await metrics(page.locator(`.markdown-content ${selector}`).first())).size).toBeCloseTo(bodySize * 0.875);
+      }
+      // Wide tables scroll within their wrapper instead of squeezing words into single letters.
+      const textTable = tables.first();
+      await expect(textTable).toHaveCSS("overflow-x", "auto");
+      await textTable.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+      expect(await textTable.evaluate(node => {
+        const bounds = node.getBoundingClientRect();
+        const lastCell = node.querySelector("tbody td:last-child")!.getBoundingClientRect();
+        return lastCell.right <= bounds.right + 1 && lastCell.right > bounds.left;
+      })).toBe(true);
+      await textTable.evaluate(node => { node.scrollLeft = 0; });
+      await expect.poll(() => formulaTable.locator(".katex-html > .base").evaluateAll((nodes) => nodes.every((node) => {
+        const formula = node.getBoundingClientRect();
+        const cell = node.closest("th, td")!;
+        const bounds = cell.getBoundingClientRect();
+        const style = getComputedStyle(cell);
+        return formula.width > 0
+          && formula.left >= bounds.left + parseFloat(style.paddingLeft) - 1
+          && formula.right <= bounds.right - parseFloat(style.paddingRight) + 1;
+      }))).toBe(true);
+      if (narrow) {
+        expect(await formulaTable.evaluate(node => node.scrollWidth > node.clientWidth)).toBe(true);
+        await formulaTable.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+        await expect.poll(() => formulaTable.evaluate((node) => {
+          const bounds = node.getBoundingClientRect();
+          const lastCell = node.querySelector("tbody td:last-child")!.getBoundingClientRect();
+          return lastCell.left >= bounds.left - 1 && lastCell.right <= bounds.right + 1;
+        })).toBe(true);
+        await formulaTable.evaluate(node => { node.scrollLeft = 0; });
       }
       expect((await metrics(page.locator(".code-content pre"))).size).toBeCloseTo(bodySize * 0.875);
       expect((await metrics(page.locator(".markdown-inline-code"))).size).toBeCloseTo(bodySize * 0.875);
@@ -103,7 +139,7 @@ test("keyboard, tooltip, persistence and unchanged preferences", async ({ page }
   const large = page.getByRole("radio", { name: "Large reading text", exact: true });
   await expect(large).toBeFocused();
   await expect(large).toBeChecked();
-  await expect(page.locator(".markdown-content p").first()).toHaveCSS("line-height", `${20 * 1.625}px`);
+  await expect(page.locator(".markdown-content p").first()).toHaveCSS("line-height", `${18 * 1.6}px`);
   await page.reload();
   await expect(page.getByRole("radio", { name: "Large reading text", exact: true })).toBeChecked();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("nanobot-webui.settings-preferences")!))).toMatchObject({

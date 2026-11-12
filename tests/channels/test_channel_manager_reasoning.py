@@ -137,7 +137,6 @@ async def test_reasoning_end_routes_to_send_reasoning_end(manager):
 
 @pytest.mark.asyncio
 async def test_one_shot_reasoning_expands_to_delta_plus_end(manager):
-    """One-shot reasoning expands to a single delta + end."""
     channel = manager.channels["mock"]
     msg = outbound_message_for_event(
         channel="mock",
@@ -206,7 +205,6 @@ async def test_dispatch_silently_drops_reasoning_for_unknown_channel(manager):
 
 @pytest.mark.asyncio
 async def test_base_channel_reasoning_primitives_are_noop_safe():
-    """Plugins that don't override the streaming primitives must not blow up."""
 
     class _Plain(BaseChannel):
         name = "plain"
@@ -224,7 +222,6 @@ async def test_base_channel_reasoning_primitives_are_noop_safe():
     channel = _Plain({}, MessageBus())
     assert await channel.send_reasoning_delta("c", "x") is None
     assert await channel.send_reasoning_end("c") is None
-    # And the one-shot wrapper translates without raising.
     assert await channel.send_reasoning(
         OutboundMessage(channel="plain", chat_id="c", content="x", metadata={})
     ) is None

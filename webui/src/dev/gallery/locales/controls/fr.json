@@ -504,5 +504,12 @@
     "view": "Voir l’invitation",
     "dismissed": "Ne plus rappeler sélectionné dans l’aperçu",
     "starred": "Lien GitHub sélectionné dans l’aperçu"
+  },
+  "sidebarPanel": {
+    "title": "Panneau latéral",
+    "toggle": "Afficher ou masquer le panneau",
+    "content": "Les détails restent dans le volet actuel.",
+    "description": "Un panneau latéral non modal avec une transition d’ouverture commune.",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

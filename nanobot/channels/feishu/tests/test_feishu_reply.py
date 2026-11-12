@@ -1,4 +1,3 @@
-"""Tests for Feishu message reply (quote) feature."""
 import asyncio
 import json
 from pathlib import Path
@@ -7,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Check optional Feishu dependencies before running tests
 try:
     from nanobot.channels.feishu import runtime as feishu
     FEISHU_AVAILABLE = getattr(feishu, "FEISHU_AVAILABLE", False)
@@ -22,9 +20,6 @@ from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu.runtime import FeishuChannel, FeishuConfig
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _make_feishu_channel(
     reply_to_message: bool = False,
@@ -42,7 +37,6 @@ def _make_feishu_channel(
     )
     channel = FeishuChannel(config, MessageBus())
     channel._client = MagicMock()
-    # _loop is only used by the WebSocket thread bridge; not needed for unit tests
     channel._loop = None
     channel._running = True
     return channel
@@ -89,10 +83,6 @@ def _make_get_message_response(text: str, msg_type: str = "text", success: bool 
     resp.msg = "ok"
     return resp
 
-
-# ---------------------------------------------------------------------------
-# Config tests
-# ---------------------------------------------------------------------------
 
 def test_feishu_config_reply_to_message_defaults_false() -> None:
     assert FeishuConfig().reply_to_message is False
@@ -158,10 +148,6 @@ def test_feishu_config_topic_isolation_accepts_camel_case() -> None:
     assert config.topic_isolation is False
 
 
-# ---------------------------------------------------------------------------
-# _get_message_content_sync tests
-# ---------------------------------------------------------------------------
-
 def test_get_message_content_sync_returns_reply_prefix() -> None:
     channel = _make_feishu_channel()
     channel._client.im.v1.message.get.return_value = _make_get_message_response("what time is it?")
@@ -220,10 +206,6 @@ def test_get_message_content_sync_returns_none_when_empty_text() -> None:
 
     assert result is None
 
-
-# ---------------------------------------------------------------------------
-# _reply_message_sync tests
-# ---------------------------------------------------------------------------
 
 def test_reply_message_sync_returns_true_on_success() -> None:
     channel = _make_feishu_channel()
@@ -332,10 +314,6 @@ async def test_send_uses_expected_feishu_msg_type_for_uploaded_files(
     assert json.loads(content) == {"file_key": "file-key"}
 
 
-# ---------------------------------------------------------------------------
-# send() — reply routing tests
-# ---------------------------------------------------------------------------
-
 @pytest.mark.asyncio
 async def test_send_uses_reply_api_when_configured() -> None:
     channel = _make_feishu_channel(reply_to_message=True)
@@ -435,7 +413,6 @@ async def test_send_fallback_to_create_when_reply_fails() -> None:
         metadata={"message_id": "om_001"},
     ))
 
-    # reply attempted first, then falls back to create
     channel._client.im.v1.message.reply.assert_called_once()
     channel._client.im.v1.message.create.assert_called_once()
 
@@ -489,7 +466,6 @@ def test_send_message_sync_falls_back_to_text_for_interactive_error() -> None:
 
 @pytest.mark.asyncio
 async def test_send_multiple_messages_all_use_reply_when_in_topic(tmp_path: Path) -> None:
-    """When in a topic (has thread_id), all messages use reply API to stay in topic."""
     channel = _make_feishu_channel(reply_to_message=False)
 
     file1 = tmp_path / "file1.png"
@@ -524,14 +500,12 @@ async def test_send_multiple_messages_all_use_reply_when_in_topic(tmp_path: Path
             },
         ))
 
-    # All 3 sends (text + 2 images) should use reply
     assert len(reply_calls) == 3
     assert len(create_calls) == 0
 
 
 @pytest.mark.asyncio
 async def test_send_multiple_messages_only_first_uses_reply_when_reply_to_message(tmp_path: Path) -> None:
-    """When reply_to_message is enabled but not in topic, only first message uses reply."""
     channel = _make_feishu_channel(reply_to_message=True)
 
     file1 = tmp_path / "file1.png"
@@ -565,14 +539,9 @@ async def test_send_multiple_messages_only_first_uses_reply_when_reply_to_messag
             },
         ))
 
-    # Only first send uses reply, rest use create
     assert len(reply_calls) == 1
     assert len(create_calls) == 2
 
-
-# ---------------------------------------------------------------------------
-# _on_message — parent_id / root_id metadata tests
-# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_on_message_captures_parent_and_root_id_in_metadata() -> None:
@@ -792,11 +761,6 @@ async def test_on_message_keeps_longer_mention_key_that_shares_bot_prefix() -> N
     assert captured[0]["content"] == "@Alice (ou_alice) /new @nanobot (ou_bot)"
 
 
-# ---------------------------------------------------------------------------
-# Inbound media tests
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_on_message_audio_publishes_downloaded_path_and_transcription() -> None:
     channel = _make_feishu_channel()
@@ -844,14 +808,8 @@ async def test_download_and_save_media_returns_absolute_path_in_content(monkeypa
     assert content_text == f"[audio: {file_path}]"
 
 
-# ---------------------------------------------------------------------------
-# Session key derivation tests
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_session_key_group_with_root_id_is_thread_scoped() -> None:
-    """Group message with root_id gets a thread-scoped session key."""
     channel = _make_feishu_channel(group_policy="open")
     bus_spy = []
     original_publish = channel.bus.publish_inbound
@@ -879,7 +837,6 @@ async def test_session_key_group_with_root_id_is_thread_scoped() -> None:
 
 @pytest.mark.asyncio
 async def test_session_key_group_no_root_id_uses_message_id() -> None:
-    """Group message without root_id gets session keyed by message_id (per-message session)."""
     channel = _make_feishu_channel(group_policy="open")
     bus_spy = []
     original_publish = channel.bus.publish_inbound
@@ -907,7 +864,6 @@ async def test_session_key_group_no_root_id_uses_message_id() -> None:
 
 @pytest.mark.asyncio
 async def test_session_key_named_instance_uses_runtime_channel_namespace() -> None:
-    """Named Feishu assistant instances keep group sessions separate."""
     channel = _make_feishu_channel(group_policy="open")
     channel.name = "feishu.product"
     bus_spy = []
@@ -937,7 +893,6 @@ async def test_session_key_named_instance_uses_runtime_channel_namespace() -> No
 
 @pytest.mark.asyncio
 async def test_session_key_private_chat_no_override() -> None:
-    """Private chat never overrides session key (consistent with Telegram/Slack)."""
     channel = _make_feishu_channel()
     bus_spy = []
     original_publish = channel.bus.publish_inbound
@@ -963,14 +918,8 @@ async def test_session_key_private_chat_no_override() -> None:
     assert bus_spy[0].session_key_override is None
 
 
-# ---------------------------------------------------------------------------
-# reply_in_thread tests
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_reply_uses_reply_in_thread_when_enabled() -> None:
-    """When reply_to_message is True, reply includes reply_in_thread=True."""
     channel = _make_feishu_channel(reply_to_message=True)
 
     reply_resp = MagicMock()
@@ -992,7 +941,6 @@ async def test_reply_uses_reply_in_thread_when_enabled() -> None:
 
 @pytest.mark.asyncio
 async def test_reply_without_reply_in_thread_when_disabled() -> None:
-    """When reply_to_message is False, reply does NOT use reply_in_thread."""
     channel = _make_feishu_channel(reply_to_message=False)
 
     create_resp = MagicMock()
@@ -1005,13 +953,11 @@ async def test_reply_without_reply_in_thread_when_disabled() -> None:
         content="hello",
     ))
 
-    # No message_id in metadata → no reply attempt, direct create
     channel._client.im.v1.message.create.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_topic_reply_does_not_force_reply_in_thread_when_disabled() -> None:
-    """Topic replies must not create new Feishu topics when reply_to_message is False."""
     channel = _make_feishu_channel(reply_to_message=False)
 
     reply_resp = MagicMock()
@@ -1037,7 +983,6 @@ async def test_topic_reply_does_not_force_reply_in_thread_when_disabled() -> Non
 
 @pytest.mark.asyncio
 async def test_reply_keeps_fallback_when_reply_fails() -> None:
-    """Even with reply_to_message=True, fallback to create on reply failure."""
     channel = _make_feishu_channel(reply_to_message=True)
 
     reply_resp = MagicMock()
@@ -1063,7 +1008,6 @@ async def test_reply_keeps_fallback_when_reply_fails() -> None:
 
 @pytest.mark.asyncio
 async def test_reply_no_reply_in_thread_for_p2p_chat() -> None:
-    """reply_in_thread should NOT be set for p2p chats (identified by chat_type)."""
     channel = _make_feishu_channel(reply_to_message=True)
 
     reply_resp = MagicMock()
@@ -1085,7 +1029,6 @@ async def test_reply_no_reply_in_thread_for_p2p_chat() -> None:
 
 @pytest.mark.asyncio
 async def test_reply_uses_reply_in_thread_for_group_chat() -> None:
-    """reply_in_thread should be True for group chats (identified by chat_type)."""
     channel = _make_feishu_channel(reply_to_message=True)
 
     reply_resp = MagicMock()
@@ -1131,13 +1074,11 @@ async def test_reply_targets_message_id_when_in_topic() -> None:
     channel._client.im.v1.message.reply.assert_called_once()
     call_args = channel._client.im.v1.message.reply.call_args
     request = call_args[0][0]
-    # Should reply to the inbound message_id, not the root
     assert request.message_id == "om_child456"
     assert request.request_body.reply_in_thread is True
 
 
 def test_on_reaction_added_stores_reaction_id() -> None:
-    """_on_reaction_added stores the returned reaction_id in _reaction_ids."""
     channel = _make_feishu_channel()
     loop = asyncio.new_event_loop()
     try:
@@ -1151,7 +1092,6 @@ def test_on_reaction_added_stores_reaction_id() -> None:
 
 
 def test_on_reaction_added_skips_none_result() -> None:
-    """_on_reaction_added does not store None results."""
     channel = _make_feishu_channel()
     loop = asyncio.new_event_loop()
     try:
@@ -1165,7 +1105,6 @@ def test_on_reaction_added_skips_none_result() -> None:
 
 
 def test_on_background_task_done_removes_from_set() -> None:
-    """_on_background_task_done removes task from tracking set."""
     channel = _make_feishu_channel()
     loop = asyncio.new_event_loop()
     try:
@@ -1177,7 +1116,7 @@ def test_on_background_task_done_removes_from_set() -> None:
         try:
             loop.run_until_complete(task)
         except RuntimeError:
-            pass  # expected
+            pass
         channel._on_background_task_done(task)
     finally:
         loop.close()
@@ -1186,7 +1125,6 @@ def test_on_background_task_done_removes_from_set() -> None:
 
 
 def test_on_message_sync_ignores_events_after_channel_stops() -> None:
-    """Late WebSocket callbacks should not schedule work after the assistant is off."""
     channel = _make_feishu_channel()
     channel._running = False
     channel._loop = MagicMock()
@@ -1200,7 +1138,6 @@ def test_on_message_sync_ignores_events_after_channel_stops() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_ignores_events_after_channel_stops() -> None:
-    """Stopped assistants must not react, pair, or publish stale Feishu events."""
     channel = _make_feishu_channel(group_policy="open")
     channel._running = False
     channel._add_reaction = AsyncMock()
@@ -1214,7 +1151,6 @@ async def test_on_message_ignores_events_after_channel_stops() -> None:
 
 @pytest.mark.asyncio
 async def test_on_message_unauthorized_dm_sends_pairing_code_without_side_effects() -> None:
-    """Unauthorized DM sender gets a pairing code but no media side effects."""
     channel = _make_feishu_channel(group_policy="open")
     channel.config.allow_from = ["ou_allowed"]
     channel._add_reaction = AsyncMock()
@@ -1233,13 +1169,11 @@ async def test_on_message_unauthorized_dm_sends_pairing_code_without_side_effect
     channel._add_reaction.assert_not_awaited()
     channel._download_and_save_media.assert_not_awaited()
     channel.transcribe_audio.assert_not_awaited()
-    # _handle_message is called to issue the pairing code in DMs
     channel._handle_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_on_message_unauthorized_group_ignored_before_side_effects() -> None:
-    """Unauthorized group chat sender is silently ignored before any side effects."""
     channel = _make_feishu_channel(group_policy="open")
     channel.config.allow_from = ["ou_allowed"]
     channel._add_reaction = AsyncMock()
@@ -1264,7 +1198,6 @@ async def test_on_message_unauthorized_group_ignored_before_side_effects() -> No
 
 @pytest.mark.asyncio
 async def test_session_key_with_topic_isolation_true_uses_thread_scoped() -> None:
-    """When topic_isolation is True (default), group messages use thread-scoped session keys."""
     channel = _make_feishu_channel(group_policy="open", topic_isolation=True)
     bus_spy = []
     original_publish = channel.bus.publish_inbound
@@ -1278,7 +1211,6 @@ async def test_session_key_with_topic_isolation_true_uses_thread_scoped() -> Non
     channel.transcribe_audio = AsyncMock(return_value="")
     channel._add_reaction = AsyncMock(return_value=None)
 
-    # Test with root_id
     event1 = _make_feishu_event(
         chat_type="group",
         content='{"text": "hello"}',
@@ -1287,7 +1219,6 @@ async def test_session_key_with_topic_isolation_true_uses_thread_scoped() -> Non
     )
     await channel._on_message(event1)
 
-    # Test without root_id
     event2 = _make_feishu_event(
         chat_type="group",
         content='{"text": "another"}',
@@ -1303,7 +1234,6 @@ async def test_session_key_with_topic_isolation_true_uses_thread_scoped() -> Non
 
 @pytest.mark.asyncio
 async def test_session_key_with_topic_isolation_false_uses_group_scoped() -> None:
-    """When topic_isolation is False, all group messages share the same session key (no isolation)."""
     channel = _make_feishu_channel(group_policy="open", topic_isolation=False)
     bus_spy = []
     original_publish = channel.bus.publish_inbound
@@ -1317,7 +1247,6 @@ async def test_session_key_with_topic_isolation_false_uses_group_scoped() -> Non
     channel.transcribe_audio = AsyncMock(return_value="")
     channel._add_reaction = AsyncMock(return_value=None)
 
-    # Test with root_id
     event1 = _make_feishu_event(
         chat_type="group",
         content='{"text": "hello"}',
@@ -1326,7 +1255,6 @@ async def test_session_key_with_topic_isolation_false_uses_group_scoped() -> Non
     )
     await channel._on_message(event1)
 
-    # Test without root_id
     event2 = _make_feishu_event(
         chat_type="group",
         content='{"text": "another"}',
@@ -1335,7 +1263,6 @@ async def test_session_key_with_topic_isolation_false_uses_group_scoped() -> Non
     )
     await channel._on_message(event2)
 
-    # Private chat still works
     event3 = _make_feishu_event(
         chat_type="p2p",
         content='{"text": "private"}',
@@ -1345,8 +1272,6 @@ async def test_session_key_with_topic_isolation_false_uses_group_scoped() -> Non
     await channel._on_message(event3)
 
     assert len(bus_spy) == 3
-    # Group messages all share the same key
     assert bus_spy[0].session_key_override == "feishu:oc_abc"
     assert bus_spy[1].session_key_override == "feishu:oc_abc"
-    # Private chat has no session key override
     assert bus_spy[2].session_key_override is None

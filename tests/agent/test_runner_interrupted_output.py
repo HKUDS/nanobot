@@ -1,5 +1,3 @@
-"""Model failures retain the assistant text already delivered to the user."""
-
 from __future__ import annotations
 
 from copy import deepcopy

@@ -22,7 +22,7 @@ test("restores canonical event history, media, tools, file edits and absolute fo
     { event: "reasoning_delta", text: "private reasoning" },
     { event: "reasoning_end", text: "private reasoning" },
     { event: "message", kind: "reasoning", text: "private reasoning" },
-    { event: "message", kind: "tool_hint", text: "read_file", tool_events: tools },
+    { event: "message", kind: "tool_hint", text: "", tool_events: tools },
     { event: "file_edit", edits },
     { event: "delta", text: "partial" },
     { event: "stream_end", text: "answer" },
@@ -32,7 +32,7 @@ test("restores canonical event history, media, tools, file edits and absolute fo
   expect(await fetchHistory("http://fixture", "token", "chat")).toEqual({
     messages: [
       { role: "user", content: "question", media, turnId: "turn" },
-      { role: "activity", content: "read_file", toolEvents: tools },
+      { role: "activity", content: "", toolEvents: tools },
       { role: "activity", content: "", fileEdits: edits },
       { role: "assistant", content: "answer", forkIndex: 8 },
     ],

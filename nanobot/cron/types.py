@@ -1,5 +1,3 @@
-"""Cron types."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,7 +15,6 @@ def _store_int(value: Any, default: int = 0) -> int: ...
 
 
 def _store_int(value: Any, default: int | None = 0) -> int | None:
-    """Coerce JSON numerics to int; treat null/blank like a missing key."""
     if value is None or value == "":
         return default
     return int(value)
@@ -54,8 +51,8 @@ class CronPayload:
     message: str = ""
     # Legacy delivery fields used by pre-session-bound cron jobs.
     deliver: bool = False
-    channel: str | None = None  # e.g. "whatsapp"
-    to: str | None = None  # e.g. phone number
+    channel: str | None = None
+    to: str | None = None
     channel_meta: dict[str, Any] = field(default_factory=dict)
     session_key: str | None = None  # original session key for correct session recording
     origin_channel: str | None = None

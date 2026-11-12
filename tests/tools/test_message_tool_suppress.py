@@ -1,5 +1,3 @@
-"""Test message tool suppress logic for final replies."""
-
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -23,7 +21,6 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 
 
 class TestMessageToolSuppressLogic:
-    """Final reply suppressed only when message tool sends to the same target."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("ephemeral", [False, True])
@@ -53,7 +50,7 @@ class TestMessageToolSuppressLogic:
         result = await loop._process_message(msg, ephemeral=ephemeral)
 
         assert len(sent) == 1
-        assert result is None  # suppressed
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_not_suppress_when_sent_to_different_target(self, tmp_path: Path) -> None:
@@ -79,7 +76,7 @@ class TestMessageToolSuppressLogic:
 
         assert len(sent) == 1
         assert sent[0].channel == "email"
-        assert result is not None  # not suppressed
+        assert result is not None
         assert result.channel == "feishu"
 
     @pytest.mark.asyncio
@@ -196,7 +193,7 @@ class TestMessageToolSuppressLogic:
         assert result.final_content == "Done"
         assert progress == [
             ("Visible", False),
-            ('read foo.txt', True),
+            ("", True),
         ]
 
 class TestMessageToolSchema:

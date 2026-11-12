@@ -1,5 +1,3 @@
-"""Tests for the native AWS Bedrock Converse provider."""
-
 from __future__ import annotations
 
 from typing import Any

@@ -8,7 +8,6 @@
 .appearance-theme-check { opacity: 0; }
 .appearance-theme-option input:checked + .appearance-theme-card .appearance-theme-check { opacity: 1; }
 .appearance-theme-label { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 8px 4px 2px; min-height: 36px; }
-/* Nested surfaces follow the outer curve minus their actual inset, including the border. */
 .appearance-theme-miniature { --mini-paper: #fff; --mini-sidebar: #f1f0ec; --mini-line: #dad9d5; display: flex; height: 84px; overflow: hidden; border-radius: calc(var(--radius-panel) - var(--appearance-theme-inset) - 1px); background: var(--mini-paper); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.04); }
 .appearance-theme-miniature[data-mode="dark"] { --mini-paper: #303030; --mini-sidebar: #383838; --mini-line: #656565; }
 .appearance-theme-miniature[data-mode="system"] { --mini-paper: linear-gradient(110deg, #fff calc(50% - 0.5px), #303030 calc(50% + 0.5px)); --mini-sidebar: #f1f0ec; --mini-line: #969590; }

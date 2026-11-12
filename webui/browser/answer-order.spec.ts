@@ -156,7 +156,6 @@ test.describe("answer order", () => {
       await expect(first).toHaveCount(1);
       await expect(last).toHaveCount(1);
       await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
-      // Completed activity is folded into the answer block, not lost or still running.
       const lastBlock = last.locator("xpath=ancestor::*[@data-thread-display-unit]");
       await lastBlock.hover();
       await lastBlock.getByRole("button", { name: "Message actions" }).click();

@@ -2,6 +2,17 @@
 
 Use the update method that owns your installation. If your version does not include the WebUI updater, first upgrade through the original installer or package manager. This does not convert an existing installation into an installer-managed one.
 
+## Upgrade older JSONL installations
+
+The 0.4.x releases retain automatic import of legacy model JSONL history, WebUI JSONL / segments and per-feature proxy settings. You can upgrade an older installation directly to 0.4.1 through its original installation method; an intermediate 0.4.0 installation is not required. These importers are scheduled for removal in 0.5.0.
+
+1. Stop all writers and back up the complete instance, including the configuration directory and workspace.
+2. Upgrade through the original installation method, preserving existing extras, constraints and installation ownership.
+3. Start the updated instance with the same configuration and workspace selectors. Open existing conversations and verify both messages and displayed history. Check proxy settings and save the migrated shared-proxy configuration.
+4. Verify the running version, a new message and another restart before considering the upgrade complete.
+
+Keep the original backup and retained JSONL import backups. Do not delete or overwrite old data to resolve a missing-history problem. Complete and verify the migration on a 0.4.x release before upgrading to 0.5.0.
+
 ## Update from the WebUI
 
 1. Open the blue update entry in the sidebar or **Settings → About → Update**. Opening the dialog only checks the installation; it does not install or restart anything.

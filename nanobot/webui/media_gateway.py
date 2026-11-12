@@ -1,5 +1,3 @@
-"""Media gateway services shared by WebUI HTTP routes and WebSocket frames."""
-
 from __future__ import annotations
 
 import secrets

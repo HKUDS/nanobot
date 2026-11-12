@@ -104,14 +104,27 @@ describe("Settings capabilities", () => {
     expect(web).not.toBeChecked();
   });
 
-  it("keeps missing image credentials local and does not submit an invalid draft", async () => {
-    renderSettingsView({ initialSection: "capabilities", initialSettings: settingsPayload() });
+  it("closes an invalid image draft without submitting it and lets the user disable it", async () => {
+    renderSettingsView({ initialSection: "image", initialSettings: settingsPayload() });
     fireEvent.click(screen.getByRole("switch", { name: "Image generation" }));
     const image = within(screen.getByRole("dialog", { name: "Image generation" }));
     expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation.");
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(image.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const feature = within(screen.getByRole("region", { name: "Image generation" }));
+    expect(feature.getByRole("switch")).toBeChecked();
+    expect(feature.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation.");
     expect(screen.getAllByRole("alert")).toHaveLength(1);
+    fireEvent.click(feature.getByRole("button", { name: "Configure" }));
+    const reopened = screen.getByRole("dialog", { name: "Image generation" });
+    expect(within(reopened).getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation.");
+    fireEvent.keyDown(reopened, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(feature.getByRole("switch"));
+    expect(feature.getByRole("switch")).not.toBeChecked();
+    expect(feature.queryByRole("alert")).not.toBeInTheDocument();
+    await act(async () => {});
+    expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
   it("retains an invalid capability draft while navigating to repair its provider", () => {
@@ -124,7 +137,7 @@ describe("Settings capabilities", () => {
     expect(requestMutationMock).not.toHaveBeenCalled();
   });
 
-  it("keeps a rejected image draft in its editor until retry succeeds", async () => {
+  it("retains a rejected image draft and error after closing and allows retry", async () => {
     const payload = settingsPayload();
     payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
     requestMutationMock.mockRejectedValue(new Error("image generation provider is not configured"));
@@ -133,11 +146,43 @@ describe("Settings capabilities", () => {
     const image = within(screen.getByRole("dialog", { name: "Image generation" }));
     await waitFor(() => expect(image.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation."));
     fireEvent.click(image.getByRole("button", { name: "Close" }));
-    await act(async () => {});
-    expect(screen.getByRole("dialog", { name: "Image generation" })).toContainElement(screen.getByRole("alert"));
-    requestMutationMock.mockResolvedValue({ ...payload, image_generation: { ...payload.image_generation, enabled: true } });
-    fireEvent.click(image.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    const feature = within(screen.getByRole("region", { name: "Image generation" }));
+    await waitFor(() => expect(feature.getByRole("alert")).toHaveTextContent("Configure this provider before enabling image generation."));
+    expect(feature.getByRole("switch")).toBeChecked();
+    requestMutationMock.mockResolvedValue({ ...payload, image_generation: { ...payload.image_generation, enabled: true } });
+    fireEvent.click(feature.getByRole("button", { name: "Configure" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Image generation" })).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(feature.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(requestMutationMock).toHaveBeenLastCalledWith(
+      "settings.image_generation.update", expect.objectContaining({ enabled: true }), 20_000,
+    );
+  });
+
+  it("saves focused image edits on close without waiting or closing a reopened dialog", async () => {
+    const payload = settingsPayload();
+    payload.image_generation.enabled = true;
+    payload.image_generation.providers = [{ name: "openrouter", label: "OpenRouter", configured: true }];
+    let finish!: (value: SettingsPayload) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve) => { finish = resolve; }));
+    renderSettingsView({ initialSection: "image", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    const limit = screen.getByRole("spinbutton");
+    fireEvent.focus(limit);
+    fireEvent.change(limit, { target: { value: "2" } });
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.image_generation.update", expect.objectContaining({ max_images_per_turn: 2 }), 20_000,
+    ));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("region", { name: "Image generation" })).getByRole("button", { name: "Configure" }));
+    await act(async () => finish({ ...payload, image_generation: { ...payload.image_generation, max_images_per_turn: 2 } }));
+    expect(screen.getByRole("dialog", { name: "Image generation" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Advanced options" }));
+    expect(screen.getByRole("spinbutton")).toHaveValue(2);
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
   });
 
   it("keeps capabilities together and separates expanding settings from enabling a feature", () => {

@@ -1,5 +1,3 @@
-"""Exercise scheduled delivery through the real gateway pipeline, without external sends."""
-
 import asyncio
 import json
 import os
@@ -162,11 +160,8 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
     if origin == "websocket":
         manager.channels["websocket"] = MagicMock(spec=BaseChannel, send=AsyncMock(), stop=AsyncMock())
     manager._dispatch_task = asyncio.create_task(manager._dispatch_outbound())
-    # Legacy channel/to fields still normalize through the existing binding migration.
     schedule = CronSchedule(kind="at", at_ms=4102444800000) if one_shot else CronSchedule(kind="every", every_ms=86400000)
     if origin == "websocket":
-        # A WebUI-created task remains in its source chat even when its instructions
-        # explicitly request a separate send. Recovery must keep that send's target.
         with request_context(RequestContext("websocket", "source", session_key="websocket:source",
                                             metadata={"webui": True, "_wants_stream": True})):
             await CronTool(cron).execute(action="add", name="Reminder", every_seconds=86400,
@@ -202,7 +197,6 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         assert DELIVERY_RUN_META not in json.dumps(calls[0]["messages"])
         assert "Diagnostic result" not in calls[0]["messages"][0]["content"]
         await manager.stop_all()
-        # A second gateway uses the saved result; no timer, agent, or model is restarted.
         manager = make_manager(tmp_path, sessions)
         manager.channels["whatsapp"] = channel
         channel._connected = True
@@ -216,7 +210,6 @@ async def test_cron_offline_restart_and_reconnect_do_not_rerun_model(tmp_path, m
         await again._recover_scheduled()
         assert channel._client.send_message.await_count == 1
         assert len(calls) == count
-        # Existing jobs still load after delivery state is added beside them.
         old_jobs = CronService(cron.store_path).list_jobs()
         assert old_jobs == [] if one_shot else old_jobs[0].payload.message == job.payload.message
     finally:
@@ -335,7 +328,6 @@ async def test_recovery_keeps_destination_order_and_does_not_block_other_chats(t
     await manager._recover_scheduled()
     await drain(manager)
     assert [call.args[0].content for call in channel.send.await_args_list] == ["first", "other", "first", "second"]
-    # A stale queued copy must not downgrade the durable successful result.
     manager._outbox.finish(first, "failed", "channel_disabled")
     assert all(row["status"] == "sent" for row in rows(manager._outbox))
 

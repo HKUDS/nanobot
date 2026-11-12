@@ -1,5 +1,3 @@
-"""Prompt preparation must leave the public runtime responsive."""
-
 import asyncio
 import threading
 from copy import deepcopy
@@ -13,7 +11,7 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage
 from nanobot.runtime_context import public_history_message
 from nanobot.security.workspace_access import current_workspace_scope
-from nanobot.session.manager import Session
+from nanobot.session.manager import Session, SessionPolicy
 
 
 class ControlledProvider(LLMProvider):
@@ -128,7 +126,10 @@ async def test_preparation_allows_status_heartbeat_and_cancellation(
     tasks = [task, pulse]
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
-        status = await asyncio.wait_for(loop.process_direct("/status", session_key="cli:status"), 5)
+        # Measure preparation responsiveness, not command-history disk writes.
+        status = await asyncio.wait_for(loop.process_direct(
+            "/status", session_key="cli:status", _session_policy=SessionPolicy(persist=False),
+        ), 5)
         assert status is not None and "test-model" in status.content
         heartbeat_requested.set()
         await asyncio.wait_for(heartbeat_progress.wait(), 5)
@@ -156,14 +157,12 @@ async def test_preparation_allows_status_heartbeat_and_cancellation(
                 assert final_loop is runtime_loop
                 if phase != "prompt":
                     assert snapshot
-            # Observe the new session entering the real semaphore, not a settling delay.
             slots = loop.runner.context_governor._preparation_slots
             acquire_slot = slots.acquire
             queued = asyncio.Event()
             acquired = asyncio.Event()
 
             async def acquire():
-                # History preparation queues before RequestContext is bound.
                 is_waiting = asyncio.current_task() is waiting
                 if is_waiting:
                     queued.set()
@@ -183,7 +182,6 @@ async def test_preparation_allows_status_heartbeat_and_cancellation(
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(waiting, 5)
         elif phase == "history":
-            # The live nested payload may change after capture; the worker owns its copy.
             live.messages[0]["content"][0]["text"] = "Changed after capture"
         release.set()
         await asyncio.wait_for(finished.wait(), 5)
@@ -416,7 +414,6 @@ async def test_cancelled_prompt_keeps_its_worker_slot_until_read_finishes() -> N
         second = asyncio.create_task(runner.prepare_prompt(read, "second"))
         tasks.append(second)
         await asyncio.sleep(0)
-        # The cancelled caller's read keeps its slot until the worker exits.
         assert not entered["second"].is_set()
         released["first"].set()
         await asyncio.wait_for(entered["second"].wait(), timeout=5)

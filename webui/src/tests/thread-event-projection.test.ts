@@ -193,7 +193,7 @@ describe("canonical thread event projection", () => {
     expect(normalizeProjection(messages)).toEqual(fixtureCase.expected);
   });
 
-  it("keeps deferred activity rows separately addressable in one segment", () => {
+  it.each(["read_file(…)", ""])("keeps deferred activity rows separately addressable in one segment (summary=%s)", (summary) => {
     const firstDetail = { ref: "2.history-aaaaaaaaaaaaaaaaaaaa", bytes: 40_000, traceCount: 1 };
     const secondDetail = { ref: "2.history-bbbbbbbbbbbbbbbbbbbb", bytes: 41_000, traceCount: 1 };
 
@@ -209,7 +209,7 @@ describe("canonical thread event projection", () => {
       {
         event: "message",
         chat_id: "chat-1",
-        text: "read_file(…)",
+        text: summary,
         kind: "tool_hint",
         projection_id: "history-bbbbbbbbbbbbbbbbbbbb",
         trace_detail: secondDetail,
@@ -217,6 +217,7 @@ describe("canonical thread event projection", () => {
     ]);
 
     expect(messages).toHaveLength(2);
+    expect(messages.map((message) => message.content)).toEqual(["exec(…)", summary]);
     expect(messages.map((message) => message.traceDetail)).toEqual([
       firstDetail,
       secondDetail,

@@ -1,5 +1,3 @@
-"""Application orchestration for typed WebUI WebSocket commands."""
-
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +8,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
@@ -18,7 +16,8 @@ from websockets.asyncio.server import ServerConnection
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
-from nanobot.command.builtin import USER_SHELL_COMMAND, builtin_command_starts_agent_turn
+from nanobot.command.application import builtin_command_starts_agent_turn
+from nanobot.command.builtin import USER_SHELL_COMMAND
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
@@ -62,9 +61,11 @@ from nanobot.webui.session_access import (
     session_mentions_runtime_context,
 )
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
-from nanobot.webui.sidebar_state import write_webui_sidebar_state
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
+
+if TYPE_CHECKING:
+    from nanobot.webui.outbound_delivery import WebUIOutboundDelivery
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
@@ -100,10 +101,6 @@ class WebUICommandTransport(Protocol):
 
     def webui_clear_connection_default(self, connection: ServerConnection) -> None: ...
 
-    def webui_clear_stream_buffers(self, chat_id: str) -> None: ...
-
-    async def webui_hydrate(self, chat_id: str) -> None: ...
-
     async def webui_send_event(
         self,
         connection: ServerConnection,
@@ -133,19 +130,15 @@ class WebUICommandTransport(Protocol):
         session_generation: str | None,
     ) -> None: ...
 
-    async def send_session_updated(
-        self,
-        chat_id: str,
-        *,
-        scope: str | None = None,
-    ) -> None: ...
-
 
 class WebUICommandRouter:
     """Own WebUI command semantics while a transport host owns raw connections."""
 
-    def __init__(self, transport: WebUICommandTransport, gateway: GatewayServices) -> None:
+    def __init__(
+        self, transport: WebUICommandTransport, gateway: GatewayServices, *, outbound: WebUIOutboundDelivery,
+    ) -> None:
         self._transport = transport
+        self._outbound = outbound
         self.gateway = gateway
         self._http_router = gateway.http
         self._media = gateway.media
@@ -171,7 +164,7 @@ class WebUICommandRouter:
         self._message_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
-        return self._http_router.workspace_project_selection_available(connection)
+        return connection in self._webui_connections
 
     async def send_webui_protocol_error(
         self,
@@ -202,7 +195,7 @@ class WebUICommandRouter:
             scope="metadata",
             workspace_scope=scope.payload(),
         )
-        await self._transport.webui_hydrate(fork_id)
+        await self._outbound.hydrate(fork_id)
 
     async def discard_owned_chat(
         self,
@@ -212,7 +205,7 @@ class WebUICommandRouter:
         await self._temporary_chats.discard(connection, chat_id)
         self._transport.webui_detach(connection, chat_id)
         clear_websocket_turns(chat_id)
-        self._transport.webui_clear_stream_buffers(chat_id)
+        self._outbound.discard(chat_id)
 
     async def cleanup_connection(self, connection: ServerConnection) -> None:
         """Release command-owned state associated with one transport connection."""
@@ -293,6 +286,37 @@ class WebUICommandRouter:
             )
             return None
 
+    async def dispatch_legacy_message(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        chat_id: str,
+        content: str,
+    ) -> None:
+        """Authorize legacy text frames through the same workspace boundary."""
+        scope = await self.workspace_scope_or_error(
+            connection,
+            lambda: self._workspaces.scope_for_message(
+                {}, chat_id=chat_id, chat_running=False,
+                can_change_project=self.workspace_project_selection_available(connection),
+            ),
+            chat_id=chat_id,
+        )
+        if scope is None:
+            return
+        await self._transport.webui_dispatch_message(
+            sender_id=client_id, chat_id=chat_id, content=content,
+            media=None,
+            metadata={
+                "remote": getattr(connection, "remote_address", None),
+                WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
+            },
+            is_dm=False,
+            session_key=None,
+            require_existing_session=False,
+            session_generation=None,
+        )
+
     async def dispatch(
         self,
         connection: ServerConnection,
@@ -330,7 +354,7 @@ class WebUICommandRouter:
                 scope="metadata",
                 workspace_scope=scope.payload(),
             )
-            await self._transport.webui_hydrate(new_id)
+            await self._outbound.hydrate(new_id)
             return
         if command_type == "new_temporary_chat":
             try:
@@ -397,7 +421,7 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 **(await self._session_projection.attach_fields(webui_session_key(chat_id))),
             )
-            await self._transport.webui_hydrate(chat_id)
+            await self._outbound.hydrate(chat_id)
             return
         if command_type == "set_sidebar_state":
             if connection not in self._webui_connections:
@@ -412,10 +436,7 @@ class WebUICommandRouter:
                 )
                 return
             try:
-                saved_state = await asyncio.to_thread(
-                    write_webui_sidebar_state,
-                    cast(dict[str, Any], state),
-                )
+                saved_state = await self._http_router.sidebar_state.write(cast(dict[str, Any], state))
             except (OSError, ValueError):
                 await self._transport.webui_send_event(
                     connection,
@@ -456,8 +477,11 @@ class WebUICommandRouter:
             )
             if scope is None:
                 return
-            await self._workspaces.stage_scope(chat_id, scope)
-            await self._transport.send_session_updated(chat_id, scope="metadata")
+            if await self.workspace_scope_or_error(
+                connection, lambda: self._workspaces.stage_scope(chat_id, scope), chat_id=chat_id,
+            ) is None:
+                return
+            await self._outbound.session_updated(chat_id, scope="metadata")
             await self._transport.webui_send_event(
                 connection,
                 "session_updated",
@@ -627,7 +651,7 @@ class WebUICommandRouter:
             return
         self._transport.webui_attach(connection, chat_id)
         if temporary_policy is None or temporary_policy.hydrate_transcript:
-            await self._transport.webui_hydrate(chat_id)
+            await self._outbound.hydrate(chat_id)
 
         scope = temporary_policy.workspace_scope if temporary_policy is not None else (
             await self.workspace_scope_or_error(
@@ -759,16 +783,24 @@ class WebUICommandRouter:
         execution_created = False
         try:
             if not restart_control:
-                session_generation, session_created = await self._workspaces.persist_scope(
-                    chat_id,
-                    scope,
-                    session_key=admission_session_key,
-                    expected_generation=(
-                        temporary_policy.session_generation
-                        if temporary_policy is not None
-                        else None
+                admission = await self.workspace_scope_or_error(
+                    connection,
+                    lambda: self._workspaces.persist_scope(
+                        chat_id,
+                        scope,
+                        session_key=admission_session_key,
+                        expected_generation=(
+                            temporary_policy.session_generation
+                            if temporary_policy is not None
+                            else None
+                        ),
                     ),
+                    chat_id=chat_id,
+                    turn_id=turn_id,
                 )
+                if admission is None:
+                    return
+                session_generation, session_created = admission
                 execution_generation = session_generation
                 if (
                     execution_session_key != admission_session_key
@@ -859,6 +891,8 @@ class WebUICommandRouter:
             if name:
                 attachment["name"] = name
         if is_webui and not restart_control:
+            if session_created:
+                await self._outbound.session_updated(chat_id, scope="metadata")
             await self.broadcast_user_message(
                 connection,
                 chat_id,

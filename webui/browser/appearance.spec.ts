@@ -52,7 +52,7 @@ test("custom reading size previews, persists and survives preset changes", async
   await page.reload();
   await expect(input).toHaveValue("24");
   await page.getByRole("radio", { name: "Small reading text", exact: true }).click();
-  await expect(paragraph).toHaveCSS("font-size", "16px");
+  await expect(paragraph).toHaveCSS("font-size", "15px");
   await page.getByRole("spinbutton", { name: "Custom text size", exact: true }).click();
   await expect(input).toHaveValue("24");
   await expect(paragraph).toHaveCSS("font-size", "24px");

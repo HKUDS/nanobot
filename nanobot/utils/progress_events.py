@@ -1,5 +1,3 @@
-"""Structured progress-event helpers shared by agent runtimes."""
-
 from __future__ import annotations
 
 import inspect

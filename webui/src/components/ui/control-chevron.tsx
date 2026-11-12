@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils";
 export function ControlChevron({ className }: { className?: string }) {
   return (
     <ChevronDown
-      // Keep the horizontal viewBox around the artwork, including its stroke.
       viewBox="5 0 14 24"
       width={14}
       height={24}

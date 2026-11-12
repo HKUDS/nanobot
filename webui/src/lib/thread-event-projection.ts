@@ -10,6 +10,7 @@ import type {
   ToolProgressEvent,
   UIFileEdit,
   UIMessage,
+  UIModelRequestSnapshot,
   UITurnPhase,
 } from "@/lib/types";
 
@@ -21,6 +22,7 @@ const FILE_EDIT_TOOL_NAMES = new Set(["write_file", "edit_file", "apply_patch"])
 
 export interface ThreadProjectionState {
   messages: UIMessage[];
+  modelRequests: ReadonlyMap<string, UIModelRequestSnapshot>;
   activeAssistantId: string | null;
   closedAssistantIds: Set<string>;
   /** Completed wire identities also fence late deltas for textless ends. */
@@ -104,10 +106,6 @@ function findStreamingAssistantIndex(
   return null;
 }
 
-/**
- * Find the most recent assistant placeholder that an incoming answer
- * delta should adopt instead of spawning a parallel row.
- */
 function findActiveAssistantPlaceholderIndex(
   prev: UIMessage[],
   turn: UIMessageTurnFields = {},
@@ -403,6 +401,7 @@ export function createThreadProjectionState(
 ): ThreadProjectionState {
   return {
     messages,
+    modelRequests: new Map(),
     activeAssistantId: null,
     closedAssistantIds: new Set(),
     closedAnswerStreamIds: new Set(),
@@ -422,6 +421,7 @@ export function resetThreadProjectionCursor(
 ): ThreadProjectionState {
   return {
     ...createThreadProjectionState(messages),
+    modelRequests: state.modelRequests,
     activitySegmentCounter: state.activitySegmentCounter,
     closedTurnIds: new Set(state.closedTurnIds),
     turnAliases: new Map(state.turnAliases),
@@ -731,9 +731,9 @@ function projectToolActivity(
       : event.text
         ? [event.text]
         : [];
-  if (lines.length === 0) return;
-
   const deferredDetail = event.trace_detail;
+  if (lines.length === 0 && !deferredDetail) return;
+
   const segmentId = ensureProjectionActivitySegment(state);
   const turn = turnFieldsForProjection(state, event, "activity");
   const last = state.messages[state.messages.length - 1];
@@ -784,7 +784,7 @@ function projectToolActivity(
       id,
       role: "tool",
       kind: "trace",
-      content: lines[lines.length - 1],
+      content: lines[lines.length - 1] ?? "",
       traces: lines,
       ...(visibleEvents.length ? { toolEvents: visibleEvents } : {}),
       ...(deferredDetail ? { traceDetail: deferredDetail } : {}),
@@ -848,7 +848,6 @@ function projectFileEdits(
   options.effects?.bodyWrites.add(id);
 }
 
-/** Canonical UI-message reducer shared by WebSocket delivery and transcript replay. */
 export function projectThreadEvent(
   previous: ThreadProjectionState,
   event: ThreadProjectionEvent,
@@ -861,6 +860,40 @@ export function projectThreadEvent(
     closedTurnIds: new Set(previous.closedTurnIds),
     turnAliases: new Map(previous.turnAliases),
   };
+
+  if (event.event === "model_request") {
+    if (!event.turn_id || state.closedTurnIds.has(event.turn_id)) return state;
+    const previousRequest = state.modelRequests.get(event.turn_id);
+    if (previousRequest?.ended
+      || previousRequest?.retiredRunIds.includes(event.run_id)
+      || (previousRequest?.runId === event.run_id && event.sequence <= previousRequest.sequence)
+      || (previousRequest?.turnSeq !== undefined && event.turn_seq !== undefined
+        && event.turn_seq <= previousRequest.turnSeq)) return state;
+    const modelRequest: UIModelRequestSnapshot = {
+      ...previousRequest,
+      createdAt: previousRequest?.createdAt ?? projectionCreatedAt(event, options),
+      runId: event.run_id,
+      sequence: event.sequence,
+      turnSeq: event.turn_seq,
+      ...((event.phase === "completed" || event.phase === "failed")
+        && (event.usage?.request_count ?? 0) > (
+          previousRequest?.runId === event.run_id ? previousRequest.usage?.request_count ?? 0 : 0
+        ) ? { usageTurnSeq: event.turn_seq } : {}),
+      retiredRunIds: previousRequest && previousRequest.runId !== event.run_id
+        ? [...previousRequest.retiredRunIds, previousRequest.runId]
+        : previousRequest?.retiredRunIds ?? [],
+      ...(event.usage !== undefined ? { usage: event.usage } : {}),
+      ...(event.round_usages !== undefined ? { roundUsages: event.round_usages.slice(-8) } : {}),
+      ...(event.context_window_tokens !== undefined ? { contextWindowTokens: event.context_window_tokens } : {}),
+      ...(event.context_graph ? { contextSnapshots: [
+        ...(previousRequest?.contextSnapshots ?? []).filter((s) => s.id !== event.request_id),
+        { id: event.request_id, turnSeq: event.turn_seq, graph: event.context_graph, usage: event.request_usage === undefined
+          ? (event.phase === "completed" ? event.round_usages?.at(-1) : undefined) : event.request_usage ?? undefined, contextWindowTokens: event.context_window_tokens },
+      ] } : {}),
+    };
+    state.modelRequests = new Map(state.modelRequests).set(event.turn_id, modelRequest);
+    return state;
+  }
 
   if (event.event === "user_message") {
     if (event.provenance?.session_message) {
@@ -996,6 +1029,10 @@ export function projectThreadEvent(
 
   if (event.event === "context_compaction") {
     Object.assign(state, closeThreadProjectionAnswer(state));
+    if (event.phase === "succeeded") {
+      state.modelRequests = new Map(Array.from(state.modelRequests, ([turn, request]) =>
+        [turn, { ...request, contextSnapshots: [] }]));
+    }
     const id = `compaction-${event.compaction_id}`;
     const existing = state.messages.findIndex((message) => message.id === id);
     const message: UIMessage = {
@@ -1007,7 +1044,13 @@ export function projectThreadEvent(
       compaction: {
         id: event.compaction_id,
         phase: event.phase,
+        turnSeq: event.turn_seq,
         reason: event.reason,
+        ...(event.context_snapshot ? { contextSnapshot: {
+          id, graph: event.context_snapshot.graph,
+          estimatedTokens: event.context_snapshot.estimated_tokens,
+          contextWindowTokens: event.context_snapshot.context_window_tokens,
+        } } : {}),
         ...(!options.persisted ? { announce: true } : {}),
       },
       ...positionedTurnFields(state.messages[existing], turnFieldsForProjection(state, event, "activity"), options),
@@ -1094,6 +1137,18 @@ export function projectThreadEvent(
   state.activitySegmentId = null;
   state.fileEditSegmentId = null;
   state.messages = finalizeStreamedTurn(state.messages);
+  const modelRequests = new Map(state.modelRequests);
+  for (const [turnId, snapshot] of modelRequests) {
+    if (turn.turnId && turnId !== turn.turnId) continue;
+    modelRequests.set(turnId, { ...snapshot, ended: true,
+      turnSeq: event.turn_seq ?? snapshot.turnSeq,
+      ...(!options.persisted ? { completedAt: options.now } : {}),
+      ...(event.usage !== undefined ? { usage: event.usage } : {}),
+      ...(event.round_usages !== undefined ? { roundUsages: event.round_usages.slice(-8) } : {}),
+      ...(event.context_window_tokens !== undefined ? { contextWindowTokens: event.context_window_tokens } : {}),
+    });
+  }
+  state.modelRequests = modelRequests;
   const latencyMs = typeof event.latency_ms === "number" && event.latency_ms >= 0
     ? Math.round(event.latency_ms)
     : undefined;
