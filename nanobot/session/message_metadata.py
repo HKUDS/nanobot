@@ -7,13 +7,12 @@ from typing import Any, cast
 
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_TURN_ID, InboundMessage
 from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META, RUNTIME_CONTEXT_MESSAGE_META
+from nanobot.session.input_keys import CONSUMED_INPUT_CURSOR_KEY, MODEL_INPUT_ROLE_KEY
 from nanobot.session.session_messages import session_message_input, session_message_public_metadata
 
 # A consumed cursor is distinct from admitted input and from response ownership.
 # Generation-binding prevents reset/branch operations from inheriting it.
-CONSUMED_INPUT_CURSOR_KEY = "_model_consumed_input"
 CONSUMED_INPUT_ID_KEY = "consumed_input_id"
-MODEL_INPUT_ROLE_KEY = "_is_user_input"
 
 
 def consumed_input_cursor(metadata: Mapping[str, Any], generation: str) -> str | None:
@@ -24,6 +23,17 @@ def consumed_input_cursor(metadata: Mapping[str, Any], generation: str) -> str |
     if cursor.get("generation") != generation or cursor.get("pending") is True:
         return None
     input_id = cursor.get("input_id")
+    return input_id if isinstance(input_id, str) and input_id else None
+
+
+def pending_input_cursor(metadata: Mapping[str, Any], generation: str) -> str | None:
+    value: object = metadata.get(CONSUMED_INPUT_CURSOR_KEY)
+    if not isinstance(value, dict):
+        return None
+    cursor = cast(dict[str, object], value)
+    input_id = cursor.get("input_id")
+    if cursor.get("generation") != generation or cursor.get("pending") is not True:
+        return None
     return input_id if isinstance(input_id, str) and input_id else None
 
 
@@ -59,6 +69,8 @@ def persisted_message(message: dict[str, Any]) -> dict[str, Any]:
     if entry.get("role") == "user":
         if "input_id" in metadata:
             entry["input_id"] = metadata["input_id"]
+        if isinstance(metadata.get(MODEL_INPUT_ROLE_KEY), bool):
+            entry[MODEL_INPUT_ROLE_KEY] = metadata[MODEL_INPUT_ROLE_KEY]
         for key in ("timestamp", INBOUND_META_TURN_ID):
             if isinstance(value := metadata.get(key), str) and value:
                 entry[key] = value

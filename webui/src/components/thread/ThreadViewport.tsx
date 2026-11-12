@@ -60,6 +60,7 @@ interface ThreadViewportProps {
   /** Override when message ownership changes after the selected conversation. */
   messagesKey?: string | null;
   conversationReady?: boolean;
+  onVisibleMessagesChange?: (messages: UIMessage[]) => void;
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
@@ -287,6 +288,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   conversationKey = null,
   messagesKey = conversationKey,
   conversationReady = true,
+  onVisibleMessagesChange,
   showScrollToBottomButton = true,
   cliApps = [],
   mcpPresets = [],
@@ -471,6 +473,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     () => windowMessages(messages, visibleMessageCount),
     [messages, visibleMessageCount],
   );
+  useLayoutEffect(() => {
+    if (conversationReady) onVisibleMessagesChange?.(visibleMessages);
+  }, [conversationReady, onVisibleMessagesChange, visibleMessages]);
   const hiddenMessageCount = messages.length - visibleMessages.length;
   const historyUnknown = hasMoreBefore === null;
   const historyExhausted = hasMoreBefore === false && hiddenMessageCount === 0;

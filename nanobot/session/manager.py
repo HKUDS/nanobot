@@ -18,6 +18,11 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
+from nanobot.session.input_keys import (
+    CONSUMED_INPUT_CURSOR_KEY,
+    MODEL_INPUT_AFTER_CURSOR_KEY,
+    MODEL_INPUT_ROLE_KEY,
+)
 from nanobot.session.location import SessionLocation
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
@@ -248,8 +253,22 @@ class Session:
         if start:
             sliced = sliced[start:]
 
+        # The confirmed cursor may have been archived out of the model's
+        # replay window. The retained transcript still proves which later
+        # rows follow it; it does not prove those rows were ever dispatched.
+        cursor_index: int | None = None
+        cursor = self.metadata.get(CONSUMED_INPUT_CURSOR_KEY)
+        if include_runtime_context and isinstance(cursor, dict):
+            cursor = cast(dict[str, Any], cursor)
+            cursor_id = cursor.get("input_id")
+            if cursor.get("generation") == self.generation and cursor.get("pending") is not True and isinstance(cursor_id, str) and cursor_id:
+                cursor_index = next((
+                    i for i in range(len(self.messages) - 1, -1, -1)
+                    if self.messages[i].get("role") == "user" and self.messages[i].get("input_id") == cursor_id
+                ), None)
+        history_start = len(self.messages) - len(sliced)
         out: list[dict[str, Any]] = []
-        for message in sliced:
+        for source_index, message in enumerate(sliced, history_start):
             if message.get("_command") or is_summary_checkpoint(message):
                 continue
             has_persisted_runtime_context = isinstance(
@@ -303,8 +322,19 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
-            if include_runtime_context and "input_id" in message and not is_hidden_history_message(message):
-                entry["_meta"] = {"input_id": message["input_id"]}
+            if include_runtime_context:
+                internal_meta: dict[str, Any] = {}
+                if is_hidden_history_message(message):
+                    internal_meta[MODEL_INPUT_ROLE_KEY] = False
+                else:
+                    if "input_id" in message:
+                        internal_meta["input_id"] = message["input_id"]
+                    if isinstance(message.get(MODEL_INPUT_ROLE_KEY), bool):
+                        internal_meta[MODEL_INPUT_ROLE_KEY] = message[MODEL_INPUT_ROLE_KEY]
+                    if cursor_index is not None and source_index > cursor_index and role == "user":
+                        internal_meta[MODEL_INPUT_AFTER_CURSOR_KEY] = True
+                if internal_meta:
+                    entry["_meta"] = internal_meta
             marker = message.get(HIDDEN_HISTORY_META)
             if include_runtime_context and isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
                 # Attribution must distinguish persisted continuations from no-ID automation inputs.

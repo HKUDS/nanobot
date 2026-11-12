@@ -40,6 +40,7 @@ from nanobot.runtime_context import (
     reattach_runtime_context,
 )
 from nanobot.session.history_visibility import is_hidden_history_message
+from nanobot.session.input_keys import MODEL_INPUT_POSITION_KEY, MODEL_INPUT_ROLE_KEY
 from nanobot.session.summary import (
     SUMMARY_CONTINUATION_TEXT,
     SessionSummaryCheckpoint,
@@ -409,6 +410,19 @@ class ContextGovernor:
                         merged.get("content"),
                         injection.get("content"),
                     )
+                # The content of both user messages reaches the model. Keep the
+                # last input's request-local position even when metadata was merged.
+                if right_meta_dict is not None and MODEL_INPUT_POSITION_KEY in right_meta_dict:
+                    merged_meta = dict(merged.get("_meta") or {})
+                    merged_meta[MODEL_INPUT_POSITION_KEY] = right_meta_dict[MODEL_INPUT_POSITION_KEY]
+                    # Accepted history and provider-state deltas can reuse this
+                    # merged row in later requests, so retain the last source.
+                    for key in (MODEL_INPUT_ROLE_KEY, "input_id"):
+                        if key in right_meta_dict:
+                            merged_meta[key] = right_meta_dict[key]
+                        else:
+                            merged_meta.pop(key, None)
+                    merged["_meta"] = merged_meta
                 prepared[-1] = merged
                 continue
             prepared.append(injection)
@@ -664,7 +678,7 @@ class ContextGovernor:
             continuation = (
                 []
                 if any(message.get("role") == "user" for message in delta_messages)
-                else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT}]
+                else [{"role": "user", "content": SUMMARY_CONTINUATION_TEXT, "_meta": {MODEL_INPUT_ROLE_KEY: False}}]
             )
             summary_transcript = await self.prepare_in_background(
                 self._summary_transcript, compaction, summary,

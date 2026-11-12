@@ -274,9 +274,11 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         assert child.state == "done"
         assert child.origin_message_id == expected_origin["message_id"]
         assert child.origin_turn_id == expected_origin["turn_id"]
-        # An interrupted first request has no confirmed model response. A late
-        # system result instead retains the last successfully consumed input.
-        assert child.origin_input_id == ("user:request-b" if late_result else None)
+        # The continuation actually replays the interrupted user request; a
+        # late system result instead retains the last successfully consumed input.
+        replayed = provider.chat_stream_with_retry.await_args_list[0].kwargs["messages"]
+        assert any("Inspect configuration" in str(message.get("content")) for message in replayed)
+        assert child.origin_input_id == ("user:request-b" if late_result else "user:user-request")
         assert persisted_origin == expected_origin
         assert continuation.metadata["webui_turn_id"] == f"recovery:{state['recovery_id']}"
         assert sessions.get_or_create(request.session_key).metadata[RECOVERY_METADATA_KEY]["status"] == "recovered"
@@ -295,7 +297,7 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         assert {
             status.origin_input_id
             for task_id, status in statuses.items() if task_id not in existing_tasks
-        } == {"user:request-b" if late_result else None, "user:next-request"}
+        } == {"user:request-b" if late_result else "user:user-request", "user:next-request"}
     finally:
         await loop.aclose()
 

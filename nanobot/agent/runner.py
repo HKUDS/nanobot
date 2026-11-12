@@ -43,7 +43,13 @@ from nanobot.providers.base import (
 from nanobot.providers.compaction import ProviderStateCommitError
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
-from nanobot.session.message_metadata import CONSUMED_INPUT_ID_KEY, MODEL_INPUT_ROLE_KEY
+from nanobot.session.input_keys import (
+    MODEL_INPUT_AFTER_CURSOR_KEY,
+    MODEL_INPUT_FRESH_KEY,
+    MODEL_INPUT_POSITION_KEY,
+    MODEL_INPUT_ROLE_KEY,
+)
+from nanobot.session.message_metadata import CONSUMED_INPUT_ID_KEY
 from nanobot.session.summary import SessionSummaryCheckpoint
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
@@ -117,6 +123,7 @@ class AgentRunSpec:
     session_key: str | None = None
     provider_retry_mode: str = "standard"
     initial_consumed_input_id: str | None = None
+    initial_pending_input_id: str | None = None
     model_input_callback: ModelInputCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     consolidate_history: HistoryConsolidator | None = None
@@ -410,8 +417,8 @@ class AgentRunner:
         had_injections = False
         pending_stream_content: str | None = None
         consumed_input_id = spec.initial_consumed_input_id
-        # History may contain inputs persisted before dispatch. Only the fresh
-        # turn and subsequently injected messages are eligible to advance it.
+        # Track freshly admitted inputs separately from replayed history. Both
+        # may reach a model request, but admission alone is not consumption.
         scanned_messages = (
             len(messages) - 1
             if spec.transcript_input is not None and spec.transcript_input.current_message is not None
@@ -497,13 +504,9 @@ class AgentRunner:
             await end_length_segment(interrupted=drained_before_request)
             for message in messages[scanned_messages:]:
                 metadata = message.get("_meta")
-                if message.get("role") != "user" or not isinstance(metadata, dict):
-                    continue
-                metadata = cast(dict[str, Any], metadata)
-                if metadata.get(MODEL_INPUT_ROLE_KEY) is not True:
-                    continue
-                input_id = metadata.get("input_id")
-                consumed_input_id = input_id if isinstance(input_id, str) and input_id else None
+                if message.get("role") == "user" and isinstance(metadata, dict):
+                    if cast(dict[str, Any], metadata).get(MODEL_INPUT_ROLE_KEY) is True:
+                        metadata[MODEL_INPUT_FRESH_KEY] = iteration
             scanned_messages = len(messages)
             response_input_ids = self._response_input_ids(messages)
             if spec.events.accepts(ResponseInputsEvent):
@@ -519,7 +522,7 @@ class AgentRunner:
                 request_state.compaction.request_messages, messages,
             )
             request_state.recent_round_usages.append(None)
-            response, raw_usage = await self._request_model(
+            response, raw_usage, consumed_input_id = await self._request_model(
                 spec,
                 request_messages,
                 hook,
@@ -527,6 +530,9 @@ class AgentRunner:
                 request_state=request_state,
                 transcript=messages,
                 consumed_input_id=consumed_input_id,
+                pending_input_id=spec.initial_pending_input_id if iteration == 0 else None,
+                fresh_marker=iteration,
+                allow_after_cursor=iteration == 0,
             )
             assert request_state.messages is not None
             messages_for_model = request_state.messages
@@ -1044,6 +1050,67 @@ class AgentRunner:
         await emit("failed" if response.finish_reason == "error" else "completed")
         return response
 
+    @staticmethod
+    def _model_input_positions(messages: list[dict[str, Any]]) -> list[tuple[int, str | None, object, bool, bool]]:
+        """Mark user sources so normalization and compaction retain their order."""
+        positions: list[tuple[int, str | None, object, bool, bool]] = []
+        for index, message in enumerate(messages):
+            if message.get("role") != "user" or is_hidden_history_message(message):
+                continue
+            value = message.get("_meta")
+            metadata: dict[str, Any] = dict(cast(dict[str, Any], value)) if isinstance(value, dict) else {}
+            role = metadata.get(MODEL_INPUT_ROLE_KEY)
+            if role is False:
+                continue
+            input_id = metadata.get("input_id")
+            input_id = input_id if isinstance(input_id, str) and input_id else None
+            # Older rows without provenance may be user input or a system event.
+            # Their unknown identity must not silently fall back to an older ID.
+            known_role = role is True or (role is None and input_id is not None)
+            metadata[MODEL_INPUT_POSITION_KEY] = index
+            message["_meta"] = metadata
+            positions.append((
+                index, input_id, metadata.get(MODEL_INPUT_FRESH_KEY), known_role,
+                metadata.get(MODEL_INPUT_AFTER_CURSOR_KEY) is True,
+            ))
+        return positions
+
+    @staticmethod
+    def _request_input_id(
+        positions: list[tuple[int, str | None, object, bool, bool]],
+        prepared: list[dict[str, Any]],
+        previous: str | None,
+        pending: str | None,
+        fresh_marker: int,
+        allow_after_cursor: bool,
+    ) -> str | None:
+        visible: set[int] = set()
+        for message in prepared:
+            value = message.get("_meta")
+            if isinstance(value, dict):
+                position = cast(dict[str, Any], value).get(MODEL_INPUT_POSITION_KEY)
+                if isinstance(position, int):
+                    visible.add(position)
+        anchor_id = previous if previous is not None else pending
+        anchors = [index for index, input_id, _, known, _ in positions if known and input_id == anchor_id]
+        anchor = anchors[-1] if anchors else None
+        candidates = [item for item in positions if item[0] in visible]
+        if not positions:
+            return previous
+        latest = positions[-1]
+        # A newer source removed by compaction can only be represented by an
+        # opaque summary. Do not pretend it was either consumed or ignored.
+        if latest[0] not in visible and (anchor is None or latest[0] > anchor):
+            return None
+        if not candidates:
+            return previous
+        candidate = candidates[-1]
+        if anchor is not None:
+            return candidate[1] if candidate[0] >= anchor else previous
+        if candidate[2] == fresh_marker or (allow_after_cursor and candidate[4]):
+            return candidate[1]
+        return None
+
     async def _request_model(
         self,
         spec: AgentRunSpec,
@@ -1055,8 +1122,12 @@ class AgentRunner:
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
         consumed_input_id: str | None,
-    ) -> tuple[LLMResponse, LLMUsage]:
+        pending_input_id: str | None,
+        fresh_marker: int,
+        allow_after_cursor: bool,
+    ) -> tuple[LLMResponse, LLMUsage, str | None]:
         _raise_if_cancelling()
+        positions = self._model_input_positions(messages) if spec.model_input_callback is not None else []
         messages, kwargs = await self._prepare_model_request(
             spec,
             messages,
@@ -1065,6 +1136,34 @@ class AgentRunner:
             transcript=transcript,
         )
         _raise_if_cancelling()
+        previous_input_id = consumed_input_id
+        if spec.model_input_callback is not None:
+            consumed_input_id = self._request_input_id(
+                positions, messages, consumed_input_id, pending_input_id, fresh_marker, allow_after_cursor,
+            )
+        provider_context = kwargs.get("provider_context")
+        state = provider_context.conversation_state if isinstance(provider_context, ProviderCallContext) else None
+        if state is not None and spec.model_input_callback is not None:
+            # A resumed provider consumes its opaque state and pending delta;
+            # an internal fallback may instead consume the full transcript.
+            # Keep an ID only when both possible branches agree.
+            resumed_input_id = previous_input_id
+            for row in state.pending_messages:
+                metadata = row.get("_meta")
+                if row.get("role") != "user" or is_hidden_history_message(row):
+                    continue
+                if not isinstance(metadata, dict):
+                    resumed_input_id = None
+                    continue
+                metadata = cast(dict[str, Any], metadata)
+                role = metadata.get(MODEL_INPUT_ROLE_KEY)
+                input_id = metadata.get("input_id")
+                if role is True or (role is None and isinstance(input_id, str) and input_id):
+                    resumed_input_id = input_id if isinstance(input_id, str) and input_id else None
+                elif role is not False:
+                    resumed_input_id = None
+            if resumed_input_id != consumed_input_id:
+                consumed_input_id = None
         wants_streaming = hook.wants_streaming()
 
         active_hosted_tools: dict[str, dict[str, Any]] = {}
@@ -1235,14 +1334,17 @@ class AgentRunner:
             retry_messages = self._malformed_tool_call_retry_messages(
                 messages, response.content,
             )
-            retry_response, retry_usage = await self._request_model(
+            retry_response, retry_usage, retry_input_id = await self._request_model(
                 spec, retry_messages, hook, context,
                 request_state=request_state,
                 malformed_retry=True,
                 transcript=None,
                 consumed_input_id=consumed_input_id,
+                pending_input_id=None,
+                fresh_marker=fresh_marker,
+                allow_after_cursor=False,
             )
-            return retry_response, round_usage + retry_usage
+            return retry_response, round_usage + retry_usage, retry_input_id
         if (
             all_dropped
             and original_finish_reason in ("tool_calls", "function_call")
@@ -1264,8 +1366,8 @@ class AgentRunner:
                 request_state,
                 fallback_response,
             )
-            return fallback_response, round_usage + fallback_usage
-        return response, round_usage
+            return fallback_response, round_usage + fallback_usage, consumed_input_id
+        return response, round_usage, consumed_input_id
 
     @staticmethod
     def _drop_malformed_tool_calls(
@@ -1323,7 +1425,7 @@ class AgentRunner:
                 f"\n\nPrevious assistant text before the malformed calls:\n"
                 f"{assistant_text}"
             )
-        retry_messages.append({"role": "user", "content": note})
+        retry_messages.append({"role": "user", "content": note, "_meta": {MODEL_INPUT_ROLE_KEY: False}})
         return retry_messages
 
     async def _request_finalization_retry(

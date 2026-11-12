@@ -81,12 +81,13 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
+from nanobot.session.input_keys import MODEL_INPUT_ROLE_KEY
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
 from nanobot.session.message_metadata import (
     CONSUMED_INPUT_CURSOR_KEY,
-    MODEL_INPUT_ROLE_KEY,
     consumed_input_cursor,
     input_history_metadata,
+    pending_input_cursor,
     persisted_message,
 )
 from nanobot.session.model_selection import (
@@ -718,6 +719,7 @@ class AgentLoop:
         has_text = isinstance(content_value, str) and content_value.strip()
         if has_text or media_paths or runtime_context_blocks:
             extra = input_history_metadata(msg) | ({"media": list(media_paths)} if media_paths else {}) | agent_context.session_extra(msg.metadata)
+            extra[MODEL_INPUT_ROLE_KEY] = msg.is_user_input and not automation_history_overrides(msg.metadata)[1]
             extra.update(kwargs)
             if HIDDEN_HISTORY_META in msg.metadata:
                 extra[HIDDEN_HISTORY_META] = msg.metadata[HIDDEN_HISTORY_META]
@@ -750,7 +752,7 @@ class AgentLoop:
             session_summary=ctx.pending_summary,
             runtime_context_blocks=ctx.runtime_context_blocks,
             input_metadata=(
-                None
+                {MODEL_INPUT_ROLE_KEY: False}
                 if turn_continuation.internal_continuation_inbound(ctx.msg.metadata)
                 else input_history_metadata(ctx.msg) | {
                     MODEL_INPUT_ROLE_KEY: (
@@ -1133,7 +1135,9 @@ class AgentLoop:
                 )
                 row: dict[str, Any] = {
                     "role": "user", "content": user_content,
-                    "_meta": input_history_metadata(pending_msg) | {MODEL_INPUT_ROLE_KEY: pending_msg.is_user_input},
+                    "_meta": input_history_metadata(pending_msg) | {
+                        MODEL_INPUT_ROLE_KEY: pending_msg.is_user_input and not automation_history_overrides(pending_msg.metadata)[1],
+                    },
                 }
                 if HIDDEN_HISTORY_META in pending_msg.metadata:
                     row[HIDDEN_HISTORY_META] = pending_msg.metadata[HIDDEN_HISTORY_META]
@@ -1362,6 +1366,9 @@ class AgentLoop:
                 provider_retry_mode=self.provider_retry_mode,
                 initial_consumed_input_id=(
                     consumed_input_cursor(session.metadata, session.generation) if session is not None else None
+                ),
+                initial_pending_input_id=(
+                    pending_input_cursor(session.metadata, session.generation) if session is not None else None
                 ),
                 model_input_callback=_record_model_input,
                 checkpoint_callback=_checkpoint,
@@ -2265,6 +2272,14 @@ class AgentLoop:
                 media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
                 runtime_context_blocks=ctx.runtime_context_blocks,
             )
+            continuation = turn_continuation.internal_continuation_inbound(ctx.msg.metadata)
+            current_provider_message["_meta"] = {
+                **current_provider_message.get("_meta", {}),
+                **({} if continuation else input_history_metadata(ctx.msg)),
+                MODEL_INPUT_ROLE_KEY: (
+                    not continuation and ctx.msg.is_user_input and not automation_history_overrides(ctx.msg.metadata)[1]
+                ),
+            }
             task_id = ctx.msg.metadata.get("subagent_task_id") if is_subagent else None
             already_staged = False
             if isinstance(task_id, str) and task_id:

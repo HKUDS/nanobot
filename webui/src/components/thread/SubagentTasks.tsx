@@ -7,7 +7,7 @@ import {
   InterruptedTaskIcon,
   ErrorTaskIcon,
 } from "@/components/icons/product-icons";
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -49,11 +49,12 @@ interface SubagentTasksProviderProps {
   historyEnabled?: boolean;
   scopedHistory?: boolean;
   messages?: UIMessage[];
+  windowReady?: boolean;
   active?: boolean;
   children: ReactNode;
 }
 
-export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, scopedHistory = false, messages = [], active = true, children }: SubagentTasksProviderProps) {
+export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, scopedHistory = false, messages = [], windowReady = true, active = true, children }: SubagentTasksProviderProps) {
   const { t } = useTranslation("common");
   const pageVisible = usePageVisibility();
   const paneVisible = useThreadVisibility();
@@ -77,8 +78,20 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   const windowKey = scopedHistory ? JSON.stringify(windowScope) : "";
   const windowRef = useRef(windowScope);
   windowRef.current = windowScope;
-  const previousWindowKey = useRef(windowKey);
-  const refreshRef = useRef<(() => void) | null>(null);
+  const windowKeyRef = useRef(windowKey);
+  windowKeyRef.current = windowKey;
+  const readState = useMemo(() => ({
+    inputIds: new Set<string>(), messageIds: new Set<string>(), turnIds: new Set<string>(),
+    inFlight: false, force: false, epoch: 0,
+  }), [client, sessionKey]);
+  const readStateRef = useRef(readState);
+  readStateRef.current = readState;
+  const refreshRef = useRef<((force: boolean, invalidate?: boolean) => void) | null>(null);
+  const mergeTasks = (incoming: SubagentTaskSnapshot[]) => {
+    const next = mergeSubagentTasks(taskRef.current, incoming);
+    taskRef.current = next;
+    setTasks(next);
+  };
 
   useLayoutEffect(() => {
     scopeGeneration.current += 1;
@@ -100,59 +113,87 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   }, [active, paneVisible]);
 
   useEffect(() => {
-    if (!enabled || !active || !pageVisible || !paneVisible || !sessionKey || !token) return;
+    if (!enabled || !active || !pageVisible || !paneVisible || !sessionKey || !token || !liveEvents) return;
+    let subscribing = true;
+    const unsubscribeChat = client.onChat(sessionKey.slice("websocket:".length), (event) => {
+      if (readStateRef.current === readState && event.event === "subagent_task" && isSubagentTask(event.task)) mergeTasks([event.task]);
+    });
+    const unsubscribeStatus = client.onStatus((status) => {
+      if (!subscribing && status === "open") refreshRef.current?.(true, true);
+    });
+    subscribing = false;
+    return () => { unsubscribeChat(); unsubscribeStatus(); };
+  }, [client, enabled, liveEvents, active, sessionKey, token, pageVisible, paneVisible, readState]);
+
+  useEffect(() => {
+    if (!enabled || !active || !pageVisible || !paneVisible || !sessionKey || !token
+      || (scopedHistory && !windowReady)) return;
     let cancelled = false;
-    let refreshing = false;
-    let refreshPending = false;
-    const refresh = async () => {
-      if (refreshing) { refreshPending = true; return; }
-      refreshing = true;
-      try {
-        const window = scopedHistory ? {
-          ...windowRef.current,
-          trackedIds: taskRef.current.filter(isActiveSubagentTask).map((task) => task.task_id),
-        } : undefined;
-        const payload = await fetchSubagentTasks(token, sessionKey, window);
-        if (!cancelled) {
-          setTasks((current) => mergeSubagentTasks(current, payload.tasks));
+    let scheduled = false;
+    const read = () => {
+      if (readState.inFlight) return;
+      const full = readState.force;
+      const current = windowRef.current;
+      const requested = {
+        inputIds: current.inputIds.filter((id) => full || !readState.inputIds.has(id)),
+        messageIds: current.messageIds.filter((id) => full || !readState.messageIds.has(id)),
+        turnIds: current.turnIds.filter((id) => full || !readState.turnIds.has(id)),
+      };
+      if (!full && (!scopedHistory || !Object.values(requested).some((ids) => ids.length))) return;
+      readState.force = false;
+      readState.inFlight = true;
+      const requestedKey = windowKeyRef.current;
+      const requestedEpoch = readState.epoch;
+      const window = scopedHistory ? {
+        ...requested,
+        trackedIds: taskRef.current.filter(isActiveSubagentTask).map((task) => task.task_id),
+      } : undefined;
+      let succeeded = false;
+      void fetchSubagentTasks(token, sessionKey, window).then((payload) => {
+        if (!mounted.current || readStateRef.current !== readState) return;
+        succeeded = true;
+        if (requestedEpoch === readState.epoch) {
+          for (const key of ["inputIds", "messageIds", "turnIds"] as const) {
+            for (const id of requested[key]) readState[key].add(id);
+          }
         }
-      } catch {
-        // Background read failures retain the last task snapshot.
-      } finally {
-        refreshing = false;
-        if (refreshPending && !cancelled) {
-          refreshPending = false;
-          void refresh();
-        }
-      }
+        mergeTasks(payload.tasks);
+      }).catch(() => {
+        // Background read failures retain the last task snapshot and remain retryable.
+      }).finally(() => {
+        readState.inFlight = false;
+        if (readStateRef.current === readState
+          && (succeeded || readState.force || requestedKey !== windowKeyRef.current)) refreshRef.current?.(false);
+      });
     };
-    refreshRef.current = () => { void refresh(); };
-    const unsubscribeChat = liveEvents ? client.onChat(sessionKey.slice("websocket:".length), (event) => {
-      if (cancelled || event.event !== "subagent_task") return;
-      if (!isSubagentTask(event.task)) return;
-      setTasks((current) => mergeSubagentTasks(current, [event.task]));
-    }) : undefined;
-    const unsubscribeStatus = liveEvents ? client.onStatus((status) => {
-      if (status === "open") void refresh();
-    }) : undefined;
-    if (!refreshing) void refresh();
-    const focus = () => void refresh();
+    const refresh = (force: boolean, invalidate = false) => {
+      if (cancelled) return;
+      if (invalidate) {
+        // Events may have been missed on any previously viewed page. Mark all
+        // pages stale, then refresh only the current one and revisit others lazily.
+        readState.epoch += 1;
+        readState.inputIds.clear();
+        readState.messageIds.clear();
+        readState.turnIds.clear();
+      }
+      if (force) readState.force = true;
+      if (scheduled) return;
+      scheduled = true;
+      // Coalesce layout-driven window changes and Strict Mode effect replays.
+      queueMicrotask(() => { scheduled = false; if (!cancelled) read(); });
+    };
+    refreshRef.current = refresh;
+    refresh(true, true);
+    const focus = () => refresh(true, true);
     window.addEventListener("focus", focus);
     return () => {
       cancelled = true;
       refreshRef.current = null;
-      unsubscribeChat?.();
-      unsubscribeStatus?.();
       window.removeEventListener("focus", focus);
     };
-  }, [client, enabled, liveEvents, scopedHistory, active, sessionKey, token, pageVisible, paneVisible]);
+  }, [client, enabled, scopedHistory, active, sessionKey, token, pageVisible, paneVisible, windowReady, readState]);
 
-  useEffect(() => {
-    if (previousWindowKey.current !== windowKey) {
-      previousWindowKey.current = windowKey;
-      refreshRef.current?.();
-    }
-  }, [windowKey]);
+  useEffect(() => { refreshRef.current?.(false); }, [windowKey]);
 
   const stop = async (task: SubagentTaskSnapshot) => {
     if (!sessionKey) return;
@@ -162,7 +203,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     try {
       const next = await cancelSubagentTask(client, sessionKey, task.task_id);
       if (!mounted.current || generation !== scopeGeneration.current) return;
-      setTasks((current) => mergeSubagentTasks(current, [next]));
+      mergeTasks([next]);
     } catch (reason) {
       if (mounted.current && generation === scopeGeneration.current) setStopError(reason instanceof Error ? reason.message : t("thread.subagents.stopFailed"));
     } finally {
