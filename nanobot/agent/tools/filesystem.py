@@ -56,14 +56,12 @@ class _FsTool(Tool):
         restrict_to_workspace: bool | None = None,
         sandbox_restricts_workspace: bool = False,
         extra_read_allowed_files: list[Path] | None = None,
-        *,
-        files: WorkspaceFiles | None = None,
     ):
-        self._files = files if files is not None else WorkspaceFiles(
+        self._files = WorkspaceFiles(
             workspace=workspace,
             allowed_dir=allowed_dir,
-            extra_allowed_dirs=extra_allowed_dirs,
-            extra_read_allowed_dirs=extra_read_allowed_dirs,
+            # The legacy extra_allowed_dirs option grants reads only.
+            extra_read_allowed_dirs=(*(extra_allowed_dirs or ()), *(extra_read_allowed_dirs or ())),
             extra_write_allowed_dirs=extra_write_allowed_dirs,
             extra_write_allowed_files=extra_write_allowed_files,
             restrict_to_workspace=restrict_to_workspace,
@@ -78,14 +76,17 @@ class _FsTool(Tool):
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
+        workspace = Path(ctx.workspace)
+        root = workspace.expanduser().resolve()
+        restricted = ctx.config.restrict_to_workspace
+        sandboxed = bool(ctx.config.exec.sandbox)
         return cls(
-            files=WorkspaceFiles.for_agent(
-                Path(ctx.workspace),
-                restrict_to_workspace=ctx.config.restrict_to_workspace,
-                sandbox_restricts_workspace=bool(ctx.config.exec.sandbox),
-                builtin_skills=BUILTIN_SKILLS_DIR,
-                plugin_skill_roots=_plugin_skill_roots,
-            ),
+            workspace=workspace,
+            allowed_dir=workspace if restricted or sandboxed else None,
+            extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, root / "skills"],
+            extra_read_allowed_files=[root / "memory" / "history.jsonl"],
+            restrict_to_workspace=restricted,
+            sandbox_restricts_workspace=sandboxed,
             file_states=ctx.file_state_store,
         )
 
@@ -969,18 +970,17 @@ class EditFileTool(_WritableFsTool):
             if fsize > self._MAX_EDIT_FILE_SIZE:
                 return ToolResult.error(f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB.")
 
+            raw = target.read_bytes()
+            content = raw.decode("utf-8")
             if old_text == "":
-                raw = target.read_bytes()
-                content = raw.decode("utf-8")
                 if content.strip():
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
                 target.write(new_text)
                 self._file_states.record_write(fp)
                 return self._format_summary(fp, content, new_text)
 
-            raw = target.read_bytes()
             uses_crlf = b"\r\n" in raw
-            content = raw.decode("utf-8").replace("\r\n", "\n")
+            content = content.replace("\r\n", "\n")
             norm_old = old_text.replace("\r\n", "\n")
             matches = _find_matches(content, norm_old)
 
