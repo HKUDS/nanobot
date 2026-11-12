@@ -7,6 +7,7 @@ import mimetypes
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import accumulate
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -723,22 +724,19 @@ def _match_covers_line(match: _MatchSpan, line: int) -> bool:
     return match.line <= line <= _match_end_line(match)
 
 
-def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
+def _find_literal_matches(content: str, search_text: str, needle: str) -> list[_MatchSpan]:
+    """Locate matches in original text or its length-preserving quote normalization."""
     matches: list[_MatchSpan] = []
-    start = 0
-    while True:
-        idx = content.find(old_text, start)
-        if idx == -1:
-            break
-        matches.append(
-            _MatchSpan(
-                start=idx,
-                end=idx + len(old_text),
-                text=content[idx : idx + len(old_text)],
-                line=content.count("\n", 0, idx) + 1,
-            )
-        )
-        start = idx + max(1, len(old_text))
+    start = previous = 0
+    line = 1
+    size = len(needle)
+    step = size or 1
+    while (idx := search_text.find(needle, start)) != -1:
+        line += content.count("\n", previous, idx)
+        end = idx + size
+        matches.append(_MatchSpan(idx, end, content[idx:end], line))
+        previous = idx
+        start = idx + step
     return matches
 
 
@@ -747,17 +745,11 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
     if not old_lines:
         return []
 
-    content_lines = content.splitlines()
-    content_lines_keepends = content.splitlines(keepends=True)
+    content_lines = content.splitlines(keepends=True)
     if len(content_lines) < len(old_lines):
         return []
 
-    offsets: list[int] = []
-    pos = 0
-    for line in content_lines_keepends:
-        offsets.append(pos)
-        pos += len(line)
-    offsets.append(pos)
+    offsets = list(accumulate(map(len, content_lines), initial=0))
 
     if normalize_quotes:
         stripped_old = [_normalize_quotes(line.strip()) for line in old_lines]
@@ -780,7 +772,7 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
         # Include the line terminator only when the requested match includes it.
         if (
             not old_text.endswith("\n")
-            and content_lines_keepends[i + window_size - 1].endswith("\n")
+            and content_lines[i + window_size - 1].endswith("\n")
         ):
             end -= 1
         matches.append(
@@ -794,38 +786,13 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
     return matches
 
 
-def _find_quote_matches(content: str, old_text: str) -> list[_MatchSpan]:
-    norm_content = _normalize_quotes(content)
-    norm_old = _normalize_quotes(old_text)
-    matches: list[_MatchSpan] = []
-    start = 0
-    while True:
-        idx = norm_content.find(norm_old, start)
-        if idx == -1:
-            break
-        matches.append(
-            _MatchSpan(
-                start=idx,
-                end=idx + len(old_text),
-                text=content[idx : idx + len(old_text)],
-                line=content.count("\n", 0, idx) + 1,
-            )
-        )
-        start = idx + max(1, len(norm_old))
-    return matches
-
-
 def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
-    for matcher in (
-        lambda: _find_exact_matches(content, old_text),
-        lambda: _find_trim_matches(content, old_text),
-        lambda: _find_trim_matches(content, old_text, normalize_quotes=True),
-        lambda: _find_quote_matches(content, old_text),
-    ):
-        matches = matcher()
-        if matches:
-            return matches
-    return []
+    return (
+        _find_literal_matches(content, content, old_text)
+        or _find_trim_matches(content, old_text)
+        or _find_trim_matches(content, old_text, normalize_quotes=True)
+        or _find_literal_matches(content, _normalize_quotes(content), _normalize_quotes(old_text))
+    )
 
 
 def _collapse_internal_whitespace(text: str) -> str:
