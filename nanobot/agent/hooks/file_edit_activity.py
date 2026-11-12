@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from nanobot.agent.hook import (
     AgentHook,
@@ -46,15 +46,14 @@ class FileEditActivityHook(AgentHook):
         tool: Any,
         params: Any,
     ) -> None:
-        if self._publish is None or not isinstance(params, dict):
+        if self._publish is None:
             return
-        typed_params = cast(dict[str, Any], params)
         trackers = prepare_file_edit_trackers(
             call_id=tool_call.id,
             tool_name=tool_call.name,
             tool=tool,
             workspace=self._workspace,
-            params=typed_params,
+            params=params,
         )
         if not trackers:
             return
