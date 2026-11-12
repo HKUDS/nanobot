@@ -52,6 +52,8 @@ _USAGE_COLUMNS = (
     "cache_write_tokens",
     "cache_read_observed_input_tokens",
     "cache_write_observed_input_tokens",
+    "cache_miss_tokens",
+    "cache_unknown_tokens",
     "total_tokens",
     "reported_tokens",
     "estimated_tokens",
@@ -78,6 +80,16 @@ _AGGREGATE_SQL = """
     COALESCE(SUM(
         CASE WHEN cache_write_tokens IS NOT NULL THEN input_tokens ELSE 0 END
     ), 0) AS cache_write_observed_input_tokens,
+    COALESCE(SUM(
+        CASE WHEN cache_read_tokens IS NOT NULL
+            THEN input_tokens - cache_read_tokens - COALESCE(cache_write_tokens, 0)
+            ELSE 0 END
+    ), 0) AS cache_miss_tokens,
+    COALESCE(SUM(
+        CASE WHEN cache_read_tokens IS NULL
+            THEN input_tokens - COALESCE(cache_write_tokens, 0)
+            ELSE 0 END
+    ), 0) AS cache_unknown_tokens,
     COALESCE(SUM(total_tokens), 0) AS total_tokens,
     COALESCE(SUM(reported_tokens), 0) AS reported_tokens,
     COALESCE(SUM(estimated_tokens), 0) AS estimated_tokens,

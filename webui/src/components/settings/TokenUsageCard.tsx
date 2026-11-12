@@ -23,9 +23,11 @@ const CACHE_PATTERN = { backgroundImage: "repeating-linear-gradient(135deg, tran
 function tokenSegments(day?: Usage["days"][number]): number[] {
   if (!day) return [0, 0, 0, 0, 0, 0];
   const observed = day.cache_read_observed_input_tokens;
-  const written = Math.min(day.cache_write_observed_input_tokens > 0 ? day.cache_write_tokens : 0, observed);
-  return [day.cache_read_tokens, written, Math.max(0, observed - day.cache_read_tokens - written),
-    Math.max(0, day.input_tokens - observed), day.output_tokens,
+  // Older backends cannot locate writes within the read-observed and unknown pools.
+  const input = day.cache_miss_tokens !== undefined && day.cache_unknown_tokens !== undefined
+    ? [day.cache_read_tokens, day.cache_write_tokens, day.cache_miss_tokens, day.cache_unknown_tokens]
+    : [day.cache_read_tokens, 0, observed - day.cache_read_tokens, day.input_tokens - observed];
+  return [...input, day.output_tokens,
     Math.max(0, day.total_tokens - day.input_tokens - day.output_tokens)];
 }
 

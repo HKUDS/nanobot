@@ -46,7 +46,7 @@ describe("Token usage card", () => {
   afterEach(() => vi.useRealTimers());
 
   it("uses one 30-day window for the total, chart and source percentages", () => {
-    const today = { ...day("2026-09-09", 300), input_tokens: 240, output_tokens: 60, cache_read_tokens: 120, cache_read_observed_input_tokens: 180, estimated_tokens: 100,
+    const today = { ...day("2026-09-09", 300), input_tokens: 240, output_tokens: 60, cache_read_tokens: 120, cache_read_observed_input_tokens: 180, cache_miss_tokens: 60, cache_unknown_tokens: 60, estimated_tokens: 100,
       sources: { user: day("2026-09-09", 200) } };
     render(<TokenUsageCard timeZone="UTC" usage={usage([
       day("2026-08-10", 9000), day("2026-08-11", 100), today, day("2026-09-10", 9000),
@@ -70,12 +70,38 @@ describe("Token usage card", () => {
     expect(screen.getByText(/Sep 9/)).toBeInTheDocument();
   });
 
+  it.each([0, 100])("partitions cache writes without overlap when cached input is %i", (read) => {
+    const output = read === 0 ? 20 : 40;
+    const total = read + 100 + output;
+    const today = { ...day("2026-09-09", total), input_tokens: read + 100, output_tokens: output,
+      cache_read_tokens: read, cache_write_tokens: 100,
+      cache_read_observed_input_tokens: read, cache_write_observed_input_tokens: read + 100,
+      cache_miss_tokens: 0, cache_unknown_tokens: 0 };
+    render(<TokenUsageCard usage={usage([today])} />);
+    const bar = within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img")[29];
+    expect(bar).toHaveAccessibleName(new RegExp(`Cached input: ${read}, Cache write: 100, Cache miss: 0, Unknown status: 0, Output: ${output}`));
+    const segments = Array.from(bar.firstElementChild!.children);
+    const values = [read, 100, output].filter(value => value > 0);
+    expect(segments).toHaveLength(values.length);
+    segments.forEach((segment, index) => expect(segment).toHaveStyle({ height: `${values[index] / total * 100}%` }));
+  });
+
+  it("keeps the read-only breakdown for older backends without per-call partitions", () => {
+    render(<TokenUsageCard usage={usage([{ ...day("2026-09-09", 240), input_tokens: 200, output_tokens: 40,
+      cache_read_tokens: 100, cache_write_tokens: 100,
+      cache_read_observed_input_tokens: 100, cache_write_observed_input_tokens: 200 }])} />);
+    const bar = within(screen.getByRole("group", { name: "Daily tokens" })).getAllByRole("img")[29];
+    expect(bar).toHaveAccessibleName(/Cached input: 100, Cache write: 0, Cache miss: 0, Unknown status: 100, Output: 40/);
+    expect(bar.firstElementChild?.children).toHaveLength(3);
+    expect(bar.firstElementChild?.children[1]).toHaveStyle({ height: `${100 / 240 * 100}%` });
+  });
+
   it("hides a legend entry when that segment stays empty across the window", () => {
     const today = { ...day("2026-09-09", 1000), cache_read_tokens: 200, cache_read_observed_input_tokens: 400 };
     const { rerender } = render(<TokenUsageCard usage={usage([today])} />);
     expect(screen.getByText("Cached input")).toBeInTheDocument();
     expect(screen.queryByText("Cache write")).not.toBeInTheDocument();
-    rerender(<TokenUsageCard usage={usage([{ ...today, cache_write_tokens: 150, cache_write_observed_input_tokens: 400 }])} />);
+    rerender(<TokenUsageCard usage={usage([{ ...today, cache_write_tokens: 150, cache_write_observed_input_tokens: 400, cache_miss_tokens: 50, cache_unknown_tokens: 600 }])} />);
     expect(screen.getByText("Cache write")).toBeInTheDocument();
   });
 

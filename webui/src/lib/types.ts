@@ -918,6 +918,8 @@ export interface SettingsPayload {
       cache_write_tokens: number;
       cache_read_observed_input_tokens: number;
       cache_write_observed_input_tokens: number;
+      cache_miss_tokens?: number;
+      cache_unknown_tokens?: number;
       total_tokens: number;
       reported_tokens?: number;
       estimated_tokens?: number;
@@ -940,6 +942,8 @@ export interface SettingsPayload {
           cache_write_tokens: number;
           cache_read_observed_input_tokens: number;
           cache_write_observed_input_tokens: number;
+          cache_miss_tokens?: number;
+          cache_unknown_tokens?: number;
           total_tokens: number;
           reported_tokens?: number;
           estimated_tokens?: number;
@@ -979,6 +983,8 @@ export interface SettingsPayload {
       cache_write_tokens: number;
       cache_read_observed_input_tokens: number;
       cache_write_observed_input_tokens: number;
+      cache_miss_tokens?: number;
+      cache_unknown_tokens?: number;
       total_tokens: number;
       reported_tokens: number;
       estimated_tokens: number;

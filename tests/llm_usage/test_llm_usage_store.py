@@ -156,12 +156,46 @@ def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: 
     assert day["requests"] == 4
     assert day["reported_requests"] == 2
     assert day["estimated_requests"] == 1
+    assert day["cache_miss_tokens"] == 50
+    assert day["cache_unknown_tokens"] == 80
     assert day["sources"]["api"]["cache_read_observed_input_tokens"] == 0
     assert day["sources"]["user"]["cache_read_observed_input_tokens"] == 100
     assert {(row["provider"], row["model"]) for row in payload["providers_30d"]} == {
         ("openai", "gpt-5"),
         ("anthropic", "claude-sonnet-4"),
     }
+
+
+@pytest.mark.parametrize("with_read_call", [False, True], ids=["write-only", "mixed-observation"])
+def test_usage_payload_partitions_cache_tokens_before_aggregation(
+    tmp_path: Path, with_read_call: bool,
+) -> None:
+    store = LLMUsageStore(tmp_path / "llm_usage.sqlite3")
+    store.record(_call(
+        "2026-06-03T00:00:00+00:00",
+        usage=LLMUsage.reported(
+            input_tokens=100, output_tokens=20, cache_write_tokens=100,
+        ),
+    ))
+    if with_read_call:
+        store.record(_call(
+            "2026-06-03T00:01:00+00:00",
+            usage=LLMUsage.reported(
+                input_tokens=100, output_tokens=20,
+                cache_read_tokens=100, cache_write_tokens=0,
+            ),
+        ))
+
+    payload = store.usage_payload(now=datetime(2026, 6, 3, 12, tzinfo=timezone.utc))
+    day = payload["days"][0]
+    assert day["cache_write_tokens"] == 100
+    assert day["cache_read_tokens"] == (100 if with_read_call else 0)
+    assert day["cache_miss_tokens"] == 0
+    assert day["cache_unknown_tokens"] == 0
+    assert sum(day[key] for key in (
+        "cache_read_tokens", "cache_write_tokens", "cache_miss_tokens",
+        "cache_unknown_tokens", "output_tokens",
+    )) == day["total_tokens"]
 
 
 def test_usage_payload_preserves_zero_cache_observation(tmp_path: Path) -> None:
