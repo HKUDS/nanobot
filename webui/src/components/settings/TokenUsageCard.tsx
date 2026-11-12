@@ -114,7 +114,7 @@ export function TokenUsageCard({ usage, timeZone, onDetailsOpenChange, detailsLo
         <div>
           <h3 className="flex items-baseline gap-2 text-sm font-medium">
             {t("settings.usage.shortTitle", { defaultValue: "Token usage" })}
-            {usage && <span className="text-[11px] font-normal text-muted-foreground">{t("settings.usage.last30Days", { defaultValue: "Last 30 days" })}</span>}
+            {usage && <span className="text-[11px] font-normal leading-none text-muted-foreground">{t("settings.usage.last30Days", { defaultValue: "Last 30 days" })}</span>}
           </h3>
           <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums" aria-label={usage ? `${exact(total)} tokens in the last 30 days` : undefined}>
             {usage ? compact(total) : "—"}

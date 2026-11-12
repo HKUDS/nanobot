@@ -66,7 +66,8 @@ export function installSkeletonPreviewApi() {
       return detailState === "error" ? Response.json({ error: "Preview read failed" }, { status: 503 }) : Response.json(skill);
     }
     const bodies: Record<string, unknown> = {
-      "/api/settings": previewSettings, "/api/settings/usage": { usage: null },
+      "/api/settings": previewSettings,
+      "/api/settings/usage": { days: [] } satisfies NonNullable<SettingsPayload["usage"]>,
       "/api/webui/automations": { jobs }, "/api/settings/nanobot-features": { features: [], enabled_count: 0, requires_restart: false },
       "/api/settings/cli-apps": { apps: [], installed_count: 0 }, "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
     };
