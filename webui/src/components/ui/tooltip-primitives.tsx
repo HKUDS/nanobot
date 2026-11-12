@@ -4,8 +4,11 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { cn } from "@/lib/utils";
 
-function TooltipProvider(props: Omit<React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Provider>, "delayDuration" | "skipDelayDuration">) {
-  return <TooltipPrimitive.Provider {...props} delayDuration={500} skipDelayDuration={0} />;
+function TooltipProvider({
+  delayDuration = 500,
+  ...props
+}: Omit<React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Provider>, "delayDuration" | "skipDelayDuration"> & { delayDuration?: number }) {
+  return <TooltipPrimitive.Provider {...props} delayDuration={delayDuration} skipDelayDuration={0} />;
 }
 const Tooltip = TooltipPrimitive.Root;
 const TooltipTrigger = TooltipPrimitive.Trigger;
@@ -20,7 +23,7 @@ const TooltipContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         floatingSurfaceElevationClassName,
-        "z-50 overflow-hidden rounded-control px-3 py-1.5 text-caption animate-in fade-in-0 zoom-in-95",
+        "z-50 overflow-hidden rounded-control px-3 py-1.5 text-caption animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
         className,
       )}
       {...props}

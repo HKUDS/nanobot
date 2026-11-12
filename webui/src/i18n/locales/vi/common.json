@@ -935,18 +935,19 @@
       "shortTitle": "Mức dùng token",
       "viewDetails": "Xem chi tiết",
       "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",
-      "cacheRateHelp": "Tỷ lệ không tính đầu vào có trạng thái bộ nhớ đệm không rõ.",
       "dailyTrend": "Token mỗi ngày",
       "systemHelp": "Gồm tác vụ nội bộ và lệnh gọi chưa ghi nguồn.",
       "bySource": "Mức dùng theo nguồn",
       "modelTrend": "Xu hướng mô hình",
       "modelsUnavailable": "Chưa có chi tiết theo mô hình.",
-      "otherModels": "Khác / chưa phân loại",
+      "otherModels": "Mô hình khác",
       "unclassified": "Chưa phân loại",
       "unavailable": "Không có dữ liệu sử dụng.",
       "noActivity": "Không có token nào được sử dụng trong 30 ngày qua.",
+      "last30Days": "30 ngày qua",
       "cachedInput": "Đầu vào có trong bộ nhớ đệm",
       "cacheMiss": "Không khớp cache",
+      "cacheWrite": "Ghi bộ nhớ đệm",
       "cacheUnknown": "Trạng thái chưa rõ",
       "outputTokens": "Đầu ra",
       "otherTokens": "Token khác",
@@ -959,7 +960,9 @@
         "cron": "Tự động hóa",
         "dream": "Sắp xếp bộ nhớ",
         "system": "Lượt gọi phụ trợ"
-      }
+      },
+      "failedRequests": "{{count}} lần lỗi",
+      "estimatedShare": "{{percent}} token là ước tính"
     },
     "providers": {
       "manageProviders": "Quản lý nhà cung cấp",

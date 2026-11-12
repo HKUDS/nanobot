@@ -89,7 +89,10 @@ def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: 
             _call(
                 "2026-06-03T01:00:00+00:00",
                 source="api",
-                usage=LLMUsage.reported(input_tokens=50, output_tokens=5),
+                usage=LLMUsage.reported(input_tokens=50, output_tokens=5).with_timing(
+                    generation_ms=2500,
+                    ttft_ms=200,
+                ),
             ),
             _call(
                 "2026-06-03T02:00:00+00:00",
@@ -122,8 +125,30 @@ def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: 
     assert payload["cache_read_observed_input_tokens_30d"] == 100
     assert payload["cache_read_rate_30d"] == 0.4
     assert payload["model_days_30d"] == [
-        {"date": "2026-06-03", "provider": "anthropic", "model": "claude-sonnet-4", "total_tokens": 40},
-        {"date": "2026-06-03", "provider": "openai", "model": "gpt-5", "total_tokens": 175},
+        {
+            "date": "2026-06-03",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4",
+            "total_tokens": 40,
+            "measured_output_tokens": 0,
+            "generation_ms": 0,
+            "ttft_ms": 0,
+            "timed_requests": 0,
+            "cache_read_tokens": 0,
+            "cache_read_observed_input_tokens": 0,
+        },
+        {
+            "date": "2026-06-03",
+            "provider": "openai",
+            "model": "gpt-5",
+            "total_tokens": 175,
+            "measured_output_tokens": 5,
+            "generation_ms": 2500,
+            "ttft_ms": 200,
+            "timed_requests": 1,
+            "cache_read_tokens": 40,
+            "cache_read_observed_input_tokens": 100,
+        },
     ]
 
     day = payload["days"][0]

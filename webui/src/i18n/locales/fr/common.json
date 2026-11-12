@@ -935,18 +935,19 @@
       "shortTitle": "Utilisation des tokens",
       "viewDetails": "Voir les détails",
       "cacheHitRate": "Taux de réussite du cache",
-      "cacheRateHelp": "Le taux exclut les entrées dont l’état du cache est inconnu.",
       "dailyTrend": "Tokens quotidiens",
       "systemHelp": "Inclut les tâches internes et les appels sans source enregistrée.",
       "bySource": "Utilisation par source",
       "modelTrend": "Tendances des modèles",
       "modelsUnavailable": "Aucune ventilation par modèle disponible.",
-      "otherModels": "Autres / non attribués",
+      "otherModels": "Autres modèles",
       "unclassified": "Non classé",
       "unavailable": "Les données d’utilisation sont indisponibles.",
       "noActivity": "Aucun token utilisé au cours des 30 derniers jours.",
+      "last30Days": "30 derniers jours",
       "cachedInput": "Entrée en cache",
       "cacheMiss": "Cache manqué",
+      "cacheWrite": "Écriture de cache",
       "cacheUnknown": "État inconnu",
       "outputTokens": "Sortie",
       "otherTokens": "Autres tokens",
@@ -959,7 +960,9 @@
         "cron": "Automatisations",
         "dream": "Consolidation de la mémoire",
         "system": "Appels auxiliaires"
-      }
+      },
+      "failedRequests": "{{count}} échecs",
+      "estimatedShare": "{{percent}} des tokens sont estimés"
     },
     "providers": {
       "manageProviders": "Gérer les fournisseurs",

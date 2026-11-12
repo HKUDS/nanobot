@@ -398,7 +398,7 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView({ initialSection: "overview" });
 
-    expect(await screen.findByLabelText("1,500 tokens")).toBeInTheDocument();
+    expect(await screen.findByLabelText("1,500 tokens in the last 30 days")).toBeInTheDocument();
     expect(screen.getByText("Token usage")).toBeInTheDocument();
   });
 

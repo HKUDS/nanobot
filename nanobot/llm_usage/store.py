@@ -459,11 +459,19 @@ class LLMUsageStore:
                     "provider": str(row["provider"]),
                     "model": str(row["model"]),
                     "total_tokens": int(row["total_tokens"]),
+                    "measured_output_tokens": int(row["measured_output_tokens"]),
+                    "generation_ms": int(row["generation_ms"]),
+                    "ttft_ms": int(row["ttft_ms"]),
+                    "timed_requests": int(row["timed_requests"]),
+                    "cache_read_tokens": int(row["cache_read_tokens"]),
+                    "cache_read_observed_input_tokens": int(
+                        row["cache_read_observed_input_tokens"]
+                    ),
                 }
                 for row in connection.execute(
-                    """
+                    f"""
                     SELECT llm_usage_local_day(started_at_ms, ?) AS date, provider, model,
-                           COALESCE(SUM(total_tokens), 0) AS total_tokens
+                           {_AGGREGATE_SQL}
                     FROM llm_calls
                     WHERE started_at_ms >= ? AND started_at_ms < ?
                     GROUP BY date, provider, model

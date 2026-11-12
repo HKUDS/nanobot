@@ -998,6 +998,12 @@ export interface SettingsPayload {
       provider: string;
       model: string;
       total_tokens: number;
+      measured_output_tokens?: number;
+      generation_ms?: number;
+      ttft_ms?: number;
+      timed_requests?: number;
+      cache_read_tokens?: number;
+      cache_read_observed_input_tokens?: number;
     }>;
     updated_at?: string | null;
   };

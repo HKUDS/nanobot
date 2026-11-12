@@ -220,10 +220,15 @@ const usage: Usage = (() => {
   return { days, total_tokens: total, total_tokens_30d: total, total_tokens_365d: total,
     peak_day_tokens: Math.max(...days.map((day) => day.total_tokens)), current_streak_days: 3, longest_streak_days: 6,
     active_days_30d: days.filter((day) => day.total_tokens > 0).length, requests_30d: days.reduce((sum, day) => sum + day.requests, 0),
-    model_days_30d: days.flatMap((day) => [
-      { date: day.date, provider: "openai", model: "gpt-5.4", total_tokens: day.total_tokens * 0.6 },
-      { date: day.date, provider: "anthropic", model: "claude-sonnet-4", total_tokens: day.total_tokens * 0.4 },
-    ]) };
+    model_days_30d: days.flatMap((day, index) => [
+      { provider: "openai", model: "gpt-5.4", share: 0.6, speed: 48 + index % 7 },
+      { provider: "anthropic", model: "claude-sonnet-4", share: 0.4, speed: 33 + index % 5 },
+    ].map(({ provider, model, share, speed }) => {
+      const totalTokens = day.total_tokens * share;
+      const measured = Math.round(totalTokens * 0.4);
+      const generationMs = Math.round(measured / speed * 1000);
+      return { date: day.date, provider, model, total_tokens: totalTokens, measured_output_tokens: measured, generation_ms: generationMs, ttft_ms: Math.round(generationMs * 0.6), timed_requests: 1, cache_read_tokens: Math.round(totalTokens * 0.5), cache_read_observed_input_tokens: Math.round(totalTokens * 0.8) };
+    })) };
 })();
 
 function UsagePreview() {

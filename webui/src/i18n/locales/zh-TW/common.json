@@ -935,18 +935,19 @@
       "shortTitle": "Token 用量",
       "viewDetails": "查看詳情",
       "cacheHitRate": "快取命中率",
-      "cacheRateHelp": "快取命中率僅統計快取狀態已知的輸入。",
       "dailyTrend": "每日 Token",
       "systemHelp": "包括內部任務和未標註來源的呼叫",
       "bySource": "用量來源",
       "modelTrend": "模型趨勢",
       "modelsUnavailable": "暫無模型用量明細。",
-      "otherModels": "其他模型 / 未歸類",
+      "otherModels": "其他模型",
       "unclassified": "未分類",
       "unavailable": "暫時無法取得用量資料。",
       "noActivity": "近 30 天暫無 Token 用量。",
+      "last30Days": "近 30 天",
       "cachedInput": "快取命中",
       "cacheMiss": "未命中",
+      "cacheWrite": "快取寫入",
       "cacheUnknown": "狀態未知",
       "outputTokens": "輸出",
       "otherTokens": "其他 Token",
@@ -959,7 +960,9 @@
         "cron": "自動任務",
         "dream": "記憶整理",
         "system": "輔助呼叫"
-      }
+      },
+      "failedRequests": "{{count}} 次失敗",
+      "estimatedShare": "{{percent}} 的 Token 為本地估算"
     },
     "providers": {
       "manageProviders": "管理提供商",
