@@ -631,7 +631,8 @@ class SubagentManager:
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
         status = record.status
-        return f"Subagent [{status.label}] started (id: {status.task_id}). I'll notify you when it completes."
+        return (f"Subagent [{status.label}] started (id: {status.task_id}). "
+                "I'll notify you when it completes. Don't duplicate its work.")
 
     async def run_inline(
         self,

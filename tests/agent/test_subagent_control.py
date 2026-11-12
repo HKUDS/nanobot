@@ -190,6 +190,7 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
     # Keep bounded waits without treating a loaded Windows runner as a routing failure.
     timeout = 30
     child_started, release_child, parent_idle = (asyncio.Event() for _ in range(3))
+    parent_tool_results = []
 
     class Provider(LLMProvider):
         def __init__(self):
@@ -207,6 +208,8 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
                     id="delegate", name="subagent",
                     arguments={"action": "create", "task": "Inspect config", "wait": False},
                 )])
+            if self.parent_calls == 2:
+                parent_tool_results.extend(m["content"] for m in messages if m.get("role") == "tool")
             return LLMResponse(content="Parent reply" if self.parent_calls == 2 else "Late follow-up")
 
         def get_default_model(self):
@@ -246,6 +249,7 @@ async def test_default_loop_keeps_slack_thread_for_late_subagent_result(
             metadata={"slack": slack_route}, session_key_override=session_key,
         ))
         initial_reply = await next_reply("Parent reply")
+        assert any("Don't duplicate its work." in result for result in parent_tool_results)
         await asyncio.wait_for(child_started.wait(), timeout=timeout)
         await asyncio.wait_for(parent_idle.wait(), timeout=timeout)
         saved = SessionManager(workspace, sessions_root=sessions_root).get_existing(session_key)
