@@ -118,6 +118,20 @@ def _image_content_type(content_type: str) -> str | None:
     return media_type + separator + parameters if media_type.startswith("image/") else None
 
 
+def _web_fetch_text_result(
+    url: str, final_url: object, status: int, extractor: str, text: str, max_chars: int,
+) -> str:
+    truncated = len(text) > max_chars
+    if truncated:
+        text = text[:max_chars]
+    text = f"{_UNTRUSTED_BANNER}\n\n{text}"
+    return json.dumps({
+        "url": url, "finalUrl": final_url, "status": status,
+        "extractor": extractor, "truncated": truncated, "length": len(text),
+        "untrusted": True, "text": text,
+    }, ensure_ascii=False)
+
+
 # Forwarding a URL to the remote Jina reader discloses it to a third party, so
 # URLs that embed credential material (userinfo, signed-URL parameters, token
 # or key query values) must never leave the machine. Matching is by parameter
@@ -1279,16 +1293,7 @@ class WebFetchTool(Tool):
 
             if title:
                 text = f"# {title}\n\n{text}"
-            truncated = len(text) > max_chars
-            if truncated:
-                text = text[:max_chars]
-            text = f"{_UNTRUSTED_BANNER}\n\n{text}"
-
-            return json.dumps({
-                "url": url, "finalUrl": data.get("url", url), "status": r.status_code,
-                "extractor": "jina", "truncated": truncated, "length": len(text),
-                "untrusted": True, "text": text,
-            }, ensure_ascii=False)
+            return _web_fetch_text_result(url, data.get("url", url), r.status_code, "jina", text, max_chars)
         except Exception as e:
             logger.debug(
                 "Jina Reader failed for {}, falling back to readability ({})",
@@ -1323,16 +1328,7 @@ class WebFetchTool(Tool):
             else:
                 text, extractor = r.text, "raw"
 
-            truncated = len(text) > max_chars
-            if truncated:
-                text = text[:max_chars]
-            text = f"{_UNTRUSTED_BANNER}\n\n{text}"
-
-            return json.dumps({
-                "url": url, "finalUrl": str(r.url), "status": r.status_code,
-                "extractor": extractor, "truncated": truncated, "length": len(text),
-                "untrusted": True, "text": text,
-            }, ensure_ascii=False)
+            return _web_fetch_text_result(url, str(r.url), r.status_code, extractor, text, max_chars)
         except (UnsafeURLRequestError, RedirectLimitError) as e:
             return _redirect_error(url, e)
         except httpx.ProxyError as e:
