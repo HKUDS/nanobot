@@ -941,6 +941,9 @@ function Shell({
   const { skills, loading: skillsLoading, error: skillsError } = useSkills(getToken);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsPayload | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
+  const settingsSnapshotRef = useRef(settingsSnapshot);
+  settingsSnapshotRef.current = settingsSnapshot;
+  const settingsOwnsSnapshot = view !== "chat" && view !== "remote";
   const settingsRefreshGenerationRef = useRef(0);
   const [pendingAutomationMessage, setPendingAutomationMessage] = useState<{
     id: string;
@@ -1081,10 +1084,14 @@ function Shell({
   }, [client]);
 
   useEffect(() => {
+    if (settingsOwnsSnapshot || settingsSnapshotRef.current !== null) {
+      setSettingsLoading(false);
+      return;
+    }
     let cancelled = false;
     const requestGeneration = settingsRefreshGenerationRef.current;
     setSettingsLoading(true);
-    fetchSettings(getToken())
+    fetchSettings(getToken(), "", client)
       .then((payload) => {
         if (!cancelled && requestGeneration === settingsRefreshGenerationRef.current) {
           setSettingsSnapshot(payload);
@@ -1101,7 +1108,7 @@ function Shell({
     return () => {
       cancelled = true;
     };
-  }, [getToken]);
+  }, [client, getToken, settingsOwnsSnapshot]);
 
   useEffect(() => {
     try {
@@ -1924,7 +1931,7 @@ function Shell({
     let cancelled = false;
     let retryTimer: number | undefined;
     const refreshSettings = (generation: number, attempt = 0): void => {
-      void fetchSettings(getToken())
+      void fetchSettings(getToken(), "", client)
         .then((payload) => {
           if (!cancelled && generation === settingsRefreshGenerationRef.current) {
             setSettingsSnapshot(payload);

@@ -48,7 +48,12 @@ function todayInTimeZone(timeZone?: string): string {
   return now.toISOString().slice(0, 10);
 }
 
-export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: string }) {
+export function TokenUsageCard({ usage, timeZone, onDetailsOpenChange, detailsLoading }: {
+  usage?: Usage;
+  timeZone?: string;
+  detailsLoading?: boolean;
+  onDetailsOpenChange?: (open: boolean) => void;
+}) {
   const { t, i18n } = useTranslation();
   const today = todayInTimeZone(timeZone);
   const byDate = new Map(usage?.days.map(day => [day.date, day]));
@@ -115,7 +120,7 @@ export function TokenUsageCard({ usage, timeZone }: { usage?: Usage; timeZone?: 
             {usage ? compact(total) : "—"}
           </p>
         </div>
-        {usage && <TokenUsageDetails days={days} models={usage.providers_30d} modelDays={usage.model_days_30d} />}
+        {usage && <TokenUsageDetails days={days} models={usage.providers_30d} modelDays={usage.model_days_30d} onOpenChange={onDetailsOpenChange} loading={detailsLoading} />}
       </div>
 
       {!usage || total === 0 ? (

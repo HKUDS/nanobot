@@ -842,28 +842,40 @@ export async function deleteSession(
   );
 }
 
-export async function fetchSettings(
+const settingsReads = new WeakMap<WebUIMutationTransport, Map<string, Promise<SettingsPayload>>>();
+
+export function fetchSettings(
   token: string,
   base: string = "",
+  scope?: WebUIMutationTransport,
 ): Promise<SettingsPayload> {
-  return request<SettingsPayload>(
-    `${base}/api/settings`,
-    token,
-    undefined,
-    API_READ_TIMEOUT_MS,
-  );
+  const load = () => request<SettingsPayload>(`${base}/api/settings`, token, undefined, API_READ_TIMEOUT_MS);
+  if (!scope) return load();
+  let reads = settingsReads.get(scope);
+  if (!reads) {
+    reads = new Map();
+    settingsReads.set(scope, reads);
+  }
+  const key = JSON.stringify([base, token]);
+  const pending = reads.get(key);
+  if (pending) return pending;
+  const read = load().finally(() => reads.delete(key));
+  reads.set(key, read);
+  return read;
 }
 
 export async function fetchSettingsUsage(
   token: string,
-  base: string = "",
+  options: { details?: boolean; cached?: NonNullable<SettingsPayload["usage"]>; signal?: AbortSignal } = {},
 ): Promise<NonNullable<SettingsPayload["usage"]>> {
-  return request<NonNullable<SettingsPayload["usage"]>>(
-    `${base}/api/settings/usage`,
-    token,
-    undefined,
-    API_READ_TIMEOUT_MS,
-  );
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (options.cached?.revision) headers["If-None-Match"] = `W/"${options.cached.revision}"`;
+  const response = await fetchWithTimeout(`/api/settings/usage${options.details ? "?details=true" : ""}`, {
+    headers, credentials: "same-origin", cache: "no-store", signal: options.signal,
+  }, API_READ_TIMEOUT_MS);
+  if (response.status === 304 && options.cached) return options.cached;
+  if (!response.ok) throw new ApiError(response.status, `HTTP ${response.status}`);
+  return await response.json() as NonNullable<SettingsPayload["usage"]>;
 }
 
 export type UpdateChannel = "stable" | "preview";

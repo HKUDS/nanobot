@@ -334,3 +334,50 @@ def test_usage_query_does_not_hold_writer_lock(
 
     assert not query_thread.is_alive()
     assert not record_thread.is_alive()
+
+
+def test_dashboard_views_are_bounded_and_cached_independently(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "llm_usage.sqlite3"
+    store = LLMUsageStore(path)
+    store.record_many([
+        _call("2026-05-04T12:00:00+00:00", usage=LLMUsage.reported(input_tokens=100, output_tokens=0)),
+        _call("2026-06-03T12:00:00+00:00", usage=LLMUsage.reported(input_tokens=10, output_tokens=2)),
+    ])
+    queries = []
+    daily_rows = store._daily_rows
+
+    def count_daily_rows(**kwargs):
+        queries.append((kwargs["start_ms"], kwargs["end_ms"]))
+        return daily_rows(**kwargs)
+
+    monkeypatch.setattr(store, "_daily_rows", count_daily_rows)
+    kwargs = {"now": datetime(2026, 6, 3, 23, tzinfo=timezone.utc), "timezone_name": "UTC"}
+    overview = store.usage_payload(view="overview", **kwargs)
+    models = store.usage_payload(view="models", **kwargs)
+    assert overview["range_start"] == "2026-05-05"
+    assert overview["range_end"] == "2026-06-03"
+    assert sum(day["total_tokens"] for day in overview["days"]) == 12
+    assert set(overview) == {"days", "range_start", "range_end", "revision"}
+    assert models["days"] == overview["days"]
+    assert models["providers_30d"][0]["total_tokens"] == 12
+    assert models["model_days_30d"][0]["total_tokens"] == 12
+    assert models["revision"] != overview["revision"]
+    assert store.usage_payload(view="overview", **kwargs) == overview
+    assert store.usage_payload(view="models", **kwargs) == models
+    assert queries == [(_timestamp("2026-05-05T00:00:00+00:00"),
+                        _timestamp("2026-06-04T00:00:00+00:00"))] * 2
+
+    # Another gateway writer must invalidate both projections, not just the last read view.
+    other = LLMUsageStore(path)
+    other.record(_call("2026-06-03T13:00:00+00:00", usage=LLMUsage.reported(input_tokens=5, output_tokens=0)))
+    other.close()
+    refreshed = store.usage_payload(view="overview", **kwargs)
+    assert sum(day["total_tokens"] for day in refreshed["days"]) == 17
+    assert refreshed["revision"] != overview["revision"]
+    assert store.usage_payload(view="models", **kwargs)["providers_30d"][0]["total_tokens"] == 17
+
+    next_day = store.usage_payload(view="overview", timezone_name="UTC",
+                                   now=datetime(2026, 6, 4, 1, tzinfo=timezone.utc))
+    assert next_day["days"] == refreshed["days"]
+    assert next_day["range_end"] == "2026-06-04"
+    assert next_day["revision"] != refreshed["revision"]

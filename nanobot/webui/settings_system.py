@@ -185,9 +185,12 @@ def system_settings_payload(
     return payload
 
 
-def settings_usage_payload(config: Config) -> dict[str, Any]:
-    """Return the lightweight token usage slice for Overview refreshes."""
-    return llm_usage_payload(timezone_name=config.agents.defaults.timezone)
+def settings_usage_payload(config: Config, *, details: bool = False) -> dict[str, Any]:
+    """Return only the 30-day usage projection currently displayed."""
+    return llm_usage_payload(
+        timezone_name=config.agents.defaults.timezone,
+        view="models" if details else "overview",
+    )
 
 
 def update_agent_system_settings(config: Config, query: QueryParams) -> tuple[bool, bool]:

@@ -36,7 +36,7 @@ import { useSystemSettingsState } from "@/components/settings/system/useSystemSe
 import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
-import { cancelProviderOAuth, fetchSettings, fetchSettingsUsage } from "@/lib/api";
+import { cancelProviderOAuth, fetchSettings } from "@/lib/api";
 import {
   LOCAL_PREFS_CHANGED_EVENT,
   readLocalPreferences,
@@ -204,7 +204,7 @@ export function useSettingsController({
     const requestInitialSettings = latestInitialSettingsRef.current;
     const requestDrafts = draftsRef.current;
     if (showLoading) setLoading(true);
-    fetchSettings(getToken())
+    fetchSettings(getToken(), "", client)
       .then((payload) => {
         if (!cancelled && latestInitialSettingsRef.current === requestInitialSettings) {
           const current = draftsRef.current;
@@ -228,37 +228,8 @@ export function useSettingsController({
     return () => {
       cancelled = true;
     };
-  }, [applyPayload, getToken]);
+  }, [applyPayload, client, getToken]);
 
-  const hasSettings = settings !== null;
-  useEffect(() => {
-    if (activeSection !== "overview" || !hasSettings || !pageVisible) return;
-    let cancelled = false;
-    let refreshing = false;
-    const refresh = async () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        const usage = await fetchSettingsUsage(getToken());
-        if (!cancelled) {
-          setSettings((current) => (current ? { ...current, usage } : current));
-        }
-      } catch {
-        // Usage is best-effort telemetry; the settings snapshot remains usable.
-      } finally {
-        refreshing = false;
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 5000);
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [activeSection, getToken, hasSettings, pageVisible]);
   const { refreshAutomations } = useSystemSettingsEffects({
     state: systemState,
     activeSection,
@@ -363,7 +334,7 @@ export function useSettingsController({
       const requestDrafts = draftsRef.current;
       try {
         const nextToken = await onNativeEngineRestart();
-        const payload = await fetchSettings(nextToken);
+        const payload = await fetchSettings(nextToken, "", client);
         const current = draftsRef.current;
         applyPayload(payload, {
           preserveAgentForm: current.form !== requestDrafts.form,
@@ -399,7 +370,7 @@ export function useSettingsController({
       setHostEngineApplying(true);
       try {
         const nextToken = await onNativeEngineRestart();
-        const refreshed = await fetchSettings(nextToken);
+        const refreshed = await fetchSettings(nextToken, "", client);
         applyPayload(refreshed, { preserveAgentForm: true, preserveCapabilityForms: true });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);

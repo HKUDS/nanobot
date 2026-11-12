@@ -960,14 +960,17 @@ export interface SettingsPayload {
         }
       >;
     }>;
-    total_tokens: number;
-    total_tokens_30d: number;
-    total_tokens_365d: number;
-    peak_day_tokens: number;
-    current_streak_days: number;
-    longest_streak_days: number;
-    active_days_30d: number;
-    requests_30d: number;
+    revision?: string;
+    range_start?: string;
+    range_end?: string;
+    total_tokens?: number;
+    total_tokens_30d?: number;
+    total_tokens_365d?: number;
+    peak_day_tokens?: number;
+    current_streak_days?: number;
+    longest_streak_days?: number;
+    active_days_30d?: number;
+    requests_30d?: number;
     failed_requests_30d?: number;
     reported_tokens_30d?: number;
     estimated_tokens_30d?: number;

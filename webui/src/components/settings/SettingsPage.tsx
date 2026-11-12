@@ -25,6 +25,7 @@ import {
 } from "@/components/settings/models/ProviderSettings";
 import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
+import { TokenUsageOverview } from "@/components/settings/TokenUsageOverview";
 import { NotificationSettings } from "@/components/settings/notifications/NotificationSettings";
 import { SettingsSidebar, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
 import {
@@ -270,6 +271,7 @@ export function SettingsPage({
             settings={settings}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
+            usageCard={<TokenUsageOverview initialUsage={settings.usage} timeZone={settings.agent.timezone} />}
           />
         );
       case "about":

@@ -8,10 +8,12 @@ import { TokenUsageModelTrend } from "@/components/settings/TokenUsageModelTrend
 type Usage = NonNullable<SettingsPayload["usage"]>;
 type DayTotal = NonNullable<Usage["days"][number]>;
 
-export function TokenUsageDetails({ days, models, modelDays }: {
+export function TokenUsageDetails({ days, models, modelDays, onOpenChange, loading }: {
   days: { date: string; usage?: DayTotal }[];
   models?: Usage["providers_30d"];
   modelDays?: Usage["model_days_30d"];
+  onOpenChange?: (open: boolean) => void;
+  loading?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const percent = usageFormats(i18n.language).percent;
@@ -22,7 +24,7 @@ export function TokenUsageDetails({ days, models, modelDays }: {
 
   return (
     <DialogLayoutContext.Provider value={null}>
-      <Dialog>
+      <Dialog onOpenChange={onOpenChange}>
         <DialogTrigger asChild>
           <button type="button" className="settings-hover flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
             {t("settings.usage.viewDetails")}<ChevronRight className="size-3.5" aria-hidden />
@@ -41,7 +43,7 @@ export function TokenUsageDetails({ days, models, modelDays }: {
               })}
             </p>
           )}
-          {modelDays?.length ? <TokenUsageModelTrend days={days} modelDays={modelDays} models={models} /> : <p className="text-sm text-muted-foreground">{t("settings.usage.modelsUnavailable")}</p>}
+          {modelDays?.length ? <TokenUsageModelTrend days={days} modelDays={modelDays} models={models} /> : <p className="text-sm text-muted-foreground">{t(loading ? "common.loading" : "settings.usage.modelsUnavailable")}</p>}
         </DialogContent>
       </Dialog>
     </DialogLayoutContext.Provider>

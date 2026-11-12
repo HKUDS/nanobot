@@ -707,6 +707,34 @@ describe("webui API helpers", () => {
     );
   });
 
+  it("shares only pending settings reads within the same client", async () => {
+    const pending: ((response: Response) => void)[] = [];
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>((resolve) => pending.push(resolve)));
+    const first = fetchSettings("tok", "", mutationTransport);
+    expect(fetchSettings("tok", "", mutationTransport)).toBe(first);
+    const other = fetchSettings("tok", "", { requestMutation });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    pending[0]({ ok: true, json: async () => ({ version: { current: "first" } }) } as Response);
+    pending[1]({ ok: true, json: async () => ({ version: { current: "other" } }) } as Response);
+    expect((await first).version?.current).toBe("first");
+    expect((await other).version?.current).toBe("other");
+    const refreshed = fetchSettings("tok", "", mutationTransport);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    pending[2]({ ok: true, json: async () => ({ version: { current: "refreshed" } }) } as Response);
+    expect((await refreshed).version?.current).toBe("refreshed");
+  });
+
+  it("reuses unchanged usage and requests model details explicitly", async () => {
+    const cached = { days: [], revision: "models" };
+    const json = vi.fn();
+    vi.mocked(fetch).mockResolvedValue({ status: 304, json } as unknown as Response);
+    expect(await fetchSettingsUsage("tok", { details: true, cached })).toBe(cached);
+    expect(fetch).toHaveBeenCalledWith("/api/settings/usage?details=true", expect.objectContaining({
+      headers: { Authorization: "Bearer tok", "If-None-Match": 'W/"models"' },
+    }));
+    expect(json).not.toHaveBeenCalled();
+  });
+
   it("serializes model configuration creation", async () => {
     await createModelConfiguration(mutationTransport, {
       name: "Fast writing",

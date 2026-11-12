@@ -161,7 +161,7 @@ def settings_payload(
     restart_required_sections: list[str] | None = None,
     apply_state: dict[str, Any] | None = None,
     config_path: Path | None = None,
-    include_usage: bool = True,
+    include_usage: bool = False,
 ) -> dict[str, Any]:
     config = _load_settings_config(config_path)
     payload: dict[str, Any] = {
@@ -190,8 +190,10 @@ def settings_payload(
     )
 
 
-def settings_usage_payload(*, config_path: Path | None = None) -> dict[str, Any]:
-    return system.settings_usage_payload(_load_settings_config(config_path))
+def settings_usage_payload(
+    *, config_path: Path | None = None, details: bool = False,
+) -> dict[str, Any]:
+    return system.settings_usage_payload(_load_settings_config(config_path), details=details)
 
 
 def update_agent_settings(

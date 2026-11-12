@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import threading
 from collections.abc import Awaitable, Callable, Mapping
@@ -1181,3 +1182,36 @@ async def test_mcp_proxy_mutation_persists_reloads_and_keeps_oauth_credentials(
         reload.assert_awaited_once()
     finally:
         await gateway.http.settings_routes.close()
+
+
+@pytest.mark.asyncio
+async def test_usage_query_supports_lazy_details_and_conditional_compressed_responses(monkeypatch):
+    calls = []
+    payload = {"days": [{"date": "2026-06-03", "total_tokens": 12}] * 100, "revision": "overview"}
+
+    def usage_payload(**kwargs):
+        calls.append(kwargs["details"])
+        return {**payload, "revision": "models" if kwargs["details"] else "overview"}
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.settings_usage_payload", usage_payload)
+    router = _router()
+    path = "/api/settings/usage"
+    request = SimpleNamespace(path=path, headers=Headers({"Accept-Encoding": "gzip"}))
+    first = await router.dispatch(None, request, path)
+    assert first.status_code == 200
+    assert first.headers["Content-Encoding"] == "gzip"
+    assert json.loads(gzip.decompress(first.body)) == payload
+    assert first.headers["ETag"] == 'W/"overview"'
+    request.headers["If-None-Match"] = first.headers["ETag"]
+    unchanged = await router.dispatch(None, request, path)
+    assert unchanged.status_code == 304
+    assert unchanged.body == b""
+    request.path = f"{path}?details=true"
+    detailed = await router.dispatch(None, request, path)
+    assert detailed.status_code == 200
+    assert detailed.headers["ETag"] == 'W/"models"'
+    assert calls == [False, False, True]
+    request.path = f"{path}?details=invalid"
+    assert (await router.dispatch(None, request, path)).status_code == 400
+    unauthorized = _router(authorized=False)
+    assert (await unauthorized.dispatch(None, request, path)).status_code == 401

@@ -4,7 +4,7 @@ import {
   ImageGenerationIcon,
   VoiceIcon,
 } from "@/components/icons/product-icons";
-import { useContext, useEffect, type Dispatch, type SetStateAction } from "react";
+import { useContext, useEffect, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import {
   ChevronRight,
   type LucideIcon,
@@ -39,10 +39,12 @@ export function OverviewSettings({
   settings,
   onSelectSection,
   showBrandLogos,
+  usageCard,
 }: {
   settings: SettingsPayload;
   onSelectSection: (section: SettingsSectionKey) => void;
   showBrandLogos: boolean;
+  usageCard?: ReactNode;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -76,7 +78,7 @@ export function OverviewSettings({
   return (
     <div className="settings-stack">
       <section className="rounded-panel bg-settings-surface p-6">
-        <TokenUsageCard usage={settings.usage} timeZone={settings.agent.timezone} />
+        {usageCard ?? <TokenUsageCard usage={settings.usage} timeZone={settings.agent.timezone} />}
       </section>
 
       <section>
