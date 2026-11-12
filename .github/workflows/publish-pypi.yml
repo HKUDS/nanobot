@@ -1,6 +1,9 @@
 name: Publish approved release to PyPI
 
 on:
+  workflow_run:
+    workflows: [Validate published release for PyPI]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -19,12 +22,18 @@ on:
 permissions: {}
 
 concurrency:
-  group: publish-pypi
+  group: publish-pypi-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || format('v{0}', inputs.version) }}
   cancel-in-progress: false
 
 jobs:
   verify:
-    if: github.repository == 'HKUDS/nanobot' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'HKUDS/nanobot' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'release' &&
+      (github.event.workflow_run.path == '.github/workflows/trigger-pypi.yml' ||
+      startsWith(github.event.workflow_run.path, '.github/workflows/trigger-pypi.yml@'))))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -32,6 +41,9 @@ jobs:
     outputs:
       artifact_id: ${{ steps.staged.outputs.artifact-id }}
       upload_required: ${{ steps.reconcile.outputs.upload_required }}
+      release_actor: ${{ steps.release.outputs.release_actor }}
+      release_version: ${{ steps.release.outputs.release_version }}
+      destination: ${{ steps.release.outputs.destination }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -43,18 +55,41 @@ jobs:
         run: |
           python -m pip install --require-hashes --only-binary=:all: -r .github/release-signing-requirements.txt
       - name: Download and verify the approved public release
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
+          VERSION_INPUT: ${{ inputs.version }}
+          DESTINATION_INPUT: ${{ inputs.destination }}
+          UPSTREAM_TAG: ${{ github.event.workflow_run.head_branch }}
+          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          UPSTREAM_ACTOR: ${{ github.event.workflow_run.actor.login }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid release tag.' >&2; exit 1; }
+            VERSION="${UPSTREAM_TAG#v}"
+            destination=pypi
+            release_actor="$UPSTREAM_ACTOR"
+          else
+            VERSION="$VERSION_INPUT"
+            destination="$DESTINATION_INPUT"
+            release_actor="$GITHUB_ACTOR"
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a final X.Y.Z version.' >&2; exit 1; }
+          [[ "$destination" == pypi || "$destination" == testpypi ]] || { echo 'Invalid destination.' >&2; exit 1; }
+          [[ "$release_actor" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]] || { echo 'Invalid release actor.' >&2; exit 1; }
           tag="v$VERSION"
           gh release view "$tag" --repo HKUDS/nanobot --json tagName,isDraft,isPrerelease \
             | jq -e --arg tag "$tag" '.tagName == $tag and .isDraft == false and .isPrerelease == false' >/dev/null
           git fetch --no-tags origin "refs/tags/$tag:refs/tags/$tag"
           commit="$(git rev-parse "refs/tags/$tag^{commit}")"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            [[ "$UPSTREAM_SHA" == "$commit" ]] || { echo 'Release tag no longer matches the trigger.' >&2; exit 1; }
+          fi
+          echo "release_actor=$release_actor" >> "$GITHUB_OUTPUT"
+          echo "release_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "destination=$destination" >> "$GITHUB_OUTPUT"
           gh release download "$tag" --repo HKUDS/nanobot --dir "$RUNNER_TEMP/release" \
             --pattern 'release-manifest.json' --pattern 'release-manifest.json.sigstore.json' \
             --pattern 'nanobot_ai-*.whl' --pattern 'nanobot_ai-*.tar.gz' \
@@ -64,8 +99,8 @@ jobs:
       - name: Check for an interrupted upload
         id: reconcile
         env:
-          VERSION: ${{ inputs.version }}
-          DESTINATION: ${{ inputs.destination }}
+          VERSION: ${{ steps.release.outputs.release_version }}
+          DESTINATION: ${{ steps.release.outputs.destination }}
         shell: bash
         run: |
           set -euo pipefail
@@ -91,21 +126,34 @@ jobs:
     needs: verify
     if: needs.verify.outputs.upload_required == 'true'
     runs-on: ubuntu-latest
-    environment: ${{ inputs.destination == 'pypi' && 'pypi' || 'testpypi' }}
+    environment: ${{ needs.verify.outputs.destination }}
     timeout-minutes: 20
     permissions:
       id-token: write
+      actions: read
     steps:
+      - name: Verify an independent PyPI approval
+        if: needs.verify.outputs.destination == 'pypi'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ACTOR: ${{ needs.verify.outputs.release_actor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/HKUDS/nanobot/actions/runs/$GITHUB_RUN_ID/approvals" | jq -e \
+            --arg actor "$RELEASE_ACTOR" \
+            'any(.[]; .state == "approved" and ([.environments[]?.name] | index("pypi")) != null and (.user.login | ascii_downcase) != ($actor | ascii_downcase))' >/dev/null \
+            || { echo 'A different maintainer must approve this release in the pypi environment.' >&2; exit 1; }
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           artifact-ids: ${{ needs.verify.outputs.artifact_id }}
           path: dist
           merge-multiple: true
       - name: Publish with PyPI Trusted Publishing
-        if: inputs.destination == 'pypi'
+        if: needs.verify.outputs.destination == 'pypi'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
       - name: Publish to TestPyPI
-        if: inputs.destination == 'testpypi'
+        if: needs.verify.outputs.destination == 'testpypi'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
