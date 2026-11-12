@@ -1861,6 +1861,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `volcengine` | `apiKey` | `VOLCENGINE_SEARCH_API_KEY` or `WEB_SEARCH_API_KEY` | Monthly quota, then paid |
 | `keenable` | `apiKey` (optional) | `KEENABLE_API_KEY` | Yes (no key needed; key raises limits) |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
+| `mst` | `mstEngines`, `mstWeights` | `MST_ENGINES`, `MST_WEIGHTS` | Yes (some engines require keys) |
 | `duckduckgo` (default) | — | — | Yes |
 
 **Brave:**
@@ -2079,6 +2080,28 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 ```
 
 </details>
+
+**Meta-Search (mst)** (multi-engine ranking):
+<details>
+<summary>Manual configuration</summary>
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "mst",
+        "mstEngines": ["ddg", "google"],
+        "mstWeights": { "ddg": 1.0, "google": 1.0 }
+      }
+    }
+  }
+}
+```
+
+</details>
+
+Install the optional binding with `nanobot plugins enable mst`. By default mst queries every engine it reports as ready. Some engines require their own API keys in the gateway environment. `mstEngines` or `MST_ENGINES` limits the engine list, and `mstWeights` or `MST_WEIGHTS` overrides ranking weights. The shared Web access proxy is not supported by mst; disable **Use proxy** for Web access or choose another search provider.
 
 **AnySearch** (key-optional, anonymous quota):
 <details>

@@ -301,6 +301,53 @@ def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
     return "\n".join(lines)
 
 
+_MST_STATUS_LABELS = {
+    "missing-key": "missing API key",
+    "disabled": "disabled",
+}
+
+
+def _mst_no_results_diagnostic(mst_lib: object, engines: list[str] | None) -> str | None:
+    """Explain a no-results response when a requested engine cannot run."""
+    list_engines = getattr(mst_lib, "list_engines", None)
+    if not callable(list_engines):
+        return None
+    try:
+        entries: object = list_engines()
+    except Exception:
+        return None
+    if not isinstance(entries, list):
+        return None
+    statuses: dict[str, str] = {}
+    for entry in cast(list[object], entries):
+        if not isinstance(entry, dict):
+            continue
+        fields = cast(dict[str, object], entry)
+        name: object = fields.get("name")
+        status: object = fields.get("status")
+        if isinstance(name, str) and isinstance(status, str):
+            statuses[name] = status
+    if not statuses:
+        return None
+    if engines:
+        unavailable = [
+            f"{name} ({_MST_STATUS_LABELS.get(statuses[name], statuses[name])})"
+            for name in engines
+            if name in statuses and statuses[name] != "ready"
+        ]
+        if unavailable:
+            return (
+                f"mst engines are not ready: {', '.join(unavailable)}. "
+                "Configure engine credentials or choose different mst_engines."
+            )
+    if not any(status == "ready" for status in statuses.values()):
+        return (
+            "mst has no ready search engines. "
+            "Configure engine credentials or choose a different search provider."
+        )
+    return None
+
+
 def _deepseek_is_retryable(status_code: int) -> bool:
     return status_code in {408, 429} or status_code >= 500
 
@@ -716,6 +763,11 @@ class WebSearchTool(Tool):
         ``MST_ENGINES`` env var (comma-separated). Override weights via
         ``mst_weights`` or ``MST_WEIGHTS`` env var (JSON object).
         """
+        if self.proxy:
+            return ToolResult.error(
+                "Error: mst does not support the shared proxy. "
+                "Disable 'Use proxy' for Web access or choose another search provider."
+            )
         try:
             import mst as mst_lib  # pyright: ignore[reportMissingImports, reportMissingTypeStubs]
             from mst import (
@@ -729,6 +781,7 @@ class WebSearchTool(Tool):
             return ToolResult.error(f"Error: mst support failed to load: {e}")
 
         mst_error_cls: type[Exception] = cast(type[Exception], MSTError)
+        engines: list[str] | None = None
 
         try:
             # Resolve engines: config > env var > None (uses all ready engines)
@@ -799,6 +852,9 @@ class WebSearchTool(Tool):
         except mst_error_cls as e:
             # "No results" is a valid outcome, not a failed search.
             if getattr(e, "code", None) == "no_results":
+                diagnostic = _mst_no_results_diagnostic(mst_lib, engines)
+                if diagnostic is not None:
+                    return ToolResult.error(f"Error: {diagnostic}")
                 return _format_results(query, [], n)
             logger.warning("mst search failed: {}", e)
             return ToolResult.error(f"Error: mst search failed ({e})")

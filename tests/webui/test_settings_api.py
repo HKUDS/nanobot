@@ -1474,7 +1474,21 @@ def test_update_web_search_settings_mst_weights(tmp_path, monkeypatch: pytest.Mo
     assert saved.tools.web.search.mst_weights == {"brave": 2.0, "ddg": 1.0}
 
 
-def test_update_web_search_settings_mst_invalid_engines(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "raw_engines",
+    [
+        "not json",
+        json.dumps("ddg"),
+        json.dumps({"ddg": 1}),
+        json.dumps(["ddg", ""]),
+    ],
+    ids=["not-json", "string", "object", "empty-item"],
+)
+def test_update_web_search_settings_mst_rejects_invalid_engines(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    raw_engines: str,
+) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
     save_config(config, config_path)
@@ -1483,11 +1497,29 @@ def test_update_web_search_settings_mst_invalid_engines(tmp_path, monkeypatch: p
     with pytest.raises(WebUISettingsError, match="mst_engines"):
         update_web_search_settings({
             "provider": ["mst"],
-            "mst_engines": ["not json"],
+            "mst_engines": [raw_engines],
         })
 
+    saved = load_config(config_path)
+    assert saved.tools.web.search.mst_engines == []
 
-def test_update_web_search_settings_mst_invalid_weights(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+
+@pytest.mark.parametrize(
+    "raw_weights",
+    [
+        "not json",
+        json.dumps([1, 2]),
+        json.dumps("x"),
+        json.dumps({"ddg": True}),
+        json.dumps({"ddg": float("nan")}),
+    ],
+    ids=["not-json", "list", "string", "bool", "non-finite"],
+)
+def test_update_web_search_settings_mst_rejects_invalid_weights(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    raw_weights: str,
+) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
     save_config(config, config_path)
@@ -1496,8 +1528,11 @@ def test_update_web_search_settings_mst_invalid_weights(tmp_path, monkeypatch: p
     with pytest.raises(WebUISettingsError, match="mst_weights"):
         update_web_search_settings({
             "provider": ["mst"],
-            "mst_weights": ["not json"],
+            "mst_weights": [raw_weights],
         })
+
+    saved = load_config(config_path)
+    assert saved.tools.web.search.mst_weights == {}
 
 
 def test_update_web_search_settings_accepts_deepseek_with_api_key(
