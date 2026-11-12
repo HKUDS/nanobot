@@ -6,8 +6,11 @@ import json
 from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, TypeGuard, cast
+
+from nanobot.config.network import NetworkConfig
 
 if TYPE_CHECKING:
     from nanobot.channels.plugin import ChannelPlugin
@@ -21,6 +24,7 @@ class ChannelValidationContext:
     """Host policy passed to package-owned setup validators."""
 
     allow_local_service_access: bool = False
+    network: NetworkConfig = dataclass_field(default_factory=NetworkConfig)
 
 
 # Keep callback contracts precise for static consumers. The public adapters below
@@ -118,6 +122,8 @@ class ChannelFieldSpec:
     default: Any = None
     writable: bool = True
     snapshot: bool = True
+    # An omitted/null override inherits host policy instead of materializing a default.
+    inheritable: bool = False
 
     @property
     def route_type(self) -> RouteFieldType:
@@ -210,6 +216,8 @@ class ChannelSetupSpec:
             }
             if field.default is not None:
                 public_field["default_value"] = stringify_channel_value(field.default)
+            if field.inheritable:
+                public_field["inheritable"] = True
             fields.append(public_field)
         payload: dict[str, Any] = {
             "fields": fields,
@@ -283,6 +291,8 @@ def channel_default_config(plugin: ChannelPlugin) -> dict[str, Any]:
     defaults: dict[str, Any] = {"enabled": plugin.default_enabled}
     if plugin.setup is not None:
         for name, field in plugin.setup.fields.items():
+            if field.inheritable:
+                continue
             value: Any = field.default
             if value is None:
                 fallback_defaults: dict[str, Any] = {

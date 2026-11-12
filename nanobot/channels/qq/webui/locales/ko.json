@@ -2,6 +2,10 @@
   "setup": {
     "docsLabel": "QQ 설정 가이드 열기",
     "officialLabel": "QQ 봇 콘솔 열기",
+    "sections": {
+      "credentials": "수동 인증 정보",
+      "advanced": "고급"
+    },
     "fields": {
       "appId": {
         "label": "App ID",
@@ -12,7 +16,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "허용된 사용자",
+        "label": "허용 사용자",
         "placeholder": "Open ID, 쉼표로 구분"
       },
       "msgFormat": {
@@ -23,17 +27,43 @@
         }
       },
       "ackMessage": {
-        "label": "확인 메시지"
+        "label": "수신 확인 메시지"
       },
       "mediaDir": {
         "label": "미디어 디렉토리"
       },
       "downloadChunkSize": {
-        "label": "청크 크기 다운로드"
+        "label": "청크 크기(바이트)"
       },
       "downloadMaxBytes": {
-        "label": "최대 다운로드 크기"
+        "label": "다운로드 상한(바이트)"
+      },
+      "showCompactionNotices": {
+        "label": "압축 알림",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "모바일 QQ로 스캔",
+    "waiting": "스캔 대기 중…",
+    "connected": "연동 완료",
+    "stopped": "취소됨",
+    "connecting": "QR 코드 준비 중…",
+    "qrAlt": "QQ 연동 QR 코드",
+    "scanAgainWarning": "재연동하면 이 QQ 봇을 사용하는 다른 앱의 연결이 끊길 수 있습니다. App Secret이 재설정되면 기존 시크릿이 무효화되므로 다른 앱도 새 시크릿으로 업데이트해야 합니다.",
+    "configured": "구성됨",
+    "bind": "QQ 봇 연동",
+    "rebind": "봇 다시 연동",
+    "refresh": "QR 코드 새로고침",
+    "retry": "재시도",
+    "expired": "QR 코드 만료",
+    "failed": "연동 실패",
+    "cancelFailed": "취소하지 못함",
+    "retrying": "재시도 중…",
+    "manualSetup": "인증 정보 수동 입력"
   }
 }

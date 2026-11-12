@@ -10,15 +10,20 @@ from nanobot.channels.validation import (
     http_get,
     payload,
     required_checks,
+    resolve_proxy,
     status_from_checks,
     string_value,
 )
 
 
-def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict[str, Any]:
+def validate(values: dict[str, Any], context: ChannelValidationContext) -> dict[str, Any]:
     checks, missing = required_checks("discord", values)
+    try:
+        proxy = resolve_proxy(values, context)
+    except ValueError as exc:
+        checks.append(check("network_proxy", "Network proxy", "fail", str(exc)))
+        return status_from_checks("discord", checks, missing)
     token = string_value(values.get("token"))
-    proxy = string_value(values.get("proxy"))
     if token:
         try:
             data = http_get(
@@ -61,9 +66,9 @@ def validate(values: dict[str, Any], _context: ChannelValidationContext) -> dict
                     f"Discord rejected the token: HTTP {exc.response.status_code}",
                 )
             )
-        except Exception as exc:
+        except Exception:
             checks.append(
-                check("bot_token", "Bot token", "warn", f"Could not reach Discord now: {exc}")
+                check("bot_token", "Bot token", "warn", "Could not reach Discord now. Try again later.")
             )
     return status_from_checks("discord", checks, missing)
 

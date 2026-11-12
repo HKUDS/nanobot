@@ -16,7 +16,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Người được phép gửi tin nhắn riêng",
+        "label": "Người dùng DM được phép",
         "placeholder": "Số điện thoại hoặc UUID"
       },
       "group_allowFrom": {
@@ -24,7 +24,7 @@
         "placeholder": "ID nhóm"
       },
       "groupMessageBufferSize": {
-        "label": "Nhóm tin nhắn ngữ cảnh"
+        "label": "Số tin nhắn ngữ cảnh"
       },
       "attachmentsDir": {
         "label": "Thư mục đính kèm"
@@ -58,7 +58,7 @@
         }
       },
       "group_requireMention": {
-        "label": "Yêu cầu đề cập trong nhóm",
+        "label": "Yêu cầu nhắc trong nhóm",
         "choices": {
           "true": "Bật",
           "false": "Tắt"

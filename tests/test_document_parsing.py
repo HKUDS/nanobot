@@ -42,6 +42,14 @@ class TestExtractText:
         result = extract_text(txt_file)
         assert result == content
 
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    def test_extract_text_respects_unicode_bom(self, tmp_path: Path, encoding: str):
+        txt_file = tmp_path / "unicode.txt"
+        content = "Hello 世界\nSecond line"
+        txt_file.write_bytes(content.encode(encoding))
+
+        assert extract_text(txt_file) == content
+
     def test_extract_text_accepts_string_path(self, tmp_path: Path):
         """String paths retain the compatibility behavior of Path inputs."""
         txt_file = tmp_path / "string-path.txt"
@@ -154,6 +162,38 @@ class TestExtractText:
         assert "Bob" in result
         assert "Widget" in result
         assert "9.99" in result
+
+    @pytest.mark.parametrize("chart_index", [0, 1, 2])
+    def test_extract_text_xlsx_with_chartsheet(self, tmp_path: Path, chart_index: int):
+        from openpyxl import Workbook
+        from openpyxl.chart import BarChart, Reference
+
+        xlsx_file = tmp_path / "report.xlsx"
+        workbook = Workbook()
+        first_sheet = workbook.active
+        first_sheet.title = "Sales"
+        first_sheet.append(["Revenue", 42])
+        second_sheet = workbook.create_sheet("Notes")
+        second_sheet.append(["Forecast", 50])
+        chart = BarChart()
+        chart.add_data(Reference(first_sheet, min_col=2, min_row=1))
+        workbook.create_chartsheet("Dashboard", index=chart_index).add_chart(chart)
+        workbook.save(xlsx_file)
+        workbook.close()
+
+        assert extract_text(xlsx_file) == (
+            "--- Sheet: Sales ---\nRevenue\t42\n\n--- Sheet: Notes ---\nForecast\t50"
+        )
+        source = open_document_line_source(xlsx_file)
+        assert source is not None
+        assert [
+            (line.text, line.extracted_line, line.locator)
+            for line in source.lines
+            if line.searchable
+        ] == [
+            ("Revenue\t42", 2, "sheet='Sales',row=1"),
+            ("Forecast\t50", 5, "sheet='Notes',row=1"),
+        ]
 
     def test_extract_text_xlsx_empty_sheet(self, tmp_path: Path):
         """Test extracting text from an .xlsx file with empty sheets."""
@@ -376,6 +416,40 @@ class TestExtractText:
         assert "Header B" in result
         assert "Alice" in result
         assert "Bob" in result
+
+    @pytest.mark.parametrize(
+        ("cells", "expected"),
+        [
+            (("Alice", "", "100"), "Alice\t\t100"),
+            (("", "10", "100"), "\t10\t100"),
+            (("Alice", "10", ""), "Alice\t10\t"),
+            (("", " ", ""), None),
+        ],
+    )
+    def test_extract_text_pptx_table_preserves_empty_columns(
+        self, tmp_path: Path, cells: tuple[str, ...], expected: str | None
+    ):
+        """Blank cells keep values aligned with their table headers."""
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        pptx_file = tmp_path / "empty-columns.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        table = slide.shapes.add_table(
+            2, 3, Inches(1), Inches(1), Inches(4), Inches(1)
+        ).table
+        for column, text in enumerate(("Name", "Q1", "Q2")):
+            table.cell(0, column).text = text
+        for column, text in enumerate(cells):
+            table.cell(1, column).text = text
+        prs.save(pptx_file)
+
+        result = extract_text(pptx_file)
+        expected_lines = ["--- Slide 1 ---", "Name\tQ1\tQ2"]
+        if expected is not None:
+            expected_lines.append(expected)
+        assert result == "\n".join(expected_lines)
 
     def test_extract_text_pptx_grouped_shapes(self, tmp_path: Path):
         """Text inside grouped shapes must be extracted recursively."""

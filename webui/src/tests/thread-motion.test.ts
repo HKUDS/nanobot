@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { type ThreadCameraFollowResult } from "@/components/thread/thread-camera";
 import {
   ThreadMotionCoordinator,
   type ThreadMotionGeometry,
@@ -9,6 +10,7 @@ import {
 function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
   let nextFrameId = 1;
   let cameraFollowing = false;
+  let nextNavigationResult: ThreadCameraFollowResult = "started";
   const frames = new Map<number, FrameRequestCallback>();
   let geometry: ThreadMotionGeometry = {
     scrollTop: 400,
@@ -19,17 +21,17 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     promptTop: 404,
     ...initial,
   };
-  const scheduler: ThreadMotionScheduler = {
-    request: vi.fn((callback) => {
+  const scheduler = {
+    request: vi.fn<ThreadMotionScheduler["request"]>((callback) => {
       const id = nextFrameId;
       nextFrameId += 1;
       frames.set(id, callback);
       return id;
     }),
-    cancel: vi.fn((id) => {
+    cancel: vi.fn<ThreadMotionScheduler["cancel"]>((id) => {
       frames.delete(id);
     }),
-  };
+  } satisfies ThreadMotionScheduler;
   const camera = {
     cancel: vi.fn(() => {
       cameraFollowing = false;
@@ -39,8 +41,8 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     followTo: vi.fn(() => "settled" as const),
     isFollowing: vi.fn(() => cameraFollowing),
     navigateTo: vi.fn(() => {
-      cameraFollowing = true;
-      return "started" as const;
+      cameraFollowing = nextNavigationResult === "started";
+      return nextNavigationResult;
     }),
   };
   const onGeometry = vi.fn();
@@ -69,6 +71,9 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
   const setCameraFollowing = (following: boolean) => {
     cameraFollowing = following;
   };
+  const setNextNavigationResult = (result: ThreadCameraFollowResult) => {
+    nextNavigationResult = result;
+  };
 
   return {
     camera,
@@ -81,6 +86,7 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     advanceFrame,
     setCameraFollowing,
     setGeometry,
+    setNextNavigationResult,
   };
 }
 
@@ -707,5 +713,57 @@ describe("ThreadMotionCoordinator", () => {
     advanceFrame();
 
     expect(camera.jumpTo.mock.calls).toEqual([[430], [458], [490]]);
+  });
+
+  it("retargets a prompt navigation from authoritative geometry without restarting the camera", () => {
+    const { camera, coordinator, measure, setGeometry } = motionHarness();
+    coordinator.navigateHistoryToPrompt("prompt-46");
+    expect(measure).toHaveBeenCalledWith("prompt-46");
+    expect(camera.navigateTo).toHaveBeenLastCalledWith(404);
+    expect(coordinator.snapshot().mode).toBe("navigating-history");
+
+    camera.cancel.mockClear();
+    setGeometry({ promptTop: 520 });
+    coordinator.reconcileObservedGeometry();
+
+    expect(camera.navigateTo).toHaveBeenLastCalledWith(520);
+    expect(camera.cancel).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("navigating-history");
+  });
+
+  it("releases prompt retarget ownership on composer input and user takeover", () => {
+    const { camera, coordinator, setGeometry } = motionHarness();
+    coordinator.navigateHistoryToPrompt("prompt-46");
+    camera.cancel.mockClear();
+    coordinator.handleComposerInput();
+    expect(camera.cancel).toHaveBeenCalledTimes(1);
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+    const callsAfterComposer = camera.navigateTo.mock.calls.length;
+    setGeometry({ promptTop: 600 });
+    coordinator.reconcileObservedGeometry();
+    expect(camera.navigateTo).toHaveBeenCalledTimes(callsAfterComposer);
+
+    coordinator.navigateHistoryToPrompt("prompt-47");
+    camera.cancel.mockClear();
+    coordinator.handleUserScrollIntent(true);
+    expect(camera.cancel).toHaveBeenCalledTimes(1);
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+    const callsAfterTouch = camera.navigateTo.mock.calls.length;
+    setGeometry({ promptTop: 700 });
+    coordinator.reconcileObservedGeometry();
+    expect(camera.navigateTo).toHaveBeenCalledTimes(callsAfterTouch);
+  });
+
+  it("drops prompt identity when an aligned navigation settles immediately", () => {
+    const { camera, coordinator, measure, setGeometry, setNextNavigationResult } = motionHarness();
+    setNextNavigationResult("settled");
+    expect(coordinator.navigateHistoryToPrompt("prompt-46")).toBe("settled");
+    expect(measure).toHaveBeenCalledWith("prompt-46");
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+    const callsAfterSettle = camera.navigateTo.mock.calls.length;
+    setGeometry({ promptTop: 720 });
+    coordinator.reconcileObservedGeometry();
+    expect(camera.navigateTo).toHaveBeenCalledTimes(callsAfterSettle);
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
   });
 });

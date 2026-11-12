@@ -71,33 +71,24 @@ class TestHistoryWithCursor:
         cursor = store.append_history("event 3")
         assert cursor == 3
 
-    def test_append_history_strips_thinking_content(self, store):
-        """`strip_think` must run before persistence — well-formed thinking
-        blocks shouldn't land in history."""
-        cursor = store.append_history("<think>reasoning</think>final answer")
+    @pytest.mark.parametrize(
+        "input_text, expected_content",
+        [
+            pytest.param(
+                "<think>reasoning</think>final answer",
+                "final answer",
+                id="strips_thinking_content",
+            ),
+            pytest.param("<think>nothing user-facing</think>", "", id="drops_pure_leak_content"),
+            pytest.param("<channel|>", "", id="drops_malformed_leak_prefix"),
+        ],
+    )
+    def test_append_history_sanitizes_thinking(self, store, input_text, expected_content):
+        cursor = store.append_history(input_text)
         content = store.read_file(store.history_file)
         data = json.loads(content)
         assert data["cursor"] == cursor
-        assert data["content"] == "final answer"
-
-    def test_append_history_drops_pure_leak_content(self, store):
-        """Regression: entries that strip down to empty (pure template-token
-        leak) must NOT fall back to the raw leak. Persisting the raw text
-        would re-pollute context via consolidation / replay, undoing the
-        protection `strip_think` provides."""
-        cursor = store.append_history("<think>nothing user-facing</think>")
-        content = store.read_file(store.history_file)
-        data = json.loads(content)
-        assert data["cursor"] == cursor
-        assert data["content"] == ""
-
-    def test_append_history_drops_malformed_leak_prefix(self, store):
-        """Channel-marker / malformed opening leaks should not survive."""
-        cursor = store.append_history("<channel|>")
-        content = store.read_file(store.history_file)
-        data = json.loads(content)
-        assert data["cursor"] == cursor
-        assert data["content"] == ""
+        assert data["content"] == expected_content
 
     def test_read_unprocessed_history(self, store):
         store.append_history("event 1")
@@ -205,7 +196,7 @@ class TestHistoryWithCursor:
         assert [entry["cursor"] for entry in entries] == list(range(21, 101))
 
     def test_write_entries_uses_atomic_write(self, tmp_path):
-        """_write_entries uses temp file + os.replace for atomicity."""
+        """_write_entries uses a temporary file and atomic replacement."""
         store = MemoryStore(tmp_path)
         store.append_history("event 1")
         store.append_history("event 2")
@@ -230,19 +221,17 @@ class TestHistoryWithCursor:
         store.append_history("event 1")
         entries = store.read_unprocessed_history(since_cursor=0)
 
-        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
-
-        # Mock os.replace to raise an exception
+        # Fail the platform-independent replacement boundary.
         def failing_replace(*args, **kwargs):
             raise RuntimeError("Simulated failure")
 
-        monkeypatch.setattr('os.replace', failing_replace)
+        monkeypatch.setattr('nanobot.utils.atomic_file.replace_atomic', failing_replace)
 
         with pytest.raises(RuntimeError):
             store._write_entries(entries)
 
-        # Temp file should be cleaned up
-        assert not tmp_path_obj.exists()
+        # Temp file should be cleaned up, including uniquely named temps.
+        assert list(store.history_file.parent.glob("*.tmp")) == []
 
         # Original file should still exist (because replace failed)
         assert store.history_file.exists()

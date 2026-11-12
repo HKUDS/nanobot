@@ -29,6 +29,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
             "name": "read_file",
             "arguments_delta": "",
         })
+        await on_content_delta("Before search.")
         await on_tool_call_delta({
             "kind": "hosted_tool",
             "phase": "start",
@@ -46,7 +47,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
             "result": {"name": "x_semantic_search"},
         })
         await on_content_delta("done")
-        return LLMResponse(content="done", tool_calls=[], usage=None)
+        return LLMResponse(content="Before search.done", tool_calls=[], usage=None)
 
     provider.chat_stream_with_retry = chat_stream_with_retry
     provider.chat_with_retry = AsyncMock()
@@ -54,17 +55,23 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
     tools.get_definitions.return_value = []
     progress_events: list[dict] = []
     progress_text: list[str] = []
-    streamed_text: list[str] = []
+    timeline: list[str] = []
 
     async def progress_cb(content, *, tool_events=None, **kwargs):
         progress_text.append(content)
         if tool_events:
             progress_events.extend(tool_events)
+            timeline.extend(f"tool:{event['phase']}" for event in tool_events)
 
     async def stream_cb(content: str) -> None:
-        streamed_text.append(content)
+        timeline.append(f"delta:{content}")
 
-    hook = AgentProgressHook(output_events(on_progress=progress_cb, on_stream=stream_cb), streaming=True)
+    async def end_cb(*, resuming: bool) -> None:
+        timeline.append(f"end:{resuming}")
+
+    hook = AgentProgressHook(output_events(
+        on_progress=progress_cb, on_stream=stream_cb, on_stream_end=end_cb,
+    ), streaming=True)
     result = await AgentRunner().run(make_run_spec(
         provider,
         initial_messages=[{"role": "user", "content": "search X"}],
@@ -75,7 +82,7 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
         hook=hook,
     ))
 
-    assert result.final_content == "done"
+    assert result.final_content == "Before search.done"
     assert result.tools_used == []
     assert result.tool_events == []
     assert progress_events == [
@@ -103,7 +110,9 @@ async def test_runner_routes_hosted_tool_events_to_structured_progress():
         },
     ]
     assert progress_text == ['search X "nanobot oauth"', ""]
-    assert streamed_text == ["done"]
+    assert timeline == [
+        "delta:Before search.", "end:True", "tool:start", "tool:end", "delta:done", "end:False",
+    ]
     provider.chat_with_retry.assert_not_awaited()
 
 

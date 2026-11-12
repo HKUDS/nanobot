@@ -62,17 +62,18 @@ class TestSanitizeSurrogatesDeep:
             "role": "user",
             "content": [
                 {"type": "text", "text": "hello \ud83e world"},
-                {"type": "text", "text": "normal"},
+                {"type": "text", "text": "normal 🤖"},
             ],
         }
         cleaned = sanitize_surrogates_deep(dirty)
         assert cleaned is not dirty  # rebuilt
         first = cleaned["content"][0]["text"]
         assert "\ud83e" not in first
+        assert cleaned["content"][1]["text"] == "normal 🤖"
         # Full payload must be UTF-8 encodable.
         import json
 
-        json.dumps(cleaned).encode("utf-8")
+        json.dumps(cleaned, ensure_ascii=False).encode("utf-8")
 
     def test_paired_surrogates_in_list_collapse_to_emoji(self):
         dirty = ["a", "b \ud83e\udd16", "c"]
@@ -150,13 +151,16 @@ class TestProviderSanitizeEmptyContent:
             {
                 "role": "assistant",
                 "content": [
-                    {"type": "text", "text": "answer with a lone \ud83e half"},
+                    {"type": "text", "text": "answer with a lone \ud83e half and paired \ud83e\udd16"},
                 ],
             },
         ]
         cleaned = LLMProvider._sanitize_empty_content(messages)
         # This is the operation that previously raised UnicodeEncodeError.
-        json.dumps({"model": "x", "messages": cleaned}).encode("utf-8")
+        json.dumps({"model": "x", "messages": cleaned}, ensure_ascii=False).encode("utf-8")
+        assert cleaned[0]["content"] == "You are a 🐱 assistant."
+        assert cleaned[1]["content"] == "🤖 fixed?"
+        assert cleaned[2]["content"][0]["text"] == "answer with a lone \ufffd half and paired 🤖"
 
 
 class TestBackwardCompatReExport:

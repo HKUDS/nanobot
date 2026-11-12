@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AutomationRunDialog } from "@/components/settings/system/AutomationRunDialog";
+import { AutomationRunDialogView } from "@/components/settings/system/AutomationRunDialogView";
 import { fetchAutomationRunResult } from "@/lib/api";
 import i18n from "@/i18n";
 import type { SessionAutomationJob } from "@/lib/types";
@@ -25,6 +26,21 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe("Automation run response", () => {
+  it("renders caller-owned results and delegates retry without loading a run", async () => {
+    const retry = vi.fn();
+    const { rerender } = render(<AutomationRunDialogView job={job} run={run} locale="en" open
+      result={{ status: "error", response: null }} onRetry={retry}
+      onOpenChange={props.onOpenChange} onCloseAutoFocus={props.onCloseAutoFocus} />);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(fetchResult).not.toHaveBeenCalled();
+    rerender(<AutomationRunDialogView job={job} run={run} locale="en" open
+      result={{ status: "loaded", response: "A supplied result" }} onRetry={retry}
+      onOpenChange={props.onOpenChange} onCloseAutoFocus={props.onCloseAutoFocus} />);
+    expect(await screen.findByText("A supplied result")).toBeVisible();
+    expect(fetchResult).not.toHaveBeenCalled();
+  });
+
   it("loads only the selected run and renders its Markdown response", async () => {
     let complete!: (value: { response: string }) => void;
     fetchResult.mockReturnValue(new Promise((resolve) => { complete = resolve; }));

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import errno
 import json
 import os
 import secrets
@@ -16,7 +15,7 @@ from filelock import FileLock
 from loguru import logger
 
 from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery, TriggerRunRecord
-from nanobot.utils.helpers import truncate_text
+from nanobot.utils.helpers import atomic_write_text, truncate_text
 from nanobot.utils.run_records import write_run_record as write_automation_run_record
 
 _TRIGGER_ID_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -409,27 +408,7 @@ class LocalTriggerStore:
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, path)
-            with suppress(PermissionError):
-                fd = os.open(str(path.parent), os.O_RDONLY)
-                try:
-                    try:
-                        os.fsync(fd)
-                    except OSError as exc:
-                        if exc.errno != errno.EINVAL:
-                            raise
-                finally:
-                    os.close(fd)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        atomic_write_text(path, content)
 
 
 def _new_trigger_id(existing_ids: set[str]) -> str:

@@ -22,7 +22,7 @@ function Harness({ activeId, targetByRef }: { activeId: string | null; targetByR
 
 describe("sidebar selection highlight geometry", () => {
   it.each([true, false])("updates the animated width as its target resizes (target by ref: %s)", (targetByRef) => {
-    let width = 272;
+    let width = 272.25;
     let frameId = 0;
     const frames = new Map<number, FrameRequestCallback>();
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
@@ -47,14 +47,14 @@ describe("sidebar selection highlight geometry", () => {
       const container = this.dataset.testid === "highlight-container";
       const second = this.textContent === "Second";
       const inset = container ? 0 : second ? 24 : 8;
-      const x = 100 + inset;
-      const y = container ? 20 : second ? 100 : 60;
+      const x = 100.5 + inset;
+      const y = container ? 20.5 : second ? 100.5 : 60.5;
       const w = container ? width : width - inset - 8;
       return { x, y, left: x, top: y, right: x + w, bottom: y + 32, width: w, height: 32, toJSON() {} };
     });
     const { rerender } = render(<Harness activeId="first" targetByRef={targetByRef} />);
     const highlight = screen.getByTestId("test-selection-highlight");
-    expect(highlight).toHaveStyle({ width: "256px", height: "32px", transform: "translate3d(8px, 40px, 0)" });
+    expect(highlight).toHaveStyle({ left: "0px", top: "0px", width: "256.25px", height: "32px", transform: "translate3d(8px, 40px, 0)" });
     paint();
 
     // After initial placement, every observer update changes the animation's
@@ -65,7 +65,7 @@ describe("sidebar selection highlight geometry", () => {
     width = 420;
     act(() => resizes.at(-1)?.());
     expect(frames.size).toBe(1);
-    expect(highlight).toHaveStyle({ width: "256px" });
+    expect(highlight).toHaveStyle({ width: "256.25px" });
     paint();
     expect(highlight).toHaveStyle({ width: "404px" });
     expect(highlight.style.transitionProperty).not.toBe("none");

@@ -1,14 +1,7 @@
-"""Tests for WS envelope media handling (client attachment upload path).
-
-Exercises ``WebSocketChannel._dispatch_envelope`` for the ``message`` branch:
-decoding base64 data URLs, rejecting malformed / oversized / non-whitelisted
-payloads, preserving backward compatibility with media-less frames, and
-forwarding saved paths to ``_handle_message``.
-"""
+"""WS envelope regressions; binary ingress is tested through the HTTP listener."""
 
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,23 +19,9 @@ from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.webui.gateway_services import build_gateway_services
 
 
-def _tiny_png_data_url() -> str:
-    """A 1-pixel PNG prefixed as a data URL — just enough for magic-bytes sniffing."""
-    # 1x1 transparent PNG
-    png = (
-        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00"
-        b"\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx"
-        b"\x9cc\xf8\xcf\xc0\x00\x00\x00\x03\x00\x01\x00\x18\xdd\x8d\xb4\x00"
-        b"\x00\x00\x00IEND\xaeB`\x82"
-    )
-    return f"data:image/png;base64,{base64.b64encode(png).decode()}"
-
-
-def _data_url(mime: str, payload: bytes) -> str:
-    return f"data:{mime};base64,{base64.b64encode(payload).decode()}"
-
-
-def _make_channel(session_manager: SessionManager | None = None) -> WebSocketChannel:
+def _make_channel(
+    session_manager: SessionManager | None = None, *, workspace: Path | None = None, restricted: bool = False,
+) -> WebSocketChannel:
     bus = MagicMock()
     bus.publish_inbound = AsyncMock()
     cfg = {"enabled": True, "allowFrom": ["*"], "websocketRequiresToken": False}
@@ -52,8 +31,8 @@ def _make_channel(session_manager: SessionManager | None = None) -> WebSocketCha
         bus=bus,
         session_manager=session_manager,
         static_dist_path=None,
-        workspace_path=Path.cwd(),
-        default_restrict_to_workspace=False,
+        workspace_path=workspace or Path.cwd(),
+        default_restrict_to_workspace=restricted,
         runtime_model_name=None,
         runtime_surface="browser",
         runtime_capabilities_overrides=None,
@@ -76,30 +55,25 @@ def isolate_websocket_turn_state() -> None:
     wth._WEBSOCKET_TURN_OWNERS.clear()
 
 
-# -- max_message_bytes bump ----------------------------------------------------
-
-
-def test_max_message_bytes_default_supports_multi_image_frame() -> None:
-    """Default 36 MB must comfortably hold 4 × 6 MB base64-encoded images."""
+def test_max_message_bytes_keeps_existing_transport_guard() -> None:
+    """Moving attachments to HTTP does not disable the configurable WS guard."""
     from nanobot.channels.websocket.runtime import WebSocketConfig
 
     default = WebSocketConfig().max_message_bytes
-    # 4 images × 6 MB × 1.37 base64 overhead ≈ 33 MB
-    assert default >= 33 * 1024 * 1024
-    # Upper bound 40 MB matches plan
+    assert default == 36 * 1024 * 1024
+    assert WebSocketConfig(max_message_bytes=1048576).max_message_bytes == 1048576
+    # The existing upper bound remains 40 MB.
     with pytest.raises(Exception):
         WebSocketConfig(max_message_bytes=41_943_040 + 1)
 
 
-# -- _dispatch_envelope message branch + media --------------------------------
-
-
 @pytest.mark.asyncio
-async def test_message_without_media_backward_compatible() -> None:
+async def test_message_without_media_backward_compatible(monkeypatch) -> None:
     """Existing clients that don't send ``media`` keep working unchanged."""
     channel = _make_channel()
     mock_conn = AsyncMock()
     envelope = {"type": "message", "chat_id": "abc123", "content": "hello"}
+    monkeypatch.setattr(channel.gateway.uploads.store, "prune", lambda: pytest.fail("text send scanned upload staging"))
 
     await channel._dispatch_envelope(mock_conn, "client-1", envelope)
 
@@ -134,41 +108,6 @@ async def test_webui_message_acceptance_echoes_turn_id() -> None:
         "active_turn_id": "turn-accepted",
         "started_at": wth.websocket_turn_wall_started_at("abc123"),
     }
-
-
-@pytest.mark.asyncio
-async def test_webui_message_projects_attachments_to_other_clients(tmp_path: Path) -> None:
-    channel = _make_channel()
-    origin = AsyncMock()
-    peer = AsyncMock()
-    channel._attach(origin, "abc123")
-    channel._attach(peer, "abc123")
-    channel._webui_connections.add(origin)
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "please inspect @drawio",
-        "webui": True,
-        "turn_id": "turn-shared",
-        "media": [{"data_url": _tiny_png_data_url(), "name": "shot.png"}],
-        "cli_apps": [{"name": "DrawIO", "entry_point": "cli-anything-drawio"}],
-    }
-
-    with patch("nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path):
-        await channel._dispatch_envelope(origin, "client-1", envelope)
-
-    event = json.loads(peer.send.await_args.args[0])
-    assert event["event"] == "user_message"
-    assert event["turn_id"] == "turn-shared"
-    assert event["text"] == "please inspect @drawio"
-    assert event["cli_apps"] == [{
-        "name": "drawio",
-        "entry_point": "cli-anything-drawio",
-    }]
-    assert event["media_urls"][0]["kind"] == "image"
-    assert event["media_urls"][0]["name"] == "shot.png"
-    assert event["media_urls"][0]["url"].startswith("/api/media/")
-    assert json.loads(origin.send.await_args.args[0])["event"] == "message_accepted"
 
 
 @pytest.mark.asyncio
@@ -258,7 +197,7 @@ async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> Non
 
     channel._handle_message.assert_awaited_once()
     metadata = channel._handle_message.call_args.kwargs["metadata"]
-    handle = SessionHandleResolver(manager).handle_for_session("websocket:pricing")
+    handle = await SessionHandleResolver(manager).ahandle_for_session("websocket:pricing")
     assert handle is not None
     assert metadata["session_mentions"] == [{
         **handle.public_payload(),
@@ -268,295 +207,6 @@ async def test_webui_message_forwards_verified_session_mentions(tmp_path) -> Non
     [block] = metadata[RUNTIME_CONTEXT_INPUT_META]
     assert block.source == "session_mentions"
     assert "websocket:pricing" in block.content
-
-
-@pytest.mark.asyncio
-async def test_message_with_single_image_forwards_saved_path(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "look at this",
-        "media": [{"data_url": _tiny_png_data_url(), "name": "shot.png"}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_awaited_once()
-    paths = channel._handle_message.call_args.kwargs["media"]
-    assert isinstance(paths, list) and len(paths) == 1
-    saved = Path(paths[0])
-    assert saved.exists()
-    assert saved.suffix == ".png"
-    assert saved.is_relative_to(tmp_path)
-
-
-@pytest.mark.asyncio
-async def test_message_with_multiple_images(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "a couple",
-        "media": [
-            {"data_url": _tiny_png_data_url()},
-            {"data_url": _tiny_png_data_url()},
-            {"data_url": _tiny_png_data_url()},
-        ],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    paths = channel._handle_message.call_args.kwargs["media"]
-    assert len(paths) == 3
-    # Saved filenames must be unique.
-    assert len({Path(p).name for p in paths}) == 3
-
-
-@pytest.mark.asyncio
-async def test_image_only_message_allows_empty_text(tmp_path) -> None:
-    """When media is attached, empty text is acceptable."""
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "",
-        "media": [{"data_url": _tiny_png_data_url()}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_awaited_once()
-    # Error event NOT sent.
-    mock_conn.send.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_message_rejected_when_more_than_four_images(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "hi",
-        "media": [{"data_url": _tiny_png_data_url()}] * 5,
-        "turn_id": "turn-attachments",
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    mock_conn.send.assert_awaited_once()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["event"] == "error"
-    assert err["chat_id"] == "abc123"
-    assert err["detail"] == "attachment_rejected"
-    assert err["reason"] == "too_many_images"
-    assert err["turn_id"] == "turn-attachments"
-
-
-@pytest.mark.asyncio
-async def test_message_rejected_when_too_many_total_attachments(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "mixed",
-        "media": [
-            {"data_url": _tiny_png_data_url()},
-            {"data_url": _tiny_png_data_url()},
-            {"data_url": _tiny_png_data_url()},
-            {"data_url": _tiny_png_data_url()},
-            {"data_url": _data_url("application/pdf", b"%PDF-1.4"), "name": "report.pdf"},
-        ],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["detail"] == "attachment_rejected"
-    assert err["reason"] == "too_many_attachments"
-
-
-@pytest.mark.asyncio
-async def test_message_rejected_on_oversize_payload(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    oversized = b"x" * (9 * 1024 * 1024)  # > 8 MB WS limit
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "big",
-        "media": [{"data_url": _data_url("image/png", oversized)}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["detail"] == "attachment_rejected"
-    assert err["reason"] == "size"
-
-
-@pytest.mark.asyncio
-async def test_message_with_pdf_forwards_saved_path(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "pdf?",
-        "media": [{"data_url": _data_url("application/pdf", b"%PDF-1.4"), "name": "report.pdf"}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_awaited_once()
-    paths = channel._handle_message.call_args.kwargs["media"]
-    assert isinstance(paths, list) and len(paths) == 1
-    saved = Path(paths[0])
-    assert saved.exists()
-    assert saved.suffix == ".pdf"
-    assert saved.name.endswith("_report.pdf")
-    assert saved.read_bytes() == b"%PDF-1.4"
-
-
-@pytest.mark.asyncio
-async def test_message_with_csv_forwards_saved_path(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "summarize",
-        "media": [
-            {"data_url": _data_url("text/csv", b"name,value\nnanobot,1"), "name": "report.csv"}
-        ],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_awaited_once()
-    paths = channel._handle_message.call_args.kwargs["media"]
-    saved = Path(paths[0])
-    assert saved.suffix == ".csv"
-    assert saved.name.endswith("_report.csv")
-    assert saved.read_bytes() == b"name,value\nnanobot,1"
-
-
-@pytest.mark.asyncio
-async def test_message_rejected_on_unsupported_file_mime(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "zip?",
-        "media": [{"data_url": _data_url("application/zip", b"PK")}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["detail"] == "attachment_rejected"
-    assert err["reason"] == "mime"
-
-
-@pytest.mark.asyncio
-async def test_message_rejected_on_svg_mime(tmp_path) -> None:
-    """SVG is explicitly rejected — XSS surface inside embedded scripts."""
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "svg",
-        "media": [{"data_url": _data_url("image/svg+xml", b"<svg/>")}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["reason"] == "mime"
-
-
-@pytest.mark.asyncio
-async def test_message_rejected_on_malformed_data_url(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "nope",
-        "media": [{"data_url": "http://evil.example/image.png"}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["reason"] == "decode"
-
-
-@pytest.mark.asyncio
-async def test_message_rejected_on_broken_base64(tmp_path) -> None:
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "nope",
-        "media": [{"data_url": "data:image/png;base64,not-valid-base64!!!"}],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["reason"] == "decode"
 
 
 @pytest.mark.asyncio
@@ -601,38 +251,6 @@ async def test_message_rejected_when_media_field_is_not_list() -> None:
 
 
 @pytest.mark.asyncio
-async def test_failed_media_does_not_partially_persist(tmp_path) -> None:
-    """If the second attachment is invalid, the first must not be forwarded.
-
-    Also: files already written in this call are cleaned up on failure, so
-    a mixed-valid/invalid batch never leaves orphan files in the media dir.
-    """
-    channel = _make_channel()
-    mock_conn = AsyncMock()
-    envelope = {
-        "type": "message",
-        "chat_id": "abc123",
-        "content": "mixed",
-        "media": [
-            {"data_url": _tiny_png_data_url()},
-            {"data_url": _data_url("image/svg+xml", b"<svg/>")},
-        ],
-    }
-
-    with patch(
-        "nanobot.webui.media_gateway.get_media_dir", return_value=tmp_path
-    ):
-        await channel._dispatch_envelope(mock_conn, "client-1", envelope)
-
-    channel._handle_message.assert_not_awaited()
-    err = json.loads(mock_conn.send.call_args[0][0])
-    assert err["reason"] == "mime"
-    # Partial-batch failures must not leak files to disk.
-    leftover = [p for p in tmp_path.iterdir() if p.is_file()]
-    assert leftover == [], f"orphan media after rejected batch: {leftover}"
-
-
-@pytest.mark.asyncio
 async def test_rejects_empty_text_without_media() -> None:
     """When no media is attached, whitespace-only content is still rejected
     (matches the existing behavior for backward compat)."""
@@ -666,3 +284,195 @@ async def test_non_string_content_still_rejected() -> None:
     channel._handle_message.assert_not_awaited()
     err = json.loads(mock_conn.send.call_args[0][0])
     assert err["detail"] == "missing content"
+
+
+@pytest.mark.asyncio
+async def test_reference_attachments_are_projected_to_other_clients(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    channel = _make_channel()
+    origin, peer = AsyncMock(), AsyncMock()
+    owner = channel.gateway.uploads.issue(origin)["token"]
+    channel._attach(origin, "reference-chat")
+    channel._attach(peer, "reference-chat")
+    channel._webui_connections.add(origin)
+
+    async def body():
+        yield b"image"
+
+    reference = await channel.gateway.uploads.store.upload(
+        body(), owner=owner, mime="image/png", size=5,
+    )
+    await channel._dispatch_envelope(origin, "client", {
+        "type": "message", "chat_id": "reference-chat", "content": "",
+        "webui": True, "turn_id": "reference-turn",
+        "media": [{"reference": reference, "name": "shot.png"}],
+    })
+    channel._handle_message.assert_awaited_once()
+    assert Path(channel._handle_message.call_args.kwargs["media"][0]).read_bytes() == b"image"
+    payload = json.loads(peer.send.await_args.args[0])
+    assert payload["event"] == "user_message"
+    assert payload["media_urls"][0]["name"] == "shot.png"
+    assert payload["media_urls"][0]["url"].startswith("/api/media/")
+    assert reference not in str(payload)
+    accepted = json.loads(origin.send.await_args.args[0])
+    assert accepted["event"] == "message_accepted"
+    assert accepted["media_urls"] == payload["media_urls"]
+
+
+@pytest.mark.asyncio
+async def test_local_reference_inspection_send_recheck_and_no_staging(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    source = workspace / "clip #100%.mp4"
+    source.write_bytes(b"\0video")
+    channel = _make_channel(workspace=workspace, restricted=True)
+    conn = AsyncMock()
+    channel._webui_connections.add(conn)
+
+    async def inspect(path):
+        conn.send.reset_mock()
+        await channel._dispatch_envelope(conn, "client", {
+            "type": "webui_request", "request_id": "inspect", "action": "attachment.inspect",
+            "payload": {"chat_id": "local-chat", "path": path},
+        })
+        return json.loads(conn.send.await_args.args[0])
+
+    result = await inspect(source.name)
+    assert result["ok"] is True
+    local = result["result"]
+    assert local["path"] == str(source)
+    assert local["size"] == 6
+    assert local["kind"] == "video"
+    assert channel.gateway.uploads.store._entries == {}
+    assert not list(channel.gateway.uploads.store.media_dir.glob("*"))
+    assert channel._webui_request_operations == {}
+
+    for invalid in ("missing.mp4", str(workspace), str(tmp_path / "outside.mp4")):
+        failure = await inspect(invalid)
+        assert failure["ok"] is False
+
+    message = {
+        "type": "message", "chat_id": "local-chat", "content": "keep my text",
+        "webui": True, "turn_id": "local-turn", "media": [{"path": local["path"]}],
+    }
+    source.unlink()
+    await channel._dispatch_envelope(conn, "client", message)
+    assert json.loads(conn.send.await_args.args[0])["detail"] == "attachment_rejected"
+    channel._handle_message.assert_not_awaited()
+    source.write_bytes(b"latest video")
+    await channel._dispatch_envelope(conn, "client", message)
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.await_args.kwargs["media"] == [str(source)]
+    assert channel._handle_message.await_args.kwargs["metadata"]["local_media_paths"] == [str(source)]
+    assert source.read_bytes() == b"latest video"
+    assert not list(channel.gateway.uploads.store.media_dir.glob("*"))
+
+
+@pytest.mark.asyncio
+async def test_mixed_local_and_uploaded_video_limit_keeps_upload_for_retry(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    source = tmp_path / "local.webm"
+    source.write_bytes(b"video")
+    channel = _make_channel(workspace=tmp_path, restricted=True)
+    conn = AsyncMock()
+    owner = channel.gateway.uploads.issue(conn)["token"]
+
+    async def body():
+        yield b"upload"
+
+    ref = await channel.gateway.uploads.store.upload(body(), owner=owner, mime="video/mp4", size=6)
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": "mixed-local", "content": "retained",
+        "media": [{"path": str(source)}, {"reference": ref}],
+    })
+    assert json.loads(conn.send.await_args.args[0])["detail"] == "attachment_rejected"
+    assert channel.gateway.uploads.store.resolve([ref], owner=owner)
+    assert source.exists()
+    channel._handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_temporary_chat_disposal_never_deletes_borrowed_source(tmp_path, monkeypatch):
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    source = tmp_path / "original.txt"
+    source.write_text("borrowed", encoding="utf-8")
+    manager = SessionManager(tmp_path)
+    channel = _make_channel(manager, workspace=tmp_path, restricted=True)
+    conn = AsyncMock()
+    channel._webui_connections.add(conn)
+    chat_id = await channel.gateway.temporary_chats.create(conn, trusted_webui=True)
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": chat_id, "content": "", "webui": True,
+        "media": [{"path": str(source)}],
+    })
+    channel._handle_message.assert_awaited_once()
+    url = channel.gateway.media.local_attachment_url(str(source), session_key=f"websocket:{chat_id}")
+    sig, payload = url.split("/")[-2:]
+    assert channel.gateway.http._handle_media_fetch(sig, payload).status_code == 200
+    channel.gateway.uploads.store.discard_owner(channel.gateway.uploads.owner(conn))
+    channel.gateway.uploads.store.prune()
+    await channel.gateway.temporary_chats.discard(conn, chat_id)
+    assert channel.gateway.http._handle_media_fetch(sig, payload).status_code == 404
+    assert source.read_text(encoding="utf-8") == "borrowed"
+
+
+@pytest.mark.asyncio
+async def test_large_local_files_and_upload_share_count_but_not_byte_budget(tmp_path, monkeypatch):
+    from nanobot.channels.websocket.attachment_policy import AttachmentIngressLimits
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    sources = [tmp_path / "large.mp4", tmp_path / "large.pdf"]
+    for source in sources:
+        with source.open("wb") as output:
+            output.truncate(64 * 1024 * 1024 + 1)
+    channel = _make_channel(workspace=tmp_path, restricted=True)
+    channel.gateway.uploads.store.limits = AttachmentIngressLimits(max_file_bytes=8, max_total_bytes=8)
+    conn = AsyncMock()
+    owner = channel.gateway.uploads.issue(conn)["token"]
+
+    async def body():
+        yield b"uploaded"
+
+    ref = await channel.gateway.uploads.store.upload(body(), owner=owner, mime="image/png", size=8)
+    uploaded = channel.gateway.uploads.store.resolve([ref], owner=owner)[0]
+    await channel._dispatch_envelope(conn, "client", {
+        "type": "message", "chat_id": "large-local", "content": "read references",
+        "media": [{"path": str(sources[0])}, {"reference": ref}, {"path": str(sources[1])}],
+    })
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.await_args.kwargs["media"] == [str(sources[0]), uploaded, str(sources[1])]
+    assert channel._handle_message.await_args.kwargs["metadata"]["local_media_paths"] == [str(source) for source in sources]
+    assert all(source.stat().st_size == 64 * 1024 * 1024 + 1 for source in sources)
+    assert [path for path in channel.gateway.uploads.store.media_dir.iterdir() if path.is_file()] == [Path(uploaded)]
+
+
+@pytest.mark.parametrize("persisted", [False, True])
+async def test_deleted_local_attachment_scope_never_reverts_to_default(tmp_path, monkeypatch, persisted):
+    from nanobot.security.workspace_access import default_workspace_scope
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    project = tmp_path / "nested"
+    project.mkdir()
+    source = tmp_path / "original.txt"
+    source.write_text("borrowed", encoding="utf-8")
+    manager = SessionManager(tmp_path)
+    channel = _make_channel(manager, workspace=tmp_path, restricted=True)
+    workspaces = channel.gateway.workspaces
+    key = "websocket:scoped-media"
+    await workspaces.stage_scope("scoped-media", default_workspace_scope(project, False))
+    if persisted:
+        await workspaces.persist_scope("scoped-media", default_workspace_scope(project, False))
+    url = channel.gateway.media.local_attachment_url(str(source), session_key=key)
+    sig, payload = url.split("/")[-2:]
+
+    def fetch():
+        return channel.gateway.http._handle_media_fetch(sig, payload)
+
+    assert bytes(fetch().body) == b"borrowed"
+    await workspaces.stage_scope("scoped-media", default_workspace_scope(project, True))
+    assert fetch().status_code == 403
+    workspaces.discard_draft_scope(key)
+    await manager.state.delete(key)
+    assert fetch().status_code == 404
+    assert source.read_text(encoding="utf-8") == "borrowed"

@@ -29,7 +29,7 @@ const SheetOverlay = React.forwardRef<
 SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-  "fixed z-50 flex flex-col gap-4 bg-background transition ease-in-out",
+  "fixed z-50 flex flex-col gap-4 bg-background outline-none transition ease-in-out",
   {
     variants: {
       side: {
@@ -62,6 +62,7 @@ interface SheetContentProps
     VariantProps<typeof sheetVariants> {
   closeButtonClassName?: string;
   showCloseButton?: boolean;
+  overlayClassName?: string;
 }
 
 const SheetContent = React.forwardRef<
@@ -74,6 +75,7 @@ const SheetContent = React.forwardRef<
     children,
     closeButtonClassName,
     showCloseButton = true,
+    overlayClassName,
     ...props
   },
   ref,
@@ -81,7 +83,7 @@ const SheetContent = React.forwardRef<
   const { t } = useTranslation();
   return (
     <SheetPortal>
-      <SheetOverlay />
+      <SheetOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
@@ -97,8 +99,8 @@ const SheetContent = React.forwardRef<
         {showCloseButton ? (
           <DialogPrimitive.Close
             className={cn(
-              "absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity",
-              "hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+              "absolute right-4 top-4 rounded-mark opacity-70 ring-offset-background transition-opacity",
+              "hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               "disabled:pointer-events-none",
               closeButtonClassName,
             )}

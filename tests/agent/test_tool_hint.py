@@ -16,6 +16,17 @@ def _hint(calls, max_length=40):
 class TestToolHintKnownTools:
     """Test registered tool types produce correct formatted output."""
 
+    def test_rg_shows_argument_boundaries(self):
+        assert _hint([_tc("rg", {"args": ["-n", "hello world", "src"]})]) == 'rg -n "hello world" src'
+
+    def test_rg_shows_regex_and_empty_argument(self):
+        assert _hint([_tc("rg", {"args": [r"resolve\(", ""]})]) == 'rg resolve\\( ""'
+
+    def test_rg_truncates_long_arguments(self):
+        result = _hint([_tc("rg", {"args": ["x" * 100]})])
+        assert result.endswith("…")
+        assert len(result) == 43
+
     def test_read_file_short_path(self):
         result = _hint([_tc("read_file", {"path": "foo.txt"})])
         assert result == 'read foo.txt'
@@ -251,7 +262,7 @@ class TestToolHintMixedFolding:
 class TestToolHintMaxLength:
     """Test max_length parameter controls truncation of tool hints."""
 
-    def test_exec_default_truncates_at_40(self):
+    def test_exec_explicit_max_length_limits_hint(self):
         cmd = "cd /very/long/path/to/some/project && npm run build && npm test"
         result = _hint([_tc("exec", {"command": cmd})], max_length=40)
         assert len(result) <= 50  # "$ " prefix + 40 + ellipsis

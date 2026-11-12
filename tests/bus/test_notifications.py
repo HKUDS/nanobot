@@ -80,7 +80,9 @@ async def test_output_consumer_capability_survives_callback_adaptation():
     await events.emit(ProgressEvent(content="working"))
     await events.emit(ContextCompactionEvent("compact", "succeeded"))
     assert received == ["working"]
-    assert bus.outbound.get_nowait().event == ContextCompactionEvent("compact", "succeeded")
+    assert bus.outbound.get_nowait().event == ContextCompactionEvent(
+        "compact", "succeeded",
+    )
 
 
 async def test_scope_snapshots_route_and_queues_events_in_order():
@@ -123,7 +125,7 @@ async def test_new_internal_event_needs_explicit_audience(monkeypatch):
     assert project_notification("chat", event) is None
 
 
-async def test_background_scope_keeps_retry_quiet_but_delivers_compaction():
+async def test_background_scope_keeps_retry_quiet_and_delivers_compaction():
     bus = MessageBus()
     factory = TurnDeliveryFactory(bus,
                                   lambda *_: TurnRoute("websocket", "chat"))
@@ -133,6 +135,21 @@ async def test_background_scope_keeps_retry_quiet_but_delivers_compaction():
     await delivery.events.emit(RetryWaitEvent("waiting"))
     assert bus.outbound.empty()
     event = ContextCompactionEvent("c1", "cancelled")
+    await delivery.events.emit(event)
+    assert bus.outbound.get_nowait().event is event
+
+
+@pytest.mark.parametrize("channel", ["websocket", "cli", "slack", "custom"])
+async def test_automatic_and_manual_compaction_are_delivered_to_channels(channel):
+    bus = MessageBus()
+    delivery = TurnDeliveryFactory(bus).create(InboundMessage(
+        channel=channel, sender_id="u", chat_id="chat", content="",
+    ), f"{channel}:chat")
+
+    await delivery.events.emit(ContextCompactionEvent("auto", "succeeded"))
+    assert bus.outbound.get_nowait().event == ContextCompactionEvent("auto", "succeeded")
+
+    event = ContextCompactionEvent("notified", "succeeded", notify=True)
     await delivery.events.emit(event)
     assert bus.outbound.get_nowait().event is event
 
@@ -168,7 +185,9 @@ async def test_bus_event_preserves_existing_text_fallback():
 
 @pytest.mark.parametrize("phase", ["started", "succeeded", "failed", "cancelled"])
 def test_compaction_durability_is_independent_of_subscribers(phase):
-    projection = project_notification("chat", ContextCompactionEvent("c1", phase))
+    projection = project_notification(
+        "chat", ContextCompactionEvent("c1", phase),
+    )
     assert projection is not None
     assert projection.deliver_offline
     assert projection.attach_turn_metadata

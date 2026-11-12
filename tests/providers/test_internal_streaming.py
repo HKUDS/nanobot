@@ -2,10 +2,11 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import httpx
 import pytest
+from agent.runner_helpers import failed_test_consolidator
 from openai import AsyncOpenAI
 
 from nanobot.agent.hook import AgentHook
@@ -15,21 +16,26 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import ProviderSpec
+from nanobot.providers.registry import ModelAPICapabilities, find_by_name
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
 class _EventStream(httpx.AsyncByteStream):
-    def __init__(self, events: list[dict], *, stall_at: int | None = None) -> None:
+    def __init__(
+        self, events: list[dict], *, stall_at: int | None = None, event_delay: float = 0,
+    ) -> None:
         self.events = events
         self.stall_at = stall_at
+        self.event_delay = event_delay
+        self.sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
         self.closed = False
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
         for index, event in enumerate(self.events):
             if index == self.stall_at:
                 await asyncio.Event().wait()
-            await asyncio.sleep(0.05)
+            if self.event_delay:
+                await self.sleep(self.event_delay)
             yield f"data: {json.dumps(event)}\n\n".encode()
 
     async def aclose(self) -> None:
@@ -73,15 +79,18 @@ def _events(api: str, kind: str) -> list[dict]:
 
 @pytest.fixture
 async def make_provider(monkeypatch):
-    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0.3")
     clients = []
 
-    async def make(api: str, kind: str, *, stall_at: int | None = None):
-        stream = _EventStream(_events(api, kind), stall_at=stall_at)
+    async def make(
+        api: str, kind: str, *, stall_at: int | None = None,
+        event_delay: float = 0, idle_timeout: float = 5,
+    ):
+        monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", str(idle_timeout))
+        stream = _EventStream(_events(api, kind), stall_at=stall_at, event_delay=event_delay)
 
         def handler(request: httpx.Request) -> httpx.Response:
             assert json.loads(request.content)["stream"] is True
-            assert request.extensions["timeout"]["read"] == 0.3
+            assert request.extensions["timeout"]["read"] == idle_timeout
             return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=stream)
 
         client = AsyncOpenAI(
@@ -95,8 +104,8 @@ async def make_provider(monkeypatch):
         else:
             provider = OpenAICompatProvider(
                 api_key="test", default_model="gpt-5.2",
-                spec=ProviderSpec(name="openai", keywords=(), env_key=""),
-                api_type="chat_completions" if api == "chat" else "responses",
+                spec=find_by_name("openai"),
+                model_api=ModelAPICapabilities(("chat_completions",), "chat_completions") if api == "chat" else ModelAPICapabilities(("responses",), "responses"),
             )
         provider._client = client
         provider._CHAT_RETRY_DELAYS = ()
@@ -109,9 +118,22 @@ async def make_provider(monkeypatch):
 
 @pytest.mark.parametrize("api", ["chat", "responses", "azure"])
 @pytest.mark.parametrize("kind", ["content", "reasoning", "tool", "metadata"])
-async def test_silent_stream_renews_idle_timeout_on_every_event(make_provider, api, kind):
-    provider, stream = await make_provider(api, kind)
+async def test_silent_stream_renews_idle_timeout_on_every_event(
+    make_provider, monkeypatch, api, kind,
+):
+    provider, stream = await make_provider(api, kind, event_delay=0.05, idle_timeout=0.3)
+    loop = asyncio.get_running_loop()
+    started_at = now = loop.time()
+    monkeypatch.setattr(loop, "time", lambda: now)
+
+    async def advance_time(delay: float) -> None:
+        nonlocal now
+        now += delay
+        await asyncio.sleep(0)
+
+    stream.sleep = advance_time
     response = await provider.chat_stream_with_retry([{"role": "user", "content": "work"}])
+    assert now - started_at > 0.3
     assert response.finish_reason == "stop"
     assert response.content is not None and response.content.strip().endswith("done")
     assert stream.closed
@@ -120,7 +142,7 @@ async def test_silent_stream_renews_idle_timeout_on_every_event(make_provider, a
 @pytest.mark.parametrize("api", ["chat", "responses", "azure"])
 @pytest.mark.parametrize("stall_at", [0, 2], ids=["first-event", "after-reasoning"])
 async def test_silent_stream_times_out_without_events(make_provider, api, stall_at):
-    provider, stream = await make_provider(api, "reasoning", stall_at=stall_at)
+    provider, stream = await make_provider(api, "reasoning", stall_at=stall_at, idle_timeout=0.3)
     response = await asyncio.wait_for(
         provider.chat_stream_with_retry([{"role": "user", "content": "work"}]),
         timeout=2,
@@ -181,7 +203,7 @@ async def test_runner_streams_past_old_wall_limit_with_optional_ui(
     make_provider, monkeypatch, show_deltas,
 ):
     monkeypatch.setenv("NANOBOT_LLM_TIMEOUT_S", "0.01")
-    provider, _ = await make_provider("chat", "reasoning")
+    provider, _ = await make_provider("chat", "reasoning", event_delay=0.05)
     content_deltas = []
 
     class Hook(AgentHook):
@@ -196,6 +218,7 @@ async def test_runner_streams_past_old_wall_limit_with_optional_ui(
         tools=ToolRegistry(),
         runtime=LLMRuntime.capture(provider, "gpt-5.2", context_window_tokens=128_000),
         max_iterations=1, max_tool_result_chars=1_000, hook=Hook(),
+        consolidate_history=failed_test_consolidator,
     ))
     assert result.stop_reason == "completed"
     assert result.final_content == "done"
@@ -231,6 +254,7 @@ async def test_chat_only_provider_still_has_a_timeout(monkeypatch, finalize):
         tools=ToolRegistry(),
         runtime=LLMRuntime.capture(provider, "test", context_window_tokens=128_000),
         max_iterations=1, max_tool_result_chars=1_000,
+        consolidate_history=failed_test_consolidator,
         max_iterations_message="Tool budget exhausted.",
     )), timeout=1)
     assert provider.calls == (2 if finalize else 1)

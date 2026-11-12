@@ -22,7 +22,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "groupAllowFrom": field("list"),
         "allowRoomMentions": field("bool", default=False),
         "streaming": field("bool", default=False),
-        "proxy": field(),
+        "useProxy": field("bool", default=False),
     },
     required=(
         *required_fields("homeserver", "userId"),

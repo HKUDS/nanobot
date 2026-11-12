@@ -1,8 +1,8 @@
 """Sandbox backends for shell command execution.
 
-To add a new backend, implement a function with the signature:
-    _wrap_<name>(command: str, workspace: str, cwd: str) -> str
-and register it in _BACKENDS below.
+To add a backend, match the callable signature of _bwrap and _seatbelt,
+including keyword-only sandbox_ro_binds and sandbox_rw_binds, and register
+it in _BACKENDS below.
 """
 
 import os
@@ -55,9 +55,10 @@ def _bwrap(
 ) -> str:
     """Wrap command in a bubblewrap sandbox (requires bwrap in container).
 
-    Only the workspace is bind-mounted read-write; its parent dir (which holds
-    config.json) is hidden behind a fresh tmpfs.  The media directory is
-    bind-mounted read-only so exec commands can read uploaded attachments.
+    The workspace is bind-mounted read-write; its parent directory is hidden
+    behind a fresh tmpfs. Media is mounted read-only for uploaded attachments.
+    Explicit sandbox_ro_binds and sandbox_rw_binds add read-only and read-write
+    roots, respectively.
     """
     ws = Path(workspace).resolve()
     media = get_media_dir().resolve()

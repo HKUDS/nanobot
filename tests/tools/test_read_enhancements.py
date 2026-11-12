@@ -1,5 +1,6 @@
 """Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist, office docs."""
 
+import base64
 import os
 import sys
 from unittest.mock import patch
@@ -21,13 +22,6 @@ def _document_source(text: str) -> DocumentLineSource:
         for line_no, line in enumerate(text.splitlines(), 1)
     )
     return DocumentLineSource(lines)
-
-
-@pytest.fixture(autouse=True)
-def _clear_file_state():
-    file_state.clear()
-    yield
-    file_state.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -102,14 +96,18 @@ class TestReadDedup:
         assert "unchanged" not in read_result.lower()
 
     @pytest.mark.asyncio
-    async def test_dedup_does_not_apply_to_images(self, tool, tmp_path):
+    async def test_repeated_image_reads_return_full_content(self, tool, tmp_path):
         f = tmp_path / "img.png"
         f.write_bytes(b"\x89PNG\r\n\x1a\nfake-png-data")
         first = await tool.execute(path=str(f))
-        assert isinstance(first, list)
         second = await tool.execute(path=str(f))
-        # Images should always return full content blocks, not a stub
-        assert isinstance(second, list)
+
+        assert second == first
+        assert second[0]["type"] == "image_url"
+        encoded = base64.b64encode(f.read_bytes()).decode("ascii")
+        assert second[0]["image_url"]["url"] == f"data:image/png;base64,{encoded}"
+        assert second[0]["_meta"]["path"] == str(f)
+        assert second[1] == {"type": "text", "text": f"(Image file: {f})"}
 
     @pytest.mark.asyncio
     async def test_known_text_extension_falls_back_to_latin1(self, tool, tmp_path):
@@ -120,6 +118,33 @@ class TestReadDedup:
 
         assert "1| name" in result
         assert "2| café" in result
+
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    @pytest.mark.asyncio
+    async def test_bom_marked_unicode_text_uses_declared_encoding(
+        self,
+        tool,
+        tmp_path,
+        encoding,
+    ):
+        f = tmp_path / "unicode.txt"
+        f.write_bytes("Hello 世界\nSecond line".encode(encoding))
+
+        result = await tool.execute(path=str(f))
+
+        assert "1| Hello 世界" in result
+        assert "2| Second line" in result
+        assert "\x00" not in result
+
+    @pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+    @pytest.mark.asyncio
+    async def test_bom_only_unicode_text_is_empty_file(self, tool, tmp_path, encoding):
+        f = tmp_path / "empty.txt"
+        f.write_bytes("".encode(encoding))
+
+        result = await tool.execute(path=str(f))
+
+        assert result == f"(Empty file: {f})"
 
 
 # ---------------------------------------------------------------------------
@@ -192,8 +217,69 @@ class TestReadDedupSessionIsolation:
 class TestReadPdf:
 
     @pytest.fixture()
-    def tool(self, tmp_path):
+    def tool(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
         return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("page_count", [2, 3])
+    async def test_pdf_character_limit_preserves_pages_across_continuation(
+        self, tool, tmp_path, monkeypatch, page_count,
+    ):
+        import re
+
+        fitz = pytest.importorskip("pymupdf")
+        pdf_path = tmp_path / "report.pdf"
+        doc = fitz.open()
+        markers = []
+        for number in range(1, page_count + 1):
+            marker = f"END_OF_PAGE_{number}"
+            markers.append(marker)
+            page = doc.new_page()
+            page.insert_text((72, 72), "Report details " * 4 + "\n" + marker)
+        doc.save(pdf_path)
+        doc.close()
+        monkeypatch.setattr(tool, "_MAX_CHARS", 130)
+
+        outputs = []
+        pages = None
+        for _ in range(page_count):
+            result = await tool.execute(path=str(pdf_path), pages=pages)
+            outputs.append(result)
+            continuation = re.search(r"Use pages='([^']+)'", result)
+            if continuation is None:
+                break
+            pages = continuation[1]
+
+        combined = "\n".join(outputs)
+        for marker in markers:
+            assert combined.count(marker) == 1
+        assert "truncated" not in combined
+        assert "Use pages=" not in outputs[-1]
+
+    @pytest.mark.asyncio
+    async def test_pdf_oversized_page_reports_unreturned_text(
+        self, tool, tmp_path, monkeypatch,
+    ):
+        fitz = pytest.importorskip("pymupdf")
+        pdf_path = tmp_path / "dense.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "\n".join(["Dense page content " * 3] * 8))
+        page = doc.new_page()
+        page.insert_text((72, 72), "Second page complete")
+        doc.save(pdf_path)
+        doc.close()
+        monkeypatch.setattr(tool, "_MAX_CHARS", 130)
+
+        result = await tool.execute(path=str(pdf_path))
+
+        assert "Page 1 was truncated" in result
+        assert "remaining text on this page is not shown" in result
+        assert "Use pages='2-2'" in result
+        second = await tool.execute(path=str(pdf_path), pages="2")
+        assert "Second page complete" in second
+        assert "truncated" not in second
 
     @pytest.mark.asyncio
     async def test_pdf_returns_text_content(self, tool, tmp_path):
@@ -534,7 +620,7 @@ class TestOfficeDocTruncation:
         assert "truncated" not in result
 
 
-class TestReadDescriptionUpdate:
+class TestReadFileDescription:
 
     def test_description_mentions_documents(self):
         tool = ReadFileTool()

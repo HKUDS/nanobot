@@ -1,78 +1,43 @@
-"""Unified, content-free LLM usage backend."""
+"""Public LLM usage records and persistence services."""
 
 from __future__ import annotations
 
-import threading
-from pathlib import Path
-from typing import Any
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
-from loguru import logger
+if TYPE_CHECKING:
+    from nanobot.llm_usage.models import LLMCallRecord
+    from nanobot.llm_usage.service import (
+        empty_usage_payload,
+        get_llm_usage_store,
+        llm_usage_payload,
+        llm_usage_store_path,
+        record_llm_call,
+    )
+    from nanobot.llm_usage.store import LLMUsageStore
 
-from nanobot.config.paths import get_data_dir
-from nanobot.llm_usage.models import LLMCallRecord
-from nanobot.llm_usage.store import LLMUsageStore
-
-_STORES_LOCK = threading.Lock()
-_STORES: dict[Path, LLMUsageStore] = {}
-
-
-def empty_usage_payload() -> dict[str, Any]:
-    return {
-        "days": [],
-        "total_tokens": 0,
-        "total_tokens_30d": 0,
-        "total_tokens_365d": 0,
-        "reported_tokens_30d": 0,
-        "estimated_tokens_30d": 0,
-        "cache_read_tokens_30d": 0,
-        "cache_read_observed_input_tokens_30d": 0,
-        "cache_read_rate_30d": None,
-        "peak_day_tokens": 0,
-        "current_streak_days": 0,
-        "longest_streak_days": 0,
-        "active_days_30d": 0,
-        "requests_30d": 0,
-        "failed_requests_30d": 0,
-        "providers_30d": [],
-        "updated_at": None,
-    }
+_EXPORTS = {
+    "LLMCallRecord": "nanobot.llm_usage.models",
+    "LLMUsageStore": "nanobot.llm_usage.store",
+    "empty_usage_payload": "nanobot.llm_usage.service",
+    "get_llm_usage_store": "nanobot.llm_usage.service",
+    "record_llm_call": "nanobot.llm_usage.service",
+    "llm_usage_store_path": "nanobot.llm_usage.service",
+    "llm_usage_payload": "nanobot.llm_usage.service",
+}
 
 
-def llm_usage_store_path() -> Path:
-    return get_data_dir() / "llm_usage.sqlite3"
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
 
 
-def get_llm_usage_store(path: Path | None = None) -> LLMUsageStore:
-    resolved = (path or llm_usage_store_path()).resolve(strict=False)
-    with _STORES_LOCK:
-        store = _STORES.get(resolved)
-        if store is None:
-            store = LLMUsageStore(resolved)
-            _STORES[resolved] = store
-        return store
-
-
-def record_llm_call(call: LLMCallRecord) -> None:
-    """Default fail-open callback attached to gateway provider snapshots."""
-    try:
-        get_llm_usage_store().record(call)
-    except Exception:
-        logger.exception("failed to record LLM usage")
-
-
-def llm_usage_payload(
-    *,
-    days: int = 371,
-    timezone_name: str | None = None,
-) -> dict[str, Any]:
-    try:
-        return get_llm_usage_store().usage_payload(
-            days=days,
-            timezone_name=timezone_name,
-        )
-    except Exception:
-        logger.exception("failed to query LLM usage")
-        return empty_usage_payload()
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_EXPORTS))
 
 
 __all__ = [

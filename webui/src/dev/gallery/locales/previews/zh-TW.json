@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · 群組與專案改名",
+    "description": "預覽群組與專案改名；話題在清單內改名。",
+    "options": "呼叫端提供 dialogTitle、description 與 placeholder。title 設定初始值，onConfirm 接收去除頭尾空白的標題。空標題無法儲存。",
+    "hint": "儲存後更新上方標題。"
+  },
+  "delete": {
+    "title": "DeleteConfirm · 刪除確認",
+    "description": "比較單筆、多筆與含自動任務的刪除確認。",
+    "options": "count 控制批次刪除文案；automations 顯示關聯任務、排程與下次執行時間。確認按鈕呼叫 onConfirm。",
+    "scenario": "刪除情境",
+    "open": "開啟刪除確認",
+    "confirmed": "已確認刪除範例。",
+    "hint": "選擇單一、多個或含自動任務的對話。"
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · 指令與對話識別",
+    "description": "編輯指令與識別碼，查看醒目樣式與色彩。",
+    "options": "SlashCommandText 接收 command；InlineTokenHighlight 接收 color 與內容；SessionHandleLabel 依 id 產生色彩。",
+    "command": "指令文字",
+    "run": "執行 <command/> 查看狀態。",
+    "handle": "對話識別碼",
+    "continue": "繼續 <session/> 中的工作。",
+    "highlight": "共用醒目樣式",
+    "review": "使用 <skill/> 檢查修改。",
+    "skill": "技能：{{name}}"
+  },
+  "sessionLinks": {
+    "selected": "已選擇對話：{{name}}。",
+    "hint": "選擇對話提及以查看回饋。"
+  },
+  "userText": {
+    "title": "UserMessageText · 訊息提及",
+    "description": "編輯訊息中的技能、應用、MCP 與對話提及。",
+    "options": "text 為原始訊息；cliApps、mcpPresets 與 sessionMentions 提供可解析的提及。技能使用 $name，其他提及使用 @name。",
+    "message": "訊息文字"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · 應用提及",
+    "description": "比較輸入框與訊息中的提及樣式。",
+    "options": "segment 指定 cli、mcp 或 session 及其中繼資料；variant 選擇 composer 或 message。範例使用本機品牌圖片。",
+    "position": "提及位置"
+  },
+  "productIcons": {
+    "title": "Product icons · 產品圖示",
+    "description": "瀏覽圖示、切換尺寸並選擇醒目項目。",
+    "options": "圖示接受 LucideProps，如 size、strokeWidth 與 className。色彩繼承 currentColor，按鈕提供無障礙操作名稱。",
+    "size": "圖示尺寸",
+    "selected": "已選擇：{{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · 啟動佔位",
+    "description": "預覽應用連線時的安靜佔位版面。",
+    "options": "embedded 使用 section，其他情況使用 main。元件持續提供 aria-busy 與載入狀態；佔位樣式來自應用入口。"
+  },
+  "fileActions": {
+    "title": "FileActions · 檔案選單",
+    "description": "按右鍵複製完整路徑、相對路徑或參照文字。",
+    "options": "path 為參照文字；metadata 提供完整路徑與選填的相對路徑。元件庫直接提供中繼資料，無須載入檔案。",
+    "scope": "檔案範圍",
+    "hint": "按右鍵開啟複製選單，或聚焦檔案後按 Shift+F10。"
+  },
+  "workbench": {
+    "title": "PaneWorkbench · 多窗格",
+    "description": "切換版面、啟用或新增窗格並調整尺寸。",
+    "options": "panes、activePaneKey、layout 與 splitRatios 由呼叫端控制。renderPane 提供內容；回呼更新本機預覽狀態。窄螢幕自動顯示目前窗格。",
+    "layout": "窗格版面",
+    "limit": "最多四個窗格",
+    "notes": "{{title}}筆記",
+    "active": "目前窗格",
+    "activate": "選擇此窗格以啟用",
+    "hint": "目前：{{title}}。拖曳底部把手移動窗格，拖曳邊界調整尺寸。"
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · 連線狀態",
+    "description": "比較已連線、中斷、連線中與錯誤狀態。",
+    "options": "state 控制圖示與文字；compact 隱藏可見文字，保留無障礙狀態與提示。",
+    "state": "連線狀態",
+    "withText": "狀態與文字",
+    "compact": "精簡顯示"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · 版本相容",
+    "description": "查看相容結果、版本與升級指南。",
+    "options": "profile 存在時開啟對話框；compatibility 指定結果與版本。onClose 由呼叫端關閉；此元件僅顯示資訊。",
+    "state": "版本相容狀態",
+    "open": "查看相容詳細資訊"
+  },
+  "composer": {
+    "title": "ThreadComposer · 訊息輸入",
+    "description": "試用訊息、附件、指令與引用等輸入狀態。",
+    "options": "onSend 成功後清空輸入；isStreaming 控制停止與排隊；variant 切換對話與歡迎頁樣式。範例提交保留於目前預覽。",
+    "statusCommand": "對話狀態",
+    "statusDescription": "查看目前對話狀態",
+    "compactCommand": "壓縮上下文",
+    "compactDescription": "壓縮目前對話上下文",
+    "helpCommand": "指令說明",
+    "helpDescription": "查看可用指令",
+    "state": "輸入狀態",
+    "addQuote": "加入引用",
+    "input": "範例訊息",
+    "placeholder": "輸入訊息，或輸入 / 查看指令",
+    "stopped": "已停止範例任務。",
+    "sent": "提交內容：{{content}}{{attachments}}",
+    "attachments": " · 附件數：{{amount}}",
+    "hint": "試用訊息提交、附件選擇、模型切換與指令選單。"
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · 模型預設",
+    "description": "試用模型選單、鍵盤操作與待設定狀態。",
+    "options": "modelPresets 提供預設；modelPreset 與 onPresetChange 控制選擇；needsSetup 顯示設定入口。",
+    "state": "模型控制項狀態",
+    "manage": "已開啟模型管理。",
+    "settings": "已開啟模型設定。",
+    "hint": "目前預設：{{preset}}。開啟選單或用方向鍵切換。"
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · 上下文用量",
+    "description": "查看上下文、快取、生成時間與警戒狀態。",
+    "options": "context 提供上下文容量；rounds 提供各輪統計；bottomSheet 選擇行動裝置面板。",
+    "state": "用量狀態",
+    "hint": "開啟用量詳細資訊，查看上下文佔用、快取與各輪生成時間。"
+  },
+  "workspace": {
+    "title": "WorkspaceControls · 工作目錄",
+    "description": "選擇範例專案並切換存取模式。",
+    "options": "scope 與 onChange 控制選擇；onLoadProjects 提供範例目錄。實際路徑解析與權限執行由 gateway 負責。",
+    "state": "工作目錄狀態"
+  },
+  "navigator": {
+    "title": "PromptNavigator · 問題導覽",
+    "description": "搜尋歷史問題並查看跳轉回饋。",
+    "options": "messages 提供完整訊息清單，元件擷取使用者問題；onJumpToPrompt 接收目標訊息 ID。",
+    "hint": "開啟問題導覽，搜尋並選擇問題。",
+    "empty": "尚未選擇問題"
+  },
+  "header": {
+    "title": "ThreadHeader · 對話標題列",
+    "description": "試用側邊欄、主題、臨時對話與問題導覽。",
+    "options": "title、handle、theme 與 temporaryChatEnabled 提供顯示狀態；各操作透過回呼交給呼叫端。",
+    "jump": "已跳至 {{id}}",
+    "sidebar": "已切換側邊欄",
+    "hint": "試用標題列操作",
+    "temporary": "臨時對話",
+    "regular": "一般對話"
+  },
+  "messages": {
+    "title": "ThreadMessages · 訊息清單",
+    "description": "試用多輪訊息、操作選單、分支與引用。",
+    "options": "messages 為已投影訊息；onForkFromMessage 接收使用者問題索引，onQuoteSelection 接收所選回覆文字。",
+    "quoted": "引用：{{text}}",
+    "forked": "已從第 {{index}} 個問題建立分支",
+    "hint": "開啟訊息選單，或選取回覆文字後點選引用。"
+  },
+  "viewport": {
+    "title": "ThreadViewport · 對話捲動",
+    "description": "體驗長對話捲動、問題導覽與返回底部。",
+    "options": "預覽容器高度固定；messages 驅動歷史顯示，ref.jumpToUserPrompt 執行定位；emptyState 提供空對話內容。",
+    "state": "對話檢視",
+    "empty": "輸入訊息開始對話",
+    "hint": "捲動查看問題標記，或使用導覽跳轉並返回底部。"
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · 歷史狀態",
+    "description": "顯示載入、歷史起點與失敗重試狀態。",
+    "options": "loading 表示正在請求，exhausted 表示沒有更早訊息，error 提供錯誤資訊，onRetry 重試載入。",
+    "state": "歷史狀態",
+    "error": "範例歷史暫時無法使用。",
+    "retries": "重試次數：{{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · 任務復原",
+    "description": "比較任務復原狀態，試用繼續與關閉。",
+    "options": "state 為復原快照；onContinue 與 onDismiss 回傳 Promise。範例回呼只更新目前預覽。",
+    "state": "復原狀態",
+    "continued": "已繼續範例任務。",
+    "dismissed": "已關閉復原提示。",
+    "reset": "重設預覽",
+    "hint": "選擇復原狀態，再試用繼續或關閉。"
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · 模型備援",
+    "description": "查看備援模型與授權失效提示。",
+    "options": "model 指定備援模型；reauthProviderLabel 顯示授權到期提示；onOpenSettings 與 onDismiss 由呼叫端提供。",
+    "state": "模型備援狀態",
+    "showAgain": "重新顯示",
+    "hint": "試用模型設定入口與關閉按鈕。"
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · 上下文壓縮",
+    "description": "比較壓縮開始、成功、失敗與取消狀態。",
+    "options": "compaction.phase 決定提示；announce 控制螢幕閱讀器播報。",
+    "phase": "上下文壓縮階段"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · 訊息錯誤",
+    "description": "比較訊息大小、權限與請求失敗提示。",
+    "options": "error.kind 決定錯誤文案；onDismiss 關閉提示。",
+    "kind": "訊息錯誤類型"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · 完整活動",
+    "description": "查看推理、工具記錄與各執行狀態。",
+    "options": "messages 包含 reasoning 與 trace 投影；isTurnStreaming 控制活動狀態；expanded 可由呼叫端控制。",
+    "state": "活動狀態",
+    "error": "無法讀取檔案。"
+  },
+  "search": {
+    "title": "WebSearchRun · 搜尋活動",
+    "description": "查看網頁與 X 搜尋進度及來源。",
+    "options": "run 包含 query、target、status 與 sources；turnActive 控制執行效果。結果網站圖示由共用元件載入。",
+    "state": "搜尋狀態",
+    "source": "搜尋來源"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · 回應來源",
+    "description": "查看歷史回覆使用的預設、模型與供應商。",
+    "options": "sources 保留回應當時的模型快照，僅 fallback 為 true 的來源顯示標記。",
+    "hint": "點選備援標記查看回應當時的預設、模型與供應商。"
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · 檔案內容",
+    "description": "比較檔案顯示狀態，點選圖片試用縮放。",
+    "options": "state 為顯示快照；path 決定檔案類型與名稱；圖片開啟與失敗回呼更新目前預覽。",
+    "state": "檔案預覽狀態"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · 對話任務",
+    "description": "查看、編輯、停用與刪除對話任務。",
+    "options": "jobs、loading、loadFailed 與 now 來自呼叫端；onAction 與 onEdit 回傳更新後的任務；介面負責對話框銜接、焦點復原與操作回饋。",
+    "state": "對話任務狀態",
+    "saveError": "範例儲存失敗，請重試。",
+    "providerError": "範例供應商暫時無法使用。",
+    "saved": "已儲存任務。",
+    "openedChat": "已開啟範例對話。",
+    "openedCalendar": "已開啟任務行事曆。",
+    "actionError": "範例操作失敗，請重試。",
+    "delete": "已刪除：{{name}}",
+    "run": "已請求執行：{{name}}",
+    "enable": "已啟用：{{name}}",
+    "disable": "已停用：{{name}}",
+    "hint": "開啟對話詳細資訊，試用任務查看、開關、編輯與刪除。"
+  },
+  "subagent": {
+    "title": "SubagentThreadView · 子任務訊息",
+    "description": "查看子任務訊息、活動與重試狀態。",
+    "options": "messages 已由執行階段投影；loading 與 error 共用歷史載入元件；isStreaming 與 activeTurnId 決定活動。介面不擷取任務歷史。",
+    "state": "子任務對話狀態"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · 配對路由",
+    "description": "選擇路由並比較儲存與重新整理失敗狀態。",
+    "options": "route 與 original 由呼叫端管理；routes 提供 SSH 路由。儲存成功與目錄重新整理失敗分別呈現；元件庫與設定共用此檢視。",
+    "state": "路由狀態"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · 快速配對",
+    "description": "試用邀請、回執、存取確認與重試介面。",
+    "options": "state 提供配對與顯示狀態，回呼執行操作，routeSettings 組合路由設定。元件庫使用範例資料與本機回呼；實際配對由 QuickPairSetup 管理。",
+    "state": "配對階段",
+    "open": "開啟快速配對",
+    "connected": "已選擇連線：{{name}}。",
+    "ssh": "已選擇 SSH 連線方式。",
+    "hint": "範例邀請與回執僅供展示；確認操作更新本機回饋。"
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · SSH 位址",
+    "description": "篩選 SSH 別名並查看匯入與讀取狀態。",
+    "options": "discovery 提供目前設定檔的位址；value、busy、error 與回呼由呼叫端控制。customConfig 保留自訂設定的別名探索行為；inputRef 用於選擇後的焦點。",
+    "state": "SSH 位址狀態",
+    "refreshed": "已重新整理範例位址。",
+    "entered": "已輸入：{{value}}",
+    "hint": "輸入文字篩選位址；按方向鍵選擇 SSH 別名。"
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · 連線指示",
+    "description": "查看連線色彩、動畫與無障礙狀態。",
+    "options": "status 來自呼叫端；頁面容器維護連線訂閱。",
+    "state": "連線狀態",
+    "idle": "未連線",
+    "connecting": "連線中",
+    "open": "已連線",
+    "reconnecting": "重新連線中",
+    "closed": "已中斷",
+    "error": "連線錯誤"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · 主機選單",
+    "description": "選擇主機並比較待連線、中斷與收合狀態。",
+    "options": "picker 提供主機資料與回呼；status 為目前連線狀態。正式 HostSwitcher 負責訂閱用戶端。",
+    "state": "主機選單狀態",
+    "offline": "範例主機已中斷連線。",
+    "manage": "已開啟連線管理。",
+    "cancelled": "已取消範例切換。",
+    "selected": "預覽中的主機：{{name}}"
+  },
+  "chats": {
+    "title": "ChatList · 對話清單",
+    "description": "選擇對話並試用置頂、封存與刪除。",
+    "options": "sessions、activeKey 與置頂或封存的 key 由呼叫端提供；操作回呼更新範例清單。",
+    "state": "對話清單狀態",
+    "renamed": "已重新命名：{{name}}",
+    "selected": "選擇的對話：{{name}}",
+    "none": "無"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · 側邊欄尺寸",
+    "description": "用滑鼠或鍵盤調整、收合與展開側邊欄。",
+    "options": "width 與 open 為受控狀態；onResize 更新尺寸與展開狀態；onDraggingChange 通知拖曳狀態。",
+    "content": "側邊欄內容",
+    "hint": "拖曳分隔線，或聚焦後使用方向鍵、Home、End 與 Enter。",
+    "collapsed": "已收合",
+    "dragging": "拖曳中"
+  },
+  "language": {
+    "title": "LanguageSwitcher · 介面語言",
+    "description": "切換元件庫與正式元件的介面語言。",
+    "options": "使用應用既有的 i18n 與瀏覽器語言偏好，無須 gateway。頂部語言選擇器使用同一元件。"
+  },
+  "channelMarks": {
+    "title": "Channel marks · 頻道識別",
+    "description": "查看頭像預設文字、工作區與頻道圖示。",
+    "options": "LinearAvatar 接收 name、url 與 workspace；無有效圖片時顯示預設文字或圖示。",
+    "name": "頭像名稱",
+    "member": "成員頭像",
+    "workspace": "工作區圖示"
+  },
+  "secret": {
+    "title": "LinearSecretField · 金鑰編輯",
+    "description": "編輯、儲存金鑰並檢查失敗時的草稿保留。",
+    "options": "configured 為已儲存狀態；onSave 負責持久儲存。元件庫回呼僅更新本機狀態。",
+    "state": "金鑰狀態",
+    "error": "範例儲存失敗。",
+    "hint": "輸入範例文字並儲存，或切換錯誤狀態檢查草稿保留。"
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · 頻道說明",
+    "description": "在實際下拉選單中查看頻道說明。",
+    "options": "內容使用頻道現有翻譯；呼叫端提供選單容器。",
+    "open": "開啟頻道說明"
+  },
+  "channel": {
+    "title": "{{channel}} · 頻道設定",
+    "description": "查看實際頻道設定表單與狀態。",
+    "options": "使用頻道註冊定義、Python 設定契約快照與正式 ChannelSetupSurfaceView。輸入、憑證顯示、預設、檢查與開關僅更新目前預覽。",
+    "state": "頻道設定狀態",
+    "credentialsError": "範例憑證遭拒。請更新預覽中的值後重試。",
+    "validation": "預覽設定"
+  },
+  "channelConnect": {
+    "state": "{{channel}} 連線狀態",
+    "error": "授權暫時無法使用，請重試。"
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ 掃碼連線",
+    "description": "查看 QQ 掃碼、重試與 App Secret 替換提示。",
+    "options": "檢視接收連線狀態和操作回呼。預覽操作只改變本機狀態；工作階段建立和 QQ 輪詢由執行階段入口負責。"
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · 飛書掃碼授權",
+    "description": "試用飛書掃碼、成功、到期與錯誤狀態。",
+    "options": "connect、busy 與 error 提供顯示狀態；QR 碼於本機產生。開始、取消與輪詢由功能入口提供，預覽回呼僅改變目前範例。"
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · 飛書助手管理",
+    "description": "查看助手卡片、執行狀態與進階設定。",
+    "options": "feature 與 instances 提供助手快照；檢視管理草稿與儲存回饋。onToggleInstance、onSaveInstance 與 renderConnectFlow 接入執行階段操作。",
+    "state": "助手執行狀態",
+    "error": "助手已停止。請檢查憑證後重新啟動。",
+    "on": "{{name}}：已開啟",
+    "off": "{{name}}：已關閉",
+    "saved": "{{name}}：已儲存 {{amount}} 個預覽欄位"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · WhatsApp 裝置連結",
+    "description": "比較連結、成功、到期與錯誤介面。",
+    "options": "檢視沿用自動開始與精簡版面的顯示規則；呼叫端控制狀態與重試。實際自動開始、強制重試與輪詢由連線功能入口負責。"
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Linear 設定",
+    "description": "查看應用設定、工作區、成員與瀏覽器授權。",
+    "options": "state 與 workspaces 提供快照；工作區、儲存與 MCP 操作透過回呼接入。三個插槽組合正式使用的成員、授權與重設檢視。",
+    "state": "Linear 設定狀態",
+    "runtimeError": "無法啟動 Linear webhook。",
+    "saveError": "無法儲存設定，已保留草稿。",
+    "inspectionError": "無法檢查已連線的工作區。",
+    "refreshed": "已重新整理範例工作區。",
+    "removed": "已移除範例工作區：{{name}}",
+    "mcp": "已選擇 Linear MCP 設定入口。"
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · 成員存取",
+    "description": "搜尋成員、修改權限並比較儲存狀態。",
+    "options": "snapshot 為已確認的成員狀態。onLoad 與 onSetAllowed 交給頻道入口；權限驗證仍由閘道負責。",
+    "state": "成員狀態",
+    "loadError": "成員目錄暫時無法使用。",
+    "saveError": "尚未確認存取權限。"
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Linear 授權",
+    "description": "試用瀏覽器授權入口與各授權階段。",
+    "options": "重用 ChannelQrConnectFlowView。Linear 提供瀏覽器授權顯示、標籤與焦點處理；工作階段建立與輪詢留在執行階段入口。",
+    "state": "授權階段",
+    "error": "無法完成授權。",
+    "hint": "授權連結與工作區為範例資料；開始、取消僅更新預覽階段。"
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · 重設連線",
+    "description": "查看清除範圍、忙碌與部分完成狀態。",
+    "options": "onReset 執行完整撤銷與清理交易；檢視管理確認、錯誤、關閉限制與焦點復原。",
+    "state": "重設結果",
+    "error": "無法停止頻道，已保留應用設定。",
+    "completed": "預覽工作區與應用設定已清除。"
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · 微信設定",
+    "description": "查看微信設定、儲存回饋與登入復原。",
+    "options": "欄位來自頻道設定契約。檢視管理展開與金鑰可見狀態；執行階段入口負責自動儲存、草稿合併與登入復原。",
+    "state": "微信面板狀態"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · 微信掃碼與驗證",
+    "description": "比較掃碼、驗證、到期與連線錯誤狀態。",
+    "options": "檢視接收連線快照與回呼，保留驗證碼草稿。QR 碼在瀏覽器中產生；授權啟動、輪詢暫停、重新整理與取消由實際入口負責。",
+    "state": "微信連線狀態",
+    "error": "連線中斷，請重試。",
+    "refreshed": "已顯示新的預覽 QR 碼。",
+    "hint": "驗證碼預覽輸入 123456 可完成連線；其他輸入會保留草稿並顯示錯誤。"
+  }
+}

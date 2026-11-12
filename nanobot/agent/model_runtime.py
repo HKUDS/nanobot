@@ -2,15 +2,72 @@
 
 from __future__ import annotations
 
+import asyncio
+import math
 from collections.abc import Callable, Mapping
-from dataclasses import replace
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import cast
 
 from nanobot.agent import model_presets as preset_helpers
 from nanobot.config.schema import Config, ModelPresetConfig
-from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
+from nanobot.providers.base import LLMProvider
+from nanobot.providers.factory import (
+    ProviderSnapshot,
+    build_isolated_provider_snapshot,
+    build_provider_snapshot,
+    provider_override_declarations,
+    provider_signature,
+    validate_provider_setup,
+)
+from nanobot.providers.request_overrides import isolate_request_overrides
 from nanobot.utils.llm_runtime import LLMRuntime, runtime_from_provider_snapshot
+
+
+def _override_key(value: object, active: set[int] | None = None) -> tuple[object, ...] | None:
+    """Detach JSON-like identity without comparing application objects or mixing bool/int."""
+    if value is None or type(value) in (str, bool, int):
+        return (type(value), value)
+    if type(value) is float:
+        return (float, value) if math.isfinite(value) else None
+    if type(value) not in (tuple, list, dict):
+        return None
+    active = active if active is not None else set()
+    identity = id(value)
+    if identity in active:
+        return None
+    active.add(identity)
+    try:
+        if isinstance(value, dict):
+            mapping = cast(dict[object, object], value)
+            if any(type(key) is not str for key in mapping):
+                return None
+            items: list[object] = []
+            for name, item in mapping.items():
+                key = _override_key(item, active)
+                if key is None:
+                    return None
+                items.append((name, key))
+            return (dict, tuple(items))
+        items = []
+        for item in cast(tuple[object, ...] | list[object], value):
+            key = _override_key(item, active)
+            if key is None:
+                return None
+            items.append(key)
+        return (type(value), tuple(items))
+    finally:
+        active.remove(identity)
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _RecentOverride:
+    key: tuple[object, ...]
+    runtime: LLMRuntime
+
+    def borrow(self) -> LLMRuntime:
+        return replace(self.runtime, snapshot_signature=deepcopy(self.runtime.snapshot_signature))
 
 
 class ModelRuntimeResolver:
@@ -32,6 +89,7 @@ class ModelRuntimeResolver:
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
     ) -> None:
         self._runtime = initial_runtime
+        self._providers: set[LLMProvider] = {initial_runtime.provider}
         self._model_presets = dict(model_presets or {})
         self._preset_catalog_loader = preset_catalog_loader
         self._preset_catalog_refresh_required = False
@@ -39,6 +97,7 @@ class ModelRuntimeResolver:
         self._preset_snapshot_loader = preset_snapshot_loader
         self._refresh_required = False
         self._resolved_presets: dict[str, LLMRuntime] = {}
+        self._recent_override: _RecentOverride | None = None
         self._tracks_provider_generation = initial_runtime.model_preset is None
         self._default_selection_signature = preset_helpers.default_selection_signature(
             initial_runtime.snapshot_signature,
@@ -85,6 +144,7 @@ class ModelRuntimeResolver:
         self._refresh_required = True
         self._preset_catalog_refresh_required = True
         self._resolved_presets.clear()
+        self._recent_override = None
 
     def _refresh_preset_catalog(self) -> None:
         if not self._preset_catalog_refresh_required:
@@ -98,13 +158,24 @@ class ModelRuntimeResolver:
         snapshot: ProviderSnapshot,
     ) -> LLMRuntime:
         """Resolve a factory snapshot without changing the selected default."""
+        self._providers.add(snapshot.provider)
         return runtime_from_provider_snapshot(snapshot)
+
+    async def aclose(self) -> None:
+        """Close all admitted providers, including runtimes replaced by configuration reloads."""
+        self._recent_override = None
+        providers, self._providers = self._providers, set()
+        results = await asyncio.gather(*(provider.aclose() for provider in providers), return_exceptions=True)
+        errors = [result for result in results if isinstance(result, BaseException)]
+        if errors:
+            raise BaseExceptionGroup("failed to close model providers", errors)
 
     def adopt_snapshot(
         self,
         snapshot: ProviderSnapshot,
     ) -> LLMRuntime:
         """Select a snapshot as the default for future turns."""
+        self._recent_override = None
         runtime = self.resolve_snapshot(snapshot)
         self._runtime = runtime
         self._tracks_provider_generation = runtime.model_preset is None
@@ -182,6 +253,7 @@ class ModelRuntimeResolver:
 
     def refresh(self) -> LLMRuntime | None:
         """Refresh configured defaults and return the replacement when changed."""
+        self._recent_override = None
         if self._provider_snapshot_loader is None:
             self._refresh_required = False
             return None
@@ -242,4 +314,24 @@ class ModelRuntimeResolver:
 
         base = config.resolve_preset(self.model_preset)
         preset = base.model_copy(update={"model": model, "provider": "auto"})
-        return self.resolve_snapshot(build_provider_snapshot(config, preset=preset))
+        preset = isolate_request_overrides(
+            preset, previous_provider=config.get_provider_name(preset=base),
+            provider=config.get_provider_name(preset=preset),
+        )
+        declarations = provider_override_declarations(config, preset=preset)
+        key = _override_key((provider_signature(config, preset=preset), declarations))
+        if key is None:
+            return self.resolve_snapshot(build_provider_snapshot(config, preset=preset))
+        if self._recent_override is not None and self._recent_override.key == key:
+            # Equivalent wire settings can still contain an unsupported preset override.
+            validate_provider_setup(config, preset=preset)
+            return self._recent_override.borrow()
+
+        snapshot = build_isolated_provider_snapshot(config, preset=preset)
+        runtime = self.resolve_snapshot(snapshot)
+        key = _override_key((snapshot.signature, declarations))
+        if key is None:
+            return runtime
+        # Replacing lookup eligibility must not close providers still used by active turns.
+        self._recent_override = _RecentOverride(key, runtime)
+        return self._recent_override.borrow()

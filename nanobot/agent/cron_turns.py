@@ -19,15 +19,11 @@ class CronTurnCoordinator(AutomationTurnCoordinator):
     def __init__(
         self,
         *,
-        publish_inbound: Callable[[InboundMessage], Awaitable[None]],
-        dispatch: Callable[[InboundMessage], Awaitable[object]],
-        is_running: Callable[[], bool],
+        enqueue: Callable[[InboundMessage], Awaitable[None]],
         deferred_queues: dict[str, list[InboundMessage]] | None = None,
     ) -> None:
         super().__init__(
-            publish_inbound=publish_inbound,
-            dispatch=dispatch,
-            is_running=is_running,
+            enqueue=enqueue,
             turn_id=lambda msg: cron_run_id(msg.metadata),
             pending_id=_cron_job_id,
             should_defer_turn=_should_defer_cron_turn,

@@ -35,7 +35,7 @@ from nanobot.utils.helpers import _write_text_atomic  # pyright: ignore[reportPr
 
 XAI_OAUTH_ISSUER = "https://auth.x.ai"
 XAI_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
-XAI_CLIENT_VERSION = "0.2.109"
+XAI_CLIENT_VERSION = "1.0.13"
 XAI_ALLOWED_CALLBACK_ORIGIN = "https://accounts.x.ai"
 XAI_OAUTH_SCOPES = (
     "openid",
@@ -58,6 +58,10 @@ _HTTP_TIMEOUT_S = 15.0
 
 class XAIOAuthError(RuntimeError):
     """An actionable xAI OAuth failure with no credential material."""
+
+
+class XAIOAuthReauthRequiredError(XAIOAuthError):
+    """No usable login remains; an explicit sign-in is required."""
 
 
 @dataclass(frozen=True)
@@ -140,10 +144,26 @@ class XAIOAuthLoginFlow:
             name="nanobot-xai-grok-oauth-callback",
             daemon=True,
         )
-        self._server_thread.start()
         self._timeout_timer = threading.Timer(timeout_s, self._expire)
         self._timeout_timer.daemon = True
-        self._timeout_timer.start()
+
+    def start(self) -> XAIOAuthLoginFlow:
+        with self._lock:
+            self._raise_if_finished()
+            self._server_thread.start()
+            self._timeout_timer.start()
+        return self
+
+    @property
+    def has_pending_work(self) -> bool:
+        return self._server_thread.is_alive() or self._timeout_timer.is_alive()
+
+    def wait_closed(self) -> None:
+        # Join outside _lock: the expiry timer can be waiting to acquire it.
+        if self._timeout_timer.ident is not None:
+            self._timeout_timer.join()
+        if self._server_thread.ident is not None:
+            self._server_thread.join()
 
     @property
     def expired(self) -> bool:
@@ -249,8 +269,8 @@ class XAIOAuthLoginFlow:
         self._closed = True
         self._timeout_timer.cancel()
         self._stop_event.set()
-        if threading.current_thread() is not self._server_thread:
-            self._server_thread.join(timeout=2)
+        if self._server_thread.ident is None:
+            self._server.server_close()
 
 
 def get_xai_oauth_storage_path() -> Path:
@@ -305,6 +325,7 @@ def login_xai_oauth(
         return flow.wait(callback_timeout_s)
     finally:
         flow.cancel()
+        flow.wait_closed()
 
 
 def start_xai_oauth_login(
@@ -313,6 +334,15 @@ def start_xai_oauth_login(
     timeout_s: float = 600,
 ) -> XAIOAuthLoginFlow:
     """Create a non-blocking OAuth flow for browser or pasted-callback completion."""
+    return create_xai_oauth_login(proxy=proxy, timeout_s=timeout_s).start()
+
+
+def create_xai_oauth_login(
+    *,
+    proxy: str | None = None,
+    timeout_s: float = 600,
+) -> XAIOAuthLoginFlow:
+    """Prepare the flow so a gateway can own it before starting its threads."""
     discovery = _discover(proxy)
     verifier, challenge = _generate_pkce()
     state = secrets.token_urlsafe(32)
@@ -357,7 +387,7 @@ def get_xai_oauth_token(
     """Load a usable token, refreshing it under an inter-process lock when needed."""
     token = _load_token()
     if token is None:
-        raise XAIOAuthError(
+        raise XAIOAuthReauthRequiredError(
             "xAI is not signed in. Run `nanobot provider login xai-grok` first."
         )
     if not force_refresh and _token_is_fresh(token, min_ttl_ms):
@@ -365,7 +395,7 @@ def get_xai_oauth_token(
     if not token.refresh:
         if not force_refresh and token.expires > _now_ms():
             return token
-        raise XAIOAuthError(
+        raise XAIOAuthReauthRequiredError(
             "The xAI login has expired and cannot be refreshed. "
             "Run `nanobot provider login xai-grok` again."
         )
@@ -373,13 +403,13 @@ def get_xai_oauth_token(
     with _token_lock():
         latest = _load_token()
         if latest is None:
-            raise XAIOAuthError(
+            raise XAIOAuthReauthRequiredError(
                 "xAI is not signed in. Run `nanobot provider login xai-grok` first."
             )
         if not force_refresh and _token_is_fresh(latest, min_ttl_ms):
             return latest
         if not latest.refresh:
-            raise XAIOAuthError(
+            raise XAIOAuthReauthRequiredError(
                 "The xAI login has expired and cannot be refreshed. "
                 "Run `nanobot provider login xai-grok` again."
             )
@@ -471,6 +501,10 @@ def _make_callback_server(
     result_queue: queue.Queue[_CallbackResult],
 ) -> ThreadingHTTPServer:
     class CallbackHandler(BaseHTTPRequestHandler):
+        def setup(self) -> None:
+            super().setup()
+            self.connection.settimeout(5)
+
         def do_OPTIONS(self) -> None:  # noqa: N802
             if self.path.split("?", 1)[0] != "/callback":
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -526,7 +560,11 @@ def _make_callback_server(
             # Callback query strings contain an authorization code.
             return
 
-    return ThreadingHTTPServer(("127.0.0.1", 0), CallbackHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), CallbackHandler)
+    # The listener's server_close must join accepted requests too, not merely
+    # close the listening socket while handlers still run application code.
+    server.daemon_threads = False
+    return server
 
 
 def _serve_callback_server(
@@ -705,6 +743,11 @@ def _oauth_http_error(response: httpx.Response, action: str) -> XAIOAuthError:
             description = raw_description[:200] if isinstance(raw_description, str) else None
     detail = ": ".join(value for value in (code, description) if value)
     suffix = f" ({detail})" if detail else ""
+    if action == "token refresh" and (
+        response.status_code == 401
+        or (response.status_code in {400, 403} and code in {"invalid_grant", "invalid_token"})
+    ):
+        return XAIOAuthReauthRequiredError("The xAI login has expired. Please sign in again.")
     return XAIOAuthError(f"xAI OAuth {action} failed with HTTP {response.status_code}{suffix}.")
 
 

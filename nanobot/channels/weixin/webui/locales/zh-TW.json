@@ -6,7 +6,7 @@
     "officialLabel": "開啟微信",
     "fields": {
       "allowFrom": {
-        "label": "允許的使用者",
+        "label": "允許使用者",
         "placeholder": "使用者 ID，以逗號分隔"
       },
       "token": {
@@ -14,31 +14,31 @@
         "placeholder": "QR Code登入後自動儲存"
       },
       "sendProgress": {
-        "label": "傳送進度訊息"
+        "label": "傳送進度"
       },
       "sendToolHints": {
-        "label": "傳送工具執行摘要"
+        "label": "工具提示"
       },
       "streaming": {
         "label": "使用串流 API"
       },
       "replyProgressMessages": {
-        "label": "傳送結構化進度"
+        "label": "分項進度"
       },
       "replyProgressMaxMessages": {
-        "label": "結構化進度訊息上限"
+        "label": "進度上限"
       },
       "contextMessageBudget": {
-        "label": "上下文訊息數量上限"
+        "label": "上下文條數"
       },
       "blockStreaming": {
-        "label": "分塊傳送回覆"
+        "label": "分段回覆"
       },
       "blockStreamingMinChars": {
-        "label": "最小分塊字元數"
+        "label": "分段下限（字元）"
       },
       "blockStreamingMaxMessages": {
-        "label": "分塊訊息上限"
+        "label": "分段上限"
       },
       "baseUrl": {
         "label": "API 位址"

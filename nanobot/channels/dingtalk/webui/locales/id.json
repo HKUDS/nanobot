@@ -12,21 +12,21 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "Pengguna yang diizinkan",
+        "label": "Pengguna diizinkan",
         "placeholder": "ID pengguna, dipisahkan koma"
       },
       "allowRemoteMediaRedirects": {
-        "label": "Izinkan pengalihan media",
+        "label": "Pengalihan media",
         "choices": {
           "true": "Aktif",
           "false": "Mati"
         }
       },
       "remoteMediaRedirectAllowedHosts": {
-        "label": "Host pengalihan media"
+        "label": "Host pengalihan"
       },
       "groupUserIsolation": {
-        "label": "Sesi kelompok terpisah",
+        "label": "Sesi per anggota",
         "choices": {
           "true": "Aktif",
           "false": "Mati"

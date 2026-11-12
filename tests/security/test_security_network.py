@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from unittest.mock import patch
 from urllib.request import getproxies_environment
 
+import httpx
 import pytest
 
 from nanobot.security.network import (
+    PinnedDNSAsyncTransport,
     configure_ssrf_whitelist,
     contains_internal_url,
     env_proxy_applies_to_url,
@@ -240,15 +243,97 @@ def test_resolve_url_target_does_not_delegate_local_targets(url: str):
     assert not ok
 
 
-def test_pin_resolved_url_dns_prevents_second_resolution_rebind():
-    def _rebinding_resolver(hostname, port, family=0, type_=0):
+@pytest.mark.parametrize("host", ["example.com", b"example.com", "EXAMPLE.COM.", b"EXAMPLE.COM."])
+def test_pin_resolved_url_dns_prevents_second_resolution_rebind(host):
+    def _rebinding_resolver(hostname, port, family=0, type_=0, proto=0, flags=0):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("169.254.169.254", 0))]
 
-    with patch("nanobot.security.network.socket.getaddrinfo", _rebinding_resolver):
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo", side_effect=_rebinding_resolver
+    ) as resolver:
         with pin_resolved_url_dns("http://example.com/page", ("93.184.216.34",)):
-            infos = socket.getaddrinfo("example.com", 80, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            infos = socket.getaddrinfo(host, 80, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        assert socket.getaddrinfo is resolver
+        resolver.assert_not_called()
 
     assert infos[0][4][0] == "93.184.216.34"
+
+
+@pytest.mark.parametrize("host", ["other.example", b"other.example"])
+def test_pin_resolved_url_dns_preserves_other_host_lookups(host):
+    expected = [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.35", 443))]
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo", return_value=expected
+    ) as resolver:
+        with pin_resolved_url_dns("https://example.com/", ("93.184.216.34",)):
+            infos = socket.getaddrinfo(
+                host, 443, socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, socket.AI_CANONNAME
+            )
+        assert socket.getaddrinfo is resolver
+        resolver.assert_called_once_with(
+            host, 443, socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, socket.AI_CANONNAME
+        )
+    assert infos == expected
+
+
+@pytest.mark.asyncio
+async def test_pinned_dns_httpx_does_not_connect_to_rebound_loopback(monkeypatch):
+    public_ip = "93.184.216.34"
+    requests: list[bytes] = []
+    lookups: list[str | bytes] = []
+    connections: list[tuple[str, int]] = []
+
+    async def serve(reader, writer):
+        try:
+            request = await reader.readuntil(b"\r\n\r\n")
+            requests.append(request.split(b"\r\n", 1)[0])
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\n"
+                b"Connection: close\r\n\r\ninternal secret"
+            )
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    original_getaddrinfo = socket.getaddrinfo
+
+    def rebinding_resolver(host, port, family=0, type_=0, proto=0, flags=0):
+        if host in ("rebind.example", b"rebind.example"):
+            lookups.append(host)
+            ip = public_ip if len(lookups) == 1 else "127.0.0.1"
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port or 0))]
+        return original_getaddrinfo(host, port, family, type_, proto, flags)
+
+    loop = asyncio.get_running_loop()
+    original_create_connection = loop.create_connection
+
+    async def controlled_connection(protocol_factory, host, port, **kwargs):
+        connections.append((host, port))
+        # Exercise real HTTPX DNS and local sockets without connecting to the internet.
+        if host == public_ip:
+            raise OSError("Test stopped the connection to the validated public IP")
+        return await original_create_connection(protocol_factory, host, port, **kwargs)
+
+    monkeypatch.setattr("nanobot.security.network._allowed_networks", [])
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding_resolver)
+    monkeypatch.setattr(loop, "create_connection", controlled_connection)
+    async with server, httpx.AsyncClient(
+        transport=PinnedDNSAsyncTransport(), trust_env=False, timeout=3.0
+    ) as client:
+        response = None
+        try:
+            response = await client.get(f"http://rebind.example:{port}/secret")
+        except httpx.ConnectError:
+            pass
+
+    assert socket.getaddrinfo is rebinding_resolver
+    assert response is None, f"DNS pinning bypass: HTTP {response.status_code}: {response.text}"
+    assert connections == [(public_ip, port)]
+    assert requests == []
+    assert lookups == ["rebind.example"]
 
 
 def test_allows_normal_https():

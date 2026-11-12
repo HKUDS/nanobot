@@ -16,15 +16,15 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "DM을 보낼 수 있는 사용자",
+        "label": "허용 DM 사용자",
         "placeholder": "전화번호 또는 UUID"
       },
       "group_allowFrom": {
-        "label": "허용된 그룹",
+        "label": "허용 그룹",
         "placeholder": "그룹 ID"
       },
       "groupMessageBufferSize": {
-        "label": "그룹 상황 메시지"
+        "label": "컨텍스트 메시지 수"
       },
       "attachmentsDir": {
         "label": "첨부파일 디렉토리"
@@ -58,7 +58,7 @@
         }
       },
       "group_requireMention": {
-        "label": "그룹에서 멘션 필요",
+        "label": "그룹 멘션 필요",
         "choices": {
           "true": "켜기",
           "false": "끄기"

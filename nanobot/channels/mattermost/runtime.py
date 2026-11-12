@@ -11,11 +11,14 @@ from typing import Any, cast
 import httpx
 from pydantic import Field, model_validator
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config_base import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import PAIRING_CODE_META_KEY, format_pairing_reply, generate_code, is_approved
 from nanobot.utils.helpers import safe_filename, split_message
 
@@ -247,7 +250,7 @@ class MattermostChannel(BaseChannel):
 
         if not await self._is_allowed(sender_id, channel_id, channel_type):
             if is_dm and self.config.dm.enabled:
-                code = generate_code(self.name, str(sender_id))
+                code = generate_code(self.name, str(sender_id), on_change=self._pairing_changed)
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
@@ -275,7 +278,7 @@ class MattermostChannel(BaseChannel):
         session_key = f"mattermost:{channel_id}:{thread_ts}" if thread_ts else None
 
         try:
-            await self._add_reaction(channel_id, post_id, self.config.react_emoji)
+            await self._add_reaction(post_id, self.config.react_emoji)
         except Exception:
             self.logger.debug("add reaction failed")
 
@@ -492,9 +495,12 @@ class MattermostChannel(BaseChannel):
     # Send ---------------------------------------------------------------------
 
     async def send(self, msg: OutboundMessage) -> None:
-        if not self._http_client:
-            self.logger.warning("client not initialized")
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
+        if not self._http_client:
+            raise ChannelNotReadyError("Mattermost client not initialized")
 
         try:
             chat_id = msg.chat_id
@@ -524,14 +530,14 @@ class MattermostChannel(BaseChannel):
                         file_ids=(file_ids if i == 0 else None) or None,
                     )
 
-            if not meta.get("_progress") and meta.get("message_id"):
+            if not isinstance(msg.event, ProgressEvent) and meta.get("message_id"):
                 try:
                     await self._remove_reaction(meta["message_id"], self.config.react_emoji)
                 except Exception:
                     self.logger.debug("remove reaction failed")
                 if self.config.done_emoji:
                     try:
-                        await self._add_reaction(chat_id, meta["message_id"], self.config.done_emoji)
+                        await self._add_reaction(meta["message_id"], self.config.done_emoji)
                     except Exception:
                         self.logger.debug("done reaction failed")
 
@@ -556,9 +562,7 @@ class MattermostChannel(BaseChannel):
             return
 
         meta = metadata or {}
-        stream_id = cast(str, stream_id or meta.get("_stream_id") or chat_id)
-        stream_end = stream_end or bool(meta.get("_stream_end"))
-        resuming = resuming or bool(meta.get("_resuming"))
+        stream_id = stream_id or chat_id
 
         if stream_end:
             committed = self._stream_committed.get(stream_id, "")
@@ -575,7 +579,7 @@ class MattermostChannel(BaseChannel):
                     self._clear_stream_state(stream_id)
                 return
 
-            if final and not meta.get("_progress"):
+            if final:
                 mm_meta = (
                     cast(dict[str, Any], meta.get("mattermost", {}) or {})
                     if isinstance(meta.get("mattermost"), dict)
@@ -608,7 +612,7 @@ class MattermostChannel(BaseChannel):
                         self.logger.debug("remove reaction failed")
                 if first_post_id and self.config.done_emoji:
                     try:
-                        await self._add_reaction(chat_id, first_post_id, self.config.done_emoji)
+                        await self._add_reaction(first_post_id, self.config.done_emoji)
                     except Exception:
                         self.logger.debug("done reaction failed")
 
@@ -717,7 +721,7 @@ class MattermostChannel(BaseChannel):
             self.logger.warning("file download failed for {}: {}", file_id, e)
             return None
 
-    async def _add_reaction(self, channel_id: str, post_id: str, emoji: str) -> None:
+    async def _add_reaction(self, post_id: str, emoji: str) -> None:
         if not self._self_id or not emoji:
             return
         await self._api_post("/api/v4/reactions", {

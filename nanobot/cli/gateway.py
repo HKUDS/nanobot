@@ -26,6 +26,7 @@ from nanobot.gateway.service import (
     GatewayServiceResult,
     ServiceManagerKind,
 )
+from nanobot.utils.log_config import add_console_log_sink
 from nanobot.webui.build import BuildMode
 
 RuntimeConfigLoader = Callable[[str | None, str | None], Config]
@@ -66,18 +67,7 @@ def create_gateway_app(
         if not verbose:
             return
         logger.remove(log_handler_id)
-        logger.add(
-            sys.stderr,
-            format=(
-                "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                "<level>{level: <5}</level> | "
-                "<cyan>{extra[channel]}</cyan> | "
-                "<level>{message}</level>"
-            ),
-            level="DEBUG",
-            colorize=None,
-            filter=lambda record: record["extra"].setdefault("channel", "-") or True,
-        )
+        add_console_log_sink(sys.stderr, level="DEBUG")
 
     def instance_for_selectors(
         *,
@@ -161,6 +151,12 @@ def create_gateway_app(
     ) -> None:
         """Start the nanobot gateway."""
         if ctx.invoked_subcommand is not None:
+            if config is not None or workspace is not None:
+                ctx.fail(
+                    "--config and --workspace must follow a management subcommand that "
+                    "supports them. See "
+                    f"'nanobot gateway {ctx.invoked_subcommand} --help'."
+                )
             return
         if foreground and background:
             console.print("[red]Error: --foreground and --background cannot be used together.[/red]")
@@ -245,6 +241,7 @@ def create_gateway_app(
             run_gateway(
                 cfg,
                 port=port,
+                verbose=verbose,
                 webui_bundle_mode=interactive_build_mode(),
                 unconfigured_provider_error=unconfigured_provider_error,
                 gateway_instance=instance,

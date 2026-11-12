@@ -9,6 +9,7 @@ type ChannelFieldMessages = {
 export type ChannelMessages = {
   displayName?: string;
   setup: {
+    privacyNotice?: string;
     primaryAction?: string;
     docsLabel?: string;
     officialLabel?: string;

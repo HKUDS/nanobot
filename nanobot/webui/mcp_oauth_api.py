@@ -15,7 +15,9 @@ from urllib.parse import SplitResult, parse_qs, urlsplit, urlunsplit
 from nanobot.agent.tools.mcp import MCPConnection, connect_mcp_servers
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH, MCPOAuthHandlers
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import MCPServerConfig
+from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.security.network import validate_url_target
 from nanobot.webui.http_utils import is_loopback_host
 
@@ -43,6 +45,7 @@ class _McpOAuthFlow:
     flow_id: str
     name: str
     cfg: MCPServerConfig
+    network: NetworkConfig
     redirect_uri: str
     manual_callback: bool
     expires_at: float
@@ -100,9 +103,36 @@ def prepare_mcp_oauth_redirect_uri(redirect_uri: str) -> tuple[str, bool]:
 class McpOAuthManager:
     """Own short-lived browser flows while the gateway process is running."""
 
-    def __init__(self) -> None:
+    def __init__(self, admission: RuntimeAdmission) -> None:
+        self._admission = admission
         self._flows: dict[str, _McpOAuthFlow] = {}
         self._states: dict[str, str] = {}
+        self._tasks: set[asyncio.Task[bool]] = set()
+        self._cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._remove_pending_work: Callable[[], None] | None = None
+
+    async def close(self) -> None:
+        """Join authorization work after the owner has stopped request intake."""
+        tasks = tuple(self._tasks)
+        for task in tasks:
+            if not task.done() and not task.cancelling():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        if self._cleanup_tasks:
+            await asyncio.shield(asyncio.gather(*tuple(self._cleanup_tasks)))
+        self._flows.clear()
+        self._states.clear()
+        if self._remove_pending_work is not None:
+            self._remove_pending_work()
+            self._remove_pending_work = None
+
+    def _flow_finished(self, task: asyncio.Task[bool]) -> None:
+        self._tasks.discard(task)
+        # An expired flow no longer has a status consumer, but still owns its
+        # task until connection cleanup finishes. Observe any terminal error.
+        if not task.cancelled():
+            task.exception()
 
     async def start(
         self,
@@ -111,18 +141,26 @@ class McpOAuthManager:
         redirect_uri: str,
         *,
         reload_mcp: McpReload,
+        network: NetworkConfig | None = None,
         reset_credentials: bool = False,
     ) -> dict[str, Any]:
+        self._admission.check()
         self._prune()
         redirect_uri, manual_callback = prepare_mcp_oauth_redirect_uri(redirect_uri)
         await self._cancel_name(name)
+        self._admission.check()
+        if self._remove_pending_work is None:
+            self._remove_pending_work = self._admission.register_pending_work(
+                lambda: bool(self._tasks or self._cleanup_tasks),
+            )
 
         loop = asyncio.get_running_loop()
         now = time.monotonic()
         flow = _McpOAuthFlow(
             flow_id=secrets.token_urlsafe(24),
             name=name,
-            cfg=cfg,
+            cfg=cfg.model_copy(deep=True),
+            network=(network or NetworkConfig()).model_copy(deep=True),
             redirect_uri=redirect_uri,
             manual_callback=manual_callback,
             expires_at=now + _FLOW_TTL_S,
@@ -139,6 +177,8 @@ class McpOAuthManager:
             self._connect_and_reload(flow, handlers, reload_mcp),
             name=f"mcp-oauth:{name}",
         )
+        self._tasks.add(flow.task)
+        flow.task.add_done_callback(self._flow_finished)
 
         ready_waiter = asyncio.create_task(flow.authorization_ready.wait())
         try:
@@ -287,11 +327,21 @@ class McpOAuthManager:
             flow.error = "MCP authorization timed out."
             raise _OAuthCallbackError(flow.error) from exc
 
-    @staticmethod
-    async def _close_connections(connections: dict[str, MCPConnection]) -> None:
-        for connection in connections.values():
-            with suppress(Exception):
-                await connection.aclose()
+    async def _close_connections(self, connections: dict[str, MCPConnection]) -> None:
+        if not connections:
+            return
+
+        async def close_all() -> None:
+            for connection in connections.values():
+                with suppress(Exception):
+                    await connection.aclose()
+
+        # Cancelling/expiring the browser flow must not interrupt a transport
+        # close already in progress. Keep ownership until it actually finishes.
+        cleanup = asyncio.create_task(close_all(), name="mcp-oauth-cleanup")
+        self._cleanup_tasks.add(cleanup)
+        cleanup.add_done_callback(self._cleanup_tasks.discard)
+        await asyncio.shield(cleanup)
 
     async def _connect(
         self, flow: _McpOAuthFlow, handlers: MCPOAuthHandlers
@@ -302,6 +352,7 @@ class McpOAuthManager:
                 {flow.name: flow.cfg},
                 ToolRegistry(),
                 oauth_handlers={flow.name: handlers},
+                network=flow.network,
             )
             if flow.name not in connections:
                 await self._close_connections(connections)
@@ -406,7 +457,8 @@ class McpOAuthManager:
             self._states.pop(flow.state, None)
         task = flow.task
         if task is not None and not task.done():
-            task.cancel()
+            if not task.cancelling():
+                task.cancel()
             with suppress(BaseException):
                 await task
 
@@ -417,7 +469,7 @@ class McpOAuthManager:
                 continue
             if flow.state:
                 self._states.pop(flow.state, None)
-            if flow.task is not None and not flow.task.done():
+            if flow.task is not None and not flow.task.done() and not flow.task.cancelling():
                 flow.task.cancel()
             callback_result = flow.callback_result
             if callback_result is not None and not callback_result.done():

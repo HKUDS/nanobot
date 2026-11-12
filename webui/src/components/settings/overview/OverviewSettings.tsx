@@ -1,44 +1,39 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
 import {
-  ArrowUpCircle,
-  Bot,
-  BookOpen,
-  Github,
-  MessageCircle,
-  Check,
+  ModelsIcon,
+  WebSearchIcon,
+  ImageGenerationIcon,
+  VoiceIcon,
+} from "@/components/icons/product-icons";
+import { useContext, useEffect, type Dispatch, type SetStateAction } from "react";
+import {
   ChevronRight,
-  ExternalLink,
-  Globe2,
-  ImageIcon,
-  Loader2,
-  Mic,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { HostNavigationContext } from "@/components/remote/HostSwitcher";
+import { StarLink } from "@/components/StarPrompt";
+import { AboutSettingsView } from "./AboutSettingsView";
+import { AppearanceSettingsView } from "./AppearanceSettingsView";
+import { VersionCheckRowView, type VersionInfoProps } from "./VersionCheckRowView";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import type { SettingsSectionKey } from "@/components/settings/contracts";
 import { settingsProviderConfigured } from "@/components/settings/shared/ModelControls";
 import {
   SettingsGroup,
-  SettingsRow,
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
 import { TokenUsageCard } from "@/components/settings/TokenUsageCard";
-import { ToggleButton } from "@/components/settings/ToggleButton";
-import { Button } from "@/components/ui/button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { checkVersion } from "@/lib/api";
+import type { ThemePreference } from "@/hooks/useTheme";
 import type {
-  FileEditDisplayMode,
-  LocalActivityMode,
   LocalPreferences,
 } from "@/lib/local-preferences";
 import { providerBrand, providerDisplayLabel } from "@/lib/provider-brand";
 import type { SettingsPayload } from "@/lib/types";
-import { useClient } from "@/providers/ClientProvider";
+import { cn } from "@/lib/utils";
+import { useUpdateFlow } from "@/providers/UpdateFlowProvider";
+import { useVersionCheck } from "@/providers/VersionCheckProvider";
 
 export function OverviewSettings({
   settings,
@@ -64,9 +59,9 @@ export function OverviewSettings({
     ? settings.agent.model
     : tx("settings.values.notConfigured", "Not configured");
   const activeModelCaption = activeProviderConfigured
-    ? [activeProvider, activePreset].filter(Boolean).join(" · ")
+    ? [activeProvider, activePreset].filter(Boolean).join(" ")
     : activeProviderLabel || settings.agent.model
-      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" · ")
+      ? [activeProviderLabel, settings.agent.model].filter(Boolean).join(" ")
       : tx("settings.byok.noConfiguredProviders", "No configured providers");
   const webStatus = settings.web.enable
     ? tx("settings.values.enabled", "Enabled")
@@ -88,7 +83,7 @@ export function OverviewSettings({
         <SettingsSectionTitle>{tx("settings.sections.ai", "AI")}</SettingsSectionTitle>
         <SettingsGroup>
           <OverviewListRow
-            icon={Bot}
+            icon={ModelsIcon}
             valueLogoProvider={activeProvider}
             title={tx("settings.overview.model", "Current model")}
             value={activeModelValue}
@@ -103,7 +98,7 @@ export function OverviewSettings({
         <SettingsSectionTitle>{tx("settings.sections.capabilities", "Capabilities")}</SettingsSectionTitle>
         <SettingsGroup>
           <OverviewListRow
-            icon={Globe2}
+            icon={WebSearchIcon}
             valueLogoProvider={settings.web_search.provider}
             title={tx("settings.overview.webSearch", "Web search")}
             value={webStatus}
@@ -111,7 +106,7 @@ export function OverviewSettings({
             onClick={() => onSelectSection("browser")}
           />
           <OverviewListRow
-            icon={ImageIcon}
+            icon={ImageGenerationIcon}
             valueLogoProvider={settings.image_generation.provider}
             title={tx("settings.overview.imageGeneration", "Image generation")}
             value={imageStatus}
@@ -119,7 +114,7 @@ export function OverviewSettings({
             onClick={() => onSelectSection("image")}
           />
           <OverviewListRow
-            icon={Mic}
+            icon={VoiceIcon}
             valueLogoProvider={transcription.provider}
             title={tx("settings.overview.voiceInput", "Voice input")}
             value={voiceStatus}
@@ -133,256 +128,59 @@ export function OverviewSettings({
   );
 }
 
-export function AboutSettings({ currentVersion }: { currentVersion?: string }) {
-  const { t } = useTranslation();
-  const links = [
-    { key: "documentation", icon: BookOpen, href: "https://nanobot.wiki/" },
-    { key: "sourceCode", icon: Github, href: "https://github.com/HKUDS/nanobot" },
-    { key: "reportIssue", icon: MessageCircle, href: "https://github.com/HKUDS/nanobot/issues" },
-  ];
-  return (
-    <div className="settings-stack">
-      <div className="flex flex-col items-center gap-4 py-6 text-center">
-        <img src="/brand/nanobot_mark.svg" alt="" className="h-16 w-16 select-none" draggable={false} />
-        <h1><img src="/brand/nanobot_wordmark.svg" alt="nanobot" className="h-auto w-40 select-none dark:brightness-150" draggable={false} /></h1>
-        <VersionCheckRow currentVersion={currentVersion} />
-      </div>
-      <SettingsGroup>
-        {links.map(({ key, icon: Icon, href }) => (
-          <a key={key} href={href} target="_blank" rel="noopener noreferrer"
-            className="settings-list-row flex select-none items-center gap-3 text-[14px] settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
-            <span className="flex-1">{t(`settings.about.${key}`)}</span>
-            <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-          </a>
-        ))}
-      </SettingsGroup>
-    </div>
-  );
+export function AboutSettings({ settings, onRequestUpdate: requestUpdate }: { settings: SettingsPayload; onRequestUpdate?: () => void }) {
+  const hostPicker = useContext(HostNavigationContext);
+  const flow = useUpdateFlow();
+  const onRequestUpdate = requestUpdate ?? flow.open;
+  const currentVersion = settings.version?.current;
+  const currentCommit = settings.version?.commit;
+  const environment = settings.environment;
+  const reportIssueUrl = new URL("https://github.com/HKUDS/nanobot/issues/new");
+  reportIssueUrl.searchParams.set("template", "bug_report.yml");
+  const reportedVersion = [currentVersion, currentCommit && `(commit ${currentCommit})`]
+    .filter(Boolean).join(" ");
+  if (reportedVersion) reportIssueUrl.searchParams.set("version", reportedVersion);
+  reportIssueUrl.searchParams.set("channel", "WebSocket");
+  if (environment) {
+    reportIssueUrl.searchParams.set("python_version", environment.python_version);
+    const osName = environment.os === "Darwin" ? "macOS" : environment.os;
+    const osVersion = [osName, environment.os_version].filter(Boolean).join(" ");
+    reportIssueUrl.searchParams.set("os", environment.architecture
+      ? `${osVersion} (${environment.architecture})` : osVersion);
+  }
+  if (settings.agent.model) reportIssueUrl.searchParams.set("model", settings.agent.model);
+  const provider = settings.agent.resolved_provider || settings.agent.provider;
+  if (provider) reportIssueUrl.searchParams.set("llm_provider", provider);
+  reportIssueUrl.searchParams.set("browser", navigator.userAgent);
+  reportIssueUrl.searchParams.set("connection", hostPicker?.kind === "embedded"
+    ? "Remote host" : hostPicker ? "Local host" : "Direct WebUI");
+  return <AboutSettingsView reportIssueUrl={reportIssueUrl.href}
+    versionCheck={<VersionCheckRow currentVersion={currentVersion} currentCommit={currentCommit}
+      onRequestUpdate={onRequestUpdate} hasPendingUpdate={flow.pending} />}
+    starLink={<StarLink />} />;
 }
 
-function VersionCheckRow({ currentVersion }: { currentVersion?: string }) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const { token } = useClient();
-  const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<
-    | { type: "up-to-date" }
-    | { type: "update"; latestVersion: string; pypiUrl?: string }
-    | { type: "error"; message: string }
-    | null
-  >(null);
+function VersionCheckRow({ currentVersion, currentCommit, onRequestUpdate, hasPendingUpdate }: VersionInfoProps) {
+  const { checking, result, check, releaseStatus, canChangeChannel,
+    changingChannel, channelError, changeChannel, installationMethod } = useVersionCheck();
+  useEffect(() => { void check(); }, [check]);
 
-  const handleCheck = async () => {
-    setChecking(true);
-    setResult(null);
-    try {
-      const res = await checkVersion(token);
-      if (res.updateAvailable) {
-        setResult({
-          type: "update",
-          latestVersion: res.updateAvailable.latestVersion,
-          pypiUrl: res.updateAvailable.pypiUrl,
-        });
-      } else {
-        setResult({ type: "up-to-date" });
-      }
-    } catch (err) {
-      setResult({ type: "error", message: (err as Error).message });
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col items-center gap-4">
-      <div className="min-w-0">
-        <div className="sr-only">
-          {tx("settings.about.version", "Version")}
-        </div>
-        <div className="mt-0.5 text-[12px] leading-5 text-muted-foreground">
-          {currentVersion ? `v${currentVersion}` : "nanobot"}
-        </div>
-      </div>
-      <div className="flex shrink-0 flex-col items-center gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handleCheck()}
-          disabled={checking}
-          className="rounded-full"
-        >
-          {checking ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
-            <ArrowUpCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          )}
-          {checking
-            ? tx("settings.about.checking", "Checking...")
-            : tx("settings.about.checkForUpdates", "Check for updates")}
-        </Button>
-        {result?.type === "up-to-date" ? (
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-emerald-600 dark:text-emerald-300">
-            <Check className="h-3 w-3" aria-hidden />
-            {tx("settings.about.upToDate", "You're up to date")}
-          </span>
-        ) : null}
-        {result?.type === "update" ? (
-          <span className="inline-flex items-center gap-1.5 text-[12px] text-blue-600 dark:text-blue-300">
-            <ArrowUpCircle className="h-3 w-3" aria-hidden />
-            {t("settings.about.updateAvailable", {
-              defaultValue: "Update available v{{version}}",
-              version: result.latestVersion,
-            })}
-            {result.pypiUrl ? (
-              <a
-                href={result.pypiUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-0.5 underline-offset-2 hover:underline"
-              >
-                PyPI
-                <ExternalLink className="h-2.5 w-2.5" aria-hidden />
-              </a>
-            ) : null}
-          </span>
-        ) : null}
-        {result?.type === "error" ? (
-          <span className="text-[12px] text-destructive">{result.message}</span>
-        ) : null}
-      </div>
-    </div>
-  );
+  return <VersionCheckRowView currentVersion={currentVersion} currentCommit={currentCommit}
+    checking={checking} result={result} onCheck={() => void check()}
+    onRequestUpdate={onRequestUpdate} hasPendingUpdate={hasPendingUpdate}
+    installationMethod={installationMethod}
+    releaseStatus={releaseStatus} canChangeChannel={canChangeChannel} changingChannel={changingChannel}
+    channelError={channelError} onChangeChannel={changeChannel} />;
 }
 
-export function AppearanceSettings({
-  theme,
-  onToggleTheme,
-  localPrefs,
-  onChangeLocalPrefs,
-}: {
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
+export function AppearanceSettings({ themePreference, onChangeTheme, localPrefs, onChangeLocalPrefs }: {
+  themePreference: ThemePreference;
+  onChangeTheme: (value: ThemePreference) => void;
   localPrefs: LocalPreferences;
   onChangeLocalPrefs: Dispatch<SetStateAction<LocalPreferences>>;
 }) {
-  const { t } = useTranslation();
-  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  return (
-    <div className="settings-stack">
-      <section>
-        <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <SettingsRow title={t("settings.rows.theme")}>
-            <SegmentedControl
-              value={theme}
-              ariaLabel={t("settings.rows.theme")}
-              className="bg-muted p-0.5"
-              itemClassName="px-3"
-              options={[
-                { value: "light", label: t("settings.values.light") },
-                { value: "dark", label: t("settings.values.dark") },
-              ]}
-              onChange={(nextTheme) => {
-                if (nextTheme !== theme) onToggleTheme();
-              }}
-            />
-          </SettingsRow>
-
-          <SettingsRow title={t("settings.rows.language")}>
-            <LanguageSwitcher />
-          </SettingsRow>
-        </SettingsGroup>
-      </section>
-
-      <section>
-        <SettingsSectionTitle>{tx("settings.sections.localPreferences", "Local preferences")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.activityMode", "Activity detail")}>
-            <SegmentedControl
-              value={localPrefs.activityMode}
-              options={[
-                { value: "auto", label: tx("settings.values.auto", "Auto") },
-                { value: "expanded", label: tx("settings.values.expanded", "Expanded") },
-              ]}
-              onChange={(activityMode) =>
-                onChangeLocalPrefs((prev) => ({ ...prev, activityMode: activityMode as LocalActivityMode }))
-              }
-            />
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.fileEditDisplay", "File edit display")}>
-            <SegmentedControl
-              value={localPrefs.fileEditDisplayMode}
-              options={[
-                { value: "summary", label: tx("settings.values.summary", "Summary") },
-                { value: "diff", label: tx("settings.values.diff", "Diff") },
-                { value: "collapsed_diff", label: tx("settings.values.collapsedDiff", "Collapsed diff") },
-              ]}
-              onChange={(fileEditDisplayMode) =>
-                onChangeLocalPrefs((prev) => ({
-                  ...prev,
-                  fileEditDisplayMode: fileEditDisplayMode as FileEditDisplayMode,
-                }))
-              }
-            />
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.codeWrap", "Code wrapping")}>
-            <ToggleButton
-              checked={localPrefs.codeWrap}
-              onChange={(codeWrap) => onChangeLocalPrefs((prev) => ({ ...prev, codeWrap }))}
-              ariaLabel={tx("settings.rows.codeWrap", "Code wrapping")}
-              label={localPrefs.codeWrap ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title={tx("settings.rows.brandLogos", "Brand logos")}
-            description={tx(
-              "settings.legal.thirdPartyBrands",
-              "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.",
-            )}
-          >
-            <ToggleButton
-              checked={localPrefs.brandLogos}
-              onChange={(brandLogos) => onChangeLocalPrefs((prev) => ({ ...prev, brandLogos }))}
-              ariaLabel={tx("settings.rows.brandLogos", "Brand logos")}
-              label={localPrefs.brandLogos ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-          <SettingsRow
-            title={tx("settings.rows.browserNotifications", "Task notifications")}
-            description={tx(
-              "settings.help.browserNotifications",
-              "Notify only when this page is in the background. Off by default.",
-            )}
-          >
-            <ToggleButton
-              checked={localPrefs.browserNotifications}
-              onChange={(enabled) => {
-                if (!enabled) {
-                  onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: false }));
-                  return;
-                }
-                if (typeof Notification === "undefined") return;
-                if (Notification.permission === "granted") {
-                  onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: true }));
-                  return;
-                }
-                void Notification.requestPermission().then((permission) => {
-                  if (permission === "granted") {
-                    onChangeLocalPrefs((prev) => ({ ...prev, browserNotifications: true }));
-                  }
-                });
-              }}
-              ariaLabel={tx("settings.rows.browserNotifications", "Task notifications")}
-              label={localPrefs.browserNotifications
-                ? tx("settings.values.on", "On")
-                : tx("settings.values.off", "Off")}
-            />
-          </SettingsRow>
-        </SettingsGroup>
-      </section>
-    </div>
-  );
+  return <AppearanceSettingsView themePreference={themePreference} onChangeTheme={onChangeTheme}
+    localPrefs={localPrefs} onChangeLocalPrefs={onChangeLocalPrefs} />;
 }
 
 function OverviewRowIcon({
@@ -391,7 +189,7 @@ function OverviewRowIcon({
   icon: LucideIcon;
 }) {
   return (
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 transition-colors group-hover:bg-muted/80 dark:bg-muted/70">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-control bg-muted text-foreground/82 transition-colors dark:bg-muted/70">
       <Icon className="h-4 w-4" aria-hidden />
     </span>
   );
@@ -405,7 +203,8 @@ function OverviewValueLogo({
   showBrandLogos: boolean;
 }) {
   const brand = provider ? providerBrand(provider) : null;
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const { logoUrl, logoLoaded, onLogoError, onLogoLoad } = useLogoFallback(brand?.logoUrls);
+  const isLogoTile = brand?.logoLayout === "tile" && logoUrl === brand.logoUrl;
 
   if (!provider || !showBrandLogos || !brand) return null;
 
@@ -413,15 +212,33 @@ function OverviewValueLogo({
     return (
       <span
         data-testid={`overview-logo-${provider}`}
-        className="grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md border border-border/35 bg-background"
+        className={cn(
+          "grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-md",
+          logoLoaded ? (isLogoTile ? "bg-transparent" : "bg-white") : "bg-muted",
+        )}
         aria-hidden
       >
+        <span
+          className={cn(
+            "col-start-1 row-start-1 grid h-full w-full place-items-center rounded-md text-[7.5px] font-semibold text-white",
+            logoLoaded ? "opacity-0" : "opacity-100",
+          )}
+          style={{ backgroundColor: brand.color }}
+        >
+          {brand.initials}
+        </span>
         <img
           src={logoUrl}
           alt=""
           decoding="async"
           loading="lazy"
-          className="h-3.5 w-3.5 object-contain"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          className={cn(
+            "col-start-1 row-start-1 object-contain",
+            isLogoTile ? "h-5 w-5" : "h-3.5 w-3.5",
+            logoLoaded ? "opacity-100" : "opacity-0",
+          )}
           onLoad={onLogoLoad}
           onError={onLogoError}
         />

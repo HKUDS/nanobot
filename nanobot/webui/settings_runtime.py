@@ -20,6 +20,7 @@ RUNTIME_CONFIG_PATHS = (
     "agents.defaults.timezone",
     "agents.defaults.timezone_mode",
     "agents.defaults.unified_session",
+    "agents.defaults.session_ttl_minutes",
     "agents.defaults.max_tool_iterations",
     "agents.defaults.max_concurrent_subagents",
     "agents.defaults.max_tool_result_chars",
@@ -51,7 +52,8 @@ RUNTIME_CONFIG_PATHS = (
     "tools.max_session_messages_per_minute",
     "tools.webui_allow_remote_package_install",
     "tools.web.enable",
-    "tools.web.proxy",
+    "network.proxy",
+    "tools.web.use_proxy",
     "tools.web.user_agent",
     "tools.image_generation.save_dir",
     "api.host",
@@ -60,6 +62,9 @@ RUNTIME_CONFIG_PATHS = (
 
 
 def _parent(config: Config, path: str) -> tuple[BaseModel, str]:
+    # Keep the existing WebUI editor on the canonical hard-runtime field.
+    if path == "tools.exec.timeout":
+        path = "tools.exec.max_runtime"
     parent: BaseModel = config
     *parts, leaf = path.split(".")
     for part in parts:
@@ -128,6 +133,12 @@ def update_runtime_config(
         raise WebUISettingsError("gateway.port: must be at most 65535")
     if "api.timeout" in values and validated.api.timeout > 3600:
         raise WebUISettingsError("api.timeout: must be at most 3600 seconds")
+    if "tools.exec.timeout" in values:
+        limit = validated.tools.exec.max_runtime_limit
+        if validated.tools.exec.max_runtime > limit:
+            raise WebUISettingsError(
+                f"tools.exec.timeout: enter 1–{limit} seconds, or 0 for no time limit"
+            )
     for path in ("gateway.host", "api.host", "tools.image_generation.save_dir"):
         if path in values:
             parent, leaf = _parent(validated, path)
@@ -157,12 +168,18 @@ def update_runtime_config(
                     re.compile(pattern)
                 except re.error:
                     raise WebUISettingsError(f"{path}: invalid regular expression") from None
+    if values.get("tools.web.use_proxy") is True:
+        try:
+            validated.network.resolve_proxy(True)
+        except ValueError as exc:
+            raise WebUISettingsError(str(exc)) from None
     before = runtime_config_payload(config)
     after = runtime_config_payload(validated)
     if before == after:
         return False
     config.agents = validated.agents
     config.tools = validated.tools
+    config.network = validated.network
     config.gateway = validated.gateway
     config.api = validated.api
     return True

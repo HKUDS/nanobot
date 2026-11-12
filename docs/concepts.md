@@ -10,14 +10,14 @@ nanobot has one small core loop and several ways to enter it:
 
 | Part | What it does |
 |---|---|
-| Agent loop | Builds context, selects the session, calls the provider, runs tools, and publishes replies |
+| Agent | Takes an incoming message, chooses the conversation and model, uses enabled tools when needed, and prepares a reply |
 | Providers | LLM backends such as OpenRouter, Anthropic, OpenAI, Bedrock, Ollama, vLLM, and other OpenAI-compatible APIs |
 | Channels | User-facing transports such as CLI, WebUI/WebSocket, Telegram, Discord, Slack, Feishu, WeChat, Email, Mattermost, and others |
 | Tools | Capabilities the model may call, including files, shell, web search/fetch, MCP, cron, image generation, and subagents |
 | Memory | Workspace files and session history that keep useful context across turns |
 | Gateway | Long-running process that connects enabled channels and serves the health endpoint |
 
-The simplest path is `nanobot agent -m "Hello!"`: one inbound message goes through the agent loop and prints the reply in your terminal. The long-running path is `nanobot gateway`: channels receive messages from chat apps or the WebUI, publish them to the same agent loop, and send replies back to the originating channel.
+To test nanobot once, run `nanobot agent -m "Hello!"`; it prints a reply in your terminal. To keep nanobot running, start `nanobot gateway`. It receives messages from enabled chat apps or the WebUI and sends replies back to the same conversation.
 
 ## Config vs Workspace
 
@@ -41,9 +41,7 @@ The config file controls what nanobot may use. The workspace is where nanobot ke
 
 ### Agent Workspace and Project Workspace
 
-The configured workspace is the **agent workspace**. A WebUI chat can also select
-a different **project workspace** for repository-specific work without moving the
-agent's identity or durable state.
+The configured workspace is the **agent workspace**. A WebUI chat can also select a different **project workspace** for repository-specific work without moving the agent's identity or durable state.
 
 | Resource | Owner when a project is selected |
 |---|---|
@@ -52,9 +50,7 @@ agent's identity or durable state.
 | Memory and custom skills | `memory/` and `skills/` from the agent workspace |
 | Relative file paths and shell working directory | The selected project workspace |
 
-When no separate project is selected, one directory normally serves both roles.
-Selecting a project changes the working context for that chat; it does not create
-a second agent or relocate the configured agent workspace.
+When no separate project is selected, one directory normally serves both roles. Selecting a project changes the working context for that chat; it does not create a second agent or relocate the configured agent workspace.
 
 ## Config Format
 
@@ -66,11 +62,10 @@ Most examples are partial snippets. Merge them into the existing file created by
 
 A normal turn follows this flow:
 
-1. A channel receives a user message and publishes it to the message bus.
-2. The agent loop chooses a session key and builds context from the effective project workspace, agent-owned profile/skills/memory, recent messages, channel metadata, and runtime settings.
-3. The provider receives the model request.
-4. If the model asks for tools, the runner executes them and feeds results back to the model.
-5. The final reply is saved to the session and sent back through the channel.
+1. The CLI, WebUI, or a connected chat app receives your message.
+2. nanobot uses the conversation's history and the files available to that chat to prepare the request.
+3. Your selected AI service generates a response. If it needs an enabled tool, nanobot runs that tool and returns the result to the model.
+4. nanobot saves the reply in the conversation and shows or sends it through the same app or channel.
 
 That flow is the same whether the message starts in the CLI, WebUI, Telegram, Discord, or another channel.
 
@@ -88,6 +83,8 @@ The WebUI launcher is the normal browser entry point. Underneath, the gateway ke
 
 ## Provider and Model Selection
 
+Choose and configure the primary model in **Settings → Models**, then select its preset in the chat composer. The config-file example below is an alternative for deployment-managed settings.
+
 The active model should normally come from a named `modelPresets` entry selected by `agents.defaults.modelPreset`. Direct `agents.defaults.provider` and `agents.defaults.model` still form the implicit `default` preset for older or minimal configs. The active provider is resolved in this order:
 
 1. If the active preset provider or implicit default provider is not `"auto"`, nanobot uses that provider.
@@ -95,6 +92,9 @@ The active model should normally come from a named `modelPresets` entry selected
 3. OAuth providers such as OpenAI Codex and GitHub Copilot require explicit login and explicit provider/model selection inside the active preset.
 
 Pin the provider inside the preset when setting up for the first time. It is easier to debug:
+
+<details>
+<summary>Manual configuration</summary>
 
 ```json
 {
@@ -112,6 +112,8 @@ Pin the provider inside the preset when setting up for the first time. It is eas
 }
 ```
 
+</details>
+
 See [`providers.md`](./providers.md) for practical examples and [`configuration.md#providers`](./configuration.md#providers) for the full provider reference.
 
 ## Channels and Sessions
@@ -126,24 +128,18 @@ nanobot uses two related stores:
 
 | Store | Location | Purpose |
 |---|---|---|
-| Sessions | `<config-dir>/sessions/<workspace-id>/*.jsonl` | Recent conversation turns replayed into context |
+| Sessions | `<config-dir>/sessions/<workspace-id>/sessions.sqlite3` | Recent conversation turns replayed into context |
 | Memory | `<workspace>/memory/MEMORY.md` and `<workspace>/memory/history.jsonl` | Long-term facts and consolidated history |
 
 Dream is a periodic consolidation job. It reads accumulated history and updates workspace memory so useful context can survive beyond short session replay.
 
-The configured workspace contains a `.nanobot/workspace-id` file. It contains only an
-opaque random identifier—never conversation content or credentials. Keep it with workspace
-backups: it lets nanobot find the same external session namespace after the workspace is
-renamed, moved, or restored. A live copy opened alongside the original receives a new ID so
-the two workspaces do not share conversations accidentally.
+The configured workspace contains a `.nanobot/workspace-id` file. It contains only an opaque random identifier—never conversation content or credentials. Keep it with workspace backups: it lets nanobot find the same external session namespace after the workspace is renamed, moved, or restored. A live copy opened alongside the original receives a new ID so the two workspaces do not share conversations accidentally.
 
 See [`memory.md`](./memory.md) for the detailed design.
 
 ## Apps and Agent Plugins
 
-Agent Plugins are nanobot's common package and activation boundary for
-installable capabilities. They organize existing extension types instead of
-replacing them:
+Agent Plugins are installable packages that help you add and manage capabilities in nanobot. A package can include one or more of these:
 
 | Part | Role |
 |---|---|
@@ -153,15 +149,11 @@ replacing them:
 | CLI App | Locally managed executable whose adapter is packaged and activated like a plugin |
 | Apps | WebUI surface for reviewing and managing these capabilities |
 
-Native providers, channels, built-in tools, standalone workspace skills, and
-directly configured MCP servers keep their existing extension paths. See
-[`webui.md#apps`](./webui.md#apps) for the user-facing flow and
-[`configuration.md#agent-plugins-v1`](./configuration.md#agent-plugins-v1) for
-the package contract.
+Native providers, channels, built-in tools, standalone workspace skills, and directly configured MCP servers keep their existing extension paths. See [`webui.md#apps`](./webui.md#apps) for the user-facing flow and [`configuration.md#agent-plugins-v1`](./configuration.md#agent-plugins-v1) for the package contract.
 
 ## Tools and Safety
 
-Tools are discovered automatically from built-in modules and plugin entry points. Common tool groups include:
+nanobot can use built-in tools and tools enabled through Apps. Common tool groups include:
 
 - file read/write/edit and patching;
 - shell execution with configurable sandboxing;
@@ -173,31 +165,32 @@ Tools are discovered automatically from built-in modules and plugin entry points
 
 Security-sensitive controls live in [`configuration.md#security`](./configuration.md#security). For production or shared chat apps, also configure channel access controls such as `allowFrom`, pairing, or WebSocket tokens.
 
+## Subagents
+
+Nanobot can delegate parts of a request to subagents while remaining responsible for the final answer. In the conversation that started the work, you can ask it to check progress, send follow-up instructions, wait for results, or cancel a task. Cancelling one task leaves the others running. A delivered instruction means the subagent received it, not that it has acted on it yet.
+
+Background tasks return their results to the conversation that started them. Single-turn CLI and SDK calls wait for results when background delivery is unavailable. Tasks that reach their iteration limit are marked incomplete; cancelled, failed, and incomplete tasks retain available partial results.
+
+Use `/stop` to stop the current session and its subagents. Other sessions are unaffected. Some operations may take time to stop, and cancellation does not undo file changes or other actions already taken.
+
+Subagents belong to their original conversation. They do not appear as separate topics or in general conversation searches. Deleting the conversation stops its subagents and removes their saved history; forking it does not copy them.
+
+Saved task history and results remain available after a gateway restart. Unfinished tasks are marked interrupted, with saved partial results when available. Nanobot does not automatically resume them or resend completion notifications; ask it to start a new task to continue the work.
+
+See [Delegated work in the WebUI](./webui.md#delegated-work) for progress and task details. WebUI temporary chats do not support subagents. SDK calls with `ephemeral=True` wait for delegated results without saving the temporary conversation or its subagent history.
+
 ## Background Jobs
 
-When `nanobot gateway` starts, it runs workspace-scoped automations and
-registers system jobs:
+When `nanobot gateway` starts, it runs workspace-scoped automations and registers system jobs:
 
 - `dream`, when `agents.defaults.dream.enabled` is true;
 - `heartbeat`, when `gateway.heartbeat.enabled` is true.
 
 Heartbeat reads `<workspace>/HEARTBEAT.md`. If the file has tasks under `## Active Tasks`, nanobot executes them and sends only useful/actionable results to the most recently active chat target. Routine "nothing changed" results are suppressed.
 
-User-created reminders use the same cron service but are not the same as the
-protected heartbeat system job. They run as scheduled turns in their origin
-chat/session and normally deliver the result back to that channel.
+User-created reminders use the same cron service but are not the same as the protected heartbeat system job. They run as scheduled turns in their origin chat/session and normally deliver the result back to that channel.
 
-Local triggers are also session-bound, but they do not have their own
-schedule. Create one from the target chat with `/trigger <name>`, then call
-`nanobot trigger <id> "<message>"` when a local script or external service wants
-nanobot to respond in that session. Webhook servers, third-party auth, and
-event-to-message formatting stay outside nanobot. Trigger deliveries are stored
-in the workspace until the linked agent turn finishes successfully. If the
-target session is busy, the trigger waits until that session is idle instead of
-being injected into the active turn. The message is recorded as an automation
-turn in that session. Delivery is at-least-once, so external systems should
-tolerate repeated trigger messages; a delivery that reaches the agent but fails
-is marked failed rather than retried forever.
+Local triggers are also session-bound, but they do not have their own schedule. Create one from the target chat with `/trigger <name>`, then call `nanobot trigger <id> "<message>"` when a local script or external service wants nanobot to respond in that session. Webhook servers, third-party auth, and event-to-message formatting stay outside nanobot. Trigger deliveries are stored in the workspace until the linked agent turn finishes successfully. If the target session is busy, the trigger waits until that session is idle instead of being injected into the active turn. The message is recorded as an automation turn in that session. Delivery is at-least-once, so external systems should tolerate repeated trigger messages; a delivery that reaches the agent but fails is marked failed rather than retried forever.
 
 ## Where to Go Next
 

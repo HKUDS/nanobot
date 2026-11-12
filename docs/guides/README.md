@@ -2,6 +2,8 @@
 
 Start with [Install and Quick Start](../quick-start.md) and get one reply before using a guide below. Each guide targets one outcome; linked reference pages hold the complete option tables and edge cases.
 
+You can ask nanobot to guide your next task using the built-in `nanobot-document` skill, or read a guide yourself. See [Continue with nanobot](../quick-start.md#continue-with-nanobot) for availability and examples. Each task guide describes its starting requirements, setup steps, and how to check the result; use the parts that match your current instance.
+
 ## Start and Use
 
 | Goal | Guide |
@@ -14,7 +16,7 @@ Start with [Install and Quick Start](../quick-start.md) and get one reply before
 
 ## Connect a Chat App
 
-Use **Settings → Channels** in the WebUI for guided setup. These guides explain the account, bot, token, permission, and test-message steps on each platform.
+Use **Channels** in the WebUI for guided setup. These guides explain the account, bot, token, permission, and test-message steps on each platform.
 
 | Goal | Guide |
 |---|---|
@@ -24,10 +26,12 @@ Use **Settings → Channels** in the WebUI for guided setup. These guides explai
 | Connect Slack | [Slack AI agent](./slack-ai-agent.md) |
 | Connect Feishu | [Feishu AI agent](./feishu-ai-agent.md) |
 | Connect WhatsApp | [WhatsApp AI agent](./whatsapp-ai-agent.md) |
+| Connect through WhatsApp Agent Platform | [WhatsApp Agent Platform](./whatsapp-agent-platform.md) |
 | Connect WeChat | [WeChat AI agent](./wechat-ai-agent.md) |
 | Connect QQ | [QQ AI agent](./qq-ai-agent.md) |
 | Connect Email | [Email AI agent](./email-ai-agent.md) |
 | Connect Mattermost | [Mattermost AI agent](./mattermost-ai-agent.md) |
+| Connect Linear | [Native Linear agent](./linear-agent.md) |
 
 ## Integrate from Code
 

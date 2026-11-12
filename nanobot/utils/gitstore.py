@@ -115,7 +115,7 @@ class GitStore:
                 author=b"nanobot <nanobot@dream>",
                 committer=b"nanobot <nanobot@dream>",
             )
-            logger.info("Git store initialized at {}", self._workspace)
+            logger.debug("Git store initialized at {}", self._workspace)
             return True
         except Exception as exc:
             raise GitStoreError(f"Git store init failed for {self._workspace}") from exc

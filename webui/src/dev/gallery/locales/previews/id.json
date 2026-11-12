@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · Ubah nama grup dan proyek",
+    "description": "Coba dialog pengubahan nama grup dan proyek. Nama topik diubah langsung di daftar percakapan.",
+    "options": "Pemanggil menyediakan dialogTitle, description, dan placeholder. title menentukan nilai awal; onConfirm menerima judul tanpa spasi di kedua ujung. Judul kosong tidak dapat disimpan.",
+    "hint": "Menyimpan akan memperbarui judul di atas."
+  },
+  "delete": {
+    "title": "DeleteConfirm · Konfirmasi penghapusan",
+    "description": "Bandingkan penghapusan satu percakapan, beberapa percakapan, atau percakapan dengan otomatisasi.",
+    "options": "count mengatur teks penghapusan massal. automations menampilkan tugas terkait, jadwal, dan waktu eksekusi berikutnya. Konfirmasi memanggil onConfirm.",
+    "scenario": "Skenario penghapusan",
+    "open": "Buka konfirmasi penghapusan",
+    "confirmed": "Penghapusan contoh dikonfirmasi.",
+    "hint": "Pilih satu percakapan, beberapa percakapan, atau percakapan dengan otomatisasi."
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · Perintah dan pengenal sesi",
+    "description": "Edit perintah dan pengenal untuk melihat sorotan serta warna sesi yang konsisten.",
+    "options": "SlashCommandText menerima command; InlineTokenHighlight menerima color dan konten. SessionHandleLabel menentukan warna berdasarkan id.",
+    "command": "Teks perintah",
+    "run": "Jalankan <command/> untuk memeriksa status.",
+    "handle": "Pengenal sesi",
+    "continue": "Lanjutkan pekerjaan di <session/>.",
+    "highlight": "Sorotan bersama",
+    "review": "Gunakan <skill/> untuk meninjau perubahan.",
+    "skill": "Keterampilan: {{name}}"
+  },
+  "sessionLinks": {
+    "selected": "Sesi terpilih: {{name}}.",
+    "hint": "Pilih penyebutan sesi untuk melihat hasilnya."
+  },
+  "userText": {
+    "title": "UserMessageText · Penyebutan dalam pesan",
+    "description": "Edit pesan yang menyebut keterampilan, aplikasi, MCP, dan sesi.",
+    "options": "text adalah pesan asli. cliApps, mcpPresets, dan sessionMentions digunakan untuk mengenali penyebutan. Keterampilan memakai $name; penyebutan lain memakai @name.",
+    "message": "Teks pesan"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · Penyebutan aplikasi",
+    "description": "Bandingkan penyebutan aplikasi, MCP, dan sesi di kolom penulisan dan pesan.",
+    "options": "segment menentukan cli, mcp, atau session beserta metadatanya. variant memilih composer atau message. Contoh ini memakai gambar merek lokal.",
+    "position": "Lokasi penyebutan"
+  },
+  "productIcons": {
+    "title": "Product icons · Katalog ikon",
+    "description": "Jelajahi ikon, ubah ukurannya, dan pilih ikon untuk disorot.",
+    "options": "Ikon menerima LucideProps seperti size, strokeWidth, dan className. Warna mengikuti currentColor; tombol memiliki nama tindakan yang aksesibel.",
+    "size": "Ukuran ikon",
+    "selected": "Terpilih: {{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · Tampilan awal",
+    "description": "Pratinjau tampilan penantian yang tenang saat aplikasi terhubung.",
+    "options": "embedded merender section; selain itu memakai main. aria-busy dan status pemuatan tetap tersedia. Gaya tampilan berasal dari titik masuk aplikasi."
+  },
+  "fileActions": {
+    "title": "FileActions · Menu berkas",
+    "description": "Klik kanan untuk menyalin jalur lengkap, jalur relatif, atau teks referensi berkas.",
+    "options": "path adalah teks referensi. metadata menyediakan jalur lengkap dan jalur relatif opsional. Galeri menyediakan metadata tanpa memuat berkas.",
+    "scope": "Cakupan berkas",
+    "hint": "Klik kanan untuk membuka menu salin, atau fokuskan berkas lalu tekan Shift+F10."
+  },
+  "workbench": {
+    "title": "PaneWorkbench · Beberapa panel",
+    "description": "Ganti tata letak, aktifkan atau tambahkan panel, lalu atur posisi dan ukurannya.",
+    "options": "Pemanggil mengontrol panes, activePaneKey, layout, dan splitRatios. renderPane menyediakan konten; callback memperbarui status lokal. Layar sempit menampilkan panel aktif.",
+    "layout": "Tata letak panel",
+    "limit": "Maksimal empat panel",
+    "notes": "Catatan {{title}}",
+    "active": "Panel aktif",
+    "activate": "Pilih panel ini untuk mengaktifkannya",
+    "hint": "Aktif: {{title}}. Seret pegangan bawah untuk memindahkan panel dan tepinya untuk mengubah ukuran."
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · Status koneksi",
+    "description": "Bandingkan status terhubung, terputus, menghubungkan, dan kesalahan.",
+    "options": "state mengatur ikon dan teks. compact menyembunyikan teks yang terlihat, tetapi mempertahankan status aksesibel dan tooltip.",
+    "state": "Status koneksi",
+    "withText": "Status dengan teks",
+    "compact": "Tampilan ringkas"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · Kompatibilitas versi",
+    "description": "Lihat versi, persiapan, dan panduan peningkatan untuk setiap hasil kompatibilitas.",
+    "options": "profile membuka dialog; compatibility menyediakan hasil dan versi. onClose menutupnya. Komponen ini hanya menampilkan informasi.",
+    "state": "Kompatibilitas versi",
+    "open": "Lihat detail kompatibilitas"
+  },
+  "composer": {
+    "title": "ThreadComposer · Penulisan pesan",
+    "description": "Coba pesan, lampiran, perintah, dan kutipan dalam status sibuk dan nonaktif.",
+    "options": "onSend yang berhasil mengosongkan input. isStreaming mengatur penghentian dan antrean; variant memilih gaya percakapan atau halaman pembuka. Kiriman tetap berada di pratinjau ini.",
+    "statusCommand": "Status sesi",
+    "statusDescription": "Lihat status sesi saat ini",
+    "compactCommand": "Padatkan konteks",
+    "compactDescription": "Padatkan konteks sesi saat ini",
+    "helpCommand": "Bantuan perintah",
+    "helpDescription": "Lihat perintah yang tersedia",
+    "state": "Status input",
+    "addQuote": "Tambahkan kutipan",
+    "input": "Pesan contoh",
+    "placeholder": "Ketik pesan, atau / untuk melihat perintah",
+    "stopped": "Tugas contoh dihentikan.",
+    "sent": "Konten terkirim: {{content}}{{attachments}}",
+    "attachments": " · Lampiran: {{amount}}",
+    "hint": "Coba kirim pesan, pilih lampiran, ganti model, dan buka menu perintah."
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · Preset model",
+    "description": "Coba menu model, navigasi papan ketik, dan status perlu pengaturan.",
+    "options": "modelPresets menyediakan preset; modelPreset dan onPresetChange mengontrol pilihan. needsSetup menampilkan akses ke pengaturan.",
+    "state": "Status kontrol model",
+    "manage": "Pengelolaan model dibuka.",
+    "settings": "Pengaturan model dibuka.",
+    "hint": "Preset saat ini: {{preset}}. Buka menu atau gunakan tombol panah untuk mengganti."
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · Penggunaan konteks",
+    "description": "Lihat konteks, cache, dan waktu pembuatan dengan peringatan serta panel bawah.",
+    "options": "context menyediakan kapasitas; rounds menyediakan statistik per giliran. bottomSheet memilih panel seluler.",
+    "state": "Status penggunaan",
+    "hint": "Buka detail untuk melihat konteks, cache, dan waktu pembuatan per giliran."
+  },
+  "workspace": {
+    "title": "WorkspaceControls · Direktori kerja",
+    "description": "Pilih proyek contoh dan ubah mode akses pratinjau ini.",
+    "options": "scope dan onChange mengontrol pilihan; onLoadProjects menyediakan direktori contoh. Gateway menyelesaikan jalur nyata dan menerapkan izin.",
+    "state": "Status direktori kerja"
+  },
+  "navigator": {
+    "title": "PromptNavigator · Navigasi pertanyaan",
+    "description": "Cari pertanyaan sebelumnya dan periksa callback perpindahan.",
+    "options": "messages menyediakan seluruh percakapan; komponen mengambil pertanyaan pengguna. onJumpToPrompt menerima ID pesan tujuan.",
+    "hint": "Buka navigasi, lalu cari dan pilih pertanyaan.",
+    "empty": "Belum ada pertanyaan yang dipilih"
+  },
+  "header": {
+    "title": "ThreadHeader · Header percakapan",
+    "description": "Coba bilah samping, tema, percakapan sementara, dan navigasi pertanyaan.",
+    "options": "title, handle, theme, dan temporaryChatEnabled menyediakan status tampilan. Callback meneruskan tindakan ke pemanggil.",
+    "jump": "Berpindah ke {{id}}",
+    "sidebar": "Tampilan bilah samping diubah",
+    "hint": "Coba tindakan pada header",
+    "temporary": "Percakapan sementara",
+    "regular": "Percakapan biasa"
+  },
+  "messages": {
+    "title": "ThreadMessages · Daftar pesan",
+    "description": "Jelajahi percakapan beberapa giliran, menu, cabang, dan kutipan teks terpilih.",
+    "options": "messages berisi pesan yang diproyeksikan. onForkFromMessage menerima indeks pertanyaan; onQuoteSelection menerima teks jawaban yang dipilih.",
+    "quoted": "Kutipan: {{text}}",
+    "forked": "Cabang dibuat dari pertanyaan {{index}}",
+    "hint": "Buka menu pesan, atau pilih teks jawaban lalu pilih Kutip."
+  },
+  "viewport": {
+    "title": "ThreadViewport · Gulir percakapan",
+    "description": "Gulir percakapan panjang dengan penanda pertanyaan, navigasi, dan kembali ke bawah.",
+    "options": "Tinggi pratinjau tetap. messages menyediakan riwayat; ref.jumpToUserPrompt menemukan pertanyaan. emptyState menyediakan konten percakapan kosong.",
+    "state": "Tampilan percakapan",
+    "empty": "Ketik pesan untuk memulai percakapan",
+    "hint": "Gulir untuk menjelajahi penanda, atau gunakan navigasi lalu kembali ke bawah."
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · Status riwayat",
+    "description": "Tampilkan pemuatan, awal riwayat, dan kesalahan dengan opsi coba lagi.",
+    "options": "loading menandakan permintaan sedang berlangsung, exhausted berarti tidak ada pesan sebelumnya, error menyediakan detail kesalahan, dan onRetry mencoba memuat ulang.",
+    "state": "Status riwayat",
+    "error": "Riwayat contoh tidak tersedia.",
+    "retries": "Percobaan ulang: {{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · Pemulihan tugas",
+    "description": "Bandingkan terhenti, melanjutkan, gagal, dan tidak tersedia; coba lanjutkan atau tutup.",
+    "options": "state menyediakan snapshot pemulihan. onContinue dan onDismiss mengembalikan Promise. Callback ini hanya memperbarui pratinjau.",
+    "state": "Status pemulihan",
+    "continued": "Tugas contoh dilanjutkan.",
+    "dismissed": "Pemberitahuan pemulihan ditutup.",
+    "reset": "Atur ulang pratinjau",
+    "hint": "Pilih status pemulihan, lalu coba lanjutkan atau tutup."
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · Model cadangan",
+    "description": "Lihat pemberitahuan model cadangan dan otorisasi kedaluwarsa, lalu coba pengaturan atau tutup.",
+    "options": "model menentukan model cadangan; reauthProviderLabel menyebut otorisasi yang kedaluwarsa. Pemanggil menyediakan onOpenSettings dan onDismiss.",
+    "state": "Status model cadangan",
+    "showAgain": "Tampilkan lagi",
+    "hint": "Coba tautan pengaturan model dan tombol tutup."
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · Pemadatan konteks",
+    "description": "Bandingkan status pemadatan dimulai, berhasil, gagal, dan dibatalkan.",
+    "options": "compaction.phase memilih pemberitahuan; announce mengatur pengumuman pembaca layar.",
+    "phase": "Tahap pemadatan konteks"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · Kesalahan pesan",
+    "description": "Bandingkan kesalahan ukuran, izin direktori, penolakan giliran, dan permintaan model.",
+    "options": "error.kind memilih pesan kesalahan; onDismiss menutup pemberitahuan.",
+    "kind": "Jenis kesalahan pesan"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · Aktivitas lengkap",
+    "description": "Lihat penalaran dan catatan alat saat berjalan, selesai, atau gagal.",
+    "options": "messages berisi proyeksi reasoning dan trace. isTurnStreaming mengatur aktivitas; expanded dapat dikontrol pemanggil.",
+    "state": "Status aktivitas",
+    "error": "Berkas tidak dapat dibaca."
+  },
+  "search": {
+    "title": "WebSearchRun · Aktivitas pencarian",
+    "description": "Lihat kemajuan dan sumber pencarian web maupun X.",
+    "options": "run menyediakan query, target, status, dan sources; turnActive mengatur efek berjalan. Komponen bersama memuat ikon situs sumber.",
+    "state": "Status pencarian",
+    "source": "Sumber pencarian"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · Sumber respons",
+    "description": "Lihat preset, model, dan penyedia cadangan yang digunakan dalam jawaban sebelumnya.",
+    "options": "sources mempertahankan snapshot model saat merespons. Hanya sumber dengan fallback bernilai true yang menampilkan lencana.",
+    "hint": "Pilih lencana cadangan untuk melihat preset, model, dan penyedia yang digunakan dalam respons itu."
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · Konten berkas",
+    "description": "Bandingkan teks, gambar, pemotongan, pemuatan, dan kesalahan. Pilih gambar untuk memperbesar.",
+    "options": "state menyediakan snapshot tampilan; path menentukan jenis dan nama berkas. Callback pembukaan dan kesalahan gambar memperbarui pratinjau.",
+    "state": "Status pratinjau berkas"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · Otomatisasi sesi",
+    "description": "Lihat, edit, nonaktifkan, dan hapus tugas dengan status pemuatan dan kesalahan.",
+    "options": "Pemanggil menyediakan jobs, loading, loadFailed, dan now. onAction dan onEdit mengembalikan tugas terbaru; tampilan mengoordinasikan dialog, fokus, dan umpan balik.",
+    "state": "Status otomatisasi sesi",
+    "saveError": "Penyimpanan contoh gagal. Coba lagi.",
+    "providerError": "Penyedia contoh tidak tersedia.",
+    "saved": "Otomatisasi disimpan.",
+    "openedChat": "Percakapan contoh dibuka.",
+    "openedCalendar": "Kalender otomatisasi dibuka.",
+    "actionError": "Tindakan contoh gagal. Coba lagi.",
+    "delete": "Dihapus: {{name}}",
+    "run": "Eksekusi diminta: {{name}}",
+    "enable": "Diaktifkan: {{name}}",
+    "disable": "Dinonaktifkan: {{name}}",
+    "hint": "Buka detail sesi untuk melihat, mengaktifkan, mengedit, dan menghapus otomatisasi."
+  },
+  "subagent": {
+    "title": "SubagentThreadView · Pesan subagen",
+    "description": "Lihat pesan, penalaran, pemuatan, dan kegagalan subagen; coba ulang.",
+    "options": "Runtime memproyeksikan messages. loading dan error memakai tampilan status riwayat bersama; isStreaming dan activeTurnId menentukan aktivitas. Tampilan tidak mengambil riwayat.",
+    "state": "Status percakapan subagen"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · Rute pemasangan",
+    "description": "Pilih dan simpan rute secara lokal, dengan status penyimpanan, kesalahan, dan kegagalan penyegaran.",
+    "options": "Pemanggil mengelola route dan original; routes menyediakan rute SSH. Penyimpanan berhasil dan penyegaran direktori gagal ditampilkan terpisah. Galeri dan pengaturan memakai tampilan yang sama.",
+    "state": "Status rute"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · Pemasangan cepat",
+    "description": "Coba salin undangan, masukkan balasan, konfirmasi akses, host yang ada, dan percobaan ulang.",
+    "options": "state menyediakan status pemasangan dan tampilan; callback menjalankan tindakan. routeSettings menyusun pengaturan rute. Galeri memakai contoh dan callback lokal; QuickPairSetup mengelola pemasangan nyata.",
+    "state": "Tahap pemasangan",
+    "open": "Buka pemasangan cepat",
+    "connected": "Koneksi terpilih: {{name}}.",
+    "ssh": "Koneksi SSH dipilih.",
+    "hint": "Undangan dan balasan contoh hanya untuk tampilan. Konfirmasi memperbarui umpan balik lokal."
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · Alamat SSH",
+    "description": "Filter alias SSH, pilih dengan tombol panah, dan bandingkan impor, pemuatan, serta kesalahan.",
+    "options": "discovery menyediakan host dari konfigurasi saat ini. Pemanggil mengontrol value, busy, error, dan callback. customConfig mempertahankan penemuan alias konfigurasi khusus; inputRef memulihkan fokus setelah pemilihan.",
+    "state": "Status alamat SSH",
+    "refreshed": "Alamat contoh disegarkan.",
+    "entered": "Masukan: {{value}}",
+    "hint": "Ketik untuk memfilter alamat; gunakan tombol panah untuk memilih alias SSH."
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · Indikator koneksi",
+    "description": "Bandingkan warna, animasi, dan teks status yang aksesibel.",
+    "options": "Pemanggil menyediakan status. Kontainer halaman mengelola langganan koneksi.",
+    "state": "Status koneksi",
+    "idle": "Siaga",
+    "connecting": "Menghubungkan",
+    "open": "Terhubung",
+    "reconnecting": "Menghubungkan ulang",
+    "closed": "Terputus",
+    "error": "Kesalahan koneksi"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · Menu host",
+    "description": "Pilih host lokal atau contoh; bandingkan status menunggu, luring, dan diciutkan.",
+    "options": "picker menyediakan data host dan callback; status adalah status koneksi saat ini. HostSwitcher produksi berlangganan ke klien.",
+    "state": "Status menu host",
+    "offline": "Host contoh terputus.",
+    "manage": "Pengelolaan koneksi dibuka.",
+    "cancelled": "Peralihan host contoh dibatalkan.",
+    "selected": "Host pratinjau: {{name}}"
+  },
+  "chats": {
+    "title": "ChatList · Daftar percakapan",
+    "description": "Pilih percakapan dan coba sematkan, arsipkan, atau hapus melalui menunya.",
+    "options": "Pemanggil menyediakan sessions, activeKey, serta kunci yang disematkan atau diarsipkan. Callback tindakan memperbarui daftar contoh.",
+    "state": "Status daftar percakapan",
+    "renamed": "Nama diubah: {{name}}",
+    "selected": "Percakapan terpilih: {{name}}",
+    "none": "Tidak ada"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · Ukuran bilah samping",
+    "description": "Ubah ukuran, ciutkan, dan perluas bilah samping dengan tetikus atau papan ketik.",
+    "options": "width dan open dikontrol pemanggil. onResize memperbarui ukuran dan perluasan; onDraggingChange melaporkan penyeretan.",
+    "content": "Konten bilah samping",
+    "hint": "Seret pembatas, atau fokuskan lalu gunakan tombol panah, Home, End, dan Enter.",
+    "collapsed": "Diciutkan",
+    "dragging": "Sedang diseret"
+  },
+  "language": {
+    "title": "LanguageSwitcher · Bahasa antarmuka",
+    "description": "Ganti bahasa galeri dan komponen produksi.",
+    "options": "Memakai i18n aplikasi dan preferensi bahasa peramban, tanpa gateway. Pemilih bahasa di atas memakai komponen yang sama."
+  },
+  "channelMarks": {
+    "title": "Channel marks · Identitas kanal",
+    "description": "Lihat teks pengganti avatar, ikon ruang kerja, dan tanda WebSocket.",
+    "options": "LinearAvatar menerima name, url, dan workspace. Tanpa gambar yang valid, komponen menampilkan teks pengganti atau ikon.",
+    "name": "Nama avatar",
+    "member": "Avatar anggota",
+    "workspace": "Ikon ruang kerja"
+  },
+  "secret": {
+    "title": "LinearSecretField · Penyuntingan rahasia",
+    "description": "Edit, tampilkan, simpan, dan ganti rahasia; periksa draf setelah penyimpanan gagal.",
+    "options": "configured menunjukkan status tersimpan; onSave menyimpan secara permanen. Callback galeri hanya memperbarui status lokal.",
+    "state": "Status rahasia",
+    "error": "Penyimpanan contoh gagal.",
+    "hint": "Masukkan teks contoh lalu simpan, atau pilih status kesalahan untuk memeriksa apakah draf tetap ada."
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · Bantuan kanal",
+    "description": "Lihat bantuan kanal di dalam menu tarik-turun asli.",
+    "options": "Konten memakai terjemahan kanal yang sudah ada; pemanggil menyediakan kontainer menu.",
+    "open": "Buka bantuan kanal"
+  },
+  "channel": {
+    "title": "{{channel}} · Pengaturan kanal",
+    "description": "Jelajahi formulir pengaturan kanal asli dan statusnya.",
+    "options": "Memakai registrasi kanal, snapshot kontrak pengaturan Python, dan ChannelSetupSurfaceView produksi. Input, visibilitas kredensial, preset, pemeriksaan, dan sakelar hanya memengaruhi pratinjau ini.",
+    "state": "Status pengaturan kanal",
+    "credentialsError": "Kredensial contoh ditolak. Perbarui nilai pratinjau lalu coba lagi.",
+    "validation": "Konfigurasi pratinjau"
+  },
+  "channelConnect": {
+    "state": "Status koneksi {{channel}}",
+    "error": "Otorisasi sementara tidak tersedia. Coba lagi."
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Koneksi QR QQ",
+    "description": "Coba login QR QQ, percobaan ulang, dan peringatan penggantian App Secret.",
+    "options": "Tampilan menerima status koneksi dan callback. Tindakan pratinjau tetap lokal; bagian runtime membuat sesi dan melakukan polling ke portal QQ."
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · Otorisasi QR Feishu",
+    "description": "Coba alur QR Feishu asli dengan status menunggu, berhasil, kedaluwarsa, batal, dan kesalahan.",
+    "options": "connect, busy, dan error menyediakan status tampilan; kode QR dibuat secara lokal. Fitur mengelola mulai, batal, dan polling; callback pratinjau hanya mengubah contoh ini."
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · Asisten Feishu",
+    "description": "Jelajahi kartu asisten, status eksekusi dan otorisasi, sakelar, pengaturan lanjutan, dan penambahan asisten.",
+    "options": "feature dan instances menyediakan snapshot asisten. Tampilan mengelola draf dan hasil penyimpanan; onToggleInstance, onSaveInstance, dan renderConnectFlow menghubungkan tindakan runtime.",
+    "state": "Status eksekusi asisten",
+    "error": "Asisten berhenti. Periksa kredensial sebelum memulainya kembali.",
+    "on": "{{name}}: aktif",
+    "off": "{{name}}: nonaktif",
+    "saved": "{{name}}: kolom pratinjau tersimpan: {{amount}}"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · Penautan perangkat WhatsApp",
+    "description": "Bandingkan penautan otomatis, berhasil, kedaluwarsa, dan kesalahan; coba tautkan akun lain.",
+    "options": "Tampilan mempertahankan aturan mulai otomatis dan tata letak minimal. Pemanggil mengontrol status dan percobaan ulang. Titik masuk koneksi nyata menangani mulai otomatis, percobaan paksa, dan polling."
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Pengaturan Linear",
+    "description": "Jelajahi detail aplikasi, rahasia, opsi lanjutan, ruang kerja, akses anggota, dan otorisasi web.",
+    "options": "state dan workspaces menyediakan snapshot; callback menghubungkan tindakan ruang kerja, penyimpanan, dan MCP. Tiga slot menyusun tampilan anggota, otorisasi, dan pengaturan ulang yang dipakai di produksi.",
+    "state": "Status pengaturan Linear",
+    "runtimeError": "Webhook Linear tidak dapat dimulai.",
+    "saveError": "Pengaturan tidak dapat disimpan. Draf Anda tetap disimpan.",
+    "inspectionError": "Ruang kerja yang terhubung tidak dapat diperiksa.",
+    "refreshed": "Ruang kerja contoh disegarkan.",
+    "removed": "Ruang kerja contoh dihapus: {{name}}",
+    "mcp": "Pengaturan Linear MCP dipilih."
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · Akses anggota",
+    "description": "Cari anggota, ubah akses, dan bandingkan pemuatan, kosong, penyimpanan, serta belum dikonfirmasi.",
+    "options": "snapshot berisi status anggota yang telah dikonfirmasi. onLoad dan onSetAllowed ditangani titik masuk kanal; gateway tetap memvalidasi izin.",
+    "state": "Status anggota",
+    "loadError": "Direktori anggota tidak tersedia.",
+    "saveError": "Akses belum dikonfirmasi."
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Otorisasi Linear",
+    "description": "Coba otorisasi peramban dan pemberitahuan menunggu dengan tahap mulai, batal, berhasil, dan gagal.",
+    "options": "Memakai ulang ChannelQrConnectFlowView. Linear menyediakan tampilan, label, dan penanganan fokus; titik masuk runtime menangani pembuatan sesi dan polling.",
+    "state": "Tahap otorisasi",
+    "error": "Otorisasi tidak dapat diselesaikan.",
+    "hint": "Tautan otorisasi dan ruang kerja hanyalah contoh. Mulai dan Batal hanya mengubah tahap pratinjau."
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · Atur ulang koneksi",
+    "description": "Tinjau data yang dihapus atau dipertahankan, status sibuk, dan percobaan ulang setelah pengaturan ulang sebagian.",
+    "options": "onReset menjalankan seluruh transaksi pencabutan dan pembersihan. Tampilan mengelola konfirmasi, kesalahan, pembatasan penutupan, dan pemulihan fokus.",
+    "state": "Hasil pengaturan ulang",
+    "error": "Kanal tidak dapat dihentikan. Pengaturan aplikasi dipertahankan.",
+    "completed": "Ruang kerja dan pengaturan aplikasi pratinjau telah dihapus."
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · Pengaturan Weixin",
+    "description": "Jelajahi pengaturan, opsi lanjutan, hasil penyimpanan, dan pemulihan login kedaluwarsa.",
+    "options": "Kolom berasal dari kontrak pengaturan kanal. Tampilan mengatur perluasan dan visibilitas rahasia; titik masuk runtime menangani simpan otomatis, penggabungan draf, dan pemulihan login.",
+    "state": "Status panel Weixin"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · QR dan verifikasi Weixin",
+    "description": "Bandingkan pemindaian QR, kode verifikasi, keberhasilan, kedaluwarsa, pembatalan, dan kesalahan koneksi.",
+    "options": "Tampilan menerima snapshot koneksi dan callback, sambil mempertahankan draf kode verifikasi. Kode QR dibuat di peramban. Titik masuk nyata menangani otorisasi, jeda polling, penyegaran, dan pembatalan.",
+    "state": "Status koneksi Weixin",
+    "error": "Koneksi terputus. Coba lagi.",
+    "refreshed": "Kode QR pratinjau baru ditampilkan.",
+    "hint": "Masukkan 123456 untuk menyelesaikan pratinjau verifikasi. Input lain mempertahankan draf dan menampilkan kesalahan."
+  }
+}

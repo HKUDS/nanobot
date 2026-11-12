@@ -13,31 +13,31 @@
         "placeholder": "Enregistré après la connexion QR"
       },
       "sendProgress": {
-        "label": "Envoyer la progression"
+        "label": "Envoyer l’avancement"
       },
       "sendToolHints": {
-        "label": "Envoyer un résumé de l’activité des outils"
+        "label": "Indications des outils"
       },
       "streaming": {
         "label": "Utiliser l’API de streaming"
       },
       "replyProgressMessages": {
-        "label": "Envoyer la progression structurée"
+        "label": "Avancement détaillé"
       },
       "replyProgressMaxMessages": {
-        "label": "Limite de progression structurée"
+        "label": "Limite de messages d’avancement"
       },
       "contextMessageBudget": {
-        "label": "Nombre maximal de messages de contexte"
+        "label": "Limite de messages de contexte"
       },
       "blockStreaming": {
-        "label": "Envoyer la réponse par blocs"
+        "label": "Répondre par blocs"
       },
       "blockStreamingMinChars": {
-        "label": "Taille minimale d’un bloc"
+        "label": "Longueur minimale des blocs (caractères)"
       },
       "blockStreamingMaxMessages": {
-        "label": "Limite de messages par blocs"
+        "label": "Nombre maximal de blocs"
       },
       "baseUrl": {
         "label": "URL de l’API"

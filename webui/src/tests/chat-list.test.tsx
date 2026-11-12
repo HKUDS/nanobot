@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatList } from "@/components/ChatList";
@@ -95,8 +95,33 @@ describe("ChatList", () => {
       .toContain(sessionHandleColor("handle_1234"));
 
     expect(conversation.closest("[data-chat-row]"))
-      .toHaveClass("rounded-xl");
+      .toHaveClass("rounded-control");
     expect(conversation.querySelector("[data-sidebar-selection-track]")).toBeNull();
+  });
+
+  it("opens topic actions with a dedicated touch target without selecting the topic", async () => {
+    const onSelect = vi.fn();
+    const onRequestRename = vi.fn();
+    render(<ChatList
+      sessions={[session({ chatId: "review", title: "Review the patch" })]}
+      activeKey={null}
+      onSelect={onSelect}
+      onRequestDelete={vi.fn()}
+      onTogglePin={vi.fn()}
+      onRequestRename={onRequestRename}
+      onToggleArchive={vi.fn()}
+    />);
+    const trigger = screen.getByRole("button", { name: "Topic actions for Review the patch" });
+    expect(trigger).toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByRole("textbox", { name: "Topic name" });
+    expect(input).toHaveValue("Review the patch");
+    expect(onRequestRename).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Review the patch" }));
+    expect(onSelect).toHaveBeenCalledWith("websocket:review");
   });
 
   it("marks a conversation that needs recovery attention with a warning indicator", () => {
@@ -264,7 +289,10 @@ describe("ChatList", () => {
       .closest("[data-sidebar-pane]")!;
     fireEvent.contextMenu(paneRow);
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
-    expect(onRequestRename).toHaveBeenCalledWith("websocket:child", "Research pane");
+    const input = screen.getByRole("textbox", { name: "Topic name" });
+    expect(input).toHaveValue("Research pane");
+    expect(onRequestRename).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Escape" });
 
     const tabRow = screen.getByRole("button", { name: "Group: Root topic" })
       .closest("[data-workbench-tab]")!;
@@ -350,12 +378,12 @@ describe("ChatList", () => {
     expect(screen.queryByRole("menuitem", { name: "Target pane" }))
       .not.toBeInTheDocument();
     const fullTarget = await screen.findByRole("menuitem", {
-      name: "Existing group · 4/4",
+      name: "Existing group 4/4",
     });
     expect(fullTarget).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(fullTarget);
     expect(onAttachPane).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Fine group · 1/4" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Fine group 1/4" }));
     expect(onAttachPane).toHaveBeenCalledWith("websocket:solo", "tab:fine");
   });
 
@@ -613,7 +641,7 @@ describe("ChatList", () => {
     }), { button: 0, ctrlKey: false });
     const moveTo = await screen.findByRole("menuitem", { name: "Move to" });
     fireEvent.pointerMove(moveTo, { pointerType: "mouse" });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Target tab · 2/4" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Target tab 2/4" }));
     expect(onAttachPane).toHaveBeenCalledWith("websocket:child", "websocket:target");
 
     fireEvent.pointerDown(screen.getByRole("button", {
@@ -672,7 +700,7 @@ describe("ChatList", () => {
     );
 
     const tabButton = screen.getByRole("button", { name: "Group: Root topic" });
-    const tabGroup = tabButton.closest("[data-sidebar-tab-group]")!;
+    const tabGroup = tabButton.closest<HTMLElement>("[data-sidebar-tab-group]")!;
     const tabHeader = tabButton.closest("[data-workbench-tab]")!;
     const tabSurface = tabButton.closest("[data-workbench-tab-surface]")!;
     expect(tabGroup).toHaveAttribute("data-sidebar-tab-group", "true");
@@ -684,12 +712,15 @@ describe("ChatList", () => {
     expect(tabSurface).toContainElement(paneList);
     const activePane = within(tabGroup).getByRole("button", { name: "Research pane" });
     expect(activePane).toHaveAttribute("aria-current", "true");
-    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-xl");
+    expect(activePane.closest("[data-sidebar-pane]")).toHaveClass("rounded-control");
     expect(screen.getByTestId("chats-selection-highlight"))
       .toHaveAttribute("data-active-id", "websocket:root");
     expect(screen.getByRole("button", {
       name: "Research pane pane actions",
-    })).toHaveClass("opacity-0");
+    })).toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
+    expect(screen.getByRole("button", {
+      name: "Topic actions for Root topic",
+    })).toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
     expect(within(tabGroup).getByRole("button", { name: "Root topic" }))
       .not.toHaveAttribute("aria-current");
     expect(tabGroup).not.toHaveTextContent("2/4");
@@ -754,6 +785,8 @@ describe("ChatList", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
 
     expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Root topic pane actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Topic actions for Root topic" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }));
     expect(screen.getByRole("button", { name: "Group: Root topic" }))
       .toHaveAttribute("aria-pressed", "true");
@@ -773,8 +806,114 @@ describe("ChatList", () => {
       { key: "websocket:root", label: "Root topic" },
       { key: "websocket:child", label: "Research pane" },
       { key: "websocket:target", label: "Target tab" },
-    ]);
+    ], expect.any(Function));
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    act(() => onRequestDeleteMany.mock.calls[0][1](true));
     expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { archivedKeys: [], action: "Archive", archive: true },
+    { archivedKeys: ["websocket:root", "websocket:child"], action: "Unarchive", archive: false },
+    { archivedKeys: ["websocket:child"], action: "Archive", archive: true },
+  ])("confirms $action for selected panes without toggling mixed archive states", async ({ archivedKeys, action, archive }) => {
+    const onArchiveMany = vi.fn();
+    render(<ChatList
+      sessions={[session({ chatId: "root", title: "Root topic" })]}
+      activeKey="websocket:root"
+      paneGroups={{
+        "websocket:root": {
+          tabKey: "websocket:root",
+          title: "Root topic",
+          activePaneKey: "websocket:root",
+          panes: [
+            { key: "websocket:root", chatId: "root", title: "Root topic" },
+            { key: "websocket:child", chatId: "child", title: "Research pane" },
+          ],
+        },
+      }}
+      archivedPaneKeys={archivedKeys}
+      onSelect={vi.fn()}
+      onRequestDelete={vi.fn()}
+      onTogglePin={vi.fn()}
+      onRequestRename={vi.fn()}
+      onToggleArchive={vi.fn()}
+      onArchiveMany={onArchiveMany}
+    />);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Root topic pane actions" }), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "Group: Root topic" }));
+    const bar = screen.getByTestId("delete-selection-bar");
+    fireEvent.click(within(bar).getByRole("button", { name: action }));
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveAccessibleName(`${action} 2 topics?`);
+    fireEvent.click(document.body);
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    expect(onArchiveMany).not.toHaveBeenCalled();
+    if (archive) fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    else fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Research pane" })).toHaveAttribute("aria-pressed", "true");
+    expect(onArchiveMany).not.toHaveBeenCalled();
+
+    fireEvent.click(within(bar).getByRole("button", { name: action }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: action }));
+    expect(onArchiveMany).toHaveBeenCalledTimes(1);
+    expect(onArchiveMany).toHaveBeenCalledWith(["websocket:root", "websocket:child"], archive);
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+  });
+
+  it("disables batch archive when all topics are deselected", async () => {
+    render(<ChatList
+      sessions={[session({ chatId: "first", title: "First topic" })]}
+      activeKey={null}
+      onSelect={vi.fn()}
+      onRequestDelete={vi.fn()}
+      onTogglePin={vi.fn()}
+      onRequestRename={vi.fn()}
+      onToggleArchive={vi.fn()}
+      onArchiveMany={vi.fn()}
+    />);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Topic actions for First topic" }), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    fireEvent.click(screen.getByRole("button", { name: "First topic" }));
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+  });
+
+  it.each(["outside action", "list whitespace"])("exits selection from %s without consuming the click", async (target) => {
+    const outsideAction = vi.fn();
+    const onSelect = vi.fn();
+    const { container } = render(<>
+      <button onClick={outsideAction}>Outside action</button>
+      <ChatList
+        sessions={[session({ chatId: "first", title: "First topic" })]}
+        activeKey={null}
+        onSelect={onSelect}
+        onRequestDelete={vi.fn()}
+        onTogglePin={vi.fn()}
+        onRequestRename={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onArchiveMany={vi.fn()}
+      />
+    </>);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Topic actions for First topic" }), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Select" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "First topic" }));
+    expect(screen.getByText("0 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "First topic" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
+
+    fireEvent.click(target === "outside action"
+      ? screen.getByRole("button", { name: "Outside action" })
+      : container.querySelector("[data-chat-list-content]")!);
+    expect(screen.queryByTestId("delete-selection-bar")).not.toBeInTheDocument();
+    expect(outsideAction).toHaveBeenCalledTimes(target === "outside action" ? 1 : 0);
+    fireEvent.click(screen.getByRole("button", { name: "First topic" }));
+    expect(onSelect).toHaveBeenCalledWith("websocket:first");
   });
 
   it("selects a contiguous session range with Shift-click", async () => {
@@ -919,16 +1058,19 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showPreviews
       />,
     );
 
     const chatsSection = screen.getAllByRole("region")[0];
-    const text = chatsSection.textContent ?? "";
+    const chats = within(chatsSection).getAllByRole("button", {
+      name: /^(Newest|Middle|Older) chat$/,
+    });
 
-    expect(text.indexOf("Newest chat")).toBeLessThan(text.indexOf("Middle chat"));
-    expect(text.indexOf("Middle chat")).toBeLessThan(text.indexOf("Older chat"));
-    expect(screen.queryByText("/model fast")).not.toBeInTheDocument();
+    expect(chats.map((chat) => chat.textContent)).toEqual([
+      "Newest chat",
+      "Middle chat",
+      "Older chat",
+    ]);
   });
 
   it("shows a pin indicator for pinned chats", () => {
@@ -1005,7 +1147,6 @@ describe("ChatList", () => {
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
         sort="title_asc"
-        showTimestamps
         runningChatIds={["zeta"]}
       />,
     );
@@ -1065,7 +1206,6 @@ describe("ChatList", () => {
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
         defaultWorkspacePath="/Users/me/.nanobot/workspace"
-        showTimestamps
       />,
     );
 
@@ -1189,6 +1329,8 @@ describe("ChatList", () => {
     );
 
     const projectSection = screen.getByRole("region", { name: "Photos" });
+    expect(within(projectSection).getByRole("button", { name: "Topic actions for Photos" }))
+      .toHaveClass("sidebar-action-trigger", "touch-target", "opacity-0");
     fireEvent.click(within(projectSection).getByRole("button", { name: "Photos" }));
 
     expect(onToggleGroup).toHaveBeenCalledWith("project:/Users/me/nanobot");
@@ -1415,7 +1557,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 
@@ -1471,7 +1612,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 
@@ -1521,7 +1661,6 @@ describe("ChatList", () => {
         onTogglePin={vi.fn()}
         onRequestRename={vi.fn()}
         onToggleArchive={vi.fn()}
-        showTimestamps
       />,
     );
 

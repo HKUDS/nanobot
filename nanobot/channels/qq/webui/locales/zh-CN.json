@@ -2,6 +2,10 @@
   "setup": {
     "docsLabel": "打开 QQ 配置指南",
     "officialLabel": "打开 QQ 机器人后台",
+    "sections": {
+      "credentials": "手动凭据",
+      "advanced": "高级"
+    },
     "fields": {
       "appId": {
         "label": "App ID",
@@ -12,7 +16,7 @@
         "placeholder": "••••••"
       },
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "Open ID，用逗号分隔"
       },
       "msgFormat": {
@@ -23,17 +27,43 @@
         }
       },
       "ackMessage": {
-        "label": "处理中提示"
+        "label": "处理提示"
       },
       "mediaDir": {
         "label": "媒体目录"
       },
       "downloadChunkSize": {
-        "label": "下载分块大小"
+        "label": "分块大小（字节）"
       },
       "downloadMaxBytes": {
-        "label": "下载大小上限"
+        "label": "下载上限（字节）"
+      },
+      "showCompactionNotices": {
+        "label": "压缩通知",
+        "choices": {
+          "true": "开",
+          "false": "关"
+        }
       }
     }
+  },
+  "custom": {
+    "scanTitle": "用手机 QQ 扫码绑定",
+    "waiting": "等待扫码…",
+    "connected": "绑定成功",
+    "stopped": "已取消",
+    "connecting": "生成中…",
+    "qrAlt": "QQ 绑定二维码",
+    "scanAgainWarning": "重新绑定可能中断其他软件与此 QQ 机器人的连接。若 App Secret 被重置，旧密钥将失效，使用旧密钥的软件也需更新密钥。",
+    "configured": "已配置",
+    "bind": "绑定机器人",
+    "rebind": "重新绑定",
+    "refresh": "刷新二维码",
+    "retry": "重试",
+    "expired": "二维码已过期",
+    "failed": "绑定失败",
+    "cancelFailed": "取消失败",
+    "retrying": "正在重试…",
+    "manualSetup": "手动配置"
   }
 }

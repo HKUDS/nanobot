@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.events import NO_EVENTS, EventSink
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest
 
@@ -25,6 +26,8 @@ class AgentHookContext:
     tool_results: list[Any] = field(default_factory=list)
     tool_events: list[dict[str, str]] = field(default_factory=list)
     streamed_content: bool = False
+    # Raw segments observed this round, retained only if its terminal response fails.
+    streamed_content_parts: list[str] = field(default_factory=list, repr=False)
     streamed_reasoning: bool = False
     stream_continues_current_message: bool = False
     final_content: str | None = None
@@ -71,6 +74,13 @@ class AgentHook:
 
     def wants_streaming(self) -> bool:
         return False
+
+    def has_run_hooks(self) -> bool:
+        """Whether run-level callbacks consume a detached context snapshot."""
+        return any(
+            getattr(getattr(self, name), "__func__", None) is not getattr(AgentHook, name)
+            for name in ("before_run", "after_run", "on_error", "on_finally")
+        )
 
     async def before_run(self, context: AgentRunHookContext) -> None:
         pass
@@ -171,6 +181,14 @@ class CompositeHook(AgentHook):
     def wants_streaming(self) -> bool:
         return any(h.wants_streaming() for h in self._hooks)
 
+    def has_run_hooks(self) -> bool:
+        if any(
+            getattr(getattr(self, name), "__func__", None) is not getattr(CompositeHook, name)
+            for name in ("before_run", "after_run", "on_error", "on_finally")
+        ):
+            return True
+        return any(h.has_run_hooks() for h in self._hooks)
+
     async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for h in self._hooks:
             if getattr(h, "_reraise", False):
@@ -180,7 +198,9 @@ class CompositeHook(AgentHook):
             try:
                 await getattr(h, method_name)(*args, **kwargs)
             except Exception:
-                logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+                logger.opt(exception=tool_log_content_allowed()).error(
+                    "AgentHook.{} error in {}", method_name, type(h).__name__,
+                )
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)

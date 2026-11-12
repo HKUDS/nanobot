@@ -2,10 +2,12 @@ import json
 import os
 import shutil
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
 from nanobot.agent import plugins as agent_plugins
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.plugins import (
     AGENT_PLUGIN_MCP_SCHEMA,
     AGENT_PLUGIN_SCHEMA,
@@ -18,12 +20,15 @@ from nanobot.agent.plugins import (
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
+from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
+from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
     reset_workspace_scope,
     validate_workspace_scope_payload,
 )
+from nanobot.session.manager import SessionManager
 
 
 @pytest.fixture(autouse=True)
@@ -62,12 +67,14 @@ def _loaded_skills(workspace: Path) -> list[str]:
 
 def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
     plugin = _plugin(tmp_path)
-    _skill(
+    plugin_skill = _skill(
         plugin / "skills",
         "shared",
         "name: shared\ndescription: Plugin version.\nalways: true",
         "Plugin body.",
-    )
+    ) / "SKILL.md"
+    plugin_content = plugin_skill.read_text(encoding="utf-8")
+    plugin_skill.write_bytes(plugin_content.replace("\n", "\r\n").encode("utf-8"))
     _skill(tmp_path / "builtin", "shared", body="Built-in body.")
     workspace_skill = _skill(
         tmp_path / "skills", "shared", "name: shared\ndescription: Workspace version."
@@ -83,15 +90,133 @@ def test_plugin_skill_lifecycle_and_precedence(tmp_path: Path) -> None:
     assert [entry["source"] for entry in loader.list_skills()] == ["plugin"]
     assert loader.get_explicitly_invoked_skills("Use $shared") == ["shared"]
     assert loader.get_always_skills() == ["shared"]
-    assert "Plugin body" in (loader.load_skill("shared") or "")
+    assert loader.load_skill("shared") == plugin_content
     summary = loader.build_skills_summary()
     assert "### Agent Plugin skills (`plugins`)" in summary
     assert "`demo/skills/shared/SKILL.md`" in summary
     assert str(tmp_path.resolve()) not in summary
 
+    disabled_loader = SkillsLoader(
+        tmp_path, builtin_skills_dir=tmp_path / "builtin", disabled_skills={"shared"},
+    )
+    with disabled_loader.snapshot():
+        assert disabled_loader.list_skills() == []
+        assert disabled_loader.load_skill("shared") is None
+        assert disabled_loader.get_skill_metadata("shared") is None
+
     set_agent_plugin_enabled(tmp_path, "demo", False)
     assert [entry["source"] for entry in loader.list_skills()] == ["builtin"]
     assert "Built-in body" in (loader.load_skill("shared") or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("boundary", ["after-verification", "during-verification"])
+async def test_prompt_snapshot_uses_approved_plugin_bytes_after_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "instance")
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config" / "config.json")
+
+    class CaptureProvider(LLMProvider):
+        def __init__(self):
+            super().__init__(provider_name="test")
+            self.generation = GenerationSettings(max_tokens=1024)
+            self.prompts: list[str] = []
+
+        def get_default_model(self):
+            return "test"
+
+        async def chat(self, messages, tools=None, **kwargs):
+            self.prompts.append(messages[0]["content"])
+            return LLMResponse(content="done")
+
+    workspace = tmp_path / "workspace"
+    (workspace / "skills").mkdir(parents=True)
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    plugin = _plugin(workspace)
+    skill_dir = _skill(
+        plugin / "skills", "trusted-skill",
+        "name: trusted-skill\ndescription: Approved plugin.\nalways: true",
+        "ORIGINAL_APPROVED_INSTRUCTIONS",
+    )
+    document = skill_dir / "SKILL.md"
+    original = document.read_text(encoding="utf-8")
+    replacement = original.replace("ORIGINAL_APPROVED_INSTRUCTIONS", "REPLACEMENT_INSTRUCTIONS")
+    set_agent_plugin_enabled(workspace, "demo", True)
+    provider = CaptureProvider()
+    sessions = SessionManager(workspace, sessions_root=tmp_path / "sessions")
+    loop = AgentLoop(
+        bus=MessageBus(), provider=provider, workspace=workspace, session_manager=sessions,
+        model="test", context_window_tokens=64000, max_iterations=1,
+    )
+    loop.context.skills = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    reached = Event()
+    replaced = Event()
+    errors: list[Exception] = []
+    writer: Thread | None = None
+
+    def pause_for_replacement():
+        reached.set()
+        assert replaced.wait(timeout=10), "package editor did not finish"
+
+    def replace_package():
+        try:
+            assert reached.wait(timeout=10), "prompt did not reach the replacement boundary"
+            document.write_text(replacement, encoding="utf-8")
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            replaced.set()
+
+    try:
+        await loop.process_direct("Explain this project", session_key="cli:approved")
+        assert "ORIGINAL_APPROVED_INSTRUCTIONS" in provider.prompts[-1]
+        original_iterdir = Path.iterdir
+        original_read_bytes = Path.read_bytes
+
+        def iterdir(path):
+            if path == workspace / "skills" and not reached.is_set():
+                pause_for_replacement()
+            return original_iterdir(path)
+
+        def read_bytes(path):
+            content = original_read_bytes(path)
+            if path == document and not reached.is_set():
+                pause_for_replacement()
+            return content
+
+        # Both boundaries retain the approved bytes: after discovery returns,
+        # and while the fingerprint scan still holds bytes read before an edit.
+        with monkeypatch.context() as race:
+            if boundary == "after-verification":
+                race.setattr(Path, "iterdir", iterdir)
+            else:
+                race.setattr(Path, "read_bytes", read_bytes)
+            writer = Thread(target=replace_package)
+            writer.start()
+            await loop.process_direct("Explain this project", session_key="cli:replacement-race")
+        writer.join(timeout=10)
+        assert not writer.is_alive() and not errors
+        assert reached.is_set()
+        assert "ORIGINAL_APPROVED_INSTRUCTIONS" in provider.prompts[-1]
+        assert "REPLACEMENT_INSTRUCTIONS" not in provider.prompts[-1]
+
+        await loop.process_direct("Explain this project", session_key="cli:unapproved")
+        assert discover_agent_plugins(workspace)[0].enabled is False
+        assert "ORIGINAL_APPROVED_INSTRUCTIONS" not in provider.prompts[-1]
+        assert "REPLACEMENT_INSTRUCTIONS" not in provider.prompts[-1]
+
+        set_agent_plugin_enabled(workspace, "demo", True)
+        await loop.process_direct("Explain this project", session_key="cli:reenabled")
+        assert discover_agent_plugins(workspace)[0].enabled is True
+        assert "REPLACEMENT_INSTRUCTIONS" in provider.prompts[-1]
+    finally:
+        reached.set()
+        replaced.set()
+        if writer is not None:
+            writer.join(timeout=10)
+        await loop.subagents.close()
 
 
 def test_plugin_skills_are_direct_valid_and_contained(tmp_path: Path) -> None:
@@ -230,10 +355,12 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
     activation_checks = 0
     activation_marker = agent_plugins._activation_marker
 
-    def count_activation_checks(plugin: agent_plugins.AgentPlugin) -> str | None:
+    def count_activation_checks(
+        plugin: agent_plugins.AgentPlugin, *, documents: dict[Path, bytes | None] | None = None,
+    ) -> str | None:
         nonlocal activation_checks
         activation_checks += 1
-        return activation_marker(plugin)
+        return activation_marker(plugin, documents=documents)
 
     monkeypatch.setattr(agent_plugins, "_activation_marker", count_activation_checks)
     scope = validate_workspace_scope_payload(

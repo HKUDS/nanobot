@@ -13,14 +13,6 @@ from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
 # Helpers
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(autouse=True)
-def _clear_file_state():
-    """Reset global read-state between tests."""
-    file_state.clear()
-    yield
-    file_state.clear()
-
-
 # ---------------------------------------------------------------------------
 # Read-independent editing
 # ---------------------------------------------------------------------------
@@ -144,7 +136,7 @@ class TestEditIpynbFiles:
             new_text='"cells": [{"cell_type": "markdown", "source": "hi"}]',
         )
         assert "Patch applied:" in result
-        assert '"source": "hi"' in f.read_text(encoding="utf-8")
+        assert f.read_text(encoding="utf-8") == '{"cells": [{"cell_type": "markdown", "source": "hi"}]}'
 
 
 # ---------------------------------------------------------------------------

@@ -52,4 +52,25 @@ describe("useLogoFallback", () => {
 
     expect(screen.getByText("No logo")).toBeInTheDocument();
   });
+
+  it("does not treat a different provider's image as already loaded", () => {
+    const view = render(<TestLogo urls={["/first.svg"]} />);
+    fireEvent.load(screen.getByRole("img"));
+    expect(screen.getByText("Loaded")).toBeInTheDocument();
+    view.rerender(<TestLogo urls={["/second.svg"]} />);
+    expect(screen.getByRole("img")).toHaveAttribute("src", "/second.svg");
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+  });
+
+  it("invalidates a previously loaded candidate if it later fails", () => {
+    const urls = ["/first.svg", "/second.svg"];
+    const view = render(<TestLogo urls={urls} />);
+    fireEvent.load(screen.getByRole("img"));
+    fireEvent.error(screen.getByRole("img"));
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    view.unmount();
+    render(<TestLogo urls={urls} />);
+    expect(screen.getByRole("img")).toHaveAttribute("src", "/second.svg");
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+  });
 });

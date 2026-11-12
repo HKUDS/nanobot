@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle, RestartRequiredNotice, RestartSettingsFooter } from "@/components/settings/shared/SettingsControls";
 import { ProviderPicker } from "@/components/settings/shared/ModelControls";
 import { TimezonePicker } from "@/components/settings/shared/TimezonePicker";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
+import { SharedProxyEditor } from "@/components/settings/shared/SharedProxyEditor";
+import { SettingsHint } from "@/components/settings/shared/SettingsHint";
+import { ShellRuntimeControl } from "@/components/settings/system/ShellRuntimeControl";
+import { IdleCompactionControl } from "@/components/settings/system/IdleCompactionControl";
 import { Input } from "@/components/ui/input";
 import { RUNTIME_CONFIG_FIELDS, RUNTIME_CONFIG_GROUPS, type RuntimeConfigField, type RuntimeConfigPage } from "@/components/settings/system/runtime-config-fields";
 import { updateRuntimeConfigSettings } from "@/lib/api";
@@ -59,23 +63,37 @@ export function useRuntimeConfigSettings(
     setErrors((prev) => ({ ...prev, [field.group]: "" }));
     setInvalidField(null);
   };
-  const save = async (group: string) => {
+  const reject = (field: RuntimeConfigField, message: string) => {
+    setSaved((prev) => ({ ...prev, [field.group]: false }));
+    setErrors((prev) => ({ ...prev, [field.group]: message }));
+    setInvalidField(field.path);
+  };
+  const save = async (group: string, edits: Record<string, Draft> = {}) => {
     if (!settings?.runtime_config) return;
     if (saving) {
       if (!queuedSaves.current.includes(group)) queuedSaves.current.push(group);
       return;
     }
-    const changed = RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group && visible(field) && dirty(field));
+    const editedValue = (field: RuntimeConfigField) => edits[field.path] ?? value(field.path);
+    const changed = RUNTIME_CONFIG_FIELDS.filter((field) => field.group === group && visible(field)
+      && editedValue(field) !== displayValue(settings.runtime_config?.[field.path]));
     if (!changed.length) return;
     const values: Record<string, RuntimeConfigValue> = {};
     for (const field of changed) {
-      const raw = value(field.path);
-      if (field.kind === "number") {
+      const raw = editedValue(field);
+      if (field.kind === "idle-compaction") {
+        if (!/^\d+$/.test(String(raw)) || !Number.isSafeInteger(Number(raw))) {
+          reject(field, t("settings.runtimeConfig.idleCompaction.numberError"));
+          return;
+        }
+        values[field.path] = Number(raw);
+      } else if (field.kind === "number" || field.kind === "duration") {
+        const maximum = field.kind === "duration" ? settings.advanced.exec_max_runtime_limit : field.max;
         const parsed = Number(raw);
         if (String(raw).trim() === "" || !Number.isFinite(parsed)
           || (field.path !== "api.timeout" && !Number.isInteger(parsed))
           || (field.min !== undefined && parsed < field.min)
-          || (field.max !== undefined && parsed > field.max)) {
+          || (maximum !== undefined && parsed > maximum)) {
           setErrors((prev) => ({ ...prev, [group]: t("settings.runtimeConfig.numberError") }));
           setInvalidField(field.path);
           return;
@@ -124,7 +142,23 @@ export function useRuntimeConfigSettings(
     applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
     setSaved((prev) => ({ ...prev, [field.group]: true }));
   };
-  return { value, visible, dirty, discard, change, save, saveList, saving, errors, invalidField, saved };
+  const commit = (field: RuntimeConfigField, next: Draft) => {
+    if (next === value(field.path) && !dirty(field)) return;
+    change(field, next);
+    void save(field.group, { [field.path]: next });
+  };
+  const saveProxy = async (next: string) => {
+    setSaving("proxy");
+    try {
+      const payload = await updateRuntimeConfigSettings(client, { "network.proxy": next.trim() || null });
+      applyPayload(payload, { preserveAgentForm: true, preserveCapabilityForms: true });
+      discard("proxy");
+      setSaved((prev) => ({ ...prev, proxy: true }));
+    } finally {
+      setSaving(null);
+    }
+  };
+  return { value, visible, dirty, discard, change, commit, reject, save, saveList, saveProxy, saving, errors, invalidField, saved };
 }
 
 export type RuntimeConfigController = ReturnType<typeof useRuntimeConfigSettings>;
@@ -160,20 +194,37 @@ export function RuntimeConfigSettings({
         const dirty = fields.filter(state.visible).some(state.dirty);
         const title = tr(`groups.${group.id}.title`);
         const errorId = `runtime-error-${group.id}`;
+        const inlineError = fields.some((field) => field.kind === "duration" && state.invalidField === field.path);
         const section = (
           <section key={group.id} aria-label={title}>
-            <SettingsSectionTitle>{title}</SettingsSectionTitle>
-            <form noValidate onSubmit={(event) => { event.preventDefault(); void state.save(group.id); }}>
+            <SettingsSectionTitle>{group.id === "proxy"
+              ? <SettingsHint description={tr("fields.network_proxy.help")}>{title}</SettingsHint>
+              : title}</SettingsSectionTitle>
+            <form noValidate onSubmit={(event) => { event.preventDefault(); void state.save(group.id); }}
+              onBlur={(event) => {
+                if (event.relatedTarget && event.currentTarget.contains(event.relatedTarget)) return;
+                if (fields.some((field) => field.kind === "idle-compaction" && state.dirty(field))) {
+                  void state.save(group.id);
+                }
+              }}>
               <fieldset disabled={state.saving === group.id || isRestarting} className="min-w-0">
                 <legend className="sr-only">{title}</legend>
                 <button type="submit" hidden />
                 <SettingsGroup>
                   {fields.filter(state.visible).map((field) => {
                     const id = `runtime-${field.path}`;
+                    const current = state.value(field.path);
+                    if (field.kind === "idle-compaction") return (
+                      <IdleCompactionControl key={field.path} id={id} value={String(current)}
+                        savedMinutes={Number(settings.runtime_config?.[field.path])}
+                        disabled={state.saving === group.id || isRestarting}
+                        errorId={state.invalidField === field.path ? errorId : undefined}
+                        onChange={(next) => state.change(field, next)}
+                        onCommit={(next) => state.commit(field, next)} />
+                    );
                     const key = field.path.replaceAll(".", "_");
                     const text = tr(`fields.${key}.label`);
                     const help = tr(`fields.${key}.help`);
-                    const current = state.value(field.path);
                     const disabled = (field.path === "agents.defaults.timezone" && state.value("agents.defaults.timezone_mode") === "auto")
                       || (field.path === "tools.webui_allow_remote_package_install" && remoteBrowserAccess);
                     const common = {
@@ -185,6 +236,14 @@ export function RuntimeConfigSettings({
                       : [...field.options ?? []];
                     // Keep a configured preset visible if it is no longer available.
                     if (field.kind === "preset" && current && !options.includes(String(current))) options.push(String(current));
+                    if (field.path === "network.proxy") return (
+                      <div key={field.path} className="px-4 py-4 sm:px-5">
+                        <span id={`${id}-help`} className="sr-only">{help}</span>
+                        <SharedProxyEditor value={String(current)} addressProps={common}
+                          disabled={disabled || state.saving !== null || isRestarting}
+                          onChange={(next) => state.change(field, next)} />
+                      </div>
+                    );
                     return (
                       <SettingsRow key={field.path} title={text} description={help}>
                         <span id={`${id}-help`} className="sr-only">{help}</span>
@@ -195,6 +254,13 @@ export function RuntimeConfigSettings({
                           <div className="w-full">
                             {field.path === "agents.defaults.timezone" ? (
                               <TimezonePicker {...common} value={String(current)} onChange={(next) => state.change(field, next)} />
+                            ) : field.kind === "duration" ? (
+                              <ShellRuntimeControl value={String(current)} maximum={settings.advanced.exec_max_runtime_limit}
+                                controlProps={{ ...common, disabled: disabled || state.saving === group.id || isRestarting }}
+                                onChange={(next) => state.change(field, next)}
+                                error={state.invalidField === field.path && state.errors[group.id]
+                                  ? { id: errorId, message: state.errors[group.id] } : undefined}
+                                onReject={(message) => state.reject(field, message)} />
                             ) : field.kind === "list" ? (
                               <SettingsTextEditor id={id} title={text} description={help} value={String(current)}
                                 disabled={disabled || state.saving !== null || isRestarting}
@@ -227,7 +293,7 @@ export function RuntimeConfigSettings({
                     onRestart={onRestart} isRestarting={isRestarting} />
                 </SettingsGroup>
               </fieldset>
-              {state.errors[group.id] ? <p id={errorId} role="alert" className="mt-2 break-words px-1 text-[12px] text-destructive">{state.errors[group.id]}</p> : null}
+              {state.errors[group.id] && !inlineError ? <p id={errorId} role="alert" className="mt-2 break-words px-1 text-[12px] text-destructive">{state.errors[group.id]}</p> : null}
             </form>
           </section>
         );

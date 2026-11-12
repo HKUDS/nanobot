@@ -1,6 +1,6 @@
 ---
 name: my
-description: Inspect and optionally adjust the agent's runtime state. Use to check the current model or preset, context window and runtime limits, workspace and tool configuration, subagent status, and request routing metadata such as channel, chat ID, and sender ID; diagnose unavailable capabilities; change allowed runtime settings; or store temporary session scratchpad values.
+description: Inspect or troubleshoot the agent's runtime state, adjust runtime settings, or keep temporary session notes.
 ---
 
 # Self-Awareness
@@ -57,6 +57,8 @@ description: Inspect and optionally adjust the agent's runtime state. Use to che
 ## Constraints
 
 - `model_preset` is saved for the current session; other modifications are in-memory only
+- Scratchpad values survive across turns until the agent runtime restarts and are shared by its sessions; do not treat them as private per-session storage.
+- Use `my(action="check", key="workspace_sandbox")` for the current project and file restriction. `workspace` is only a legacy agent-directory display.
 - Direct `model` and `context_window_tokens` writes are rejected during active sessions because they would change the shared instance default. Use a configured `model_preset` instead.
 - Protected params have type/range validation: `max_iterations` (1–100), `context_window_tokens` (4096–1M), `model` (non-empty str)
 - If `tools.my.allow_set` is false, check only
@@ -65,8 +67,8 @@ description: Inspect and optionally adjust the agent's runtime state. Use to che
 
 | Need | Use | Persists? |
 |------|-----|-----------|
-| Per-session temp state | `my(action="set", key="...", value=...)` | No |
+| Temporary runtime notes | `my(action="set", key="...", value=...)` | Across turns, not restarts |
 | Long-term facts | Memory skill (`MEMORY.md`, `USER.md`) | Yes |
 | Permanent config change | Edit config file | Yes |
 
-**Rule of thumb:** Tomorrow? Memory. This turn only? My.
+**Rule of thumb:** Durable facts? Memory. Temporary runtime notes? My.

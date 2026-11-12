@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · Renombrar grupos y proyectos",
+    "description": "Prueba el cambio de nombre de grupos y proyectos. Los temas se renombran en la lista de chats.",
+    "options": "El componente padre aporta dialogTitle, description y placeholder. title fija el valor inicial; onConfirm recibe el título sin espacios en los extremos. No se pueden guardar títulos vacíos.",
+    "hint": "Al guardar se actualiza el título de arriba."
+  },
+  "delete": {
+    "title": "DeleteConfirm · Confirmación de eliminación",
+    "description": "Compara la eliminación de un chat, varios chats o un chat con automatizaciones.",
+    "options": "count controla el texto de eliminación múltiple. automations muestra tareas vinculadas, horarios y próximas ejecuciones. Confirmar llama a onConfirm.",
+    "scenario": "Escenario de eliminación",
+    "open": "Abrir confirmación de eliminación",
+    "confirmed": "Eliminación de ejemplo confirmada.",
+    "hint": "Elige un chat, varios chats o un chat con automatizaciones."
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · Comandos e identificadores de sesión",
+    "description": "Edita comandos e identificadores para ver el resaltado y los colores estables de sesión.",
+    "options": "SlashCommandText recibe command; InlineTokenHighlight recibe color y contenido. SessionHandleLabel obtiene su color a partir de id.",
+    "command": "Texto del comando",
+    "run": "Ejecuta <command/> para consultar el estado.",
+    "handle": "Identificador de sesión",
+    "continue": "Continúa trabajando en <session/>.",
+    "highlight": "Resaltado compartido",
+    "review": "Usa <skill/> para revisar los cambios.",
+    "skill": "Habilidad: {{name}}"
+  },
+  "sessionLinks": {
+    "selected": "Sesión seleccionada: {{name}}.",
+    "hint": "Selecciona una mención de sesión para ver el resultado."
+  },
+  "userText": {
+    "title": "UserMessageText · Menciones en mensajes",
+    "description": "Edita un mensaje con menciones de habilidades, aplicaciones, MCP y sesiones.",
+    "options": "text es el mensaje original. cliApps, mcpPresets y sessionMentions resuelven las menciones. Las habilidades usan $name; las demás menciones, @name.",
+    "message": "Texto del mensaje"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · Menciones de aplicaciones",
+    "description": "Compara las menciones de aplicaciones, MCP y sesiones en el editor y los mensajes.",
+    "options": "segment especifica cli, mcp o session y sus metadatos. variant elige composer o message. El ejemplo usa una imagen de marca local.",
+    "position": "Ubicación de la mención"
+  },
+  "productIcons": {
+    "title": "Product icons · Catálogo de iconos",
+    "description": "Explora los iconos, cambia su tamaño y selecciona uno para resaltarlo.",
+    "options": "Los iconos aceptan LucideProps como size, strokeWidth y className. El color hereda currentColor; los botones tienen nombres de acción accesibles.",
+    "size": "Tamaño del icono",
+    "selected": "Seleccionado: {{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · Pantalla de inicio",
+    "description": "Previsualiza la pantalla discreta que aparece mientras se conecta la aplicación.",
+    "options": "embedded renderiza section; en caso contrario, main. aria-busy y el estado de carga permanecen disponibles. Los estilos se cargan desde la entrada de la aplicación."
+  },
+  "fileActions": {
+    "title": "FileActions · Menú de archivo",
+    "description": "Haz clic derecho para copiar la ruta completa, relativa o el texto de referencia de un archivo.",
+    "options": "path es el texto de referencia. metadata aporta la ruta completa y la relativa opcional. La galería proporciona los metadatos sin cargar el archivo.",
+    "scope": "Ámbito del archivo",
+    "hint": "Haz clic derecho para abrir el menú de copia, o enfoca el archivo y pulsa Mayús+F10."
+  },
+  "workbench": {
+    "title": "PaneWorkbench · Paneles múltiples",
+    "description": "Cambia la disposición, activa o añade paneles y ajusta su posición y tamaño.",
+    "options": "El componente padre controla panes, activePaneKey, layout y splitRatios. renderPane aporta el contenido y las funciones actualizan el estado local. En pantallas estrechas se muestra el panel activo.",
+    "layout": "Disposición de paneles",
+    "limit": "Hasta cuatro paneles",
+    "notes": "Notas de {{title}}",
+    "active": "Panel activo",
+    "activate": "Selecciona este panel para activarlo",
+    "hint": "Activo: {{title}}. Arrastra el tirador inferior para mover un panel y sus bordes para cambiar su tamaño."
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · Estado de conexión",
+    "description": "Compara los estados conectado, desconectado, conectando y error.",
+    "options": "state controla el icono y el texto. compact oculta el texto visible, pero conserva el estado accesible y la descripción emergente.",
+    "state": "Estado de conexión",
+    "withText": "Estado con texto",
+    "compact": "Vista compacta"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · Compatibilidad de versiones",
+    "description": "Consulta versiones, preparación y guía de actualización para cada resultado de compatibilidad.",
+    "options": "Un profile abre el diálogo; compatibility aporta el resultado y las versiones. onClose lo cierra. Este componente solo muestra información.",
+    "state": "Compatibilidad de versiones",
+    "open": "Ver detalles de compatibilidad"
+  },
+  "composer": {
+    "title": "ThreadComposer · Entrada de mensajes",
+    "description": "Prueba mensajes, adjuntos, comandos y citas en los estados ocupado y desactivado.",
+    "options": "Un onSend correcto vacía la entrada. isStreaming controla la detención y la cola; variant elige el estilo de chat o bienvenida. Los envíos se conservan en esta vista previa.",
+    "statusCommand": "Estado de la sesión",
+    "statusDescription": "Ver el estado de la sesión actual",
+    "compactCommand": "Compactar contexto",
+    "compactDescription": "Compactar el contexto de la sesión actual",
+    "helpCommand": "Ayuda de comandos",
+    "helpDescription": "Ver los comandos disponibles",
+    "state": "Estado de entrada",
+    "addQuote": "Añadir cita",
+    "input": "Mensaje de ejemplo",
+    "placeholder": "Escribe un mensaje o / para ver comandos",
+    "stopped": "Tarea de ejemplo detenida.",
+    "sent": "Contenido enviado: {{content}}{{attachments}}",
+    "attachments": " · Adjuntos: {{amount}}",
+    "hint": "Prueba el envío, la selección de adjuntos, el cambio de modelo y el menú de comandos."
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · Preajustes de modelo",
+    "description": "Prueba el menú de modelos, el teclado y el estado pendiente de configuración.",
+    "options": "modelPresets aporta los preajustes; modelPreset y onPresetChange controlan la selección. needsSetup muestra el acceso a la configuración.",
+    "state": "Estado del control de modelo",
+    "manage": "Gestión de modelos abierta.",
+    "settings": "Configuración de modelos abierta.",
+    "hint": "Preajuste actual: {{preset}}. Abre el menú o usa las flechas para cambiar."
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · Uso del contexto",
+    "description": "Consulta contexto, caché y tiempo de generación, con avisos y panel inferior.",
+    "options": "context aporta la capacidad y rounds las estadísticas por turno. bottomSheet elige el panel móvil.",
+    "state": "Estado de uso",
+    "hint": "Abre los detalles para ver el contexto, la caché y el tiempo de generación por turno."
+  },
+  "workspace": {
+    "title": "WorkspaceControls · Directorio de trabajo",
+    "description": "Elige un proyecto de ejemplo y cambia el modo de acceso de esta vista previa.",
+    "options": "scope y onChange controlan la selección; onLoadProjects aporta directorios de ejemplo. La pasarela resuelve las rutas reales y aplica los permisos.",
+    "state": "Estado del directorio de trabajo"
+  },
+  "navigator": {
+    "title": "PromptNavigator · Navegación de preguntas",
+    "description": "Busca preguntas anteriores y observa la función de salto.",
+    "options": "messages aporta toda la conversación; el componente extrae las preguntas del usuario. onJumpToPrompt recibe el ID del mensaje de destino.",
+    "hint": "Abre la navegación, busca una pregunta y selecciónala.",
+    "empty": "Aún no hay ninguna pregunta seleccionada"
+  },
+  "header": {
+    "title": "ThreadHeader · Cabecera del chat",
+    "description": "Prueba la barra lateral, el tema, el chat temporal y la navegación de preguntas.",
+    "options": "title, handle, theme y temporaryChatEnabled aportan el estado visual. Las funciones de retorno envían las acciones al componente padre.",
+    "jump": "Salto a {{id}}",
+    "sidebar": "Barra lateral alternada",
+    "hint": "Prueba las acciones de la cabecera",
+    "temporary": "Chat temporal",
+    "regular": "Chat normal"
+  },
+  "messages": {
+    "title": "ThreadMessages · Lista de mensajes",
+    "description": "Explora una conversación con varios turnos, menús, ramas y citas del texto seleccionado.",
+    "options": "messages contiene los mensajes proyectados. onForkFromMessage recibe el índice de una pregunta; onQuoteSelection recibe el texto seleccionado de una respuesta.",
+    "quoted": "Cita: {{text}}",
+    "forked": "Rama creada desde la pregunta {{index}}",
+    "hint": "Abre el menú de un mensaje, o selecciona texto de una respuesta y elige Citar."
+  },
+  "viewport": {
+    "title": "ThreadViewport · Desplazamiento del chat",
+    "description": "Recorre una conversación larga con marcadores, navegación y regreso al final.",
+    "options": "La altura de la vista previa es fija. messages aporta el historial; ref.jumpToUserPrompt localiza una pregunta. emptyState aporta el contenido de un chat vacío.",
+    "state": "Vista del chat",
+    "empty": "Escribe un mensaje para iniciar un chat",
+    "hint": "Desplázate para ver los marcadores, o usa la navegación y vuelve al final."
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · Estado del historial",
+    "description": "Muestra la carga, el inicio del historial y los errores con reintento.",
+    "options": "loading indica una solicitud, exhausted que no hay mensajes anteriores, error aporta los detalles del error y onRetry reintenta la carga.",
+    "state": "Estado del historial",
+    "error": "El historial de ejemplo no está disponible.",
+    "retries": "Reintentos: {{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · Recuperación de tareas",
+    "description": "Compara interrupción, reanudación, error e imposibilidad de continuar; prueba continuar y cerrar.",
+    "options": "state aporta una instantánea de recuperación. onContinue y onDismiss devuelven Promises. Estas funciones solo actualizan la vista previa.",
+    "state": "Estado de recuperación",
+    "continued": "Tarea de ejemplo reanudada.",
+    "dismissed": "Aviso de recuperación cerrado.",
+    "reset": "Restablecer vista previa",
+    "hint": "Elige un estado de recuperación y prueba a continuar o cerrar."
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · Modelo alternativo",
+    "description": "Consulta avisos de modelo alternativo y autorización caducada, configuración y cierre.",
+    "options": "model identifica el modelo alternativo; reauthProviderLabel nombra la autorización caducada. El componente padre aporta onOpenSettings y onDismiss.",
+    "state": "Estado del modelo alternativo",
+    "showAgain": "Mostrar de nuevo",
+    "hint": "Prueba el enlace a la configuración de modelos y el botón de cierre."
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · Compactación del contexto",
+    "description": "Compara los estados de inicio, éxito, error y cancelación de la compactación.",
+    "options": "compaction.phase selecciona el aviso; announce controla los anuncios del lector de pantalla.",
+    "phase": "Fase de compactación del contexto"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · Errores de mensaje",
+    "description": "Compara errores de tamaño, permisos, rechazo de turno y petición al modelo.",
+    "options": "error.kind elige el mensaje de error; onDismiss cierra el aviso.",
+    "kind": "Tipo de error de mensaje"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · Actividad completa",
+    "description": "Consulta razonamiento y registros de herramientas en ejecución, completados o fallidos.",
+    "options": "messages contiene las proyecciones reasoning y trace. isTurnStreaming controla la actividad; expanded puede controlarse desde el componente padre.",
+    "state": "Estado de la actividad",
+    "error": "No se pudo leer el archivo."
+  },
+  "search": {
+    "title": "WebSearchRun · Actividad de búsqueda",
+    "description": "Consulta el progreso y las fuentes de búsquedas web y en X.",
+    "options": "run aporta query, target, status y sources; turnActive controla el efecto de ejecución. Los componentes compartidos cargan los iconos de las fuentes.",
+    "state": "Estado de la búsqueda",
+    "source": "Fuente de búsqueda"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · Fuentes de respuesta",
+    "description": "Consulta los preajustes, modelos y proveedores alternativos de respuestas anteriores.",
+    "options": "sources conserva la instantánea del modelo al responder. Solo las fuentes con fallback en true muestran una insignia.",
+    "hint": "Selecciona una insignia de modelo alternativo para ver el preajuste, modelo y proveedor de esa respuesta."
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · Contenido de archivos",
+    "description": "Compara texto, imágenes, truncamiento, carga y errores. Selecciona una imagen para ampliarla.",
+    "options": "state aporta la instantánea visual; path determina el tipo y nombre del archivo. Las funciones de apertura y error de imagen actualizan la vista previa.",
+    "state": "Estado de la vista previa del archivo"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · Automatizaciones de sesión",
+    "description": "Consulta, edita, desactiva y elimina tareas con estados de carga y error.",
+    "options": "El componente padre aporta jobs, loading, loadFailed y now. onAction y onEdit devuelven las tareas actualizadas; la vista coordina diálogos, foco y resultados.",
+    "state": "Estado de las automatizaciones",
+    "saveError": "Falló el guardado de ejemplo. Inténtalo de nuevo.",
+    "providerError": "El proveedor de ejemplo no está disponible.",
+    "saved": "Automatización guardada.",
+    "openedChat": "Chat de ejemplo abierto.",
+    "openedCalendar": "Calendario de automatizaciones abierto.",
+    "actionError": "Falló la acción de ejemplo. Inténtalo de nuevo.",
+    "delete": "Eliminado: {{name}}",
+    "run": "Ejecución solicitada: {{name}}",
+    "enable": "Activado: {{name}}",
+    "disable": "Desactivado: {{name}}",
+    "hint": "Abre los detalles de la sesión para consultar, alternar, editar y eliminar automatizaciones."
+  },
+  "subagent": {
+    "title": "SubagentThreadView · Mensajes del subagente",
+    "description": "Consulta mensajes, razonamiento, carga y fallos del subagente; prueba el reintento.",
+    "options": "El entorno de ejecución proyecta messages. loading y error usan el estado compartido del historial; isStreaming y activeTurnId identifican la actividad. La vista no obtiene el historial.",
+    "state": "Estado del chat del subagente"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · Ruta de emparejamiento",
+    "description": "Selecciona y guarda rutas localmente, con estados de guardado, error y fallo de actualización.",
+    "options": "El componente padre gestiona route y original; routes aporta rutas SSH. El guardado correcto y el fallo de actualización del directorio se muestran por separado. Galería y ajustes comparten esta vista.",
+    "state": "Estado de la ruta"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · Emparejamiento rápido",
+    "description": "Prueba la copia de invitación, el recibo, la confirmación de acceso, hosts existentes y reintentos.",
+    "options": "state aporta el estado visual y del emparejamiento; las funciones ejecutan acciones. routeSettings integra los ajustes de ruta. La galería usa ejemplos y funciones locales; QuickPairSetup gestiona el emparejamiento real.",
+    "state": "Etapa de emparejamiento",
+    "open": "Abrir emparejamiento rápido",
+    "connected": "Conexión seleccionada: {{name}}.",
+    "ssh": "Conexión SSH seleccionada.",
+    "hint": "Las invitaciones y los recibos de ejemplo son solo visuales. La confirmación actualiza el resultado local."
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · Dirección SSH",
+    "description": "Filtra alias SSH, elige con las flechas y compara importación, carga y errores.",
+    "options": "discovery aporta los hosts de la configuración actual. El componente padre controla value, busy, error y las funciones. customConfig conserva el descubrimiento de alias personalizados; inputRef restaura el foco tras seleccionar.",
+    "state": "Estado de la dirección SSH",
+    "refreshed": "Direcciones de ejemplo actualizadas.",
+    "entered": "Entrada: {{value}}",
+    "hint": "Escribe para filtrar direcciones y usa las flechas para elegir un alias SSH."
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · Indicador de conexión",
+    "description": "Compara colores, animaciones y textos de estado accesibles.",
+    "options": "El componente padre aporta status. El contenedor de la página gestiona la suscripción de conexión.",
+    "state": "Estado de conexión",
+    "idle": "Inactivo",
+    "connecting": "Conectando",
+    "open": "Conectado",
+    "reconnecting": "Reconectando",
+    "closed": "Desconectado",
+    "error": "Error de conexión"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · Menú de hosts",
+    "description": "Elige hosts locales o de ejemplo y compara espera, desconexión y vista contraída.",
+    "options": "picker aporta datos y funciones de los hosts; status es el estado de conexión actual. HostSwitcher de producción se suscribe al cliente.",
+    "state": "Estado del menú de hosts",
+    "offline": "El host de ejemplo está desconectado.",
+    "manage": "Gestión de conexiones abierta.",
+    "cancelled": "Cambio de host de ejemplo cancelado.",
+    "selected": "Host de la vista previa: {{name}}"
+  },
+  "chats": {
+    "title": "ChatList · Lista de chats",
+    "description": "Selecciona chats y prueba a fijarlos, archivarlos o eliminarlos desde sus menús.",
+    "options": "El componente padre aporta sessions, activeKey y las claves fijadas o archivadas. Las funciones de acción actualizan la lista de ejemplo.",
+    "state": "Estado de la lista de chats",
+    "renamed": "Nuevo nombre: {{name}}",
+    "selected": "Chat seleccionado: {{name}}",
+    "none": "Ninguno"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · Tamaño de la barra lateral",
+    "description": "Ajusta, contrae y expande la barra lateral con el ratón o el teclado.",
+    "options": "width y open son estados controlados. onResize actualiza tamaño y expansión; onDraggingChange informa del arrastre.",
+    "content": "Contenido de la barra lateral",
+    "hint": "Arrastra el separador, o enfócalo y usa las flechas, Inicio, Fin y Entrar.",
+    "collapsed": "Contraída",
+    "dragging": "Arrastrando"
+  },
+  "language": {
+    "title": "LanguageSwitcher · Idioma de la interfaz",
+    "description": "Cambia el idioma de la galería y los componentes de producción.",
+    "options": "Usa el i18n de la aplicación y la preferencia del navegador, sin pasarela. El selector superior es el mismo componente."
+  },
+  "channelMarks": {
+    "title": "Channel marks · Identidad de canales",
+    "description": "Consulta el texto alternativo de avatares, iconos de espacio y la marca WebSocket.",
+    "options": "LinearAvatar recibe name, url y workspace. Sin una imagen válida, muestra texto alternativo o un icono.",
+    "name": "Nombre del avatar",
+    "member": "Avatar de miembro",
+    "workspace": "Icono del espacio de trabajo"
+  },
+  "secret": {
+    "title": "LinearSecretField · Edición de secretos",
+    "description": "Edita, muestra, guarda y sustituye un secreto; comprueba el borrador tras un fallo.",
+    "options": "configured indica el estado guardado y onSave persiste el secreto. Las funciones de la galería solo actualizan el estado local.",
+    "state": "Estado del secreto",
+    "error": "Falló el guardado de ejemplo.",
+    "hint": "Introduce un texto y guárdalo, o elige el estado de error para comprobar que se conserva el borrador."
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · Ayuda del canal",
+    "description": "Consulta la ayuda del canal dentro del menú desplegable real.",
+    "options": "El contenido usa las traducciones existentes del canal; el componente padre aporta el contenedor del menú.",
+    "open": "Abrir ayuda del canal"
+  },
+  "channel": {
+    "title": "{{channel}} · Configuración del canal",
+    "description": "Explora el formulario real de configuración del canal y sus estados.",
+    "options": "Usa registros de canal, instantáneas del contrato Python y ChannelSetupSurfaceView de producción. Entradas, credenciales visibles, preajustes, comprobaciones e interruptores solo afectan a esta vista previa.",
+    "state": "Estado de configuración del canal",
+    "credentialsError": "Se rechazaron las credenciales de ejemplo. Actualiza los valores de la vista previa y reintenta.",
+    "validation": "Configuración de vista previa"
+  },
+  "channelConnect": {
+    "state": "Estado de conexión de {{channel}}",
+    "error": "La autorización no está disponible temporalmente. Inténtalo de nuevo."
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Conexión QR de QQ",
+    "description": "Prueba el acceso por QR de QQ, los reintentos y el aviso de sustitución de App Secret.",
+    "options": "La vista recibe el estado y los callbacks. Las acciones de ejemplo solo cambian el estado local; la entrada de ejecución crea sesiones y consulta el portal de QQ."
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · Autorización QR de Feishu",
+    "description": "Prueba el flujo QR real de Feishu con espera, éxito, caducidad, cancelación y errores.",
+    "options": "connect, busy y error aportan el estado visual; los QR se generan localmente. La función gestiona inicio, cancelación y sondeo; los ejemplos solo cambian esta vista previa."
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · Asistentes de Feishu",
+    "description": "Explora tarjetas, ejecución y autorización, interruptores, ajustes avanzados y nuevos asistentes.",
+    "options": "feature e instances aportan instantáneas. La vista gestiona borradores y resultados de guardado; onToggleInstance, onSaveInstance y renderConnectFlow conectan acciones de ejecución.",
+    "state": "Estado de ejecución del asistente",
+    "error": "El asistente se detuvo. Comprueba sus credenciales antes de reiniciarlo.",
+    "on": "{{name}}: activado",
+    "off": "{{name}}: desactivado",
+    "saved": "{{name}}: campos de vista previa guardados: {{amount}}"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · Vinculación de dispositivo WhatsApp",
+    "description": "Compara vinculación automática, éxito, caducidad y errores; prueba otra cuenta.",
+    "options": "La vista conserva las reglas visuales de inicio automático y diseño mínimo. El componente padre controla estado y reintentos. La entrada real gestiona inicio automático, reintentos forzados y sondeo."
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Configuración de Linear",
+    "description": "Explora datos de la app, secretos, ajustes avanzados, espacios, acceso y autorización web.",
+    "options": "state y workspaces aportan instantáneas; las funciones conectan acciones de espacio, guardado y MCP. Tres espacios de composición integran las vistas reales de miembros, autorización y restablecimiento.",
+    "state": "Estado de configuración de Linear",
+    "runtimeError": "No se pudo iniciar el webhook de Linear.",
+    "saveError": "No se pudo guardar la configuración. Se conservó el borrador.",
+    "inspectionError": "No se pudieron inspeccionar los espacios de trabajo conectados.",
+    "refreshed": "Espacios de trabajo de ejemplo actualizados.",
+    "removed": "Espacio de trabajo de ejemplo eliminado: {{name}}",
+    "mcp": "Configuración de Linear MCP seleccionada."
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · Acceso de miembros",
+    "description": "Busca miembros, cambia permisos y compara carga, vacío, guardado y falta de confirmación.",
+    "options": "snapshot contiene el estado confirmado de los miembros. onLoad y onSetAllowed corresponden a la entrada del canal; la pasarela sigue validando los permisos.",
+    "state": "Estado de miembros",
+    "loadError": "El directorio de miembros no está disponible.",
+    "saveError": "No se confirmó el acceso."
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Autorización de Linear",
+    "description": "Prueba la autorización del navegador con espera, inicio, cancelación, éxito y error.",
+    "options": "Reutiliza ChannelQrConnectFlowView. Linear aporta la vista, etiquetas y gestión del foco; la entrada de ejecución crea sesiones y realiza el sondeo.",
+    "state": "Etapa de autorización",
+    "error": "No se pudo completar la autorización.",
+    "hint": "El enlace y el espacio de trabajo son ejemplos. Iniciar y Cancelar solo cambian la etapa de la vista previa."
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · Restablecer conexión",
+    "description": "Revisa qué se borra o conserva, el estado ocupado y el reintento tras un restablecimiento parcial.",
+    "options": "onReset ejecuta la revocación y limpieza completas. La vista gestiona confirmación, errores, restricciones de cierre y restauración del foco.",
+    "state": "Resultado del restablecimiento",
+    "error": "No se pudo detener el canal. Se conservó la configuración de la aplicación.",
+    "completed": "Se borraron el espacio y la configuración de la aplicación de la vista previa."
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · Ajustes de Weixin",
+    "description": "Explora ajustes, opciones avanzadas, guardado y recuperación de sesión caducada.",
+    "options": "Los campos proceden del contrato del canal. La vista gestiona expansión y secretos visibles; la entrada de ejecución gestiona autoguardado, combinación de borradores y recuperación de acceso.",
+    "state": "Estado del panel de Weixin"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · QR y verificación de Weixin",
+    "description": "Compara escaneo QR, códigos de verificación, éxito, caducidad, cancelación y errores.",
+    "options": "La vista recibe instantáneas y funciones, conservando el código escrito. Los QR se generan en el navegador. La entrada real gestiona autorización, pausa de sondeo, actualización y cancelación.",
+    "state": "Estado de conexión de Weixin",
+    "error": "Conexión interrumpida. Inténtalo de nuevo.",
+    "refreshed": "Se muestra un nuevo código QR de vista previa.",
+    "hint": "Introduce 123456 para completar la verificación de ejemplo. Otro valor conserva el borrador y muestra un error."
+  }
+}

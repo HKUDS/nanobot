@@ -10,12 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import INBOUND_META_USER_SHELL, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket import runtime
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.config.schema import Config
+from nanobot.runtime_admission import RuntimeBusyError
 from nanobot.webui.gateway_services import build_gateway_services
 
 
@@ -64,7 +65,7 @@ class _RecordingConnection:
 
 
 def _channel() -> WebSocketChannel:
-    bus = MagicMock(spec=MessageBus)
+    bus = MessageBus()
     config = WebSocketConfig(
         enabled=True,
         allow_from=["*"],
@@ -83,7 +84,7 @@ def _channel() -> WebSocketChannel:
     )
     channel = WebSocketChannel(config, bus, gateway=gateway)
     # Keep disk latency out of every connection delivery synchronization check.
-    channel._persist_turn_transcript_event = MagicMock(return_value=True)
+    channel._persist_turn_transcript_event = AsyncMock(return_value=True)
     return channel
 
 
@@ -129,9 +130,24 @@ async def test_message_bus_delivers_to_ten_tuis_with_one_blocked_connection() ->
             assert await _next_text(connection) == "first"
             assert await _next_text(connection) == "last"
         assert connections[0].sent.empty()
+        async with asyncio.timeout(2):
+            while manager._outbound_tasks or bus.outbound_size:
+                await asyncio.sleep(0)
+        # The manager's send has finished; the physical transport still owns
+        # its final frames. A shutdown idle check must include that second queue.
+        assert channel.has_pending_delivery
+        with pytest.raises(RuntimeBusyError):
+            with bus.admission.pause_if_idle(lambda: False):
+                pytest.fail("The blocked WebSocket transport was missed")
+        assert not bus.admission.paused
         connections[0].release_send.set()
         assert await _next_text(connections[0]) == "first"
         assert await _next_text(connections[0]) == "last"
+        async with asyncio.timeout(2):
+            while manager.has_pending_delivery:
+                await asyncio.sleep(0)
+        with bus.admission.pause_if_idle(lambda: False):
+            assert bus.admission.paused
     finally:
         dispatcher.cancel()
         await asyncio.gather(dispatcher, return_exceptions=True)
@@ -140,6 +156,26 @@ async def test_message_bus_delivers_to_ten_tuis_with_one_blocked_connection() ->
     assert not manager._outbound_tasks
     assert not manager._outbound_tails
     assert not channel._connection_outbound
+
+
+@pytest.mark.asyncio
+async def test_delivery_remains_busy_until_timed_out_transport_is_retired(monkeypatch) -> None:
+    monkeypatch.setattr(runtime, "_OUTBOUND_SEND_TIMEOUT_S", 0.02)
+    channel = _channel()
+    connection = _RecordingConnection(block_first_send=True, block_close=True)
+    channel._attach(cast(Any, connection), "chat-retiring")
+    try:
+        await channel.send(_message("chat-retiring", "reply"))
+        await asyncio.wait_for(connection.closed.wait(), 2)
+        assert connection.send_cancelled.is_set()
+        assert channel.has_pending_delivery
+        connection.release_close.set()
+        await asyncio.wait_for(_wait_for_retire_tasks(channel), 2)
+        assert not channel.has_pending_delivery
+    finally:
+        connection.release_send.set()
+        connection.release_close.set()
+        await channel._cleanup_connection(cast(Any, connection))
 
 
 @pytest.mark.asyncio
@@ -442,3 +478,31 @@ async def test_normal_cleanup_can_overlap_connection_retirement(monkeypatch) -> 
     assert connection not in channel._connection_outbound
     assert connection not in channel._conn_chats
     assert channel._subs == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_shell", [True, False])
+async def test_shell_output_is_literal_without_changing_other_command_replies(
+    user_shell: bool, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = _channel()
+    connection = _RecordingConnection()
+    channel._attach(cast(Any, connection), "shell-output")
+    output = "Path\n----\n  __pycache__\n```mermaid\nflowchart LR\n```\n![preview](local.png)\n"
+    rewritten = output.replace("local.png", "/api/media/signed")
+    monkeypatch.setattr(channel._media, "rewrite_local_markdown_images", lambda text: rewritten)
+    message = OutboundMessage(
+        channel="websocket", chat_id="shell-output", content=output,
+        metadata={"render_as": "text", INBOUND_META_USER_SHELL: user_shell},
+    )
+    try:
+        await channel.send(message)
+        payload = json.loads(await asyncio.wait_for(connection.sent.get(), timeout=1))
+        assert payload["text"] == (output if user_shell else rewritten)
+        assert payload.get("render_as") == ("text" if user_shell else None)
+        persisted = channel._persist_turn_transcript_event.await_args
+        assert persisted.args[1] == payload
+        assert persisted.kwargs["transcript_overrides"] == {"text": output}
+        assert message.content == output
+    finally:
+        await channel._cleanup_connection(cast(Any, connection))

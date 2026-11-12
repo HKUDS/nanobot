@@ -1,10 +1,6 @@
 # nanobot WebUI Source
 
-This directory contains the React/TypeScript source for the nanobot WebUI. If
-you installed `nanobot-ai` from PyPI and only want to use the bundled browser UI,
-read the user guide in [`docs/webui.md`](../docs/webui.md). You do not need
-Node.js, Bun, Vite, or anything in this directory unless you are changing the
-frontend.
+This directory contains the React/TypeScript source for the nanobot WebUI. If you installed `nanobot-ai` from PyPI and only want to use the bundled browser UI, read the user guide in [`docs/webui.md`](../docs/webui.md). You do not need Node.js, Bun, Vite, or anything in this directory unless you are changing the frontend.
 
 For the project overview, install guide, and general docs map, see the root [`README.md`](../README.md) and [`docs/README.md`](../docs/README.md).
 
@@ -17,15 +13,20 @@ For the project overview, install guide, and general docs map, see the root [`RE
 | Change WebUI source code | [Develop the WebUI (Vite HMR)](#develop-the-webui-vite-hmr) | `http://127.0.0.1:5173` |
 | Debug setup failures | [`docs/troubleshooting.md#webui-problems`](../docs/troubleshooting.md#webui-problems) | Diagnosis order and common fixes |
 
-The source app is built with Vite + React 18 + TypeScript + Tailwind 3 +
-shadcn/ui. It talks to the gateway over the WebSocket multiplex protocol and
-reads session metadata from the embedded REST surface on the same port.
+The source app is built with Vite + React 18 + TypeScript + Tailwind 3 + shadcn/ui. It talks to the gateway over the WebSocket multiplex protocol and reads session metadata from the embedded REST surface on the same port.
 
 ## Layout
+
+For existing components, ownership boundaries, and interactive examples, see the [component guide](COMPONENTS.md). `bun run gallery` opens the internal component gallery without starting a gateway.
 
 ```text
 webui/                 source tree (this directory)
 nanobot/web/dist/      build output served by the gateway
+webui/src/components/settings/   model, capability, and system settings
+webui/src/lib/                   transport, API clients, and shared types
+webui/src/tests/                 frontend test setup and integration tests
+nanobot/channels/*/webui/        channel-owned interface code
+nanobot/channels/*/tests/webui/  channel interface tests
 ```
 
 ## Develop the WebUI (Vite HMR)
@@ -48,12 +49,9 @@ From the repository root:
 nanobot webui --dev
 ```
 
-The command safely prepares the local WebSocket channel, starts both the gateway and Vite,
-and opens `http://127.0.0.1:5173`. Vite proxies to the configured WebSocket channel and applies
-frontend changes with HMR. Press Ctrl+C in that terminal to stop both processes.
+The command safely prepares the local WebSocket channel, starts both the gateway and Vite, and opens `http://127.0.0.1:5173`. Vite proxies HTTP requests to the gateway and applies frontend changes with HMR; the application WebSocket connects directly to the gateway. Ctrl+C stops Vite and releases this gateway client. An on-demand gateway stops when its last interactive client exits; a persistent gateway keeps running.
 
-Use `--no-open` to skip opening a browser. `--dev` is foreground-only and cannot be combined
-with `--background`.
+Use `--no-open` to skip opening a browser. `--dev` is foreground-only and cannot be combined with `--background`.
 
 ## Manual development setup
 
@@ -87,13 +85,15 @@ bun run dev
 
 Then open `http://127.0.0.1:5173`.
 
-By default the dev server proxies `/api`, `/webui`, `/auth`, and WebSocket traffic to `http://127.0.0.1:8765`.
+By default Vite proxies the HTTP paths `/api`, `/webui`, and `/auth` to `http://127.0.0.1:8765`. The application WebSocket connects directly to the URL returned by the gateway bootstrap response (`ws_url`); Vite does not proxy that connection.
 
 If your gateway listens on a non-default port, point the dev server at it:
 
 ```bash
 NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
 ```
+
+This variable sets the HTTP target. Check the bootstrap response's `ws_url` when HTTP works but chat cannot connect: that address must be reachable by the browser. For a reverse proxy, configure the gateway's `channels.websocket.publicWsUrl` as described in [WebSocket deployment](../docs/websocket.md), rather than adding a Vite WebSocket proxy. If authentication is enabled, use the launcher's full login link or sign in with the configured bootstrap secret.
 
 ## Build for packaged runtime
 
@@ -112,8 +112,15 @@ The gateway picks up the new bundle on the next restart.
 
 ```bash
 cd webui
+bun run lint
+bun run typecheck
 bun run test
+bun x playwright install chromium
+bun run test:browser
+bun run build
 ```
+
+`lint` runs ESLint; `typecheck` checks application and unit-test TypeScript, including channel-owned frontend code and tests; `test` runs Vitest; `test:browser` typechecks and runs Chromium tests with the real components and stylesheet to check tall-dialog reachability and completed-history motion without a gateway; `build` checks production TypeScript and produces the production bundle. Keep tests near the changed behavior and exercise settings save/reload in the browser. Browser-only preferences stay in the frontend; persistent configuration and security policy belong to the Python gateway. When changing that boundary, also run the relevant Python tests from [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Acknowledgements
 

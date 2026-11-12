@@ -12,6 +12,7 @@ FILE_TOOL_NAMES = {
     "edit_file",
     "find_files",
     "grep",
+    "rg",
     "list_dir",
     "read_file",
     "write_file",

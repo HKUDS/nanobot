@@ -3,10 +3,36 @@ import react from "@vitejs/plugin-react";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { readStartupLayout, StartupSkeleton } from "./src/components/StartupSkeleton";
+import { componentGallery } from "./src/dev/gallery/inventory-plugin";
+
+function startupSkeleton(): Plugin {
+  return {
+    name: "nanobot-startup-skeleton",
+    transformIndexHtml: {
+      order: "post",
+      handler(html) {
+        if (!html.includes("<!--startup-shell-->")) return html;
+        const css = readFileSync(path.resolve(__dirname, "src/components/startup-skeleton.css"), "utf8");
+        const initialize = `var shell = document.querySelector('.startup-shell'); var layout = (${readStartupLayout.toString()})();
+          shell.dataset.startupSurface = layout.surface; shell.dataset.startupSection = layout.section;
+          shell.dataset.sidebarExpanded = String(layout.sidebarExpanded); shell.dataset.existingChat = String(layout.existingChat);
+          shell.dataset.calendarWeeks = String(layout.calendarWeeks);
+          shell.style.setProperty('--startup-sidebar-width', (layout.sidebarExpanded ? layout.sidebarWidth : 56) + 'px');`;
+        return html.replace("<!--startup-style-->", `<style>${css}</style>`)
+          .replace("<!--startup-shell-->", renderToStaticMarkup(createElement(StartupSkeleton)))
+          .replace("<!--startup-script-->", `<script>${initialize}</script>`)
+          .replace(/<link rel="stylesheet"/g, '<link rel="preload" as="style" data-app-stylesheet');
+      },
+    },
+  };
+}
 
 const GZIP_MIN_BYTES = 4 * 1024;
 const GZIP_ASSET_PATTERN = /\.(?:css|html|js|json|mjs|svg)$/i;
-const LAZY_FEATURE_CHUNK_PREFIXES = ["markdown-vendor-", "syntax-highlight-", "katex-"];
+const LAZY_FEATURE_CHUNK_PREFIXES = ["markdown-vendor-", "markdown-diagrams-", "MermaidBlock-", "syntax-highlight-", "katex-"];
 
 export function entryLazyFeatureImports(imports: string[]): string[] {
   return imports.filter((fileName) =>
@@ -82,8 +108,7 @@ export function webuiManualChunk(id: string): string | undefined {
   if (id.includes("node_modules/refractor/lang/")) {
     return;
   }
-  // Streamdown lazy-loads diagrams and highlighted code. Keep those modules
-  // outside the core markdown chunk so ordinary replies do not download them.
+  // Streamdown retains a lazy viewer shell, not the native Mermaid engine.
   if (id.includes("node_modules/streamdown/dist/mermaid-")) return "markdown-diagrams";
   if (id.includes("node_modules/streamdown/dist/highlighted-body-")) return "markdown-code";
   // Refractor reaches this HAST helper through hastscript. Keeping it with
@@ -119,7 +144,7 @@ export default defineConfig(({ mode }) => {
   const hmrPath = "/__nanobot_vite_hmr";
 
   return {
-    plugins: [react(), guardWebuiEntryChunk(), gzipWebuiAssets()],
+    plugins: [react(), startupSkeleton(), componentGallery(path.resolve(__dirname, "..")), guardWebuiEntryChunk(), gzipWebuiAssets()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
@@ -132,8 +157,14 @@ export default defineConfig(({ mode }) => {
       // Pre-bundle Dialog up front, including lazy settings/sheets. Excluding
       // it splits its layer/focus state from optimized Popover and DropdownMenu,
       // so nested overlays can dismiss the wrong layer in development.
-      include: ["@radix-ui/react-dialog"],
+      include: [
+        "@radix-ui/react-dialog",
+        // Vite's HTML scan does not follow the lazy Worker entry. Discovering
+        // these imports on first render would reload the page and lose UI state.
+        "pele/lazy", "saxes", "css-tree/parser", "css-tree/walker", "css-tree/generator",
+      ],
     },
+    worker: { format: "es" },
     build: {
       outDir: path.resolve(__dirname, "../nanobot/web/dist"),
       emptyOutDir: true,
@@ -169,10 +200,14 @@ export default defineConfig(({ mode }) => {
       environment: "happy-dom",
       globals: true,
       setupFiles: ["./src/tests/setup.ts"],
+      include: [
+        "src/**/*.{test,spec}.{ts,tsx}",
+        "../nanobot/channels/*/tests/webui/**/*.{test,spec}.{ts,tsx}",
+      ],
       coverage: {
         provider: "v8",
         include: ["src/**/*.{ts,tsx}"],
-        exclude: ["src/tests/**", "src/**/*.d.ts"],
+        exclude: ["src/tests/**", "src/dev/**", "src/**/*.d.ts"],
         reporter: ["text", "json-summary"],
         thresholds: {
           statements: 85,

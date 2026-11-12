@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · Renommer groupes et projets",
+    "description": "Essayez le renommage des groupes et projets. Les sujets se renomment dans la liste des discussions.",
+    "options": "L’appelant fournit dialogTitle, description et placeholder. title définit la valeur initiale ; onConfirm reçoit le titre sans espaces aux extrémités. Un titre vide ne peut pas être enregistré.",
+    "hint": "L’enregistrement met à jour le titre ci-dessus."
+  },
+  "delete": {
+    "title": "DeleteConfirm · Confirmation de suppression",
+    "description": "Comparez la suppression d’une discussion, de plusieurs discussions ou d’une discussion avec automatisations.",
+    "options": "count détermine le texte de suppression groupée. automations affiche les tâches liées, leur planification et leur prochaine exécution. La confirmation appelle onConfirm.",
+    "scenario": "Scénario de suppression",
+    "open": "Ouvrir la confirmation de suppression",
+    "confirmed": "Suppression d’exemple confirmée.",
+    "hint": "Choisissez une discussion, plusieurs discussions ou une discussion avec automatisations."
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · Commandes et identifiants de session",
+    "description": "Modifiez les commandes et identifiants pour observer la mise en évidence et les couleurs stables.",
+    "options": "SlashCommandText reçoit command ; InlineTokenHighlight reçoit color et le contenu. SessionHandleLabel déduit sa couleur de id.",
+    "command": "Texte de commande",
+    "run": "Exécutez <command/> pour vérifier l’état.",
+    "handle": "Identifiant de session",
+    "continue": "Continuez votre travail dans <session/>.",
+    "highlight": "Mise en évidence partagée",
+    "review": "Utilisez <skill/> pour examiner les modifications.",
+    "skill": "Compétence : {{name}}"
+  },
+  "sessionLinks": {
+    "selected": "Session sélectionnée : {{name}}.",
+    "hint": "Sélectionnez une mention de session pour voir le résultat."
+  },
+  "userText": {
+    "title": "UserMessageText · Mentions dans les messages",
+    "description": "Modifiez un message contenant des mentions de compétences, d’applications, de MCP et de sessions.",
+    "options": "text est le message d’origine. cliApps, mcpPresets et sessionMentions permettent de résoudre les mentions. Les compétences utilisent $name, les autres mentions @name.",
+    "message": "Texte du message"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · Mentions d’applications",
+    "description": "Comparez les mentions d’applications, de MCP et de sessions dans la saisie et les messages.",
+    "options": "segment indique cli, mcp ou session et ses métadonnées. variant choisit composer ou message. L’exemple utilise une image de marque locale.",
+    "position": "Emplacement de la mention"
+  },
+  "productIcons": {
+    "title": "Product icons · Catalogue d’icônes",
+    "description": "Parcourez les icônes, changez leur taille et sélectionnez-en une.",
+    "options": "Les icônes acceptent LucideProps, dont size, strokeWidth et className. La couleur hérite de currentColor ; les boutons ont des noms d’action accessibles.",
+    "size": "Taille des icônes",
+    "selected": "Sélection : {{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · Écran de démarrage",
+    "description": "Prévisualisez l’écran discret affiché pendant la connexion de l’application.",
+    "options": "embedded produit un élément section, sinon main. aria-busy et l’état de chargement restent disponibles. Les styles proviennent du point d’entrée de l’application."
+  },
+  "fileActions": {
+    "title": "FileActions · Menu de fichier",
+    "description": "Faites un clic droit pour copier le chemin complet, relatif ou le texte de référence d’un fichier.",
+    "options": "path est le texte de référence. metadata fournit le chemin complet et, éventuellement, relatif. La galerie fournit ces métadonnées sans charger le fichier.",
+    "scope": "Emplacement du fichier",
+    "hint": "Ouvrez le menu de copie par clic droit, ou placez le focus sur le fichier et appuyez sur Maj+F10."
+  },
+  "workbench": {
+    "title": "PaneWorkbench · Volets multiples",
+    "description": "Changez la disposition, activez ou ajoutez des volets et ajustez leur position et leur taille.",
+    "options": "L’appelant contrôle panes, activePaneKey, layout et splitRatios. renderPane fournit le contenu ; les rappels modifient l’état local. Sur écran étroit, seul le volet actif est affiché.",
+    "layout": "Disposition des volets",
+    "limit": "Quatre volets maximum",
+    "notes": "Notes de {{title}}",
+    "active": "Volet actif",
+    "activate": "Sélectionnez ce volet pour l’activer",
+    "hint": "Actif : {{title}}. Faites glisser la poignée inférieure pour déplacer un volet, ses bords pour le redimensionner."
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · État de connexion",
+    "description": "Comparez les états connecté, déconnecté, en cours de connexion et en erreur.",
+    "options": "state contrôle l’icône et le texte. compact masque le texte visible mais conserve l’état accessible et l’infobulle.",
+    "state": "État de connexion",
+    "withText": "État avec texte",
+    "compact": "Affichage compact"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · Compatibilité des versions",
+    "description": "Consultez les versions, les préparatifs et le guide de mise à niveau pour chaque résultat.",
+    "options": "Un profile ouvre la boîte de dialogue ; compatibility fournit le résultat et les versions. onClose la ferme. Ce composant affiche uniquement des informations.",
+    "state": "Compatibilité des versions",
+    "open": "Voir les détails de compatibilité"
+  },
+  "composer": {
+    "title": "ThreadComposer · Saisie des messages",
+    "description": "Essayez l’envoi, les pièces jointes, les commandes et les citations, y compris les états occupé et désactivé.",
+    "options": "Un onSend réussi vide la saisie. isStreaming contrôle l’arrêt et la mise en attente ; variant choisit le style discussion ou accueil. Les envois restent dans cet aperçu.",
+    "statusCommand": "État de la session",
+    "statusDescription": "Voir l’état de la session actuelle",
+    "compactCommand": "Compacter le contexte",
+    "compactDescription": "Compacter le contexte de la session actuelle",
+    "helpCommand": "Aide sur les commandes",
+    "helpDescription": "Voir les commandes disponibles",
+    "state": "État de la saisie",
+    "addQuote": "Ajouter une citation",
+    "input": "Message d’exemple",
+    "placeholder": "Saisissez un message, ou / pour les commandes",
+    "stopped": "Tâche d’exemple arrêtée.",
+    "sent": "Contenu envoyé : {{content}}{{attachments}}",
+    "attachments": " · Pièces jointes : {{amount}}",
+    "hint": "Essayez l’envoi, les pièces jointes, le changement de modèle et le menu des commandes."
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · Préréglages de modèle",
+    "description": "Essayez le menu des modèles, la navigation au clavier et l’état à configurer.",
+    "options": "modelPresets fournit les préréglages ; modelPreset et onPresetChange contrôlent la sélection. needsSetup affiche l’accès à la configuration.",
+    "state": "État du sélecteur de modèle",
+    "manage": "Gestion des modèles ouverte.",
+    "settings": "Paramètres des modèles ouverts.",
+    "hint": "Préréglage actuel : {{preset}}. Ouvrez le menu ou utilisez les flèches pour changer."
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · Utilisation du contexte",
+    "description": "Consultez contexte, cache et durée de génération, avec alertes et panneau inférieur.",
+    "options": "context fournit la capacité ; rounds fournit les statistiques par tour. bottomSheet choisit le panneau mobile.",
+    "state": "État de l’utilisation",
+    "hint": "Ouvrez les détails pour voir le contexte, le cache et la durée de génération par tour."
+  },
+  "workspace": {
+    "title": "WorkspaceControls · Répertoire de travail",
+    "description": "Choisissez un projet d’exemple et modifiez son mode d’accès.",
+    "options": "scope et onChange contrôlent la sélection ; onLoadProjects fournit des répertoires d’exemple. La passerelle résout les chemins réels et applique les permissions.",
+    "state": "État du répertoire de travail"
+  },
+  "navigator": {
+    "title": "PromptNavigator · Navigation des messages",
+    "description": "Recherchez des questions précédentes et observez le rappel de navigation.",
+    "options": "messages fournit toute la conversation ; le composant en extrait les questions. onJumpToPrompt reçoit l’ID du message cible.",
+    "hint": "Ouvrez la navigation, puis recherchez et sélectionnez une question.",
+    "empty": "Aucune question sélectionnée"
+  },
+  "header": {
+    "title": "ThreadHeader · En-tête de discussion",
+    "description": "Essayez la barre latérale, le thème, les discussions temporaires et la navigation.",
+    "options": "title, handle, theme et temporaryChatEnabled fournissent l’état d’affichage. Les rappels transmettent les actions à l’appelant.",
+    "jump": "Navigation vers {{id}}",
+    "sidebar": "Barre latérale basculée",
+    "hint": "Essayez les actions de l’en-tête",
+    "temporary": "Discussion temporaire",
+    "regular": "Discussion normale"
+  },
+  "messages": {
+    "title": "ThreadMessages · Liste des messages",
+    "description": "Explorez une conversation à plusieurs tours, ses menus, ses branches et ses citations.",
+    "options": "messages contient les messages projetés. onForkFromMessage reçoit l’index d’une question ; onQuoteSelection reçoit le texte sélectionné d’une réponse.",
+    "quoted": "Citation : {{text}}",
+    "forked": "Branche créée depuis la question {{index}}",
+    "hint": "Ouvrez le menu d’un message, ou sélectionnez du texte dans une réponse et choisissez Citer."
+  },
+  "viewport": {
+    "title": "ThreadViewport · Défilement des discussions",
+    "description": "Parcourez une longue conversation avec repères, navigation et retour en bas.",
+    "options": "La hauteur de l’aperçu est fixe. messages fournit l’historique ; ref.jumpToUserPrompt localise une question. emptyState fournit le contenu d’une discussion vide.",
+    "state": "Vue de la discussion",
+    "empty": "Saisissez un message pour commencer",
+    "hint": "Faites défiler pour explorer les repères, ou utilisez la navigation et le retour en bas."
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · État de l’historique",
+    "description": "Affichez le chargement, le début de l’historique et les erreurs avec relance.",
+    "options": "loading indique une requête, exhausted l’absence de messages plus anciens, error fournit les détails de l’erreur et onRetry relance le chargement.",
+    "state": "État de l’historique",
+    "error": "L’historique d’exemple est indisponible.",
+    "retries": "Tentatives : {{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · Reprise de tâche",
+    "description": "Comparez interruption, reprise, échec et indisponibilité ; essayez de continuer ou fermer.",
+    "options": "state fournit un instantané de reprise. onContinue et onDismiss renvoient des Promises. Ces rappels modifient uniquement l’aperçu.",
+    "state": "État de la reprise",
+    "continued": "Tâche d’exemple reprise.",
+    "dismissed": "Avis de reprise fermé.",
+    "reset": "Réinitialiser l’aperçu",
+    "hint": "Sélectionnez un état de reprise, puis essayez de continuer ou de fermer."
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · Modèle de secours",
+    "description": "Consultez les avis de modèle de secours et d’autorisation expirée, puis les actions associées.",
+    "options": "model identifie le modèle de secours ; reauthProviderLabel nomme l’autorisation expirée. L’appelant fournit onOpenSettings et onDismiss.",
+    "state": "État du modèle de secours",
+    "showAgain": "Afficher à nouveau",
+    "hint": "Essayez le lien vers les paramètres des modèles et le bouton de fermeture."
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · Compactage du contexte",
+    "description": "Comparez les états démarré, réussi, échoué et annulé du compactage.",
+    "options": "compaction.phase choisit l’avis ; announce contrôle les annonces du lecteur d’écran.",
+    "phase": "Phase de compactage du contexte"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · Erreurs de message",
+    "description": "Comparez les erreurs de taille, de permissions, de refus et de requête au modèle.",
+    "options": "error.kind choisit le message d’erreur ; onDismiss ferme l’avis.",
+    "kind": "Type d’erreur de message"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · Activité complète",
+    "description": "Consultez le raisonnement et les traces d’outils en cours, terminés ou en échec.",
+    "options": "messages contient les projections reasoning et trace. isTurnStreaming contrôle l’activité ; expanded peut être contrôlé par l’appelant.",
+    "state": "État de l’activité",
+    "error": "Impossible de lire le fichier."
+  },
+  "search": {
+    "title": "WebSearchRun · Activité de recherche",
+    "description": "Consultez la progression et les sources des recherches web et X.",
+    "options": "run fournit query, target, status et sources ; turnActive contrôle l’effet d’exécution. Les composants partagés chargent les icônes des sites sources.",
+    "state": "État de la recherche",
+    "source": "Source de recherche"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · Sources des réponses",
+    "description": "Consultez les préréglages, modèles et fournisseurs de secours utilisés précédemment.",
+    "options": "sources conserve l’instantané du modèle lors de la réponse. Seules les sources dont fallback vaut true affichent un badge.",
+    "hint": "Sélectionnez un badge de secours pour voir le préréglage, le modèle et le fournisseur de la réponse."
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · Contenu des fichiers",
+    "description": "Comparez texte, images, troncature, chargement et erreurs. Sélectionnez une image pour zoomer.",
+    "options": "state fournit l’état d’affichage ; path détermine le type et le nom du fichier. Les rappels d’ouverture et d’erreur d’image actualisent l’aperçu.",
+    "state": "État de l’aperçu du fichier"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · Automatisations de session",
+    "description": "Consultez, modifiez, désactivez et supprimez des tâches, avec chargement et erreurs.",
+    "options": "L’appelant fournit jobs, loading, loadFailed et now. onAction et onEdit renvoient les tâches mises à jour ; la vue coordonne les dialogues, le focus et les retours.",
+    "state": "État des automatisations de session",
+    "saveError": "Échec de l’enregistrement d’exemple. Réessayez.",
+    "providerError": "Le fournisseur d’exemple est indisponible.",
+    "saved": "Automatisation enregistrée.",
+    "openedChat": "Discussion d’exemple ouverte.",
+    "openedCalendar": "Calendrier des automatisations ouvert.",
+    "actionError": "Échec de l’action d’exemple. Réessayez.",
+    "delete": "Suppression : {{name}}",
+    "run": "Exécution demandée : {{name}}",
+    "enable": "Activation : {{name}}",
+    "disable": "Désactivation : {{name}}",
+    "hint": "Ouvrez les détails de la session pour consulter, activer, modifier ou supprimer des automatisations."
+  },
+  "subagent": {
+    "title": "SubagentThreadView · Messages du sous-agent",
+    "description": "Consultez les messages, le raisonnement, le chargement et les échecs ; essayez de relancer.",
+    "options": "Le runtime projette messages. loading et error utilisent l’état partagé de l’historique ; isStreaming et activeTurnId identifient l’activité. La vue ne récupère pas l’historique.",
+    "state": "État de la discussion du sous-agent"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · Route d’appairage",
+    "description": "Sélectionnez et enregistrez des routes localement, avec les états de sauvegarde et d’erreur.",
+    "options": "L’appelant gère route et original ; routes fournit les routes SSH. Le succès d’enregistrement et l’échec d’actualisation sont distincts. La galerie et les paramètres partagent cette vue.",
+    "state": "État de la route"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · Appairage rapide",
+    "description": "Essayez copie d’invitation, saisie du reçu, confirmation d’accès, hôtes existants et nouvelles tentatives.",
+    "options": "state fournit l’état d’appairage et d’affichage ; les rappels exécutent les actions. routeSettings intègre les paramètres de route. La galerie utilise des données d’exemple ; QuickPairSetup gère l’appairage réel.",
+    "state": "Étape d’appairage",
+    "open": "Ouvrir l’appairage rapide",
+    "connected": "Connexion sélectionnée : {{name}}.",
+    "ssh": "Connexion SSH sélectionnée.",
+    "hint": "Les invitations et reçus d’exemple servent uniquement à l’affichage. La confirmation met à jour le retour local."
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · Adresse SSH",
+    "description": "Filtrez les alias SSH, sélectionnez avec les flèches et comparez import, chargement et erreurs.",
+    "options": "discovery fournit les hôtes de la configuration actuelle. L’appelant contrôle value, busy, error et les rappels. customConfig conserve la découverte d’alias personnalisés ; inputRef rétablit le focus après sélection.",
+    "state": "État de l’adresse SSH",
+    "refreshed": "Adresses d’exemple actualisées.",
+    "entered": "Saisie : {{value}}",
+    "hint": "Saisissez du texte pour filtrer les adresses ; utilisez les flèches pour choisir un alias SSH."
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · Indicateur de connexion",
+    "description": "Comparez les couleurs, animations et textes d’état accessibles.",
+    "options": "L’appelant fournit status. Le conteneur de page gère l’abonnement à la connexion.",
+    "state": "État de connexion",
+    "idle": "Inactif",
+    "connecting": "Connexion en cours",
+    "open": "Connecté",
+    "reconnecting": "Reconnexion en cours",
+    "closed": "Déconnecté",
+    "error": "Erreur de connexion"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · Menu des hôtes",
+    "description": "Choisissez un hôte local ou d’exemple ; comparez attente, déconnexion et repli.",
+    "options": "picker fournit les hôtes et les rappels ; status est l’état de connexion actuel. Le HostSwitcher de production s’abonne au client.",
+    "state": "État du menu des hôtes",
+    "offline": "L’hôte d’exemple est déconnecté.",
+    "manage": "Gestion des connexions ouverte.",
+    "cancelled": "Changement d’hôte d’exemple annulé.",
+    "selected": "Hôte de l’aperçu : {{name}}"
+  },
+  "chats": {
+    "title": "ChatList · Liste des discussions",
+    "description": "Sélectionnez des discussions, puis essayez l’épinglage, l’archivage et la suppression.",
+    "options": "L’appelant fournit sessions, activeKey et les clés épinglées ou archivées. Les rappels modifient la liste d’exemple.",
+    "state": "État de la liste des discussions",
+    "renamed": "Nouveau nom : {{name}}",
+    "selected": "Discussion sélectionnée : {{name}}",
+    "none": "Aucune"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · Taille de la barre latérale",
+    "description": "Redimensionnez, repliez et dépliez la barre latérale à la souris ou au clavier.",
+    "options": "width et open sont contrôlés. onResize actualise taille et ouverture ; onDraggingChange signale le glissement.",
+    "content": "Contenu de la barre latérale",
+    "hint": "Faites glisser la séparation, ou placez-y le focus puis utilisez les flèches, Début, Fin et Entrée.",
+    "collapsed": "Repliée",
+    "dragging": "Glissement en cours"
+  },
+  "language": {
+    "title": "LanguageSwitcher · Langue de l’interface",
+    "description": "Changez la langue de la galerie et des composants de production.",
+    "options": "Utilise l’i18n de l’application et la langue préférée du navigateur, sans passerelle. Le sélecteur en haut utilise le même composant."
+  },
+  "channelMarks": {
+    "title": "Channel marks · Identité des canaux",
+    "description": "Consultez les avatars de remplacement, les icônes d’espace de travail et la marque WebSocket.",
+    "options": "LinearAvatar reçoit name, url et workspace. Sans image valide, il affiche du texte de remplacement ou une icône.",
+    "name": "Nom de l’avatar",
+    "member": "Avatar de membre",
+    "workspace": "Icône d’espace de travail"
+  },
+  "secret": {
+    "title": "LinearSecretField · Édition des secrets",
+    "description": "Modifiez, révélez, enregistrez et remplacez un secret ; vérifiez le brouillon après un échec.",
+    "options": "configured indique l’état enregistré ; onSave persiste le secret. Les rappels de la galerie modifient uniquement l’état local.",
+    "state": "État du secret",
+    "error": "Échec de l’enregistrement d’exemple.",
+    "hint": "Saisissez un exemple et enregistrez, ou choisissez l’état d’erreur pour vérifier la conservation du brouillon."
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · Aide du canal",
+    "description": "Consultez l’aide du canal dans le véritable menu déroulant.",
+    "options": "Le contenu utilise les traductions existantes du canal ; l’appelant fournit le conteneur du menu.",
+    "open": "Ouvrir l’aide du canal"
+  },
+  "channel": {
+    "title": "{{channel}} · Configuration du canal",
+    "description": "Explorez le véritable formulaire de configuration et ses états.",
+    "options": "Utilise les enregistrements de canaux, les instantanés du contrat Python et ChannelSetupSurfaceView de production. Saisie, affichage des identifiants, préréglages, vérifications et interrupteurs ne modifient que cet aperçu.",
+    "state": "État de configuration du canal",
+    "credentialsError": "Les identifiants d’exemple ont été refusés. Modifiez les valeurs de l’aperçu et réessayez.",
+    "validation": "Configuration d’aperçu"
+  },
+  "channelConnect": {
+    "state": "État de connexion {{channel}}",
+    "error": "L’autorisation est temporairement indisponible. Réessayez."
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · Connexion QR QQ",
+    "description": "Essayez la connexion QR QQ, les nouvelles tentatives et l’avertissement de remplacement de l’App Secret.",
+    "options": "La vue reçoit l’état et les callbacks. Les actions d’aperçu restent locales ; l’entrée du runtime crée les sessions et interroge le portail QQ."
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · Autorisation Feishu par QR",
+    "description": "Essayez le parcours QR Feishu avec attente, réussite, expiration, annulation et erreurs.",
+    "options": "connect, busy et error fournissent l’affichage ; les QR codes sont générés localement. La fonctionnalité gère démarrage, annulation et interrogation ; les rappels ne modifient que cet exemple."
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · Assistants Feishu",
+    "description": "Explorez les cartes d’assistants, leurs états, les réglages avancés et l’ajout d’un assistant.",
+    "options": "feature et instances fournissent les instantanés. La vue gère les brouillons et les retours d’enregistrement ; onToggleInstance, onSaveInstance et renderConnectFlow relient les actions au runtime.",
+    "state": "État d’exécution des assistants",
+    "error": "L’assistant s’est arrêté. Vérifiez ses identifiants avant de le redémarrer.",
+    "on": "{{name}} : activé",
+    "off": "{{name}} : désactivé",
+    "saved": "{{name}} : champs d’aperçu enregistrés : {{amount}}"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · Association d’appareil WhatsApp",
+    "description": "Comparez association automatique, réussite, expiration et erreurs ; essayez un autre compte.",
+    "options": "La vue conserve les règles d’affichage de démarrage automatique et de présentation minimale. L’appelant contrôle l’état et les tentatives. Le point d’entrée réel gère démarrage, relance forcée et interrogation."
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Configuration de Linear",
+    "description": "Explorez l’application, les secrets, les réglages avancés, les espaces, les accès et l’autorisation web.",
+    "options": "state et workspaces fournissent des instantanés ; les rappels relient les actions d’espace, d’enregistrement et de MCP. Trois emplacements composent les vues de membres, d’autorisation et de réinitialisation.",
+    "state": "État de configuration de Linear",
+    "runtimeError": "Impossible de démarrer le webhook Linear.",
+    "saveError": "Impossible d’enregistrer les paramètres. Votre brouillon a été conservé.",
+    "inspectionError": "Impossible d’inspecter les espaces de travail connectés.",
+    "refreshed": "Espaces de travail d’exemple actualisés.",
+    "removed": "Espace de travail d’exemple retiré : {{name}}",
+    "mcp": "Configuration du MCP Linear sélectionnée."
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · Accès des membres",
+    "description": "Recherchez des membres, changez les accès et comparez chargement, enregistrement et échecs.",
+    "options": "snapshot contient l’état confirmé des membres. onLoad et onSetAllowed appartiennent au canal ; la passerelle valide toujours les permissions.",
+    "state": "État des membres",
+    "loadError": "L’annuaire des membres est indisponible.",
+    "saveError": "L’accès n’a pas été confirmé."
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Autorisation Linear",
+    "description": "Essayez l’autorisation dans le navigateur, l’attente, l’annulation, la réussite et l’échec.",
+    "options": "Réutilise ChannelQrConnectFlowView. Linear fournit affichage, libellés et gestion du focus ; le runtime crée les sessions et gère l’interrogation.",
+    "state": "Étape d’autorisation",
+    "error": "Impossible de terminer l’autorisation.",
+    "hint": "Le lien d’autorisation et l’espace de travail sont des exemples. Démarrer et Annuler modifient uniquement l’étape de l’aperçu."
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · Réinitialiser la connexion",
+    "description": "Vérifiez les éléments effacés ou conservés et la relance après une réinitialisation partielle.",
+    "options": "onReset exécute toute la révocation et le nettoyage. La vue gère confirmation, erreurs, restrictions de fermeture et restauration du focus.",
+    "state": "Résultat de la réinitialisation",
+    "error": "Impossible d’arrêter le canal. Les paramètres de l’application ont été conservés.",
+    "completed": "Espace de travail et paramètres d’application de l’aperçu effacés."
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · Paramètres Weixin",
+    "description": "Explorez les paramètres, les options avancées, l’enregistrement et la reconnexion.",
+    "options": "Les champs proviennent du contrat du canal. La vue gère le déploiement et la visibilité des secrets ; le runtime gère l’enregistrement automatique, la fusion des brouillons et la reconnexion.",
+    "state": "État du panneau Weixin"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · QR et vérification Weixin",
+    "description": "Comparez scan QR, codes de vérification, réussite, expiration, annulation et erreurs.",
+    "options": "La vue reçoit des instantanés et des rappels, en conservant le code saisi. Les QR codes sont générés dans le navigateur. L’entrée réelle gère autorisation, pauses d’interrogation, actualisation et annulation.",
+    "state": "État de connexion Weixin",
+    "error": "Connexion interrompue. Réessayez.",
+    "refreshed": "Un nouveau QR code d’aperçu est affiché.",
+    "hint": "Saisissez 123456 pour terminer l’aperçu de vérification. Toute autre saisie conserve le brouillon et affiche une erreur."
+  }
+}

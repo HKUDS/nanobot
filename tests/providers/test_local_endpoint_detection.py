@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from nanobot.providers.openai_compat_provider import (
     OpenAICompatProvider,
     _is_local_endpoint,
@@ -26,61 +28,42 @@ class TestIsLocalEndpoint:
     def test_no_spec_no_base(self):
         assert _is_local_endpoint(None, None) is False
 
-    def test_localhost(self):
-        assert _is_local_endpoint(None, "http://localhost:1234/v1") is True
-
-    def test_localhost_https(self):
-        assert _is_local_endpoint(None, "https://localhost:8080/v1") is True
-
-    def test_loopback_127(self):
-        assert _is_local_endpoint(None, "http://127.0.0.1:11434/v1") is True
-
-    def test_private_192_168(self):
-        assert _is_local_endpoint(None, "http://192.168.8.188:1234/v1") is True
-
-    def test_private_10(self):
-        assert _is_local_endpoint(None, "http://10.0.0.5:8000/v1") is True
-
-    def test_private_172_16(self):
-        assert _is_local_endpoint(None, "http://172.16.0.1:1234/v1") is True
-
-    def test_private_172_31(self):
-        assert _is_local_endpoint(None, "http://172.31.255.255:1234/v1") is True
-
-    def test_not_private_172_32(self):
-        assert _is_local_endpoint(None, "http://172.32.0.1:1234/v1") is False
-
-    def test_docker_internal(self):
-        assert _is_local_endpoint(None, "http://host.docker.internal:11434/v1") is True
-
-    def test_ipv6_loopback(self):
-        assert _is_local_endpoint(None, "http://[::1]:1234/v1") is True
-
-    def test_public_api(self):
-        assert _is_local_endpoint(None, "https://api.openai.com/v1") is False
-
-    def test_openrouter(self):
-        assert _is_local_endpoint(None, "https://openrouter.ai/api/v1") is False
+    @pytest.mark.parametrize(
+        "expected, api_base",
+        [
+            pytest.param(True, "http://localhost:1234/v1", id="localhost"),
+            pytest.param(True, "https://localhost:8080/v1", id="localhost_https"),
+            pytest.param(True, "http://127.0.0.1:11434/v1", id="loopback_127"),
+            pytest.param(True, "http://192.168.8.188:1234/v1", id="private_192_168"),
+            pytest.param(True, "http://10.0.0.5:8000/v1", id="private_10"),
+            pytest.param(True, "http://172.16.0.1:1234/v1", id="private_172_16"),
+            pytest.param(True, "http://172.31.255.255:1234/v1", id="private_172_31"),
+            pytest.param(False, "http://172.32.0.1:1234/v1", id="not_private_172_32"),
+            pytest.param(True, "http://host.docker.internal:11434/v1", id="docker_internal"),
+            pytest.param(True, "http://[::1]:1234/v1", id="ipv6_loopback"),
+            pytest.param(False, "https://api.openai.com/v1", id="public_api"),
+            pytest.param(False, "https://openrouter.ai/api/v1", id="openrouter"),
+            pytest.param(True, "http://LOCALHOST:1234/v1", id="case_insensitive"),
+            pytest.param(True, "http://192.168.1.1:8080/v1/", id="trailing_slash"),
+            pytest.param(
+                False,
+                "https://notlocalhost.example/v1",
+                id="public_hostname_containing_localhost_is_not_local",
+            ),
+            pytest.param(
+                False,
+                "https://api10.example.com/v1",
+                id="public_hostname_containing_private_ip_prefix_is_not_local",
+            ),
+            pytest.param(True, "192.168.1.1:8080/v1", id="url_without_scheme"),
+        ],
+    )
+    def test_endpoint_locality(self, expected, api_base):
+        assert _is_local_endpoint(None, api_base) is expected
 
     def test_spec_overrides_public_url(self):
         """spec.is_local=True takes precedence even with a public-looking URL."""
         assert _is_local_endpoint(_make_spec(is_local=True), "https://api.example.com/v1") is True
-
-    def test_case_insensitive(self):
-        assert _is_local_endpoint(None, "http://LOCALHOST:1234/v1") is True
-
-    def test_trailing_slash(self):
-        assert _is_local_endpoint(None, "http://192.168.1.1:8080/v1/") is True
-
-    def test_public_hostname_containing_localhost_is_not_local(self):
-        assert _is_local_endpoint(None, "https://notlocalhost.example/v1") is False
-
-    def test_public_hostname_containing_private_ip_prefix_is_not_local(self):
-        assert _is_local_endpoint(None, "https://api10.example.com/v1") is False
-
-    def test_url_without_scheme(self):
-        assert _is_local_endpoint(None, "192.168.1.1:8080/v1") is True
-
 
 class TestLocalKeepaliveConfig:
     """Verify that local endpoints get keepalive_expiry=0."""

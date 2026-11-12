@@ -1,0 +1,132 @@
+import { useId, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { channelTranslator, type ChannelTranslator } from "@/channel-plugins/i18n";
+import {
+  ChannelQrConnectFlowView,
+  type ChannelQrConnectFlowViewProps,
+  type ChannelQrConnectLabels,
+  type ChannelQrConnectPendingContext,
+} from "@/components/settings/channels/ChannelQrConnectFlowView";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import type { ChannelConnectPayload } from "@/lib/types";
+
+import { isVerificationChallenge, WEIXIN_AUTH_EXPIRED_MESSAGE } from "./presentation";
+
+function weixinConnectMessage(
+  payload: ChannelConnectPayload,
+  tx: ChannelTranslator,
+): string {
+  if (payload.status === "succeeded") {
+    return tx("custom.connected", "WeChat is connected.");
+  }
+  if (payload.status === "expired") {
+    return tx("custom.expired", WEIXIN_AUTH_EXPIRED_MESSAGE);
+  }
+  if (payload.status === "failed") {
+    return payload.message
+      ?? tx("custom.failed", "Unable to connect WeChat. Try again.");
+  }
+  if (payload.status === "cancelled") {
+    return tx("custom.stopped", "WeChat login stopped.");
+  }
+  if (isVerificationChallenge(payload)) {
+    return payload.verification_failed
+      ? tx(
+        "custom.verifyMismatch",
+        "That code did not match. Enter the new number shown in WeChat.",
+      )
+      : tx(
+        "custom.verifyDescription",
+        "Enter the number shown in WeChat to continue.",
+      );
+  }
+  return tx("custom.waiting", "Waiting for WeChat scan...");
+}
+
+export function weixinConnectLabels(t: Parameters<typeof channelTranslator>[0]): ChannelQrConnectLabels {
+  const tx = channelTranslator(t, "weixin");
+  return {
+    qrAlt: tx("custom.qrAlt", "WeChat login QR code"),
+    scanTitle: tx("custom.scanTitle", "Scan with WeChat"),
+    scanDescription: "",
+    waiting: tx("custom.waiting", "Waiting for WeChat scan..."),
+    connected: tx("custom.connected", "WeChat is connected."),
+    stopped: tx("custom.stopped", "WeChat login stopped."),
+    connecting: tx("custom.connecting", "Connecting..."),
+    scanAgain: t("settings.channels.scanAgain", { defaultValue: "Scan again" }),
+    connect: t("settings.channels.connect", { defaultValue: "Connect" }),
+  };
+}
+
+export type WeixinConnectFlowViewProps = Omit<
+  ChannelQrConnectFlowViewProps, "labels" | "renderPending" | "resolveMessage"
+>;
+
+export function WeixinConnectFlowView(props: WeixinConnectFlowViewProps) {
+  const { t } = useTranslation();
+  const tx = channelTranslator(t, "weixin");
+  const [verificationCode, setVerificationCode] = useState("");
+  const verificationTitleId = useId();
+  const verificationMessageId = useId();
+
+  const renderVerification = ({
+    connect,
+    busy,
+    poll,
+  }: ChannelQrConnectPendingContext) => {
+    if (!isVerificationChallenge(connect)) return null;
+    return (
+      <form
+        className="mt-3 space-y-2"
+        aria-labelledby={verificationTitleId}
+        onSubmit={(event) => {
+          event.preventDefault();
+          const code = verificationCode.trim();
+          if (!code) return;
+          void poll({ verify_code: code }).then((payload) => {
+            if (payload && !isVerificationChallenge(payload)) {
+              setVerificationCode("");
+            }
+          });
+        }}
+      >
+        <div id={verificationTitleId} className="text-[12px] font-semibold text-foreground">
+          {tx("custom.verifyTitle", "Verification required")}
+        </div>
+        <p id={verificationMessageId} role={connect.verification_failed ? "alert" : undefined} className="text-[12px] leading-5 text-muted-foreground">
+          {weixinConnectMessage(connect, tx)}
+        </p>
+        <div className="flex gap-2">
+          <Input
+            value={verificationCode}
+            onChange={(event) => setVerificationCode(event.target.value)}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder={tx("custom.verifyPlaceholder", "Code")}
+            aria-label={tx("custom.verifyPlaceholder", "Code")}
+            aria-describedby={verificationMessageId}
+            className="h-8 max-w-40"
+            aria-invalid={connect.verification_failed || undefined}
+          />
+          <Button
+            type="submit"
+            size="sm"
+            className="h-8 rounded-full px-3 text-[12px] font-semibold"
+            disabled={busy || !verificationCode.trim()}
+          >
+            {tx("custom.verifySubmit", "Verify")}
+          </Button>
+        </div>
+      </form>
+    );
+  };
+
+  return <ChannelQrConnectFlowView
+    {...props}
+    labels={weixinConnectLabels(t)}
+    renderPending={renderVerification}
+    resolveMessage={(payload) => weixinConnectMessage(payload, tx)}
+  />;
+}

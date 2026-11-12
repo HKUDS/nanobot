@@ -16,15 +16,15 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "允許傳送私訊的使用者",
+        "label": "私聊使用者",
         "placeholder": "電話號碼或 UUID"
       },
       "group_allowFrom": {
-        "label": "允許的群組",
+        "label": "允許群組",
         "placeholder": "群組 ID"
       },
       "groupMessageBufferSize": {
-        "label": "群組上下文訊息數"
+        "label": "上下文條數"
       },
       "attachmentsDir": {
         "label": "附件目錄"
@@ -58,7 +58,7 @@
         }
       },
       "group_requireMention": {
-        "label": "群組需要提及",
+        "label": "提及回覆",
         "choices": {
           "true": "開啟",
           "false": "關閉"

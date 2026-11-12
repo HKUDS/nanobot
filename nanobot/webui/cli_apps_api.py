@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -103,24 +104,38 @@ def _manager(config_path: Path | None = None) -> CliAppManager:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _LocalRead:
+    payload: dict[str, Any]
+    refresh_manager: CliAppManager | None = None
+
+
+def _read_local(*, installed_only: bool, config_path: Path | None) -> _LocalRead:
+    manager = _manager(config_path) if config_path is not None else _manager()
+    if installed_only:
+        return _LocalRead(manager.installed_payload())
+    payload = manager.payload(cache_only=True)
+    refresh_manager = None if manager.catalog_cache_fresh(include_optional=True) else manager
+    if not payload["apps"]:
+        installed = manager.installed_payload()
+        if installed["apps"]:
+            payload = installed
+    return _LocalRead(payload, refresh_manager)
+
+
 async def cli_apps_payload(
     *,
     installed_only: bool = False,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
-    manager = _manager(config_path) if config_path is not None else _manager()
-    if installed_only:
-        return manager.installed_payload()
-    payload = manager.payload(cache_only=True)
-    refresh_pending = False
-    if not manager.catalog_cache_fresh(include_optional=True):
-        refresh_pending = _start_catalog_refresh(manager)
-    if not payload["apps"]:
-        installed = manager.installed_payload()
-        if installed["apps"]:
-            payload = installed
-    payload["catalog_refresh_pending"] = refresh_pending
-    return payload
+    # Configuration, cache reads and executable discovery can all block on disk.
+    local = await asyncio.to_thread(_read_local, installed_only=installed_only, config_path=config_path)
+    if not installed_only:
+        # Refresh task/throttle state belongs to this event loop, not the reader.
+        local.payload["catalog_refresh_pending"] = (
+            _start_catalog_refresh(local.refresh_manager) if local.refresh_manager is not None else False
+        )
+    return local.payload
 
 
 def cli_apps_action(

@@ -57,7 +57,7 @@ def cron_run_response(runs_dir: Path, job: CronJob, run: CronRunRecord) -> str |
                 records.append(record)
     matching = [record for record in records
                 if record.get("job_id") == job.id
-                and record.get("session_key") == job.payload.session_key
+                and record.get("session_key") == (run.session_key or job.payload.session_key)
                 and record.get("status") == run.status]
     if len(matching) != 1:
         return None

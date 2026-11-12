@@ -31,7 +31,6 @@ class FeishuConnectSession:
     expire_in: int
     created_wall: float
     deadline: float
-    last_error: str | None = None
 
 
 class FeishuConnectStore:
@@ -45,6 +44,20 @@ class FeishuConnectStore:
     def __init__(self) -> None:
         self._sessions: dict[str, FeishuConnectSession] = {}
         self._completion_lock = threading.Lock()
+
+    @property
+    def has_pending_work(self) -> bool:
+        # Registration only advances inside an owned settings request. Expired
+        # QR records have no listener or detached writer to keep alive.
+        now = time.monotonic()
+        return any(session.deadline > now for session in tuple(self._sessions.values()))
+
+    async def close(self) -> None:
+        def clear() -> None:
+            with self._completion_lock:
+                self._sessions.clear()
+
+        await asyncio.to_thread(clear)
 
     async def handle(self, action: str, query: QueryParams) -> dict[str, Any]:
         """Handle one generic settings connection action."""
@@ -127,8 +140,7 @@ class FeishuConnectStore:
                 device_code=session.device_code,
                 domain=session.domain,
             )
-        except (RuntimeError, OSError, json.JSONDecodeError, httpx.HTTPError) as exc:
-            session.last_error = str(exc)
+        except (RuntimeError, OSError, json.JSONDecodeError, httpx.HTTPError):
             return _pending_payload(session)
 
         status = result.get("status")

@@ -7,16 +7,15 @@
         "label": "Token do bot",
         "placeholder": "123456:ABC..."
       },
-      "proxy": {
-        "label": "Proxy de rede",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Usar proxy"
       },
       "allowFrom": {
         "label": "Usuários permitidos",
         "placeholder": "* ou IDs de usuário do Telegram"
       },
       "groupPolicy": {
-        "label": "Comportamento em grupos",
+        "label": "Regras de grupo",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
@@ -54,7 +53,7 @@
         }
       },
       "inlineKeyboards": {
-        "label": "Teclados embutidos",
+        "label": "Botões de mensagem",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
@@ -68,7 +67,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "Intervalo de atualização de fluxo"
+        "label": "Intervalo de atualização (segundos)"
       },
       "webhookUrl": {
         "label": "URL do webhook"
@@ -86,7 +85,7 @@
         "label": "Token secreto do webhook"
       },
       "webhookMaxConnections": {
-        "label": "Máximo de conexões de webhook"
+        "label": "Limite de conexões Webhook"
       }
     }
   }

@@ -207,33 +207,23 @@ class TestIsTemplateContent:
 
 
 class TestBundledToolContract:
-    def test_tool_contract_balances_general_and_coding_workflows(self):
+    def test_tool_contract_contains_shared_execution_policy(self):
         from importlib.resources import files as pkg_files
 
         tpl = pkg_files("nanobot") / "templates" / "agent" / "tool_contract.md"
         content = tpl.read_text(encoding="utf-8")
 
-        assert "## General Tool Contract" in content
-        assert "Use the narrowest structured tool" in content
-        assert "Do not use `exec` as a universal workaround" in content
-        assert "## File and Coding Workflows" in content
-        assert "`grep` returns matches with five context lines by default" in content
-        assert "apply_patch" in content
-        assert "acceptance criteria into concrete checks" in content
-        assert "visual evidence reaches the model" in content
         assert "clear user request as authorization" in content
-        assert "Never invent missing records or measurements" in content
-        assert "## Web and External Information" in content
-        assert "## Messaging and Media" in content
-        assert "## Scheduling and Background Work" in content
+        assert "execution and verification" in content
+        assert "irreversible action" in content
+        assert "Wait for tool results" in content
 
     def test_tool_contract_is_injected_without_workspace_file(self, tmp_path):
         builder = _builder(tmp_path)
         prompt = builder.build_system_prompt()
 
         assert "# Tool Usage Notes" in prompt
-        assert "## General Tool Contract" in prompt
-        assert "Do not use `exec` as a universal workaround" in prompt
+        assert "clear user request as authorization" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -270,19 +260,36 @@ class TestBuildUserContent:
         builder = _builder(tmp_path)
         result = builder.build_user_content("hello", [str(png)])
         assert isinstance(result, list)
-        assert len(result) == 2
-        assert result[0]["type"] == "image_url"
-        assert result[0]["image_url"]["url"].startswith("data:image/png;base64,")
-        assert result[1]["type"] == "text"
-        assert result[1]["text"] == "hello"
+        assert len(result) == 3
+        assert result[0] == {"type": "text", "text": f"[image: {png}]"}
+        assert result[1]["type"] == "image_url"
+        assert result[1]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert result[2]["type"] == "text"
+        assert result[2]["text"] == "hello"
+
+    def test_images_keep_paired_paths_in_provider_visible_content(self, tmp_path):
+        from nanobot.providers.base import LLMProvider
+        from nanobot.providers.openai_responses.converters import convert_user_message
+
+        paths = [tmp_path / "original.png", tmp_path / "uploaded.png"]
+        for index, path in enumerate(paths):
+            path.write_bytes(b"\x89PNG\r\n\x1a\n" + bytes([index]) * 16)
+        content = _builder(tmp_path).build_user_content("compare these", [str(path) for path in paths])
+        clean = LLMProvider._sanitize_empty_content([{"role": "user", "content": content}])[0]
+        converted = convert_user_message(clean["content"])["content"]
+        image_indexes = [index for index, block in enumerate(converted) if block["type"] == "input_image"]
+        assert len(image_indexes) == 2
+        for index, path in zip(image_indexes, paths, strict=True):
+            assert index > 0
+            assert converted[index - 1] == {"type": "input_text", "text": f"[image: {path}]"}
+        assert converted[-1] == {"type": "input_text", "text": "compare these"}
 
     def test_image_meta_includes_path(self, tmp_path):
         png = tmp_path / "test.png"
         png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
         builder = _builder(tmp_path)
         result = builder.build_user_content("hello", [str(png)])
-        assert "_meta" in result[0]
-        assert "path" in result[0]["_meta"]
+        assert result[1]["_meta"]["path"] == str(png)
 
 
 # ---------------------------------------------------------------------------
@@ -291,21 +298,17 @@ class TestBuildUserContent:
 
 
 class TestBuildSystemPrompt:
-    def test_returns_nonempty_string(self, tmp_path):
-        builder = _builder(tmp_path)
-        result = builder.build_system_prompt()
-        assert isinstance(result, str)
-        assert len(result) > 0
-
     def test_includes_identity_section(self, tmp_path):
         builder = _builder(tmp_path)
         result = builder.build_system_prompt()
-        assert "workspace" in result.lower() or "python" in result.lower()
+
+        assert "## Runtime\n" in result
+        assert "Agent profile: SOUL.md and USER.md" in result
+        assert "History log: memory/history.jsonl" in result
 
     def test_default_identity_uses_relative_agent_paths(self, tmp_path):
         result = ContextBuilder(tmp_path)._get_identity()
 
-        assert str(tmp_path.resolve()) not in result
         assert "Agent profile: SOUL.md and USER.md" in result
         assert "History log: memory/history.jsonl" in result
         assert "Custom skills: skills/{skill-name}/SKILL.md" in result
@@ -318,10 +321,9 @@ class TestBuildSystemPrompt:
 
         result = ContextBuilder(agent_home)._get_identity(workspace=project)
 
-        assert str(project.resolve()) not in result
         assert f"agent workspace is at: {agent_home.resolve()}" in result
         assert f"{agent_home.resolve()}/SOUL.md" in result
-        assert f"{project.resolve()}/SOUL.md" not in result
+        assert f"Custom skills: {agent_home.resolve()}/skills/" in result
 
     def test_includes_bootstrap_files(self, tmp_path):
         (tmp_path / "AGENTS.md").write_text("Be helpful and concise.", encoding="utf-8")

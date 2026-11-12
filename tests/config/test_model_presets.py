@@ -72,26 +72,38 @@ def test_agent_timezones_use_packaged_data_without_system_database() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_provider_api_type_accepts_exact_values_only() -> None:
-    config = Config.model_validate({
-        "providers": {
-            "openai": {
-                "apiKey": "sk-test",
-                "apiType": "responses",
-            }
-        }
-    })
-    assert config.providers.openai.api_type == "responses"
+@pytest.mark.parametrize("field", ["apiType", "api_type"])
+@pytest.mark.parametrize("legacy", ["auto", "chat_completions", "responses"])
+def test_legacy_provider_api_migrates_and_saves_current_format(tmp_path, field, legacy):
+    from nanobot.config.loader import load_config, save_config
 
-    with pytest.raises(ValueError):
-        Config.model_validate({
-            "providers": {
-                "openai": {
-                    "apiKey": "sk-test",
-                    "apiType": "response",
-                }
-            }
-        })
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"providers": {"openai": {"apiKey": "sk-test", field: legacy}}}), encoding="utf-8")
+    config = load_config(path)
+    expected = None if legacy == "auto" else {
+        "supportedApis": [legacy], "preferredApi": legacy,
+    }
+    save_config(config, path)
+    saved = json.loads(path.read_text(encoding="utf-8"))["providers"]["openai"]
+    assert saved.get("api") == expected
+    assert field not in saved  # The seeded legacy field must not survive a save.
+    assert load_config(path).providers.openai.api == config.providers.openai.api
+
+
+@pytest.mark.parametrize("api", [None, {"supportedApis": ["chat_completions"]}])
+def test_current_provider_api_takes_precedence_over_legacy_input(api):
+    config = Config.model_validate({"providers": {"openai": {
+        "apiType": "responses", "api": api,
+    }}})
+    if api is None:
+        assert config.providers.openai.api is None
+    else:
+        assert config.providers.openai.api.to_capabilities().preferred_api == "chat_completions"
+
+
+def test_legacy_provider_api_rejects_invalid_selector():
+    with pytest.raises(ValueError, match="apiType must be"):
+        Config.model_validate({"providers": {"openai": {"apiType": "response"}}})
 
 
 def test_provider_api_type_is_openai_only() -> None:
@@ -385,15 +397,22 @@ def test_resolve_preset_rejects_unknown_named_preset() -> None:
         Config().resolve_preset("missing")
 
 
-def test_match_provider_uses_preset_model() -> None:
+@pytest.mark.parametrize(
+    "provider_name, model",
+    [
+        pytest.param("openai", "openai/gpt-4.1", id="model"),
+        pytest.param("anthropic", "anthropic/claude-opus-4-5", id="provider_when_forced"),
+    ],
+)
+def test_match_provider_uses_model_preset(provider_name, model) -> None:
     config = Config.model_validate({
         "providers": {
-            "openai": {"apiKey": "sk-test"},
+            provider_name: {"apiKey": "sk-test"},
         },
         "model_presets": {
             "fast": {
-                "model": "openai/gpt-4.1",
-                "provider": "openai",
+                "model": model,
+                "provider": provider_name,
             }
         },
         "agents": {
@@ -403,28 +422,7 @@ def test_match_provider_uses_preset_model() -> None:
         },
     })
     name = config.get_provider_name()
-    assert name == "openai"
-
-
-def test_match_provider_uses_preset_provider_when_forced() -> None:
-    config = Config.model_validate({
-        "providers": {
-            "anthropic": {"apiKey": "sk-test"},
-        },
-        "model_presets": {
-            "fast": {
-                "model": "anthropic/claude-opus-4-5",
-                "provider": "anthropic",
-            }
-        },
-        "agents": {
-            "defaults": {
-                "modelPreset": "fast",
-            }
-        },
-    })
-    name = config.get_provider_name()
-    assert name == "anthropic"
+    assert name == provider_name
 
 
 def test_match_provider_routes_forced_novita_model_api_models() -> None:

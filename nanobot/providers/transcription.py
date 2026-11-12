@@ -11,7 +11,8 @@ import base64
 import json
 import mimetypes
 import os
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -111,20 +112,13 @@ _RETRYABLE_EXCEPTIONS = (
 
 
 async def _request_json_with_retry(
-    client: httpx.AsyncClient,
-    method: str,
-    url: str,
+    request: Callable[[], Awaitable[httpx.Response]],
     *,
     provider_label: str,
-    **kwargs: Any,
 ) -> dict[str, Any] | None:
     for attempt in range(_MAX_RETRIES + 1):
         try:
-            request = getattr(client, method.lower(), None)
-            if request is None:
-                response = await client.request(method, url, **kwargs)
-            else:
-                response = await request(url, **kwargs)
+            response = await request()
         except _RETRYABLE_EXCEPTIONS as e:
             if attempt < _MAX_RETRIES:
                 logger.warning(
@@ -436,76 +430,11 @@ async def _post_with_retry(
     extract_text: Callable[[dict[str, Any]], str],
 ) -> str:
     async with httpx.AsyncClient() as client:
-        for attempt in range(_MAX_RETRIES + 1):
-            try:
-                response = await client.post(**build_request())
-            except _RETRYABLE_EXCEPTIONS as e:
-                if attempt < _MAX_RETRIES:
-                    logger.warning(
-                        "{} transcription transient error (attempt {}/{}): {}",
-                        provider_label,
-                        attempt + 1,
-                        _MAX_RETRIES + 1,
-                        e,
-                    )
-                    await asyncio.sleep(_BACKOFF_S[attempt])
-                    continue
-                logger.exception(
-                    "{} transcription error after {} attempts: {}",
-                    provider_label,
-                    _MAX_RETRIES + 1,
-                    e,
-                )
-                return ""
-            except Exception as e:
-                logger.exception("{} transcription error: {}", provider_label, e)
-                return ""
-
-            if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
-                logger.warning(
-                    "{} transcription transient HTTP {} (attempt {}/{})",
-                    provider_label,
-                    response.status_code,
-                    attempt + 1,
-                    _MAX_RETRIES + 1,
-                )
-                await asyncio.sleep(_BACKOFF_S[attempt])
-                continue
-
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError:
-                body = response.text.strip().replace("\n", " ")[:500]
-                logger.error(
-                    "{} transcription HTTP {}{}{}",
-                    provider_label,
-                    response.status_code,
-                    f" {response.reason_phrase}" if response.reason_phrase else "",
-                    f": {body}" if body else "",
-                )
-                return ""
-            except Exception as e:
-                logger.exception("{} transcription error: {}", provider_label, e)
-                return ""
-
-            try:
-                payload = response.json()
-            except Exception as e:
-                logger.exception(
-                    "{} transcription error: malformed response body: {}",
-                    provider_label,
-                    e,
-                )
-                return ""
-            if not isinstance(payload, dict):
-                logger.error(
-                    "{} transcription error: unexpected response shape: {!r}",
-                    provider_label,
-                    type(payload).__name__,
-                )
-                return ""
-            return extract_text(cast(dict[str, Any], payload))
-    return ""
+        payload = await _request_json_with_retry(
+            lambda: client.post(**build_request()),
+            provider_label=provider_label,
+        )
+        return extract_text(payload) if payload is not None else ""
 
 
 def _text_from_transcription_payload(payload: dict[str, Any]) -> str:
@@ -560,13 +489,14 @@ class AssemblyAITranscriptionProvider:
         headers = {"Authorization": self.api_key}
         async with httpx.AsyncClient() as client:
             upload = await _request_json_with_retry(
-                client,
-                "POST",
-                self.upload_url,
+                partial(
+                    client.post,
+                    self.upload_url,
+                    headers={**headers, "Content-Type": "application/octet-stream"},
+                    content=data,
+                    timeout=60.0,
+                ),
                 provider_label="AssemblyAI",
-                headers={**headers, "Content-Type": "application/octet-stream"},
-                content=data,
-                timeout=60.0,
             )
             upload_url = upload.get("upload_url") if upload else None
             if not isinstance(upload_url, str) or not upload_url:
@@ -581,13 +511,14 @@ class AssemblyAITranscriptionProvider:
                 body["language_code"] = self.language
 
             transcript = await _request_json_with_retry(
-                client,
-                "POST",
-                self.transcript_url,
+                partial(
+                    client.post,
+                    self.transcript_url,
+                    headers=headers,
+                    json=body,
+                    timeout=30.0,
+                ),
                 provider_label="AssemblyAI",
-                headers=headers,
-                json=body,
-                timeout=30.0,
             )
             transcript_id = transcript.get("id") if transcript else None
             if not isinstance(transcript_id, str) or not transcript_id:
@@ -597,12 +528,8 @@ class AssemblyAITranscriptionProvider:
             poll_url = f"{self.transcript_url.rstrip('/')}/{transcript_id}"
             for attempt in range(_ASSEMBLYAI_POLL_ATTEMPTS):
                 payload = await _request_json_with_retry(
-                    client,
-                    "GET",
-                    poll_url,
+                    partial(client.get, poll_url, headers=headers, timeout=30.0),
                     provider_label="AssemblyAI",
-                    headers=headers,
-                    timeout=30.0,
                 )
                 if not payload:
                     return ""

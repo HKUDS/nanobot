@@ -10,7 +10,7 @@ from nanobot.providers.registry import create_dynamic_spec
 class TestCustomProviderThinkingStyle:
     """Verify that thinking_style flows from config to ProviderSpec."""
 
-    def test_default_thinking_style_is_empty(self) -> None:
+    def test_default_thinking_style_is_none(self) -> None:
         cfg = ProviderConfig()
         assert cfg.thinking_style is None
 

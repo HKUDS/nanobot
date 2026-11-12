@@ -2,40 +2,57 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from loguru import logger as default_logger
 
+from nanobot.agent.subagent import SubagentControlError
 from nanobot.providers.base import LLMUsage
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.model_selection import model_preset_from_metadata
 from nanobot.session.recovery import recovery_state_from_metadata
+from nanobot.session.state import SessionState
 from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
+
+if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
 
 
 class SessionMetadataReader(Protocol):
     """Narrow persisted-session dependency used by WebUI projections."""
 
-    def read_session_metadata(self, key: str) -> dict[str, Any] | None: ...
+    @property
+    def state(self) -> SessionState: ...
 
 
 class WebUISessionProjection:
-    """Project persisted session metadata into stable WebUI protocol fields."""
+    """Project session metadata and owned child observations for WebUI clients."""
 
     def __init__(
         self,
         sessions: SessionMetadataReader | None,
         *,
+        subagent_manager: SubagentManager | None = None,
         log: Any = default_logger,
     ) -> None:
         self._sessions = sessions
+        self._subagents = subagent_manager
         self._log = log
 
-    def attach_fields(self, session_key: str) -> dict[str, Any]:
+    def subagent_task(self, session_key: str, task_id: str) -> dict[str, object] | None:
+        """Read the current public snapshot only while the parent still owns it."""
+        if self._subagents is None:
+            return None
+        try:
+            return self._subagents.check(task_id, session_key).as_dict()
+        except SubagentControlError:
+            return None
+
+    async def attach_fields(self, session_key: str) -> dict[str, Any]:
         """Return the session runtime facts sent with an attach handshake."""
         if self._sessions is None:
             return {}
-        snapshot = self._sessions.read_session_metadata(session_key)
+        snapshot = await self._sessions.state.read_metadata(session_key)
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
 
@@ -56,10 +73,10 @@ class WebUISessionProjection:
             fields["usage"] = usage.to_turn_dict()
         return fields
 
-    def hydration_events(self, session_key: str, chat_id: str) -> tuple[dict[str, Any], ...]:
+    async def hydration_events(self, session_key: str, chat_id: str) -> tuple[dict[str, Any], ...]:
         """Return reconnect events for durable and same-process session state."""
         events: list[dict[str, Any]] = []
-        goal_state = self.persisted_goal_state(session_key)
+        goal_state = await self.persisted_goal_state(session_key)
         if goal_state is not None:
             events.append(
                 {
@@ -82,11 +99,11 @@ class WebUISessionProjection:
             events.append(event)
         return tuple(events)
 
-    def persisted_goal_state(self, session_key: str) -> dict[str, Any] | None:
+    async def persisted_goal_state(self, session_key: str) -> dict[str, Any] | None:
         """Return an actionable persisted goal state for reconnect hydration."""
         if self._sessions is None:
             return None
-        snapshot = self._sessions.read_session_metadata(session_key)
+        snapshot = await self._sessions.state.read_metadata(session_key)
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
         goal_state = goal_state_ws_blob(metadata)

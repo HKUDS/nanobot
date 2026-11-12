@@ -1,0 +1,117 @@
+{
+  "setup": {
+    "docsLabel": "開啟 Linear 設定指南",
+    "officialLabel": "建立 Linear OAuth 應用程式",
+    "fields": {
+      "clientId": {
+        "label": "OAuth Client ID",
+        "placeholder": "Linear OAuth Client ID"
+      },
+      "clientSecret": {
+        "label": "OAuth Client Secret",
+        "placeholder": "••••••"
+      },
+      "webhookSigningSecret": {
+        "label": "Webhook 簽署密鑰",
+        "placeholder": "••••••"
+      },
+      "publicBaseUrl": {
+        "label": "公網 HTTPS 網址",
+        "placeholder": "https://nanobot.example.com"
+      },
+      "host": {
+        "label": "監聽位址",
+        "placeholder": "0.0.0.0"
+      },
+      "port": {
+        "label": "監聽連接埠",
+        "placeholder": "3979"
+      },
+      "webhookPath": {
+        "label": "Webhook 路徑",
+        "placeholder": "/linear/webhook"
+      },
+      "oauthCallbackPath": {
+        "label": "OAuth 回呼路徑",
+        "placeholder": "/linear/oauth/callback"
+      },
+      "allowFrom": {
+        "label": "允許的 Linear 使用者",
+        "placeholder": "以逗號分隔 Linear 使用者 ID"
+      },
+      "showReasoning": {
+        "label": "顯示推理"
+      }
+    }
+  },
+  "custom": {
+    "authorizeTitle": "在 Linear 中授權",
+    "authorizeDescription": "去 Linear 授權，完成後返回\n\n前往 Linear 選擇工作區並授權 nanobot，完成後回到這裡。",
+    "waiting": "正在等待 Linear 授權……",
+    "connected": "Linear 已連接。",
+    "stopped": "授權已停止。",
+    "connecting": "正在連接……",
+    "connect": "連接 Linear",
+    "openLinear": "前往 Linear",
+    "createApp": "建立 Linear 應用程式",
+    "savePublicUrl": "請先填寫公網 HTTPS 網址，再建立 Linear 應用程式。",
+    "retrySave": "重試",
+    "channelRunning": "Channel 正在執行",
+    "configureTools": "設定 Linear MCP",
+    "workspacesTitle": "已授權的工作區",
+    "refreshWorkspaces": "重新整理工作區",
+    "loadingWorkspaces": "正在載入工作區",
+    "noWorkspaces": "尚未授權工作區。連接工作區後才能接收 Linear Agent 請求。",
+    "refreshRequired": "需要重新整理授權",
+    "missingScopes": "重新連接以授予：{{scopes}}",
+    "authorized": "已授權",
+    "confirmDisconnect": "移除工作區",
+    "disconnect": "移除工作區",
+    "workspaceActions": "管理 {{name}}",
+    "reauthorize": "重新授權",
+    "disconnectTitle": "移除 {{name}}？",
+    "disconnectDescription": "移除工作區授權，保留歷史記錄\n\n撤銷此工作區的授權，並清除它在 nanobot 中的成員訪問設定。保留 Linear 中的任務、評論和 nanobot 歷史會話，不影響其他工作區。之後可以重新授權連線。",
+    "disconnectLast": "這是最後一個已連線的工作區，中斷後也會停用 Linear channel。",
+    "disconnecting": "正在移除…",
+    "addWorkspace": "連接工作區",
+    "addWorkspaceDetails": "關於連接工作區",
+    "addWorkspaceHelp": "使用目前的 Linear 應用程式。連接其他工作區需允許跨工作區安裝；私人應用程式只能連接所屬工作區。選擇已有工作區會更新授權，不會重複新增。",
+    "resetConnection": "重設 Linear 連線",
+    "resetTitle": "重設 Linear？",
+    "resetDescription": "中斷此應用程式連接的所有工作區，並停用頻道。",
+    "resetClears": "清除",
+    "resetClearsDetail": "成員存取設定，以及此執行個體的應用程式設定和已儲存金鑰。",
+    "resetKeeps": "保留",
+    "resetKeepsDetail": "Linear 應用程式、任務、留言、對話記錄和既有配對。",
+    "resetConfirm": "重設",
+    "resetting": "正在重設…",
+    "resetIncomplete": "重設尚未完成。已移除的工作區不會恢復，可重試完成剩餘步驟。",
+    "resetInspectFailed": "無法確認已連接的工作區，已保留應用程式設定。",
+    "resetChanged": "有新的工作區被連接，請檢查後重試。",
+    "resetStopFailed": "未能停止 Linear channel，已保留應用程式設定。",
+    "resetSaveFailed": "未能清空應用程式設定，請重試。",
+    "secretSaved": "已儲存",
+    "replaceSecret": "更換",
+    "replaceSecretLabel": "更換{{name}}",
+    "enterSecret": "輸入金鑰",
+    "secretSaveFailed": "暫時無法確認儲存結果，請重試或取消。"
+  },
+  "members": {
+    "title": "成員存取",
+    "help": "開啟後，成員無需配對碼即可使用 nanobot，仍受 Linear 的授權範圍限制，不會取得 nanobot 後台存取權限。關閉後將阻止新請求，不會中斷已在執行的任務。",
+    "allowAll": "進階設定目前允許所有成員（*），包含新成員。個別關閉的成員仍會被拒絕；若希望新成員須經核准，請移除 *。",
+    "search": "搜尋成員",
+    "refresh": "重新整理成員",
+    "working": "儲存中…",
+    "saved": "已儲存",
+    "retry": "請重新整理成員清單確認目前狀態後再試。",
+    "empty": "沒有符合條件的活躍成員。",
+    "allow": "允許 {{name}} 使用 nanobot",
+    "saveUnconfirmed": "無法確認權限已儲存，請重新整理成員清單後再試。",
+    "guide": "在「成員存取」中為同事開通免配對使用。既有授權仍然有效，除非手動關閉。連接 Linear MCP 後可搜尋或修改 issue。",
+    "details": "關於成員存取權限",
+    "summary": "{{allowed}} 人可用",
+    "loading": "正在尋找成員…",
+    "refreshing": "正在檢查更新…"
+  }
+}

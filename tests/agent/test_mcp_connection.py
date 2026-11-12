@@ -20,7 +20,8 @@ from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.mcp import MCPProvider, MCPResourceWrapper, MCPToolWrapper
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.loader import load_config, save_config
-from nanobot.config.schema import MCPServerConfig
+from nanobot.config.network import NetworkConfig
+from nanobot.config.schema import Config, MCPServerConfig
 
 
 def _mcp_notification(method: str, params: dict[str, Any] | None = None) -> SessionMessage:
@@ -144,7 +145,7 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     provider, _registry = _make_provider()
     attempts = 0
 
-    async def _fake_connect(_servers, _registry):
+    async def _fake_connect(_servers, _registry, *, network):
         nonlocal attempts
         attempts += 1
         return {}
@@ -203,7 +204,7 @@ async def test_mcp_provider_closes_connections_independently_from_agent_loop(
             closed_tasks.append(asyncio.current_task())
             assert asyncio.current_task() is self.owner
 
-    async def _fake_connect(servers, _registry):
+    async def _fake_connect(servers, _registry, *, network):
         stacks = {name: _OwnerCheckedStack() for name in servers}
         return stacks
 
@@ -333,7 +334,7 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, network):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
@@ -382,7 +383,7 @@ async def test_reload_is_a_direct_provider_operation_without_an_agent_loop(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, network):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
@@ -394,7 +395,7 @@ async def test_reload_is_a_direct_provider_operation_without_an_agent_loop(
 
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
     registry = ToolRegistry()
-    provider = MCPProvider({}, registry, server_loader=lambda: configured)
+    provider = MCPProvider({}, registry, server_loader=lambda: (configured, NetworkConfig()))
 
     result = await provider.reload()
 
@@ -422,7 +423,7 @@ async def test_reload_timeout_marks_attempted_server_failed_and_allows_retry(
     started = asyncio.Event()
     attempts = 0
 
-    async def _fake_connect(servers, _registry):
+    async def _fake_connect(servers, _registry, *, network):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
@@ -436,7 +437,7 @@ async def test_reload_timeout_marks_attempted_server_failed_and_allows_retry(
     provider = MCPProvider(
         {"test": server},
         ToolRegistry(),
-        server_loader=lambda: {"test": server},
+        server_loader=lambda: ({"test": server}, NetworkConfig()),
     )
 
     reload_task = asyncio.create_task(provider.reload())
@@ -469,7 +470,7 @@ async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
     )
     save_config(config)
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, network):
         stacks = {}
         for name in servers:
             registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
@@ -516,7 +517,7 @@ async def test_reload_mcp_servers_skips_oauth_server_waiting_for_authorization(
 
     attempted: list[str] = []
 
-    async def _fake_connect(servers, _registry):
+    async def _fake_connect(servers, _registry, *, network):
         attempted.extend(servers)
         stack = AsyncExitStack()
         await stack.__aenter__()
@@ -568,7 +569,7 @@ async def test_mcp_tool_reconnects_after_session_terminated(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, network):
         nonlocal connect_count
         stacks = {}
         for name in servers:
@@ -626,7 +627,7 @@ async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, network):
         nonlocal connect_count
         stacks = {}
         for name in servers:
@@ -685,7 +686,7 @@ async def test_concurrent_mcp_reconnect_reuses_fresh_session(
                 ]
             )
 
-    async def _fake_connect(servers, registry):
+    async def _fake_connect(servers, registry, *, network):
         nonlocal connect_count
         stacks = {}
         for name in servers:
@@ -717,3 +718,101 @@ async def test_concurrent_mcp_reconnect_reuses_fresh_session(
     assert outputs == ["fresh:alpha", "fresh:beta"]
     assert connect_count == 2
     assert closed == ["remote"]
+
+
+@pytest.mark.asyncio
+async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_in_servers(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    config.network.proxy = "http://proxy-a.example:8080"
+    config.tools.mcp_servers = {
+        "proxied": MCPServerConfig(url="https://mcp.example.com/mcp", use_proxy=True),
+        "independent": MCPServerConfig(url="https://other.example.com/mcp"),
+    }
+    next_network = NetworkConfig(proxy="http://proxy-b.example:8080")
+    attempts: list[tuple[str, str | None, str | None]] = []
+    closed: list[str] = []
+    sessions: dict[str, Any] = {}
+
+    class Session:
+        expired = False
+
+        async def call_tool(self, _name: str, arguments: dict[str, Any]) -> Any:
+            if self.expired:
+                raise McpError(ErrorData(code=-32000, message="Session terminated"))
+            return SimpleNamespace(content=[mcp_types.TextContent(type="text", text="ok")])
+
+    async def mark_closed(name: str) -> None:
+        closed.append(name)
+
+    async def connect(servers, registry, *, network):
+        connections = {}
+        for name, cfg in servers.items():
+            attempts.append((name, network.proxy, network.resolve_proxy(cfg.use_proxy)))
+            sessions[name] = Session()
+            registry.register(MCPToolWrapper(sessions[name], name, SimpleNamespace(
+                name="echo", description="echo", inputSchema={"type": "object"},
+            )))
+            stack = AsyncExitStack()
+            await stack.__aenter__()
+            stack.push_async_callback(mark_closed, name)
+            connections[name] = stack
+        return connections
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", connect)
+    registry = ToolRegistry()
+    provider = MCPProvider.from_config(
+        config,
+        registry,
+        server_loader=lambda: (config.tools.mcp_servers, next_network),
+    )
+    try:
+        await provider.connect()
+        independent_tool = registry.get("mcp_independent_echo")
+        assert attempts == [
+            ("proxied", "http://proxy-a.example:8080", "http://proxy-a.example:8080"),
+            ("independent", "http://proxy-a.example:8080", None),
+        ]
+
+        # Mutating the caller's config must not reroute a live provider's reconnect.
+        config.network.proxy = "http://not-live.example:8080"
+        sessions["proxied"].expired = True
+        old_tool = registry.get("mcp_proxied_echo")
+        assert isinstance(old_tool, MCPToolWrapper)
+        assert await old_tool.execute() == "ok"
+        assert attempts[-1] == (
+            "proxied", "http://proxy-a.example:8080", "http://proxy-a.example:8080"
+        )
+
+        result = await provider.reload()
+        assert result["ok"] is True
+        assert result["changed"] == ["proxied"]
+        assert result["connected"] == ["independent", "proxied"]
+        assert result["tools_removed"] == 1
+        assert attempts[-1] == (
+            "proxied", "http://proxy-b.example:8080", "http://proxy-b.example:8080"
+        )
+        assert closed == ["proxied", "proxied"]
+        assert registry.get("mcp_independent_echo") is independent_tool
+
+        # Reload also captures a copy, rather than retaining the loader's mutable model.
+        next_network.proxy = "http://proxy-c.example:8080"
+        sessions["proxied"].expired = True
+        current_tool = registry.get("mcp_proxied_echo")
+        assert isinstance(current_tool, MCPToolWrapper)
+        assert await current_tool.execute() == "ok"
+        assert attempts[-1] == (
+            "proxied", "http://proxy-b.example:8080", "http://proxy-b.example:8080"
+        )
+        result = await provider.reload()
+        assert result["changed"] == ["proxied"]
+        assert attempts[-1] == (
+            "proxied", "http://proxy-c.example:8080", "http://proxy-c.example:8080"
+        )
+        assert registry.get("mcp_independent_echo") is independent_tool
+        assert closed == ["proxied"] * 4
+    finally:
+        await provider.aclose()

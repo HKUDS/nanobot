@@ -100,10 +100,6 @@ class FileStates:
         """Return the raw ReadState entry for a path, or None."""
         return self._state.get(str(Path(path).resolve()))
 
-    def raw_state(self) -> dict[str, ReadState]:
-        """Return the mutable backing map for legacy compatibility."""
-        return self._state
-
     def clear(self) -> None:
         """Clear all tracked state (useful for testing)."""
         self._state.clear()
@@ -156,34 +152,3 @@ def bind_file_states(file_states: FileStates) -> Token[FileStates | None]:
 
 def reset_file_states(token: Token[FileStates | None]) -> None:
     _current_file_states.reset(token)
-
-
-# Module-level default instance, retained for backward compatibility with
-# tests and callers that reach in directly. Per-session callers should hold
-# their own FileStates instance instead of touching this one.
-_default = FileStates()
-
-
-def record_read(path: str | Path, offset: int = 1, limit: int | None = None) -> None:
-    _default.record_read(path, offset=offset, limit=limit)
-
-
-def record_write(path: str | Path) -> None:
-    _default.record_write(path)
-
-
-def is_unchanged(path: str | Path, offset: int = 1, limit: int | None = None) -> bool:
-    return _default.is_unchanged(path, offset=offset, limit=limit)
-
-
-def clear() -> None:
-    _default.clear()
-
-
-# Legacy attribute for callers that reached into the module-level dict
-# directly (filesystem.py used to do this). Kept as a property-like accessor
-# so existing imports keep working.
-def __getattr__(name: str):
-    if name == "_state":
-        return _default.raw_state()
-    raise AttributeError(name)

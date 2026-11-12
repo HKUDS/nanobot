@@ -62,7 +62,8 @@ def test_initial_transcript_is_built_from_structured_turn_input() -> None:
     messages, compaction = AgentRunner._initial_transcript_and_compaction(spec)
 
     assert messages == expected
-    assert compaction is None
+    assert compaction is not None
+    assert compaction.raw_messages == expected
     transcript_builder.assert_called_once_with(transcript_input)
 
 
@@ -669,6 +670,64 @@ async def test_runner_uses_no_tools_finalization_after_max_iterations():
 
 
 @pytest.mark.asyncio
+async def test_runner_accounts_for_malformed_retry_and_no_tools_recovery():
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    calls: list[dict] = []
+
+    async def chat_stream_with_retry(*, messages, tools=None, **kwargs):
+        calls.append({"messages": messages, "tools": tools, **kwargs})
+        attempt = len(calls)
+        return LLMResponse(
+            content=f"attempt {attempt}" if attempt < 3 else "recovered answer",
+            tool_calls=(
+                [ToolCallRequest(id=f"bad_{attempt}", name="", arguments={})]
+                if attempt < 3 else []
+            ),
+            finish_reason="tool_calls" if attempt < 3 else "stop",
+            usage=LLMUsage.reported(input_tokens=10 * attempt, output_tokens=attempt),
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    definitions = [{"type": "function", "function": {"name": "lookup", "parameters": {}}}]
+    tools.get_definitions.return_value = definitions
+    tools.execute = AsyncMock()
+    hook = AgentHook()
+    hook.wants_streaming = MagicMock(return_value=True)
+
+    result = await AgentRunner().run(make_run_spec(
+        provider,
+        initial_messages=[{"role": "user", "content": "do task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert result.final_content == "recovered answer"
+    assert result.stop_reason == "completed"
+    assert result.messages == [
+        {"role": "user", "content": "do task"},
+        {"role": "assistant", "content": "recovered answer"},
+    ]
+    assert [item["tools"] for item in calls] == [definitions, definitions, None]
+    assert ["on_content_delta" in item for item in calls] == [True, True, False]
+    assert [item["provider_context"].response_preset for item in calls] == ["", "", ""]
+    assert calls[1]["messages"][-1]["content"].startswith(calls[0]["messages"][-1]["content"])
+    assert "attempt 1" in calls[1]["messages"][-1]["content"]
+    assert calls[2]["messages"][-1]["content"].startswith(calls[1]["messages"][-1]["content"])
+    assert "attempt 2" in calls[2]["messages"][-1]["content"]
+    tools.execute.assert_not_awaited()
+    assert result.usage is not None
+    assert (result.usage.input_tokens, result.usage.output_tokens) == (60, 6)
+    assert [(item.input_tokens, item.output_tokens) for item in result.round_usages] == [(60, 6)]
+
+
+@pytest.mark.asyncio
 async def test_runner_replaces_empty_tool_result_with_marker():
     from nanobot.agent.runner import AgentRunner
 
@@ -810,7 +869,7 @@ async def test_runner_does_not_auto_continue_goal_after_policy_terminal(
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        continuation_callback=lambda: "Continue working.",
+        continuation_callback=AsyncMock(return_value="Continue working."),
         terminal_injection_callback=terminal_injection_callback,
     ))
 
@@ -1151,8 +1210,8 @@ async def test_runner_carries_retry_notifications_in_provider_context():
 
 
 @pytest.mark.asyncio
-async def test_runner_passes_temperature_to_provider():
-    """temperature from AgentRunSpec should reach provider.chat_stream_with_retry."""
+async def test_runner_passes_generation_settings_to_provider():
+    """Non-default generation settings should reach provider.chat_stream_with_retry."""
     from nanobot.agent.runner import AgentRunner
 
     captured: dict = {}
@@ -1173,65 +1232,11 @@ async def test_runner_passes_temperature_to_provider():
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        temperature=0.7,
-    ))
-
-    assert captured["temperature"] == 0.7
-
-
-@pytest.mark.asyncio
-async def test_runner_passes_max_tokens_to_provider():
-    """max_tokens from AgentRunSpec should reach provider.chat_stream_with_retry."""
-    from nanobot.agent.runner import AgentRunner
-
-    captured: dict = {}
-
-    async def chat_stream_with_retry(**kwargs):
-        captured.update(kwargs)
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    runner = AgentRunner()
-    await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "hi"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        temperature=0.3,
         max_tokens=8192,
-    ))
-
-    assert captured["max_tokens"] == 8192
-
-
-@pytest.mark.asyncio
-async def test_runner_passes_reasoning_effort_to_provider():
-    """reasoning_effort from AgentRunSpec should reach provider.chat_stream_with_retry."""
-    from nanobot.agent.runner import AgentRunner
-
-    captured: dict = {}
-
-    async def chat_stream_with_retry(**kwargs):
-        captured.update(kwargs)
-        return LLMResponse(content="done", tool_calls=[], usage=None)
-
-    provider = MagicMock(spec=LLMProvider)
-    provider.chat_stream_with_retry = chat_stream_with_retry
-    tools = MagicMock()
-    tools.get_definitions.return_value = []
-
-    runner = AgentRunner()
-    await runner.run(make_run_spec(provider,
-        initial_messages=[{"role": "user", "content": "hi"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         reasoning_effort="high",
     ))
 
+    assert captured["temperature"] == 0.3
+    assert captured["max_tokens"] == 8192
     assert captured["reasoning_effort"] == "high"

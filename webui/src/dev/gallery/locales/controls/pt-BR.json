@@ -1,0 +1,508 @@
+{
+  "common": {
+    "unavailable": "Indisponível",
+    "selected": "Seleção: {{value}}",
+    "savingPreview": "Salvando valores da prévia…",
+    "savedPreview": "Valores da prévia salvos",
+    "providerAction": "Ação de configuração do provedor selecionada",
+    "reset": "Redefinir prévia"
+  },
+  "button": {
+    "title": "Botões",
+    "description": "Um mesmo botão com várias aparências e tamanhos, definidos pelas opções.",
+    "options": "variant muda a aparência; size muda as dimensões; disabled bloqueia a interação; onClick é fornecido por quem usa o componente.",
+    "variants": "Variantes — estilos diferentes do mesmo botão",
+    "sizes": "Tamanhos",
+    "add": "Adicionar exemplo",
+    "clicks": "Cliques nos botões: {{count}}"
+  },
+  "input": {
+    "title": "Campos de texto",
+    "description": "Entrada de texto e a variante compartilhada de pesquisa.",
+    "options": "Use Input para campos comuns e SearchInput para pesquisa. Forneça um rótulo e explique entradas inválidas.",
+    "name": "Nome de exemplo",
+    "projectName": "Nome do projeto",
+    "search": "Pesquisa",
+    "searchName": "Pesquisa de exemplo",
+    "searchProjects": "Pesquisar projetos",
+    "invalid": "Inválido",
+    "invalidName": "Nome inválido",
+    "required": "Digite um nome de projeto.",
+    "disabledName": "Campo de nome desativado"
+  },
+  "textarea": {
+    "title": "Entrada de várias linhas",
+    "description": "Texto de várias linhas com o estilo de foco compartilhado.",
+    "options": "Aceita as propriedades nativas de textarea: value, onChange, rows e disabled.",
+    "notes": "Notas de exemplo",
+    "disabledNotes": "Notas desativadas",
+    "readOnly": "Prévia somente leitura"
+  },
+  "toggle": {
+    "title": "Interruptores",
+    "description": "Um interruptor controlado de ligar e desligar, compartilhado por configurações, espaços de trabalho e canais.",
+    "options": "Quem usa o componente gerencia checked e onChange. label fornece o nome acessível.",
+    "enable": "Ativar exemplo",
+    "unavailableOn": "Interruptor ligado sem possibilidade de alteração",
+    "unavailableOff": "Interruptor desligado sem possibilidade de alteração"
+  },
+  "select": {
+    "title": "Seletores",
+    "description": "Uma escolha única com navegação por teclado e opções desativadas.",
+    "options": "Combine Select, SelectTrigger, SelectValue, SelectContent e SelectItem. A raiz gerencia value/onValueChange.",
+    "fast": "Rápido",
+    "model": "Modelo de exemplo",
+    "disabledModel": "Seletor de modelo desativado"
+  },
+  "segmented": {
+    "title": "Escolhas segmentadas",
+    "description": "Um pequeno conjunto de escolhas sempre visíveis.",
+    "options": "value, options e onChange são controlados. mode=\"tabs\" adiciona navegação entre abas com as setas.",
+    "day": "Dia",
+    "week": "Semana",
+    "month": "Mês",
+    "period": "Período de exemplo",
+    "selected": "Período selecionado: {{value}}"
+  },
+  "combobox": {
+    "title": "Escolhas com pesquisa",
+    "description": "Opções pesquisáveis com navegação compartilhada por teclado e ponteiro.",
+    "options": "useComboboxNavigation fornece propriedades de entrada, lista e opções; quem usa o componente filtra os valores e gerencia a seleção.",
+    "search": "Pesquisar opções de exemplo",
+    "placeholder": "Digite ou use as setas",
+    "choices": "Opções de exemplo",
+    "empty": "Nenhuma opção correspondente",
+    "selected": "Opção selecionada: {{value}}"
+  },
+  "chevron": {
+    "title": "Seta de controle",
+    "description": "A seta compartilhada pelos controles de seleção.",
+    "options": "className pode ajustar a posição. O ícone é decorativo; o controle ao qual pertence fornece o nome acessível."
+  },
+  "dialog": {
+    "title": "Caixas de diálogo",
+    "description": "Um editor modal com alterações em rascunho, seleção aninhada e retorno do foco.",
+    "options": "Quem usa o componente gerencia open/onOpenChange e os comportamentos de rascunho e salvamento. Sempre forneça DialogTitle e uma descrição quando for útil.",
+    "open": "Abrir diálogo",
+    "edit": "Editar rótulo de exemplo",
+    "help": "As alterações se aplicam apenas a esta prévia.",
+    "label": "Rótulo de exemplo",
+    "save": "Salvar rótulo",
+    "saved": "Rótulo salvo: {{name}}"
+  },
+  "alert": {
+    "title": "Diálogos de confirmação",
+    "description": "Confirmação explícita com controles separados para cancelar e executar.",
+    "options": "Combine título, descrição e rodapé; execute a ação no manipulador de AlertDialogAction.",
+    "remove": "Remover exemplo",
+    "confirmTitle": "Remover este exemplo?",
+    "help": "Isso altera apenas o estado da prévia.",
+    "confirm": "Confirmar remoção",
+    "removed": "Exemplo removido.",
+    "available": "Exemplo disponível."
+  },
+  "sheet": {
+    "title": "Painéis laterais",
+    "description": "Um painel modal ligado a uma borda da área visível.",
+    "options": "SheetContent aceita side. Inclua SheetTitle e SheetDescription.",
+    "open": "Abrir painel lateral",
+    "panelTitle": "Painel lateral de exemplo",
+    "help": "Controles auxiliares ao lado da página atual.",
+    "notes": "Notas do painel",
+    "placeholder": "Experimente editar aqui"
+  },
+  "popover": {
+    "title": "Painéis flutuantes",
+    "description": "Uma pequena área interativa ancorada ao seu acionador.",
+    "options": "Combine acionador e conteúdo; open/onOpenChange podem ser controlados. O conteúdo segue o portal do diálogo ao qual pertence.",
+    "open": "Abrir painel flutuante",
+    "note": "Nota rápida"
+  },
+  "menu": {
+    "title": "Menus suspensos",
+    "description": "Ações, escolhas exclusivas, menus aninhados e itens desativados.",
+    "options": "Use onSelect para ações e um grupo de opções exclusivas para uma escolha persistente.",
+    "view": "Opções de visualização",
+    "layout": "Layout",
+    "comfortable": "Confortável",
+    "compact": "Compacto",
+    "rename": "Renomear",
+    "more": "Mais ações",
+    "duplicate": "Duplicar",
+    "none": "Nenhuma",
+    "status": "Densidade: {{density}}. Ação: {{action}}."
+  },
+  "tooltip": {
+    "title": "Dicas de interface",
+    "description": "HoverHint combina as primitivas de dica compartilhadas; tooltip.tsx é o ponto público de importação.",
+    "options": "Use HoverHint para dicas comuns. Mantenha erros essenciais visíveis. O ponteiro e o foco do teclado seguem as regras de tempo do produto.",
+    "primitive": "Dica básica",
+    "primitiveHelp": "Atraso compartilhado para o ponteiro e exibição imediata com foco do teclado.",
+    "hint": "Dica ao passar o ponteiro",
+    "hintHelp": "Uma dica composta com o mesmo comportamento de foco e ponteiro."
+  },
+  "truncated": {
+    "title": "Dicas para texto truncado",
+    "description": "Mostra uma dica apenas quando o texto medido está truncado.",
+    "options": "Forneça text e uma largura limitada. Adicione tabIndex quando o próprio texto precisar receber foco do teclado."
+  },
+  "disclosure": {
+    "title": "Conteúdo recolhível",
+    "description": "Conteúdo expansível que preserva o estado dos filhos quando recolhido.",
+    "options": "Disclosure gerencia a expansão; DisclosureContent aceita a propriedade open controlada para acionadores personalizados.",
+    "show": "Mostrar opções avançadas",
+    "help": "Este rascunho é mantido ao fechar e abrir novamente.",
+    "draft": "Rascunho da área recolhível"
+  },
+  "expandable": {
+    "title": "Texto expansível",
+    "description": "Uma prévia com limite de linhas do mesmo texto montado.",
+    "options": "Quem usa o componente gerencia expanded. lines define as linhas quando recolhido; forneça um controle acessível.",
+    "less": "Mostrar menos",
+    "more": "Mostrar mais"
+  },
+  "imageViewport": {
+    "title": "Área de imagem",
+    "description": "Controles de ajuste, zoom, deslocamento e pinça locais à imagem.",
+    "options": "Forneça uma className com limites e remonte o componente se a identidade da imagem mudar. Use panWithArrows=false quando uma galeria gerenciar as setas."
+  },
+  "loadingRing": {
+    "title": "Anel de atividade",
+    "description": "Um indicador de atividade compartilhado com trilha opcional.",
+    "options": "className define o tamanho e a cor. track=false oculta a trilha; strokeWidth e strokeDasharray ajustam o arco. Respeita a preferência por movimento reduzido."
+  },
+  "streaming": {
+    "title": "Rótulos animados",
+    "description": "Uma animação de texto compartilhada para raciocínio ativo e rótulos de ferramentas.",
+    "options": "active controla a animação. Filhos do tipo texto ou número fornecem a sobreposição de glifos; as preferências de redução de movimento são respeitadas.",
+    "animate": "Animar rótulo",
+    "working": "Processando a próxima etapa…"
+  },
+  "markdown": {
+    "title": "Respostas Markdown",
+    "description": "O renderizador de produção em fluxo, com tabelas, código e fórmulas.",
+    "options": "children é texto Markdown. streaming controla o conteúdo incompleto; onOpenFilePreview é responsabilidade da tela.",
+    "state": "Estado do Markdown"
+  },
+  "code": {
+    "title": "Exibição de código",
+    "description": "Realce de sintaxe, números de linha, cópia, saída ANSI e linhas adaptadas à área visível.",
+    "options": "code e language fornecem o conteúdo; showLineNumbers, wrapLongLines e chrome controlam a apresentação. O realce da área visível exige números de linha e linhas sem quebra automática.",
+    "format": "Formato do código"
+  },
+  "math": {
+    "title": "Fórmulas matemáticas",
+    "description": "O contêiner compartilhado que ajusta as fórmulas em bloco renderizadas pelo Markdown.",
+    "options": "Use MarkdownText para código TeX. DisplayMath recebe nós matemáticos já renderizados e os redimensiona à largura disponível."
+  },
+  "message": {
+    "title": "Mensagens",
+    "description": "Mensagens de usuário e assistente, incluindo estados de raciocínio e entrega.",
+    "options": "message é um UIMessage projetado pelo ambiente de execução do chat. Dados e ações de rede ficam fora do renderizador.",
+    "state": "Estado da mensagem"
+  },
+  "activity": {
+    "title": "Atividade do agente",
+    "description": "Primitivas de atividade combinadas em uma sequência em andamento, concluída ou com falha.",
+    "options": "Passe texto, estado e expansão controlada. O gateway executa as ferramentas; estes componentes renderizam o estado projetado.",
+    "state": "Estado da atividade",
+    "working": "Processando",
+    "details": "Detalhes da atividade",
+    "collapse": "Recolher",
+    "readError": "Não foi possível ler o arquivo",
+    "read": "Ler código-fonte"
+  },
+  "files": {
+    "title": "Edições de arquivos",
+    "description": "Referências de arquivos, contagem de linhas alteradas e diferenças expansíveis.",
+    "options": "edits contém resumos para exibição; displayMode seleciona summary/diff/collapsed_diff; a tela fornece onOpenFilePreview.",
+    "error": "Não foi possível aplicar a edição de exemplo.",
+    "state": "Estado da edição do arquivo",
+    "operation": "Operação no arquivo",
+    "display": "Exibição das diferenças",
+    "selected": "Arquivo selecionado: {{path}}",
+    "hint": "Selecione uma referência de arquivo para testar seu callback."
+  },
+  "media": { "study": "Estudo de cor {{count}}" },
+  "imageGallery": {
+    "title": "Miniaturas de imagens",
+    "description": "Layout de várias imagens, seleção de miniaturas e imagens adicionais.",
+    "options": "images fornece URLs e nomes; size escolhe miniaturas grandes ou compactas, align controla o alinhamento. Apenas quatro miniaturas são exibidas; o ImageLightbox composto inclui todas as imagens disponíveis para visualização.",
+    "sixImages": "Seis imagens",
+    "compact": "Miniaturas compactas",
+    "hint": "Selecione uma miniatura ou +2 para ver as seis imagens."
+  },
+  "imageLightbox": {
+    "title": "Visualizador em tela cheia",
+    "description": "Visualização controlada em tela cheia e navegação entre imagens.",
+    "options": "index é null quando fechado. Quem usa o componente gerencia index e os callbacks de abertura; ImageLightbox combina ZoomableImage e redefine a visualização ao mudar a imagem.",
+    "open": "Abrir visualizador em tela cheia",
+    "hint": "Use anterior/próximo, ←/→ ou Home/End; feche com × ou Escape."
+  },
+  "zoomableImage": {
+    "title": "Zoom de imagem",
+    "description": "Zoom de uma imagem, deslocamento limitado e gestos.",
+    "options": "src e alt fornecem uma imagem. Coloque-a em um contêiner posicionado com altura definida e remonte ao trocar a imagem. Foque a área para usar +, − e 0.",
+    "hint": "Use +/−, clique duplo, Ctrl+roda ou pinça para ampliar. Arraste ou role após ampliar; clique na porcentagem ou pressione 0 para redefinir."
+  },
+  "attachment": {
+    "title": "Anexos",
+    "description": "Prévia de imagem, reprodução de vídeo, download de arquivo e anexos indisponíveis.",
+    "options": "attachment.kind seleciona image, video ou file. Imagens abrem ImageLightbox, vídeos usam controles nativos e arquivos usam links de download. URLs ausentes ou falhas ao carregar imagens exibem blocos indisponíveis.",
+    "image": "Imagem",
+    "video": "Vídeo reproduzível",
+    "file": "Baixar arquivo",
+    "unavailable": "Anexos indisponíveis (sem URL)"
+  },
+  "fileReference": {
+    "title": "Referências de arquivos",
+    "description": "Uma referência de arquivo cuja abertura é gerenciada por quem a utiliza.",
+    "options": "path fornece o rótulo; onOpen fornece a ação. O componente não decide as permissões do espaço de trabalho.",
+    "select": "Selecione a referência de arquivo."
+  },
+  "settingsComposition": {
+    "title": "Composição de configurações",
+    "description": "Os componentes reais de linha, grupo e capacidade das configurações, combinados com controles compartilhados.",
+    "options": "O controlador de configurações que os contém gerencia valores e persistência. Um callback da galeria altera apenas o estado local da prévia.",
+    "preferences": "Preferências de exemplo",
+    "keepDrafts": "Manter rascunhos",
+    "switchHint": "Uma linha de configuração compartilhada com um interruptor controlado.",
+    "projectLabel": "Rótulo do projeto",
+    "projectName": "Rótulo do projeto nas configurações",
+    "capability": "Capacidade de exemplo",
+    "notes": "Notas",
+    "capabilityNotes": "Notas da capacidade",
+    "localOnly": "Somente prévia local"
+  },
+  "modelPickers": {
+    "title": "Seleção de modelos",
+    "description": "Escolha um provedor, pesquise ou digite um ID de modelo e ajuste o esforço de raciocínio.",
+    "options": "Quem usa o componente fornece valores e ações de ProviderPicker. models de ModelIdPicker pode fornecer um catálogo fixo; savedValues de ReasoningEffortPicker fornece as opções existentes.",
+    "chooseProvider": "Escolher provedor",
+    "configure": "Configurar {{provider}}"
+  },
+  "providerIcons": {
+    "title": "Ícones de provedores",
+    "description": "Compare os tamanhos normal, compacto e de preenchimento, além do estado não configurado do seletor.",
+    "options": "provider seleciona um ícone existente; compact e fill controlam o tamanho. showBrandLogos=false usa ícones integrados.",
+    "size": "Tamanho do ícone"
+  },
+  "timezone": {
+    "title": "Seleção de fuso horário",
+    "description": "Pesquise por nome do fuso, nome em chinês ou deslocamento UTC e veja o mesmo instante na hora local.",
+    "options": "value é um fuso IANA; onChange atualiza o valor de quem usa o componente. O componente fornece pesquisa e navegação por teclado."
+  },
+  "textEditor": {
+    "title": "Editor de texto e dicas",
+    "description": "Abra o editor para alterar, salvar ou cancelar. Apague o conteúdo e salve para ver o erro.",
+    "options": "SettingsTextEditor fecha após o sucesso de onSave e mostra erros em caso de falha; SettingsHint abre ao passar o ponteiro, focar ou clicar.",
+    "state": "Estado de edição",
+    "hint": "Abra o editor para alterar, salvar ou cancelar. Apague o conteúdo para ver o estado de erro.",
+    "instructions": "Instruções de exemplo",
+    "edit": "Editar instruções de exemplo",
+    "help": "Após salvar, o conteúdo atualizado aparece abaixo.",
+    "required": "Digite algum conteúdo."
+  },
+  "removePreset": {
+    "title": "Excluir predefinições",
+    "description": "Exclua predefinições de modelo não utilizadas e veja o estado desativado daquela usada pelo modelo padrão.",
+    "options": "Este é o botão de exclusão de ModelsSettings; quem usa o componente fornece disabled e a ação de exclusão. A gestão de provedores usa o diálogo ProvidersSettings.",
+    "defaultModel": "Modelo padrão",
+    "codeAssistant": "Assistente de programação",
+    "remove": "Excluir {{name}}",
+    "primaryHint": "A predefinição usada pelo modelo padrão não pode ser excluída.",
+    "count": "Predefinições da prévia: {{count}}"
+  },
+  "loading": {
+    "title": "Layouts de carregamento",
+    "description": "Alterne os layouts de carregamento de apps, canais e habilidades e veja o contêiner de estado compartilhado.",
+    "options": "layout de CatalogSkeleton seleciona o layout. SkeletonStatus usa label para o estado do leitor de tela e marca o conteúdo decorativo como aria-hidden.",
+    "layout": "Layout do catálogo",
+    "catalog": "Carregando catálogo da prévia"
+  },
+  "sidebar": {
+    "title": "Navegação das configurações",
+    "description": "Selecione seções, trate uma reinicialização pendente e estreite o navegador para ver o menu móvel.",
+    "options": "activeSection e onSelectSection controlam a seleção; voltar, sair e reiniciar são callbacks de quem usa o componente.",
+    "back": "Voltar ao chat",
+    "logout": "Sair",
+    "restart": "Ação de reinicialização da prévia processada",
+    "hint": "Escolha uma seção ou estreite o navegador para ver a navegação móvel.",
+    "toggleRestart": "Alternar reinicialização pendente"
+  },
+  "providerSearch": {
+    "title": "Pesquisa de provedores",
+    "description": "Pesquise provedores agrupados por OAuth, chave de API e acesso local; selecione uma entrada ou um provedor personalizado.",
+    "options": "providers é o catálogo existente. query é um valor de pesquisa controlado; onSelect e onCustom passam a seleção ao pai.",
+    "closed": "Pesquisa fechada",
+    "custom": "Provedor personalizado selecionado",
+    "hint": "Pesquise provedores ou use as setas para escolher."
+  },
+  "requestParameters": {
+    "title": "Parâmetros de requisição",
+    "description": "Edite cabeçalhos, parâmetros de consulta e corpo; digite JSON inválido para ver a validação real.",
+    "options": "fields seleciona as entradas visíveis; form guarda o texto JSON. Cabeçalhos e parâmetros de consulta aceitam apenas strings; o corpo aceita quaisquer valores de objeto JSON."
+  },
+  "requestAPI": {
+    "title": "API de requisições",
+    "description": "Selecione as APIs compatíveis, a API padrão, as substituições por modelo e as opções de fallback.",
+    "options": "ProviderAPIControl mantém pelo menos uma API. ModelAPIControl permite null para seleção automática e mostra as APIs disponíveis conforme os recursos do provedor.",
+    "providerAPI": "API do provedor",
+    "modelOverride": "Substituição por modelo"
+  },
+  "usage": {
+    "title": "Uso de tokens",
+    "description": "Alterne entre dados, registros vazios e indisponibilidade. Passe o ponteiro nas barras para o uso diário e abra os detalhes para tendências por modelo.",
+    "options": "usage é um registro estatístico fornecido por quem usa o componente; timeZone define os limites das datas. O diálogo de detalhes e os gráficos exibem apenas os dados recebidos.",
+    "state": "Estado do uso"
+  },
+  "overview": {
+    "title": "Visão geral das configurações",
+    "description": "Veja o modelo atual, o estado dos recursos e o uso; selecione linhas de recursos para experimentar a navegação entre seções.",
+    "options": "settings fornece os dados gerais; onSelectSection recebe a seção de configurações selecionada.",
+    "selected": "Seção selecionada: {{section}}"
+  },
+  "web": {
+    "title": "Configurações de pesquisa web",
+    "description": "Alterne entre provedores sem credenciais, com chave de API ou URL de servidor; ajuste a pesquisa e experimente o salvamento automático.",
+    "options": "settings guarda a configuração atual; form guarda os valores editados. O pai fornece salvamento, visibilidade das credenciais e troca de provedor.",
+    "unsaved": "Rascunho da prévia não salvo"
+  },
+  "image": {
+    "title": "Geração de imagens",
+    "description": "Ative a geração, escolha um modelo do catálogo fixo, proporção e tamanho; expanda as opções avançadas para ajustar a quantidade.",
+    "options": "form é uma configuração controlada; dirty marca alterações. O componente reutiliza credenciais do provedor; o pai implementa o salvamento."
+  },
+  "voice": {
+    "title": "Configurações de transcrição",
+    "description": "Ative a transcrição, edite modelo, idioma e limites de duração e tamanho de envio; experimente o salvamento automático.",
+    "options": "settings fornece informações do provedor; o pai gerencia form e os callbacks de salvamento."
+  },
+  "safety": {
+    "title": "Configurações de acesso",
+    "description": "Alterne o acesso a serviços locais e as permissões padrão; veja linhas, dicas e avisos de salvamento automático.",
+    "options": "form fornece os valores exibidos; onSave trata as solicitações de salvamento. O gateway continua responsável por aplicar as permissões em execução."
+  },
+  "channelCatalog": {
+    "title": "Catálogo e identidade dos canais",
+    "description": "Alterne entre execução, inicialização, falha e não instalado; experimente o interruptor, a instalação e o menu de ajuda.",
+    "options": "feature fornece estados de instalação e execução. O pai trata onAction e onSelect; identidade, erros e ajuda usam os mesmos dados do canal.",
+    "exampleChannel": "Canal de exemplo",
+    "state": "Estado do canal",
+    "error": "A conexão de exemplo falhou.",
+    "stopped": "Parado",
+    "running": "Em execução",
+    "starting": "Iniciando",
+    "failed": "Falhou",
+    "selected": "Configurações do canal selecionadas",
+    "hint": "Use o interruptor ou o botão de instalação para ver as mudanças de estado."
+  },
+  "credentials": {
+    "title": "Credenciais do canal",
+    "description": "Insira credenciais, revele ou oculte segredos, aplique predefinições de conexão, verifique campos obrigatórios e copie um comando auxiliar.",
+    "options": "fields define grupos e controles; values e visibleSecrets são controlados. requirements define combinações de credenciais; os callbacks de predefinição e salvamento alteram apenas este exemplo.",
+    "botToken": "Token do bot",
+    "tokenPlaceholder": "Token de exemplo",
+    "serverURL": "URL do servidor",
+    "replyMode": "Modo de resposta",
+    "mentions": "Menções",
+    "allMessages": "Todas as mensagens",
+    "allowFrom": "Remetentes permitidos",
+    "local": "Servidor local",
+    "hosted": "Servidor hospedado",
+    "required": "Digite um token de bot.",
+    "checkSave": "Verificar e salvar",
+    "command": "Comando de exemplo",
+    "applied": "{{name}} aplicado",
+    "incomplete": "Complete as credenciais.",
+    "saved": "Credenciais da prévia salvas.",
+    "hint": "Preencha as credenciais, alterne a exibição de segredos ou aplique uma predefinição de conexão."
+  },
+  "channelValidation": {
+    "title": "Verificação de conexão",
+    "description": "Alterne entre verificação, sucesso e falha; acompanhe as verificações em sequência com um resumo de identidade.",
+    "options": "validation fornece os registros de verificação; validating controla o carregamento. O componente apenas exibe os resultados.",
+    "expired": "O token de exemplo expirou.",
+    "result": "Resultado da verificação"
+  },
+  "runAt": {
+    "title": "Seleção de horário agendado",
+    "description": "Insira data e hora ou abra o calendário e escolha com o mouse, as setas e as teclas de página.",
+    "options": "value usa a hora local YYYY-MM-DDTHH:mm; onChange retorna o valor editado. Entradas inválidas são indicadas no controle existente."
+  },
+  "automationCalendar": {
+    "title": "Calendário de automações",
+    "description": "Mude de mês, alterne planos e histórico e abra resultados de execuções bem-sucedidas ou com falha. Contêineres estreitos exibem uma agenda.",
+    "options": "jobs e month definem o conteúdo. onInspect trata tarefas agendadas; quem usa o componente fornece os resultados por renderRunDialog. O calendário não consulta serviços.",
+    "providerError": "O provedor de exemplo estava indisponível.",
+    "state": "Estado da agenda",
+    "previousMonth": "Mês anterior",
+    "nextMonth": "Próximo mês",
+    "planned": "Agendado",
+    "recorded": "Histórico de execução",
+    "running": "Em execução",
+    "failed": "Falhou",
+    "completed": "Concluído",
+    "skipped": "Ignorado",
+    "system": "Tarefa do sistema",
+    "noEntries": "Nenhum agendamento neste mês",
+    "more": "Mais {{count}}",
+    "selected": "Tarefa selecionada: {{name}}",
+    "hint": "Selecione uma execução para ver o resultado ou escolha uma tarefa agendada."
+  },
+  "providers": {
+    "title": "Gestão de provedores",
+    "description": "Veja o diálogo real de gestão de provedores e o fluxo de adição.",
+    "options": "Reutiliza ProvidersSettings das configurações. Quem usa o componente controla catálogo, formulários e salvamento; esta prévia altera dados locais de exemplo e permite configurar, pesquisar, criar e cancelar.",
+    "invalidParameters": "Digite parâmetros JSON válidos; os valores de cabeçalhos e parâmetros de consulta devem ser strings.",
+    "saved": "Configuração da prévia salva para {{name}}",
+    "added": "{{name}} adicionado",
+    "signedIn": "Autorização da prévia definida como conectada",
+    "signedOut": "Autorização da prévia definida como desconectada",
+    "builtInIcons": "Usar ícones integrados",
+    "brandIcons": "Usar ícones de marca",
+    "configured": "Provedores configurados: {{count}}",
+    "providerAdded": "Provedor adicionado"
+  },
+  "runResult": {
+    "title": "Resultados de automações",
+    "description": "Abra resultados para comparar respostas Markdown, carregamento, nova tentativa, respostas vazias e histórico ausente.",
+    "options": "result fornece o estado de carregamento e a resposta obtida. Quem usa o componente trata onRetry; esta visualização não lê o ambiente de execução nem solicita resultados.",
+    "state": "Resultado da execução",
+    "view": "Ver resultado da execução"
+  },
+  "chatBinding": {
+    "title": "Chat de execução",
+    "description": "Escolha o chat, edite instruções, confirme, volte ao anterior ou cancele; compare tarefas ocupadas, erros de carregamento e conflitos.",
+    "options": "data e job fornecem chats disponíveis e versões do vínculo. A visualização gerencia o rascunho de confirmação; o ponto de entrada conecta onSave, onSaved e onReload às operações de dados.",
+    "state": "Estado do vínculo ao chat",
+    "setChat": "Definir chat de execução",
+    "saved": "A próxima execução ocorrerá em {{title}}",
+    "hint": "Escolha um chat de destino e confirme ou edite as instruções da tarefa."
+  },
+  "about": {
+    "title": "Sobre e versão",
+    "description": "Compare estados de versão, links de commits, atualizações e a página Sobre; os botões exibem resultados de exemplo.",
+    "options": "AboutSettingsView aceita uma composição de links de versão e suporte. VersionCheckRowView exibe checking/result e solicita verificações por onCheck. O ponto de entrada gerencia as verificações reais e os dados dos links de diagnóstico.",
+    "error": "Não foi possível obter a versão. Tente novamente.",
+    "state": "Estado da versão",
+    "selectedLink": "Link do GitHub selecionado",
+    "preferenceSaved": "Preferência de exemplo salva; nada será instalado ou reiniciado.",
+    "updateRequested": "Revisão da atualização selecionada; esta prévia não instala nem reinicia nada.",
+    "dismissed": "Aviso de atualização dispensado"
+  },
+  "appearance": {
+    "title": "Preferências de aparência",
+    "description": "Alterne aparência, exibição de atividade, diferenças de arquivos e notificações; os valores de exemplo aparecem abaixo.",
+    "options": "Quem usa o componente gerencia tema e preferências. onChangeBrowserNotifications delega pedidos de permissão ao ponto de entrada; os callbacks da prévia só alteram interruptores de exemplo."
+  },
+  "starInvitation": {
+    "title": "Convite de apoio",
+    "description": "Abra o convite real, compare salvamento e erros e experimente adiar, o link do GitHub e nunca mais lembrar.",
+    "options": "open, saving e error são estados de exibição. O ponto de entrada StarPrompt existente gerencia o recebimento de convites e a persistência das preferências; a visualização só chama as ações fornecidas.",
+    "state": "Estado do convite",
+    "view": "Ver convite",
+    "dismissed": "Nunca mais lembrar selecionado na prévia",
+    "starred": "Link do GitHub selecionado na prévia"
+  }
+}

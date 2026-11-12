@@ -6,7 +6,18 @@ from collections.abc import Mapping, MutableMapping
 from typing import Any
 
 UNIFIED_SESSION_KEY = "unified:default"
+HEARTBEAT_SESSION_KEY = "heartbeat"
 LAST_CHANNEL_METADATA_KEY = "last_channel"
+
+
+def is_dream_session(key: str) -> bool:
+    """Identify the per-run session namespace owned by Dream."""
+    return key.startswith("dream:")
+
+
+def is_internal_session(key: str) -> bool:
+    """Identify maintenance sessions whose context is not a user conversation."""
+    return key == HEARTBEAT_SESSION_KEY or is_dream_session(key)
 
 
 def session_key_for_channel(channel: str, chat_id: str, *, unified_session: bool = False) -> str:

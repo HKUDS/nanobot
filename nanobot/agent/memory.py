@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import threading
 import weakref
@@ -21,7 +20,7 @@ from uuid import uuid4
 
 from loguru import logger
 
-from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
+from nanobot.events import NO_EVENTS, CompactionReason, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
 from nanobot.providers.conversation_state import ProviderConversationStateController
@@ -30,6 +29,7 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.session.summary import is_summary_checkpoint, session_summary_from_metadata
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
+    atomic_write_lines,
     build_assistant_message,
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -248,9 +248,8 @@ class MemoryStore:
     def write_user(self, content: str) -> None:
         self.user_file.write_text(content, encoding="utf-8")
 
-    # -- context injection (used by context.py) ------------------------------
-
     def get_memory_context(self) -> str:
+        """Return long-term memory formatted for context injection."""
         long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
@@ -300,19 +299,21 @@ class MemoryStore:
         content more tightly; this default only exists to catch unintentional
         large writes (e.g. an LLM echoing its input back as a "summary").
         """
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        raw = entry.rstrip()
         content = self._normalize_history_entry(entry, max_chars=max_chars)
+        if entry.rstrip() and not content:
+            logger.debug(
+                "history entry stripped to empty (likely template leak); "
+                "persisting empty content to avoid re-polluting Dream input",
+            )
+        return self._append_history_record(content, session_key=session_key)
+
+    def _append_history_record(self, content: str, *, session_key: str | None = None) -> int:
+        """Persist already sanitized, bounded content without rewriting chunk edges."""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         # Cursor allocation and the append must be atomic: concurrent writers
         # could otherwise read the same current cursor and emit duplicates.
         with self._append_lock:
             cursor = self._next_cursor()
-            if raw and not content:
-                logger.debug(
-                    "history entry {} stripped to empty (likely template leak); "
-                    "persisting empty content to avoid re-polluting Dream input",
-                    cursor,
-                )
             record = {"cursor": cursor, "timestamp": ts, "content": content}
             if session_key:
                 record["session_key"] = session_key
@@ -470,28 +471,10 @@ class MemoryStore:
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
         """Overwrite history.jsonl with the given entries (atomic write)."""
-        tmp_path = self.history_file.with_suffix(self.history_file.suffix + ".tmp")
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self.history_file)
-
-            # fsync the directory so the rename is durable.
-            # On Windows, opening a directory with O_RDONLY raises
-            # PermissionError — skip the dir sync there (NTFS
-            # journals metadata synchronously).
-            with suppress(PermissionError):
-                fd = os.open(str(self.history_file.parent), os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-        except BaseException:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        atomic_write_lines(
+            self.history_file,
+            (json.dumps(entry, ensure_ascii=False) for entry in entries),
+        )
 
     # -- dream cursor --------------------------------------------------------
 
@@ -516,7 +499,7 @@ class MemoryStore:
 
     @staticmethod
     def default_dream_prompt() -> str:
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 
         return render_template(
             "agent/dream.md",
@@ -574,7 +557,7 @@ class MemoryStore:
 
     def build_dream_tools(self) -> ToolRegistry:
         """Build the restricted tool registry used by Dream runs."""
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
         from nanobot.agent.tools.apply_patch import ApplyPatchTool
         from nanobot.agent.tools.file_state import FileStates
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
@@ -669,11 +652,31 @@ class MemoryStore:
         max_chars: int | None = None,
         session_key: str | None = None,
     ) -> str:
-        """Persist and return a bounded raw checkpoint when summarization degrades."""
-        checkpoint = self._build_raw_checkpoint(messages, max_chars=max_chars)
-        self.append_history(checkpoint, session_key=session_key)
+        """Persist raw messages in bounded chunks and return a checkpoint."""
+        limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
+        chunk_size = min(max(1, limit), _HISTORY_ENTRY_HARD_CAP - 1_000)
+        # Clean the complete text first: a thinking block may span chunk boundaries.
+        formatted = strip_think(self._format_messages(public_history_messages(messages)))
+        chunks = [
+            formatted[start:start + chunk_size]
+            for start in range(0, len(formatted), chunk_size)
+        ] or [""]
+        for part, chunk in enumerate(chunks, start=1):
+            suffix = f" (part {part}/{len(chunks)})" if len(chunks) > 1 else ""
+            # The whole text is sanitized and each record fits the hard cap.
+            # Normalizing again would trim meaningful whitespace at chunk edges.
+            self._append_history_record(
+                f"[RAW] {len(messages)} messages{suffix}\n{chunk}",
+                session_key=session_key,
+            )
         logger.warning(
-            "Memory consolidation degraded: raw-archived {} messages", len(messages)
+            "Memory consolidation degraded: raw-archived {} messages in {} entries",
+            len(messages),
+            len(chunks),
+        )
+        checkpoint = self._normalize_history_entry(
+            f"[RAW] {len(messages)} messages\n{formatted}",
+            max_chars=limit,
         )
         return checkpoint
 
@@ -718,28 +721,6 @@ class MemoryStore:
             return prefix
         return f"{prefix}\n\n{diff_body}"
 
-    @staticmethod
-    def prune_dream_sessions(sessions: SessionManager, *, keep: int = 10) -> None:
-        """Remove the oldest Dream session files, keeping only the N most recent.
-
-        Only current base64url-encoded Dream session keys are considered.
-        Non-dream session files are never touched.
-        """
-        with sessions.locked_session_files() as sessions_dir:
-            dream_files: list[tuple[Path, str]] = []
-            for path in sessions_dir.glob("*.jsonl"):
-                decoded_key = SessionManager.decode_storage_key(path.stem)
-                if decoded_key is not None and decoded_key.startswith("dream:"):
-                    dream_files.append((path, decoded_key))
-            dream_files.sort(key=lambda item: item[0].stat().st_mtime)
-
-            for path, key in dream_files[: max(0, len(dream_files) - keep)]:
-                if sessions.delete_session(key):
-                    logger.debug("Pruned old dream session: {}", path.stem)
-                else:
-                    logger.warning("Failed to prune dream session {}", path)
-
-
 # ---------------------------------------------------------------------------
 # Memory ingestion and context-pressure coordination
 # ---------------------------------------------------------------------------
@@ -756,11 +737,11 @@ _ARCHIVE_TOOL_RESULT = (
 
 
 class MemoryArchiver:
-    """Write durable transcript batches to the Memory ingestion journal.
+    """Generate transcript checkpoints and optionally journal their source.
 
     The archiver deliberately has no SessionManager dependency: it may read a
-    captured transcript batch and append to history.jsonl, but it cannot mutate
-    provider continuation state or advance a session watermark.
+    captured transcript batch and, for durable sessions, append to history.jsonl,
+    but it cannot mutate provider continuation state or advance a session watermark.
     """
 
     def __init__(
@@ -782,9 +763,14 @@ class MemoryArchiver:
         session_key: str,
         previous_summary: str | None,
         max_tokens: int,
+        persist: bool = True,
     ) -> str:
-        """Persist the failed chunk and return a bounded replacement checkpoint."""
-        raw = self.store.raw_archive(messages, session_key=session_key)
+        """Return a bounded raw checkpoint, optionally persisting its source."""
+        raw = (
+            self.store.raw_archive(messages, session_key=session_key)
+            if persist
+            else self.store._build_raw_checkpoint(messages)
+        )
         return self._combine_raw_checkpoint(
             raw,
             previous_summary=previous_summary,
@@ -835,8 +821,9 @@ class MemoryArchiver:
         input_token_budget: int | None = None,
         fallback_max_tokens: int | None = None,
         provider_state: ProviderConversationState | None = None,
+        persist: bool = True,
     ) -> str | None:
-        """Append the archive prompt to H and persist its summary."""
+        """Generate a replacement checkpoint and optionally persist it."""
         if not source_messages:
             return None
 
@@ -850,6 +837,7 @@ class MemoryArchiver:
                     if fallback_max_tokens is not None
                     else runtime.generation.max_tokens
                 ),
+                persist=persist,
             )
 
         prompt = render_template(
@@ -898,7 +886,8 @@ class MemoryArchiver:
             )
             if input_token_budget <= 0 or estimated > input_token_budget:
                 logger.debug(
-                    "Memory archive input does not fit for {}: {}/{} via {}; raw-dumping",
+                    "Memory archive input does not fit for {}: {}/{} via {}; "
+                    "using raw checkpoint",
                     session_key,
                     estimated,
                     input_token_budget,
@@ -922,7 +911,7 @@ class MemoryArchiver:
             except Exception:
                 phase = "provider call" if attempt == 0 else "tool-call recovery"
                 logger.warning(
-                    "Memory archive {} failed, raw-dumping to history",
+                    "Memory archive {} failed; using raw checkpoint",
                     phase,
                 )
                 return raw_fallback()
@@ -974,22 +963,24 @@ class MemoryArchiver:
         assert response is not None
         if response.finish_reason in {"error", "length"}:
             logger.warning(
-                "Memory archive provider did not complete ({}), raw-dumping to history",
+                "Memory archive provider did not complete ({}); using raw checkpoint",
                 response.finish_reason,
             )
             return raw_fallback()
         if response.has_tool_calls is True:
-            logger.warning("Memory archive provider returned tool calls, raw-dumping to history")
+            logger.warning("Memory archive provider returned tool calls; using raw checkpoint")
             return raw_fallback()
         summary = response.content
         if not summary or not summary.strip():
-            logger.warning("Memory archive provider returned no summary, raw-dumping to history")
+            logger.warning("Memory archive provider returned no summary; using raw checkpoint")
             return raw_fallback()
         summary = self.store._normalize_history_entry(summary)
         if not summary:
-            logger.warning("Memory archive provider summary was not safe to replay, raw-dumping")
+            logger.warning(
+                "Memory archive provider summary was not safe to replay; using raw checkpoint"
+            )
             return raw_fallback()
-        if summary != "(nothing)":
+        if persist and summary != "(nothing)":
             self.store.append_history(summary, session_key=session_key)
         return summary
 
@@ -1109,6 +1100,7 @@ class Consolidator:
         session_key: str,
         tools: list[dict[str, Any]],
         provider_state: ProviderConversationState | None = None,
+        persist: bool = True,
     ) -> str | None:
         """Summarize the exact transcript prefix already accepted by the model."""
         source_messages = [
@@ -1136,6 +1128,7 @@ class Consolidator:
             input_token_budget=input_token_budget,
             fallback_max_tokens=max(1, checkpoint_tokens),
             provider_state=provider_state,
+            persist=persist,
         )
         if summary is None:
             return None
@@ -1150,6 +1143,7 @@ class Consolidator:
         runtime: LLMRuntime,
         session_key: str,
         tools: list[dict[str, Any]],
+        persist: bool = True,
     ) -> str | None:
         """Prompt a native compacted state without replaying its raw history."""
         return await self.summarize_transcript(
@@ -1159,6 +1153,7 @@ class Consolidator:
             session_key=session_key,
             tools=tools,
             provider_state=state,
+            persist=persist,
         )
 
     @staticmethod
@@ -1226,6 +1221,8 @@ class Consolidator:
         runtime: LLMRuntime,
         max_suffix: int = 0,
         events: EventSink = NO_EVENTS,
+        notify: bool = False,
+        reason: CompactionReason | None = None,
     ) -> str | None:
         """Replace archived history with a summary checkpoint.
 
@@ -1234,8 +1231,8 @@ class Consolidator:
         """
         lock = self.get_lock(session_key)
         async with lock:
-            self.sessions.invalidate(session_key)
-            session = self.sessions.get_or_create(session_key)
+            await self.sessions.state.discard(session_key)
+            session = await self.sessions.state.get(session_key)
 
             archive_start = session.last_archived
             messages_to_archive = list(session.messages[archive_start:])
@@ -1248,33 +1245,30 @@ class Consolidator:
 
             compaction_id = uuid4().hex
             await events.emit(
-                ContextCompactionEvent(compaction_id=compaction_id, phase="started"),
+                ContextCompactionEvent(compaction_id=compaction_id, phase="started", notify=notify, reason=reason),
             )
-            last_active = session.updated_at
             archive_end = archive_start + len(messages_to_archive)
             try:
                 summary = await self.archive_session(
                     session, archive_end=archive_end, runtime=runtime,
                 )
                 if summary:
-                    # Concurrent appends remain after the captured boundary.
-                    session.commit_summary_checkpoint(
-                        summary, insert_at=archive_end, last_active=last_active,
+                    await self.sessions.state.commit_summary(
+                        session, summary, archive_end=archive_end,
                     )
-                    # Resume from the summary and retained transcript, not the old provider history.
-                    session.provider_state = None
-                    self.sessions.save(session)
             except (Exception, asyncio.CancelledError) as exc:
                 await events.emit(
                     ContextCompactionEvent(
                         compaction_id=compaction_id,
                         phase="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+                        notify=notify,
+                        reason=reason,
                     ),
                 )
                 raise
             if not summary:
                 await events.emit(
-                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed"),
+                    ContextCompactionEvent(compaction_id=compaction_id, phase="failed", notify=notify, reason=reason),
                 )
                 return None
 
@@ -1282,6 +1276,8 @@ class Consolidator:
                 ContextCompactionEvent(
                     compaction_id=compaction_id,
                     phase="succeeded",
+                    notify=notify,
+                    reason=reason,
                 ),
             )
 

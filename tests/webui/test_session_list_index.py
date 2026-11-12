@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import io
 import json
-import os
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -19,35 +16,23 @@ from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.recovery import RECOVERY_METADATA_KEY
+from nanobot.session.types import SESSION_TYPE_KEY, SessionType
 
 
-@pytest.fixture(autouse=True)
-def _isolate_webui_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-
-
-def test_webui_session_list_reuses_valid_index_without_scanning_files(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
+def test_webui_session_list_reads_previews_without_loading_history(tmp_path, monkeypatch):
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:indexed")
     session.metadata[SESSION_MODEL_PRESET_METADATA_KEY] = "fast"
     session.add_message("user", "indexed preview")
     manager.save(session)
-
     assert list_webui_sessions(manager)[0]["preview"] == "indexed preview"
-    assert list_webui_sessions(manager)[0]["model_preset"] == "fast"
 
-    def fail_scan(session_manager: SessionManager, path: Path, webui_dir: Path) -> None:
-        raise AssertionError(f"unexpected session file scan: {path}")
+    def fail_load(*args, **kwargs):
+        raise AssertionError("sidebar must not load conversation history or rewrite unchanged cache")
 
-    monkeypatch.setattr(session_list_index, "_scan_session_row", fail_scan)
-
+    monkeypatch.setattr(manager._store, "load", fail_load)
+    monkeypatch.setattr(manager, "read_session_metadata", fail_load)
     rows = list_webui_sessions(manager)
-
     assert rows[0]["key"] == "websocket:indexed"
     assert rows[0]["preview"] == "indexed preview"
     assert rows[0]["model_preset"] == "fast"
@@ -91,20 +76,6 @@ def test_webui_session_list_surfaces_pending_recovery_state(tmp_path: Path) -> N
     }
 
 
-def test_webui_session_index_uses_unique_temp_file(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:unique-index-temp")
-    session.add_message("user", "hello")
-    manager.save(session)
-    stale_shared_tmp = manager.sessions_dir / ".webui_session_index.json.tmp"
-    stale_shared_tmp.write_text("stale", encoding="utf-8")
-
-    assert list_webui_sessions(manager)[0]["preview"] == "hello"
-
-    assert stale_shared_tmp.read_text(encoding="utf-8") == "stale"
-    assert not list(manager.sessions_dir.glob(".webui_session_index.json.*.tmp"))
-
-
 def test_webui_session_list_indexes_workspace_scope_and_preserves_null(
     tmp_path: Path,
 ) -> None:
@@ -143,131 +114,42 @@ def test_webui_session_list_indexes_workspace_scope_and_preserves_null(
     }
 
 
-def test_webui_session_list_does_not_cache_old_snapshot_with_new_signature(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_webui_session_list_refreshes_after_concurrent_metadata_change(tmp_path, monkeypatch):
     manager = SessionManager(tmp_path)
-    session_key = "websocket:scope-race"
-    session = manager.get_or_create(session_key)
-    session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
-        "project_path": str(tmp_path),
-        "access_mode": "full",
-    }
-    session.add_message("user", "hello")
+    key = "websocket:scope-race"
+    session = manager.get_or_create(key)
+    session.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {"project_path": str(tmp_path), "access_mode": "full"}
     manager.save(session)
-    session_path = manager._get_session_path(session_key)
-    original_open = open
-    scope_changed = False
+    original = manager.list_session_metadata
 
-    class RacingReader(io.StringIO):
-        def __next__(self) -> str:
-            nonlocal scope_changed
-            if not scope_changed:
-                scope_changed = True
-                current = manager.get_or_create(session_key)
-                current.metadata[WORKSPACE_SCOPE_METADATA_KEY] = {
-                    "project_path": str(tmp_path),
-                    "access_mode": "restricted",
-                }
-                manager.save(current)
-            return super().__next__()
+    def racing_read():
+        snapshot = original()
+        manager.update_session_metadata(key, {WORKSPACE_SCOPE_METADATA_KEY: {
+            "project_path": str(tmp_path), "access_mode": "restricted",
+        }})
+        return snapshot
 
-    def racing_open(path, *args, **kwargs):
-        if Path(path) == session_path:
-            with original_open(path, *args, **kwargs) as source:
-                return RacingReader(source.read())
-        return original_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(session_list_index, "open", racing_open, raising=False)
-
+    monkeypatch.setattr(manager, "list_session_metadata", racing_read)
     first = list_webui_sessions(manager)[0]
     second = list_webui_sessions(manager)[0]
-
     assert session_list_index.indexed_workspace_scope(first)[1]["access_mode"] == "full"
     assert session_list_index.indexed_workspace_scope(second)[1]["access_mode"] == "restricted"
 
 
-def test_webui_session_scan_does_not_overlap_session_save(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = SessionManager(
-        tmp_path / "workspace",
-        sessions_root=tmp_path / "runtime",
-    )
-    session = manager.get_or_create("websocket:windows-reader")
+def test_webui_session_list_sees_committed_snapshot_during_write(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:concurrent")
     session.add_message("user", "before")
     manager.save(session)
-    session_path = manager._get_session_path(session.key)
     session.messages[0]["content"] = "after"
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        def write() -> None:
+            manager.save(session)
+            rows = executor.submit(list_webui_sessions, manager).result(timeout=3)
+            assert rows[0]["preview"] == "before"
 
-    reader_open = threading.Event()
-    release_reader = threading.Event()
-    save_started = threading.Event()
-    save_lock_attempted = threading.Event()
-    write_entered = threading.Event()
-    original_open = open
-    store = manager._jsonl_store
-    original_acquire = store._session_files_lock.acquire
-    original_save_unlocked = store._save_unlocked
-
-    class BlockingReader:
-        def __init__(self, file):
-            self.file = file
-
-        def __enter__(self):
-            entered = self.file.__enter__()
-            reader_open.set()
-            if not release_reader.wait(5):
-                raise AssertionError("timed out waiting to release the session reader")
-            return entered
-
-        def __exit__(self, *args):
-            try:
-                return self.file.__exit__(*args)
-            finally:
-                reader_open.clear()
-
-    def blocking_open(path, *args, **kwargs):
-        file = original_open(path, *args, **kwargs)
-        if Path(path) == session_path:
-            return BlockingReader(file)
-        return file
-
-    def observed_acquire(*args, **kwargs):
-        if save_started.is_set():
-            save_lock_attempted.set()
-        return original_acquire(*args, **kwargs)
-
-    def observed_save_unlocked(session, *, fsync=False):
-        write_entered.set()
-        assert not reader_open.is_set(), "save entered while the canonical file was open"
-        return original_save_unlocked(session, fsync=fsync)
-
-    monkeypatch.setattr(session_list_index, "open", blocking_open, raising=False)
-    monkeypatch.setattr(store._session_files_lock, "acquire", observed_acquire)
-    monkeypatch.setattr(store, "_save_unlocked", observed_save_unlocked)
-
-    def save_session() -> None:
-        save_started.set()
-        manager.save(session)
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        list_future = executor.submit(list_webui_sessions, manager)
-        try:
-            assert reader_open.wait(5)
-            save_future = executor.submit(save_session)
-            assert save_lock_attempted.wait(5)
-            assert not write_entered.is_set()
-        finally:
-            release_reader.set()
-
-        assert list_future.result(timeout=5)[0]["preview"] == "before"
-        save_future.result(timeout=5)
-
-    assert write_entered.is_set()
-    assert list_webui_sessions(manager)[0]["preview"] == "after"
+        manager._store.run_write(write)
+        assert list_webui_sessions(manager)[0]["preview"] == "after"
 
 
 def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(
@@ -286,7 +168,7 @@ def test_webui_session_list_rejects_invalid_internal_model_preset_metadata(
     assert manager.get_or_create(session.key).metadata["model_preset"] == 7
 
 
-def test_webui_session_list_rescans_only_changed_file(tmp_path: Path, monkeypatch) -> None:
+def test_webui_session_list_reflects_changed_preview(tmp_path: Path, monkeypatch) -> None:
     manager = SessionManager(tmp_path)
     first = manager.get_or_create("websocket:first")
     first.add_message("user", "first")
@@ -301,22 +183,8 @@ def test_webui_session_list_rescans_only_changed_file(tmp_path: Path, monkeypatc
     second.add_message("user", "second after")
     manager.save(second)
 
-    original_scan = session_list_index._scan_session_row
-    scanned: list[str] = []
-
-    def record_scan(
-        session_manager: SessionManager,
-        path: Path,
-        webui_dir: Path,
-    ) -> dict | None:
-        scanned.append(path.name)
-        return original_scan(session_manager, path, webui_dir)
-
-    monkeypatch.setattr(session_list_index, "_scan_session_row", record_scan)
-
     rows = list_webui_sessions(manager)
 
-    assert scanned == [manager._get_session_path("websocket:second").name]
     assert {row["preview"] for row in rows} == {"first", "second after"}
 
 
@@ -324,7 +192,6 @@ def test_webui_session_list_skips_provider_state_before_preview_budget(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(session_list_index, "_SESSION_LIST_PREVIEW_MAX_CHARS", 100)
     manager = SessionManager(tmp_path)
     session = manager.get_or_create("websocket:private-state")
     session.provider_state = ProviderConversationState(
@@ -351,283 +218,6 @@ def test_webui_session_list_drops_deleted_index_rows(tmp_path: Path) -> None:
     assert manager.delete_session("websocket:deleted") is True
 
     assert list_webui_sessions(manager) == []
-
-
-def test_webui_session_list_recovers_transcript_without_canonical_session(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    key = "websocket:restored"
-    transcript = webui_dir / f"{SessionManager.safe_key(key)}.jsonl"
-    transcript.write_text(
-        '{"event":"user","chat_id":"restored","text":"original question",'
-        '"created_at_ms":1785502800000}\n'
-        '{"event":"message","chat_id":"restored","text":"original answer",'
-        '"created_at_ms":1785502801000}\n'
-        '{"event":"turn_end","chat_id":"restored","created_at_ms":1785502802000}\n',
-        encoding="utf-8",
-    )
-    manager = SessionManager(tmp_path / "workspace")
-
-    [row] = list_webui_sessions(manager)
-
-    assert row["key"] == key
-    assert row["preview"] == "original question"
-    assert row["created_at"] == datetime.fromtimestamp(1785502800).isoformat()
-    assert not manager._get_session_path(key).exists()
-    assert manager.list_sessions() == []
-
-    reloaded = SessionManager(tmp_path / "workspace")
-    assert [row["key"] for row in list_webui_sessions(reloaded)] == [key]
-
-
-def test_webui_session_list_recovers_colon_chat_id_from_transcript(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    key = "websocket:scope:child"
-    transcript = webui_dir / f"{SessionManager.safe_key(key)}.jsonl"
-    transcript.write_text(
-        '{"event":"user","chat_id":"scope:child","text":"scoped history"}\n',
-        encoding="utf-8",
-    )
-
-    [row] = list_webui_sessions(SessionManager(tmp_path / "workspace"))
-
-    assert row["key"] == key
-    assert row["preview"] == "scoped history"
-
-
-def test_webui_session_list_normalizes_transcript_preview(tmp_path: Path) -> None:
-    key = "websocket:long-preview"
-    transcript = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
-    transcript.write_text(
-        json.dumps(
-            {
-                "event": "user",
-                "chat_id": "long-preview",
-                "text": "first\n\n" + "word " * 100,
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    [row] = list_webui_sessions(SessionManager(tmp_path / "workspace"))
-
-    assert row["preview"].startswith("first word")
-    assert "\n" not in row["preview"]
-    assert row["preview"].endswith("…")
-
-
-def test_webui_session_list_tolerates_invalid_transcript_timestamp(
-    tmp_path: Path,
-) -> None:
-    key = "websocket:bad-time"
-    transcript = tmp_path / "webui" / f"{SessionManager.safe_key(key)}.jsonl"
-    transcript.write_text(
-        '{"event":"user","chat_id":"bad-time","text":"still visible",'
-        '"created_at_ms":1e100}\n',
-        encoding="utf-8",
-    )
-
-    [row] = list_webui_sessions(SessionManager(tmp_path / "workspace"))
-
-    assert row["preview"] == "still visible"
-    datetime.fromisoformat(row["created_at"])
-
-
-def test_webui_session_list_ignores_invalid_transcript_chat_id(tmp_path: Path) -> None:
-    transcript = tmp_path / "webui" / "websocket_.._outside.jsonl"
-    transcript.write_text(
-        '{"event":"user","chat_id":"../outside","text":"do not expose"}\n',
-        encoding="utf-8",
-    )
-
-    assert list_webui_sessions(SessionManager(tmp_path / "workspace")) == []
-
-
-def test_webui_session_list_recovers_segment_only_transcript(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    key = "websocket:segmented"
-    segments = webui_dir / f"{SessionManager.safe_key(key)}.segments"
-    segments.mkdir()
-    (segments / "000001.jsonl").write_text(
-        '{"event":"user","chat_id":"segmented","text":"older segment"}\n'
-        '{"event":"turn_end","chat_id":"segmented"}\n',
-        encoding="utf-8",
-    )
-
-    [row] = list_webui_sessions(SessionManager(tmp_path / "workspace"))
-
-    assert row["key"] == key
-    assert row["preview"] == "older segment"
-
-
-def test_webui_session_list_prefers_canonical_metadata_without_duplicate(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    key = "websocket:canonical"
-    (webui_dir / f"{SessionManager.safe_key(key)}.jsonl").write_text(
-        '{"event":"user","chat_id":"canonical","text":"display copy"}\n',
-        encoding="utf-8",
-    )
-    manager = SessionManager(tmp_path / "workspace")
-    session = manager.get_or_create(key)
-    session.metadata["title"] = "Canonical title"
-    session.add_message("user", "canonical preview")
-    manager.save(session)
-
-    rows = list_webui_sessions(manager)
-
-    assert len(rows) == 1
-    assert rows[0]["key"] == key
-    assert rows[0]["preview"] == "canonical preview"
-
-
-def test_webui_session_list_reuses_unchanged_transcript_index(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    key = "websocket:cached-transcript"
-    (webui_dir / f"{SessionManager.safe_key(key)}.jsonl").write_text(
-        '{"event":"user","chat_id":"cached-transcript","text":"cached"}\n',
-        encoding="utf-8",
-    )
-    manager = SessionManager(tmp_path / "workspace")
-    assert list_webui_sessions(manager)[0]["preview"] == "cached"
-
-    def fail_scan(*args, **kwargs):
-        raise AssertionError("unchanged transcript should reuse its index row")
-
-    monkeypatch.setattr(session_list_index, "_scan_transcript_row", fail_scan)
-
-    assert list_webui_sessions(manager)[0]["preview"] == "cached"
-
-
-def test_webui_session_list_does_not_cache_changed_transcript_with_old_signature(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    key = "websocket:transcript-race"
-    transcript = webui_dir / f"{SessionManager.safe_key(key)}.jsonl"
-    transcript.write_text(
-        '{"event":"user","chat_id":"transcript-race","text":"initial"}\n',
-        encoding="utf-8",
-    )
-    manager = SessionManager(tmp_path / "workspace")
-    assert list_webui_sessions(manager)[0]["preview"] == "initial"
-    transcript.write_text(
-        '{"event":"user","chat_id":"transcript-race","text":"first scan"}\n',
-        encoding="utf-8",
-    )
-
-    original_open = open
-    changed = False
-
-    class RacingReader(io.StringIO):
-        def __next__(self) -> str:
-            nonlocal changed
-            if not changed:
-                changed = True
-                transcript.write_text(
-                    '{"event":"user","chat_id":"transcript-race","text":"second scan"}\n',
-                    encoding="utf-8",
-                )
-            return super().__next__()
-
-    def racing_open(path, *args, **kwargs):
-        if Path(path) == transcript:
-            with original_open(path, *args, **kwargs) as source:
-                return RacingReader(source.read())
-        return original_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(session_list_index, "open", racing_open, raising=False)
-
-    first = list_webui_sessions(manager)
-    second = list_webui_sessions(manager)
-
-    assert first[0]["preview"] == "first scan"
-    assert second[0]["preview"] == "second scan"
-
-
-def test_webui_session_list_drops_deleted_transcript_index_row(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-    key = "websocket:deleted-transcript"
-    transcript = webui_dir / f"{SessionManager.safe_key(key)}.jsonl"
-    transcript.write_text(
-        '{"event":"user","chat_id":"deleted-transcript","text":"delete me"}\n',
-        encoding="utf-8",
-    )
-    manager = SessionManager(tmp_path / "workspace")
-    assert list_webui_sessions(manager)[0]["key"] == key
-
-    transcript.unlink()
-
-    assert list_webui_sessions(manager) == []
-
-
-def test_webui_session_list_keeps_runtime_instances_isolated(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    first_dir = tmp_path / "instance-a" / "webui"
-    second_dir = tmp_path / "instance-b" / "webui"
-    first_dir.mkdir(parents=True)
-    second_dir.mkdir(parents=True)
-    (first_dir / "websocket_first.jsonl").write_text(
-        '{"event":"user","chat_id":"first","text":"first instance"}\n',
-        encoding="utf-8",
-    )
-    (second_dir / "websocket_second.jsonl").write_text(
-        '{"event":"user","chat_id":"second","text":"second instance"}\n',
-        encoding="utf-8",
-    )
-    manager = SessionManager(tmp_path / "workspace")
-
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: first_dir)
-    assert [row["key"] for row in list_webui_sessions(manager)] == ["websocket:first"]
-
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: second_dir)
-    assert [row["key"] for row in list_webui_sessions(manager)] == ["websocket:second"]
-
-
-def test_webui_session_list_ignores_legacy_stem(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
-    legacy_path = manager.sessions_dir / "websocket_legacy.jsonl"
-    legacy_path.write_text(
-        '{"_type":"metadata","key":"websocket:legacy",'
-        '"created_at":"2025-01-01T00:00:00",'
-        '"updated_at":"2025-01-01T00:00:00","metadata":{}}\n',
-        encoding="utf-8",
-    )
-
-    assert list_webui_sessions(manager) == []
-    assert legacy_path.exists()
 
 
 def test_webui_session_list_skips_cron_internal_user_preview(tmp_path: Path) -> None:
@@ -672,94 +262,6 @@ def test_webui_session_list_skips_hidden_history_user_preview(tmp_path: Path) ->
     assert list_webui_sessions(manager)[0]["preview"] == "subagent summary"
 
 
-def test_webui_session_list_uses_webui_transcript_activity_for_sort(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-
-    manager = SessionManager(tmp_path)
-    old_session = manager.get_or_create("websocket:old-metadata")
-    old_session.created_at = datetime(2026, 6, 15, 10, 0, 0)
-    old_session.updated_at = datetime(2026, 6, 15, 10, 0, 0)
-    old_session.add_message("user", "old metadata")
-    old_session.messages[-1]["timestamp"] = "2026-06-15T10:00:00"
-    old_session.updated_at = datetime(2026, 6, 15, 10, 0, 0)
-    manager.save(old_session)
-
-    newer_metadata = manager.get_or_create("websocket:newer-metadata")
-    newer_metadata.created_at = datetime(2026, 6, 15, 11, 0, 0)
-    newer_metadata.updated_at = datetime(2026, 6, 15, 11, 0, 0)
-    newer_metadata.add_message("user", "newer metadata")
-    newer_metadata.messages[-1]["timestamp"] = "2026-06-15T11:00:00"
-    newer_metadata.updated_at = datetime(2026, 6, 15, 11, 0, 0)
-    manager.save(newer_metadata)
-
-    transcript = webui_dir / "websocket_old-metadata.jsonl"
-    transcript.write_text(
-        '{"event":"turn_end","chat_id":"old-metadata"}\n',
-        encoding="utf-8",
-    )
-    activity_ns = int(datetime(2026, 6, 15, 12, 0, 0).timestamp() * 1_000_000_000)
-    os.utime(transcript, ns=(activity_ns, activity_ns))
-
-    rows = list_webui_sessions(manager)
-
-    assert [row["key"] for row in rows] == [
-        "websocket:old-metadata",
-        "websocket:newer-metadata",
-    ]
-    assert rows[0]["updated_at"].startswith("2026-06-15T12:00:00")
-
-
-def test_webui_session_list_rescans_when_transcript_changes(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    webui_dir = tmp_path / "webui"
-    webui_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr(session_list_index, "get_webui_dir", lambda: webui_dir)
-
-    manager = SessionManager(tmp_path)
-    session = manager.get_or_create("websocket:transcript-change")
-    session.created_at = datetime(2026, 6, 15, 10, 0, 0)
-    session.updated_at = datetime(2026, 6, 15, 10, 0, 0)
-    session.add_message("user", "preview")
-    session.messages[-1]["timestamp"] = "2026-06-15T10:00:00"
-    session.updated_at = datetime(2026, 6, 15, 10, 0, 0)
-    manager.save(session)
-
-    assert list_webui_sessions(manager)[0]["preview"] == "preview"
-
-    transcript = webui_dir / "websocket_transcript-change.jsonl"
-    transcript.write_text(
-        '{"event":"turn_end","chat_id":"transcript-change"}\n',
-        encoding="utf-8",
-    )
-    activity_ns = int(datetime(2026, 6, 15, 12, 30, 0).timestamp() * 1_000_000_000)
-    os.utime(transcript, ns=(activity_ns, activity_ns))
-
-    original_scan = session_list_index._scan_session_row
-    scanned: list[str] = []
-
-    def record_scan(
-        session_manager: SessionManager,
-        path: Path,
-        webui_dir: Path,
-    ) -> dict | None:
-        scanned.append(path.name)
-        return original_scan(session_manager, path, webui_dir)
-
-    monkeypatch.setattr(session_list_index, "_scan_session_row", record_scan)
-
-    rows = list_webui_sessions(manager)
-
-    assert scanned == [manager._get_session_path("websocket:transcript-change").name]
-    assert rows[0]["updated_at"].startswith("2026-06-15T12:30:00")
-
-
 def test_webui_session_list_sorts_by_message_activity_not_maintenance_timestamp(
     tmp_path: Path,
 ) -> None:
@@ -790,14 +292,74 @@ def list_webui_sessions(manager: SessionManager) -> list[dict]:
     return session_list_index.list_webui_sessions(manager)
 
 
+async def test_sidebar_allocates_handles_then_reads_during_pending_write(tmp_path, monkeypatch):
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.webui.gateway_services import build_gateway_services
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path / "data")
+    manager = SessionManager(tmp_path / "workspace")
+    state = manager.state
+    key = "websocket:busy"
+    await state.get(key)
+    await state.update_metadata(key, {"title": "committed"})
+    gateway = build_gateway_services(
+        config=WebSocketConfig(), bus=MessageBus(), session_manager=manager,
+        static_dist_path=None, workspace_path=tmp_path / "workspace",
+        default_restrict_to_workspace=True, runtime_model_name=lambda: "test-model",
+        runtime_surface="gateway", runtime_capabilities_overrides=None,
+    )
+    token = gateway.tokens.issue_api_token(60)
+    connection = SimpleNamespace(remote_address=("127.0.0.1", 12345))
+    request = Request("/api/sessions", Headers({"Authorization": f"Bearer {token}"}))
+    started, release = threading.Event(), threading.Event()
+    original = manager._store.replace_metadata
+
+    def blocked(session_key, metadata, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return original(session_key, metadata, **kwargs)
+
+    try:
+        first = await gateway.http.dispatch(connection, request)
+        assert first.status_code == 200
+        first_row, = json.loads(first.body)["sessions"]
+        persisted = await state.read_metadata(key)
+        assert first_row["handle"]["name"] == persisted["metadata"]["session_handle"]
+        monkeypatch.setattr(manager._store, "replace_metadata", blocked)
+        write = asyncio.create_task(state.update_metadata(key, {"title": "next"}))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            response = await asyncio.wait_for(gateway.http.dispatch(connection, request), 0.5)
+            assert response.status_code == 200
+            row, = json.loads(response.body)["sessions"]
+            assert row["title"] == "committed"
+            assert row["handle"] == first_row["handle"]
+        finally:
+            release.set()
+            await write
+    finally:
+        release.set()
+        await state.aclose()
+
+
 def test_webui_session_list_fallback_time_when_missing(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
-    path = manager._get_session_path("websocket:missing-time")
+    legacy = tmp_path / "sessions"
+    legacy.mkdir()
+    path = legacy / "websocket_missing-time.jsonl"
     path.write_text(
         '{"_type": "metadata", "key": "websocket:missing-time"}\n'
         '{"_type": "message", "role": "user", "content": "hello"}\n',
         encoding="utf-8",
     )
+    manager = SessionManager(tmp_path)
 
     rows = list_webui_sessions(manager)
     assert len(rows) == 1
@@ -809,13 +371,15 @@ def test_webui_session_list_fallback_time_when_missing(tmp_path: Path) -> None:
 
 
 def test_session_manager_list_sessions_fallback_time_when_missing(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
-    path = manager._get_session_path("websocket:missing-time2")
+    legacy = tmp_path / "sessions"
+    legacy.mkdir()
+    path = legacy / "websocket_missing-time2.jsonl"
     path.write_text(
         '{"_type": "metadata", "key": "websocket:missing-time2"}\n'
         '{"_type": "message", "role": "user", "content": "hello"}\n',
         encoding="utf-8",
     )
+    manager = SessionManager(tmp_path)
 
     sessions = manager.list_sessions()
     assert len(sessions) == 1
@@ -824,3 +388,22 @@ def test_session_manager_list_sessions_fallback_time_when_missing(tmp_path: Path
     assert sessions[0]["updated_at"] is not None
     datetime.fromisoformat(sessions[0]["created_at"])
     datetime.fromisoformat(sessions[0]["updated_at"])
+
+
+def test_sidebar_uses_durable_display_summary_and_filters_private_sessions(history):
+    sessions = history.sessions
+    sessions.types.register(SessionType("internal", needs_handle=False, public_history=False))
+    for key in ("websocket:visible", "websocket:private"):
+        history.append(key, {"event": "user", "text": "  display\n preview  ", "created_at_ms": 1760000001000})
+        history.append(key, {"event": "message", "text": "answer", "created_at_ms": 1760000002000})
+    private = sessions.get_or_create("websocket:private")
+    private.metadata[SESSION_TYPE_KEY] = "internal"
+    sessions.save(private)
+    rows = list_webui_sessions(sessions)
+    assert [row["key"] for row in rows] == ["websocket:visible"]
+    assert rows[0]["preview"] == "display preview"
+    assert datetime.fromisoformat(rows[0]["updated_at"]).timestamp() == 1760000002
+    history.append("websocket:visible", {"event": "turn_end", "created_at_ms": 1760000003000})
+    assert datetime.fromisoformat(list_webui_sessions(sessions)[0]["updated_at"]).timestamp() == 1760000003
+    sessions.delete_session("websocket:visible")
+    assert list_webui_sessions(sessions) == []

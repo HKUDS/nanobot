@@ -23,7 +23,7 @@ class TestNewCommandArchival:
         from nanobot.providers.base import GenerationSettings, LLMResponse
 
         bus = MessageBus()
-        provider = MagicMock()
+        provider = MagicMock(aclose=AsyncMock())
         provider.get_default_model.return_value = "test-model"
         provider.estimate_prompt_tokens.return_value = (10_000, "test")
         provider.generation = GenerationSettings(max_tokens=100)

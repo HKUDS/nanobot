@@ -98,6 +98,47 @@ def test_feishu_config_reply_to_message_defaults_false() -> None:
     assert FeishuConfig().reply_to_message is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("channel_name", ["feishu", "feishu.assistant-test"])
+async def test_pairing_failed_delivery_retries_plain_text_without_approving(channel_name):
+    from nanobot.pairing import store
+
+    channel = _make_feishu_channel()
+    channel.name = channel_name
+    channel.config.allow_from = []
+    with patch.object(channel, "_send_message_sync", return_value=None) as send:
+        await channel._on_message(_make_feishu_event(message_id="om_first"))
+        [pending] = store.list_pending()
+        assert pending["delivery_status"] == "failed"
+        assert pending["channel"] == channel_name
+        assert send.call_args.args[:3] == ("open_id", "ou_alice", "text")
+
+        send.return_value = "om_pairing_reply"
+        await channel._on_message(_make_feishu_event(message_id="om_retry"))
+        [retried] = store.list_pending()
+        assert retried["code"] == pending["code"]
+        assert retried["delivery_status"] == "sent"
+        assert pending["code"] in json.loads(send.call_args.args[3])["text"]
+        assert not channel.is_allowed("ou_alice")
+        assert channel.bus.inbound_size == 0
+
+        assert store.approve_code(pending["code"]) == (channel_name, "ou_alice")
+        assert channel.is_allowed("ou_alice")
+        other_channel = "feishu.other-assistant"
+        assert not store.is_approved(other_channel, "ou_alice")
+
+
+@pytest.mark.asyncio
+async def test_pairing_without_client_is_reported_as_failed():
+    from nanobot.pairing import store
+
+    channel = _make_feishu_channel()
+    channel.config.allow_from = []
+    channel._client = None
+    await channel._on_message(_make_feishu_event())
+    assert store.list_pending()[0]["delivery_status"] == "failed"
+
+
 def test_feishu_config_reply_to_message_can_be_enabled() -> None:
     config = FeishuConfig(reply_to_message=True)
     assert config.reply_to_message is True

@@ -6,10 +6,12 @@ import os
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+
+from nanobot.bun import BunUnavailableError, bun_environment, ensure_bun
 
 BuildMode = Literal["auto", "prompt", "warn", "skip"]
 
@@ -43,14 +45,11 @@ class WebUIBundleStatus:
 
     source_dir: Path
     dist_dir: Path
-    index_html: Path
     source_available: bool
     dist_available: bool
     stale: bool
     reason: str
     newest_source: Path | None = None
-    newest_source_mtime_ns: int | None = None
-    dist_mtime_ns: int | None = None
 
     @property
     def needs_build(self) -> bool:
@@ -114,7 +113,6 @@ def inspect_webui_bundle(
         return WebUIBundleStatus(
             source_dir=resolved_source,
             dist_dir=resolved_dist,
-            index_html=index_html,
             source_available=False,
             dist_available=index_html.is_file(),
             stale=False,
@@ -125,7 +123,6 @@ def inspect_webui_bundle(
         return WebUIBundleStatus(
             source_dir=resolved_source,
             dist_dir=resolved_dist,
-            index_html=index_html,
             source_available=True,
             dist_available=False,
             stale=True,
@@ -148,27 +145,21 @@ def inspect_webui_bundle(
         return WebUIBundleStatus(
             source_dir=resolved_source,
             dist_dir=resolved_dist,
-            index_html=index_html,
             source_available=True,
             dist_available=True,
             stale=True,
             reason="source_newer",
             newest_source=newest_source,
-            newest_source_mtime_ns=newest_source_mtime_ns,
-            dist_mtime_ns=dist_mtime_ns,
         )
 
     return WebUIBundleStatus(
         source_dir=resolved_source,
         dist_dir=resolved_dist,
-        index_html=index_html,
         source_available=True,
         dist_available=True,
         stale=False,
         reason="fresh",
         newest_source=newest_source,
-        newest_source_mtime_ns=newest_source_mtime_ns,
-        dist_mtime_ns=dist_mtime_ns,
     )
 
 
@@ -194,21 +185,22 @@ def build_webui_bundle(
 ) -> WebUIBundleStatus:
     """Install frontend dependencies and build the WebUI bundle."""
     resolved_source = source_dir or default_webui_source_dir()
-    command_runner = runner or pick_webui_build_runner()
-    if command_runner is None:
-        raise WebUIBuildError(
-            "neither `bun` nor `npm` is available on PATH; install one or run "
-            "`cd webui && bun run build` manually"
-        )
+    try:
+        command_runner = runner or pick_webui_build_runner() or ensure_bun(output=output or print)
+    except BunUnavailableError as exc:
+        raise WebUIBuildError(str(exc)) from exc
+    using_bun = Path(command_runner).stem.lower() == "bun"
 
     _emit(output, f"Building bundled WebUI with `{command_runner}`...")
+    # Reinstall the locked tree: Bun's incremental install can retain the old
+    # hoisting layout after a source upgrade and omit new nested major versions.
     _run_frontend_command(
-        [command_runner, "install"],
+        [command_runner, "install", *(["--frozen-lockfile", "--force"] if using_bun else [])],
         cwd=resolved_source,
         subprocess_run=subprocess_run,
     )
     _run_frontend_command(
-        [command_runner, "run", "build"],
+        [command_runner, *(["--bun"] if using_bun else []), "run", "build"],
         cwd=resolved_source,
         subprocess_run=subprocess_run,
     )
@@ -281,13 +273,20 @@ def _run_frontend_command(
     subprocess_run: Callable[..., subprocess.CompletedProcess[Any]],
 ) -> None:
     try:
-        subprocess_run(command, cwd=cwd, check=True)
+        environment = (
+            bun_environment(command[0])
+            if Path(command[0]).stem.lower() == "bun" else nullcontext(os.environ.copy())
+        )
+        with environment as env:
+            subprocess_run(command, cwd=cwd, check=True, env=env, timeout=900)
     except subprocess.CalledProcessError as exc:
         raise WebUIBuildError(
             f"command failed ({exc.returncode}): {' '.join(command)}"
         ) from exc
     except OSError as exc:
         raise WebUIBuildError(f"command failed: {' '.join(command)} ({exc})") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise WebUIBuildError(f"command timed out: {' '.join(command)}") from exc
 
 
 def _display_source_path(status: WebUIBundleStatus) -> str:

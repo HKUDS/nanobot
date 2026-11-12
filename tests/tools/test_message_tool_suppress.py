@@ -138,18 +138,26 @@ class TestMessageToolSuppressLogic:
             LLMResponse(content="", tool_calls=[]),
             LLMResponse(content="", tool_calls=[]),
         ])
-        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
+
+        async def next_response(*_args, **_kwargs):
+            response = next(calls)
+            if response.content == "First answer":
+                pending_queue.put_nowait(InboundMessage(
+                    channel="feishu",
+                    sender_id="user1",
+                    chat_id="chat123",
+                    content="follow-up",
+                ))
+            return response
+
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=next_response)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         sent: list[OutboundMessage] = []
         mt = loop.tools.get("message")
         if isinstance(mt, MessageTool):
             mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
-
-        pending_queue = asyncio.Queue()
-        await pending_queue.put(
-            InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="follow-up")
-        )
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Start")
         result = await loop._process_message(msg, pending_queue=pending_queue)
@@ -196,9 +204,10 @@ class TestMessageToolSchema:
     def test_schema_discourages_current_chat_replies(self) -> None:
         tool = MessageTool()
 
-        assert "Do not use this for the normal reply in the current chat" in tool.description
-        assert "generate_image creates images in the current chat" in tool.description
+        assert "For normal replies, including scheduled reminders and reports, answer directly" in tool.description
+        assert "the final reply is delivered to the current chat automatically" in tool.description
+        assert "deliver generated images via media" in tool.description
         assert (
-            "Do not use this for a normal reply in the current chat"
-            in tool.parameters["properties"]["content"]["description"]
+            "Use artifact paths returned by generate_image"
+            in tool.parameters["properties"]["media"]["description"]
         )

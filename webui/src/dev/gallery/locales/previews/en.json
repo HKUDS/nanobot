@@ -1,0 +1,431 @@
+{
+  "rename": {
+    "title": "RenameDialog · Rename groups and projects",
+    "description": "Try the rename dialog for groups and projects. Topics are renamed inline in the chat list.",
+    "options": "The caller supplies dialogTitle, description and placeholder. title sets the initial value; onConfirm receives the trimmed title. Empty titles cannot be saved.",
+    "hint": "Saving updates the title above."
+  },
+  "delete": {
+    "title": "DeleteConfirm · Delete confirmation",
+    "description": "Compare deletion of one chat, multiple chats, or a chat with automations.",
+    "options": "count controls bulk deletion copy. automations shows linked jobs, schedules and next runs. Confirm calls onConfirm.",
+    "scenario": "Deletion scenario",
+    "open": "Open delete confirmation",
+    "confirmed": "Example deletion confirmed.",
+    "hint": "Choose a single chat, multiple chats, or a chat with automations."
+  },
+  "inlineTokens": {
+    "title": "Inline tokens · Commands and session handles",
+    "description": "Edit commands and handles to see highlighting and stable session colors.",
+    "options": "SlashCommandText takes command; InlineTokenHighlight takes color and content. SessionHandleLabel derives its color from id.",
+    "command": "Command text",
+    "run": "Run <command/> to check the status.",
+    "handle": "Session handle",
+    "continue": "Continue working in <session/>.",
+    "highlight": "Shared highlight",
+    "review": "Use <skill/> to review changes.",
+    "skill": "Skill: {{name}}"
+  },
+  "sessionLinks": {
+    "selected": "Selected session: {{name}}.",
+    "hint": "Select a session mention to see feedback."
+  },
+  "userText": {
+    "title": "UserMessageText · Message mentions",
+    "description": "Edit a message with skill, app, MCP and session mentions.",
+    "options": "text is the original message. cliApps, mcpPresets and sessionMentions resolve mentions. Skills use $name; other mentions use @name.",
+    "message": "Message text"
+  },
+  "capabilityTokens": {
+    "title": "CapabilityMentionToken · App mentions",
+    "description": "Compare app, MCP and session mentions in the composer and messages.",
+    "options": "segment specifies cli, mcp or session and its metadata. variant selects composer or message. This example uses a local brand image.",
+    "position": "Mention location"
+  },
+  "productIcons": {
+    "title": "Product icons · Icon catalog",
+    "description": "Browse product icons, change their size and select a highlight.",
+    "options": "Icons accept LucideProps such as size, strokeWidth and className. Color inherits currentColor; buttons have accessible action names.",
+    "size": "Icon size",
+    "selected": "Selected: {{name}}"
+  },
+  "startup": {
+    "title": "StartupShell · Startup placeholder",
+    "description": "Preview the quiet placeholder while the app connects.",
+    "options": "embedded renders a section; otherwise the element is main. aria-busy and loading status remain available. Placeholder styles come from the app entry."
+  },
+  "fileActions": {
+    "title": "FileActions · File menu",
+    "description": "Right-click a file to copy its full path, relative path or reference text.",
+    "options": "path is the reference text. metadata supplies the full path and optional relative path. The Gallery supplies metadata without loading a file.",
+    "scope": "File scope",
+    "hint": "Right-click for the copy menu, or focus the file and press Shift+F10."
+  },
+  "workbench": {
+    "title": "PaneWorkbench · Multiple panes",
+    "description": "Switch layouts, activate or add panes, and adjust their position and size.",
+    "options": "The caller controls panes, activePaneKey, layout and splitRatios. renderPane supplies content; callbacks update local preview state. Narrow screens show the active pane.",
+    "layout": "Pane layout",
+    "limit": "Up to four panes",
+    "notes": "{{title}} notes",
+    "active": "Active pane",
+    "activate": "Select this pane to activate it",
+    "hint": "Active: {{title}}. Drag the bottom handle to move a pane; drag its edges to resize."
+  },
+  "hostConnection": {
+    "title": "HostConnectionStatus · Connection status",
+    "description": "Compare connected, disconnected, connecting and error states.",
+    "options": "state controls the icon and text. compact hides visible text but keeps the accessible status and tooltip.",
+    "state": "Connection state",
+    "withText": "Status with text",
+    "compact": "Compact display"
+  },
+  "compatibility": {
+    "title": "HostCompatibilityDialog · Version compatibility",
+    "description": "Inspect versions, preparation notes and the upgrade guide for each compatibility result.",
+    "options": "A profile opens the dialog; compatibility supplies the result and versions. onClose closes it. This component only displays information.",
+    "state": "Version compatibility",
+    "open": "View compatibility details"
+  },
+  "composer": {
+    "title": "ThreadComposer · Message input",
+    "description": "Try sending messages, attachments, commands and quotes in busy and disabled states.",
+    "options": "A successful onSend clears the input. isStreaming controls stopping and queuing; variant selects thread or welcome-page styling. Submissions stay in this preview.",
+    "statusCommand": "Session status",
+    "statusDescription": "View the current session status",
+    "compactCommand": "Compact context",
+    "compactDescription": "Compact the current session context",
+    "helpCommand": "Command help",
+    "helpDescription": "View available commands",
+    "state": "Input state",
+    "addQuote": "Add quote",
+    "input": "Example message",
+    "placeholder": "Type a message, or / for commands",
+    "stopped": "Example task stopped.",
+    "sent": "Submitted: {{content}}{{attachments}}",
+    "attachments": " · Attachments: {{amount}}",
+    "hint": "Try sending a message, selecting attachments, switching models and opening commands."
+  },
+  "modelPreset": {
+    "title": "ModelPresetBadge · Model presets",
+    "description": "Try the model menu, keyboard navigation and setup state.",
+    "options": "modelPresets supplies presets; modelPreset and onPresetChange control selection. needsSetup shows the setup entry.",
+    "state": "Model control state",
+    "manage": "Opened model management.",
+    "settings": "Opened model settings.",
+    "hint": "Current preset: {{preset}}. Open the menu or use arrow keys to switch."
+  },
+  "usage": {
+    "title": "ComposerUsagePopover · Context usage",
+    "description": "View context, cache and generation time with warning states and a bottom sheet.",
+    "options": "context supplies capacity; rounds supplies per-round statistics. bottomSheet selects the mobile panel.",
+    "state": "Usage state",
+    "hint": "Open usage details for context, cache and generation time per round."
+  },
+  "workspace": {
+    "title": "WorkspaceControls · Working directory",
+    "description": "Choose an example project and change this preview’s access mode.",
+    "options": "scope and onChange control selection; onLoadProjects supplies example directories. The gateway resolves real paths and enforces permissions.",
+    "state": "Working directory state"
+  },
+  "navigator": {
+    "title": "PromptNavigator · Message navigation",
+    "description": "Search earlier questions and inspect the jump callback.",
+    "options": "messages supplies the full conversation; the component extracts user questions. onJumpToPrompt receives the target message ID.",
+    "hint": "Open message navigation, then search and select a question.",
+    "empty": "No question selected yet"
+  },
+  "header": {
+    "title": "ThreadHeader · Chat header",
+    "description": "Try the sidebar, theme, temporary chat and message navigation controls.",
+    "options": "title, handle, theme and temporaryChatEnabled supply display state. Callbacks pass actions to the caller.",
+    "jump": "Jumped to {{id}}",
+    "sidebar": "Toggled sidebar",
+    "hint": "Try the header actions",
+    "temporary": "Temporary chat",
+    "regular": "Regular chat"
+  },
+  "messages": {
+    "title": "ThreadMessages · Message list",
+    "description": "Explore a multi-turn conversation, message menus, branches and selected-text quotes.",
+    "options": "messages contains projected messages. onForkFromMessage receives a user-question index; onQuoteSelection receives selected answer text.",
+    "quoted": "Quoted: {{text}}",
+    "forked": "Created a branch from question {{index}}",
+    "hint": "Open a message menu, or select answer text and choose Quote."
+  },
+  "viewport": {
+    "title": "ThreadViewport · Chat scrolling",
+    "description": "Scroll a long conversation with question markers, navigation and return to bottom.",
+    "options": "The preview has a fixed height. messages drives history; ref.jumpToUserPrompt locates a question. emptyState supplies empty-chat content.",
+    "state": "Chat view",
+    "empty": "Type a message to start a chat",
+    "hint": "Scroll to explore question markers, or use navigation and return to the bottom."
+  },
+  "history": {
+    "title": "ThreadHistoryStatus · History status",
+    "description": "Show loading, the beginning of history, and errors with retry.",
+    "options": "loading indicates a request, exhausted means there are no earlier messages, error supplies error details, and onRetry retries loading.",
+    "state": "History state",
+    "error": "Example history is unavailable.",
+    "retries": "Retries: {{amount}}"
+  },
+  "recovery": {
+    "title": "RecoveryNotice · Task recovery",
+    "description": "Compare interrupted, resuming, failed and unavailable states; try Continue and Dismiss.",
+    "options": "state supplies a recovery snapshot. onContinue and onDismiss return Promises. These callbacks only update the preview.",
+    "state": "Recovery state",
+    "continued": "Continued the example task.",
+    "dismissed": "Recovery notice dismissed.",
+    "reset": "Reset preview",
+    "hint": "Select a recovery state, then try continuing or dismissing."
+  },
+  "fallback": {
+    "title": "ModelFallbackNotice · Model fallback",
+    "description": "View fallback-model and expired-authorization notices, settings and dismissal.",
+    "options": "model identifies the fallback model; reauthProviderLabel names the expired authorization. The caller supplies onOpenSettings and onDismiss.",
+    "state": "Model fallback state",
+    "showAgain": "Show again",
+    "hint": "Try the model settings link and dismiss button."
+  },
+  "compaction": {
+    "title": "ContextCompactionNotice · Context compaction",
+    "description": "Compare compaction started, succeeded, failed and cancelled states.",
+    "options": "compaction.phase selects the notice; announce controls screen-reader announcements.",
+    "phase": "Context compaction phase"
+  },
+  "streamError": {
+    "title": "StreamErrorNotice · Message errors",
+    "description": "Compare message size, directory permission, turn rejection and model request errors.",
+    "options": "error.kind selects the error message; onDismiss closes the notice.",
+    "kind": "Message error type"
+  },
+  "cluster": {
+    "title": "AgentActivityCluster · Full activity",
+    "description": "View reasoning and tool records in running, completed and failed states.",
+    "options": "messages contains reasoning and trace projections. isTurnStreaming controls activity; expanded can be caller-controlled.",
+    "state": "Activity state",
+    "error": "The file could not be read."
+  },
+  "search": {
+    "title": "WebSearchRun · Search activity",
+    "description": "View search progress and sources for web and X searches.",
+    "options": "run supplies query, target, status and sources; turnActive controls the running effect. Shared components load source-site icons.",
+    "state": "Search state",
+    "source": "Search source"
+  },
+  "responseSources": {
+    "title": "FallbackResponseSources · Response sources",
+    "description": "View the fallback presets, models and providers used by earlier replies.",
+    "options": "sources preserves the model snapshot at response time. Only sources with fallback set to true show a badge.",
+    "hint": "Select a fallback badge to see the preset, model and provider used for that response."
+  },
+  "filePreview": {
+    "title": "FilePreviewPanelView · File content",
+    "description": "Compare text, images, truncation, loading and errors. Select an image to zoom.",
+    "options": "state supplies a display snapshot; path determines the file type and name. Image open and error callbacks update the preview.",
+    "state": "File preview state"
+  },
+  "session": {
+    "title": "SessionInfoPopoverView · Session automations",
+    "description": "View, edit, disable and delete jobs, with loading and error states.",
+    "options": "The caller supplies jobs, loading, loadFailed and now. onAction and onEdit return updated jobs; the view coordinates dialogs, focus and feedback.",
+    "state": "Session automation state",
+    "saveError": "Example save failed. Try again.",
+    "providerError": "The example provider is unavailable.",
+    "saved": "Automation saved.",
+    "openedChat": "Opened the example chat.",
+    "openedCalendar": "Opened the automation calendar.",
+    "actionError": "Example action failed. Try again.",
+    "delete": "Deleted: {{name}}",
+    "run": "Run requested: {{name}}",
+    "enable": "Enabled: {{name}}",
+    "disable": "Disabled: {{name}}",
+    "hint": "Open session details to view, toggle, edit and delete automations."
+  },
+  "subagent": {
+    "title": "SubagentThreadView · Subagent messages",
+    "description": "View subagent messages, reasoning, loading and failure; try the retry callback.",
+    "options": "The runtime projects messages. loading and error use the shared history status; isStreaming and activeTurnId identify activity. The view does not fetch history.",
+    "state": "Subagent chat state"
+  },
+  "pairRoute": {
+    "title": "PairRouteSettingsView · Pairing route",
+    "description": "Select and locally save routes, with saved, saving, error and refresh-failure states.",
+    "options": "The caller manages route and original; routes supplies SSH routes. Save success and directory refresh failure are shown separately. Gallery and settings share this view.",
+    "state": "Route state"
+  },
+  "quickPair": {
+    "title": "QuickPairSetupView · Quick pairing",
+    "description": "Try invitation copying, receipt entry, access confirmation, existing hosts and retries.",
+    "options": "state supplies pairing and display state; callbacks perform actions. routeSettings composes route settings. Gallery uses fixtures and local callbacks; QuickPairSetup manages real pairing.",
+    "state": "Pairing stage",
+    "open": "Open quick pairing",
+    "connected": "Selected connection: {{name}}.",
+    "ssh": "Selected SSH connection.",
+    "hint": "Example invitations and receipts are for display only. Confirmation updates local feedback."
+  },
+  "sshHost": {
+    "title": "SSHHostPickerView · SSH address",
+    "description": "Filter SSH aliases, select with arrow keys, and compare import, loading and error states.",
+    "options": "discovery supplies hosts from the current config. The caller controls value, busy, error and callbacks. customConfig retains custom-config alias discovery; inputRef restores focus after selection.",
+    "state": "SSH address state",
+    "refreshed": "Example addresses refreshed.",
+    "entered": "Entered: {{value}}",
+    "hint": "Type to filter addresses; use arrow keys to select an SSH alias."
+  },
+  "connectionBadge": {
+    "title": "ConnectionBadge · Connection indicator",
+    "description": "Compare connection colors, animations and accessible status text.",
+    "options": "The caller supplies status. The page container owns the connection subscription.",
+    "state": "Connection state",
+    "idle": "Idle",
+    "connecting": "Connecting",
+    "open": "Connected",
+    "reconnecting": "Reconnecting",
+    "closed": "Disconnected",
+    "error": "Connection error"
+  },
+  "hostPicker": {
+    "title": "HostSwitcherView · Host menu",
+    "description": "Choose local or example hosts; compare pending, offline and collapsed states.",
+    "options": "picker supplies host data and callbacks; status is the current connection state. Production HostSwitcher subscribes to the client.",
+    "state": "Host menu state",
+    "offline": "The example host is disconnected.",
+    "manage": "Opened connection management.",
+    "cancelled": "Example host switch cancelled.",
+    "selected": "Preview host: {{name}}"
+  },
+  "chats": {
+    "title": "ChatList · Chat list",
+    "description": "Select chats and try pinning, archiving and deleting from their menus.",
+    "options": "The caller supplies sessions, activeKey and pinned/archived keys. Action callbacks update the example list.",
+    "state": "Chat list state",
+    "renamed": "Renamed: {{name}}",
+    "selected": "Selected chat: {{name}}",
+    "none": "None"
+  },
+  "sidebarResize": {
+    "title": "SidebarResizeHandle · Sidebar size",
+    "description": "Resize, collapse and expand the sidebar with the mouse or keyboard.",
+    "options": "width and open are controlled. onResize updates size and expansion; onDraggingChange reports dragging.",
+    "content": "Sidebar content",
+    "hint": "Drag the divider, or focus it and use arrow keys, Home, End and Enter.",
+    "collapsed": "Collapsed",
+    "dragging": "Dragging"
+  },
+  "language": {
+    "title": "LanguageSwitcher · Interface language",
+    "description": "Switch the language of the Gallery and production components.",
+    "options": "Uses the app’s i18n and browser language preference, without a gateway. The top language selector is the same component."
+  },
+  "channelMarks": {
+    "title": "Channel marks · Channel identity",
+    "description": "View avatar fallback text, workspace icons and the WebSocket mark.",
+    "options": "LinearAvatar takes name, url and workspace. Without a valid image, it shows fallback text or an icon.",
+    "name": "Avatar name",
+    "member": "Member avatar",
+    "workspace": "Workspace icon"
+  },
+  "secret": {
+    "title": "LinearSecretField · Secret editing",
+    "description": "Edit, reveal, save and replace a secret; check draft retention after a failed save.",
+    "options": "configured indicates saved state; onSave persists the secret. Gallery callbacks only update local state.",
+    "state": "Secret state",
+    "error": "Example save failed.",
+    "hint": "Enter example text and save, or select the error state to check draft retention."
+  },
+  "channelHelp": {
+    "title": "LinearHelpContent · Channel help",
+    "description": "View channel help inside the real dropdown menu.",
+    "options": "Content uses existing channel translations; the caller supplies the menu container.",
+    "open": "Open channel help"
+  },
+  "channel": {
+    "title": "{{channel}} · Channel setup",
+    "description": "Explore the real channel setup form and states.",
+    "options": "Uses channel registrations, Python setup-contract snapshots and production ChannelSetupSurfaceView. Inputs, credential visibility, presets, checks and toggles affect only this preview.",
+    "state": "Channel setup state",
+    "credentialsError": "Example credentials were rejected. Update the preview values and try again.",
+    "validation": "Preview configuration"
+  },
+  "channelConnect": {
+    "state": "{{channel}} connection state",
+    "error": "Authorization is temporarily unavailable. Try again."
+  },
+  "qqConnect": {
+    "title": "QQConnectFlowView · QQ QR connection",
+    "description": "Explore QQ QR login, retries and the App Secret replacement warning.",
+    "options": "The view receives connection state and callbacks. Preview actions stay local; the runtime entry creates sessions and polls the QQ portal."
+  },
+  "feishuConnect": {
+    "title": "FeishuConnectFlowView · Feishu QR authorization",
+    "description": "Try the real Feishu QR flow with waiting, success, expiry, cancellation and errors.",
+    "options": "connect, busy and error supply display state; QR codes are generated locally. The feature owns start, cancel and polling; preview callbacks change only this example."
+  },
+  "feishuAssistants": {
+    "title": "FeishuAssistantsPanelView · Feishu assistants",
+    "description": "Explore assistant cards, runtime and authorization states, toggles, advanced settings and adding an assistant.",
+    "options": "feature and instances supply assistant snapshots. The view owns drafts and save feedback; onToggleInstance, onSaveInstance and renderConnectFlow connect runtime actions.",
+    "state": "Assistant runtime state",
+    "error": "The assistant stopped. Check its credentials before restarting.",
+    "on": "{{name}}: on",
+    "off": "{{name}}: off",
+    "saved": "{{name}}: preview fields saved: {{amount}}"
+  },
+  "whatsappConnect": {
+    "title": "WhatsAppConnectFlowView · WhatsApp device linking",
+    "description": "Compare automatic linking, success, expiry and errors in the minimal QR layout; try linking another account.",
+    "options": "The view preserves automatic-start and minimal-layout display rules. The caller controls state and retries. The real connection entry owns automatic start, forced retries and polling."
+  },
+  "linearPanel": {
+    "title": "LinearPanelView · Linear setup",
+    "description": "Explore app details, secrets, advanced settings, workspaces, member access and browser authorization.",
+    "options": "state and workspaces supply snapshots; callbacks connect workspace, save and MCP actions. Three slots compose production member, authorization and reset views.",
+    "state": "Linear setup state",
+    "runtimeError": "The Linear webhook could not be started.",
+    "saveError": "Settings could not be saved. Your draft was kept.",
+    "inspectionError": "Connected workspaces could not be inspected.",
+    "refreshed": "Example workspaces refreshed.",
+    "removed": "Removed example workspace: {{name}}",
+    "mcp": "Selected Linear MCP setup."
+  },
+  "linearMembers": {
+    "title": "LinearMemberAccessView · Member access",
+    "description": "Search members, change access and compare loading, empty, saving and unconfirmed states.",
+    "options": "snapshot contains confirmed member state. onLoad and onSetAllowed belong to the channel entry; the gateway still validates permissions.",
+    "state": "Member state",
+    "loadError": "The member directory is unavailable.",
+    "saveError": "Access was not confirmed."
+  },
+  "linearConnect": {
+    "title": "LinearConnectFlowView · Linear authorization",
+    "description": "Try browser authorization and waiting notices with start, cancel, success and failure stages.",
+    "options": "Reuses ChannelQrConnectFlowView. Linear supplies browser authorization display, labels and focus handling; the runtime entry owns session creation and polling.",
+    "state": "Authorization stage",
+    "error": "Authorization could not be completed.",
+    "hint": "The authorization link and workspace are examples. Start and Cancel only change the preview stage."
+  },
+  "linearReset": {
+    "title": "LinearResetConnectionView · Reset connection",
+    "description": "Review what is cleared or kept, busy state and retries after a partial reset.",
+    "options": "onReset performs the full revocation and cleanup transaction. The view manages confirmation, errors, closing restrictions and focus restoration.",
+    "state": "Reset result",
+    "error": "The channel could not be stopped. App settings were kept.",
+    "completed": "Preview workspace and app settings cleared."
+  },
+  "weixinPanel": {
+    "title": "WeixinPanelView · Weixin settings",
+    "description": "Explore Weixin settings, advanced options, save feedback and expired-login recovery.",
+    "options": "Fields come from the channel setup contract. The view owns expansion and secret visibility; the runtime entry owns autosave, draft merging and login recovery.",
+    "state": "Weixin panel state"
+  },
+  "weixinConnect": {
+    "title": "WeixinConnectFlowView · Weixin QR and verification",
+    "description": "Compare QR scanning, verification codes, success, expiry, cancellation and connection errors.",
+    "options": "The view takes connection snapshots and callbacks, retaining the verification draft. QR codes are generated in the browser. The real entry owns authorization, polling pauses, refresh and cancellation.",
+    "state": "Weixin connection state",
+    "error": "Connection interrupted. Try again.",
+    "refreshed": "A new preview QR code is displayed.",
+    "hint": "Enter 123456 to complete the verification preview. Other input keeps your draft and shows an error."
+  }
+}

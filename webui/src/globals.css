@@ -2,6 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Notices and the input share one width, including the compact screen inset. */
+.thread-composer-stack {
+  --composer-content-width: 49.5rem;
+}
+.thread-composer-stack.is-hero {
+  --composer-content-width: 58rem;
+}
+.subagent-task-dock {
+  --subagent-handle-inset: var(--radius-panel);
+  width: calc(100% - 0.5rem - 2 * var(--subagent-handle-inset));
+  max-width: calc(var(--composer-content-width, 49.5rem) - 2 * var(--subagent-handle-inset));
+}
+.thread-composer-stack.is-hero .subagent-task-dock {
+  --subagent-handle-inset: var(--radius-prominent);
+  width: calc(100% - 2 * var(--subagent-handle-inset));
+}
+.subagent-task-dock + .thread-composer-form {
+  padding-top: 0;
+}
+.thread-composer-notice {
+  width: calc(100% - 0.5rem);
+  max-width: var(--composer-content-width, 49.5rem);
+  margin-inline: auto;
+}
+.thread-composer-stack.is-hero .thread-composer-notice {
+  width: 100%;
+}
+@media (min-width: 640px) {
+  .thread-composer-notice {
+    width: 100%;
+  }
+  .subagent-task-dock {
+    width: calc(100% - 2 * var(--subagent-handle-inset));
+  }
+}
+
 @supports (content-visibility: auto) {
   .apps-catalog-row {
     content-visibility: auto;
@@ -9,10 +45,34 @@
   }
 }
 
+/* Only gradient owners need interpolable colors; palette tokens remain unchanged. */
+@property --thread-history-background {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-spot {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-start {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --host-glass-end {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
 /* Design tokens — HSL form, sourced from shadcn/ui's "neutral" palette. */
 @layer base {
   :root {
     color-scheme: light;
+    --content-link: #0369a1;
+    --content-link-hover: #075985;
     --background: 0 0% 100%;
     --foreground: 240 3% 12%;
     --card: 0 0% 100%;
@@ -24,22 +84,30 @@
     --secondary: 0 0% 96.1%;
     --secondary-foreground: 0 0% 9%;
     --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
+    --muted-foreground: 240 4% 40%;
     --accent: 0 0% 96.1%;
     --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 73.7% 41.8%;
     --destructive-foreground: 0 0% 98%;
     --border: 40 8% 90.5%;
     --input: 40 8% 90.5%;
     --ring: 0 0% 3.9%;
-    --inline-token-highlight: #ef8e30;
+    --inline-token-highlight: #ad450b;
+    --inline-reference-highlight: rgb(244 169 73);
+    --code-comment: #62626b;
+    --code-string: #166534;
+    --code-keyword: #7e22ce;
+    --code-function: #1d4ed8;
+    --code-property: #854d0e;
+    --diff-added: rgb(16 185 129 / 0.09);
+    --diff-added-foreground: #047857;
+    --diff-deleted: rgb(244 63 94 / 0.09);
+    --diff-deleted-foreground: #be123c;
     --usage-token: 29 86% 56%;
     --session-handle-lightness: 0.5;
     --session-handle-chroma: 0.12;
     --temporary-control-active: #ef8e30;
-    --temporary-accent: 24 95% 53%;
     --temporary-foreground: 17 88% 32%;
-    --temporary-border: 17 88% 40%;
     --radius: 0.4375rem;
     /* Shared shape scale: marks, compact content, controls, and progressively larger surfaces. */
     --radius-mark: 0.25rem;
@@ -47,9 +115,10 @@
     --radius-control: 0.75rem;
     --radius-floating: 1.125rem;
     --radius-panel: 1.375rem;
-    --radius-modal: 1.375rem;
+    --radius-modal: 2rem;
     --radius-prominent: 1.75rem;
     --radius-pill: 9999px;
+    --corner-shape: superellipse(1.5);
     --content-column-width: 49.5rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
@@ -66,8 +135,39 @@
     --scrollbar-thumb-hover: hsl(var(--muted-foreground) / 0.42);
   }
 
+  :root, .reading-typography {
+    --reading-size-wide: 18px;
+    --reading-size-narrow: 16px;
+    --text-reading-size: var(--reading-size-wide);
+    --text-code-size: calc(var(--text-reading-size) * 0.875);
+    --text-code-dense-size: calc(var(--text-reading-size) * 0.75);
+  }
+
+  :root[data-reading-text-size="small"], .reading-typography[data-reading-text-size="small"] {
+    --reading-size-wide: 16px;
+    --reading-size-narrow: 15px;
+  }
+
+  :root[data-reading-text-size="large"], .reading-typography[data-reading-text-size="large"] {
+    --reading-size-wide: 20px;
+    --reading-size-narrow: 18px;
+  }
+
+  :root[data-reading-text-size="custom"], .reading-typography[data-reading-text-size="custom"] {
+    --reading-size-wide: var(--custom-reading-size, 18px);
+    --reading-size-narrow: var(--custom-reading-size, 18px);
+  }
+
+  @media (max-width: 639px) {
+    :root, .reading-typography {
+      --text-reading-size: var(--reading-size-narrow);
+    }
+  }
+
   .dark {
     color-scheme: dark;
+    --content-link: #bae6fd;
+    --content-link-hover: #e0f2fe;
     --background: 0 0% 19%;
     --foreground: 240 4% 96%;
     --card: 0 0% 22%;
@@ -79,21 +179,30 @@
     --secondary: var(--card);
     --secondary-foreground: 0 0% 98%;
     --muted: var(--card);
-    --muted-foreground: 0 0% 65%;
+    --muted-foreground: 0 0% 72%;
     --accent: 0 0% 25%;
     --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
+    /* Destructive text needs contrast on dark surfaces; filled controls use a dark label. */
+    --destructive: 0 93.5% 81.8%;
+    --destructive-foreground: 0 0% 9%;
     --border: 0 0% 28%;
     --input: var(--border);
     --ring: 0 0% 83.1%;
     --inline-token-highlight: #ef8e30;
+    --inline-reference-highlight: rgb(244 169 73);
+    --code-comment: #c8c8d0;
+    --code-string: #b5d99c;
+    --code-keyword: #e3a5f7;
+    --code-function: #93c5fd;
+    --code-property: #f6c177;
+    --diff-added: rgb(110 231 183 / 0.11);
+    --diff-added-foreground: #6ee7b7;
+    --diff-deleted: rgb(253 164 175 / 0.11);
+    --diff-deleted-foreground: #fda4af;
     --session-handle-lightness: 0.75;
     --session-handle-chroma: 0.11;
     --temporary-control-active: #ef8e30;
-    --temporary-accent: 24 95% 53%;
     --temporary-foreground: 32 98% 73%;
-    --temporary-border: 27 96% 61%;
     --sidebar: var(--card);
     --sidebar-foreground: 0 0% 98%;
     --sidebar-content: 240 3% 84%;
@@ -115,6 +224,12 @@
     @apply border-border;
   }
 
+  *,
+  ::before,
+  ::after {
+    corner-shape: var(--corner-shape);
+  }
+
   html,
   body,
   #root {
@@ -124,6 +239,57 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     overflow: hidden;
+    text-autospace: normal;
+  }
+
+  /* Keep source text and editable values visually literal. */
+  pre,
+  code,
+  kbd,
+  samp,
+  .font-mono,
+  input,
+  textarea,
+  [contenteditable="true"] {
+    text-autospace: no-autospace;
+  }
+
+  #root.visual-viewport {
+    position: fixed;
+    top: var(--app-viewport-top);
+    left: 0;
+    width: 100%;
+    height: var(--app-viewport-height);
+  }
+
+  /* A landscape keyboard can leave less room than the composer needs. Keep
+     navigation reachable and scroll the composer instead of overlapping it. */
+  #root.visual-viewport .workbench-body {
+    min-height: 2.75rem;
+  }
+
+  #root.short-visual-viewport .workbench-composer-footer {
+    max-height: max(0px, calc(var(--app-viewport-height) - 2.75rem));
+    overflow-y: auto;
+  }
+
+  /* Body portals share the viewport owner's short-frame state. A landscape
+     keyboard needs input and results beside each other, not stacked. */
+  @media (min-width: 640px) {
+    body:has(> #root.short-visual-viewport) .session-search-dialog {
+      flex-direction: row;
+    }
+
+    body:has(> #root.short-visual-viewport) .session-search-input {
+      width: 40%;
+      height: auto;
+      border-bottom-width: 0;
+      border-right-width: 1px;
+    }
+
+    body:has(> #root.short-visual-viewport) .session-search-label {
+      @apply sr-only;
+    }
   }
 
   * {
@@ -268,6 +434,12 @@
     backdrop-filter: saturate(185%) blur(34px);
   }
 
+  .host-window-shell {
+    transition: --host-glass-spot var(--theme-paint-duration, 0s) linear,
+      --host-glass-start var(--theme-paint-duration, 0s) linear,
+      --host-glass-end var(--theme-paint-duration, 0s) linear;
+  }
+
   .host-sidebar-glass {
     background: hsl(var(--sidebar) / 0.94);
     -webkit-backdrop-filter: saturate(145%) blur(18px);
@@ -319,7 +491,36 @@
     --tw-prose-headings: hsl(var(--foreground));
     --tw-prose-bold: hsl(var(--foreground));
     --tw-prose-lead: hsl(var(--foreground));
-    line-height: var(--cjk-line-height);
+    transition: var(--theme-ink-transition, color 0s);
+    @apply text-reading;
+  }
+
+  .markdown-content :is(h1, h2, h3, h4, h5, h6) {
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  .markdown-content h1 { font-size: 1.5em; }
+  .markdown-content h2 { font-size: 1.25em; }
+  .markdown-content h3 { font-size: 1.125em; }
+  .markdown-content :is(h4, h5, h6) { font-size: 1em; }
+  .markdown-content strong { font-weight: 600; }
+  .markdown-content :is(th, td) {
+    font-size: inherit;
+    line-height: inherit;
+  }
+  .markdown-content blockquote {
+    font-size: 1em;
+    line-height: inherit;
+  }
+  .markdown-content summary {
+    font-size: 1em;
+    font-weight: 600;
+    line-height: inherit;
+  }
+
+  .markdown-inline-code {
+    font-size: 0.875em;
+    font-weight: 400;
   }
 
   .markdown-content .contains-task-list {
@@ -330,19 +531,26 @@
     @apply list-none pl-0;
   }
 
-  /* CJK-friendly line-height: prose paragraphs default to 1.625 which is
-     tight for Chinese/Japanese/Korean characters. Bump to 1.8 for better
-     readability when the browser detects a CJK primary font. */
+  /* Set the default before locale overrides: html also matches :lang(). */
+  :root {
+    --cjk-line-height: 1.625;
+  }
+
   :lang(zh),
-  :lang(zh-CN),
-  :lang(zh-TW),
-  :lang(zh-HK),
   :lang(ja),
   :lang(ko) {
     --cjk-line-height: 1.8;
   }
-  :root {
-    --cjk-line-height: 1.625;
+
+  /* Balance short headings; preserve explicit line breaks in chat prose. */
+  .markdown-content :is(h1, h2, h3, h4, h5, h6),
+  .settings-section-title {
+    text-wrap: balance;
+  }
+
+  .activity-current,
+  .streaming-text-sheen {
+    --activity-animation: 2.8s ease-in-out infinite;
   }
 
   /* L→R sheen clipped to live activity labels. The highlight lives inside
@@ -363,7 +571,7 @@
     color: inherit;
   }
   .streaming-text-sheen::after {
-    content: attr(data-sheen-text);
+    content: attr(data-sheen-text) / "";
     position: absolute;
     inset: 0;
     display: block;
@@ -371,6 +579,7 @@
     white-space: nowrap;
     text-overflow: ellipsis;
     pointer-events: none;
+    padding-right: inherit;
     color: transparent;
     background: linear-gradient(
       90deg,
@@ -386,7 +595,7 @@
     background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    animation: streaming-text-sheen-ltr 2.8s ease-in-out infinite;
+    animation: streaming-text-sheen-ltr var(--activity-animation);
   }
   .dark .streaming-text-sheen::after {
     background-image: linear-gradient(
@@ -403,9 +612,6 @@
       animation: none;
       content: "";
     }
-    .streaming-text-fallback::after {
-      animation: none;
-    }
   }
 
   /**
@@ -416,6 +622,7 @@
    */
   .thread-layout {
     --thread-composer-fade-height: 2.25rem;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(min-content, 1fr) auto 0fr;
     transition: grid-template-rows 220ms ease-out;
   }
@@ -434,25 +641,97 @@
   /**
    * Keep the transcript and composer visually continuous. The scrollport owns
    * the fade because overflow clips its contents before an adjacent overlay
-   * can soften the edge. The matching in-flow gap keeps the last line fully
-   * visible once the user reaches the bottom.
+   * can soften the edge. On phones, the same mask keeps a clear top edge even
+   * after the initial inset scrolls away. The matching bottom in-flow gap keeps
+   * the last line fully visible once the user reaches the bottom.
    */
   .thread-message-viewport {
+    --thread-top-clearance: 0px;
+    --thread-top-fade-height: 0px;
     -webkit-mask-image: linear-gradient(
       to bottom,
-      #000 0,
+      transparent 0,
+      transparent var(--thread-top-clearance),
+      #000 var(--thread-top-fade-height),
       #000 calc(100% - var(--thread-composer-fade-height)),
       transparent 100%
     );
     mask-image: linear-gradient(
       to bottom,
-      #000 0,
+      transparent 0,
+      transparent var(--thread-top-clearance),
+      #000 var(--thread-top-fade-height),
       #000 calc(100% - var(--thread-composer-fade-height)),
       transparent 100%
     );
   }
+  @media (max-width: 639px) {
+    .thread-message-viewport {
+      --thread-top-clearance: 6px;
+      --thread-top-fade-height: 22px;
+    }
+  }
   .thread-message-end-gap {
     height: var(--thread-composer-fade-height);
+  }
+
+  .thread-history-status {
+    --thread-history-background: hsl(var(--background));
+    height: 48px;
+    background: linear-gradient(var(--thread-history-background) 35%, transparent);
+    color: hsl(var(--muted-foreground));
+    transition: --thread-history-background var(--theme-paint-duration, 0s) linear,
+      var(--theme-ink-transition, color 0s);
+  }
+  .thread-history-reveal {
+    transform: translateY(calc(var(--history-pull, 0px) - 100%));
+  }
+  .thread-history-reveal:focus-within {
+    transform: none;
+  }
+  .thread-history-control {
+    display: flex;
+    width: 120px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+  /* loading.dev Blocks, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+  .thread-history-blocks {
+    color: hsl(var(--muted-foreground));
+    display: grid;
+    width: 20px;
+    height: 20px;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 2px;
+  }
+  .thread-history-blocks > span {
+    background: currentColor;
+    border-radius: 1.25px;
+    animation: thread-history-blocks 1300ms ease-in-out infinite;
+  }
+  .thread-history-status[data-state="error"] .thread-history-blocks {
+    width: 24px;
+    height: 24px;
+    color: hsl(var(--destructive));
+  }
+  .thread-history-status:not([data-state="loading"]):not([data-state="error"]) .thread-history-blocks > span {
+    animation: none;
+    transform: none;
+  }
+  @keyframes thread-history-blocks {
+    0%, 70%, 100% { transform: scale(1); }
+    35% { transform: scale(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .thread-history-feedback {
+      transform: none;
+    }
+    .thread-history-blocks > span {
+      animation: none;
+      transform: scale(0.8);
+    }
   }
   .thread-composer-dock {
     background: hsl(var(--background));
@@ -475,27 +754,12 @@
       transform: translateY(0) scale(1);
     }
   }
-  @keyframes composer-status-strip-exit {
-    0% {
-      max-height: var(--composer-strip-max-height, 46px);
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-    100% {
-      max-height: 0;
-      opacity: 0;
-      transform: translateY(8px) scale(0.99);
-    }
-  }
   .composer-status-strip {
     transform-origin: bottom center;
     will-change: max-height, opacity, transform;
   }
   .composer-status-strip[data-state="enter"] {
     animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-  .composer-status-strip[data-state="exit"] {
-    animation: composer-status-strip-exit 180ms ease-in both;
   }
   .composer-status-drawer {
     --composer-status-drawer-duration: 220ms;
@@ -569,19 +833,6 @@
       transform: translateY(0);
     }
   }
-  @keyframes queued-prompt-row-enter {
-    0% {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    100% {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  .queued-prompt-row {
-    animation: queued-prompt-row-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
   @media (prefers-reduced-motion: reduce) {
     .composer-status-strip {
       will-change: auto;
@@ -599,63 +850,51 @@
     .thread-layout {
       transition-duration: 0.01ms;
     }
-    .queued-prompt-row {
-      animation: none;
-    }
   }
 
   .thread-workspace {
     container: thread-workspace / inline-size;
   }
+  .thread-preview-layout {
+    container: thread-preview-layout / inline-size;
+  }
+  /* A split needs 420px for the conversation plus 360px for the preview.
+     Narrow workbench panes use the same contained overlay as a phone. */
+  @container thread-preview-layout (min-width: 780px) {
+    .file-preview-pane {
+      position: relative;
+      z-index: auto;
+      width: var(--file-preview-slot-width);
+      min-width: 0;
+      flex-shrink: 0;
+    }
+    .file-preview-content {
+      width: var(--file-preview-width);
+      padding-bottom: 0;
+    }
+    .file-preview-resize {
+      display: flex;
+    }
+  }
+  @container thread-preview-layout (width < 780px) {
+    /* Covered conversation controls must not remain in the keyboard/AT order. */
+    .thread-preview-layout[data-preview-open] > .thread-conversation {
+      visibility: hidden;
+    }
+  }
+  /* Split content leaves no margin for floating conversation controls. */
+  .thread-preview-layout[data-preview-open] > .thread-conversation {
+    --thread-header-position: relative;
+  }
   /* Keep room for the 49.5rem message column and controls in the side margin. */
   @container thread-workspace (max-width: 72rem) {
     .thread-workspace > * {
       --thread-header-position: relative;
-      --thread-prompt-inset: 1rem;
     }
   }
 
   .workbench-pane {
     transform-origin: top left;
-  }
-
-  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
-  @keyframes goal-shell-glow-breathe {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
-        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
-    }
-    50% {
-      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
-        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
-    }
-  }
-  .goal-shell-glow {
-    animation: goal-shell-glow-breathe 4.8s ease-in-out infinite;
-  }
-  @keyframes goal-shell-glow-breathe-dark {
-    0%,
-    100% {
-      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
-        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
-    }
-    50% {
-      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
-        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
-    }
-  }
-  .dark .goal-shell-glow {
-    animation-name: goal-shell-glow-breathe-dark;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .goal-shell-glow {
-      animation: none;
-      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
-    }
-    .dark .goal-shell-glow {
-      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
-    }
   }
 
   /* Subtle scrollbar that doesn't fight the dark background. */
@@ -717,10 +956,9 @@
     display: inline;
   }
 
-  /* Wide markdown tables scroll horizontally within the conversation column.
-     Tables are wrapped in an overflow-x:auto <div> by the markdown renderer's
-     custom `table` component (see MarkdownTextRenderer); min-w-max on the
-     <table> keeps natural column widths so it scrolls instead of shrinking. */
+  /* Markdown tables wrap cell text to fit the conversation column. The
+     renderer's overflow-x:auto wrapper remains a fallback for content that
+     cannot shrink. */
 
   /* Clip any residual horizontal bleed at the thread column edge. Vertical
      scrolling and internal code-block scroll are unaffected. */
@@ -733,16 +971,19 @@
     container-type: inline-size;
   }
 
-  @supports (content-visibility: auto) {
-    .thread-render-unit {
-      content-visibility: auto;
-      contain-intrinsic-size: auto 12rem;
-    }
-  }
-
   .thread-prompt-rail {
     display: none;
     left: 1.75rem;
+  }
+
+  .thread-prompt-rail-scroll {
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+  }
+
+  .thread-prompt-rail-scroll::-webkit-scrollbar {
+    display: none;
   }
 
   @media (min-width: 768px) {
@@ -758,28 +999,224 @@
   }
 }
 
-.message-actions > button:first-child {
-  margin-inline-start: -0.5rem;
+.thread-message-row,
+.message-block-menu-trigger,
+[data-message-block-menu] {
+  --message-block-control-size: 1.75rem;
+  --message-block-action-width: 1.75rem;
+  --message-block-trigger-offset: 2rem;
+}
+
+.thread-message-row {
+  padding-inline-start: max(
+    calc(var(--message-block-trigger-offset) + 0.75rem),
+    calc((100% - var(--content-column-width)) / 2)
+  );
+  padding-inline-end: max(0.75rem, calc((100% - var(--content-column-width)) / 2));
+}
+
+.message-block-menu-trigger,
+.message-block-hover-time {
+  pointer-events: none;
+  opacity: 0;
+}
+
+[data-user-text-bubble] > .message-block-menu-trigger {
+  top: calc((1rem + var(--text-reading-size) * var(--cjk-line-height) - var(--message-block-control-size)) / 2);
+}
+
+[data-user-text-bubble] > .message-block-hover-time {
+  top: calc((1rem + var(--text-reading-size) * var(--cjk-line-height) + var(--message-block-control-size)) / 2);
+}
+
+[data-context-block-active] .message-block-menu-trigger,
+[data-message-context-menu-open] .message-block-menu-trigger,
+.message-block-menu-trigger:focus-visible,
+[data-context-block-active] .message-block-hover-time,
+[data-message-context-menu-open] .message-block-hover-time,
+.message-block-hover-time:focus-visible {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+[data-block-context-rail] {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+[data-context-block-active] [data-block-context-rail],
+[data-block-context-rail][data-block-context-expanded] {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message-block-menu-trigger {
+    transition: none;
+  }
+
+  [data-block-context-rail] {
+    transition: none;
+  }
+}
+
+.workspace-picker-favorite {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.workspace-picker-row:hover .workspace-picker-favorite,
+.workspace-picker-row:focus-within .workspace-picker-favorite,
+.workspace-picker-row[data-keyboard-active] .workspace-picker-favorite {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .workspace-picker-favorite {
+    pointer-events: auto;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-picker-favorite {
+    transition: none;
+  }
+}
+
+/* loading.dev Ring, Copyright (c) 2026 Jakub Krehel (MIT); THIRD_PARTY_NOTICES.md. */
+.loading-ring-arc {
+  transform-origin: center;
+  animation: loading-ring-spin 800ms linear infinite;
+}
+@keyframes loading-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+.composer-primary-action {
+  transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out;
+}
+.composer-action-icons {
+  transition: transform 120ms ease-out;
+}
+.composer-primary-action:active:not(:disabled) .composer-action-icons {
+  transform: scale(0.94);
+}
+.composer-action-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 140ms ease-out, transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.composer-action-glyph[data-active] {
+  opacity: 1;
+  transform: scale(1);
+}
+.composer-action-icons[data-state="stop"] [data-action-icon="send"] {
+  transform: translateY(-3px) scale(0.8);
+}
+.composer-action-glyph:not([data-active]) .loading-ring-arc {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .loading-ring-arc {
+    animation: none;
+  }
+  .composer-primary-action,
+  .composer-action-icons,
+  .composer-primary-action:active:not(:disabled) .composer-action-icons {
+    transition: none;
+    transform: none;
+  }
+  .composer-action-icons[data-state] .composer-action-glyph {
+    transform: none;
+    transition: opacity 80ms linear;
+  }
 }
 
 @media (pointer: coarse) {
-  .message-actions > button:first-child {
-    margin-inline-start: -0.875rem;
+  /* Readable form text avoids Safari's focus zoom without disabling the user's
+     pinch zoom. Keep this after utilities so compact desktop overrides cannot
+     shrink shared form fields on touch devices. Larger chat/search text stays
+     on its own typography; this is not a blanket rule for every input. */
+  .touch-text-input {
+    font-size: max(16px, 1rem);
+  }
+
+  .thread-message-row,
+  .message-block-menu-trigger,
+  [data-message-block-menu] {
+    --message-block-control-size: 2.75rem;
+    --message-block-action-width: 2rem;
+    --message-block-trigger-offset: 3rem;
   }
 
   .touch-target {
     min-width: 2.75rem;
     min-height: 2.75rem;
   }
+
+  .touch-target.preview-tab-close {
+    opacity: 1;
+  }
+
+  /* Touch users cannot hover a sidebar row to discover its actions. */
+  .sidebar-action-trigger {
+    opacity: 1;
+  }
 }
 
-/*
- * Composer controls adapt to their actual container, not just the viewport.
- * Narrow layouts move access and usage into a separate metadata row.
- */
+/* On phones, actions follow the message instead of taking a separate gutter. */
+@media (max-width: 767px) {
+  .thread-message-row {
+    padding-inline: 1rem;
+  }
+
+  [data-message-mobile-actions],
+  [data-message-mobile-sheet] {
+    --message-block-control-size: 2.75rem;
+    --message-block-action-width: 2.75rem;
+  }
+}
+
+.sidebar-selection-highlight {
+  transition: transform 300ms ease-out, width 300ms ease-out, height 300ms ease-out,
+    var(--theme-paint-transition, background-color 0s);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-selection-highlight {
+    transition: var(--theme-paint-transition, none);
+  }
+}
+
+/* Composer controls adapt to their actual container, not just the viewport. */
 .thread-composer-surface {
+  --composer-shadow-color: 240 10% 16%;
+  --tw-shadow: inset 0 0 0 1px hsl(var(--border) / 0.75), 0 4px 18px -8px hsl(var(--composer-shadow-color) / 0.12);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  transition: var(--theme-paint-transition, background-color 160ms ease-out, box-shadow 160ms ease-out), opacity 160ms ease-out;
   container-name: thread-composer;
   container-type: inline-size;
+}
+
+.dark .thread-composer-surface {
+  --composer-shadow-color: 240 12% 3%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-composer-surface { transition: var(--theme-paint-transition, none); }
+}
+
+@media (forced-colors: active) {
+  .thread-composer-surface { outline: 1px solid CanvasText; }
+  .thread-composer-surface:focus-within { outline: 2px solid Highlight; }
 }
 
 .thread-composer-footer-actions {
@@ -796,38 +1233,22 @@
   mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent);
 }
 
-.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
-  transform: scale(0.98);
-}
-
 .composer-model-pill-setup {
   border-color: hsl(var(--border) / 0.72);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.62),
-    0 1px 2px hsl(var(--foreground) / 0.035);
-  transition-property: color, background-color, border-color, box-shadow, transform;
-  transition-duration: 180ms;
-  transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.dark .composer-model-pill-setup {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.045),
-    0 1px 2px rgb(0 0 0 / 0.12);
+  transition: color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out;
 }
 
 .thread-composer-model-badge:hover > .composer-model-pill-setup {
   border-color: hsl(var(--border));
-  background-color: hsl(var(--accent) / 0.7);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.72),
-    0 2px 5px hsl(var(--foreground) / 0.06);
+  background-color: hsl(var(--foreground) / 0.045);
 }
 
 .dark .thread-composer-model-badge:hover > .composer-model-pill-setup {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.07),
-    0 2px 5px rgb(0 0 0 / 0.16);
+  background-color: rgb(255 255 255 / 0.065);
+}
+
+.thread-composer-model-badge:not([data-switching="true"]):active > .composer-model-pill {
+  background-color: hsl(var(--foreground) / 0.085);
 }
 
 @keyframes composer-model-pill-setup-attention {
@@ -934,8 +1355,22 @@
   }
 }
 
-/* Narrow composers separate message actions from permissions and usage instead
- * of shrinking touch targets or hiding the active model and access state. */
+/* Match the directory glyph's start to the attachment glyph, not its hit area. */
+.thread-composer-meta {
+  padding-inline-start: calc(var(--composer-footer-inset) + var(--composer-action-margin) + (var(--composer-action-size) - 0.875rem) / 2 - 0.5rem);
+}
+
+@media (pointer: coarse) {
+  .thread-composer-form { --composer-action-size: 2.75rem; }
+}
+
+/* Compact composers keep their primary actions on a stable 44px touch grid. */
+.thread-composer-form[data-compact-controls] {
+  --composer-action-size: 2.25rem;
+  --composer-action-margin: 0.25rem;
+  --composer-footer-inset: 0.5rem;
+}
+
 [data-compact-controls] .thread-composer-footer {
   column-gap: 0.25rem;
   padding: 0 0.5rem 0.5rem;
@@ -947,8 +1382,7 @@
 }
 
 [data-compact-controls] .thread-composer-footer-actions {
-  flex: none;
-  max-width: none;
+  max-width: 50%;
 }
 
 [data-compact-controls] .thread-composer-action.touch-target {
@@ -965,16 +1399,16 @@
   align-items: center;
 }
 
-/* Keep a 44px hit area around the quieter 36px attachment/send circles.
+/* Keep a 44px hit area around the quieter 36px attachment/send controls.
  * The transparent pseudo-element belongs to the button, including its disabled
  * state; margins reserve its space so adjacent controls never overlap it. */
 [data-compact-controls] .thread-composer-round-action.touch-target {
   position: relative;
-  width: 2.25rem;
-  height: 2.25rem;
-  min-width: 2.25rem;
-  min-height: 2.25rem;
-  margin: 0.25rem;
+  width: var(--composer-action-size);
+  height: var(--composer-action-size);
+  min-width: var(--composer-action-size);
+  min-height: var(--composer-action-size);
+  margin: var(--composer-action-margin);
 }
 
 [data-compact-controls] .thread-composer-round-action::before {
@@ -988,15 +1422,13 @@
   height: 2.25rem;
 }
 
-.thread-composer-meta .touch-target {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
+@media (pointer: coarse) {
+  .thread-composer-meta .touch-target {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
 }
 
-.thread-composer-meta .thread-composer-access {
-  max-width: 100%;
-  padding-inline: 0.5rem;
-}
 @media (forced-colors: active) {
   [data-workbench-move-handle]:focus-visible {
     outline: 2px solid CanvasText;
@@ -1007,7 +1439,7 @@
 @layer components {
   @media (prefers-reduced-motion: no-preference) {
     .segmented-control-indicator[data-animate="true"] {
-      transition-property: transform, width;
+      transition-property: translate, scale;
       transition-duration: 220ms, 160ms;
       transition-timing-function:
         cubic-bezier(0.2, 0.95, 0.25, 1.08),
@@ -1020,7 +1452,6 @@
    desktop, 4 columns / 16px gutter on mobile. Rows share the same tracks. */
 @layer components {
   .settings-grid {
-    --settings-baseline: 4px;
     --settings-columns: 4;
     --settings-gutter: 16px;
     --settings-margin: 16px;
@@ -1045,7 +1476,7 @@
   .automation-create-composer .thread-composer-surface {
     max-inline-size: none;
   }
-  .automation-create-composer .thread-composer-input textarea {
+  .automation-create-composer .thread-composer-input > :is(textarea, [aria-hidden]) {
     padding-inline: var(--settings-inset);
   }
   .automation-view-switch .segmented-control button {
@@ -1089,7 +1520,7 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-  .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+  .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
     display: block;
     block-size: 3.125rem !important;
   }
@@ -1097,7 +1528,7 @@
     .thread-composer-collapsible .thread-composer-input {
       inline-size: 100%;
     }
-    .thread-composer-collapsible .thread-composer-input textarea {
+    .thread-composer-collapsible .thread-composer-input > :is(textarea, [aria-hidden]) {
       display: block;
       min-block-size: 3.5rem;
       padding-block: 1.125rem;
@@ -1105,7 +1536,7 @@
     .thread-composer-collapsible[data-compact] .thread-composer-input {
       inline-size: max(0px, calc(100% - var(--composer-compact-controls-width, 15rem) - 1.5rem));
     }
-    .thread-composer-collapsible[data-compact] .thread-composer-input textarea {
+    .thread-composer-collapsible[data-compact] .thread-composer-input > :is(textarea, [aria-hidden]) {
       display: block;
       block-size: 3.5rem !important;
       min-block-size: 3.5rem;
@@ -1192,7 +1623,15 @@
   }
   .settings-section-heading > .settings-section-title { margin: 0; padding: 0; }
   .settings-stack > .settings-section-heading + :not([hidden]) { margin-block-start: 20px; }
-  .settings-row, .settings-footer {
+  .control-layout {
+    display: flex;
+    height: 2.25rem;
+    align-items: center;
+    gap: 0.5rem;
+    border-width: 1px;
+    padding-inline: 0.75rem;
+  }
+  .settings-row, .settings-footer, .settings-disclosure-row {
     display: grid;
     grid-template-columns: repeat(var(--settings-columns, 4), minmax(0, 1fr));
     column-gap: var(--settings-gutter, 16px);
@@ -1202,6 +1641,7 @@
     min-block-size: 60px;
   }
   .settings-row > *, .settings-footer > * { grid-column: 1 / -1; min-inline-size: 0; }
+  .settings-disclosure-row { grid-template-columns: minmax(0, 1fr) auto; }
   .settings-control { display: flex; align-items: center; max-inline-size: 100%; }
   .settings-control > * { max-inline-size: 100%; }
   .settings-control input, .settings-control textarea { max-inline-size: 100%; text-align: start; }
@@ -1210,36 +1650,74 @@
   .settings-footer-auto { min-block-size: 40px; padding-block: 8px; row-gap: 0; }
   .settings-footer-auto > :first-child { grid-column: 1 / -1; font-size: 12px; }
   .settings-footer-auto > :nth-child(2):empty { display: none; }
-  .settings-row:has(> .settings-control > [role="switch"]) {
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) {
     grid-template-columns: minmax(0, 1fr) auto;
     column-gap: 24px;
   }
-  .settings-row:has(> .settings-control > [role="switch"]) > :first-child { grid-column: 1; }
-  .settings-row:has(> .settings-control > [role="switch"]) > :nth-child(2) { grid-column: 2; }
-  .settings-disclosure > summary {
-    cursor: pointer;
-    padding: 12px var(--settings-inset, 16px);
-    border-radius: var(--radius-control, 12px);
-    font-size: 13px;
-    font-weight: 500;
-    line-height: 20px;
-    color: hsl(var(--muted-foreground));
-  }
-  .settings-disclosure > summary:hover { color: hsl(var(--foreground)); }
-  .settings-disclosure > summary:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
-  .settings-disclosure[open] > summary { margin-block-end: 8px; }
-
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) > :first-child { grid-column: 1; }
+  .settings-row:has(> .settings-control > :is([role="switch"], [data-skeleton-switch])) > :nth-child(2) { grid-column: 2; }
   .settings-list-row, .settings-list-inset { padding-inline: var(--settings-inset, 16px); }
-  .settings-list-row { min-block-size: 60px; border-radius: 12px; }
-  .sidebar-action-label:lang(zh) {
-    display: inline-block;
-    min-inline-size: var(--sidebar-label-width, 3em);
-    text-align: justify;
-    text-align-last: justify;
+  .settings-list-row { min-block-size: 60px; border-radius: var(--radius-control); }
+  .settings-list-row:focus-visible { outline: none; }
+  .icon-action[aria-pressed="true"], .icon-action[data-state="open"] {
+    color: hsl(var(--foreground));
+  }
+  .icon-action[aria-pressed="true"]::after, .icon-action[data-state="open"]::after {
+    content: "";
+    position: absolute;
+    bottom: 3px;
+    left: calc(50% - 4px);
+    width: 8px;
+    height: 2px;
+    border-radius: 1px;
+    background-color: currentColor;
+    pointer-events: none;
+  }
+  .icon-action svg {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .icon-action [data-product-icon="settings"] > path {
+      transform-box: view-box;
+      transform-origin: center;
+      transform: rotate(0deg);
+      transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .icon-action:not(:disabled):hover [data-product-icon="settings"] > path {
+      transform: rotate(90deg);
+    }
+  }
+  .activity-current-trace { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .activity-current > path:first-child { opacity: 0.35; }
+    .activity-current-trace {
+      display: block;
+      stroke-dasharray: 16 84;
+      animation: activity-current-flow var(--activity-animation);
+    }
+  }
+  @keyframes activity-current-flow {
+    0% { stroke-dashoffset: 16; opacity: 0; }
+    50% { opacity: 1; }
+    100% { stroke-dashoffset: 116; opacity: 0; }
+  }
+  .quiet-control, .settings-hover {
+    --control-hover-fill: hsl(var(--foreground) / 0.045);
+    --control-active-fill: hsl(var(--foreground) / 0.085);
+  }
+  .dark .quiet-control, .dark .settings-hover {
+    --control-hover-fill: rgb(255 255 255 / 0.065);
+    --control-active-fill: rgb(255 255 255 / 0.105);
   }
   @media (hover: hover) {
-    .settings-hover:hover { background-color: hsl(var(--sidebar-foreground) / 0.055); }
-    .dark .settings-hover:hover { background-color: rgb(255 255 255 / 0.07); }
+    .quiet-control:hover, .settings-hover:hover {
+      background-color: var(--control-hover-fill);
+    }
+  }
+  .quiet-control:active, .settings-hover:active,
+  .quiet-control[data-state="open"], .quiet-control[aria-pressed="true"] {
+    background-color: var(--control-active-fill);
   }
   .settings-editor { padding: 16px var(--settings-inset, 16px); }
   @media (min-width: 640px) {
@@ -1257,8 +1735,8 @@
     .settings-grid .settings-row > :nth-child(2),
     .settings-grid .settings-footer > :nth-child(2) { grid-column: 8 / -1; }
     .settings-grid .settings-footer-auto > :first-child { grid-column: 1 / -1; }
-    .settings-grid .settings-row:has(.segmented-control) > :first-child { grid-column: 1 / 7; }
-    .settings-grid .settings-row:has(.segmented-control) > :nth-child(2) { grid-column: 7 / -1; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :first-child { grid-column: 1 / 7; }
+    .settings-grid .settings-row:has(:is(.segmented-control, .settings-version-actions)) > :nth-child(2) { grid-column: 7 / -1; }
   }
   @media (min-width: 768px) {
     .settings-grid { --settings-inset: 24px; }
@@ -1338,4 +1816,58 @@
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar-scrollbar::-webkit-scrollbar-thumb { transition: none; }
+}
+
+.workspace-directory-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .workspace-directory-loading::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.045), transparent);
+    transform: translateX(-100%);
+    animation: workspace-directory-shimmer 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes workspace-directory-shimmer {
+  to { transform: translateX(100%); }
+}
+
+/* Prism classes are generated at runtime, outside Tailwind's source inventory. */
+.code-content {
+  color: hsl(var(--foreground));
+}
+/* Flattened JSX tokens retain the ancestor tag class; let inner token types win. */
+.code-content .token.tag {
+  color: var(--code-property);
+}
+.code-content :is(.token.comment, .token.prolog, .token.doctype, .token.cdata, .linenumber) {
+  color: var(--code-comment);
+}
+.code-content .token.comment {
+  font-style: italic;
+}
+.code-content :is(.token.string, .token.char, .token.attr-value, .token.regex, .token.inserted) {
+  color: var(--code-string);
+}
+.code-content :is(.token.keyword, .token.selector, .token.important, .token.atrule) {
+  color: var(--code-keyword);
+}
+.code-content :is(.token.function, .token.operator, .token.entity, .token.url) {
+  color: var(--code-function);
+}
+.code-content :is(.token.number, .token.boolean, .token.constant, .token.symbol, .token.attr-name, .token.class-name, .token.builtin, .token.property, .token.deleted) {
+  color: var(--code-property);
+}
+.code-content :is(.token.bold, .token.important) {
+  font-weight: 600;
+}
+.code-content .token.italic {
+  font-style: italic;
 }

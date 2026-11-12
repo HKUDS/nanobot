@@ -29,16 +29,17 @@ def webui_skills_payload(
 ) -> dict[str, Any]:
     """Return agent skills without leaking local filesystem paths."""
     loader = SkillsLoader(workspace_path)
-    entries = sorted(
-        loader.list_skills(filter_unavailable=False),
-        key=lambda entry: (entry.get("source") != "workspace", entry["name"]),
-    )
-    return {
-        "skills": [
-            _skill_payload(loader, entry, disabled_skills=disabled_skills)
-            for entry in entries
-        ]
-    }
+    with loader.snapshot():
+        entries = sorted(
+            loader.list_skills(filter_unavailable=False),
+            key=lambda entry: (entry.get("source") != "workspace", entry["name"]),
+        )
+        return {
+            "skills": [
+                _skill_payload(loader, entry, disabled_skills=disabled_skills)
+                for entry in entries
+            ]
+        }
 
 
 def webui_skill_detail_payload(
@@ -49,22 +50,23 @@ def webui_skill_detail_payload(
 ) -> dict[str, Any] | None:
     """Return a single skill's safe detail payload."""
     loader = SkillsLoader(workspace_path)
-    entries = loader.list_skills(filter_unavailable=False)
-    entry = next((item for item in entries if item["name"] == name), None)
-    if entry is None:
-        return None
-    metadata = loader.get_skill_metadata(name)
-    return {
-        **_skill_payload(
-            loader,
-            entry,
-            metadata=metadata,
-            disabled_skills=disabled_skills,
-        ),
-        "requirements": loader.get_skill_requirements(name),
-        "install_options": _install_options(metadata),
-        "raw_markdown": loader.load_skill(name) or "",
-    }
+    with loader.snapshot():
+        entries = loader.list_skills(filter_unavailable=False)
+        entry = next((item for item in entries if item["name"] == name), None)
+        if entry is None:
+            return None
+        metadata = loader.get_skill_metadata(name)
+        return {
+            **_skill_payload(
+                loader,
+                entry,
+                metadata=metadata,
+                disabled_skills=disabled_skills,
+            ),
+            "requirements": loader.get_skill_requirements(name),
+            "install_options": _install_options(metadata),
+            "raw_markdown": loader.load_skill(name) or "",
+        }
 
 
 def set_webui_skill_enabled(

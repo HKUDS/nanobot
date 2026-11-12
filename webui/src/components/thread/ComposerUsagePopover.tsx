@@ -14,7 +14,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { formatCompactTokenCount, formatTurnLatency } from "@/lib/format";
+import { formatCompactTokenCount } from "@/lib/format";
+import { formatTurnLatency } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 
 export interface ComposerContextUsage {
@@ -58,11 +59,13 @@ export function ComposerUsagePopover({
   context,
   rounds,
   showLabel = false,
+  compactLabel = false,
   bottomSheet = false,
 }: {
   context: ComposerContextUsage | null;
   rounds: readonly ComposerRoundUsage[];
   showLabel?: boolean;
+  compactLabel?: boolean;
   bottomSheet?: boolean;
 }) {
   const { t, i18n } = useTranslation();
@@ -122,6 +125,7 @@ export function ComposerUsagePopover({
   const RoundTrigger = bottomSheet ? PopoverTrigger : TooltipTrigger;
   const RoundContent = bottomSheet ? PopoverContent : TooltipContent;
   const RoundBar = bottomSheet ? "button" : "span";
+  const showTextLabel = showLabel && (!compactLabel || contextPercentage !== null);
   const trigger = (
     <Trigger asChild>
       <button
@@ -130,9 +134,9 @@ export function ComposerUsagePopover({
         aria-label={triggerLabel}
         className={cn(
           "touch-target inline-flex size-5 shrink-0 items-center justify-center rounded-full",
-          "text-muted-foreground/75 transition-colors hover:text-foreground/85",
+          "text-muted-foreground transition-colors hover:text-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          showLabel && "w-auto gap-1.5 px-2 text-xs",
+          showTextLabel && "w-auto gap-1.5 px-2 text-xs",
         )}
       >
         {contextPercentage === null ? (
@@ -153,7 +157,7 @@ export function ComposerUsagePopover({
               "size-[15px] shrink-0 -rotate-90",
               status === "critical" && "text-destructive",
               status === "caution" && "text-amber-600 dark:text-amber-400",
-              status === "normal" && "text-muted-foreground/75",
+              status === "normal" && "text-muted-foreground",
             )}
           >
             <circle
@@ -178,7 +182,11 @@ export function ComposerUsagePopover({
             />
           </svg>
         )}
-        {showLabel ? <span aria-hidden>{contextDescription}</span> : null}
+        {showTextLabel ? (
+          <span aria-hidden className="whitespace-nowrap tabular-nums">
+            {compactLabel && contextPercentage !== null ? `${contextPercentage}%` : contextDescription}
+          </span>
+        ) : null}
       </button>
     </Trigger>
   );

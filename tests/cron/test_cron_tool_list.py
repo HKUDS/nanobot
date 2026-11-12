@@ -1,6 +1,9 @@
 """Tests for CronTool._list_jobs() output formatting."""
 
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -43,34 +46,20 @@ def test_format_timing_cron_without_tz(tmp_path) -> None:
     assert tool._format_timing(s) == "cron: */5 * * * *"
 
 
-def test_format_timing_every_hours(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "expected, every_ms",
+    [
+        pytest.param("every 2h", 7200000, id="hours"),
+        pytest.param("every 30m", 1800000, id="minutes"),
+        pytest.param("every 30s", 30000, id="seconds"),
+        pytest.param("every 90s", 90000, id="non_minute_seconds"),
+        pytest.param("every 200ms", 200, id="milliseconds"),
+    ],
+)
+def test_format_timing_every_interval(tmp_path, expected, every_ms) -> None:
     tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=7_200_000)
-    assert tool._format_timing(s) == "every 2h"
-
-
-def test_format_timing_every_minutes(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=1_800_000)
-    assert tool._format_timing(s) == "every 30m"
-
-
-def test_format_timing_every_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=30_000)
-    assert tool._format_timing(s) == "every 30s"
-
-
-def test_format_timing_every_non_minute_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=90_000)
-    assert tool._format_timing(s) == "every 90s"
-
-
-def test_format_timing_every_milliseconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    s = CronSchedule(kind="every", every_ms=200)
-    assert tool._format_timing(s) == "every 200ms"
+    s = CronSchedule(kind="every", every_ms=every_ms)
+    assert tool._format_timing(s) == expected
 
 
 def test_format_timing_at(tmp_path) -> None:
@@ -160,64 +149,26 @@ def test_list_cron_job_shows_expression_and_timezone(tmp_path) -> None:
     assert "cron: 0 9 * * 1-5 (America/Denver)" in result
 
 
-def test_list_every_job_shows_human_interval(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("every_ms", "expected"),
+    [
+        pytest.param(1_800_000, "every 30m", id="minutes"),
+        pytest.param(7_200_000, "every 2h", id="hours"),
+        pytest.param(30_000, "every 30s", id="seconds"),
+        pytest.param(90_000, "every 90s", id="non-minute-seconds"),
+        pytest.param(200, "every 200ms", id="milliseconds"),
+    ],
+)
+def test_list_every_job_shows_human_interval(tmp_path, every_ms, expected) -> None:
     tool = _make_tool(tmp_path)
     tool._cron.add_job(
         name="Frequent check",
-        schedule=CronSchedule(kind="every", every_ms=1_800_000),
+        schedule=CronSchedule(kind="every", every_ms=every_ms),
         message="check",
         **_bound_chat(),
     )
     result = tool._list_jobs()
-    assert "every 30m" in result
-
-
-def test_list_every_job_hours(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.add_job(
-        name="Hourly check",
-        schedule=CronSchedule(kind="every", every_ms=7_200_000),
-        message="check",
-        **_bound_chat(),
-    )
-    result = tool._list_jobs()
-    assert "every 2h" in result
-
-
-def test_list_every_job_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.add_job(
-        name="Fast check",
-        schedule=CronSchedule(kind="every", every_ms=30_000),
-        message="check",
-        **_bound_chat(),
-    )
-    result = tool._list_jobs()
-    assert "every 30s" in result
-
-
-def test_list_every_job_non_minute_seconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.add_job(
-        name="Ninety-second check",
-        schedule=CronSchedule(kind="every", every_ms=90_000),
-        message="check",
-        **_bound_chat(),
-    )
-    result = tool._list_jobs()
-    assert "every 90s" in result
-
-
-def test_list_every_job_milliseconds(tmp_path) -> None:
-    tool = _make_tool(tmp_path)
-    tool._cron.add_job(
-        name="Sub-second check",
-        schedule=CronSchedule(kind="every", every_ms=200),
-        message="check",
-        **_bound_chat(),
-    )
-    result = tool._list_jobs()
-    assert "every 200ms" in result
+    assert expected in result
 
 
 def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:
@@ -333,17 +284,123 @@ def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
 
 def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
+    naive = (datetime.now(timezone.utc) + timedelta(days=1)).replace(tzinfo=None)
     with request_context(
         RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
     ):
-        result = tool._add_job(
-            None, "Morning reminder", None, None, None, "2026-03-25T08:00:00"
-        )
+        result = tool._add_job(None, "Morning reminder", None, None, None, naive.isoformat())
 
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
-    expected = int(datetime(2026, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    expected = int(naive.replace(tzinfo=ZoneInfo("Asia/Shanghai")).timestamp() * 1000)
     assert job.schedule.at_ms == expected
+
+def test_add_at_job_rejects_past_datetime(tmp_path) -> None:
+    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
+    with request_context(
+        RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
+    ):
+        result = tool._add_job(None, "Old reminder", None, None, None, "2020-01-01T09:00:00")
+
+    assert "not in the future" in result
+    assert "2020-01-01T09:00:00" in result
+    assert tool._cron.list_jobs() == []
+
+def test_add_at_job_rejects_datetime_equal_to_now(tmp_path, monkeypatch) -> None:
+    tool = _make_tool(tmp_path)
+    fixed_now = 1_900_000_000.0
+    monkeypatch.setattr("nanobot.agent.tools.cron.time", SimpleNamespace(time=lambda: fixed_now))
+    at = datetime.fromtimestamp(fixed_now, tz=timezone.utc).isoformat()
+    with request_context(
+        RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
+    ):
+        result = tool._add_job(None, "Deadline reminder", None, None, None, at)
+
+    assert "not in the future" in result
+    assert tool._cron.list_jobs() == []
+
+def test_add_at_job_accepts_future_datetime(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    with request_context(
+        RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
+    ):
+        result = tool._add_job(None, "Future reminder", None, None, None, future)
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.schedule.kind == "at"
+    assert job.state.next_run_at_ms is not None
+
+
+def test_add_job_rejects_multiple_schedule_fields(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    with request_context(
+        RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
+    ):
+        result = tool._add_job(None, "Morning standup", 60, "0 8 * * *", None, None)
+
+    assert result == "Error: exactly one of every_seconds, cron_expr, or at is required"
+    assert tool._cron.list_jobs() == []
+
+
+@pytest.mark.parametrize("every_seconds", [0, -60])
+def test_add_job_rejects_non_positive_interval(tmp_path, every_seconds: int) -> None:
+    tool = _make_tool(tmp_path)
+    with request_context(
+        RequestContext(channel="telegram", chat_id="chat-1", session_key="telegram:chat-1")
+    ):
+        result = tool._add_job(None, "Morning standup", every_seconds, None, None, None)
+
+    assert result == "Error: every_seconds must be a positive integer"
+    assert tool._cron.list_jobs(include_disabled=True) == []
+
+
+@pytest.mark.parametrize("every_seconds", [0, -60])
+def test_validate_params_rejects_non_positive_interval(tmp_path, every_seconds: int) -> None:
+    tool = _make_tool(tmp_path)
+
+    errors = tool.validate_params(
+        {"action": "add", "message": "Morning standup", "every_seconds": every_seconds}
+    )
+
+    assert any("every_seconds" in error for error in errors)
+
+
+@pytest.mark.asyncio
+async def test_legacy_zero_interval_job_can_be_listed_repaired_and_removed(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    store_path = tool._cron.store_path
+    store_path.parent.mkdir(parents=True)
+    # Older versions accepted and persisted zero-interval jobs that never ran.
+    store_path.write_text(json.dumps({
+        "version": 1,
+        "jobs": [{
+            "id": "legacy-zero",
+            "name": "Legacy reminder",
+            "enabled": True,
+            "schedule": {"kind": "every", "everyMs": 0},
+            "payload": {"kind": "agent_turn", "message": "hello", **_bound_chat()},
+        }],
+    }), encoding="utf-8")
+
+    assert "Legacy reminder" in await tool.execute(action="list")
+    renamed = tool._cron.update_job("legacy-zero", name="Repair me")
+    assert isinstance(renamed, CronJob)
+    assert renamed.schedule.every_ms == 0
+    repaired = tool._cron.update_job(
+        "legacy-zero", schedule=CronSchedule(kind="every", every_ms=60_000),
+    )
+    assert isinstance(repaired, CronJob)
+    assert repaired.state.next_run_at_ms is not None
+
+    reloaded = _make_tool(tmp_path)
+    assert "Repair me" in await reloaded.execute(action="list")
+    with request_context(RequestContext(
+        channel="websocket", chat_id="chat-1", session_key="websocket:chat-1",
+    )):
+        await reloaded.execute(action="remove", job_id="legacy-zero")
+    assert _make_tool(tmp_path)._cron.list_jobs(include_disabled=True) == []
 
 
 def test_add_job_binds_current_session_key(tmp_path) -> None:

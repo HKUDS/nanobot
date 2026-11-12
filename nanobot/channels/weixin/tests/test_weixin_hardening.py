@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -74,6 +74,22 @@ def test_reply_progress_opt_in_enables_progress_transport() -> None:
     assert config.send_tool_hints is True
 
 
+@pytest.mark.asyncio
+async def test_start_suppresses_httpx_polling_logs(monkeypatch) -> None:
+    channel = _channel(token="bot-token")
+    redirect = Mock()
+    monkeypatch.setattr("nanobot.channels.weixin.runtime.redirect_lib_logging", redirect)
+    monkeypatch.setattr(channel, "_notify_lifecycle", AsyncMock())
+
+    async def poll_once() -> None:
+        channel._running = False
+
+    monkeypatch.setattr(channel, "_poll_once", poll_once)
+    await channel.start()
+
+    redirect.assert_called_once_with("httpx", level="WARNING")
+
+
 @pytest.mark.parametrize(
     ("section", "send_progress", "send_tool_hints"),
     [
@@ -91,7 +107,7 @@ def test_channel_manager_preserves_weixin_quota_defaults(
     manager.config = Config.model_validate({"channels": {"weixin": section}})
     manager.bus = MessageBus()
 
-    channel = manager._build_channel("weixin", WeixinChannel, section)
+    channel = manager._build_channel(WeixinChannel, section)
 
     assert channel.send_progress is send_progress
     assert channel.send_tool_hints is send_tool_hints
@@ -237,7 +253,10 @@ async def test_qr_fetch_does_not_retry_invalid_request_without_local_tokens(tmp_
 @pytest.mark.asyncio
 async def test_lifecycle_notifications_are_best_effort() -> None:
     channel = _ready_channel()
-    channel._api_post = AsyncMock(return_value={"ret": 0})
+    channel._api_post = AsyncMock(side_effect=[
+        httpx.ReadTimeout("upstream unavailable"),
+        {"ret": -100, "errmsg": "upstream rejected notification"},
+    ])
 
     await channel._notify_lifecycle("start")
     await channel._notify_lifecycle("stop")

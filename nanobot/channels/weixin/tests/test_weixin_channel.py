@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.weixin import runtime as weixin_mod
@@ -350,7 +351,7 @@ async def test_process_message_pairs_unauthorized_sender_before_media_side_effec
     channel._get_typing_ticket = AsyncMock(return_value="")
     channel._send_text = AsyncMock()
     monkeypatch.setattr(
-        "nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH"
+        "nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH"
     )
 
     await channel._process_message(
@@ -546,9 +547,7 @@ async def test_send_without_context_token_raises() -> None:
     channel._send_text = AsyncMock()
 
     with pytest.raises(RuntimeError, match="context_token missing"):
-        await channel.send(
-            type("Msg", (), {"chat_id": "unknown-user", "content": "pong", "media": [], "metadata": {}})()
-        )
+        await channel.send(_make_outbound_msg(chat_id="unknown-user", content="pong"))
 
     channel._send_text.assert_not_awaited()
 
@@ -800,6 +799,7 @@ async def test_manager_surfaces_actionable_weixin_auth_error_without_traceback(
     )
     manager = manager_mod.ChannelManager.__new__(manager_mod.ChannelManager)
     manager._channel_errors = {}
+    manager.bus = channel.bus
 
     await manager._start_channel("weixin", channel)
 
@@ -895,7 +895,6 @@ async def test_qr_login_switches_polling_base_url_on_redirect_status(
             "ilink_user_id": "wx-user",
         },
     ]
-    channel._api_get = AsyncMock(side_effect=list(status_side_effect))
     channel._api_get_with_base = AsyncMock(side_effect=list(status_side_effect))
 
     ok = await channel._qr_login()
@@ -929,7 +928,6 @@ async def test_qr_login_redirect_without_host_keeps_current_polling_base_url(
             "ilink_user_id": "wx-user",
         },
     ]
-    channel._api_get = AsyncMock(side_effect=list(status_side_effect))
     channel._api_get_with_base = AsyncMock(side_effect=list(status_side_effect))
 
     ok = await channel._qr_login()
@@ -1482,6 +1480,26 @@ def _make_outbound_msg(chat_id: str = "wx-user", content: str = "", media: list 
         media=media or [],
         metadata={},
     )
+
+
+@pytest.mark.parametrize("partial", [False, True])
+async def test_scheduled_quota_failure_has_only_one_recovery_owner(partial):
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._refresh_context_token_if_stale = AsyncMock(return_value="context")
+    channel._get_typing_ticket = AsyncMock(return_value="")
+    channel._send_media_part = AsyncMock()
+    channel._send_text = AsyncMock(side_effect=weixin_mod.WeixinQuotaError("sendmessage"))
+    msg = _make_outbound_msg(content="result", media=["image.png"] if partial else [])
+    msg.delivery_id = "scheduled-result"
+
+    expected = weixin_mod.WeixinQuotaError if partial else ChannelNotReadyError
+    with pytest.raises(expected):
+        await channel.send(msg)
+
+    assert channel._deferred_outbound == {}
+    assert channel._send_media_part.await_count == int(partial)
 
 
 @pytest.mark.asyncio
@@ -2193,8 +2211,8 @@ async def test_stream_end_flushes_buffered_answer() -> None:
     channel._context_token_at["wx-user"] = time.time()
     channel._send_text = AsyncMock()
 
-    await channel.send_delta("wx-user", "hello ", {"_stream_delta": True})
-    await channel.send_delta("wx-user", "world", {"_stream_end": True})
+    await channel.send_delta("wx-user", "hello ")
+    await channel.send_delta("wx-user", "world", stream_end=True)
 
     channel._send_text.assert_awaited_once_with("wx-user", "hello world", "ctx-1")
     assert "wx-user" not in channel._stream_buffers
@@ -2232,14 +2250,14 @@ async def test_stream_end_send_failure_keeps_buffer_for_retry() -> None:
     channel._context_token_at["wx-user"] = time.time()
     channel._send_text = AsyncMock(side_effect=RuntimeError("temporary send failure"))
 
-    await channel.send_delta("wx-user", "hello ", {"_stream_delta": True})
+    await channel.send_delta("wx-user", "hello ")
     with pytest.raises(RuntimeError):
-        await channel.send_delta("wx-user", "world", {"_stream_end": True})
+        await channel.send_delta("wx-user", "world", stream_end=True)
 
     assert channel._stream_buffers["wx-user"] == ["hello "]
 
     channel._send_text = AsyncMock()
-    await channel.send_delta("wx-user", "world", {"_stream_end": True})
+    await channel.send_delta("wx-user", "world", stream_end=True)
 
     channel._send_text.assert_awaited_once_with("wx-user", "hello world", "ctx-1")
     assert "wx-user" not in channel._stream_buffers

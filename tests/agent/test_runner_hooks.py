@@ -3,6 +3,7 @@ cached-token propagation, and hook context."""
 
 from __future__ import annotations
 
+from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -387,8 +388,9 @@ async def test_runner_calls_run_level_hooks_on_success():
 
 
 @pytest.mark.asyncio
-async def test_runner_run_level_context_is_detached_snapshot():
-    from nanobot.agent.hook import AgentHook, AgentRunHookContext
+@pytest.mark.parametrize("composite", [False, True])
+async def test_runner_run_level_context_is_detached_snapshot(composite):
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext, CompositeHook
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -422,6 +424,7 @@ async def test_runner_run_level_context_is_detached_snapshot():
         async def on_finally(self, context: AgentRunHookContext) -> None:
             context.messages[0]["content"] = "mutated-finally"
 
+    hook = MutatingRunHook()
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "hi"}],
@@ -429,7 +432,7 @@ async def test_runner_run_level_context_is_detached_snapshot():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=MutatingRunHook(),
+        hook=CompositeHook([hook]) if composite else hook,
     ))
 
     assert request_messages[0][0]["content"] == "hi"
@@ -438,6 +441,68 @@ async def test_runner_run_level_context_is_detached_snapshot():
     assert result.tool_events == [
         {"name": "list_dir", "status": "ok", "detail": "tool result"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_runner_snapshots_for_composite_subclass_run_callback():
+    from nanobot.agent.hook import AgentRunHookContext, CompositeHook
+    from nanobot.agent.progress_hook import AgentProgressHook
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    snapshots: list[list[dict]] = []
+
+    class CaptureCompositeHook(CompositeHook):
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            snapshots.append([dict(message) for message in context.messages])
+            context.messages[0]["content"] = "hook-only"
+
+    hook = CaptureCompositeHook([AgentProgressHook()])
+    result = await AgentRunner().run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert hook.has_run_hooks() is True
+    assert snapshots == [result.messages]
+    assert result.messages[0]["content"] == "hi"
+    assert result.final_content == "done"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["error", "cancelled"])
+async def test_runner_skips_run_snapshots_without_consumers_on_exception(outcome):
+    import asyncio
+
+    from nanobot.agent.progress_hook import AgentProgressHook
+    from nanobot.agent.runner import AgentRunner
+
+    error = RuntimeError("provider exploded") if outcome == "error" else asyncio.CancelledError()
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=error)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    with patch("nanobot.agent.runner.deepcopy", wraps=deepcopy) as copy_state:
+        with pytest.raises(type(error)):
+            await AgentRunner().run(make_run_spec(provider,
+                initial_messages=[{"role": "user", "content": "hi"}],
+                tools=tools,
+                model="test-model",
+                max_iterations=1,
+                max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+                hook=AgentProgressHook(),
+            ))
+
+    provider.chat_stream_with_retry.assert_awaited_once()
+    assert copy_state.call_count == 0
 
 
 @pytest.mark.asyncio

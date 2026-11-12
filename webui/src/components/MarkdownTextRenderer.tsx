@@ -4,19 +4,28 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Globe2 } from "lucide-react";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { Streamdown, type Components, type StreamdownProps } from "streamdown";
+import remend from "remend";
+import type { ListItem, Nodes, Root } from "mdast";
 
+import { parseMathAwareMarkdownBlocks } from "@/lib/markdown-streaming-blocks";
+
+import { DisplayMath } from "@/components/DisplayMath";
 import { AttachmentTile } from "@/components/AttachmentTile";
-import { CodeBlock } from "@/components/CodeBlock";
+import { MarkdownCodeBlock } from "@/components/markdown-diagrams/MarkdownCodeBlock";
+import { MarkdownCodeContext } from "@/components/markdown-diagrams/context";
+import { WebLink } from "@/components/WebLink";
 import {
-  INLINE_TOKEN_HIGHLIGHT_COLOR,
+  INLINE_REFERENCE_HIGHLIGHT_COLOR,
   InlineTokenHighlight,
 } from "@/components/InlineTokenHighlight";
 import {
@@ -27,10 +36,12 @@ import {
   FileReferenceChip,
   isFilePatternReference,
   isLikelyFilePath,
+  splitFilePath,
 } from "@/components/FileReferenceChip";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { inferMediaKind } from "@/lib/media";
 import { browserSafeFaviconUrls } from "@/lib/provider-brand";
+import { remarkCjkAutolinks } from "@/lib/remark-cjk-autolinks";
 import { remarkTexMath } from "@/lib/remark-tex-math";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +52,10 @@ interface MarkdownTextRendererProps {
   className?: string;
   highlightCode?: boolean;
   streaming?: boolean;
+  preserveStreamingLayout?: boolean;
   onOpenFilePreview?: (path: string) => void;
+  /** Read-only documents must not load embedded resources or use chat routing. */
+  documentPath?: string;
 }
 
 type MarkdownAstNode = {
@@ -60,19 +74,24 @@ type InlineLinkPreview = {
   title: string;
 };
 
+type InlineLinkPreviewProperties = {
+  "data-link-preview-href": string;
+  "data-link-preview-host": string;
+  "data-link-preview-title": string;
+  "data-link-preview-prefix"?: string;
+};
+
 type AvailabilityResult = {
   available: boolean;
   path: string;
   resolve: FilePreviewAvailabilityResolver;
 };
 
-function InferredFileReferenceChip({
-  path,
+function AvailableFileReferenceChip({
   onOpen,
-}: {
-  path: string;
-  onOpen?: (path: string) => void;
-}) {
+  ...props
+}: ComponentProps<typeof FileReferenceChip>) {
+  const path = props.previewPath || props.tooltipPath || props.path;
   const resolve = useFilePreviewAvailabilityResolver();
   const [result, setResult] = useState<AvailabilityResult | null>(null);
 
@@ -98,7 +117,7 @@ function InferredFileReferenceChip({
   );
   return (
     <FileReferenceChip
-      path={path}
+      {...props}
       onOpen={onOpen && resolvedAvailable ? onOpen : undefined}
     />
   );
@@ -239,49 +258,15 @@ function remarkSafeHtmlSubset() {
   };
 }
 
-// Recover a common model-output edge case that CommonMark leaves as literal
-// text: `**结论。**如果`, with no separator after the closing delimiter.
-const CJK_AFTER_STRONG =
-  /(?<!\\)\*\*([^*\r\n]+?)(?<!\\)\*\*(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/gu;
-
-function normalizeCjkStrongBoundaries(node: MarkdownAstNode): void {
-  if (!node.children) return;
-  node.children = node.children.flatMap((child) => {
-    if (child.type !== "text" || !child.value?.includes("**")) {
-      normalizeCjkStrongBoundaries(child);
-      return [child];
-    }
-
-    const replacement: MarkdownAstNode[] = [];
-    let cursor = 0;
-    for (const match of child.value.matchAll(CJK_AFTER_STRONG)) {
-      const start = match.index;
-      if (start > cursor) replacement.push(safeText(child.value.slice(cursor, start)));
-      replacement.push({
-        type: "strong",
-        children: [safeText(match[1])],
-      });
-      cursor = start + match[0].length;
-    }
-    if (cursor === 0) return [child];
-    if (cursor < child.value.length) replacement.push(safeText(child.value.slice(cursor)));
-    return replacement;
-  });
-}
-
-function remarkCjkStrongBoundaries() {
-  return (tree: MarkdownAstNode) => {
-    normalizeCjkStrongBoundaries(tree);
-  };
-}
-
 const remarkPlugins: NonNullable<StreamdownProps["remarkPlugins"]> = [
+  remarkCjkFriendly,
   remarkBreaks,
-  remarkGfm,
+  [remarkGfm, { singleTilde: false }],
+  remarkCjkAutolinks,
   [remarkMath, { singleDollarTextMath: false }],
   remarkTexMath,
-  remarkCjkStrongBoundaries,
   remarkSafeHtmlSubset,
+  remarkInlineLinkPreviews,
 ];
 type MathPlugin = typeof import("@/lib/markdown-math").default;
 let loadedMathPlugin: MathPlugin | undefined;
@@ -365,6 +350,29 @@ function fileReferenceFromLink(href: string | undefined): string | null {
   return isPreviewableFileTarget(target) ? target : null;
 }
 
+function DocumentLink({ href, path, onOpen, children }: {
+  href: string;
+  path: string;
+  onOpen?: (path: string) => void;
+  children: ReactNode;
+}) {
+  // Fragment-only links must not replace the application's hash route.
+  if (!href || href.startsWith("#")) return <>{children}</>;
+  if (/^(https?:\/\/|mailto:)/i.test(href)) {
+    return <WebLink href={href} className="text-content-link underline underline-offset-2">{children}</WebLink>;
+  }
+  if (/^[a-z][a-z\d+.-]*:/i.test(href) || href.startsWith("//")) return <>{children}</>;
+  let target = href.split(/[?#]/, 1)[0];
+  try { target = decodeURIComponent(target); } catch { return <>{children}</>; }
+  if (!target) return <>{children}</>;
+  // Resolve against the document, not the WebUI origin or the project root.
+  // The gateway still resolves and authorizes the resulting path.
+  const resolved = /^[\\/]|^[a-z]:[\\/]/i.test(target)
+    ? target : `${splitFilePath(path).directory}${target}`;
+  return <FileReferenceChip path={nodeText(children) || target} previewPath={resolved}
+    tooltipPath={resolved} onOpen={onOpen} />;
+}
+
 function sessionReferenceHref(href: string): string | null {
   const prefix = href.startsWith("#session/")
     ? "#session/"
@@ -381,28 +389,6 @@ function sessionReferenceHref(href: string): string | null {
   }
 }
 
-function linkPreviewParts(value: ReactNode): { text: string; href?: string } {
-  let text = "";
-  let href: string | undefined;
-  for (const child of Children.toArray(value)) {
-    if (typeof child === "string" || typeof child === "number") {
-      text += String(child);
-      continue;
-    }
-    if (!isValidElement(child)) {
-      continue;
-    }
-    const props = child.props as { href?: unknown; children?: ReactNode };
-    if (!href && typeof props.href === "string" && /^https?:\/\//i.test(props.href)) {
-      href = props.href;
-    }
-    const nested = linkPreviewParts(props.children);
-    text += nested.text;
-    href ||= nested.href;
-  }
-  return { text, href };
-}
-
 function cleanLinkPreviewText(value: string): string {
   return value
     .replace(/\s+/g, " ")
@@ -410,36 +396,57 @@ function cleanLinkPreviewText(value: string): string {
     .trim();
 }
 
-function inlineLinkPreviewFromChildren(children: ReactNode): InlineLinkPreview | null {
-  const { text: rawText, href } = linkPreviewParts(children);
-  if (!href) return null;
+function inlineLinkPreviewFromListItem(item: ListItem): InlineLinkPreview | null {
+  if (typeof item.checked === "boolean" || item.children.length !== 1) return null;
+  const paragraph = item.children[0];
+  if (paragraph.type !== "paragraph" || paragraph.children.length !== 3) return null;
+  const [heading, lineBreak, link] = paragraph.children;
+  if (heading.type !== "text" || lineBreak.type !== "break" || link.type !== "link"
+    || link.title || link.children.length !== 1 || link.children[0].type !== "text") return null;
 
   let url: URL;
   try {
-    url = new URL(href);
+    url = new URL(link.url);
+    if (new URL(link.children[0].value).href !== url.href) return null;
   } catch {
     return null;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
 
-  const strippedUrl = rawText
-    .replace(/\s+/g, " ")
-    .replace(href, "")
-    .replace(url.toString(), "")
-    .replace(/https?:\/\/\S+/i, "")
-    .trim();
-  if (!strippedUrl || strippedUrl.length < 4) return null;
-
-  const sourceMatch = /^(.*?)\s*(?:[—–]| - |:)\s*(.+)$/.exec(strippedUrl);
+  const headingText = heading.value.trim();
+  if (headingText.length < 4) return null;
+  const sourceMatch = /^(.*?)\s*(?:[—–]| - |:)\s*(.+)$/.exec(headingText);
   const prefix = sourceMatch?.[1] ? cleanLinkPreviewText(sourceMatch[1]) : undefined;
-  const title = cleanLinkPreviewText(sourceMatch?.[2] ?? strippedUrl);
+  const title = cleanLinkPreviewText(sourceMatch?.[2] ?? headingText);
   if (!title || /^https?:\/\//i.test(title)) return null;
 
-  return {
-    href,
-    host: url.hostname,
-    prefix,
-    title,
+  return { href: link.url, host: url.hostname, prefix, title };
+}
+
+function remarkInlineLinkPreviews() {
+  return (tree: Root) => {
+    function visit(node: Nodes) {
+      // Only the syntax tree knows both the whole item and its list's numbering.
+      // Never infer a preview by flattening rendered descendants.
+      if (node.type === "list" && !node.ordered) {
+        for (const item of node.children) {
+          const link = inlineLinkPreviewFromListItem(item);
+          if (!link) continue;
+          const properties: InlineLinkPreviewProperties = {
+            "data-link-preview-href": link.href,
+            "data-link-preview-host": link.host,
+            "data-link-preview-title": link.title,
+            "data-link-preview-prefix": link.prefix,
+          };
+          item.data = {
+            ...item.data,
+            hProperties: { ...item.data?.hProperties, ...properties },
+          };
+        }
+      }
+      if ("children" in node) node.children.forEach(visit);
+    }
+    visit(tree);
   };
 }
 
@@ -451,14 +458,14 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
     : link.title;
 
   return (
-    <a
+    <WebLink
       href={link.href}
       target="_blank"
       rel="noreferrer noopener"
       aria-label={t("message.openLink", { label })}
       className={cn(
         "not-prose inline-flex max-w-full items-center gap-2 align-baseline",
-        "text-blue-500 no-underline underline-offset-2 hover:underline dark:text-blue-300",
+        "text-content-link no-underline underline-offset-2 hover:underline",
       )}
     >
       <span
@@ -487,7 +494,7 @@ function InlineLinkPreviewRow({ link }: { link: InlineLinkPreview }) {
       <span className="min-w-0 [overflow-wrap:anywhere] leading-normal sm:truncate">
         {label}
       </span>
-    </a>
+    </WebLink>
   );
 }
 
@@ -500,12 +507,6 @@ function useFaviconFallback(host: string) {
     onFaviconError: onLogoError,
     onFaviconLoad: onLogoLoad,
   };
-}
-
-function isRenderedCodeBlock(value: ReactNode): boolean {
-  if (!isValidElement(value)) return false;
-  const props = value.props as { code?: unknown };
-  return value.type === CodeBlock || typeof props.code === "string";
 }
 
 function codeFenceFromPreChild(value: ReactNode): { code: string; language?: string } | null {
@@ -529,7 +530,9 @@ export default function MarkdownTextRenderer({
   className,
   highlightCode = true,
   streaming = false,
+  preserveStreamingLayout = false,
   onOpenFilePreview,
+  documentPath,
 }: MarkdownTextRendererProps) {
   const { t } = useTranslation();
   const [mathPlugin, setMathPlugin] = useState(() => loadedMathPlugin);
@@ -550,23 +553,10 @@ export default function MarkdownTextRenderer({
     () => ({
       code({ className: cls, children: kids, node: _node, ...props }) {
         void _node;
-        const match = /language-(\w+)/.exec(cls || "");
-        if (match) {
-          const code = String(kids).replace(/\n$/, "");
-          return (
-            <CodeBlock
-              language={match[1]}
-              code={code}
-              className="my-3"
-              highlight={highlightCode}
-              showLineNumbers={code.includes("\n")}
-            />
-          );
-        }
         const raw = String(kids).replace(/\n$/, "");
-        if (isLikelyFilePath(raw)) {
+        if (!documentPath && isLikelyFilePath(raw)) {
           return (
-            <InferredFileReferenceChip
+            <AvailableFileReferenceChip
               path={raw}
               onOpen={onOpenFilePreview}
             />
@@ -578,8 +568,8 @@ export default function MarkdownTextRenderer({
           return (
             <code
               className={cn(
-                "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-[0.8125rem]",
-                "leading-snug text-inherit",
+                "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-code",
+                "text-inherit",
                 cls,
               )}
               {...props}
@@ -591,7 +581,7 @@ export default function MarkdownTextRenderer({
         return (
           <code
             className={cn(
-              "rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]",
+              "markdown-inline-code rounded bg-muted px-1 py-0.5 font-mono",
               cls,
             )}
             {...props}
@@ -603,27 +593,17 @@ export default function MarkdownTextRenderer({
       pre({ children: markdownChildren }) {
         const kids = Children.toArray(markdownChildren);
         const lone = kids.length === 1 ? kids[0] : null;
-        /** Highlighted fences render ``CodeBlock`` (block shell); skip invalid ``<pre><div>``. */
-        if (isRenderedCodeBlock(lone)) {
-          return <>{markdownChildren}</>;
-        }
         const fence = codeFenceFromPreChild(lone);
         if (fence) {
           return (
-            <CodeBlock
-              language={fence.language || "text"}
-              code={fence.code}
-              className="my-3"
-              highlight={highlightCode}
-              showLineNumbers={fence.code.includes("\n")}
-            />
+            <MarkdownCodeBlock language={fence.language} code={fence.code} />
           );
         }
         return (
           <pre
             className={cn(
               "my-3 overflow-x-auto rounded-lg border border-border/60 bg-muted/35",
-              "p-3 font-mono text-[0.8125rem] leading-snug text-foreground/90",
+              "p-3 font-mono text-code text-foreground/90",
               "whitespace-pre [overflow-wrap:normal]",
             )}
           >
@@ -639,15 +619,18 @@ export default function MarkdownTextRenderer({
         if (href === "streamdown:incomplete-link") {
           return <>{markdownChildren}</>;
         }
+        if (documentPath) {
+          return <DocumentLink href={href} path={documentPath} onOpen={onOpenFilePreview}>{markdownChildren}</DocumentLink>;
+        }
         const sessionHref = sessionReferenceHref(href);
         if (sessionHref) {
           return (
             <a
               href={sessionHref}
               className="rounded-sm underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
-              style={{ textDecorationColor: INLINE_TOKEN_HIGHLIGHT_COLOR }}
+              style={{ textDecorationColor: INLINE_REFERENCE_HIGHLIGHT_COLOR }}
             >
-              <InlineTokenHighlight color={INLINE_TOKEN_HIGHLIGHT_COLOR}>
+              <InlineTokenHighlight color={INLINE_REFERENCE_HIGHLIGHT_COLOR}>
                 {markdownChildren}
               </InlineTokenHighlight>
             </a>
@@ -660,7 +643,7 @@ export default function MarkdownTextRenderer({
         if (filePath) {
           const label = nodeText(markdownChildren).trim();
           return (
-            <FileReferenceChip
+            <AvailableFileReferenceChip
               path={label || filePath}
               tooltipPath={filePath}
               previewPath={filePath}
@@ -672,16 +655,23 @@ export default function MarkdownTextRenderer({
           return <>{markdownChildren}</>;
         }
         return (
-          <a
+          <WebLink
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-blue-500 underline underline-offset-2 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+            className="text-content-link underline underline-offset-2 hover:text-content-link-hover"
             {...props}
           >
             {markdownChildren}
-          </a>
+          </WebLink>
         );
+      },
+      span({ children: spanChildren, className: spanClassName, node: _node, ...props }) {
+        void _node;
+        if (spanClassName?.split(" ").includes("katex-display")) {
+          return <DisplayMath>{spanChildren}</DisplayMath>;
+        }
+        return <span className={spanClassName} {...props}>{spanChildren}</span>;
       },
       // Streamdown decorates emphasis with spans by default. Preserve native
       // semantics for accessibility and predictable typography.
@@ -714,11 +704,13 @@ export default function MarkdownTextRenderer({
           >
             <table
               className={cn(
-                "w-full min-w-max border-collapse text-[13px] leading-5",
+                "w-full table-fixed border-collapse text-reading-small",
                 "[&_thead]:bg-muted/45 [&_thead]:text-muted-foreground",
                 "[&_th]:border-b [&_th]:border-border/65 [&_th]:px-3 [&_th]:py-2",
-                "[&_th]:text-left [&_th]:font-medium",
+                "[&_th]:text-left [&_th]:font-medium [&_th]:whitespace-normal",
+                "[&_th]:[overflow-wrap:anywhere]",
                 "[&_td]:border-b [&_td]:border-border/55 [&_td]:px-3 [&_td]:py-2",
+                "[&_td]:whitespace-normal [&_td]:[overflow-wrap:anywhere]",
                 "[&_th:not(:last-child)]:border-r [&_th:not(:last-child)]:border-border/45",
                 "[&_td:not(:last-child)]:border-r [&_td:not(:last-child)]:border-border/45",
                 "[&_tbody_tr:last-child_td]:border-b-0",
@@ -730,12 +722,17 @@ export default function MarkdownTextRenderer({
           </div>
         );
       },
-      li({ children: markdownChildren, className: itemClassName }) {
-        const link = inlineLinkPreviewFromChildren(markdownChildren);
-        if (link) {
+      li({ children: markdownChildren, className: itemClassName, node }) {
+        const preview = node?.properties as InlineLinkPreviewProperties | undefined;
+        if (!documentPath && preview?.["data-link-preview-href"]) {
           return (
             <li className={cn("list-none pl-0", itemClassName)}>
-              <InlineLinkPreviewRow link={link} />
+              <InlineLinkPreviewRow link={{
+                href: preview["data-link-preview-href"],
+                host: preview["data-link-preview-host"],
+                title: preview["data-link-preview-title"],
+                prefix: preview["data-link-preview-prefix"],
+              }} />
             </li>
           );
         }
@@ -745,7 +742,7 @@ export default function MarkdownTextRenderer({
             className={cn(
               itemClassName,
               taskItem
-                ? "flex min-w-0 items-start gap-2 text-[13px] leading-5 [&>p]:m-0"
+                ? "flex min-w-0 items-start gap-2 [&>p]:m-0"
                 : "[&>p]:inline",
             )}
           >
@@ -761,12 +758,12 @@ export default function MarkdownTextRenderer({
             data-testid="markdown-task-checkbox"
             data-task-checked={checked ? "true" : "false"}
             className={cn(
-              "mt-0.5 inline-grid h-4 w-4 shrink-0 place-items-center rounded-full",
+              "mt-[0.35em] inline-grid h-[1em] w-[1em] shrink-0 place-items-center rounded-full",
               "border border-dashed border-muted-foreground/55 bg-background text-background",
               checked && "border-solid border-emerald-500 bg-emerald-500 text-white",
             )}
           >
-            {checked ? <Check className="h-3 w-3 stroke-[3]" /> : null}
+            {checked ? <Check className="h-[0.75em] w-[0.75em] stroke-[3]" /> : null}
           </span>
         );
       },
@@ -792,7 +789,7 @@ export default function MarkdownTextRenderer({
       },
       summary({ children: markdownChildren }) {
         return (
-          <summary className="cursor-pointer select-none text-sm font-medium text-foreground/88 marker:text-muted-foreground">
+          <summary className="cursor-pointer select-none text-foreground/88 marker:text-muted-foreground">
             {markdownChildren}
           </summary>
         );
@@ -804,6 +801,9 @@ export default function MarkdownTextRenderer({
         const source = typeof src === "string" ? src : "";
         if (!source) return null;
         const label = typeof alt === "string" ? alt : "";
+        if (documentPath) {
+          return <DocumentLink href={source} path={documentPath} onOpen={onOpenFilePreview}>{label || source}</DocumentLink>;
+        }
         const kind = markdownAttachmentKind(source, label);
         return (
           <AttachmentTile
@@ -817,15 +817,16 @@ export default function MarkdownTextRenderer({
         );
       },
     }),
-    [highlightCode, onOpenFilePreview, t],
+    [onOpenFilePreview, documentPath, t],
   );
 
   return (
+    <MarkdownCodeContext.Provider value={{ streaming, highlight: highlightCode }}>
     <Streamdown
       key={needsMath && mathPlugin ? "math" : "text"}
-      mode={streaming ? "streaming" : "static"}
-      parseIncompleteMarkdown
-      remend={REMEND_OPTIONS}
+      mode={streaming || preserveStreamingLayout ? "streaming" : "static"}
+      parseIncompleteMarkdown={false}
+      parseMarkdownIntoBlocksFn={parseMathAwareMarkdownBlocks}
       isAnimating={false}
       animated={false}
       linkSafety={DIRECT_LINKS}
@@ -835,20 +836,21 @@ export default function MarkdownTextRenderer({
       components={components}
       className={cn(
         "markdown-content prose max-w-none dark:prose-invert",
-        "prose-headings:mt-4 prose-headings:mb-2 prose-headings:font-semibold prose-headings:tracking-tight",
-        "prose-h1:text-lg prose-h2:text-base prose-h3:text-sm prose-h4:text-[13px]",
+        "prose-headings:mt-4 prose-headings:mb-2 prose-headings:tracking-tight",
         "prose-p:my-2",
         "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
         "prose-blockquote:my-3 prose-blockquote:border-l-2 prose-blockquote:font-normal",
         "prose-blockquote:not-italic prose-blockquote:text-foreground/80",
-        "prose-a:text-blue-500 prose-a:underline-offset-2 hover:prose-a:text-blue-600 dark:prose-a:text-blue-300 dark:hover:prose-a:text-blue-200",
+        "prose-a:text-content-link prose-a:underline-offset-2 hover:prose-a:text-content-link-hover",
         "prose-hr:my-6",
         "prose-pre:my-0 prose-pre:bg-transparent prose-pre:p-0",
         "prose-code:before:content-none prose-code:after:content-none prose-code:font-normal",
         className,
       )}
     >
-      {children}
+      {/* Repair follows generation, independently of the preserved layout mode. */}
+      {streaming ? remend(children, REMEND_OPTIONS) : children}
     </Streamdown>
+    </MarkdownCodeContext.Provider>
   );
 }

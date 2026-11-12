@@ -25,6 +25,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
@@ -42,7 +43,8 @@ from nanobot.channels.feishu.instances import (
 from nanobot.channels.feishu.websocket import get_feishu_ws_runner
 from nanobot.command.router import normalize_command_text
 from nanobot.config.paths import get_media_dir
-from nanobot.pairing import clear_channel
+from nanobot.events import ContextCompactionEvent
+from nanobot.pairing import PAIRING_CODE_META_KEY, clear_channel
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.logging_bridge import redirect_lib_logging
 
@@ -2440,9 +2442,12 @@ class FeishuChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Feishu, including media (images/files) if present."""
-        if not self._client:
-            self.logger.warning("client not initialized")
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
+        if not self._client:
+            raise ChannelNotReadyError("Feishu client is not ready to send the reply")
 
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
@@ -2584,7 +2589,8 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                fmt = self._detect_msg_format(msg.content)
+                # Bootstrap authorization must not depend on rich-text/card permissions.
+                fmt = "text" if msg.metadata.get(PAIRING_CODE_META_KEY) else self._detect_msg_format(msg.content)
 
                 if fmt == "text":
                     # Short plain text – send as simple text message

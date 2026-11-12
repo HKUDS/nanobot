@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { installedMcpPresetsFromPayload } from "@/lib/mcp-preset-events";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ClientProvider } from "@/providers/ClientProvider";
+import type { McpPresetInfo } from "@/lib/types";
 import { __clearLogoFallbackCacheForTests } from "@/hooks/useLogoFallback";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
@@ -29,6 +30,8 @@ const agentPlugin = {
   display_name: "Computer Use",
   category: "Plugin",
   description: "Control the desktop with a live preview.",
+  docs_url: "",
+  note: "",
   requires: "screen-recording, accessibility",
   transport: "stdio",
   install_supported: false,
@@ -38,8 +41,9 @@ const agentPlugin = {
   available: false,
   status: "disabled",
   required_fields: [],
+  connection_summary: "",
   source: "agent-plugin",
-};
+} satisfies McpPresetInfo;
 
 function selectAutomationFilter(name: string) {
   fireEvent.pointerDown(screen.getByRole("button", { name: /^Filter/ }), { button: 0, ctrlKey: false });
@@ -72,7 +76,7 @@ describe("Settings system domains", () => {
       ...settingsPayload(), requires_restart: true,
     }, onRestart: restart });
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restart", exact: true }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restart" }));
     expect(restart).toHaveBeenCalledTimes(1);
   });
 
@@ -93,11 +97,11 @@ describe("Settings system domains", () => {
       },
     });
     const sidebar = screen.getByRole("complementary");
-    const restart = within(sidebar).getByRole("button", { name: "Restart", exact: true });
+    const restart = within(sidebar).getByRole("button", { name: "Restart" });
     for (const section of ["Capabilities", "Models", "Advanced", "System"]) {
-      fireEvent.click(within(sidebar).getByRole("button", { name: section, exact: true }));
+      fireEvent.click(within(sidebar).getByRole("button", { name: section }));
       await waitFor(() => {
-        expect(screen.getAllByRole("button", { name: "Restart", exact: true })).toEqual([restart]);
+        expect(screen.getAllByRole("button", { name: "Restart" })).toEqual([restart]);
         expect(screen.getAllByText("Saved. Restart to apply changes.")).toHaveLength(1);
         expect(within(sidebar).getByText("Saved. Restart to apply changes.")).toBeVisible();
       });
@@ -136,7 +140,8 @@ describe("Settings system domains", () => {
 
     expect(await screen.findByText("Computer Use")).toBeInTheDocument();
     expect(screen.getByText("Plugins")).toBeInTheDocument();
-    expect(screen.getByText(/Control the desktop.*screen-recording, accessibility/)).toBeInTheDocument();
+    expect(screen.getByText(/Control the desktop/)).toBeInTheDocument();
+    expect(screen.getByText("screen-recording, accessibility")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Enable" }));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
@@ -162,6 +167,32 @@ describe("Settings system domains", () => {
       expect(screen.getByTestId("settings-section-transition")).toHaveClass("settings-feature-page");
     },
   );
+
+  it.each([
+    ["skills", "Loading skills…"],
+    ["apps", "Loading apps…"],
+    ["channels", "Loading channels…"],
+    ["automations", "Loading automations..."],
+  ] as const)("keeps the %s loading surface mounted when the settings snapshot arrives", async (initialSection, label) => {
+    let resolveSettings!: (value: Response) => void;
+    const pendingSettings = new Promise<Response>((resolve) => { resolveSettings = resolve; });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? pendingSettings : new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection, initialSettings: null, skillsLoading: true, showSidebar: false });
+    const skeleton = screen.getByRole("status", { name: label });
+    expect(skeleton).toHaveAttribute("aria-busy", "true");
+    await act(async () => { resolveSettings(jsonResponse(settingsPayload())); });
+    expect(screen.getByRole("status", { name: label })).toBe(skeleton);
+  });
+
+  it("shows available skills while the unrelated settings snapshot is still pending", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    renderSettingsView({ initialSection: "skills", initialSettings: null, showSidebar: false, skills: [{
+      name: "project-review", description: "Review a project.", source: "builtin", available: true, enabled: true,
+    }] });
+    expect(screen.getByRole("button", { name: "Open details for project-review" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Search installed skills" })).toBeVisible();
+  });
 
   it("keeps the regular settings page at its existing width", () => {
     renderSettingsView({ initialSection: "models", initialSettings: settingsPayload() });
@@ -202,9 +233,11 @@ describe("Settings system domains", () => {
     expect(title.parentElement).toHaveClass("settings-section-heading");
     expect(title.nextElementSibling).toHaveTextContent("1");
     expect(title.nextElementSibling).toHaveClass("tabular-nums");
-    expect(title.nextElementSibling).not.toHaveClass("rounded-full", "bg-muted");
+    for (const className of ["rounded-full", "bg-muted"]) {
+      expect(title.nextElementSibling).not.toHaveClass(className);
+    }
 
-    fireEvent.click(screen.getByRole("button", { name: "MCP", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
     const mcpTitle = screen.getByRole("heading", { name: "MCP tools" });
     expect(mcpTitle.parentElement).toHaveClass("settings-section-heading");
     expect(mcpTitle.nextElementSibling).toHaveTextContent("0");
@@ -236,7 +269,7 @@ describe("Settings system domains", () => {
       }));
       renderSettingsView({ initialSection: "apps", initialSettings: settingsPayload() });
       await screen.findByText("AnyGen");
-      if (kind === "mcp") fireEvent.click(screen.getByRole("button", { name: "MCP", exact: true }));
+      if (kind === "mcp") fireEvent.click(screen.getByRole("button", { name: "MCP" }));
       const row = (await screen.findByText(name)).closest("article")!;
       const image = row.querySelector("img")!;
       expect(image).toHaveAttribute("src", logoUrl);
@@ -255,6 +288,32 @@ describe("Settings system domains", () => {
     },
   );
 
+  it("loads only the skill detail body and preserves it while checking dependencies again", async () => {
+    const skill = { name: "pr-review", description: "Review pull requests", source: "builtin", available: false, enabled: true };
+    let finish!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
+    render(<ClientProvider client={{} as never} token="tok"><SkillsCatalogSettings skills={[skill]} /></ClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Open details for pr-review" }));
+    const detail = screen.getByRole("dialog");
+    expect(within(detail).getByText("Review pull requests")).toBeVisible();
+    expect(within(detail).getByRole("status", { name: "Loading skill details..." })).toHaveAttribute("aria-busy", "true");
+    await act(async () => finish(jsonResponse({ ...skill, raw_markdown: "Review repository changes.", requirements: {
+      bins: ["gh"], env: [], missing_bins: ["gh"], missing_env: [],
+    } })));
+    const toggle = within(detail).getByRole("switch");
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    let fail!: (error: Error) => void;
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    fireEvent.click(within(detail).getByRole("button", { name: "Check again" }));
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    expect(toggle).toBeDisabled();
+    expect(within(detail).queryByRole("status", { name: "Loading skill details..." })).not.toBeInTheDocument();
+    await act(async () => fail(new Error("Read failed")));
+    expect(within(detail).getByRole("alert")).toHaveTextContent("Could not load skill details.");
+    expect(within(detail).getByText("Skill instructions")).toBeVisible();
+    expect(toggle).toBeEnabled();
+  });
+
   it("keeps skill group labels natural without changing grouping or filtering", () => {
     render(<ClientProvider client={{} as never} token="tok">
       <SkillsCatalogSettings skills={[
@@ -264,9 +323,11 @@ describe("Settings system domains", () => {
       ]} />
     </ClientProvider>);
     for (const name of ["Custom", "Built-in", "Other"]) {
-      const title = screen.getByRole("heading", { name, exact: true });
+      const title = screen.getByRole("heading", { name });
       expect(title).toHaveClass("text-[13px]", "font-medium", "leading-5");
-      expect(title).not.toHaveClass("uppercase", "tracking-[0.08em]");
+      for (const className of ["uppercase", "tracking-[0.08em]"]) {
+        expect(title).not.toHaveClass(className);
+      }
       expect(title.nextElementSibling).toHaveTextContent("1");
       expect(title.nextElementSibling).toHaveClass("leading-5");
     }
@@ -307,7 +368,7 @@ describe("Settings system domains", () => {
     const input = screen.getByRole("textbox", { name: "Describe an automation" });
     expect(input).toHaveAttribute(
       "placeholder",
-      "What would you like nanobot to automate?",
+      "What should nanobot automate?",
     );
     fireEvent.change(input, { target: { value: "Summarize updates every weekday at 9" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -376,7 +437,7 @@ describe("Settings system domains", () => {
     }));
     renderSettingsView({ initialSection: "automations", initialSettings: settingsPayload(), showSidebar: false });
 
-    const trigger = await screen.findByRole("button", { name: "Filter", exact: true });
+    const trigger = await screen.findByRole("button", { name: "Filter" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     const menu = screen.getByRole("menu", { name: "Filter" });
@@ -679,7 +740,7 @@ describe("Settings system domains", () => {
     expect(screen.getByLabelText("User ID")).toBeInTheDocument();
     expect(screen.getByLabelText("Device ID")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.click(screen.getByRole("switch", { name: "Matrix channel" }));
 
     await waitFor(() =>

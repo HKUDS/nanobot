@@ -30,44 +30,44 @@
         "label": "Porta de escuta"
       },
       "replyInThread": {
-        "label": "Responder no tópico",
+        "label": "Respostas na thread",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "mentionOnlyResponse": {
-        "label": "Resposta apenas com menção"
+        "label": "Resposta à menção isolada"
       },
       "validateInboundAuth": {
-        "label": "Validar solicitações recebidas",
+        "label": "Verificar solicitações",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "refTtlDays": {
-        "label": "Vida útil da conversa"
+        "label": "Validade das referências (dias)"
       },
       "pruneWebChatRefs": {
-        "label": "Remover conversas do Web Chat",
+        "label": "Limpar referências Web Chat",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "Remover conversas não pessoais",
+        "label": "Limpar referências de grupos",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"
         }
       },
       "refTouchIntervalS": {
-        "label": "Intervalo de atualização da conversa"
+        "label": "Intervalo de atualização (segundos)"
       },
       "trustedServiceUrlHosts": {
-        "label": "Hosts de serviço confiáveis"
+        "label": "Hosts confiáveis"
       }
     }
   }

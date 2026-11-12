@@ -77,8 +77,7 @@ async def test_repeat_requires_original_read_result_in_current_context(tmp_path,
     assert repeated == (stub if retained == "original" else contents)
 
 
-@pytest.mark.parametrize("rewrite", ["compact", "snip"])
-async def test_dedup_uses_governed_request_instead_of_raw_transcript(tmp_path, monkeypatch, rewrite):
+async def test_dedup_uses_compacted_request_instead_of_raw_transcript(tmp_path, monkeypatch):
     tools = _tools(tmp_path)
     first, contents, _ = await _read(tools, "read-1")
 
@@ -87,7 +86,6 @@ async def test_dedup_uses_governed_request_instead_of_raw_transcript(tmp_path, m
         return (600 if contains_original else 100), "test-counter"
 
     monkeypatch.setattr("nanobot.agent.context_governance.estimate_prompt_tokens_chain", estimate)
-    monkeypatch.setattr("nanobot.agent.context_governance.estimate_message_tokens", lambda _: 300)
     consolidate = AsyncMock(return_value="The file was inspected; its original text was omitted.")
 
     def build(transcript):
@@ -97,25 +95,24 @@ async def test_dedup_uses_governed_request_instead_of_raw_transcript(tmp_path, m
             messages.append({"role": "user", "content": transcript.current_message})
         return messages
 
-    options = {}
-    if rewrite == "compact":
-        options = {
-            "transcript_input": TranscriptInput(
-                history=first.messages, current_message="Read data.txt again.",
-            ),
-            "transcript_builder": build,
-            "consolidate_history": consolidate,
-        }
     result, repeated, requests = await _read(
-        tools, "read-2", first.messages, context_window_tokens=1_624, max_tokens=100, **options,
+        tools,
+        "read-2",
+        first.messages,
+        context_window_tokens=1_624,
+        max_tokens=100,
+        transcript_input=TranscriptInput(
+            history=first.messages, current_message="Read data.txt again.",
+        ),
+        transcript_builder=build,
+        consolidate_history=consolidate,
     )
 
     assert any(message.get("tool_call_id") == "read-1" for message in result.messages)
     assert not any(message.get("tool_call_id") == "read-1" for message in requests[0])
     assert repeated == contents
-    if rewrite == "compact":
-        consolidate.assert_awaited_once()
-        assert result.summary_checkpoint is not None
+    consolidate.assert_awaited_once()
+    assert result.summary_checkpoint is not None
 
 
 async def test_direct_read_without_model_context_never_omits_contents(tmp_path):

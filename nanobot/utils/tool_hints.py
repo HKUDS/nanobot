@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import cast
 
@@ -15,6 +16,7 @@ _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
     "edit":       (["file_path", "path"],              "edit {}",     True,  False),
     "find_files": (["query", "glob", "path"],           "find {}",     False, False),
     "grep":       (["pattern"],                        'grep "{}"',   False, False),
+    "rg":         (["args"],                           "rg {}",       False, False),
     "exec":       (["command"],                        "$ {}",        False, True),
     "list_exec_sessions": ([],                          "exec sessions", False, False),
     "web_search": (["query"],                          'search "{}"', False, False),
@@ -87,6 +89,12 @@ def _extract_arg(tc: ToolCallRequest, key_args: list[str]) -> str | None:
         val = args.get(key)
         if isinstance(val, str) and val:
             return val
+        if key == "args" and isinstance(val, list) and val:
+            return " ".join(
+                arg if isinstance(arg, str) and arg and not re.search(r"[\s\"']", arg)
+                else json.dumps(arg, ensure_ascii=False)
+                for arg in cast(list[object], val)
+            )
     for val in args.values():
         if isinstance(val, str) and val:
             return val

@@ -6,7 +6,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from filelock import FileLock
 
@@ -46,30 +46,90 @@ class WebUISettingsConfig:
             return operation(self.path)
 
 
+class WebUIOAuthToken(Protocol):
+    @property
+    def access(self) -> str: ...
+
+
+class WebUIOAuthFlow(Protocol):
+    """Provider flow whose cancellation and actual worker exit are separate."""
+
+    @property
+    def expired(self) -> bool: ...
+
+    @property
+    def has_pending_work(self) -> bool:
+        """A nonblocking observation of live workers, including cleanup."""
+        ...
+
+    def complete(self, response: str | None = None, /) -> WebUIOAuthToken | None: ...
+    def cancel(self) -> None: ...
+    def wait_closed(self) -> None:
+        """Return only after the cancelled flow's workers have actually exited."""
+        ...
+
+
 class WebUIOAuthFlowRegistry:
-    """Bounded, thread-safe OAuth flows owned by one gateway instance."""
+    """Bounded, thread-safe OAuth ownership, including removed flows still stopping."""
 
     def __init__(self, *, max_flows: int = _WEBUI_OAUTH_MAX_FLOWS) -> None:
         if max_flows < 1:
             raise ValueError("max_flows must be at least one")
         self._max_flows = max_flows
-        self._flows: dict[str, tuple[str, Any]] = {}
+        self._flows: dict[str, tuple[str, WebUIOAuthFlow]] = {}
+        self._retiring: dict[int, tuple[str, WebUIOAuthFlow]] = {}
+        self._cancelling: set[int] = set()
         self._lock = threading.Lock()
+        self._closed = False
+        self._closing = False
 
-    def register(self, provider_name: str, flow_id: str, flow: Any) -> None:
-        discarded: list[Any] = []
+    @property
+    def has_pending_work(self) -> bool:
         with self._lock:
-            for existing_id, (_provider_name, existing) in list(self._flows.items()):
-                if existing.expired:
-                    discarded.append(self._flows.pop(existing_id)[1])
-            while len(self._flows) >= self._max_flows:
-                oldest_id = next(iter(self._flows))
-                discarded.append(self._flows.pop(oldest_id)[1])
-            self._flows[flow_id] = (provider_name, flow)
-        for existing in discarded:
-            existing.cancel()
+            return self._closing or bool(self._cancelling) or any(
+                flow.has_pending_work
+                for _provider, flow in (*self._flows.values(), *self._retiring.values())
+            )
 
-    def get(self, provider_name: str, flow_id: str) -> Any | None:
+    def _retire_locked(self, flow_id: str, *, cancel: bool = True) -> WebUIOAuthFlow:
+        registered = self._flows.pop(flow_id)
+        self._retiring[id(registered[1])] = registered
+        if cancel:
+            self._cancelling.add(id(registered[1]))
+        return registered[1]
+
+    def _cancel(self, flow: WebUIOAuthFlow) -> None:
+        flow.cancel()
+        with self._lock:
+            self._cancelling.discard(id(flow))
+
+    def register(self, provider_name: str, flow_id: str, flow: WebUIOAuthFlow) -> None:
+        """Register before start; reject capacity rather than losing a live worker."""
+        discarded: list[WebUIOAuthFlow] = []
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("OAuth sign-in is closing. Reconnect before starting again.")
+            for existing_id, (_provider_name, existing) in list(self._flows.items()):
+                if existing.expired or existing_id == flow_id:
+                    discarded.append(self._retire_locked(existing_id))
+            if len(self._flows) >= self._max_flows:
+                oldest_id = next(iter(self._flows))
+                discarded.append(self._retire_locked(oldest_id))
+        # Never hold the registry lock while a provider waits for its commit lock.
+        for existing in discarded:
+            self._cancel(existing)
+        with self._lock:
+            self._retiring = {
+                key: value for key, value in self._retiring.items()
+                if key in self._cancelling or value[1].has_pending_work
+            }
+            if self._closed:
+                raise RuntimeError("OAuth sign-in is closing. Reconnect before starting again.")
+            if len(self._flows) + len(self._retiring) >= self._max_flows:
+                raise RuntimeError("Previous sign-ins are still stopping. Try again shortly.")
+            self._flows[flow_id] = (provider_name, flow)
+
+    def get(self, provider_name: str, flow_id: str) -> WebUIOAuthFlow | None:
         with self._lock:
             registered = self._flows.get(flow_id)
             if registered is None or registered[0] != provider_name:
@@ -77,15 +137,15 @@ class WebUIOAuthFlowRegistry:
             flow = registered[1]
             if not flow.expired:
                 return flow
-            self._flows.pop(flow_id, None)
-        flow.cancel()
+            self._retire_locked(flow_id)
+        self._cancel(flow)
         return None
 
     def remove(
         self,
         provider_name: str,
         flow_id: str,
-        flow: Any,
+        flow: WebUIOAuthFlow,
         *,
         cancel: bool = True,
     ) -> None:
@@ -96,9 +156,9 @@ class WebUIOAuthFlowRegistry:
                 and registered[0] == provider_name
                 and registered[1] is flow
             ):
-                self._flows.pop(flow_id)
+                self._retire_locked(flow_id, cancel=cancel)
         if cancel:
-            flow.cancel()
+            self._cancel(flow)
 
     def clear(self, provider_name: str) -> None:
         with self._lock:
@@ -107,9 +167,29 @@ class WebUIOAuthFlowRegistry:
                 for flow_id, (registered_provider, _flow) in self._flows.items()
                 if registered_provider == provider_name
             ]
-            flows = [self._flows.pop(flow_id)[1] for flow_id in flow_ids]
+            for flow_id in flow_ids:
+                self._retire_locked(flow_id)
+            flows = [
+                flow for provider, flow in self._retiring.values() if provider == provider_name
+            ]
         for flow in flows:
-            flow.cancel()
+            self._cancel(flow)
+
+    def close(self) -> None:
+        """Cancel and join all owned workers; failure retains ownership for retry."""
+        with self._lock:
+            self._closed = True
+            self._closing = True
+            for flow_id in tuple(self._flows):
+                self._retire_locked(flow_id)
+            flows = [flow for _provider, flow in self._retiring.values()]
+        for flow in flows:
+            self._cancel(flow)
+        for flow in flows:
+            flow.wait_closed()
+        with self._lock:
+            self._retiring.clear()
+            self._closing = False
 
 
 @dataclass(frozen=True)

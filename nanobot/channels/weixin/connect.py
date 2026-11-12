@@ -25,7 +25,6 @@ class WeixinConnectSession:
     force: bool
     created_wall: float
     deadline: float
-    last_error: str | None = None
 
 
 class WeixinConnectStore:
@@ -33,6 +32,15 @@ class WeixinConnectStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, WeixinConnectSession] = {}
+
+    @property
+    def has_pending_work(self) -> bool:
+        # Poll/commit are awaited by the settings request owner, not detached.
+        return any(session.deadline > time.monotonic() for session in self._sessions.values())
+
+    async def close(self) -> None:
+        for session_id in tuple(self._sessions):
+            await self.cancel(session_id)
 
     async def handle(self, action: str, query: QueryParams) -> dict[str, Any]:
         """Handle one generic settings connection action."""
@@ -114,7 +122,6 @@ class WeixinConnectStore:
             )
         except Exception as exc:
             if session.channel.connect_poll_error_is_retryable(exc):
-                session.last_error = str(exc)
                 return self._pending_payload(session)
             self._sessions.pop(session_id, None)
             await self._close_channel(session.channel)

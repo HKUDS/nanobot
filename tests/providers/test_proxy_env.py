@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import httpx
+import pytest
 
 import nanobot.providers.openai_compat_provider as openai_compat_provider
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -17,28 +18,22 @@ def _make_spec(is_local: bool = False) -> MagicMock:
 class TestLocalEndpointProxyDisabled:
     """Local endpoints must bypass proxy to avoid routing LAN traffic through it."""
 
-    async def test_local_disables_proxy(self):
-        spec = _make_spec(is_local=True)
+    @pytest.mark.parametrize("api_base,is_local", [
+        ("http://localhost:11434/v1", True),
+        ("http://192.168.8.188:1234/v1", False),
+    ])
+    async def test_local_endpoint_bypasses_environment_proxy(self, monkeypatch, api_base, is_local):
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+            monkeypatch.delenv(name, raising=False)
+            monkeypatch.delenv(name.lower(), raising=False)
+        monkeypatch.setenv("ALL_PROXY", "http://proxy.example:8123")
+        spec = _make_spec(is_local=is_local)
         spec.env_key = ""
-        spec.default_api_base = "http://localhost:11434/v1"
-        provider = OpenAICompatProvider(
-            api_key="test", api_base="http://localhost:11434/v1", spec=spec,
-        )
-        await provider._ensure_client()
-        transport = provider._client._client._transport
-        # The transport should be an AsyncHTTPTransport with proxy=None
-        assert isinstance(transport, httpx.AsyncHTTPTransport)
-
-    async def test_lan_ip_disables_proxy(self):
-        spec = _make_spec(is_local=False)
-        spec.env_key = ""
-        spec.default_api_base = None
-        provider = OpenAICompatProvider(
-            api_key="test", api_base="http://192.168.8.188:1234/v1", spec=spec,
-        )
-        await provider._ensure_client()
-        transport = provider._client._client._transport
-        assert isinstance(transport, httpx.AsyncHTTPTransport)
+        spec.default_api_base = api_base
+        provider = OpenAICompatProvider(api_key="test", api_base=api_base, spec=spec)
+        async with await provider._ensure_client() as sdk:
+            client = sdk._client
+            assert client._transport_for_url(httpx.URL(api_base)) is client._transport
 
 
 class TestCloudEndpointProxyEnabled:

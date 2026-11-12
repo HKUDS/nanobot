@@ -4,26 +4,31 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 import shutil
-import stat
 import time
-import uuid
 from contextlib import suppress
 from datetime import datetime
-from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING, Any, TypeVar, cast, overload
 
-import tiktoken
 from loguru import logger
 
+from nanobot.utils.atomic_file import atomic_write_lines as atomic_write_lines
+from nanobot.utils.atomic_file import atomic_write_text as atomic_write_text
+from nanobot.utils.file_io import ensure_dir as ensure_dir
+from nanobot.utils.file_io import write_text_atomic as _write_text_atomic
+from nanobot.utils.token_encoding import get_token_encoding as _get_token_encoding
+
 if TYPE_CHECKING:
+    from tiktoken import Encoding
+
     from nanobot.providers.base import LLMUsage
 
 _TOOLS_TOKEN_CACHE_MAX_ENTRIES = 64
 _TOOLS_TOKEN_CACHE: dict[int, tuple[tuple[int, ...], dict[bool, int]]] = {}
+_TOOLS_TOKEN_CACHE_LOCK = Lock()
 _T = TypeVar("_T")
 
 
@@ -102,26 +107,25 @@ def sanitize_surrogates_deep(value: Any) -> Any:
     return value
 
 
-@lru_cache(maxsize=1)
-def _get_token_encoding() -> Any:
-    return tiktoken.get_encoding("cl100k_base")
-
-
 def _cache_tools_token_count(
     tools_id: int,
     fingerprint: tuple[int, ...],
     counts: dict[bool, int],
 ) -> None:
-    if (
-        tools_id not in _TOOLS_TOKEN_CACHE
-        and len(_TOOLS_TOKEN_CACHE) >= _TOOLS_TOKEN_CACHE_MAX_ENTRIES
-    ):
-        _TOOLS_TOKEN_CACHE.pop(next(iter(_TOOLS_TOKEN_CACHE)))
-    _TOOLS_TOKEN_CACHE[tools_id] = (fingerprint, counts)
+    with _TOOLS_TOKEN_CACHE_LOCK:
+        cached = _TOOLS_TOKEN_CACHE.get(tools_id)
+        if cached is not None and cached[0] == fingerprint:
+            counts = {**cached[1], **counts}
+        if (
+            tools_id not in _TOOLS_TOKEN_CACHE
+            and len(_TOOLS_TOKEN_CACHE) >= _TOOLS_TOKEN_CACHE_MAX_ENTRIES
+        ):
+            _TOOLS_TOKEN_CACHE.pop(next(iter(_TOOLS_TOKEN_CACHE)))
+        _TOOLS_TOKEN_CACHE[tools_id] = (fingerprint, counts)
 
 
 def _estimate_tools_tokens(
-    enc: Any,
+    enc: Encoding,
     tools: list[dict[str, Any]],
     *,
     leading_separator: bool,
@@ -130,19 +134,20 @@ def _estimate_tools_tokens(
     # ToolRegistry keeps the returned definitions list alive until the registry changes.
     tools_id = id(tools)
     fingerprint = tuple(id(tool) for tool in tools)
-    cached = _TOOLS_TOKEN_CACHE.get(tools_id)
-    if cached and cached[0] == fingerprint:
-        token_count = cached[1].get(leading_separator)
-        if token_count is not None:
-            return token_count
-        counts = cached[1]
-    else:
-        counts = {}
+    with _TOOLS_TOKEN_CACHE_LOCK:
+        cached = _TOOLS_TOKEN_CACHE.get(tools_id)
+        if cached and cached[0] == fingerprint:
+            token_count = cached[1].get(leading_separator)
+            if token_count is not None:
+                return token_count
+            counts = dict(cached[1])
+        else:
+            counts = {}
 
     rendered = json.dumps(tools, ensure_ascii=False)
     if leading_separator:
         rendered = "\n" + rendered
-    token_count = len(enc.encode(rendered))
+    token_count = len(enc.encode_ordinary(rendered))
     counts[leading_separator] = token_count
     _cache_tools_token_count(tools_id, fingerprint, counts)
     return token_count
@@ -281,10 +286,10 @@ class IncrementalThinkExtractor:
         thinking, _ = extract_think(buf)
         if not thinking or thinking == self._emitted:
             return False
-        new = thinking[len(self._emitted) :].strip()
-        self._emitted = thinking
-        if not new:
+        new = thinking[len(self._emitted) :]
+        if not new.strip():
             return False
+        self._emitted = thinking
         await emit(new)
         return True
 
@@ -352,19 +357,12 @@ def build_image_content_blocks(
     ]
 
 
-def ensure_dir(path: Path) -> Path:
-    """Ensure directory exists, return it."""
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def timestamp() -> str:
     """Current ISO timestamp."""
     return datetime.now().isoformat()
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
-_TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
@@ -409,34 +407,35 @@ def truncate_text(text: str, max_chars: int) -> str:
 def truncate_text_to_tokens(text: str, max_tokens: int) -> str:
     """Truncate text to a token budget with a stable suffix.
 
-    Unlike :func:`truncate_text`, this measures actual tokens, so the cap holds
-    regardless of language or content (CJK and code cost more tokens per char).
-    Falls back to a conservative UTF-8 byte budget if tiktoken is unavailable.
+    Uses cl100k_base when ready, which may differ from the model's tokenizer.
+    Falls back to a UTF-8 byte budget while loading or if initialization failed.
     """
     if max_tokens <= 0:
         return text
     try:
         enc = _get_token_encoding()
-        tokens = enc.encode(text)
-        if len(tokens) <= max_tokens:
-            return text
-        suffix_tokens = enc.encode(_TRUNCATED_SUFFIX)
-        body_budget = max_tokens - len(suffix_tokens)
-        if body_budget <= 0:
+        if enc is not None:
+            tokens = enc.encode_ordinary(text)
+            if len(tokens) <= max_tokens:
+                return text
+            suffix_tokens = enc.encode_ordinary(_TRUNCATED_SUFFIX)
+            body_budget = max_tokens - len(suffix_tokens)
+            if body_budget <= 0:
+                return enc.decode(tokens[:max_tokens])
+            for candidate_budget in range(body_budget, -1, -1):
+                result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
+                if len(enc.encode_ordinary(result)) <= max_tokens:
+                    return result
             return enc.decode(tokens[:max_tokens])
-        for candidate_budget in range(body_budget, -1, -1):
-            result = enc.decode(tokens[:candidate_budget]) + _TRUNCATED_SUFFIX
-            if len(enc.encode(result)) <= max_tokens:
-                return result
-        return enc.decode(tokens[:max_tokens])
     except Exception:
-        if len(text.encode("utf-8")) <= max_tokens:
-            return text
-        suffix_bytes = len(_TRUNCATED_SUFFIX.encode("utf-8"))
-        if max_tokens <= suffix_bytes:
-            return _truncate_text_to_utf8_bytes(text, max_tokens)
-        body = _truncate_text_to_utf8_bytes(text, max_tokens - suffix_bytes)
-        return body + _TRUNCATED_SUFFIX
+        pass
+    if len(text.encode("utf-8")) <= max_tokens:
+        return text
+    suffix_bytes = len(_TRUNCATED_SUFFIX.encode("utf-8"))
+    if max_tokens <= suffix_bytes:
+        return _truncate_text_to_utf8_bytes(text, max_tokens)
+    body = _truncate_text_to_utf8_bytes(text, max_tokens - suffix_bytes)
+    return body + _TRUNCATED_SUFFIX
 
 
 def _truncate_text_to_utf8_bytes(text: str, max_bytes: int) -> str:
@@ -553,30 +552,6 @@ def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _write_text_atomic(path: Path, content: str) -> None:
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    existing_mode: int | None = None
-    with suppress(OSError):
-        existing_mode = stat.S_IMODE(path.stat().st_mode)
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            if existing_mode is not None:
-                os.chmod(tmp, existing_mode)
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
-        with suppress(OSError, NotImplementedError):
-            dfd = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
-
-
 def maybe_persist_tool_result(
     workspace: Path | None,
     session_key: str | None,
@@ -602,12 +577,23 @@ def maybe_persist_tool_result(
     if not path.exists():
         _write_text_atomic(path, content)
 
-    preview = content[:_TOOL_RESULT_PREVIEW_CHARS]
+    reference_path = str(path.resolve())
+    overhead = len(_render_tool_result_reference(
+        reference_path, original_size=len(content), preview="", truncated_preview=True,
+    ))
+    available = max(0, max_chars - overhead)
+    separator = "\n...\n"
+    tail_chars = min(1200, max(0, (available - len(separator)) // 4))
+    if tail_chars:
+        head_chars = available - tail_chars - len(separator)
+        preview = content[:head_chars] + separator + content[-tail_chars:]
+    else:
+        preview = content[:available]
     return _render_tool_result_reference(
-        str(path.resolve()),
+        reference_path,
         original_size=len(content),
         preview=preview,
-        truncated_preview=len(content) > _TOOL_RESULT_PREVIEW_CHARS,
+        truncated_preview=True,
         max_chars=max_chars,
     )
 
@@ -755,20 +741,22 @@ def _estimate_prompt_tokens_with_source(
     per_message_overhead = len(messages) * 4
     try:
         enc = _get_token_encoding()
-        tool_tokens = (
-            _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
-        )
-        message_tokens = len(enc.encode(message_payload)) if message_payload else 0
-        return message_tokens + tool_tokens + per_message_overhead, "tiktoken"
+        if enc is not None:
+            tool_tokens = (
+                _estimate_tools_tokens(enc, tools, leading_separator=bool(parts)) if tools else 0
+            )
+            message_tokens = len(enc.encode_ordinary(message_payload)) if message_payload else 0
+            return message_tokens + tool_tokens + per_message_overhead, "tiktoken"
     except Exception:
-        tool_payload = (
-            ("\n" if message_payload else "") + json.dumps(tools, ensure_ascii=False)
-            if tools
-            else ""
-        )
-        payload = message_payload + tool_payload
-        estimated = len(payload.encode("utf-8"))
-        return estimated + per_message_overhead, "heuristic"
+        pass
+    tool_payload = (
+        ("\n" if message_payload else "") + json.dumps(tools, ensure_ascii=False)
+        if tools
+        else ""
+    )
+    payload = message_payload + tool_payload
+    estimated = len(payload.encode("utf-8"))
+    return estimated + per_message_overhead, "heuristic"
 
 
 def estimate_prompt_tokens(
@@ -814,9 +802,11 @@ def estimate_message_tokens(message: dict[str, Any]) -> int:
         return 4
     try:
         enc = _get_token_encoding()
-        return max(4, len(enc.encode(payload)) + 4)
+        if enc is not None:
+            return max(4, len(enc.encode_ordinary(payload)) + 4)
     except Exception:
-        return max(4, len(payload.encode("utf-8")) + 4)
+        pass
+    return max(4, len(payload.encode("utf-8")) + 4)
 
 
 def estimate_prompt_tokens_chain(

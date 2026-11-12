@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { FileReferenceChip } from "@/components/FileReferenceChip";
+import { FileReferenceChip, fileIconForPath } from "@/components/FileReferenceChip";
 import { codeLanguageFromPath } from "@/lib/code-language";
 import {
   hasRenderableFileDiff,
@@ -21,6 +21,7 @@ import type { UIFileDiff, UIFileEdit } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { ActivityStep } from "./ActivityStep";
+import { formatActivityTarget } from "./activity-text";
 import { DiffPair } from "./DiffPair";
 import { DiffSyntaxHighlight } from "./DiffSyntaxHighlight";
 
@@ -90,33 +91,38 @@ function FileEditRow({
   const { t } = useTranslation();
   const editing = edit.status === "editing";
   const failed = edit.status === "error";
-  const action = fileEditAction(edit, editing, failed);
+  const action = fileEditAction(edit, editing, failed, t);
   const hasCountedDiff = !failed && !edit.binary && hasVisibleDiffStats(edit);
   const showDiff = canRenderDiff(edit, displayMode);
 
   return (
     <div className="min-w-0">
       <ActivityStep
-        showMarker={false}
+        icon={fileIconForPath(edit.absolute_path || edit.path)}
+        markerLabel={action}
         active={editing}
         tone={failed ? "error" : editing ? "active" : "success"}
         className="text-xs"
-        ariaLabel={edit.path ? `${action} ${edit.path}` : action}
+        ariaLabel={formatActivityTarget(t, action, edit.path)}
         label={edit.pending && !edit.path
           ? t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })
           : (
             <span className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
-              <span className={cn("shrink-0", failed && "text-destructive/80")}>{action}</span>
-              <FileReferenceChip
-                path={edit.path}
-                previewPath={edit.absolute_path || edit.path}
-                onOpen={onOpenFilePreview}
-                display="path"
-                active={editing}
-                className="min-w-0"
-                textClassName="truncate text-[12px]"
-                testId="activity-file-reference"
-              />
+              <span className="flex min-w-0 shrink overflow-hidden">
+                <FileReferenceChip
+                  path={edit.path}
+                  tooltipPath={edit.absolute_path || edit.path}
+                  previewPath={edit.absolute_path || edit.path}
+                  onOpen={onOpenFilePreview}
+                  display="path"
+                  showIcon={false}
+                  active={editing}
+                  className="min-w-0"
+                  truncateFromStart
+                  textClassName="text-[12px]"
+                  testId="activity-file-reference"
+                />
+              </span>
               {hasCountedDiff ? <DiffPair added={edit.added} deleted={edit.deleted} /> : null}
             </span>
           )}
@@ -137,11 +143,17 @@ function hasVisibleDiffStats(edit: Pick<FileEditSummary, "added" | "deleted">): 
   return edit.added > 0 || edit.deleted > 0;
 }
 
-function fileEditAction(edit: FileEditSummary, editing: boolean, failed: boolean): string {
+function fileEditAction(
+  edit: FileEditSummary,
+  editing: boolean,
+  failed: boolean,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
   const deleting = edit.operation === "delete";
-  if (failed) return deleting ? "Could not delete" : "Could not edit";
-  if (editing) return deleting ? "Deleting" : "Editing";
-  return deleting ? "Deleted" : "Edited";
+  if (failed) return t(`message.agentActivity.${deleting ? "deleteFileFailed" : "editFileFailedShort"}`);
+  if (editing) return t(`message.agentActivity.${deleting ? "deletingFile" : "editingFileShort"}`);
+  if (edit.operation === "create") return t("message.agentActivity.createdFile");
+  return t(`message.agentActivity.${deleting ? "deletedFile" : "editedFileShort"}`);
 }
 
 function canRenderDiff(edit: FileEditSummary, displayMode: FileEditDisplayMode): boolean {
@@ -186,10 +198,6 @@ function FileUnifiedDiff({
       : EMPTY_VISIBLE_DIFF,
     [lineLimit, renderableDiff, shouldRenderBody, totalLineCount],
   );
-  const lineCountLabel = t("message.fileEditDiffLineCount", {
-    count: diff.truncated ? `${totalLineCount}+` : totalLineCount,
-    defaultValue: "{{count}} lines",
-  });
   const viewDiffLabel = shouldAutoCollapse
     ? tx("message.fileEditViewLargeDiff", "View large diff")
     : tx("message.fileEditViewDiff", "View diff");
@@ -311,7 +319,6 @@ function FileUnifiedDiff({
           aria-hidden
         />
         <span className="min-w-0 flex-1">{viewDiffLabel}</span>
-        <span className="shrink-0 text-muted-foreground/65">{lineCountLabel}</span>
       </button>
       <DisclosureContent id={contentId} open={open} onExitComplete={releaseBody}>
         {shouldRenderBody ? renderBody() : null}

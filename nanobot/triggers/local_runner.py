@@ -11,6 +11,7 @@ from loguru import logger
 
 from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 from nanobot.triggers.local_store import LocalTriggerStore
 from nanobot.triggers.local_types import LocalTrigger, TriggerDelivery
@@ -24,11 +25,14 @@ async def run_local_trigger_queue(
     is_channel_enabled: Callable[[str], bool],
     poll_interval_s: float = 0.5,
     batch_size: int = 20,
+    admission: RuntimeAdmission | None = None,
 ) -> None:
     """Poll local trigger deliveries and submit them as session turns."""
     if submit_turn is None:
         raise ValueError("run_local_trigger_queue requires submit_turn")
+    gate = admission if admission is not None else RuntimeAdmission()
     logger.info("Local trigger queue started")
+    await gate.wait_until_open()
     recovered = store.recover_processing_deliveries()
     if recovered:
         logger.warning(
@@ -36,91 +40,69 @@ async def run_local_trigger_queue(
             recovered,
         )
     while True:
-        deliveries = store.claim_deliveries(limit=batch_size)
-        if not deliveries:
-            await asyncio.sleep(poll_interval_s)
-            continue
-
-        for delivery in deliveries:
-            try:
-                await _deliver_delivery(
-                    store,
-                    delivery,
-                    submit_turn=submit_turn,
+        await gate.wait_until_open()
+        with gate.activity():
+            deliveries = store.claim_deliveries(limit=batch_size)
+            for delivery in deliveries:
+                await _run_delivery(
+                    store, delivery, submit_turn=submit_turn,
                     is_channel_enabled=is_channel_enabled,
                 )
-                store.complete_delivery(delivery)
-            except asyncio.CancelledError as exc:
-                store.retry_delivery(delivery, str(exc) or exc.__class__.__name__)
-                _write_delivery_run_record(
-                    store,
-                    delivery,
-                    status="interrupted",
-                    error=str(exc) or exc.__class__.__name__,
-                )
-                raise
-            except _TerminalDeliveryError as exc:
-                store.record_delivery(
-                    delivery.trigger_id,
-                    status="error",
-                    error=str(exc),
-                    run_at_ms=delivery.created_at_ms,
-                )
-                _write_delivery_run_record(
-                    store,
-                    delivery,
-                    status="error",
-                    error=str(exc),
-                )
-                store.complete_delivery(delivery)
-                logger.warning(
-                    "Trigger: dropped delivery {} for {}: {}",
-                    delivery.id,
-                    delivery.trigger_id,
-                    exc,
-                )
-            except AutomationTurnError as exc:
-                error = str(exc) or exc.__class__.__name__
-                store.record_delivery(
-                    delivery.trigger_id,
-                    status="error",
-                    error=error,
-                    run_at_ms=delivery.created_at_ms,
-                )
-                _write_delivery_run_record(
-                    store,
-                    delivery,
-                    status="error",
-                    error=error,
-                )
-                store.complete_delivery(delivery)
-                logger.warning(
-                    "Trigger: delivery {} for {} reached the agent but failed: {}",
-                    delivery.id,
-                    delivery.trigger_id,
-                    error,
-                )
-            except Exception as exc:
-                error = str(exc) or exc.__class__.__name__
-                retried = store.retry_delivery(delivery, error)
-                _write_delivery_run_record(
-                    store,
-                    delivery,
-                    status="retrying" if retried else "error",
-                    error=error,
-                )
-                store.record_delivery(
-                    delivery.trigger_id,
-                    status="error",
-                    error=error,
-                    run_at_ms=delivery.created_at_ms,
-                )
-                logger.exception(
-                    "Trigger: failed delivery {} for {}{}",
-                    delivery.id,
-                    delivery.trigger_id,
-                    "; queued retry" if retried else "; moved to failed queue",
-                )
+        if not deliveries:
+            await asyncio.sleep(poll_interval_s)
+
+
+async def _run_delivery(
+    store: LocalTriggerStore,
+    delivery: TriggerDelivery,
+    *,
+    submit_turn: Callable[[InboundMessage], Awaitable[OutboundMessage | None]],
+    is_channel_enabled: Callable[[str], bool],
+) -> None:
+    try:
+        await _deliver_delivery(
+            store, delivery, submit_turn=submit_turn, is_channel_enabled=is_channel_enabled,
+        )
+        store.complete_delivery(delivery)
+    except asyncio.CancelledError as exc:
+        store.retry_delivery(delivery, str(exc) or exc.__class__.__name__)
+        _write_delivery_run_record(
+            store, delivery, status="interrupted", error=str(exc) or exc.__class__.__name__,
+        )
+        raise
+    except _TerminalDeliveryError as exc:
+        store.record_delivery(
+            delivery.trigger_id, status="error", error=str(exc), run_at_ms=delivery.created_at_ms,
+        )
+        _write_delivery_run_record(store, delivery, status="error", error=str(exc))
+        store.complete_delivery(delivery)
+        logger.warning(
+            "Trigger: dropped delivery {} for {}: {}", delivery.id, delivery.trigger_id, exc,
+        )
+    except AutomationTurnError as exc:
+        error = str(exc) or exc.__class__.__name__
+        store.record_delivery(
+            delivery.trigger_id, status="error", error=error, run_at_ms=delivery.created_at_ms,
+        )
+        _write_delivery_run_record(store, delivery, status="error", error=error)
+        store.complete_delivery(delivery)
+        logger.warning(
+            "Trigger: delivery {} for {} reached the agent but failed: {}",
+            delivery.id, delivery.trigger_id, error,
+        )
+    except Exception as exc:
+        error = str(exc) or exc.__class__.__name__
+        retried = store.retry_delivery(delivery, error)
+        _write_delivery_run_record(
+            store, delivery, status="retrying" if retried else "error", error=error,
+        )
+        store.record_delivery(
+            delivery.trigger_id, status="error", error=error, run_at_ms=delivery.created_at_ms,
+        )
+        logger.exception(
+            "Trigger: failed delivery {} for {}{}", delivery.id, delivery.trigger_id,
+            "; queued retry" if retried else "; moved to failed queue",
+        )
 
 
 class _TerminalDeliveryError(RuntimeError):

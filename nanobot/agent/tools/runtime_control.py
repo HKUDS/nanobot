@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeAlias, runtime_checkable
 
+from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
+from nanobot.security.workspace_access import (
+    WorkspaceSandboxStatus,
+    WorkspaceScope,
+    current_tool_workspace,
+    workspace_sandbox_status,
+)
+
 if TYPE_CHECKING:
-    from nanobot.agent.subagent import SubagentManager, SubagentStatus
+    from nanobot.agent.tools.context import RequestContext
     from nanobot.agent.tools.shell import ExecToolConfig
     from nanobot.agent.tools.web import WebToolsConfig
     from nanobot.config.schema import ModelPresetConfig
@@ -26,12 +35,12 @@ RUNTIME_SNAPSHOT_KEYS = frozenset({
     "max_iterations",
     "context_window_tokens",
     "workspace",
+    "workspace_sandbox",
     "provider_retry_mode",
     "max_tool_result_chars",
     "tool_names",
     "web_config",
     "exec_config",
-    "subagents",
 })
 
 RUNTIME_COMMAND_KEYS = frozenset({
@@ -60,8 +69,8 @@ class RuntimeSnapshot:
     tool_names: list[str]
     web_config: dict[str, object]
     exec_config: dict[str, object]
-    subagent_statuses: dict[str, dict[str, object]]
     scratchpad: dict[str, JsonValue]
+    workspace_sandbox: dict[str, object]
 
     def as_mapping(self) -> Mapping[str, object]:
         """Return the fixed public names understood by ``MyTool``."""
@@ -72,12 +81,12 @@ class RuntimeSnapshot:
             "max_iterations": self.max_iterations,
             "context_window_tokens": self.context_window_tokens,
             "workspace": self.workspace,
+            "workspace_sandbox": self.workspace_sandbox,
             "provider_retry_mode": self.provider_retry_mode,
             "max_tool_result_chars": self.max_tool_result_chars,
             "tool_names": self.tool_names,
             "web_config": self.web_config,
             "exec_config": self.exec_config,
-            "subagents": {"_task_statuses": self.subagent_statuses},
         }
         assert values.keys() == RUNTIME_SNAPSHOT_KEYS
         return values
@@ -91,7 +100,7 @@ class RuntimeControl(Protocol):
 
     def set_model(self, model: str) -> LLMRuntime: ...
 
-    def set_model_preset(
+    async def set_model_preset(
         self,
         name: str,
         *,
@@ -119,7 +128,7 @@ class _RuntimeControlTarget(Protocol):
     max_tool_result_chars: int
     web_config: WebToolsConfig
     exec_config: ExecToolConfig
-    subagents: SubagentManager
+    restrict_to_workspace: bool
 
     @property
     def model(self) -> str: ...
@@ -143,9 +152,15 @@ class _RuntimeControlTarget(Protocol):
 
     def set_runtime_context_window(self, context_window_tokens: int) -> LLMRuntime: ...
 
+    def set_runtime_max_iterations(self, value: int) -> None: ...
+
     def set_model_preset(self, name: str | None) -> LLMRuntime: ...
 
-    def set_session_model_preset(self, session_key: str, name: str) -> LLMRuntime: ...
+    async def set_session_model_preset(
+        self,
+        session_key: str,
+        name: str,
+    ) -> LLMRuntime: ...
 
 
 class AgentRuntimeControl:
@@ -155,6 +170,41 @@ class AgentRuntimeControl:
         self.__target = target
         self.__scratchpad: dict[str, JsonValue] = {}
         self.__workspace_display: str | None = None
+
+    def _workspace_sandbox(self, scope: WorkspaceScope | None = None) -> WorkspaceSandboxStatus:
+        target = self.__target
+        workspace = current_tool_workspace(
+            target.workspace,
+            restrict_to_workspace=target.restrict_to_workspace,
+            sandbox_restricts_workspace=bool(target.exec_config.sandbox),
+            scope=scope,
+        )
+        assert workspace.project_path is not None
+        return workspace_sandbox_status(
+            workspace=workspace.project_path,
+            restrict_to_workspace=workspace.restrict_to_workspace,
+        )
+
+    async def workspace_context(self, request: RequestContext) -> RuntimeContextBlock:
+        """Append current access facts without changing the reusable prompt prefix."""
+        status = self._workspace_sandbox(request.workspace_scope)
+        # A valid directory can contain newlines or prompt delimiters. Keep it data.
+        root = json.dumps(status.workspace_root, ensure_ascii=False)
+        root = root.replace("[", "\\u005b").replace("]", "\\u005d")
+        lines = [
+            f"Current project (JSON path): {root}",
+            (
+                "File access: project and tool-specific allowed paths only."
+                if status.restrict_to_workspace
+                else "File access: no workspace restriction."
+            ),
+            "OS permissions and tool rules still apply.",
+        ]
+        if self.__target.exec_config.sandbox:
+            lines.append(
+                "Shell sandbox configured; extra binds do not grant file-tool access."
+            )
+        return RuntimeContextBlock(source="workspace_access", content=wrap_runtime_context_lines(lines))
 
     def snapshot(self) -> RuntimeSnapshot:
         target = self.__target
@@ -174,26 +224,25 @@ class AgentRuntimeControl:
             tool_names=list(target.tool_names),
             web_config=_snapshot_web_config(target.web_config),
             exec_config=_snapshot_exec_config(target.exec_config),
-            subagent_statuses=_snapshot_subagent_statuses(target.subagents),
             scratchpad=_snapshot_json_mapping(self.__scratchpad),
+            workspace_sandbox=self._workspace_sandbox().as_dict(),
         )
 
     def set_model(self, model: str) -> LLMRuntime:
         return self.__target.set_runtime_model(model)
 
-    def set_model_preset(
+    async def set_model_preset(
         self,
         name: str,
         *,
         session_key: str | None,
     ) -> LLMRuntime:
         if session_key is not None:
-            return self.__target.set_session_model_preset(session_key, name)
+            return await self.__target.set_session_model_preset(session_key, name)
         return self.__target.set_model_preset(name)
 
     def set_max_iterations(self, value: int) -> None:
-        self.__target.max_iterations = value
-        self.__target.subagents.max_iterations = value
+        self.__target.set_runtime_max_iterations(value)
 
     def set_context_window_tokens(self, value: int) -> LLMRuntime:
         return self.__target.set_runtime_context_window(value)
@@ -233,8 +282,7 @@ def _snapshot_model_presets(
 def _snapshot_web_config(config: WebToolsConfig) -> dict[str, object]:
     return {
         "enable": config.enable,
-        # Proxy URLs may embed credentials. Presence is enough for diagnosis.
-        "proxy": "<configured>" if config.proxy else config.proxy,
+        "use_proxy": config.use_proxy,
         "user_agent": config.user_agent,
         "search": {
             "provider": config.search.provider,
@@ -251,7 +299,11 @@ def _snapshot_web_config(config: WebToolsConfig) -> dict[str, object]:
 def _snapshot_exec_config(config: ExecToolConfig) -> dict[str, object]:
     return {
         "enable": config.enable,
-        "timeout": config.timeout,
+        "max_runtime": config.max_runtime,
+        "max_runtime_limit": config.max_runtime_limit,
+        "idle_timeout": config.idle_timeout,
+        "idle_action": config.idle_action,
+        "timeout": config.max_runtime,
         "path_prepend": config.path_prepend,
         "path_append": config.path_append,
         "sandbox": config.sandbox,
@@ -260,30 +312,6 @@ def _snapshot_exec_config(config: ExecToolConfig) -> dict[str, object]:
         "allowed_env_keys": list(config.allowed_env_keys),
         "allow_patterns": list(config.allow_patterns),
         "deny_patterns": list(config.deny_patterns),
-    }
-
-
-def _snapshot_subagent_statuses(
-    manager: SubagentManager,
-) -> dict[str, dict[str, object]]:
-    return {
-        task_id: _snapshot_subagent_status(status)
-        for task_id, status in manager.runtime_statuses().items()
-    }
-
-
-def _snapshot_subagent_status(status: SubagentStatus) -> dict[str, object]:
-    return {
-        "task_id": status.task_id,
-        "label": status.label,
-        "task_description": status.task_description,
-        "started_at": status.started_at,
-        "phase": status.phase,
-        "iteration": status.iteration,
-        "tool_events": [dict(event) for event in status.tool_events],
-        "usage": status.usage.to_dict() if status.usage is not None else None,
-        "stop_reason": status.stop_reason,
-        "error": status.error,
     }
 
 

@@ -6,18 +6,19 @@ import asyncio
 import html
 import json
 from collections.abc import Awaitable, Callable, Mapping
+from functools import partial
 from typing import Any, cast
 
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.agent.tools.image_generation import request_image_generation_reload
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
 from nanobot.api.runtime import ApiRuntime, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
 from nanobot.pairing import approve_code, deny_code, list_pending
+from nanobot.pairing.events import PairingChanged
 from nanobot.webui import settings_capabilities as capability_domain
 from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as model_domain
@@ -44,6 +45,7 @@ from nanobot.webui.settings_api import (
     login_oauth_provider,
     logout_oauth_provider,
     migrate_model_configurations,
+    model_api_resolution_payload,
     provider_models_payload,
     settings_payload,
     settings_usage_payload,
@@ -72,6 +74,7 @@ _WEBUI_MUTATION_REQUEST_ATTR = "_nanobot_webui_mutation_request"
 _CHANNEL_CONNECT_ACTIONS = frozenset({"start", "poll", "cancel"})
 _MCP_OAUTH_CALLBACK_URL_MAX_BYTES = 8 * 1024
 _MCP_RELOAD_TIMEOUT_SECONDS = 15.0
+_IMAGE_GENERATION_RELOAD_TIMEOUT_SECONDS = 5.0
 _query_first = contracts.query_first
 
 
@@ -96,6 +99,7 @@ _MCP_PRESET_ACTIONS_BY_PATH = {
     "/api/settings/mcp-presets/remove": "remove",
     "/api/settings/mcp-presets/test": "test",
     "/api/settings/mcp-presets/reconnect": "reconnect",
+    "/api/settings/mcp-presets/proxy": "proxy",
     "/api/settings/mcp-presets/custom": "custom",
     "/api/settings/mcp-presets/import": "import",
     "/api/settings/mcp-presets/import-cursor": "import-cursor",
@@ -112,6 +116,7 @@ _MODEL_ROUTES = {
     "/api/settings/provider/update": "provider-update",
     "/api/settings/provider/create": "provider-create",
     "/api/settings/provider-models": "provider-models",
+    "/api/settings/model-api": "model-api",
     "/api/settings/provider/oauth-login": "oauth-login",
     "/api/settings/provider/oauth-login/complete": "oauth-complete",
     "/api/settings/provider/oauth-logout": "oauth-logout",
@@ -144,6 +149,14 @@ _SYSTEM_ROUTES = {
     "/api/settings/pairing/deny": "pairing-deny",
     "/api/settings/mcp-presets": "mcp-list",
     "/api/settings/version-check": "version-check",
+    "/api/settings/nanobot-update/channel": "update-channel",
+    "/api/settings/nanobot-update/plan": "update-plan-read",
+    "/api/settings/nanobot-update/plan/create": "update-plan-create",
+    "/api/settings/nanobot-update/job": "update-job-read",
+    "/api/settings/nanobot-update/job/prepare": "update-job-prepare",
+    "/api/settings/nanobot-update/job/settle": "update-job-settle",
+    "/api/settings/nanobot-update/job/execute": "update-job-execute",
+    "/api/settings/nanobot-update/job/retry": "update-job-retry",
     **{
         path: f"mcp-{action}"
         for path, action in _MCP_PRESET_ACTIONS_BY_PATH.items()
@@ -151,6 +164,12 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/nanobot-update/channel",
+    "/api/settings/nanobot-update/plan/create",
+    "/api/settings/nanobot-update/job/prepare",
+    "/api/settings/nanobot-update/job/settle",
+    "/api/settings/nanobot-update/job/execute",
+    "/api/settings/nanobot-update/job/retry",
     "/api/settings/runtime-config/update",
     "/api/settings/update",
     "/api/settings/model-configurations/create",
@@ -231,6 +250,7 @@ class WebUISettingsRouter:
         channel_runtime_status: Callable[[], dict[str, Any]] | None = None,
         mcp_runtime_status: Callable[[], Mapping[str, str]] | None = None,
         mcp_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+        image_generation_reload: Callable[[], Awaitable[dict[str, Any]]] | None = None,
         mcp_oauth_redirect_uri: Callable[[WsRequest], str] | None = None,
     ) -> None:
         self.settings = settings
@@ -246,20 +266,23 @@ class WebUISettingsRouter:
         self._channel_runtime_status = channel_runtime_status
         self._mcp_runtime_status = mcp_runtime_status
         self._mcp_reload = mcp_reload
+        self._image_generation_reload = image_generation_reload
         self._mcp_oauth_redirect_uri = mcp_oauth_redirect_uri
-        self._mcp_oauth = McpOAuthManager()
+        self._mcp_oauth = McpOAuthManager(bus.admission)
         self._restart_sections: set[str] = set()
         self._restart_baselines: dict[str, dict[str, Any]] = {}
         self._restart_changes: dict[str, str] = {}
-        self._models = model_domain.ModelSettingsHandler(settings, logger)
+        self._models = model_domain.ModelSettingsHandler(settings, logger, bus.admission)
         self._capabilities = capability_domain.CapabilitySettingsHandler(
             settings,
             logger,
         )
-        self._system = system_domain.SystemSettingsHandler(settings, logger)
+        self._system = system_domain.SystemSettingsHandler(settings, logger, bus.admission)
 
     async def close(self) -> None:
         """Release state owned by settings domains."""
+        await self._mcp_oauth.close()
+        await self._models.close()
         await self._system.close()
 
     async def dispatch(
@@ -299,6 +322,8 @@ class WebUISettingsRouter:
             return await asyncio.to_thread(self._handle_settings_usage)
 
         domain, action = route
+        if action.startswith("update-") and self._runtime_surface == "native":
+            return self._error_response(409, "Update this installation through Nanobot Desktop.")
         restart_before = (
             await asyncio.to_thread(self._restart_values, action)
             if action in {"runtime-config-update", "image-update", "web-search-update"}
@@ -314,6 +339,14 @@ class WebUISettingsRouter:
                     "features-enable",
                     "channel-configure",
                     "channel-connect",
+                    "update-channel",
+                    "version-check",
+                    "update-plan-create",
+                    "update-plan-read",
+                    "update-job-prepare",
+                    "update-job-settle",
+                    "update-job-execute",
+                    "update-job-retry",
                 }
             ),
         )
@@ -358,7 +391,12 @@ class WebUISettingsRouter:
                     self._restart_changes[action] = result.restart_section
                 # Reversible changes are tracked separately from installation and reload failures.
                 result.payload["requires_restart"] = False
-        return self._render_result(result)
+        response = self._render_result(result)
+        if action.startswith("update-") or action == "version-check":
+            # A saved review is immutable, but its local validity and permission
+            # are not. Never reuse a cached success after an installation changes.
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     def _restart_values(self, action: str) -> dict[str, Any]:
         config = self.settings.config.load()
@@ -484,6 +522,7 @@ class WebUISettingsRouter:
             update_provider=update_provider_settings,
             create_provider=create_provider_settings,
             provider_models=provider_models_payload,
+            model_api=model_api_resolution_payload,
             oauth_login=login_oauth_provider,
             oauth_complete=complete_oauth_provider,
             oauth_logout=logout_oauth_provider,
@@ -501,8 +540,11 @@ class WebUISettingsRouter:
             update_network=update_network_safety_settings,
             nanobot_features_action=nanobot_features_action,
             api_runtime=self._api_runtime,
-            reload_image=lambda: request_image_generation_reload(self.bus),
+            reload_image=self._reload_image_generation_runtime,
         )
+
+    def _pairing_changed(self) -> None:
+        self.bus.publish_nowait(PairingChanged())
 
     def _system_operations(self) -> system_domain.SystemSettingsOperations:
         return system_domain.SystemSettingsOperations(
@@ -515,8 +557,8 @@ class WebUISettingsRouter:
             validate_channel_config=validate_channel_config,
             load_channel_plugin=load_channel_plugin,
             list_pending=list_pending,
-            approve_code=approve_code,
-            deny_code=deny_code,
+            approve_code=partial(approve_code, on_change=self._pairing_changed),
+            deny_code=partial(deny_code, on_change=self._pairing_changed),
             mcp_presets_action=mcp_presets_settings_action,
             reload_mcp=self._reload_mcp_runtime,
             mcp_runtime_status=self._mcp_runtime_status,
@@ -531,8 +573,35 @@ class WebUISettingsRouter:
     ) -> tuple[dict[str, Any], bool]:
         return await self._capabilities.apply_image_runtime_change(
             payload,
-            lambda: request_image_generation_reload(self.bus),
+            self._reload_image_generation_runtime,
         )
+
+    async def _reload_image_generation_runtime(self) -> dict[str, Any]:
+        if self._image_generation_reload is None:
+            return {
+                "ok": False,
+                "message": "Image generation runtime reload is unavailable. Restart nanobot to apply changes.",
+                "requires_restart": True,
+            }
+        try:
+            return await asyncio.wait_for(
+                self._image_generation_reload(),
+                timeout=_IMAGE_GENERATION_RELOAD_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            return {
+                "ok": False,
+                "message": "Image generation hot reload timed out.",
+                "requires_restart": True,
+            }
+        except Exception as exc:
+            self.logger.exception("Image generation hot reload failed")
+            return {
+                "ok": False,
+                "message": "Image generation hot reload failed.",
+                "requires_restart": True,
+                "error": str(exc),
+            }
 
     async def _reload_mcp_runtime(self) -> dict[str, Any]:
         if self._mcp_reload is None:
@@ -583,40 +652,6 @@ class WebUISettingsRouter:
             )
         )
 
-    _coerce_channel_value = staticmethod(system_domain.coerce_channel_value)
-    _assign_channel_config_value = staticmethod(
-        system_domain.assign_channel_config_value
-    )
-
-    def _nanobot_features_payload(self) -> dict[str, Any]:
-        return nanobot_features_payload(config_path=self.settings.config.path)
-
-    def _nanobot_features_action(
-        self,
-        action: str,
-        query: QueryParams,
-        *,
-        allow_install: bool = True,
-    ) -> dict[str, Any]:
-        return self.settings.mutate(
-            nanobot_features_action,
-            action,
-            query,
-            allow_install=allow_install,
-        )
-
-    def _allow_feature_package_install(
-        self,
-        connection: Any,
-        request: WsRequest,
-    ) -> bool:
-        domain_request = self._domain_request(
-            connection,
-            request,
-            needs_local_browser=True,
-        )
-        return self._system.allow_feature_package_install(domain_request)
-
     async def _handle_mcp_oauth_start(self, request: WsRequest) -> Response:
         if not self._authorized(request):
             return self._unauthorized()
@@ -624,7 +659,7 @@ class WebUISettingsRouter:
             return self._error_response(500, "MCP OAuth callback is not configured")
         query = self._parse_mcp_settings_query(request)
         try:
-            name, cfg = await asyncio.to_thread(
+            name, cfg, network = await asyncio.to_thread(
                 self.settings.mutate,
                 ensure_mcp_oauth_server,
                 query,
@@ -636,6 +671,7 @@ class WebUISettingsRouter:
                 cfg,
                 redirect_uri,
                 reload_mcp=self._reload_mcp_runtime,
+                network=network,
                 reset_credentials=reset,
             )
         except Exception as exc:

@@ -13,7 +13,7 @@ from nanobot.bus.outbound_events import (
     RetryStatusEvent,
     TurnEndEvent,
 )
-from nanobot.events import AgentEvent
+from nanobot.events import AgentEvent, CompactionReason
 from nanobot.webui.metadata import WEBUI_TURN_METADATA_KEY
 
 _JSONValue: TypeAlias = (
@@ -72,6 +72,8 @@ class RecoveryStateWirePayload(_ChatWirePayload):
     attempts: int
     reason: NotRequired[str]
     can_continue: NotRequired[bool]
+    failure_error_kind: NotRequired[str]
+    reply_preserved: NotRequired[bool]
 
 
 class RetryStatusWirePayload(_ChatWirePayload):
@@ -101,10 +103,17 @@ class ContextCompactionWirePayload(_ChatWirePayload):
     event: Literal["context_compaction"]
     compaction_id: str
     phase: Literal["started", "succeeded", "failed", "cancelled"]
+    reason: NotRequired[CompactionReason]
+
+
+class SubagentTaskWirePayload(_ChatWirePayload):
+    event: Literal["subagent_task"]
+    task: dict[str, object]
 
 
 WebUIWirePayload: TypeAlias = (
     RetryStatusWirePayload | ContextCompactionWirePayload | RecoveryStateWirePayload | TurnEndWirePayload
+    | SubagentTaskWirePayload
 )
 WebUIWirePersistence: TypeAlias = Literal[
     "transient",
@@ -129,6 +138,10 @@ def encode_recovery_state(
         payload["reason"] = event.reason
     if event.can_continue is not None:
         payload["can_continue"] = event.can_continue
+    if event.failure_error_kind is not None:
+        payload["failure_error_kind"] = event.failure_error_kind
+    if event.reply_preserved is not None:
+        payload["reply_preserved"] = event.reply_preserved
     return payload
 
 
@@ -143,6 +156,8 @@ def encode_context_compaction(
         "compaction_id": event.compaction_id,
         "phase": event.phase,
     }
+    if event.reason is not None:
+        payload["reason"] = event.reason
     return payload
 
 
