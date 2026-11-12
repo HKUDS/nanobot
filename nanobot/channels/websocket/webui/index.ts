@@ -1,14 +1,14 @@
-import { Network } from "lucide-react";
-
 import type { ChannelUiContribution } from "@/channel-plugins/types";
 import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
 
+import { WebSocketIcon } from "./WebSocketIcon";
+
 export default {
   presentation: {
-    displayName: "WebSocket",
+    displayName: "nanobot WebUI",
     initials: "WS",
     color: "#111827",
-    icon: Network,
+    icon: WebSocketIcon,
     setup: {
       mode: "webui",
       docsUrl: chatAppGuideUrl("websocket"),

@@ -102,20 +102,6 @@ class TestSubagentStatus:
         assert s.error is None
 
 
-# ---------------------------------------------------------------------------
-# Runtime ownership
-# ---------------------------------------------------------------------------
-
-
-class TestRuntimeOwnership:
-    def test_manager_has_no_provider_model_mirrors(self, tmp_path):
-        sm = _manager(tmp_path)
-        assert not hasattr(sm, "provider")
-        assert not hasattr(sm, "model")
-        assert not hasattr(sm, "context_window_tokens")
-        assert not hasattr(sm.runner, "provider")
-
-
 class TestLegacyCompatibility:
     def test_accepts_exported_legacy_constructor_positionally(self, tmp_path):
         provider = MagicMock(spec=LLMProvider)
@@ -132,8 +118,6 @@ class TestLegacyCompatibility:
 
         assert sm.workspace == tmp_path
         assert sm.max_tool_result_chars == 16_000
-        assert not hasattr(sm, "provider")
-        assert not hasattr(sm, "model")
 
     @pytest.mark.asyncio
     async def test_legacy_spawn_captures_runtime_at_admission(self, tmp_path):
@@ -519,6 +503,35 @@ class TestCancelBySession:
         sm = _manager(tmp_path)
         count = await sm.cancel_by_session("nonexistent")
         assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_cancels_active_and_queued_tasks(self, tmp_path):
+        sm = _manager(tmp_path, max_concurrent_subagents=1)
+        active_entered = asyncio.Event()
+        queued_entered = asyncio.Event()
+
+        async def _blocked_run(spec):
+            task = spec.initial_messages[-1]["content"]
+            if task == "active":
+                active_entered.set()
+            else:
+                queued_entered.set()
+            await asyncio.Event().wait()
+
+        sm.runner.run = _blocked_run
+        runtime = _runtime()
+        await sm.spawn("active", runtime=runtime, session_key="s1")
+        await asyncio.wait_for(active_entered.wait(), timeout=1.0)
+        await sm.spawn("queued", runtime=runtime, session_key="s1")
+        await asyncio.sleep(0)
+
+        assert not queued_entered.is_set()
+        assert await sm.cancel_by_session("s1") == 2
+        await asyncio.sleep(0)
+
+        assert not queued_entered.is_set()
+        assert sm._running_tasks == {}
+        assert sm._session_tasks == {}
 
     @pytest.mark.asyncio
     async def test_already_done_not_counted(self, tmp_path):

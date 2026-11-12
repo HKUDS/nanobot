@@ -7,10 +7,10 @@ from typing import Any, Protocol, cast
 
 import httpx
 from pydantic import Field
+from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.async_client import AsyncBaseSocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
-from slack_sdk.socket_mode.websockets import SocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown  # pyright: ignore[reportMissingTypeStubs]
 
@@ -82,6 +82,7 @@ class SlackConfig(Base):
     # instead of every message). No effect for "mention"/"open" policies.
     group_require_mention: bool = False
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
+    proxy: str | None = None
 
 
 SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
@@ -144,10 +145,15 @@ class SlackChannel(BaseChannel):
 
         self._running = True
 
-        self._web_client = AsyncWebClient(token=self.config.bot_token)
+        proxy = self.config.proxy.strip() if self.config.proxy else ""
+        if proxy and "://" not in proxy:
+            proxy = f"http://{proxy}"
+        proxy = proxy or None
+        self._web_client = AsyncWebClient(token=self.config.bot_token, proxy=proxy)
         self._socket_client = SocketModeClient(
             app_token=self.config.app_token,
             web_client=self._web_client,
+            proxy=proxy,
         )
 
         self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)
@@ -577,7 +583,19 @@ class SlackChannel(BaseChannel):
                 timeout=SLACK_DOWNLOAD_TIMEOUT,
                 follow_redirects=True,
                 transport=PinnedDNSAsyncTransport(),
-                mounts=httpx_env_proxy_mounts(),
+                mounts=(
+                    {
+                        "all://": httpx.AsyncHTTPTransport(
+                            proxy=httpx.Proxy(
+                                self.config.proxy
+                                if "://" in self.config.proxy
+                                else f"http://{self.config.proxy}"
+                            )
+                        )
+                    }
+                    if self.config.proxy
+                    else httpx_env_proxy_mounts()
+                ),
                 event_hooks={"request": [_validate_slack_download_request]},
             ) as client:
                 response = await client.get(

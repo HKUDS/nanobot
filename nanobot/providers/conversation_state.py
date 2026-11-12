@@ -11,6 +11,7 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
 )
+from nanobot.utils.helpers import estimate_prompt_tokens_chain
 
 _PROVIDER_STATE_OUTPUT_META = "provider_state_output"
 _PROVIDER_STATE_BOUNDARY_META = "provider_state_boundary"
@@ -69,6 +70,43 @@ class ProviderConversationStateController:
             session_id=self._session_id,
         )
 
+    def estimate_request_context_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model_messages: list[dict[str, Any]] | None = None,
+        supplemental_messages: list[dict[str, Any]] | None = None,
+        tool_definitions: list[dict[str, Any]] | None = None,
+    ) -> int | None:
+        """Estimate resumed state plus the pending delta for the next request."""
+        state = self.checkpoint(messages, model_messages=model_messages)
+        if state is None:
+            return None
+        context_tokens = state.payload.get("context_tokens")
+        if (
+            isinstance(context_tokens, bool)
+            or not isinstance(context_tokens, int)
+            or context_tokens < 0
+        ):
+            return None
+        pending_messages = [
+            *state.pending_messages,
+            *(supplemental_messages or []),
+        ]
+        delta_tokens, _ = estimate_prompt_tokens_chain(
+            self._provider,
+            self._model,
+            pending_messages,
+            tool_definitions,
+        )
+        return context_tokens + max(0, delta_tokens)
+
+    def replace_transcript(self, messages: list[dict[str, Any]]) -> None:
+        """Discard append-only provider state after a transcript rewrite."""
+        self._state = None
+        self._boundary = len(messages)
+        self._request_messages = []
+
     def prepare_request(
         self,
         messages: list[dict[str, Any]],
@@ -76,11 +114,20 @@ class ProviderConversationStateController:
         context_window_tokens: int | None,
         model_messages: list[dict[str, Any]] | None = None,
         supplemental_messages: list[dict[str, Any]] | None = None,
+        resume_state: bool = True,
     ) -> ProviderCallContext | None:
-        """Build typed context for the next request and remember its durable delta."""
+        """Build context for the next request and remember its durable delta.
+
+        ``resume_state=False`` abandons opaque history when local request
+        fitting has produced a new independent model-facing context.
+        """
         independent_context = self.independent_request_context(
             context_window_tokens=context_window_tokens,
         )
+        if not resume_state:
+            self._state = None
+            self._request_messages = []
+            return independent_context
         if self._state is None:
             self._request_messages = []
             return independent_context

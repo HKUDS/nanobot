@@ -11,16 +11,17 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date
 from email import policy
+from email.errors import UndecodableBytesDefect
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.parser import BytesParser
-from email.utils import parseaddr
+from email.utils import getaddresses, parseaddr
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from loguru import logger
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
@@ -66,6 +67,19 @@ class EmailConfig(Base):
     # Email authentication verification (anti-spoofing)
     verify_dkim: bool = True   # Require Authentication-Results with dkim=pass
     verify_spf: bool = True    # Require Authentication-Results with spf=pass
+    trusted_authserv_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("trusted_authserv_ids")
+    @classmethod
+    def validate_trusted_authserv_ids(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            authserv_id = value.strip().casefold().rstrip(".")
+            if not authserv_id or re.fullmatch(r"[a-z0-9][a-z0-9._:-]*", authserv_id) is None:
+                raise ValueError(f"invalid trusted Authentication-Results authserv-id: {value!r}")
+            if authserv_id not in normalized:
+                normalized.append(authserv_id)
+        return normalized
 
     # Attachment handling — set allowed types to enable (e.g. ["application/pdf", "image/*"], or ["*"] for all)
     allowed_attachment_types: list[str] = Field(default_factory=list)
@@ -78,6 +92,13 @@ class _ServerFeatures:
     move: bool
     uidplus: bool
     uid_store: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _AuthenticationResult:
+    method: str
+    result: str
+    properties: tuple[tuple[str, str], ...]
 
 
 class EmailChannel(BaseChannel):
@@ -94,6 +115,8 @@ class EmailChannel(BaseChannel):
 
     name = "email"
     display_name = "Email"
+    send_progress = False
+    send_tool_hints = False
     _IMAP_MONTHS = (
         "Jan",
         "Feb",
@@ -127,6 +150,10 @@ class EmailChannel(BaseChannel):
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return EmailConfig().model_dump(by_alias=True)
+
+    def progress_transport_defaults(self) -> tuple[bool, bool]:
+        """Email delivers one final reply instead of intermediate trace messages."""
+        return False, False
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
@@ -328,6 +355,9 @@ class EmailChannel(BaseChannel):
         if not self.config.smtp_password:
             missing.append("smtp_password")
 
+        if (self.config.verify_spf or self.config.verify_dkim) and not self.config.trusted_authserv_ids:
+            missing.append("trusted_authserv_ids")
+
         if self.config.post_action == "move" and not (self.config.post_action_move_mailbox or "").strip():
             missing.append("post_action_move_mailbox")
 
@@ -430,7 +460,13 @@ class EmailChannel(BaseChannel):
         skipped_uids: set[str],
         cycle_uids: set[str],
     ) -> list[dict[str, Any]] | None:
-        """Fetch messages by arbitrary IMAP search criteria."""
+        """Fetch messages by arbitrary IMAP search criteria.
+
+        Uses UID SEARCH so already-processed UIDs are recognized before any
+        FETCH at all, then fetches headers only to evaluate every filter — the
+        full body (and any attachments) is downloaded only for messages that
+        pass every check and are actually going to be delivered.
+        """
         mailbox = self.config.imap_mailbox or "INBOX"
 
         client = self._open_imap_client(mailbox=mailbox, missing_mailbox_ok=True)
@@ -438,29 +474,30 @@ class EmailChannel(BaseChannel):
             return messages
 
         try:
-            status, data = client.search(None, *search_criteria)
-            if status != "OK" or not data:
+            status, data = client.uid("SEARCH", None, *search_criteria)
+            if status != "OK" or not data or not data[0]:
                 return messages
 
-            ids = data[0].split()
-            if limit > 0 and len(ids) > limit:
-                ids = ids[-limit:]
-            for imap_id in ids:
-                status, fetched = client.fetch(imap_id, "(BODY.PEEK[] UID)")
+            uids = [raw.decode("ascii", errors="ignore") for raw in data[0].split()]
+            if limit > 0 and len(uids) > limit:
+                uids = uids[-limit:]
+
+            features: _ServerFeatures | None = None
+
+            for uid in uids:
+                if not uid or uid in cycle_uids:
+                    continue
+                if dedupe and uid in self._processed_uids:
+                    continue
+
+                status, fetched = client.uid("FETCH", uid, "(BODY.PEEK[HEADER])")
                 if status != "OK" or not fetched:
                     continue
-
-                raw_bytes = self._extract_message_bytes(fetched)
-                if raw_bytes is None:
+                header_bytes = self._extract_message_bytes(fetched)
+                if header_bytes is None:
                     continue
 
-                uid = self._extract_uid(fetched)
-                if uid and uid in cycle_uids:
-                    continue
-                if dedupe and uid and uid in self._processed_uids:
-                    continue
-
-                parsed = BytesParser(policy=policy.default).parsebytes(raw_bytes)
+                parsed = BytesParser(policy=policy.default).parsebytes(header_bytes)
                 sender = parseaddr(parsed.get("From", ""))[1].strip().lower()
                 if not sender:
                     continue
@@ -468,41 +505,47 @@ class EmailChannel(BaseChannel):
                     self.logger.info("From {} ignored: matches bot-owned address", sender)
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     if mark_seen:
-                        client.store(imap_id, "+FLAGS", "\\Seen")
-                    if uid:
-                        skipped_uids.add(uid)
+                        features = self._mark_seen_uid(client, uid, features)
+                    skipped_uids.add(uid)
                     continue
 
                 # --- Anti-spoofing: verify Authentication-Results ---
-                spf_pass, dkim_pass = self._check_authentication_results(parsed)
+                spf_pass, dkim_pass = self._check_authentication_results(parsed, sender)
                 if self.config.verify_spf and not spf_pass:
                     self.logger.warning(
                         "From {} rejected: SPF verification failed "
-                        "(no 'spf=pass' in Authentication-Results header)",
+                        "(no aligned 'spf=pass' from a trusted Authentication-Results header)",
                         sender,
                     )
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
-                    if uid:
-                        skipped_uids.add(uid)
+                    skipped_uids.add(uid)
                     continue
                 if self.config.verify_dkim and not dkim_pass:
                     self.logger.warning(
                         "From {} rejected: DKIM verification failed "
-                        "(no 'dkim=pass' in Authentication-Results header)",
+                        "(no aligned 'dkim=pass' from a trusted Authentication-Results header)",
                         sender,
                     )
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
-                    if uid:
-                        skipped_uids.add(uid)
+                    skipped_uids.add(uid)
                     continue
 
                 if not self.is_allowed(sender):
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     if mark_seen:
-                        client.store(imap_id, "+FLAGS", "\\Seen")
-                    if uid:
-                        skipped_uids.add(uid)
+                        features = self._mark_seen_uid(client, uid, features)
+                    skipped_uids.add(uid)
                     continue
+
+                # Passed every filter — only now fetch the full message body
+                # (and any attachments) for the message we're actually delivering.
+                status, full_fetched = client.uid("FETCH", uid, "(BODY.PEEK[])")
+                if status != "OK" or not full_fetched:
+                    continue
+                raw_bytes = self._extract_message_bytes(full_fetched)
+                if raw_bytes is None:
+                    continue
+                parsed = BytesParser(policy=policy.default).parsebytes(raw_bytes)
 
                 subject = self._decode_header_value(parsed.get("Subject", ""))
                 date_value = parsed.get("Date", "")
@@ -556,9 +599,18 @@ class EmailChannel(BaseChannel):
                 self._remember_processed_uid(uid, dedupe, cycle_uids)
 
                 if mark_seen:
-                    client.store(imap_id, "+FLAGS", "\\Seen")
+                    features = self._mark_seen_uid(client, uid, features)
         finally:
             self._close_imap_client(client)
+
+    def _mark_seen_uid(
+        self, client: Any, uid: str, features: _ServerFeatures | None
+    ) -> _ServerFeatures:
+        """Mark a single UID \\Seen, reusing session-learned STORE support."""
+        if features is None:
+            features = self._server_features(client)
+        self._uid_store_flag(client, uid, "\\Seen", features)
+        return features
 
     def _open_imap_client(self, mailbox: str, *, missing_mailbox_ok: bool = False) -> Any | None:
         if self.config.imap_use_ssl:
@@ -714,11 +766,14 @@ class EmailChannel(BaseChannel):
         return data[0].split()[0]
 
     def _uid_store_deleted(self, client: Any, uid: str, features: _ServerFeatures) -> bool:
+        return self._uid_store_flag(client, uid, "\\Deleted", features)
+
+    def _uid_store_flag(self, client: Any, uid: str, flag: str, features: _ServerFeatures) -> bool:
         # Optimistic path: try UID STORE first because UID is stable and avoids
         # sequence-number lookup. If this fails once for the session, remember it
         # and use the sequence STORE fallback directly for remaining UIDs.
         if features.uid_store is not False:
-            status, _ = client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+            status, _ = client.uid("STORE", uid, "+FLAGS", f"({flag})")
             if status == "OK":
                 features.uid_store = True
                 return True
@@ -728,12 +783,12 @@ class EmailChannel(BaseChannel):
         # unreliable: resolve the current sequence number from UID and use STORE.
         imap_id = self._lookup_imap_id_by_uid(client, uid)
         if not imap_id:
-            self.logger.warning("Post-action skipped: UID {} not found", uid)
+            self.logger.warning("Could not locate UID {} to set flag {}", uid, flag)
             return False
 
-        status, _ = client.store(imap_id, "+FLAGS", "\\Deleted")
+        status, _ = client.store(imap_id, "+FLAGS", flag)
         if status != "OK":
-            self.logger.warning("Post-action failed: could not mark UID {} as deleted", uid)
+            self.logger.warning("Failed to set flag {} on UID {}", flag, uid)
             return False
         return True
 
@@ -772,16 +827,6 @@ class EmailChannel(BaseChannel):
                 if len(fetched_item) >= 2 and isinstance(fetched_item[1], (bytes, bytearray)):
                     return bytes(fetched_item[1])
         return None
-
-    @staticmethod
-    def _extract_uid(fetched: list[Any]) -> str:
-        for item in fetched:
-            if isinstance(item, tuple) and item and isinstance(item[0], (bytes, bytearray)):
-                head = bytes(item[0]).decode("utf-8", errors="ignore")
-                m = re.search(r"UID\s+(\d+)", head)
-                if m:
-                    return m.group(1)
-        return ""
 
     @staticmethod
     def _decode_header_value(value: str) -> str:
@@ -832,22 +877,293 @@ class EmailChannel(BaseChannel):
             return cls._html_to_text(payload).strip()
         return payload.strip()
 
-    @staticmethod
-    def _check_authentication_results(parsed_msg: Any) -> tuple[bool, bool]:
-        """Parse Authentication-Results headers for SPF and DKIM verdicts.
+    def _check_authentication_results(self, parsed_msg: Any, sender: str) -> tuple[bool, bool]:
+        """Return aligned SPF/DKIM verdicts from one trusted producer header."""
+        from_headers: list[Any] = parsed_msg.get_all("From") or []
+        if (
+            len(from_headers) != 1
+            or any(
+                not isinstance(defect, UndecodableBytesDefect)
+                for defect in from_headers[0].defects
+            )
+            or len(getaddresses([str(from_headers[0])])) != 1
+        ):
+            return False, False
+        sender_domain = self._address_domain(sender)
+        if not sender_domain:
+            return False, False
 
-        Returns:
-            A tuple of (spf_pass, dkim_pass) booleans.
-        """
-        spf_pass = False
-        dkim_pass = False
-        for ar_header in cast(list[Any], parsed_msg.get_all("Authentication-Results") or []):
-            ar_lower = str(ar_header).lower()
-            if re.search(r"\bspf\s*=\s*pass\b", ar_lower):
-                spf_pass = True
-            if re.search(r"\bdkim\s*=\s*pass\b", ar_lower):
-                dkim_pass = True
+        trusted_ids = set(self.config.trusted_authserv_ids)
+        if not trusted_ids:
+            return False, False
+
+        trusted_headers: list[tuple[_AuthenticationResult, ...]] = []
+        # Authentication trace fields are wire syntax, not display text. In
+        # particular, RFC 2047 encoded words must not turn into trusted evidence.
+        for name, raw_header in parsed_msg.raw_items():
+            if name.casefold() != "authentication-results":
+                continue
+            parsed_header = self._parse_authentication_results_header(raw_header)
+            if parsed_header is None:
+                continue
+            authserv_id, header_results = parsed_header
+            if authserv_id in trusted_ids:
+                trusted_headers.append(header_results)
+
+        # The configured trust contract requires one consolidated header from
+        # the receiving service. Reject duplicates so a preserved attacker header
+        # cannot be combined with, or ordered ahead of, the genuine result.
+        if len(trusted_headers) != 1:
+            return False, False
+        results = trusted_headers[0]
+
+        spf_pass = self._has_aligned_result(
+            results,
+            method="spf",
+            property_name="smtp.mailfrom",
+            sender_domain=sender_domain,
+        )
+        dkim_pass = self._has_aligned_result(
+            results,
+            method="dkim",
+            property_name="header.d",
+            sender_domain=sender_domain,
+        )
         return spf_pass, dkim_pass
+
+    @classmethod
+    def _parse_authentication_results_header(
+        cls,
+        value: str,
+    ) -> tuple[str, tuple[_AuthenticationResult, ...]] | None:
+        parts = cls._split_authentication_results(value)
+        if not parts:
+            return None
+
+        authserv_tokens = parts[0].split()
+        if not authserv_tokens:
+            return None
+        authserv_id = authserv_tokens[0].strip('"').casefold().rstrip(".")
+        if re.fullmatch(r"[a-z0-9][a-z0-9._:-]*", authserv_id) is None:
+            return None
+
+        # Keep the producer even when its result is absent or malformed. A
+        # trusted `none`/invalid header must still count against duplicate claims.
+        no_results: tuple[str, tuple[_AuthenticationResult, ...]] = (authserv_id, ())
+        if (
+            len(parts) < 2
+            or re.fullmatch(r'(?:"[a-zA-Z0-9][a-zA-Z0-9._:-]*"|[a-zA-Z0-9][a-zA-Z0-9._:-]*)(?:\s+1)?', parts[0]) is None
+        ):
+            return no_results
+
+        results: list[_AuthenticationResult] = []
+        for part in parts[1:]:
+            assignments = cls._parse_auth_result_assignments(part)
+            if not assignments:
+                return no_results
+            method_key, result = assignments[0]
+            method = method_key.casefold().partition("/")[0]
+            if not method or "." in method:
+                return no_results
+            if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_-]*", result) is None:
+                return no_results
+            keys = [key.casefold() for key, _ in assignments[1:]]
+            if len(keys) != len(set(keys)) or any(
+                "." not in key and key != "reason" for key in keys
+            ):
+                return no_results
+            properties = tuple(
+                (key.casefold(), property_value)
+                for key, property_value in assignments[1:]
+                if "." in key
+            )
+            results.append(
+                _AuthenticationResult(
+                    method=method,
+                    result=result.casefold(),
+                    properties=properties,
+                )
+            )
+        return authserv_id, tuple(results)
+
+    @staticmethod
+    def _split_authentication_results(value: str) -> list[str]:
+        """Split RFC 8601 fields on top-level semicolons and discard comments."""
+        parts: list[str] = []
+        current: list[str] = []
+        in_quote = False
+        comment_depth = 0
+        escaped = False
+
+        for char in value:
+            if escaped:
+                if comment_depth == 0:
+                    current.append(char)
+                escaped = False
+                continue
+            if char == "\\" and (in_quote or comment_depth > 0):
+                if comment_depth == 0:
+                    current.append(char)
+                escaped = True
+                continue
+            if comment_depth > 0:
+                if char == "(":
+                    comment_depth += 1
+                elif char == ")":
+                    comment_depth -= 1
+                continue
+            if in_quote:
+                current.append(char)
+                if char == '"':
+                    in_quote = False
+                continue
+            if char == '"':
+                in_quote = True
+                current.append(char)
+            elif char == "(":
+                comment_depth = 1
+                current.append(" ")
+            elif char == ";":
+                parts.append("".join(current).strip())
+                current = []
+            else:
+                current.append(char)
+
+        if escaped or in_quote or comment_depth > 0:
+            return parts + [""]
+        parts.append("".join(current).strip())
+        return parts
+
+    @staticmethod
+    def _parse_auth_result_assignments(value: str) -> list[tuple[str, str]] | None:
+        assignments: list[tuple[str, str]] = []
+        index = 0
+        length = len(value)
+
+        while index < length:
+            while index < length and value[index].isspace():
+                index += 1
+            if index >= length:
+                break
+
+            key_match = re.match(
+                r"([a-zA-Z][a-zA-Z0-9_-]*(?:\s*(?:\.\s*[a-zA-Z][a-zA-Z0-9_-]*|/\s*[0-9]+))?)\s*=",
+                value[index:],
+            )
+            if key_match is None:
+                return None
+            key = re.sub(r"\s+", "", key_match.group(1))
+            index += key_match.end()
+            while index < length and value[index].isspace():
+                index += 1
+            if index >= length:
+                return None
+
+            if value[index] == '"':
+                index += 1
+                parsed_value: list[str] = []
+                escaped = False
+                while index < length:
+                    char = value[index]
+                    index += 1
+                    if escaped:
+                        parsed_value.append(char)
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == '"':
+                        break
+                    else:
+                        parsed_value.append(char)
+                else:
+                    return None
+                if escaped:
+                    return None
+                item_value = "".join(parsed_value)
+                if index < length and value[index] == "@" and key.casefold() in {"smtp.mailfrom", "header.i"}:
+                    # RFC 8601 pvalue permits a quoted mailbox local part
+                    # followed by @domain, not just a standalone quoted string.
+                    domain_start = index
+                    while index < length and not value[index].isspace():
+                        index += 1
+                    suffix = value[domain_start:index]
+                    if re.fullmatch(r"@[a-zA-Z0-9][a-zA-Z0-9.-]*", suffix) is None:
+                        return None
+                    item_value += suffix
+                if index < length and not value[index].isspace():
+                    return None
+            else:
+                value_start = index
+                while index < length and not value[index].isspace():
+                    index += 1
+                item_value = value[value_start:index]
+
+            if not item_value and key.casefold() != "reason":
+                return None
+            assignments.append((key, item_value))
+
+        return assignments or None
+
+    @classmethod
+    def _has_aligned_result(
+        cls,
+        results: tuple[_AuthenticationResult, ...],
+        *,
+        method: str,
+        property_name: str,
+        sender_domain: str,
+    ) -> bool:
+        for result in results:
+            if result.method != method or result.result != "pass":
+                continue
+            properties = dict(result.properties)
+            value = properties.get(property_name, "")
+            if method == "dkim":
+                # AUID (header.i) is a standard receiver-reported DKIM identity.
+                # Prefer the signing domain when supplied; never use AUID to
+                # override an unaligned or malformed header.d.
+                if property_name not in properties:
+                    value = properties.get("header.i", "")
+                    if "@" not in value:
+                        continue
+                elif any(char in value for char in "@<>"):
+                    continue
+            if cls._domains_align(cls._address_domain(value), sender_domain):
+                return True
+        return False
+
+    @staticmethod
+    def _domains_align(authenticated_domain: str, sender_domain: str) -> bool:
+        if not authenticated_domain or not sender_domain:
+            return False
+        return (
+            authenticated_domain == sender_domain
+            or authenticated_domain.endswith(f".{sender_domain}")
+            or sender_domain.endswith(f".{authenticated_domain}")
+        )
+
+    @staticmethod
+    def _address_domain(value: str) -> str:
+        candidate = value.strip().strip("<>").rstrip(".")
+        if "@" in candidate:
+            candidate = candidate.rsplit("@", 1)[1]
+        candidate = candidate.lower().rstrip(".")
+        if not candidate or any(char.isspace() for char in candidate):
+            return ""
+        try:
+            ascii_domain = candidate.encode("idna").decode("ascii")
+            # Do not merge distinct modern IDNs via IDNA 2003 mappings (e.g.
+            # sharp-s -> ss). Ambiguous forms must use their ASCII A-label.
+            if not candidate.isascii() and ascii_domain.encode("ascii").decode("idna") != candidate:
+                return ""
+        except UnicodeError:
+            return ""
+        if len(ascii_domain) > 253 or any(
+            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) is None
+            for label in ascii_domain.split(".")
+        ):
+            return ""
+        return ascii_domain
 
     @classmethod
     def _extract_attachments(

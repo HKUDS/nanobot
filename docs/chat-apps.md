@@ -382,7 +382,7 @@ nanobot plugins enable matrix
 | `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
 | `allowRoomMentions` | Accept `@room` mentions in mention mode. |
 | `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
-| `sasVerification` | Auto-complete SAS device verification requests from allowed users (default `false`). Useful for Element X, which does not expose manual trust for third-party devices. |
+| `sasVerification` | Complete Element-initiated SAS device verification for allowed users (default `false`). This does not add cross-signing, clear Element's cross-signing trust warning, or let the bot initiate verification. |
 | `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
 
 
@@ -767,6 +767,13 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 
 > - `consentGranted` must be `true` to allow mailbox access. This is a safety gate — set `false` to fully disable.
 > - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
+> - `trustedAuthservIds`: Exact `authserv-id` values added by the receiving mail
+>   service. Required while `verifyDkim` or `verifySpf` is enabled. Gmail normally
+>   uses `mx.google.com`; inspect a received message's raw headers for other services.
+>   The service must prepend one consolidated result and remove inbound headers that
+>   claim the same identity; duplicate trusted results are rejected.
+>   Existing installations must follow the [v0.3.5 upgrade instructions](guides/email-ai-agent.md#upgrading-to-v035)
+>   before re-enabling verified email polling.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
 > - `postAction`: Optional post-processing for processed emails: `"delete"` or `"move"` (default `null`).
@@ -794,6 +801,7 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
       "smtpPassword": "your-app-password",
       "fromAddress": "my-nanobot@gmail.com",
       "allowFrom": ["your-real-email@gmail.com"],
+      "trustedAuthservIds": ["mx.google.com"],
       "postAction": "move",
       "postActionMoveMailbox": "[Gmail]/Trash",
       "postActionIgnoreSkipped": true,

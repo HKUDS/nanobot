@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "MoChat 설정 가이드 열기",
+    "officialLabel": "MoChat 열기",
+    "fields": {
+      "clawToken": {
+        "label": "Claw 토큰",
+        "placeholder": "MoChat Claw 토큰"
+      },
+      "baseUrl": {
+        "label": "서버 URL",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "에이전트 사용자 ID",
+        "placeholder": "선택 사항인 에이전트 사용자 ID"
+      },
+      "sessions": {
+        "label": "세션",
+        "placeholder": "세션 ID, 쉼표로 구분"
+      },
+      "panels": {
+        "label": "패널",
+        "placeholder": "패널 ID, 쉼표로 구분"
+      },
+      "allowFrom": {
+        "label": "허용된 사용자",
+        "placeholder": "사용자 ID, 쉼표로 구분"
+      },
+      "socketUrl": {
+        "label": "소켓 URL"
+      },
+      "socketPath": {
+        "label": "소켓 경로"
+      },
+      "socketDisableMsgpack": {
+        "label": "MessagePack 비활성화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "재연결 지연"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "최대 재연결 지연"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "연결 시간 초과"
+      },
+      "refreshIntervalMs": {
+        "label": "새로 고침 간격"
+      },
+      "watchTimeoutMs": {
+        "label": "시청 시간 초과"
+      },
+      "watchLimit": {
+        "label": "시계 배치 크기"
+      },
+      "retryDelayMs": {
+        "label": "재시도 지연"
+      },
+      "maxRetryAttempts": {
+        "label": "최대 재시도"
+      },
+      "mention_requireInGroups": {
+        "label": "그룹에서 멘션 필요",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "groups": {
+        "label": "그룹 규칙(JSON)"
+      },
+      "replyDelayMode": {
+        "label": "응답 지연 모드"
+      },
+      "replyDelayMs": {
+        "label": "답변 지연"
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.autocompact import AutoCompact
+from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.session.manager import Session, SessionManager
 
 
@@ -16,7 +17,7 @@ def _runtime(_session: Session | None = None):
 def _make_session(
     key: str = "cli:test",
     messages: list | None = None,
-    last_consolidated: int = 0,
+    last_archived: int = 0,
     updated_at: datetime | None = None,
     metadata: dict | None = None,
 ) -> Session:
@@ -25,8 +26,8 @@ def _make_session(
         key=key,
         messages=messages or [],
         metadata=metadata or {},
-        last_consolidated=last_consolidated,
     )
+    session.last_archived = last_archived
     if updated_at is not None:
         session.updated_at = updated_at
     return session
@@ -267,7 +268,7 @@ class TestCheckExpired:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:old",
             runtime=admitted,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            events=NO_EVENTS,
         )
 
     @pytest.mark.parametrize("resolution_error", [KeyError, ValueError])
@@ -408,7 +409,7 @@ class TestCheckExpired:
         last_active = datetime(2026, 1, 1, 10, 0, 0)
         session = _make_session("cli:done", updated_at=last_active)
         _add_turns(session, 2)
-        session.last_consolidated = len(session.messages)
+        session.last_archived = len(session.messages)
         mock_sm.list_sessions.return_value = [
             {"key": "cli:done", "updated_at": last_active.isoformat()},
         ]
@@ -442,8 +443,38 @@ class TestArchiveDelegates:
         ac.consolidator.compact_idle_session.assert_awaited_once_with(
             "cli:test",
             runtime=runtime,
-            max_suffix=ac._RECENT_SUFFIX_MESSAGES,
+            events=NO_EVENTS,
         )
+
+    @pytest.mark.asyncio
+    async def test_forwards_timeout_compaction_events_with_session_key(self):
+        sessions = MagicMock(spec=SessionManager)
+        consolidator = MagicMock()
+        observed: list[tuple[str, ContextCompactionEvent]] = []
+
+        def bind(key: str):
+            async def publish(event: ContextCompactionEvent) -> None:
+                observed.append((key, event))
+            return EventSink(publish)
+
+        async def compact(key: str, **kwargs):
+            event = ContextCompactionEvent(compaction_id="compact-1", phase="started")
+            await kwargs["events"].emit(event)
+            return "Summary."
+
+        consolidator.compact_idle_session = AsyncMock(side_effect=compact)
+        ac = AutoCompact(
+            sessions=sessions,
+            consolidator=consolidator,
+            session_ttl_minutes=15,
+            bind_events=bind,
+        )
+
+        await ac._archive("cli:test", runtime=_runtime())
+
+        assert len(observed) == 1
+        assert observed[0][0] == "cli:test"
+        assert observed[0][1].phase == "started"
 
     @pytest.mark.asyncio
     async def test_dream_session_is_ignored(self):

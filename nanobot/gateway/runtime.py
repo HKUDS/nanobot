@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import http.client
 import json
 import os
 import subprocess
@@ -38,6 +39,33 @@ GatewayLaunchMode = Literal["foreground", "background", "unknown"]
 GatewayLifetime = Literal["explicit", "on_demand"]
 
 
+def _gateway_health_ready(host: str, port: int, *, timeout_s: float = 0.4) -> bool:
+    """Read readiness from the management listener without using proxy settings."""
+    connect_host = "127.0.0.1" if host in {"", "0.0.0.0"} else "::1" if host == "::" else host
+    connection = http.client.HTTPConnection(connect_host, port, timeout=timeout_s)
+    try:
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        body = response.read(1024)
+    except (OSError, http.client.HTTPException, TimeoutError):
+        return False
+    finally:
+        connection.close()
+    if response.status != 200:
+        return False
+    try:
+        raw_payload = cast(object, json.loads(body.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(raw_payload, dict):
+        return False
+    payload = cast(dict[str, object], raw_payload)
+    return (
+        payload.get("status") == "ok"
+        and payload.get("ready") is not False
+    )
+
+
 def _default_config_path() -> Path:
     return (Path.home() / ".nanobot" / "config.json").resolve(strict=False)
 
@@ -49,6 +77,7 @@ class GatewayStatus(ProcessStatus):
     launch_mode: GatewayLaunchMode = "unknown"
     lifetime: GatewayLifetime = "explicit"
     clients: int = 0
+    ready: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -259,6 +288,18 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             raw_mode if raw_mode in {"foreground", "background"} else "unknown"
         )
         lease = GatewayClientLease(self, kind="gateway-status").snapshot()
+        ready: bool | None = None
+        health_host = state.get("health_host") if state else None
+        if (
+            process.running
+            and process.pid != os.getpid()
+            and isinstance(health_host, str)
+            and process.port is not None
+        ):
+            ready = _gateway_health_ready(health_host, process.port)
+        status_reason = process.reason
+        if ready is False and reason is None and status_reason == "running":
+            status_reason = "websocket_unavailable"
         return GatewayStatus(
             running=process.running,
             pid=process.pid,
@@ -267,11 +308,21 @@ class GatewayRuntime(ManagedProcessRuntime[ProcessStartOptions]):
             started_at=process.started_at,
             port=process.port,
             command=process.command,
-            reason=process.reason,
+            reason=status_reason,
             launch_mode=launch_mode,
             lifetime="on_demand" if lease.auto_stop else "explicit",
             clients=lease.clients,
+            ready=ready,
         )
+
+    def publish_health_host(self, host: str) -> None:
+        """Record the management bind host for out-of-process readiness diagnostics."""
+        with self._lifecycle_lock():
+            state = self._read_state()
+            if not state or not self._record_matches_process(state, os.getpid()):
+                return
+            state["health_host"] = host
+            self._write_state(state)
 
     @contextmanager
     def foreground_instance(self, options: ProcessStartOptions) -> Generator[None]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import time
 import uuid
 from collections import deque
@@ -149,13 +150,14 @@ class _ExecSession:
     ) -> None:
         if stream is None:
             return
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         while True:
             chunk = await stream.read(4096)
-            if not chunk:
-                break
-            text = chunk.decode("utf-8", errors="replace")
+            text = decoder.decode(chunk, final=not chunk)
             async with self._lock:
                 buffer.append(text)
+            if not chunk:
+                break
 
     async def write(self, chars: str) -> str | None:
         if self.process.returncode is not None:

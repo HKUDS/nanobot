@@ -27,7 +27,9 @@ from nanobot.runtime_context import (
     RUNTIME_CONTEXT_HISTORY_META,
     public_history_message,
 )
+from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT
 from nanobot.utils.helpers import (
     content_with_media_breadcrumbs,
     ensure_dir,
@@ -40,7 +42,6 @@ from nanobot.utils.helpers import (
 from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
 SESSION_CACHE_MAX_SIZE = 128
-MIN_COMPACTED_REPLAY_MESSAGES = 8
 _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
@@ -80,6 +81,15 @@ def _json_object(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("session records must be JSON objects")
     return cast(dict[str, Any], value)
+
+
+def _archive_offset(data: dict[str, Any]) -> int:
+    """Read the Memory archive watermark across the field-name migration."""
+    for key in ("last_archived", "last_consolidated"):
+        offset = cast(object, data.get(key))
+        if isinstance(offset, int) and not isinstance(offset, bool):
+            return offset
+    return 0
 
 
 # TODO(0.3.2): Remove the write_stdin replay migration after 0.3.1.
@@ -253,12 +263,6 @@ def _metadata_title(metadata: object) -> str:
     return strip_think(title)
 
 
-@dataclass
-class RetentionResult:
-    dropped: list[dict[str, Any]]
-    already_consolidated_count: int
-
-
 @dataclass(frozen=True)
 class SessionPolicy:
     """Runtime rules that do not belong in durable session data."""
@@ -277,7 +281,8 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    last_consolidated: int = 0  # Number of messages already consolidated to files
+    # Keep the legacy storage name while persisted sessions and SDK callers migrate.
+    last_consolidated: int = 0
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
 
@@ -295,6 +300,15 @@ class Session:
         ):
             self.last_consolidated = 0
 
+    @property
+    def last_archived(self) -> int:
+        """End of the latest committed Memory checkpoint."""
+        return self.last_consolidated
+
+    @last_archived.setter
+    def last_archived(self, value: int) -> None:
+        self.last_consolidated = value
+
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -306,6 +320,27 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
+    def commit_summary_checkpoint(
+        self,
+        summary: str,
+        *,
+        insert_at: int | None = None,
+        last_active: datetime | None = None,
+    ) -> None:
+        """Replace replay before a hidden boundary while preserving the transcript."""
+        boundary = len(self.messages) if insert_at is None else insert_at
+        self.messages.insert(boundary, {
+            "role": "user",
+            "content": SUMMARY_CONTINUATION_TEXT,
+            HIDDEN_HISTORY_META: True,
+            "timestamp": datetime.now().isoformat(),
+        })
+        self.metadata["_last_summary"] = {
+            "text": summary,
+            "last_active": (last_active or self.updated_at).isoformat(),
+        }
+        self.last_archived = boundary
+
     def get_history(
         self,
         max_messages: int = 0,
@@ -316,36 +351,19 @@ class Session:
     ) -> list[dict[str, Any]]:
         """Return recent replayable messages for LLM input.
 
-        A positive ``max_messages`` applies an explicit caller-owned count
-        limit. The normal model path relies on ``max_tokens`` instead.
+        A committed summary checkpoint replaces its old prefix with the stored
+        summary and resumes replay at a hidden continuation marker. A positive
+        ``max_messages`` applies an additional caller-owned count limit.
         """
-        replay_start = self.last_consolidated
-        if replay_start:
-            # ``last_consolidated`` is archive progress, not a replay boundary.
-            # Keep a small raw suffix for continuity, extending back to the user
-            # that started an assistant/tool sequence when necessary.
-            recent_start = recent_message_start_index(
-                self.messages,
-                MIN_COMPACTED_REPLAY_MESSAGES,
-                extend_to_user=True,
-            )
-            replay_start = min(replay_start, recent_start)
-
-        replayable = self.messages[replay_start:]
+        replayable = self.messages[self.last_archived:]
         if max_messages <= 0:
             start_idx = 0
         else:
-            unarchived_count = len(self.messages) - self.last_consolidated
-            if replay_start < self.last_consolidated and unarchived_count < max_messages:
-                # The archived replay suffix can exceed the nominal count when one
-                # tool-heavy turn spans the boundary. Preserve that complete turn.
-                start_idx = 0
-            else:
-                start_idx = recent_message_start_index(
-                    replayable,
-                    max_messages,
-                    extend_to_user=extend_to_user,
-                )
+            start_idx = recent_message_start_index(
+                replayable,
+                max_messages,
+                extend_to_user=extend_to_user,
+            )
         sliced = replayable[start_idx:]
 
         # Avoid starting mid-turn when possible, except for proactive
@@ -459,114 +477,10 @@ class Session:
     def clear(self) -> None:
         """Clear all messages and reset session to initial state."""
         self.messages = []
-        self.last_consolidated = 0
+        self.last_archived = 0
         self.provider_state = None
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
-
-    def retain_recent_legal_suffix(
-        self,
-        max_messages: int,
-        *,
-        extend_to_user: bool = False,
-    ) -> RetentionResult:
-        """Keep a legal recent suffix, optionally extending it back to a user turn.
-
-        Returns a RetentionResult with dropped messages and how many of those
-        were in the already-consolidated prefix. This method mutates
-        self.messages and self.last_consolidated in place.
-        """
-        if max_messages <= 0:
-            dropped = list(self.messages)
-            lc = self.last_consolidated
-            self.clear()
-            return RetentionResult(
-                dropped=dropped,
-                already_consolidated_count=min(lc, len(dropped)),
-            )
-        if len(self.messages) <= max_messages:
-            return RetentionResult(
-                dropped=[],
-                already_consolidated_count=0,
-            )
-
-        original = list(self.messages)
-        before_lc = self.last_consolidated
-
-        start_idx = max(0, len(self.messages) - max_messages)
-        if extend_to_user:
-            recovered_user = next(
-                (i for i in range(start_idx, -1, -1) if self.messages[i].get("role") == "user"),
-                None,
-            )
-            if recovered_user is not None:
-                start_idx = recovered_user
-                if start_idx > 0 and self.messages[start_idx - 1].get("_channel_delivery"):
-                    start_idx -= 1
-
-        retained = self.messages[start_idx:]
-
-        # Prefer starting at a user turn (or its preceding _channel_delivery) when one exists within the retained window.
-        first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
-        if first_user is not None:
-            if first_user > 0 and retained[first_user - 1].get("_channel_delivery"):
-                retained = retained[first_user - 1:]
-            else:
-                retained = retained[first_user:]
-        elif not extend_to_user:
-            # If the hard-capped tail is assistant/tool-only, anchor to the
-            # latest user in the full session and take a capped forward window.
-            latest_user = next(
-                (i for i in range(len(self.messages) - 1, -1, -1)
-                 if self.messages[i].get("role") == "user"),
-                None,
-            )
-            if latest_user is not None:
-                retained = self.messages[latest_user: latest_user + max_messages]
-
-        # Mirror get_history(): avoid persisting orphan tool results at the front.
-        start = find_legal_message_start(retained)
-        if start:
-            retained = retained[start:]
-
-        # Hard-cap guarantee unless the caller requested user-turn extension.
-        if not extend_to_user and len(retained) > max_messages:
-            retained = retained[-max_messages:]
-            start = find_legal_message_start(retained)
-            if start:
-                retained = retained[start:]
-
-        # Compute actually-dropped messages using identity comparison so that
-        # even when retained is a non-contiguous slice of original (the else
-        # branch above), we never duplicate or lose messages.
-        retained_ids = set(id(m) for m in retained)
-        dropped = [m for m in original if id(m) not in retained_ids]
-
-        # Count how many dropped messages were in the already-consolidated
-        # prefix of the original list.  This cannot be a simple min() because
-        # dropped may include messages from *after* the consolidated prefix
-        # (e.g. in the else branch).
-        already_consolidated = sum(
-            1 for i, m in enumerate(original)
-            if i < before_lc and id(m) not in retained_ids
-        )
-
-        # New last_consolidated = count of retained messages that were inside
-        # the old consolidated prefix.
-        new_lc = sum(
-            1 for i, m in enumerate(original)
-            if i < before_lc and id(m) in retained_ids
-        )
-
-        self.messages = retained
-        self.last_consolidated = new_lc
-        if dropped:
-            self.provider_state = None
-        self.updated_at = datetime.now()
-        return RetentionResult(
-            dropped=dropped,
-            already_consolidated_count=already_consolidated,
-        )
 
 class SessionPayload(TypedDict):
     key: str
@@ -1167,12 +1081,7 @@ class JsonlSessionStore:
                             if isinstance(updated_at_value, str) and updated_at_value
                             else None
                         )
-                        offset = cast(object, data.get("last_consolidated", 0))
-                        last_consolidated = (
-                            offset
-                            if isinstance(offset, int) and not isinstance(offset, bool)
-                            else 0
-                        )
+                        last_consolidated = _archive_offset(data)
                     elif record_type == _PROVIDER_STATE_RECORD_TYPE:
                         provider_state = ProviderConversationState.from_private_record(
                             data.get("state")
@@ -1254,12 +1163,7 @@ class JsonlSessionStore:
                         if isinstance(updated_at_value, str) and updated_at_value:
                             with suppress(ValueError):
                                 updated_at = datetime.fromisoformat(updated_at_value)
-                        offset = cast(object, data.get("last_consolidated", 0))
-                        last_consolidated = (
-                            offset
-                            if isinstance(offset, int) and not isinstance(offset, bool)
-                            else 0
-                        )
+                        last_consolidated = _archive_offset(data)
                     elif record_type == _PROVIDER_STATE_RECORD_TYPE:
                         candidate = ProviderConversationState.from_private_record(
                             data.get("state")
@@ -1419,6 +1323,9 @@ class JsonlSessionStore:
                     "created_at": session.created_at.isoformat(),
                     "updated_at": session.updated_at.isoformat(),
                     "metadata": session.metadata,
+                    "last_archived": session.last_archived,
+                    # Keep old nanobot releases able to read sessions written
+                    # during the field-name migration.
                     "last_consolidated": session.last_consolidated,
                 }
                 f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
@@ -1996,7 +1903,7 @@ class SessionManager:
         user_index = 0
         found_target = False
         for message in source.messages:
-            if message.get("role") == "user":
+            if message.get("role") == "user" and not is_hidden_history_message(message):
                 if user_index == before_user_index:
                     found_target = True
                     break
@@ -2011,8 +1918,8 @@ class SessionManager:
         for key in _FORK_VOLATILE_METADATA_KEYS:
             metadata.pop(key, None)
 
-        last_consolidated = min(source.last_consolidated, len(copied))
-        if source.last_consolidated > len(copied):
+        last_consolidated = min(source.last_archived, len(copied))
+        if source.last_archived > len(copied):
             metadata.pop("_last_summary", None)
             last_consolidated = 0
 

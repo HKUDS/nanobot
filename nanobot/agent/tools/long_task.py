@@ -15,7 +15,8 @@ from nanobot.agent.goal_permission import (
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import RequestContext, ToolContext, current_request_context
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
-from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventBus, RuntimeEventContext
+from nanobot.bus.queue import MessageBus
+from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventContext
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
@@ -55,10 +56,10 @@ class _GoalToolsMixin:
     def __init__(
         self,
         sessions: SessionManager,
-        runtime_events: RuntimeEventBus | None = None,
+        bus: MessageBus | None = None,
     ) -> None:
         self._sessions = sessions
-        self._runtime_events = runtime_events
+        self._bus = bus
 
     def _session(self):
         request_ctx = current_request_context()
@@ -92,14 +93,14 @@ class _GoalToolsMixin:
             raise
 
     async def _publish_goal_state_changed(self, metadata: dict[str, Any]) -> None:
-        runtime_events = self._runtime_events
+        bus = self._bus
         rc = current_request_context()
-        if runtime_events is None or rc is None:
+        if bus is None or rc is None:
             return
         cid = (rc.chat_id or "").strip()
         if not cid:
             return
-        await runtime_events.publish(
+        await bus.publish(
             GoalStateChanged(
                 context=RuntimeEventContext(
                     channel=rc.channel,
@@ -135,9 +136,9 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     def __init__(
         self,
         sessions: SessionManager,
-        runtime_events: RuntimeEventBus | None = None,
+        bus: MessageBus | None = None,
     ) -> None:
-        _GoalToolsMixin.__init__(self, sessions, runtime_events)
+        _GoalToolsMixin.__init__(self, sessions, bus)
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -146,7 +147,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             raise RuntimeError("CreateGoalTool requires an initialized session manager")
         return cls(
             sessions=sess,
-            runtime_events=ctx.runtime_events,
+            bus=ctx.bus,
         )
 
     @classmethod
@@ -266,9 +267,9 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
     def __init__(
         self,
         sessions: SessionManager,
-        runtime_events: RuntimeEventBus | None = None,
+        bus: MessageBus | None = None,
     ) -> None:
-        _GoalToolsMixin.__init__(self, sessions, runtime_events)
+        _GoalToolsMixin.__init__(self, sessions, bus)
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
@@ -277,7 +278,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
             raise RuntimeError("UpdateGoalTool requires an initialized session manager")
         return cls(
             sessions=sess,
-            runtime_events=ctx.runtime_events,
+            bus=ctx.bus,
         )
 
     @classmethod

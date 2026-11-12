@@ -994,6 +994,37 @@ def test_status_keeps_live_state_when_identity_probe_is_temporarily_unavailable(
     assert runtime.paths.state_path.exists()
 
 
+def test_status_distinguishes_live_process_from_degraded_gateway_readiness(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = GatewayRuntime(paths=_paths(tmp_path), platform_name="Linux")
+    runtime.paths.run_dir.mkdir(parents=True)
+    runtime.paths.state_path.write_text(
+        json.dumps(
+            {
+                "pid": 12345,
+                "identity": 42,
+                "port": 18791,
+                "health_host": "127.0.0.1",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime, "_is_pid_running", lambda _pid: True)
+    monkeypatch.setattr(runtime, "_process_identity", lambda _pid: 42)
+    monkeypatch.setattr(
+        "nanobot.gateway.runtime._gateway_health_ready",
+        lambda _host, _port: False,
+    )
+
+    status = runtime.status()
+
+    assert status.running is True
+    assert status.ready is False
+    assert status.reason == "websocket_unavailable"
+
+
 def test_stop_refuses_to_signal_a_process_when_identity_cannot_be_verified(
     tmp_path,
     monkeypatch,

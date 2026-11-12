@@ -11,7 +11,10 @@ import httpx
 from loguru import logger
 
 from nanobot.providers.base import LLMResponse, LLMUsage, ToolCallRequest, parse_tool_arguments
-from nanobot.providers.openai_responses.state import build_responses_state
+from nanobot.providers.openai_responses.state import (
+    build_responses_compaction_state,
+    build_responses_state,
+)
 
 FINISH_REASON_MAP = {
     "completed": "stop",
@@ -365,7 +368,7 @@ async def consume_sse_with_reasoning(
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     tool_call_args_emitted: set[str] = set()
-    finish_reason = "stop"
+    finish_reason: str | None = None
     usage: LLMUsage | None = None
     reasoning_content: str | None = None
     streamed_reasoning = False
@@ -555,6 +558,8 @@ async def consume_sse_with_reasoning(
             detail = event.get("error") or event.get("message") or event
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
+    if finish_reason is None:
+        raise ConnectionError("Model stream ended before a terminal response event was received")
     if refusal_seen:
         finish_reason = "refusal"
     return content, tool_calls, finish_reason, usage, reasoning_content
@@ -655,6 +660,14 @@ def parse_response_output(
             output_items=output,
             usage=usage,
         )
+        result.provider_compaction_state = build_responses_compaction_state(
+            provider=state_provider,
+            model=state_model,
+            output_items=output,
+        )
+        result.provider_compaction_applied = result.provider_compaction_state is not None
+        if result.provider_compaction_applied:
+            result.provider_compaction_scope = "current_request"
     return result
 
 
@@ -670,7 +683,7 @@ async def consume_sdk_stream(
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
     tool_call_args_emitted: set[str] = set()
-    finish_reason = "stop"
+    finish_reason: str | None = None
     usage: LLMUsage | None = None
     reasoning_content: str | None = None
     streamed_reasoning = False
@@ -841,6 +854,8 @@ async def consume_sdk_stream(
             detail = getattr(event, "error", None) or getattr(event, "message", None) or event
             raise RuntimeError(f"Response failed: {str(detail)[:500]}")
 
+    if finish_reason is None:
+        raise ConnectionError("Model stream ended before a terminal response event was received")
     if refusal_seen:
         finish_reason = "refusal"
     return content, tool_calls, finish_reason, usage, reasoning_content

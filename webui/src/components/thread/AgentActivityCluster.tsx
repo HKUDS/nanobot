@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   CheckCircle2,
   Clock3,
@@ -43,13 +53,24 @@ import {
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
+import { useThreadVisibility } from "@/hooks/useThreadVisibility";
+import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import { cn } from "@/lib/utils";
-import { usePageVisibility } from "@/hooks/usePageVisibility";
-import type { CliAppInfo, McpPresetInfo, ToolProgressEvent, UIFileEdit, UIMessage } from "@/lib/types";
+import type {
+  CliAppInfo,
+  McpPresetInfo,
+  RetryStatus,
+  ToolProgressEvent,
+  UIFileEdit,
+  UIMessage,
+} from "@/lib/types";
 
 const ACTIVITY_SCROLL_NEAR_BOTTOM_PX = 24;
+const EMPTY_CLI_APPS: CliAppInfo[] = [];
+const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
 
 export { isAgentActivityMember };
 
@@ -106,6 +127,10 @@ function countActivity(
       continue;
     }
     if (m.kind === "trace") {
+      if (m.traceDetail) {
+        toolCalls += m.traceDetail.traceCount;
+        continue;
+      }
       const lines = traceLines(m);
       for (const line of lines) {
         if (!isCliRunTraceLine(line) && !isMcpRunTraceLine(line)) {
@@ -133,32 +158,98 @@ interface AgentActivityClusterProps {
   turnLatencyMs?: number;
   /** User turn start timestamp for live activity before the first trace/reasoning row. */
   startedAtMs?: number;
+  retryStatus?: RetryStatus | null;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
+  traceDetailScope?: string | null;
+  onLoadTraceDetails?: (refs: string[]) => void | Promise<void>;
   onOpenFilePreview?: (path: string) => void;
 }
 
-/**
- * One fold wrapping the complete middle of a turn: reasoning, model segments,
- * tool traces, and file edits. The final assistant answer stays outside it.
- */
-export function AgentActivityCluster({
+export function AgentActivityCluster(props: AgentActivityClusterProps) {
+  const displayMode = useFileEditDisplayMode();
+  const messages = useMemo(() => coalesceActivityMessages(props.messages), [props.messages]);
+  const editsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(messages, props.isTurnStreaming),
+    [messages, props.isTurnStreaming],
+  );
+  if (displayMode === "summary" || !editsByMessage.size) {
+    return <FoldedAgentActivity {...props} />;
+  }
+
+  // Diff rows break the fold so they stay visible in their original timeline position.
+  const items: ReactNode[] = [];
+  let pending: UIMessage[] = [];
+  const flush = (last: boolean) => {
+    // A live turn still needs its status header when the last row is a diff.
+    if (!pending.length && !(last && props.isTurnStreaming)) return;
+    items.push(
+      <FoldedAgentActivity
+        {...props}
+        key={pending[0]?.id ?? "tail-status"}
+        messages={pending}
+        isTurnStreaming={last && props.isTurnStreaming}
+        retryStatus={last ? props.retryStatus : null}
+        hasBodyBelow={false}
+      />,
+    );
+    pending = [];
+  };
+  for (const message of messages) {
+    const edits = editsByMessage.get(message.id);
+    if (message.fileEdits?.length) {
+      const traces = traceLines(message).filter((line) => !isFileEditTraceLine(line));
+      if (traces.some((line) => line.trim())) {
+        pending.push({ ...message, traces, content: traces.at(-1) ?? "", fileEdits: undefined });
+      }
+    } else {
+      pending.push(message);
+    }
+    if (edits?.length) {
+      flush(false);
+      items.push(
+        <FileEditGroup
+          key={`${message.id}:edits`}
+          edits={edits}
+          displayMode={displayMode}
+          onOpenFilePreview={props.onOpenFilePreview}
+        />,
+      );
+    }
+  }
+  flush(true);
+  return (
+    <div className={cn("flex w-full flex-col gap-0.5", props.hasBodyBelow && "mb-2")}>
+      {items}
+    </div>
+  );
+}
+
+function FoldedAgentActivity({
   messages,
   isTurnStreaming,
   hasBodyBelow,
   turnLatencyMs,
   startedAtMs,
-  cliApps = [],
-  mcpPresets = [],
+  retryStatus = null,
+  cliApps = EMPTY_CLI_APPS,
+  mcpPresets = EMPTY_MCP_PRESETS,
+  traceDetailScope = null,
+  onLoadTraceDetails,
   onOpenFilePreview,
 }: AgentActivityClusterProps) {
   const { t } = useTranslation();
   const fileEditDisplayMode = useFileEditDisplayMode();
   const pageVisible = usePageVisibility();
+  const threadVisible = useThreadVisibility();
   const activityMessages = useMemo(() => coalesceActivityMessages(messages), [messages]);
-  const fileEdits = useMemo(
-    () => summarizeFileEdits(collectFileEdits(activityMessages), isTurnStreaming),
+  const fileEditsByMessage = useMemo(
+    () => summarizeFileEditsByMessage(activityMessages, isTurnStreaming),
     [activityMessages, isTurnStreaming],
+  );
+  const fileEdits = useMemo(
+    () => [...fileEditsByMessage.values()].flat(),
+    [fileEditsByMessage],
   );
   const cliRuns = useMemo(() => collectCliRuns(activityMessages), [activityMessages]);
   const mcpRuns = useMemo(() => collectMcpRuns(activityMessages), [activityMessages]);
@@ -182,6 +273,7 @@ export function AgentActivityCluster({
   const [userToggledOuter, setUserToggledOuter] = useState(false);
   const [outerOpenLocal, setOuterOpenLocal] = useState(false);
   const [completionHoldOpen, setCompletionHoldOpen] = useState(false);
+  const [failedTraceDetailKey, setFailedTraceDetailKey] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [activityScrollFade, setActivityScrollFade] = useState({ top: false, bottom: false });
   const activityScrollRef = useRef<HTMLDivElement>(null);
@@ -194,6 +286,28 @@ export function AgentActivityCluster({
   const outerExpanded = userToggledOuter
     ? outerOpenLocal
     : isTurnStreaming || completionHoldOpen || (wasTurnStreaming && !isTurnStreaming);
+  const deferredTraceRefs = useMemo(
+    () => Array.from(new Set(
+      messages
+        .map((message) => message.traceDetail?.ref)
+        .filter((ref): ref is string => typeof ref === "string" && ref.length > 0),
+    )),
+    [messages],
+  );
+  const traceDetailKey = useMemo(
+    () => `${traceDetailScope ?? ""}\u0000${deferredTraceRefs.join("\u0000")}`,
+    [deferredTraceRefs, traceDetailScope],
+  );
+  const traceDetailLoadFailed = failedTraceDetailKey === traceDetailKey;
+  const requestTraceDetails = useCallback(async (refs: string[]) => {
+    if (!onLoadTraceDetails) return;
+    setFailedTraceDetailKey(null);
+    try {
+      await onLoadTraceDetails(refs);
+    } catch {
+      setFailedTraceDetailKey(`${traceDetailScope ?? ""}\u0000${refs.join("\u0000")}`);
+    }
+  }, [onLoadTraceDetails, traceDetailScope]);
 
   const hasVisibleActivity = reasoningSteps > 0 || toolCalls > 0 || modelSegments > 0 || cliCount > 0 || mcpCount > 0 || fileCount > 0;
   const hasOnlyFileActivity = fileCount > 0 && activityMessages.every(messageHasOnlyFileActivity);
@@ -205,7 +319,34 @@ export function AgentActivityCluster({
     startedAtMs,
   );
   const activityDuration = formatActivityDuration(durationMs);
-  const activityLabel = isTurnStreaming
+  const retryError = retryStatus?.error_kind === "connection"
+    ? t("message.retryConnection", { defaultValue: "Connection failed" })
+    : retryStatus?.error_kind === "timeout"
+      ? t("message.retryTimeout", { defaultValue: "Model timed out" })
+      : retryStatus?.error_kind === "rate_limit"
+        ? t("message.retryRateLimit", { defaultValue: "Rate limited" })
+        : retryStatus?.error_kind === "server"
+          ? t("message.retryServer", { defaultValue: "Model unavailable" })
+          : t("message.retryUnknown", { defaultValue: "Model request failed" });
+  const retryAttempt = retryStatus?.max_attempts
+    ? `${retryStatus.attempt}/${retryStatus.max_attempts}`
+    : String(retryStatus?.attempt ?? "");
+  const retrySeconds = retryStatus?.next_retry_at === undefined
+    ? 0
+    : Math.max(0, Math.ceil(retryStatus.next_retry_at - now / 1000));
+  const activityLabel = retryStatus?.state === "exhausted"
+    ? t("message.retryExhausted", {
+        error: retryError,
+        defaultValue: "{{error}} · ending turn",
+      })
+    : retryStatus?.state === "waiting"
+      ? t("message.retryWaiting", {
+          error: retryError,
+          seconds: retrySeconds,
+          attempt: retryAttempt,
+          defaultValue: "{{error}} · retrying in {{seconds}}s · attempt {{attempt}}",
+        })
+      : isTurnStreaming
     ? t("message.activityWorkingFor", {
         duration: activityDuration,
         defaultValue: "Working for {{duration}}",
@@ -288,11 +429,17 @@ export function AgentActivityCluster({
   useEffect(() => cancelActivityScrollFrame, [cancelActivityScrollFrame]);
 
   useEffect(() => {
-    if (!isTurnStreaming || !pageVisible) return undefined;
+    if (outerExpanded && deferredTraceRefs.length > 0) {
+      void requestTraceDetails(deferredTraceRefs);
+    }
+  }, [deferredTraceRefs, outerExpanded, requestTraceDetails]);
+
+  useEffect(() => {
+    if (!isTurnStreaming || !pageVisible || !threadVisible) return undefined;
     setNow(Date.now());
     const interval = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(interval);
-  }, [isTurnStreaming, pageVisible]);
+  }, [isTurnStreaming, pageVisible, threadVisible]);
 
   useEffect(() => {
     const wasStreaming = wasTurnStreamingRef.current;
@@ -343,20 +490,27 @@ export function AgentActivityCluster({
         onToggle={toggleOuter}
         onScroll={onActivityScroll}
       >
+        {traceDetailLoadFailed ? (
+          <div role="alert" className="flex items-center gap-2 py-1 text-[12px] text-destructive">
+            <span>{t("message.traceDetailsLoadFailed", { defaultValue: "Full activity details could not be loaded." })}</span>
+            <button
+              type="button"
+              className="shrink-0 rounded-sm font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => void requestTraceDetails(deferredTraceRefs)}
+            >
+              {t("message.retryTraceDetails", { defaultValue: "Retry" })}
+            </button>
+          </div>
+        ) : null}
         <ActivityMessageTimeline
           messages={activityMessages}
           active={isTurnStreaming}
           cliAppsByName={cliAppsByName}
           mcpPresetsByName={mcpPresetsByName}
+          fileEditsByMessage={fileEditsByMessage}
+          fileEditDisplayMode={fileEditDisplayMode}
           onOpenFilePreview={onOpenFilePreview}
         />
-        {fileEdits.length ? (
-          <FileEditGroup
-            edits={fileEdits}
-            displayMode={fileEditDisplayMode}
-            onOpenFilePreview={onOpenFilePreview}
-          />
-        ) : null}
       </ThinkingReasoningShell>
     </div>
   );
@@ -409,17 +563,21 @@ function traceLines(message: UIMessage): string[] {
   return message.content.trim() ? [message.content] : [];
 }
 
-function ActivityMessageTimeline({
+const ActivityMessageTimeline = memo(function ActivityMessageTimeline({
   messages,
   active,
   cliAppsByName,
   mcpPresetsByName,
+  fileEditsByMessage,
+  fileEditDisplayMode,
   onOpenFilePreview,
 }: {
   messages: UIMessage[];
   active: boolean;
   cliAppsByName: Map<string, CliAppInfo>;
   mcpPresetsByName: Map<string, McpPresetInfo>;
+  fileEditsByMessage: Map<string, FileEditSummary[]>;
+  fileEditDisplayMode: FileEditDisplayMode;
   onOpenFilePreview?: (path: string) => void;
 }) {
   const items: ReactNode[] = [];
@@ -447,19 +605,26 @@ function ActivityMessageTimeline({
       return;
     }
     if (message.kind === "trace") {
+      const fileEdits = fileEditsByMessage.get(message.id) ?? [];
       items.push(
-        <ActivityTraceTimeline
-          key={message.id}
-          message={message}
-          active={active && index === messages.length - 1}
-          cliAppsByName={cliAppsByName}
-          mcpPresetsByName={mcpPresetsByName}
-        />,
+        <Fragment key={message.id}>
+          <ActivityTraceTimeline
+            message={message}
+            active={active && index === messages.length - 1}
+            cliAppsByName={cliAppsByName}
+            mcpPresetsByName={mcpPresetsByName}
+          />
+          <FileEditGroup
+            edits={fileEdits}
+            displayMode={fileEditDisplayMode}
+            onOpenFilePreview={onOpenFilePreview}
+          />
+        </Fragment>,
       );
     }
   });
   return <>{items}</>;
-}
+});
 
 /**
  * Keep an intermediate assistant segment as normal Markdown. The activity
@@ -1061,16 +1226,6 @@ function fileEditCallKey(edit: UIFileEdit): string {
   return `${edit.tool}|${edit.path}`;
 }
 
-function collectFileEdits(messages: UIMessage[]): UIFileEdit[] {
-  const edits: UIFileEdit[] = [];
-  for (const message of messages) {
-    if (message.kind === "trace" && message.fileEdits?.length) {
-      edits.push(...message.fileEdits);
-    }
-  }
-  return edits;
-}
-
 function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
   const order: string[] = [];
   const byKey = new Map<string, UIFileEdit>();
@@ -1080,6 +1235,33 @@ function latestFileEditEvents(edits: UIFileEdit[]): UIFileEdit[] {
     byKey.set(key, edit);
   }
   return order.map((key) => byKey.get(key)).filter(Boolean) as UIFileEdit[];
+}
+
+/** Keep each edit at the point where its call first appeared. Later lifecycle
+ * events update that row in place instead of moving completed edits to the end. */
+function summarizeFileEditsByMessage(
+  messages: UIMessage[],
+  active: boolean,
+): Map<string, FileEditSummary[]> {
+  const messageByEdit = new Map<string, string>();
+  const edits: UIFileEdit[] = [];
+  for (const message of messages) {
+    for (const edit of message.fileEdits ?? []) {
+      const key = fileEditCallKey(edit);
+      if (!messageByEdit.has(key)) messageByEdit.set(key, message.id);
+      edits.push(edit);
+    }
+  }
+
+  const grouped = new Map<string, FileEditSummary[]>();
+  for (const edit of summarizeFileEdits(edits, active)) {
+    const messageId = messageByEdit.get(edit.key);
+    if (!messageId) continue;
+    const group = grouped.get(messageId) ?? [];
+    group.push(edit);
+    grouped.set(messageId, group);
+  }
+  return grouped;
 }
 
 function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSummary[] {

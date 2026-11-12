@@ -58,7 +58,6 @@ def _is_string_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
 class MyTool(Tool):
     """Check and set the agent loop's runtime configuration."""
 
-    _plugin_discoverable = False  # Requires AgentLoop reference; registered manually
     config_key = "my"
 
     @classmethod
@@ -67,7 +66,16 @@ class MyTool(Tool):
 
     @classmethod
     def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.config.my.enable
+        return ctx.runtime_control is not None and ctx.config.my.enable
+
+    @classmethod
+    def create(cls, ctx: ToolContext) -> Tool:
+        if ctx.runtime_control is None:
+            raise RuntimeError("MyTool requires a runtime control capability")
+        return cls(
+            runtime_control=ctx.runtime_control,
+            modify_allowed=ctx.config.my.allow_set,
+        )
 
     BLOCKED = frozenset({
         # Core infrastructure

@@ -1,0 +1,85 @@
+{
+  "setup": {
+    "docsLabel": "MoChat 設定ガイドを開く",
+    "officialLabel": "MoChat を開く",
+    "fields": {
+      "clawToken": {
+        "label": "Claw トークン",
+        "placeholder": "MoChat Claw トークン"
+      },
+      "baseUrl": {
+        "label": "サーバー URL",
+        "placeholder": "https://mochat.io"
+      },
+      "agentUserId": {
+        "label": "エージェントのユーザー ID",
+        "placeholder": "任意のエージェントユーザー ID"
+      },
+      "sessions": {
+        "label": "セッション",
+        "placeholder": "セッション ID（カンマ区切り）"
+      },
+      "panels": {
+        "label": "パネル",
+        "placeholder": "パネル ID（カンマ区切り）"
+      },
+      "allowFrom": {
+        "label": "許可するユーザー",
+        "placeholder": "ユーザー ID（カンマ区切り）"
+      },
+      "socketUrl": {
+        "label": "ソケットURL"
+      },
+      "socketPath": {
+        "label": "ソケットパス"
+      },
+      "socketDisableMsgpack": {
+        "label": "メッセージパックを無効にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "socketReconnectDelayMs": {
+        "label": "再接続の遅延"
+      },
+      "socketMaxReconnectDelayMs": {
+        "label": "最大再接続遅延"
+      },
+      "socketConnectTimeoutMs": {
+        "label": "接続タイムアウト"
+      },
+      "refreshIntervalMs": {
+        "label": "リフレッシュ間隔"
+      },
+      "watchTimeoutMs": {
+        "label": "ウォッチタイムアウト"
+      },
+      "watchLimit": {
+        "label": "バッチサイズを監視する"
+      },
+      "retryDelayMs": {
+        "label": "再試行の遅延"
+      },
+      "maxRetryAttempts": {
+        "label": "最大再試行回数"
+      },
+      "mention_requireInGroups": {
+        "label": "グループでのメンションを必須にする",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "groups": {
+        "label": "グループルール（JSON）"
+      },
+      "replyDelayMode": {
+        "label": "返信遅延モード"
+      },
+      "replyDelayMs": {
+        "label": "返信遅延"
+      }
+    }
+  }
+}

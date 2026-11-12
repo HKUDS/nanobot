@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.bus.events import InboundMessage
 from nanobot.providers.base import LLMResponse, LLMUsage
 
@@ -306,15 +307,21 @@ class TestRestartCommand:
             "nanobot.agent.runner.estimate_message_tokens",
             lambda _message: 7,
         )
-        loop.provider.chat_with_retry = AsyncMock(side_effect=[
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
             LLMResponse(content="first", usage=LLMUsage.reported(input_tokens=9, output_tokens=4)),
             LLMResponse(content="second", usage=None),
         ])
 
-        first = await loop._run_agent_loop([], runtime=loop.llm_runtime())
+        first = await loop._run_agent_loop(
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+        )
         assert first.usage == LLMUsage.reported(input_tokens=9, output_tokens=4)
 
-        second = await loop._run_agent_loop([], runtime=loop.llm_runtime())
+        second = await loop._run_agent_loop(
+            TranscriptInput(history=[], current_message=None),
+            runtime=loop.llm_runtime(),
+        )
         assert second.usage == LLMUsage.estimated(input_tokens=123, output_tokens=7)
 
     @pytest.mark.asyncio

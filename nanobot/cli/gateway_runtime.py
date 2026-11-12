@@ -23,6 +23,7 @@ from nanobot.cli.webui_support import (
     _gateway_health_bind_note,
     _gateway_health_url,
     _host_for_local_browser,
+    _launch_browser,
     _prepare_webui_bundle_for_gateway,
     _print_foreground_port_conflict,
     _tcp_endpoint_reachable,
@@ -246,6 +247,44 @@ def _print_gateway_health_endpoint(host: str, port: int) -> None:
     )
 
 
+def _gateway_readiness_payload(channels: Any) -> tuple[bool, dict[str, object]]:
+    """Describe process liveness separately from required WebSocket readiness."""
+    channel_status: dict[str, Any] = {}
+    get_status = getattr(channels, "get_status", None)
+    if callable(get_status):
+        try:
+            raw_status = get_status()
+            if isinstance(raw_status, dict):
+                channel_status = cast(dict[str, Any], raw_status)
+        except Exception:
+            logger.exception("Gateway readiness could not read channel status")
+
+    websocket = channel_status.get("websocket")
+    websocket_required = websocket is not None or "websocket" in getattr(
+        channels,
+        "enabled_channels",
+        (),
+    )
+    if not websocket_required:
+        websocket_state = "disabled"
+        ready = True
+    elif isinstance(websocket, dict):
+        websocket_status = cast(dict[str, Any], websocket)
+        ready = websocket_status.get("running") is True
+        state = websocket_status.get("state")
+        websocket_state = str(state) if isinstance(state, str) else "unavailable"
+    else:
+        ready = False
+        websocket_state = "unavailable"
+
+    return ready, {
+        "status": "ok" if ready else "degraded",
+        "process": "alive",
+        "ready": ready,
+        "websocket": websocket_state,
+    }
+
+
 async def _close_gateway_runtime(
     agent: AgentLoop,
     mcp_provider: MCPProvider,
@@ -318,13 +357,12 @@ def _run_gateway(
     from nanobot.agent.tools.message import MessageTool
     from nanobot.agent.turn_delivery import TurnDeliveryFactory
     from nanobot.bus.queue import MessageBus
-    from nanobot.bus.runtime_events import RuntimeEventBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.config.watcher import watch_config_file
     from nanobot.cron.bound_runner import run_bound_cron_job
     from nanobot.cron.service import CronJobSkippedError, CronService
     from nanobot.cron.session_turns import is_bound_cron_job
-    from nanobot.cron.types import CronJob
+    from nanobot.cron.types import CronJob, CronRunResult
     from nanobot.llm_usage import record_llm_call
     from nanobot.llm_usage.context import llm_usage_source
     from nanobot.providers.factory import (
@@ -371,7 +409,6 @@ def _run_gateway(
     )
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
-    runtime_events = RuntimeEventBus()
     fallback_model_observer = build_webui_fallback_model_observer(bus)
 
     def _observe_provider(snapshot: ProviderSnapshot) -> ProviderSnapshot:
@@ -429,7 +466,6 @@ def _run_gateway(
 
     turn_delivery_factory = TurnDeliveryFactory(
         bus,
-        runtime_events,
         route_policy=WebuiTurnRoutePolicy(session_manager),
     )
 
@@ -453,7 +489,6 @@ def _run_gateway(
         image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=_load_gateway_provider_snapshot,
         preset_catalog_loader=load_model_preset_catalog,
-        runtime_events=runtime_events,
         turn_delivery_factory=turn_delivery_factory,
         provider_signature=provider_snapshot.signature,
         local_trigger_store=trigger_store,
@@ -471,7 +506,6 @@ def _run_gateway(
         schedule_background=_schedule_webui_background,
         recovery=recovery,
     )
-    webui_turn_coordinator.subscribe(runtime_events)
     from nanobot.bus.events import OutboundMessage
     from nanobot.session.keys import session_key_for_channel
 
@@ -519,7 +553,7 @@ def _run_gateway(
         message_tool.set_send_callback(_deliver_to_channel)
 
     # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
+    async def on_cron_job(job: CronJob) -> str | CronRunResult | None:
         """Execute a cron job through the agent."""
         async def _silent(*_args: Any, **_kwargs: Any) -> None:
             pass
@@ -622,11 +656,6 @@ def _run_gateway(
             finally:
                 if isinstance(message_tool, MessageTool) and suppress_token is not None:
                     message_tool.reset_suppress_delivery(suppress_token)
-
-            # Keep a small tail of heartbeat history so the loop stays bounded.
-            session = agent.sessions.get_or_create("heartbeat")
-            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-            agent.sessions.save(session)
 
             if not resp or not resp.content:
                 return
@@ -758,8 +787,9 @@ def _run_gateway(
                         method, path = parts[0], parts[1]
 
                     if method == "GET" and path == "/health":
-                        body = _json.dumps({"status": "ok"})
-                        status = "200 OK"
+                        ready, payload = _gateway_readiness_payload(channels)
+                        body = _json.dumps(payload)
+                        status = "200 OK" if ready else "503 Service Unavailable"
                         content_type = "application/json"
                     else:
                         body = "Not Found"
@@ -825,7 +855,6 @@ def _run_gateway(
         """Wait for the gateway to bind, then point the user's browser at the webui."""
         if not open_browser_url:
             return
-        import webbrowser
         from urllib.parse import urlparse
 
         # Channels start asynchronously. When the caller supplies a backend
@@ -857,8 +886,10 @@ def _run_gateway(
                 await asyncio.sleep(0.1)
         display_url = _webui_display_url(open_browser_url)
         try:
-            webbrowser.open(open_browser_url)
-            console.print(f"[green]✓[/green] Opened browser at {display_url}")
+            if _launch_browser(open_browser_url):
+                console.print(f"[green]✓[/green] Opened browser at {display_url}")
+            else:
+                console.print(f"[yellow]Could not open browser; visit {display_url}[/yellow]")
         except Exception as e:
             console.print(f"[yellow]Could not open browser ({e}); visit {display_url}[/yellow]")
 
@@ -984,6 +1015,7 @@ def _run_gateway(
                     tasks,
                     runtime_tasks,
                 )
+                await bus.drain()
                 # Flush all cached sessions to durable storage before exit.
                 # This prevents data loss on filesystems with write-back
                 # caching (rclone VFS, NFS, FUSE mounts, etc.).
@@ -993,5 +1025,10 @@ def _run_gateway(
             finally:
                 restore_shutdown_handlers()
 
-    with gateway_runtime.foreground_instance(gateway_start_options):
+    with (
+        gateway_runtime.foreground_instance(gateway_start_options),
+        webui_turn_coordinator.connected(),
+    ):
+        if health_server_enabled:
+            gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

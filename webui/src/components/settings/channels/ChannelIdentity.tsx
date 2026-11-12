@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import type { useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 
 import {
   channelFieldMessageKey,
@@ -12,14 +12,17 @@ import {
 } from "@/channel-plugins/registry";
 import type {
   ChannelConfigField,
+  ChannelFieldPresentation,
   ChannelSetupPresentation,
 } from "@/components/settings/channels/catalog";
+import { channelValidationMessage } from "@/components/settings/channels/validationMessages";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
 import { normalizeLocale } from "@/i18n/config";
 import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { ChannelRuntimeStatus, NanobotFeatureInfo } from "@/lib/types";
 
-export type ChannelFilter = "all" | "on" | "off";
+export const CHANNEL_SETUP_PANEL_CLASS_NAME =
+  "min-h-full rounded-panel bg-settings-surface p-6";
 
 export function channelSetup(
   feature: NanobotFeatureInfo,
@@ -35,25 +38,23 @@ export function channelSetup(
       key,
       label: copy?.label ?? fieldLabel(key.split(".").at(-1) ?? key),
       placeholder: copy?.placeholder,
-      help: copy?.help,
     };
   };
+  const localizePresentedField = (
+    field: ChannelFieldPresentation,
+  ): ChannelConfigField => ({
+    ...localizeField(field.key),
+    section: field.section,
+  });
   const presentation: ChannelSetupPresentation = {
     ...definition,
     primaryActionLabel: setupMessages?.primaryAction,
     docsLabel: setupMessages?.docsLabel,
     officialLabel: setupMessages?.officialLabel,
-    summary:
-      setupMessages?.summary
-      ?? "Enable turns on this channel in nanobot, but this integration still needs platform-specific setup before it can receive messages.",
-    tryIt: setupMessages?.tryIt,
-    steps: setupMessages?.steps ?? [
-      `Open ~/.nanobot/config.json and find channels.${feature.name}.`,
-      "Add the credentials required by that platform, using the channel documentation as the source of truth.",
-      "Restart nanobot, then send a small test message from that platform.",
-    ],
-    fields: definition?.fields?.map((field) => localizeField(field.key)),
-    manualFields: definition?.manualFields?.map((field) => localizeField(field.key)),
+    presetLabel: setupMessages?.presetLabel,
+    sectionLabels: setupMessages?.sections,
+    fields: definition?.fields?.map(localizePresentedField),
+    manualFields: definition?.manualFields?.map(localizePresentedField),
     actions: definition?.actions?.map((action) => ({
       ...action,
       label: setupMessages?.actions?.[action.id] ?? fieldLabel(action.id),
@@ -83,9 +84,11 @@ export function channelSetup(
       ...copy,
       key: field.key,
       label: copy.label,
+      section: copy.section ?? (field.required ? "credentials" : "advanced"),
       secret: field.kind === "secret",
       optional: !field.required,
-      inputType: field.kind === "int" ? "number" : undefined,
+      kind: field.kind,
+      inputType: channelFieldInputType(field.field, field.kind),
       defaultValue: field.default_value,
       options:
         field.kind === "enum" || field.kind === "bool"
@@ -106,9 +109,22 @@ export function channelSetup(
     officialLabel:
       presentation.officialLabel
       ?? (contract.official_url ? "Open official setup" : undefined),
+    requirements: contract.requirements,
     fields: fields.length ? fields : undefined,
     manualFields: manual.length ? manual : undefined,
   };
+}
+
+function channelFieldInputType(
+  field: string,
+  kind: string,
+): ChannelConfigField["inputType"] {
+  if (kind === "int" || kind === "float") return "number";
+  const normalized = field.toLowerCase();
+  if (normalized.includes("url")) return "url";
+  if (normalized.includes("email") || normalized.includes("address")) return "email";
+  if (normalized.includes("phone")) return "tel";
+  return undefined;
 }
 
 function fieldLabel(value: string): string {
@@ -126,7 +142,8 @@ export function ChannelLogo({
   feature: NanobotFeatureInfo;
   showBrandLogos: boolean;
 }) {
-  const presentation = channelUiPresentation(feature.name, feature.webui);
+  const presentation = channelUiPresentation(feature.name, feature.webui)
+    ?? channelUiPresentation(feature.name);
   const initials = presentation?.initials ?? feature.display_name.slice(0, 2).toUpperCase();
   const color = presentation?.color ?? "#6B7280";
   const Icon = presentation?.icon;
@@ -186,24 +203,6 @@ export function localizedChannelDisplayName(
   return channelTranslator(t, channelUiOwner(feature.name))("displayName", fallback);
 }
 
-export function channelDescription(feature: NanobotFeatureInfo, t: ReturnType<typeof useTranslation>["t"]): string {
-  const fallback =
-    `Use nanobot from ${channelDisplayName(feature)}.`;
-  return channelTranslator(t, channelUiOwner(feature.name))("description", fallback);
-}
-
-export function channelRequirements(feature: NanobotFeatureInfo, t: ReturnType<typeof useTranslation>["t"]): string {
-  const fallback =
-    "Channel credentials and gateway settings";
-  return channelTranslator(t, channelUiOwner(feature.name))("requirements", fallback);
-}
-
-export function channelMatchesFilter(feature: NanobotFeatureInfo, filter: ChannelFilter): boolean {
-  if (filter === "on") return channelIsRunning(feature);
-  if (filter === "off") return !channelIsRunning(feature);
-  return true;
-}
-
 export function channelIsRunning(feature: NanobotFeatureInfo): boolean {
   return feature.runtime_status === "running";
 }
@@ -224,26 +223,10 @@ export function channelStatusLabel(
   }
   if (channelIsRunning(feature)) return tx("settings.values.on", "On");
   if (feature.enabled) return tx("settings.channels.runtimeStopped", "Not running");
+  if (feature.configured === false) return tx("settings.channels.needsConfig", "Needs setup");
+  if (feature.configured === true) return tx("settings.nanobotFeatures.ready", "Ready");
   return tx("settings.values.off", "Off");
 }
-
-export function channelSearchText(
-  feature: NanobotFeatureInfo,
-  t?: ReturnType<typeof useTranslation>["t"],
-): string {
-  return [
-    t ? localizedChannelDisplayName(feature, t) : undefined,
-    channelDisplayName(feature),
-    feature.display_name,
-    feature.name,
-    feature.status,
-    t ? channelDescription(feature, t) : undefined,
-    t ? channelRequirements(feature, t) : undefined,
-  ]
-    .join(" ")
-    .toLowerCase();
-}
-
 
 export function ChannelStatusBadge({
   children,
@@ -273,10 +256,11 @@ export function ChannelRuntimeError({
   message?: string;
   className?: string;
 }) {
+  const { t } = useTranslation();
   if (!message) return null;
   return (
     <div className={`${className} rounded-control border border-destructive/20 bg-destructive/5 px-3 py-2 text-[12px] leading-5 text-destructive`}>
-      {message}
+      {channelValidationMessage(message, t)}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { useAutoSave } from "@/components/settings/shared/useAutoSave";
 import type { Dispatch, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -37,6 +38,7 @@ export function visibleWebuiDefaultAccessMode(mode: string | null | undefined): 
 }
 
 export function AdvancedSettings({
+  error,
   form,
   dirty,
   saving,
@@ -47,6 +49,7 @@ export function AdvancedSettings({
   onRestart,
   isRestarting,
 }: {
+  error?: string;
   form: NetworkSafetySettingsUpdate;
   dirty: boolean;
   saving: boolean;
@@ -58,9 +61,10 @@ export function AdvancedSettings({
   isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
+  useAutoSave(form, dirty, saving, onSave);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className="space-y-7">
+    <div className="settings-stack">
       <section>
         <SettingsSectionTitle>
           {isNativeHostSurface
@@ -110,6 +114,9 @@ export function AdvancedSettings({
             />
           </SettingsRow>
           <RestartSettingsFooter
+            autoSave
+            error={Boolean(error)}
+            message={error}
             dirty={dirty}
             saving={saving}
             pendingRestart={requiresRestartPending}
@@ -120,12 +127,6 @@ export function AdvancedSettings({
         </SettingsGroup>
       </section>
 
-      <p className="max-w-3xl px-1 text-sm leading-6 text-muted-foreground">
-        {tx(
-          "settings.help.securityManagedControls",
-          "Web fetches always protect local, private, and metadata services. Core channel safety stays in config.json.",
-        )}
-      </p>
     </div>
   );
 }

@@ -1,26 +1,15 @@
 {
-  "description": "Use nanobot from Discord servers and DMs.",
-  "requirements": "Discord bot token, permissions, gateway",
   "setup": {
     "docsLabel": "Open Discord setup",
     "officialLabel": "Open Discord portal",
-    "tryIt": "Mention the bot in a server or send it a direct message.",
-    "summary": "Enable turns on Discord support. Discord still needs a bot token and server permissions.",
-    "steps": [
-      "Create a bot in Discord Developer Portal and copy its token.",
-      "Invite the bot to your server with message read/send and slash command permissions.",
-      "Save and enable Discord, then mention the bot or send a direct message."
-    ],
     "fields": {
       "token": {
         "label": "Bot token",
-        "placeholder": "Discord bot token",
-        "help": "Create it from the Bot page in Discord Developer Portal."
+        "placeholder": "Discord bot token"
       },
       "allowChannels": {
         "label": "Allowed channels",
-        "placeholder": "Channel IDs, comma separated",
-        "help": "Leave empty to allow any channel the bot can read."
+        "placeholder": "Channel IDs, comma separated"
       },
       "groupPolicy": {
         "label": "Group behavior",
@@ -33,6 +22,34 @@
       "allowFrom": {
         "label": "Allowed users",
         "placeholder": "User IDs, comma separated"
+      },
+      "proxy": {
+        "label": "Network proxy"
+      },
+      "proxyUsername": {
+        "label": "Proxy username"
+      },
+      "proxyPassword": {
+        "label": "Proxy password"
+      },
+      "intents": {
+        "label": "Gateway intents"
+      },
+      "readReceiptEmoji": {
+        "label": "Read emoji"
+      },
+      "workingEmoji": {
+        "label": "Working emoji"
+      },
+      "workingEmojiDelay": {
+        "label": "Working emoji delay"
+      },
+      "streaming": {
+        "label": "Streaming",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
       }
     }
   }

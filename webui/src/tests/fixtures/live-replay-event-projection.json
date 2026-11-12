@@ -757,6 +757,276 @@
           "turnSeq": 6
         }
       ]
+    },
+    {
+      "name": "length_continuation_reasoning_then_new_recovery_turn",
+      "chat_id": "fixture-length-recovery",
+      "initial_messages": [
+        {
+          "role": "user",
+          "content": "Write long code.",
+          "turnId": "long-turn",
+          "turnPhase": "user",
+          "turnSeq": 1,
+          "id": "length-user"
+        }
+      ],
+      "live_events": [
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 2,
+          "text": "Plan."
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 3
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 4,
+          "text": "```python\nfirst"
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 5,
+          "text": "```python\nfirst",
+          "resuming": true,
+          "merge_next": true
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 6,
+          "text": "Continue "
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 7,
+          "text": "code."
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 8
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 9,
+          "text": "\nsecond"
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 10,
+          "text": "```python\nfirst\nsecond",
+          "resuming": true,
+          "merge_next": true
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 11,
+          "text": "Finish code."
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 12
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 1,
+          "text": "Recover."
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 2
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 3,
+          "text": "Recovered "
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 4,
+          "text": "Recovered ",
+          "resuming": true,
+          "merge_next": true
+        },
+        {
+          "event": "reasoning_delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 5,
+          "text": "Continue recovery."
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 6
+        },
+        {
+          "event": "delta",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 7,
+          "text": "answer."
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 8,
+          "text": "Recovered answer."
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 9,
+          "latency_ms": 50
+        }
+      ],
+      "transcript": [
+        {
+          "event": "user",
+          "chat_id": "fixture-length-recovery",
+          "text": "Write long code.",
+          "turn_id": "long-turn",
+          "turn_seq": 1
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 3,
+          "text": "Plan."
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 5,
+          "text": "```python\nfirst",
+          "resuming": true,
+          "merge_next": true
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 8,
+          "text": "Continue code."
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 10,
+          "text": "```python\nfirst\nsecond",
+          "resuming": true,
+          "merge_next": true
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "long-turn",
+          "turn_seq": 12,
+          "text": "Finish code."
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 2,
+          "text": "Recover."
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 4,
+          "text": "Recovered ",
+          "resuming": true,
+          "merge_next": true
+        },
+        {
+          "event": "reasoning_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 6,
+          "text": "Continue recovery."
+        },
+        {
+          "event": "stream_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 8,
+          "text": "Recovered answer."
+        },
+        {
+          "event": "turn_end",
+          "chat_id": "fixture-length-recovery",
+          "turn_id": "recovery-turn",
+          "turn_seq": 9,
+          "latency_ms": 50
+        }
+      ],
+      "expected": [
+        {
+          "role": "user",
+          "content": "Write long code.",
+          "turnId": "long-turn",
+          "turnPhase": "user",
+          "turnSeq": 1
+        },
+        {
+          "role": "assistant",
+          "content": "```python\nfirst\nsecond",
+          "reasoning": "Plan.\n\nContinue code.\n\nFinish code.",
+          "turnId": "long-turn",
+          "turnPhase": "answer",
+          "turnSeq": 10,
+          "activitySegmentId": "segment-1"
+        },
+        {
+          "role": "assistant",
+          "content": "Recovered answer.",
+          "reasoning": "Recover.\n\nContinue recovery.",
+          "turnId": "recovery-turn",
+          "turnPhase": "answer",
+          "turnSeq": 8,
+          "activitySegmentId": "segment-2",
+          "latencyMs": 50
+        }
+      ]
     }
   ]
 }

@@ -171,7 +171,7 @@ async def test_subagent_keeps_project_runtime_scope_with_agent_owned_tools(tmp_p
 async def test_subagent_recovers_from_tool_error_in_same_run(tmp_path):
     provider = MagicMock(spec=LLMProvider)
     provider.get_default_model.return_value = "test"
-    provider.chat_with_retry = AsyncMock(side_effect=[
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(
             content="reading",
             tool_calls=[
@@ -197,7 +197,7 @@ async def test_subagent_recovers_from_tool_error_in_same_run(tmp_path):
     )
 
     assert result == "recovered without restarting"
-    assert provider.chat_with_retry.await_count == 2
+    assert provider.chat_stream_with_retry.await_count == 2
 
 
 @pytest.mark.asyncio

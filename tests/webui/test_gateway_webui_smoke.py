@@ -211,6 +211,55 @@ async def test_gateway_webui_bootstrap_message_and_thread_hydration(tmp_path: Pa
         _stop_gateway(process)
 
 
+@pytest.mark.asyncio
+async def test_desktop_terminal_identity_and_independent_client_lifetime(tmp_path: Path) -> None:
+    """Two terminal clients exercise real authentication, framing and gateway lifetime."""
+    ws_port, gateway_port = _free_port(), _free_port()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config_path, log_path = tmp_path / "config.json", tmp_path / "gateway.log"
+    _write_smoke_config(config_path, workspace=workspace, ws_port=ws_port, gateway_port=gateway_port)
+    process = _start_gateway(config_path, log_path)
+    base_url = f"http://127.0.0.1:{ws_port}"
+    try:
+        first = _wait_for_bootstrap(base_url, process, log_path)
+        terminal = first["terminal"]
+        assert terminal["protocolVersion"] == 1
+        unauthenticated = httpx.get(f"{base_url}/webui/terminal", trust_env=False)
+        assert unauthenticated.status_code == 401
+        probe = _get_bootstrap(f"{base_url}/webui/terminal")
+        assert probe == terminal  # Contains no token or config information.
+        second = _get_bootstrap(f"{base_url}/webui/bootstrap")
+        assert second["terminal"] == terminal
+        identity_query = f'&terminal_protocol=1&terminal_instance={terminal["gatewayId"]}'
+        first_url = f'{first["ws_url"]}?token={first["token"]}&client_id=terminal-one'
+        # A rejected wrong-instance upgrade must not consume the one-use WS token.
+        with pytest.raises(websockets.exceptions.InvalidStatus) as wrong:
+            async with websockets.connect(first_url + "&terminal_protocol=1&terminal_instance=wrong"):
+                pytest.fail("Wrong gateway identity accepted")
+        assert wrong.value.response.status_code == 409
+        async with websockets.connect(first_url + identity_query) as one:
+            assert (await _recv_until(one, "ready"))["terminal"] == terminal
+            second_url = f'{second["ws_url"]}?token={second["token"]}&client_id=terminal-two'
+            async with websockets.connect(second_url + identity_query) as two:
+                assert (await _recv_until(two, "ready"))["terminal"] == terminal
+                await one.close()
+                await two.send(json.dumps({"type": "new_chat"}))
+                chat_id = (await _recv_until(two, "attached"))["chat_id"]
+                await two.send(json.dumps({"type": "message", "chat_id": chat_id,
+                    "content": "/model", "webui": True, "turn_id": "terminal-model"}))
+                assert "custom/smoke-model" in (await _recv_until(two, "message"))["text"]
+                await _recv_until(two, "turn_end")
+        assert process.poll() is None
+        after = _get_bootstrap(f"{base_url}/webui/bootstrap")
+        assert after["terminal"] == terminal
+        # The ordinary WebUI ready frame remains unchanged (no opt-in metadata).
+        async with websockets.connect(f'{after["ws_url"]}?token={after["token"]}&client_id=browser') as browser:
+            assert "terminal" not in await _recv_until(browser, "ready")
+    finally:
+        _stop_gateway(process)
+
+
 def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
     tmp_path: Path,
 ) -> None:

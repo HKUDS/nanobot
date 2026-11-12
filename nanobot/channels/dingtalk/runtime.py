@@ -182,6 +182,12 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                 )
             )
 
+            if not self.channel._accepting_inbound_tasks:
+                self.channel.logger.debug(
+                    "Skipping DingTalk inbound dispatch during channel shutdown"
+                )
+                return AckMessage.STATUS_OK, "OK"
+
             self.channel.logger.info("Received message from {} ({}): {}", sender_name, sender_id, content)
 
             # Forward to Nanobot via _on_message (non-blocking).
@@ -196,7 +202,7 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                 )
             )
             self.channel._background_tasks.add(task)
-            task.add_done_callback(self.channel._background_tasks.discard)
+            task.add_done_callback(self.channel._on_background_task_done)
 
             return AckMessage.STATUS_OK, "OK"
 
@@ -256,6 +262,17 @@ class DingTalkChannel(BaseChannel):
 
         # Hold references to background tasks to prevent GC
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._accepting_inbound_tasks = True
+
+    def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
+        self._background_tasks.discard(task)
+        if task.cancelled():
+            return
+        exception = task.exception()
+        if exception is not None:
+            self.logger.opt(exception=exception).error(
+                "DingTalk inbound message task failed"
+            )
 
     async def start(self) -> None:
         """Start the DingTalk bot with Stream Mode."""
@@ -272,6 +289,7 @@ class DingTalkChannel(BaseChannel):
                 self.logger.error("client_id and client_secret not configured")
                 return
 
+            self._accepting_inbound_tasks = True
             self._running = True
             self._http = httpx.AsyncClient(
                 timeout=httpx.Timeout(10.0, connect=10.0, read=30.0, write=30.0, pool=10.0)
@@ -309,6 +327,7 @@ class DingTalkChannel(BaseChannel):
 
     async def stop(self) -> None:
         """Stop the DingTalk bot."""
+        self._accepting_inbound_tasks = False
         self._running = False
         await self._close_stream_client()
         start_task = self._start_task
@@ -326,8 +345,11 @@ class DingTalkChannel(BaseChannel):
             await self._http.aclose()
             self._http = None
         # Cancel outstanding background tasks
-        for task in self._background_tasks:
+        background_tasks = tuple(self._background_tasks)
+        for task in background_tasks:
             task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
         self._background_tasks.clear()
 
     async def _close_stream_client(self) -> None:

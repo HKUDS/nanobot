@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import ipaddress
 import json
+import socket
 import ssl
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self, TypeGuard, cast
 from urllib.parse import urlsplit, urlunsplit
+from weakref import WeakSet
 
 from pydantic import Field, PrivateAttr, field_validator, model_validator
-from websockets.asyncio.server import ServerConnection, serve, unix_serve
+from websockets.asyncio.server import Server, ServerConnection, serve, unix_serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
@@ -45,16 +49,58 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.outbound_projection import WebUIOutboundProjector
+from nanobot.webui.outbound_wire import (
+    WebUIWirePayload,
+    WebUIWirePersistence,
+    project_tool_events,
+)
 from nanobot.webui.session_identity import is_valid_webui_chat_id
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.websocket_logging import websockets_server_logger
 
 if TYPE_CHECKING:
-    from nanobot.bus.outbound_events import ProgressEvent, RecoveryStateEvent
-    from nanobot.providers.base import LLMUsage
+    from nanobot.bus.outbound_events import ProgressEvent
 
 # Plain HTTP WebUI routes also run through websockets.process_request.
 _WEBUI_HTTP_OPEN_TIMEOUT_S = 360.0
+_LISTENER_CHECK_INTERVAL_S = 0.5
+_LISTENER_STABLE_AFTER_S = 30.0
+_LISTENER_RESTART_BACKOFF_S = (1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+
+# Outbound delivery is isolated per connection.  A bounded queue keeps a slow
+# or suspended terminal from retaining an unbounded stream in server memory.
+_OUTBOUND_QUEUE_MAX_FRAMES = 256
+_OUTBOUND_QUEUE_MAX_BYTES = 8 * 1024 * 1024
+_OUTBOUND_SEND_TIMEOUT_S = 10.0
+_OUTBOUND_CLOSE_TIMEOUT_S = 1.0
+
+# A bind conflict or invalid address needs operator action and must not be
+# retried forever. These errors can be caused by a transient local network
+# interruption and are safe to retry at the channel boundary.
+_RECOVERABLE_LISTENER_ERRNOS = {
+    getattr(socket, name)
+    for name in (
+        "ECONNABORTED",
+        "ECONNRESET",
+        "EHOSTDOWN",
+        "EHOSTUNREACH",
+        "ENETDOWN",
+        "ENETRESET",
+        "ENETUNREACH",
+        "ETIMEDOUT",
+    )
+    if hasattr(socket, name)
+}
+_RECOVERABLE_LISTENER_WINERRORS = {
+    64,  # ERROR_NETNAME_DELETED / "The specified network name is no longer available."
+    995,  # ERROR_OPERATION_ABORTED
+    10050,  # WSAENETDOWN
+    10052,  # WSAENETRESET
+    10053,  # WSAECONNABORTED
+    10054,  # WSAECONNRESET
+    10060,  # WSAETIMEDOUT
+    10065,  # WSAEHOSTUNREACH
+}
 
 
 _ROUTING_ASSERTION_HEADERS = frozenset(
@@ -295,6 +341,25 @@ def _parse_envelope(raw: str) -> dict[str, Any] | None:
     return envelope
 
 
+class _ListenerUnavailableError(OSError):
+    """Raised when a previously bound listener loses its serving socket."""
+
+
+@dataclass(slots=True)
+class _OutboundFrame:
+    raw: str
+    utf8_bytes: int
+    label: str
+
+
+@dataclass(slots=True)
+class _ConnectionOutbound:
+    queue: asyncio.Queue[_OutboundFrame]
+    buffered_bytes: int = 0
+    writer: asyncio.Task[None] | None = None
+    closing: bool = False
+
+
 class WebSocketChannel(BaseChannel):
     """Run a local WebSocket server; forward text/JSON messages to the message bus."""
 
@@ -322,6 +387,10 @@ class WebSocketChannel(BaseChannel):
         self._webui_connections = gateway.endpoint.webui_connections
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
+        self._server: Server | None = None
+        self._connection_outbound: dict[ServerConnection, _ConnectionOutbound] = {}
+        self._outbound_retire_tasks: set[asyncio.Task[None]] = set()
+        self._retired_connections: WeakSet[ServerConnection] = WeakSet()
 
         self.gateway = gateway
         self._media = gateway.media
@@ -403,8 +472,19 @@ class WebSocketChannel(BaseChannel):
 
     def _attach(self, connection: ServerConnection, chat_id: str) -> None:
         """Idempotently subscribe *connection* to *chat_id*."""
+        if not self._register_connection_outbound(connection):
+            return
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
+
+    def _register_connection_outbound(self, connection: ServerConnection) -> bool:
+        if connection in self._retired_connections:
+            return False
+        self._connection_outbound.setdefault(
+            connection,
+            _ConnectionOutbound(asyncio.Queue(maxsize=_OUTBOUND_QUEUE_MAX_FRAMES)),
+        )
+        return True
 
     def _detach(self, connection: ServerConnection, chat_id: str) -> None:
         chats = self._conn_chats.get(connection)
@@ -428,7 +508,20 @@ class WebSocketChannel(BaseChannel):
 
     async def _cleanup_connection(self, connection: ServerConnection) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
-        await self._commands.cleanup_connection(connection)
+        self._retired_connections.add(connection)
+        state = self._connection_outbound.get(connection)
+        if state is not None:
+            state.closing = True
+            await self._stop_connection_writer(state)
+        try:
+            await self._commands.cleanup_connection(connection)
+        finally:
+            for chat_id in tuple(self._conn_chats.get(connection, ())):
+                self._detach(connection, chat_id)
+            self._conn_default.pop(connection, None)
+            self.gateway.endpoint.discard_connection(connection)
+            if self._connection_outbound.get(connection) is state:
+                self._connection_outbound.pop(connection, None)
 
     async def _hydrate_after_subscribe(self, chat_id: str) -> None:
         """Replay persisted or actively running per-chat state after subscribe."""
@@ -444,19 +537,11 @@ class WebSocketChannel(BaseChannel):
         payload: dict[str, Any] = {"event": event}
         payload.update(fields)
         raw = json.dumps(payload, ensure_ascii=False)
-        try:
-            await connection.send(raw)
-        except ConnectionClosed:
-            await self._cleanup_connection(connection)
-        except Exception as e:
-            self.logger.warning("failed to send {} event: {}", event, e)
+        await self._safe_send_to(connection, raw, label=f" {event} ")
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return WebSocketConfig().model_dump(by_alias=True)
-
-    def _expected_path(self) -> str:
-        return _normalize_config_path(self.config.path)
 
     def _build_ssl_context(self) -> ssl.SSLContext | None:
         cert = self.config.ssl_certfile.strip()
@@ -495,10 +580,100 @@ class WebSocketChannel(BaseChannel):
             headers,
         )
 
-    def _consume_issued_token(self, connection: ServerConnection, token: str) -> bool:
-        return self.gateway.endpoint.consume_issued_token(connection, token)
-
     # -- Server lifecycle and connection ingress ---------------------------
+
+    @staticmethod
+    def _socket_is_accepting(sock: socket.socket) -> bool:
+        """Return whether a bound socket still advertises a listen capability.
+
+        ``SO_ACCEPTCONN`` is not portable: macOS/BSD raise ``OSError`` with
+        ``ENOPROTOOPT`` ("Protocol not available") for this option even on a
+        perfectly healthy listening socket. Treating that as "not serving"
+        makes the listener look permanently degraded, so the caller retries
+        forever and the channel never reaches a ready state. When the option
+        is unavailable we fall back to the file-descriptor liveness check.
+        """
+        if sock.fileno() < 0:
+            return False
+        try:
+            return bool(sock.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN))
+        except OSError as exc:
+            if exc.errno in (errno.ENOPROTOOPT, errno.EOPNOTSUPP):
+                return True
+            raise
+
+    @classmethod
+    def _listener_is_serving(cls, server: Server) -> bool:
+        """Return whether every bound socket still has a live listen capability."""
+        try:
+            sockets = server.sockets
+            return bool(sockets) and server.is_serving() and all(
+                cls._socket_is_accepting(sock) for sock in sockets
+            )
+        except OSError:
+            return False
+
+    @staticmethod
+    def _is_recoverable_listener_error(error: Exception, *, was_serving: bool) -> bool:
+        if isinstance(error, _ListenerUnavailableError):
+            return True
+        if not isinstance(error, OSError):
+            return False
+        if was_serving:
+            return True
+        winerror = getattr(error, "winerror", None)
+        return (
+            error.errno in _RECOVERABLE_LISTENER_ERRNOS
+            or winerror in _RECOVERABLE_LISTENER_WINERRORS
+        )
+
+    async def _wait_for_listener_loss(self, server: Server) -> None:
+        """Wait for shutdown or raise when the serving socket disappears."""
+        assert self._stop_event is not None
+        while not self._stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(),
+                    timeout=_LISTENER_CHECK_INTERVAL_S,
+                )
+            except TimeoutError:
+                if not self._listener_is_serving(server):
+                    raise _ListenerUnavailableError(
+                        "WebSocket listener is no longer accepting connections"
+                    )
+
+    async def _close_server(self, server: Server, socket_path: str) -> None:
+        server.close()
+        try:
+            await server.wait_closed()
+        except OSError as exc:
+            self.logger.warning("WebSocket server close failed: {}", exc)
+        if socket_path:
+            with suppress(FileNotFoundError):
+                Path(socket_path).unlink()
+
+    def _log_listener_ready(self, scheme: str) -> None:
+        self.logger.info(
+            "WebSocket server listening on {}",
+            (
+                f"unix:{self.config.unix_socket_path}{self.config.path}"
+                if self.config.unix_socket_path
+                else f"{scheme}://{self.config.host}:{self.config.port}{self.config.path}"
+            ),
+        )
+        if self.config.token_issue_path:
+            self.logger.info(
+                "WebSocket token issue route: {}",
+                (
+                    f"unix:{self.config.unix_socket_path}"
+                    f"{_normalize_config_path(self.config.token_issue_path)}"
+                    if self.config.unix_socket_path
+                    else (
+                        f"{scheme}://{self.config.host}:{self.config.port}"
+                        f"{_normalize_config_path(self.config.token_issue_path)}"
+                    )
+                ),
+            )
 
     async def start(self) -> None:
         from nanobot.utils.logging_bridge import redirect_lib_logging
@@ -506,8 +681,8 @@ class WebSocketChannel(BaseChannel):
         redirect_lib_logging("websockets", level="WARNING")
         ws_logger = websockets_server_logger()
 
-        self._running = True
-        self._stop_event = asyncio.Event()
+        stop_event = asyncio.Event()
+        self._stop_event = stop_event
 
         ssl_context = self._build_ssl_context()
         scheme = "wss" if ssl_context else "ws"
@@ -521,73 +696,103 @@ class WebSocketChannel(BaseChannel):
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
-        self.logger.info(
-            "WebSocket server listening on {}",
-            (
-                f"unix:{self.config.unix_socket_path}{self.config.path}"
-                if self.config.unix_socket_path
-                else f"{scheme}://{self.config.host}:{self.config.port}{self.config.path}"
-            ),
-        )
-        if self.config.token_issue_path:
-            self.logger.info(
-                "WebSocket token issue route: {}",
-                (
-                    f"unix:{self.config.unix_socket_path}{_normalize_config_path(self.config.token_issue_path)}"
-                    if self.config.unix_socket_path
-                    else (
-                        f"{scheme}://{self.config.host}:{self.config.port}"
-                        f"{_normalize_config_path(self.config.token_issue_path)}"
-                    )
-                ),
-            )
-
         async def runner() -> None:
             socket_path = self.config.unix_socket_path
-            if socket_path:
-                path_obj = Path(socket_path)
-                path_obj.parent.mkdir(parents=True, exist_ok=True)
-                with suppress(FileNotFoundError):
-                    path_obj.unlink()
-                server = await unix_serve(
-                    handler,
-                    socket_path,
-                    process_request=process_request,
-                    open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
-                    max_size=self.config.max_message_bytes,
-                    ping_interval=self.config.ping_interval_s,
-                    ping_timeout=self.config.ping_timeout_s,
-                    logger=ws_logger,
-                )
-                with suppress(OSError):
-                    path_obj.chmod(0o600)
-            else:
-                server = await serve(
-                    handler,
-                    self.config.host,
-                    self.config.port,
-                    process_request=process_request,
-                    open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
-                    max_size=self.config.max_message_bytes,
-                    ping_interval=self.config.ping_interval_s,
-                    ping_timeout=self.config.ping_timeout_s,
-                    ssl=ssl_context,
-                    logger=ws_logger,
-                )
-            try:
-                assert self._stop_event is not None
-                await self._stop_event.wait()
-            finally:
-                server.close()
-                await server.wait_closed()
-                if socket_path:
-                    with suppress(FileNotFoundError):
-                        Path(socket_path).unlink()
+            failures = 0
+            while not stop_event.is_set():
+                server: Server | None = None
+                was_serving = False
+                started_at = 0.0
+                try:
+                    if socket_path:
+                        path_obj = Path(socket_path)
+                        path_obj.parent.mkdir(parents=True, exist_ok=True)
+                        with suppress(FileNotFoundError):
+                            path_obj.unlink()
+                        server = await unix_serve(
+                            handler,
+                            socket_path,
+                            process_request=process_request,
+                            open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
+                            max_size=self.config.max_message_bytes,
+                            ping_interval=self.config.ping_interval_s,
+                            ping_timeout=self.config.ping_timeout_s,
+                            logger=ws_logger,
+                        )
+                        with suppress(OSError):
+                            path_obj.chmod(0o600)
+                    else:
+                        server = await serve(
+                            handler,
+                            self.config.host,
+                            self.config.port,
+                            process_request=process_request,
+                            open_timeout=_WEBUI_HTTP_OPEN_TIMEOUT_S,
+                            max_size=self.config.max_message_bytes,
+                            ping_interval=self.config.ping_interval_s,
+                            ping_timeout=self.config.ping_timeout_s,
+                            ssl=ssl_context,
+                            logger=ws_logger,
+                        )
 
-        self._server_task = asyncio.create_task(runner())
-        await self._server_task
+                    self._server = server
+                    was_serving = True
+                    if not self._listener_is_serving(server):
+                        raise _ListenerUnavailableError(
+                            "WebSocket listener did not enter a serving state"
+                        )
+                    self._running = True
+                    started_at = asyncio.get_running_loop().time()
+                    self._log_listener_ready(scheme)
+                    await self._wait_for_listener_loss(server)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._running = False
+                    if not self._is_recoverable_listener_error(
+                        exc,
+                        was_serving=was_serving,
+                    ):
+                        raise
+                    uptime = (
+                        asyncio.get_running_loop().time() - started_at
+                        if started_at
+                        else 0.0
+                    )
+                    if uptime >= _LISTENER_STABLE_AFTER_S:
+                        failures = 0
+                    delay = _LISTENER_RESTART_BACKOFF_S[
+                        min(failures, len(_LISTENER_RESTART_BACKOFF_S) - 1)
+                    ]
+                    failures += 1
+                    self.logger.warning(
+                        "WebSocket listener failed ({}: {}); retrying in {:.1f}s",
+                        type(exc).__name__,
+                        exc,
+                        delay,
+                    )
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout=delay)
+                    except TimeoutError:
+                        pass
+                finally:
+                    self._running = False
+                    if server is not None:
+                        await self._close_server(server, socket_path)
+                    if self._server is server:
+                        self._server = None
+
+        task = asyncio.create_task(runner())
+        self._server_task = task
+        try:
+            await task
+        finally:
+            self._running = False
+            if self._server_task is task:
+                self._server_task = None
 
     async def _connection_loop(self, connection: ServerConnection) -> None:
+        self._retired_connections.discard(connection)
         request = connection.request
         path_part = request.path if request else "/"
         _, query = _parse_request_path(path_part)
@@ -608,6 +813,9 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        **({"terminal": {
+                            "protocolVersion": 1, "gatewayId": self.gateway.tokens.instance_id,
+                        }} if _query_first(query, "terminal_protocol") == "1" else {}),
                     },
                     ensure_ascii=False,
                 )
@@ -657,6 +865,16 @@ class WebSocketChannel(BaseChannel):
         envelope: dict[str, Any],
     ) -> None:
         """Delegate one typed envelope to the WebUI application router."""
+        await self._dispatch_active_envelope(connection, client_id, envelope)
+
+    async def _dispatch_active_envelope(
+        self,
+        connection: ServerConnection,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
+        if not self._register_connection_outbound(connection):
+            return
         await self._commands.dispatch(connection, client_id, envelope)
 
     def _prune_webui_request_operations(self) -> None:
@@ -666,14 +884,22 @@ class WebSocketChannel(BaseChannel):
     # -- Outbound WebSocket events -----------------------------------------
 
     async def stop(self) -> None:
-        if not self._running:
+        server_task = self._server_task
+        if (
+            not self._running
+            and server_task is None
+            and not self._connection_outbound
+            and not self._outbound_retire_tasks
+        ):
             return
         self._running = False
         if self._stop_event:
             self._stop_event.set()
-        if self._server_task:
+        for connection in tuple(self._connection_outbound):
+            await self._cleanup_connection(connection)
+        if server_task:
             try:
-                await self._server_task
+                await server_task
             except asyncio.CancelledError:
                 current_task = asyncio.current_task()
                 if current_task is not None and current_task.cancelling():
@@ -681,11 +907,147 @@ class WebSocketChannel(BaseChannel):
                 self.logger.debug("server task was already cancelled during shutdown")
             except Exception as e:
                 self.logger.warning("server task error during shutdown: {}", e)
-            self._server_task = None
+            if self._server_task is server_task:
+                self._server_task = None
+        retire_tasks = tuple(self._outbound_retire_tasks)
+        if retire_tasks:
+            await asyncio.gather(*retire_tasks, return_exceptions=True)
         await self._commands.close()
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()
+
+    @staticmethod
+    async def _stop_connection_writer(state: _ConnectionOutbound) -> None:
+        task = state.writer
+        current = asyncio.current_task()
+        if task is not None and task is not current and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        while True:
+            try:
+                state.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        state.buffered_bytes = 0
+
+    def _start_connection_writer(
+        self,
+        connection: ServerConnection,
+        state: _ConnectionOutbound,
+    ) -> None:
+        if state.closing or (state.writer is not None and not state.writer.done()):
+            return
+        state.writer = asyncio.create_task(
+            self._drain_connection_outbound(connection, state),
+            name=f"websocket-outbound-{id(connection):x}",
+        )
+
+    async def _drain_connection_outbound(
+        self,
+        connection: ServerConnection,
+        state: _ConnectionOutbound,
+    ) -> None:
+        current = asyncio.current_task()
+        try:
+            while not state.closing:
+                try:
+                    frame = state.queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
+                try:
+                    async with asyncio.timeout(_OUTBOUND_SEND_TIMEOUT_S):
+                        await connection.send(frame.raw)
+                except asyncio.CancelledError:
+                    raise
+                except TimeoutError:
+                    self.logger.warning("connection send timed out{}", frame.label)
+                    self._schedule_connection_retirement(
+                        connection,
+                        state,
+                        close_connection=True,
+                        close_code=1013,
+                        close_reason="outbound send timeout",
+                    )
+                    return
+                except ConnectionClosed:
+                    self.logger.warning("connection gone{}", frame.label)
+                    self._schedule_connection_retirement(
+                        connection,
+                        state,
+                        close_connection=False,
+                    )
+                    return
+                except Exception:
+                    self.logger.exception("send failed{}", frame.label)
+                    self._schedule_connection_retirement(
+                        connection,
+                        state,
+                        close_connection=True,
+                        close_code=1011,
+                        close_reason="outbound send failed",
+                    )
+                    return
+                finally:
+                    state.buffered_bytes = max(0, state.buffered_bytes - frame.utf8_bytes)
+        finally:
+            if state.writer is current:
+                state.writer = None
+            if not state.closing and not state.queue.empty():
+                self._start_connection_writer(connection, state)
+
+    def _schedule_connection_retirement(
+        self,
+        connection: ServerConnection,
+        state: _ConnectionOutbound,
+        *,
+        close_connection: bool,
+        close_code: int = 1000,
+        close_reason: str = "",
+    ) -> None:
+        if state.closing:
+            return
+        state.closing = True
+        task = asyncio.create_task(
+            self._retire_connection(
+                connection,
+                close_connection=close_connection,
+                close_code=close_code,
+                close_reason=close_reason,
+            ),
+            name=f"websocket-retire-{id(connection):x}",
+        )
+        self._outbound_retire_tasks.add(task)
+        task.add_done_callback(self._outbound_retire_tasks.discard)
+
+    async def _retire_connection(
+        self,
+        connection: ServerConnection,
+        *,
+        close_connection: bool,
+        close_code: int,
+        close_reason: str,
+    ) -> None:
+        try:
+            if close_connection:
+                try:
+                    async with asyncio.timeout(_OUTBOUND_CLOSE_TIMEOUT_S):
+                        await connection.close(code=close_code, reason=close_reason)
+                except TimeoutError:
+                    self.logger.warning("timed out closing slow WebSocket connection")
+                    with suppress(Exception):
+                        connection.transport.abort()
+                except ConnectionClosed:
+                    pass
+                except Exception:
+                    self.logger.exception("failed to close WebSocket connection")
+                    with suppress(Exception):
+                        connection.transport.abort()
+        finally:
+            try:
+                await self._cleanup_connection(connection)
+            except Exception:
+                self.logger.exception("failed to clean up WebSocket connection")
 
     async def _safe_send_to(
         self,
@@ -694,15 +1056,43 @@ class WebSocketChannel(BaseChannel):
         *,
         label: str = "",
     ) -> None:
-        """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
+        """Queue one frame without letting this connection block other clients."""
+        state = self._connection_outbound.get(connection)
+        if state is None or state.closing:
+            return
+        utf8_bytes = len(raw.encode("utf-8"))
+        if state.queue.full() or state.buffered_bytes + utf8_bytes > _OUTBOUND_QUEUE_MAX_BYTES:
+            self.logger.warning(
+                "disconnecting slow WebSocket connection: outbound queue full "
+                "({} frames, {} bytes)",
+                state.queue.qsize(),
+                state.buffered_bytes,
+            )
+            self._schedule_connection_retirement(
+                connection,
+                state,
+                close_connection=True,
+                close_code=1013,
+                close_reason="outbound queue full",
+            )
+            await asyncio.sleep(0)
+            return
         try:
-            await connection.send(raw)
-        except ConnectionClosed:
-            await self._cleanup_connection(connection)
-            self.logger.warning("connection gone{}", label)
-        except Exception:
-            self.logger.exception("send failed{}", label)
-            raise
+            state.queue.put_nowait(_OutboundFrame(raw, utf8_bytes, label))
+        except asyncio.QueueFull:
+            self._schedule_connection_retirement(
+                connection,
+                state,
+                close_connection=True,
+                close_code=1013,
+                close_reason="outbound queue full",
+            )
+            await asyncio.sleep(0)
+            return
+        state.buffered_bytes += utf8_bytes
+        self._start_connection_writer(connection, state)
+        # Give an idle writer a chance to start without waiting for physical I/O.
+        await asyncio.sleep(0)
 
     def _persist_turn_transcript_event(
         self,
@@ -811,7 +1201,7 @@ class WebSocketChannel(BaseChannel):
         if isinstance(lat, (int, float)):
             payload["latency_ms"] = int(lat)
         if progress_event and progress_event.tool_events:
-            payload["tool_events"] = progress_event.tool_events
+            payload["tool_events"] = project_tool_events(progress_event.tool_events)
         agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
         if agent_ui is not None:
             payload["agent_ui"] = agent_ui
@@ -987,79 +1377,53 @@ class WebSocketChannel(BaseChannel):
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
 
-    async def send_turn_end(
+    async def send_payload(
         self,
         chat_id: str,
-        latency_ms: int | None = None,
+        payload: WebUIWirePayload,
         *,
-        goal_state: dict[str, Any] | None = None,
-        usage: LLMUsage | None = None,
-        context_window_tokens: int | None = None,
+        persistence: WebUIWirePersistence,
         metadata: dict[str, Any] | None = None,
         turn_owner: str | None = None,
     ) -> None:
-        """Signal that the agent has fully finished processing the current turn."""
+        """Persist as requested, frame, and fan out one encoded WebUI payload."""
         conns = list(self._subs.get(chat_id, ()))
-        body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
-        turn_id = (metadata or {}).get(WEBUI_TURN_METADATA_KEY)
-        if isinstance(turn_id, str) and turn_id:
-            body["turn_id"] = turn_id
-        if latency_ms is not None:
-            body["latency_ms"] = int(latency_ms)
-        if goal_state is not None:
-            body["goal_state"] = goal_state
-        if usage is not None:
-            body["usage"] = usage.to_turn_dict()
-        if context_window_tokens is not None:
-            body["context_window_tokens"] = int(context_window_tokens)
-        canonical_webui_turn = (metadata or {}).get("webui") is True
-        prior_persistence_failure = (
-            canonical_webui_turn
-            and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
-        )
-        persisted = self._persist_turn_transcript_event(
-            chat_id,
-            body,
-            metadata=metadata,
-            phase="complete",
-            transcript_overrides=(
-                {WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True}
-                if prior_persistence_failure
-                else None
-            ),
-        )
-        if persisted:
-            # A successful completion either has a complete transcript or now
-            # carries a durable incomplete marker. The HTTP replay path can
-            # recover the latter from session history after a gateway restart.
-            clear_websocket_turn_if_current(chat_id, turn_owner)
-        self._clear_stream_buffers(chat_id)
+        body: dict[str, Any] = dict(payload)
+        if persistence == "turn_activity":
+            self._persist_turn_transcript_event(
+                chat_id,
+                body,
+                metadata=metadata,
+                phase="activity",
+            )
+        elif persistence == "turn_complete":
+            canonical_webui_turn = (metadata or {}).get("webui") is True
+            prior_persistence_failure = (
+                canonical_webui_turn
+                and websocket_turn_transcript_persistence_failed(chat_id, turn_owner)
+            )
+            persisted = self._persist_turn_transcript_event(
+                chat_id,
+                body,
+                metadata=metadata,
+                phase="complete",
+                transcript_overrides=(
+                    {WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True}
+                    if prior_persistence_failure
+                    else None
+                ),
+            )
+            if persisted:
+                # A successful completion either has a complete transcript or now
+                # carries a durable incomplete marker. The HTTP replay path can
+                # recover the latter from session history after a gateway restart.
+                clear_websocket_turn_if_current(chat_id, turn_owner)
+            self._clear_stream_buffers(chat_id)
         raw = json.dumps(body, ensure_ascii=False)
         if not conns:
             return
         for connection in conns:
-            await self._safe_send_to(connection, raw, label=" turn_end ")
-
-    async def send_recovery_state(
-        self,
-        chat_id: str,
-        event: RecoveryStateEvent,
-    ) -> None:
-        """Publish one structured recovery transition without chat pollution."""
-        body: dict[str, Any] = {
-            "event": "recovery_state",
-            "chat_id": chat_id,
-            "status": event.status,
-            "recovery_id": event.recovery_id,
-            "attempts": event.attempts,
-        }
-        if event.reason:
-            body["reason"] = event.reason
-        if event.can_continue is not None:
-            body["can_continue"] = event.can_continue
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in list(self._subs.get(chat_id, ())):
-            await self._safe_send_to(connection, raw, label=" recovery_state ")
+            await self._safe_send_to(connection, raw, label=f" {body['event']} ")
 
     async def send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:
         """Push persisted goal-state snapshot for *chat_id* (multi-chat isolation)."""

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.agent.context import TranscriptInput
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import GenerationSettings
@@ -211,8 +212,8 @@ async def test_spawn_forwards_temperature_to_run_spec(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
-    """SpawnTool should return an error string when the concurrency limit is reached."""
+async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
+    """Background tasks should be accepted and start when capacity becomes available."""
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.spawn import SpawnTool
     from nanobot.bus.queue import MessageBus
@@ -224,14 +225,23 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        max_concurrent_subagents=1,
     )
     mgr._announce_result = AsyncMock()
 
-    # Block the first subagent so it stays "running"
-    release = asyncio.Event()
+    first_entered = asyncio.Event()
+    second_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    release_second = asyncio.Event()
 
     async def fake_run(spec):
-        await release.wait()
+        task = spec.initial_messages[-1]["content"]
+        if task == "first task":
+            first_entered.set()
+            await release_first.wait()
+        else:
+            second_entered.set()
+            await release_second.wait()
         return SimpleNamespace(
             stop_reason="done",
             final_content="done",
@@ -250,19 +260,24 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
         session_key="test:c1",
         runtime=_runtime(provider),
     )):
-        # First spawn succeeds
-        result = await tool.execute(task="first task")
-        assert "started" in result
+        first_result = await tool.execute(task="first task")
+        assert "started" in first_result
+        await asyncio.wait_for(first_entered.wait(), timeout=1.0)
 
-        # Second spawn should be rejected (default limit is 1)
-        result = await tool.execute(task="second task")
-        assert "Cannot spawn subagent" in result
-        assert "concurrency limit reached" in result
+        second_result = await tool.execute(task="second task")
+        assert "started" in second_result
+        tasks = list(mgr._running_tasks.values())
+        await asyncio.sleep(0)
+        assert not second_entered.is_set()
+        phases = {status.task_description: status.phase for status in mgr._task_statuses.values()}
+        assert phases == {"first task": "initializing", "second task": "queued"}
 
-    # Release the first subagent
-    release.set()
-    # Allow cleanup
-    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+    release_first.set()
+    await asyncio.wait_for(second_entered.wait(), timeout=1.0)
+    release_second.set()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
+    assert mgr._running_tasks == {}
 
 
 @pytest.mark.asyncio
@@ -300,7 +315,7 @@ async def test_spawn_tool_waits_for_inline_result():
 
 
 @pytest.mark.asyncio
-async def test_inline_spawn_counts_toward_concurrency_limit(tmp_path):
+async def test_inline_spawn_waits_for_concurrency_capacity(tmp_path):
     from nanobot.agent.subagent import SubagentManager
     from nanobot.agent.tools.context import RequestContext, request_context
     from nanobot.agent.tools.spawn import SpawnTool
@@ -312,12 +327,19 @@ async def test_inline_spawn_counts_toward_concurrency_limit(tmp_path):
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         max_concurrent_subagents=1,
     )
-    release = asyncio.Event()
-    entered = asyncio.Event()
+    first_entered = asyncio.Event()
+    second_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    release_second = asyncio.Event()
 
     async def fake_run(spec):
-        entered.set()
-        await release.wait()
+        task = spec.initial_messages[-1]["content"]
+        if task == "first":
+            first_entered.set()
+            await release_first.wait()
+        else:
+            second_entered.set()
+            await release_second.wait()
         return SimpleNamespace(
             stop_reason="done",
             final_content="done",
@@ -334,17 +356,98 @@ async def test_inline_spawn_counts_toward_concurrency_limit(tmp_path):
         runtime=_runtime(MagicMock()),
     )):
         first = asyncio.create_task(tool.execute(task="first", wait=True))
-        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        await asyncio.wait_for(first_entered.wait(), timeout=1.0)
 
-        second = await tool.execute(task="second", wait=True)
+        second = asyncio.create_task(tool.execute(task="second", wait=True))
+        await asyncio.sleep(0)
 
-        assert "concurrency limit reached" in second
-        assert manager.get_running_count() == 1
-        release.set()
+        assert not second.done()
+        assert not second_entered.is_set()
+        assert manager.get_running_count() == 2
+        release_first.set()
         assert await first == "done"
+        await asyncio.wait_for(second_entered.wait(), timeout=1.0)
+        release_second.set()
+        assert await second == "done"
 
     assert manager.get_running_count() == 0
     assert manager._session_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
+    """Adjacent blocking consultations should share one concurrent tool batch."""
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.context import RequestContext, request_context
+    from nanobot.agent.tools.execution import execute_tool_calls
+    from nanobot.agent.tools.registry import ToolRegistry
+    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import ToolCallRequest
+
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        max_concurrent_subagents=2,
+    )
+    both_entered = asyncio.Event()
+    release = asyncio.Event()
+    entered: list[str] = []
+
+    async def fake_run(spec):
+        entered.append(spec.initial_messages[-1]["content"])
+        if len(entered) == 2:
+            both_entered.set()
+        await release.wait()
+        return SimpleNamespace(
+            stop_reason="done",
+            final_content=spec.initial_messages[-1]["content"],
+            error=None,
+            tool_events=[],
+        )
+
+    manager.runner.run = AsyncMock(side_effect=fake_run)
+    tools = ToolRegistry()
+    tools.register(SpawnTool(manager))
+    runtime = _runtime(MagicMock())
+    calls = [
+        ToolCallRequest(
+            id="spawn-1",
+            name="spawn",
+            arguments={"task": "first", "wait": True},
+        ),
+        ToolCallRequest(
+            id="spawn-2",
+            name="spawn",
+            arguments={"task": "second", "wait": True},
+        ),
+    ]
+
+    with request_context(RequestContext(
+        channel="test",
+        chat_id="c1",
+        session_key="test:c1",
+        runtime=runtime,
+    )):
+        execution = asyncio.create_task(execute_tool_calls(
+            tools,
+            calls,
+            concurrent=True,
+            external_lookup_counts={},
+            workspace_violation_counts={},
+            hook=AgentHook(),
+            context=AgentHookContext(iteration=0, messages=[], session_key="test:c1"),
+        ))
+        await asyncio.wait_for(both_entered.wait(), timeout=1.0)
+        release.set()
+        results, events = await execution
+
+    assert set(entered) == {"first", "second"}
+    assert results == ["first", "second"]
+    assert [event["status"] for event in events] == ["ok", "ok"]
+    assert manager._running_tasks == {}
 
 
 @pytest.mark.asyncio
@@ -391,6 +494,7 @@ def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     )
 
+    assert AgentDefaults().max_concurrent_subagents == 4
     assert mgr.max_concurrent_subagents == AgentDefaults().max_concurrent_subagents
 
 
@@ -465,7 +569,10 @@ async def test_agent_loop_syncs_updated_max_iterations_before_run(tmp_path):
     loop.runner.run = AsyncMock(side_effect=fake_run)
     loop.max_iterations = 55
 
-    await loop._run_agent_loop([], runtime=loop.llm_runtime())
+    await loop._run_agent_loop(
+        TranscriptInput(history=[], current_message=None),
+        runtime=loop.llm_runtime(),
+    )
 
     loop.runner.run.assert_awaited_once()
 
@@ -506,7 +613,7 @@ async def test_drain_pending_no_block_when_no_subagents(tmp_path):
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=runtime,
         session=None,
         request_context=RequestContext(channel="test", chat_id="c1", runtime=runtime),
@@ -565,7 +672,7 @@ async def test_terminal_drain_timeout(tmp_path):
 
     runtime = loop.llm_runtime()
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=runtime,
         session=session,
         request_context=RequestContext(
@@ -639,7 +746,7 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
     loop.subagents._running_tasks["sub-deadline-1"] = hang_task
 
     await loop._run_agent_loop(
-        [{"role": "user", "content": "test"}],
+        TranscriptInput(history=[{"role": "user", "content": "test"}], current_message=None),
         runtime=loop.llm_runtime(),
         session=session,
         pending_queue=pending_queue,

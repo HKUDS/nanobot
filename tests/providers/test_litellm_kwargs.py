@@ -1101,10 +1101,37 @@ def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
         {"role": "user", "content": "thanks"},
     ])
 
-    assert sanitized[1]["content"] is None
+    assert sanitized[1]["content"] == "done"
     assert sanitized[1]["reasoning_content"] == "hidden"
     assert sanitized[1]["extra_content"] == {"debug": True}
     assert sanitized[1]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
+
+
+def test_openai_compat_replays_tool_call_commentary_to_model() -> None:
+    spec = find_by_name("openai")
+    assert spec is not None
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(spec=spec)
+
+    kwargs = provider._build_kwargs(
+        messages=[
+            {"role": "user", "content": "check the files"},
+            {
+                "role": "assistant",
+                "content": "I am checking the profile first.",
+                "tool_calls": [_tool_call("call_1")],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "done"},
+        ],
+        tools=None,
+        model="gpt-5",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort="high",
+        tool_choice=None,
+    )
+
+    assert kwargs["messages"][1]["content"] == "I am checking the profile first."
 
 
 def _deepseek_kwargs(messages: list[dict]) -> dict:
@@ -1194,7 +1221,7 @@ def test_openai_compat_preserves_tool_call_ids_after_consecutive_assistant_messa
     ])
 
     assert sanitized[1]["role"] == "assistant"
-    assert sanitized[1]["content"] is None
+    assert sanitized[1]["content"] == "<think>我再查一下</think>"
     assert sanitized[1]["tool_calls"][0]["id"] == "call_function_akxp3wqzn7ph_1"
     assert sanitized[2]["tool_call_id"] == "call_function_akxp3wqzn7ph_1"
 
@@ -1222,7 +1249,7 @@ def test_mistral_normalizes_tool_call_ids_after_consecutive_assistant_messages()
     ])
 
     assert sanitized[1]["role"] == "assistant"
-    assert sanitized[1]["content"] is None
+    assert sanitized[1]["content"] == "<think>我再查一下</think>"
     assert sanitized[1]["tool_calls"][0]["id"] == "3ec83c30d"
     assert sanitized[2]["tool_call_id"] == "3ec83c30d"
 

@@ -21,6 +21,7 @@ from nanobot.cli.process_identity import named_executable
 from nanobot.cli.runtime_config import _model_display
 from nanobot.cli.webui_support import (
     _gateway_health_ready,
+    _gateway_health_url,
     _gateway_instance_command,
     _host_for_local_browser,
     _webui_endpoint_reachable,
@@ -64,6 +65,8 @@ _TUI_RELEASE_LIMITS = {
 }
 # Keep in sync with TUI_DETACH_EXIT_CODE in tui/src/index.ts.
 _TUI_DETACH_EXIT_CODE = 90
+_GATEWAY_READY_TIMEOUT_S = 20.0
+_GATEWAY_READY_POLL_S = 0.1
 
 
 @dataclass(frozen=True)
@@ -83,7 +86,7 @@ def launch_tui(
     """Run the native TUI against the shared local gateway."""
     chat_id = _initial_tui_chat_id(session_id)
     tui_workspace = _initial_tui_workspace(workspace_override)
-    command = _resolve_tui_command()
+    command = resolve_tui_command()
     base_url, bootstrap_secret = _tui_gateway_connection(config)
     gateway: _GatewayHandle | None = None
     process: subprocess.Popen[Any] | None = None
@@ -91,9 +94,15 @@ def launch_tui(
         env = os.environ.copy()
         env.pop("NANOBOT_TUI_WS_URL", None)
         env.pop("NANOBOT_TUI_API_TOKEN", None)
+        env.pop("NANOBOT_TUI_DESKTOP_RESOLVER", None)
+        env.pop("NANOBOT_TUI_DESKTOP_TARGET", None)
         env.update(
             {
                 "NANOBOT_TUI_BOOTSTRAP_URL": f"{base_url}/webui/bootstrap",
+                "NANOBOT_TUI_HEALTH_URL": _gateway_health_url(
+                    config.gateway.host,
+                    config.gateway.port,
+                ),
                 "NANOBOT_TUI_API_URL": base_url,
                 "NANOBOT_TUI_MODEL": _model_display(config)[0],
                 "NANOBOT_TUI_MODEL_PRESET": config.agents.defaults.model_preset or "default",
@@ -153,7 +162,7 @@ def launch_tui(
             lease.release(wait_for_stop=False)
 
 
-def _resolve_tui_command() -> list[str]:
+def resolve_tui_command(*, data_dir: Path | None = None) -> list[str]:
     override = os.environ.get("NANOBOT_TUI_BIN", "").strip()
     if override:
         executable = Path(override).expanduser().resolve(strict=False)
@@ -184,13 +193,13 @@ def _resolve_tui_command() -> list[str]:
                 "this source checkout requires Bun to run its matching TUI; "
                 "install Bun, then run `nanobot agent` again"
             )
-        return _resolve_source_tui_command(source_dir, bun)
+        return _resolve_source_tui_command(source_dir, bun, data_dir=data_dir)
 
     packaged = Path(__file__).resolve().parents[1] / "tui" / "bin" / asset
     if packaged.is_file():
         return [str(packaged)]
 
-    downloaded = _download_release_tui(asset)
+    downloaded = _download_release_tui(asset, data_dir=data_dir)
     if downloaded is not None:
         return [str(downloaded)]
 
@@ -215,7 +224,9 @@ def _tui_source_dir(project_root: Path) -> Path | None:
     return None
 
 
-def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
+def _resolve_source_tui_command(
+    source_dir: Path, bun: str, *, data_dir: Path | None = None,
+) -> list[str]:
     dependency = source_dir / "node_modules" / "@opentui" / "core"
     try:
         install = subprocess.run(
@@ -234,12 +245,12 @@ def _resolve_source_tui_command(source_dir: Path, bun: str) -> list[str]:
     executable = named_executable(
         bun,
         name="nanobot-tui",
-        directory=get_data_dir() / "run" / "executables",
+        directory=(data_dir if data_dir is not None else get_data_dir()) / "run" / "executables",
     )
     return [executable, str(source_dir / "src" / "index.ts")]
 
 
-def _download_release_tui(asset: str) -> Path | None:
+def _download_release_tui(asset: str, *, data_dir: Path | None = None) -> Path | None:
     """Install the complete, version-matched TUI release bundle."""
     if os.environ.get("NANOBOT_TUI_NO_DOWNLOAD") == "1":
         return None
@@ -247,7 +258,7 @@ def _download_release_tui(asset: str) -> Path | None:
     if not version or version.endswith((".dev0", "+dev")):
         return None
 
-    target_dir = get_data_dir() / "bin" / "tui" / version
+    target_dir = (data_dir if data_dir is not None else get_data_dir()) / "bin" / "tui" / version
     cached = _cached_release_tui(target_dir, asset)
     if cached is not None:
         return cached
@@ -417,17 +428,52 @@ def _ensure_gateway(
     lease = GatewayClientLease(runtime, kind="tui")
     lease.acquire()
     try:
+        def ready(status: object) -> bool:
+            management_ready = getattr(status, "ready", None)
+            if not isinstance(management_ready, bool):
+                management_ready = _gateway_health_ready(
+                    config.gateway.host,
+                    config.gateway.port,
+                )
+            return _webui_endpoint_reachable(base_url) and management_ready
+
+        def wait_for_ready(log_path: object) -> _GatewayHandle:
+            deadline = time.monotonic() + _GATEWAY_READY_TIMEOUT_S
+            while time.monotonic() < deadline:
+                current = runtime.status()
+                if not current.running:
+                    break
+                if current.port not in {None, config.gateway.port}:
+                    break
+                if ready(current):
+                    return _GatewayHandle(base_url=base_url, lease=lease)
+                time.sleep(_GATEWAY_READY_POLL_S)
+
+            current = runtime.status()
+            if current.running:
+                raise TuiUnavailableError(
+                    "local gateway process is running but its WebSocket/WebUI listener "
+                    "is unavailable; channel recovery did not restore it. "
+                    "Run `nanobot gateway status` and inspect logs at "
+                    f"{log_path}; if it remains degraded, run `nanobot gateway restart`."
+                )
+            raise TuiUnavailableError(
+                f"local gateway did not become ready; logs: {log_path}"
+            )
+
         status = runtime.status()
-        endpoint_reachable = _webui_endpoint_reachable(base_url)
         if status.running:
             if status.port not in {None, config.gateway.port}:
                 raise TuiUnavailableError(
                     "the matching gateway instance is running on a different port; "
                     "restart it or use `nanobot agent --classic`"
                 )
-            if endpoint_reachable or not wait_until_ready:
+            if not wait_until_ready:
                 return _GatewayHandle(base_url=base_url, lease=lease)
-        elif endpoint_reachable:
+            if ready(status):
+                return _GatewayHandle(base_url=base_url, lease=lease)
+            return wait_for_ready(status.log_path)
+        elif _webui_endpoint_reachable(base_url):
             raise TuiUnavailableError(
                 "the configured gateway port belongs to a different nanobot instance; "
                 "stop that instance or use `nanobot agent --classic`"
@@ -442,26 +488,17 @@ def _ensure_gateway(
                 f"logs: {result.status.log_path}"
             )
 
+        if result.message == "gateway_already_running" and result.status.port not in {
+            None,
+            config.gateway.port,
+        }:
+            raise TuiUnavailableError(
+                "the matching gateway instance is running on a different port; "
+                "restart it or use `nanobot agent --classic`"
+            )
         if not wait_until_ready:
             return _GatewayHandle(base_url=base_url, lease=lease)
-
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            if _webui_endpoint_reachable(base_url):
-                current = runtime.status()
-                if current.running and current.port in {None, config.gateway.port}:
-                    return _GatewayHandle(base_url=base_url, lease=lease)
-                break
-            if not runtime.status().running and not _gateway_health_ready(
-                config.gateway.host,
-                config.gateway.port,
-            ):
-                break
-            time.sleep(0.1)
-
-        raise TuiUnavailableError(
-            f"local gateway did not become ready; logs: {result.status.log_path}"
-        )
+        return wait_for_ready(result.status.log_path)
     except BaseException:
         lease.release(timeout_s=5)
         raise

@@ -1,16 +1,7 @@
 {
-  "description": "Matrix ルームから nanobot を利用します。",
-  "requirements": "ホームサーバー、アカウントトークン、ルームへのアクセス",
   "setup": {
     "docsLabel": "Matrix 設定ガイドを開く",
     "officialLabel": "Matrix クライアント一覧を開く",
-    "tryIt": "Matrix アカウントをルームに招待し、テストメッセージを送信します。",
-    "summary": "Matrix にはホームサーバーのアカウントと、パスワードまたはアクセストークンが必要です。",
-    "steps": [
-      "nanobot 用の Matrix アカウントを作成または選択します。",
-      "ホームサーバー、ユーザー ID、パスワードまたはアクセストークンを入力します。",
-      "保存して Matrix を有効にし、アカウントをルームに招待してテストメッセージを送信します。"
-    ],
     "fields": {
       "homeserver": {
         "label": "ホームサーバー",
@@ -22,18 +13,15 @@
       },
       "password": {
         "label": "パスワード",
-        "placeholder": "••••••",
-        "help": "パスワードまたはアクセストークンのどちらかを使います。"
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "アクセストークン",
-        "placeholder": "任意のトークンログイン",
-        "help": "Matrix クライアントでアクセストークンを取得できる場合に推奨します。"
+        "placeholder": "アクセストークンを入力"
       },
       "deviceId": {
         "label": "デバイス ID",
-        "placeholder": "アクセストークン使用時に必須",
-        "help": "トークンに関連付けられたデバイス ID をコピーします。パスワードログインでは不要です。"
+        "placeholder": "アクセストークン使用時に必須"
       },
       "groupPolicy": {
         "label": "グループでの動作",
@@ -42,6 +30,53 @@
           "open": "すべてのメッセージ",
           "allowlist": "許可リスト"
         }
+      },
+      "allowFrom": {
+        "label": "許可されたユーザー"
+      },
+      "e2eeEnabled": {
+        "label": "エンドツーエンドの暗号化",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 検証",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "同期停止猶予期間"
+      },
+      "maxMediaBytes": {
+        "label": "最大メディアサイズ"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "メディアの同時ダウンロード"
+      },
+      "groupAllowFrom": {
+        "label": "許可されたグループ"
+      },
+      "allowRoomMentions": {
+        "label": "部屋のメンションを許可する",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "streaming": {
+        "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "proxy": {
+        "label": "ネットワークプロキシ",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

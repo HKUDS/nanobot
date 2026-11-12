@@ -175,6 +175,16 @@ function projectOrderedTurn(
   };
 
   for (const message of messages) {
+    if (message.kind === "compaction") {
+      flushActivity();
+      flushAnswers();
+      units.push({
+        type: "message",
+        message,
+        sourceMessageCount: 1 + claimLeadingNoops(),
+      });
+      continue;
+    }
     if (isCompletedDisplayNoop(message)) {
       absorbDisplayNoop();
       continue;

@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 const Sheet = DialogPrimitive.Root;
+const SheetTrigger = DialogPrimitive.Trigger;
 const SheetPortal = DialogPrimitive.Portal;
 
 const SheetOverlay = React.forwardRef<
@@ -19,6 +20,7 @@ const SheetOverlay = React.forwardRef<
       "fixed inset-0 z-50 bg-black/40",
       "data-[state=open]:animate-in data-[state=closed]:animate-out",
       "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      "motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
       className,
     )}
     {...props}
@@ -85,7 +87,8 @@ const SheetContent = React.forwardRef<
         className={cn(
           sheetVariants({ side }),
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
-          "duration-300",
+          "duration-300 motion-reduce:transition-none",
+          "motion-reduce:data-[state=open]:animate-none motion-reduce:data-[state=closed]:animate-none",
           className,
         )}
         {...props}
@@ -134,4 +137,4 @@ const SheetDescription = React.forwardRef<
 ));
 SheetDescription.displayName = DialogPrimitive.Description.displayName;
 
-export { Sheet, SheetContent, SheetDescription, SheetTitle };
+export { Sheet, SheetTrigger, SheetContent, SheetDescription, SheetTitle };

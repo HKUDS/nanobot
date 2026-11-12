@@ -1,16 +1,7 @@
 {
-  "description": "Matrix 룸에서 nanobot을 사용합니다.",
-  "requirements": "홈서버, 계정 토큰 및 룸 접근 권한",
   "setup": {
     "docsLabel": "Matrix 설정 가이드 열기",
     "officialLabel": "Matrix 클라이언트 목록 열기",
-    "tryIt": "Matrix 계정을 룸에 초대하고 테스트 메시지를 보내세요.",
-    "summary": "Matrix에는 홈서버 계정과 비밀번호 또는 액세스 토큰이 필요합니다.",
-    "steps": [
-      "nanobot용 Matrix 계정을 만들거나 선택하세요.",
-      "홈서버, 사용자 ID, 비밀번호 또는 액세스 토큰을 입력하세요.",
-      "저장하고 Matrix를 활성화한 다음 계정을 룸에 초대하고 테스트 메시지를 보내세요."
-    ],
     "fields": {
       "homeserver": {
         "label": "홈서버",
@@ -22,18 +13,15 @@
       },
       "password": {
         "label": "비밀번호",
-        "placeholder": "••••••",
-        "help": "비밀번호 또는 액세스 토큰 중 하나를 사용하세요."
+        "placeholder": "••••••"
       },
       "accessToken": {
         "label": "액세스 토큰",
-        "placeholder": "선택적 토큰 로그인",
-        "help": "Matrix 클라이언트에서 토큰을 확인할 수 있다면 권장합니다."
+        "placeholder": "액세스 토큰 입력"
       },
       "deviceId": {
         "label": "장치 ID",
-        "placeholder": "액세스 토큰 사용 시 필수",
-        "help": "토큰과 연결된 장치 ID를 복사하세요. 비밀번호 로그인에는 필요하지 않습니다."
+        "placeholder": "액세스 토큰 사용 시 필수"
       },
       "groupPolicy": {
         "label": "그룹 동작",
@@ -42,6 +30,53 @@
           "open": "모든 메시지",
           "allowlist": "허용 목록"
         }
+      },
+      "allowFrom": {
+        "label": "허용된 사용자"
+      },
+      "e2eeEnabled": {
+        "label": "엔드투엔드 암호화",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "sasVerification": {
+        "label": "SAS 검증",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "syncStopGraceSeconds": {
+        "label": "동기화 중지 유예 기간"
+      },
+      "maxMediaBytes": {
+        "label": "최대 미디어 크기"
+      },
+      "maxConcurrentMediaDownloads": {
+        "label": "동시 미디어 다운로드"
+      },
+      "groupAllowFrom": {
+        "label": "허용된 그룹"
+      },
+      "allowRoomMentions": {
+        "label": "회의실 언급 허용",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "streaming": {
+        "label": "스트리밍",
+        "choices": {
+          "true": "켜기",
+          "false": "끄기"
+        }
+      },
+      "proxy": {
+        "label": "네트워크 프록시",
+        "placeholder": "http://127.0.0.1:7890"
       }
     }
   }

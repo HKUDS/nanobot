@@ -253,7 +253,7 @@ async def test_restricted_project_can_read_only_enabled_plugin_skill(
         reset_workspace_scope(token)
 
     assert "plugin reference" in read_result
-    assert "File unchanged since last read" in repeated_read_result
+    assert repeated_read_result == read_result
     assert activation_checks == 1
     assert "outside allowed directory" in write_result
     assert "outside allowed directory" in disabled_result

@@ -22,7 +22,10 @@ from nanobot.providers.openai_codex_provider import (
     _request_codex,
     _should_retry_status,
 )
-from nanobot.providers.openai_responses import build_responses_state
+from nanobot.providers.openai_responses import (
+    build_responses_state,
+    responses_state_items,
+)
 from nanobot.providers.registry import find_by_name
 
 
@@ -208,7 +211,10 @@ async def test_codex_request_honors_stream_idle_timeout_env(monkeypatch) -> None
     seen: dict[str, int] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, request=request)
+        return httpx.Response(
+            200, request=request,
+            text='data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        )
 
     def fake_client(
         *,
@@ -233,7 +239,10 @@ async def test_codex_request_uses_configured_proxy(monkeypatch) -> None:
     proxy = "http://127.0.0.1:23458"
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, request=request)
+        return httpx.Response(
+            200, request=request,
+            text='data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        )
 
     def fake_client(
         *,
@@ -262,6 +271,7 @@ async def test_codex_request_uses_configured_proxy(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_codex_omits_prompt_cache_key_without_session_id(monkeypatch) -> None:
     bodies: list[dict[str, Any]] = []
+    headers_seen: list[dict[str, str]] = []
 
     _mock_codex_token(monkeypatch)
 
@@ -277,6 +287,7 @@ async def test_codex_omits_prompt_cache_key_without_session_id(monkeypatch) -> N
     ):
         _ = proxy, on_thinking_delta, on_tool_call_delta
         bodies.append(body)
+        headers_seen.append(headers)
         return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
@@ -291,16 +302,19 @@ async def test_codex_omits_prompt_cache_key_without_session_id(monkeypatch) -> N
     )
 
     assert "prompt_cache_key" not in bodies[0]
+    assert "session-id" not in headers_seen[0]
     assert "service_tier" not in bodies[0]
 
 
 @pytest.mark.asyncio
 async def test_codex_prompt_cache_key_prefers_stable_session_id(monkeypatch) -> None:
     bodies: list[dict[str, Any]] = []
+    headers_seen: list[dict[str, str]] = []
     _mock_codex_token(monkeypatch)
 
-    async def fake_request(_url, _headers, body, **_kwargs):
+    async def fake_request(_url, headers, body, **_kwargs):
         bodies.append(body)
+        headers_seen.append(headers)
         return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
@@ -323,15 +337,22 @@ async def test_codex_prompt_cache_key_prefers_stable_session_id(monkeypatch) -> 
 
     assert bodies[0]["prompt_cache_key"] == bodies[1]["prompt_cache_key"]
     assert bodies[0]["prompt_cache_key"] != bodies[2]["prompt_cache_key"]
+    assert headers_seen[0]["session-id"] != "session-a"
+    assert headers_seen[2]["session-id"] != "session-b"
+    assert headers_seen[0]["session-id"] == bodies[0]["prompt_cache_key"]
+    assert headers_seen[1]["session-id"] == bodies[1]["prompt_cache_key"]
+    assert headers_seen[2]["session-id"] == bodies[2]["prompt_cache_key"]
 
 
 @pytest.mark.asyncio
 async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> None:
     bodies: list[dict[str, Any]] = []
+    headers_seen: list[dict[str, str]] = []
     _mock_codex_token(monkeypatch)
 
-    async def fake_request(_url, _headers, body, **_kwargs):
+    async def fake_request(_url, headers, body, **_kwargs):
         bodies.append(body)
+        headers_seen.append(headers)
         return provider_base.LLMResponse(content="ok")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", fake_request)
@@ -344,7 +365,10 @@ async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> Non
         },
         "providers": {
             "openaiCodex": {
-                "extraBody": {"service_tier": "priority"},
+                "extraBody": {
+                    "service_tier": "priority",
+                    "prompt_cache_key": "explicit-cache-key",
+                },
             },
         },
     })
@@ -354,6 +378,8 @@ async def test_codex_provider_applies_extra_body_from_config(monkeypatch) -> Non
 
     assert response.content == "ok"
     assert bodies[0]["service_tier"] == "priority"
+    assert bodies[0]["prompt_cache_key"] == "explicit-cache-key"
+    assert headers_seen[0]["session-id"] == "explicit-cache-key"
 
 
 @pytest.mark.asyncio
@@ -492,7 +518,8 @@ async def test_codex_diagnostic_log_omits_prompt_content(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_codex_retry_uses_structured_timeout_metadata(monkeypatch) -> None:
+@pytest.mark.parametrize("error", [httpx.ReadTimeout(""), ConnectionError("stream ended early")])
+async def test_codex_retry_uses_structured_transient_error_metadata(monkeypatch, error) -> None:
     calls = 0
     delays: list[float] = []
 
@@ -502,7 +529,7 @@ async def test_codex_retry_uses_structured_timeout_metadata(monkeypatch) -> None
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise httpx.ReadTimeout("")
+            raise error
         return provider_base.LLMResponse(content="ok")
 
     async def fake_sleep(delay: float) -> None:
@@ -811,12 +838,33 @@ async def test_codex_compacts_state_at_ninety_percent_before_next_request(
     )
 
     assert response.content == "done"
-    assert len(bodies) == 2
-    assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
-    assert bodies[1]["input"][-1] == {
+    assert response.provider_compaction_applied is True
+    assert response.provider_compaction_state is not None
+    assert response.provider_compaction_scope == "prior_context"
+    assert responses_state_items(response.provider_compaction_state) == [{
         "type": "compaction",
         "encrypted_content": "compacted opaque state",
-    }
+    }]
+    assert len(bodies) == 2
+    assert bodies[0]["input"][-1] == {"type": "compaction_trigger"}
+    assert not any(
+        item.get("role") == "user"
+        and "new question" in str(item.get("content"))
+        for item in bodies[0]["input"]
+    )
+    assert {
+        "type": "compaction",
+        "encrypted_content": "compacted opaque state",
+    } in bodies[1]["input"]
+    assert bodies[1]["input"].index({
+        "type": "compaction",
+        "encrypted_content": "compacted opaque state",
+    }) < next(
+        index
+        for index, item in enumerate(bodies[1]["input"])
+        if item.get("role") == "user"
+        and "new question" in str(item.get("content"))
+    )
     assert not any(
         item.get("type") == "reasoning"
         for item in bodies[1]["input"]
