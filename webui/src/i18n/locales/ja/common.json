@@ -1797,8 +1797,6 @@
       },
       "interruptedHelp": "タスクの完了前にサーバーが再起動しました。タスクは自動的に再実行されていません。",
       "workTitle": "サブタスク",
-      "otherWorkTitle": "ほかのタスク",
-      "unlinkedHelp": "表示中のメッセージには、これらのタスクに対応する依頼がありません。",
       "progress": "{{total}} 件中 {{completed}} 件完了",
       "running": "実行中: {{count}}",
       "finished": "終了: {{count}}",

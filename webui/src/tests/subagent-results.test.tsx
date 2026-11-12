@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
-import { SubagentThreadMessages, useHasSubagentResults } from "@/components/thread/SubagentTaskResults";
+import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
@@ -47,9 +47,6 @@ function emitTask(snapshot: SubagentTaskSnapshot) {
     chatHandlers.forEach((handler) => handler({ event: "subagent_task", chat_id: "a", task: snapshot }));
   });
 }
-function ResultsPresence() {
-  return <output data-testid="has-results">{useHasSubagentResults() ? "yes" : "no"}</output>;
-}
 function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEvents = true, historyEnabled = false, onActivityToggle }: {
   threadMessages?: UIMessage[];
   sessionKey?: string;
@@ -58,13 +55,12 @@ function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEve
   onActivityToggle?: () => void;
 } = {}) {
   return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled}>
-    <ResultsPresence />
     <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} onActivityToggle={onActivityToggle} /></div>
     <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock /><textarea aria-label="Message" /></div>
   </SubagentTasksProvider>;
 }
 function summary(region: HTMLElement) {
-  return within(region).getByRole("button", { name: /^(Subtasks|Other tasks) (Completed|Finished):/ });
+  return within(region).getByRole("button", { name: /^Subtasks (Completed|Finished):/ });
 }
 function expectBefore(first: Node, second: Node) {
   expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -99,14 +95,12 @@ describe("subagent result archives", () => {
     expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 3");
     const transcript = screen.getByTestId("messages");
     expect(transcript.querySelector("[data-subagent-results]")).toBeNull();
-    expect(screen.getByTestId("has-results")).toHaveTextContent("no");
     expect(transcript).not.toHaveTextContent("Config check");
     expect(transcript).not.toHaveTextContent("Waiting check");
     expect(transcript).not.toHaveTextContent("Stopping check");
 
     emitTask(task({ revision: 2, result: "Full findings stay in details" }));
     const archive = screen.getByRole("region", { name: "Subtasks" });
-    expect(screen.getByTestId("has-results")).toHaveTextContent("yes");
     expect(summary(archive)).toHaveTextContent("Completed: 1");
     expect(summary(archive).querySelector("img")).toHaveAttribute("src", "/brand/nanobot_mark.svg");
     expect(summary(archive).querySelector("img")).toHaveAttribute("alt", "");
@@ -237,7 +231,7 @@ describe("subagent result archives", () => {
     expect(screen.getByTestId("messages").querySelectorAll("[data-subagent-id]")).toHaveLength(2);
   });
 
-  it("keeps unmatched terminal work before the chat and preserves open details when its source is loaded", async () => {
+  it("shows older results only with their loaded prompt and preserves details through history navigation", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "older", label: "Earlier check", origin_turn_id: "older-turn", origin_message_id: "older-prompt",
         result: "## Earlier findings\n\nThe saved result remains available" }),
@@ -246,27 +240,26 @@ describe("subagent result archives", () => {
     ]));
     const user = userEvent.setup();
     const view = render(layout());
-    const unlinked = await screen.findByRole("region", { name: "Other tasks" });
-    expectBefore(unlinked, screen.getByText("Inspect config"));
-    expect(summary(unlinked)).toHaveAttribute("aria-expanded", "false");
-    await user.click(summary(unlinked));
-    expect(within(unlinked).getByText("These tasks have no matching request in the displayed messages.")).toBeVisible();
-    expect(unlinked).not.toHaveTextContent("Unlinked live check");
-    await user.click(within(unlinked).getByRole("button", { name: "Earlier check Completed 4s" }));
-    const detail = screen.getByRole("dialog", { name: "Earlier check" });
-    expect(await within(detail).findByRole("heading", { name: "Earlier findings" })).toBeVisible();
-
-    view.rerender(layout({ threadMessages: [
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
+    const olderMessages: UIMessage[] = [
       { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
       ...messages,
-    ] }));
-    expect(screen.getByRole("dialog", { name: "Earlier check" })).toBe(detail);
+    ];
+    view.rerender(layout({ threadMessages: olderMessages }));
+    let linked = screen.getByRole("region", { name: "Subtasks" });
+    expect(summary(linked)).toHaveAttribute("aria-expanded", "false");
+    await user.click(summary(linked));
+    await user.click(within(linked).getByRole("button", { name: "Earlier check Completed 4s" }));
+    const detail = screen.getByRole("dialog", { name: "Earlier check" });
+    expect(await within(detail).findByRole("heading", { name: "Earlier findings" })).toBeVisible();
+    view.rerender(layout());
+    expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
     expect(within(detail).getByText("The saved result remains available")).toBeVisible();
+    view.rerender(layout({ threadMessages: olderMessages }));
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
-    const linked = screen.getByRole("region", { name: "Subtasks" });
-    const header = summary(linked);
-    expect(header).toHaveAttribute("aria-expanded", "true");
+    linked = screen.getByRole("region", { name: "Subtasks" });
+    expect(summary(linked)).toHaveAttribute("aria-expanded", "true");
     await waitFor(() => expect(within(linked).getByRole("button", { name: "Earlier check Completed 4s" })).toHaveFocus());
     expect(screen.getByTestId("messages").querySelectorAll('[data-subagent-id="older"]')).toHaveLength(1);
     expectBefore(screen.getByText("Inspect earlier work"), linked);
@@ -291,7 +284,7 @@ describe("subagent result archives", () => {
     expect(within(replayed).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
   });
 
-  it("preserves each disclosure through other task outcomes, history prepends and Activity preference changes", async () => {
+  it("preserves disclosure through off-page task outcomes, history prepends and Activity preference changes", async () => {
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
     vi.mocked(fetch).mockImplementation(async () => response([
       task(),
@@ -309,9 +302,7 @@ describe("subagent result archives", () => {
     emitTask(task({ task_id: "other", label: "Other check", revision: 2, state: "error", error: "Other work failed",
       origin_message_id: null, origin_turn_id: null, created_at: 102 }));
     expect(summary(archive)).toHaveAttribute("aria-expanded", "true");
-    const unlinked = screen.getByRole("region", { name: "Other tasks" });
-    expect(summary(unlinked)).toHaveAttribute("aria-expanded", "false");
-    await user.click(summary(unlinked));
+    expect(screen.getByTestId("messages").querySelector('[data-subagent-id="other"]')).toBeNull();
     view.rerender(layout({ threadMessages: [
       { id: "prepended", role: "user", content: "Earlier request from this turn", turnId: "turn-a", createdAt: 99_000 },
       ...messages,
@@ -321,7 +312,6 @@ describe("subagent result archives", () => {
     expect(within(retained).getByRole("button", { name: "Config check Completed 4s" })).toBeVisible();
     expect([...retained.querySelectorAll("[data-subagent-id]")].map((row) => row.getAttribute("data-subagent-id")))
       .toEqual(["task-1", "second"]);
-    expect(summary(screen.getByRole("region", { name: "Other tasks" }))).toHaveAttribute("aria-expanded", "true");
     await user.click(summary(retained));
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
     expect(summary(retained)).toHaveAttribute("aria-expanded", "false");

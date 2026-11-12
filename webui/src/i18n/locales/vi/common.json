@@ -1797,8 +1797,6 @@
       },
       "interruptedHelp": "Máy chủ khởi động lại trước khi tác vụ hoàn thành. Tác vụ không tự động chạy lại.",
       "workTitle": "Tác vụ con",
-      "otherWorkTitle": "Tác vụ khác",
-      "unlinkedHelp": "Không tìm thấy yêu cầu tương ứng với các tác vụ này trong tin nhắn đang hiển thị.",
       "progress": "Hoàn thành {{completed}} / {{total}}",
       "running": "Đang chạy: {{count}}",
       "finished": "Đã kết thúc: {{count}}",

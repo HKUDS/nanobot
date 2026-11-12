@@ -1797,8 +1797,6 @@
       },
       "interruptedHelp": "Server dimulai ulang sebelum tugas ini selesai. Tugas tidak dijalankan ulang secara otomatis.",
       "workTitle": "Subtugas",
-      "otherWorkTitle": "Tugas lain",
-      "unlinkedHelp": "Permintaan yang sesuai dengan tugas ini tidak ditemukan dalam pesan yang ditampilkan.",
       "progress": "{{completed}} dari {{total}} selesai",
       "running": "Berjalan: {{count}}",
       "finished": "Berakhir: {{count}}",

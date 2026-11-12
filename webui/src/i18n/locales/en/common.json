@@ -1979,8 +1979,6 @@
       },
       "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically.",
       "workTitle": "Subtasks",
-      "otherWorkTitle": "Other tasks",
-      "unlinkedHelp": "These tasks have no matching request in the displayed messages.",
       "progress": "{{completed}} of {{total}} completed",
       "running": "Running: {{count}}",
       "finished": "Finished: {{count}}",

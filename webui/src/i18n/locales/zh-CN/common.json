@@ -1979,8 +1979,6 @@
       },
       "interruptedHelp": "后端重启时此任务尚未结束，任务没有自动恢复或重新执行。",
       "workTitle": "子任务",
-      "otherWorkTitle": "其他任务",
-      "unlinkedHelp": "未找到这些任务在当前显示消息中的原始请求。",
       "progress": "已完成 {{completed}} / {{total}} 项",
       "running": "{{count}} 项进行中",
       "finished": "{{count}} 项已结束",

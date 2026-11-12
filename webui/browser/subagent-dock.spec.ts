@@ -10,6 +10,27 @@ async function settledMotion(target: Locator) {
 }
 
 for (const width of [1440, 390]) {
+  test(`opens a session without detached past results at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/browser/fixture.html?case=subagent-dock&past&saved");
+    const messages = page.getByTestId("thread-message-region");
+    const archives = messages.locator("[data-subagent-results]");
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toContainText("Running: 3");
+    await expect(archives).toHaveCount(0);
+    await page.getByRole("button", { name: "全部完成", exact: true }).click();
+    await expect(archives).toHaveCount(1);
+    await expect(archives).toContainText("Completed: 3");
+    await archives.locator("[data-subagent-results-summary]").click();
+    await expect(archives.locator("[data-subagent-id]")).toHaveCount(3);
+    await messages.evaluate(node => { node.scrollTop = 0; });
+    await settledMotion(messages);
+    await page.screenshot({ path: info.outputPath("results-with-prompt.png") });
+    await page.reload();
+    await expect(archives).toHaveCount(1);
+    await expect(archives).toContainText("Completed: 3");
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toHaveCount(0);
+  });
+
   test(`keeps subtasks reachable through long replies, independent list scrolling and detail handoff at ${width}px`, async ({ page }, info) => {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));

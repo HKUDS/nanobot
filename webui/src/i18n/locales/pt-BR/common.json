@@ -1799,8 +1799,6 @@
       },
       "interruptedHelp": "O servidor reiniciou antes de concluir esta tarefa. Ela não foi executada novamente automaticamente.",
       "workTitle": "Subtarefas",
-      "otherWorkTitle": "Outras tarefas",
-      "unlinkedHelp": "Não foi encontrada uma solicitação correspondente a estas tarefas nas mensagens exibidas.",
       "progress": "{{completed}} de {{total}} concluídas",
       "running": "Em andamento: {{count}}",
       "finished": "Encerradas: {{count}}",

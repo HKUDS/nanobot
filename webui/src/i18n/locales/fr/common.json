@@ -1797,8 +1797,6 @@
       },
       "interruptedHelp": "Le serveur a redémarré avant la fin de cette tâche. Elle n’a pas été relancée automatiquement.",
       "workTitle": "Sous-tâches",
-      "otherWorkTitle": "Autres tâches",
-      "unlinkedHelp": "Aucune demande correspondant à ces tâches ne figure dans les messages affichés.",
       "progress": "{{completed}} sur {{total}} terminées",
       "running": "En cours : {{count}}",
       "finished": "Terminées : {{count}}",

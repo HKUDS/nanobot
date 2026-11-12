@@ -1797,8 +1797,6 @@
       },
       "interruptedHelp": "後端重新啟動時此任務尚未結束，任務沒有自動恢復或重新執行。",
       "workTitle": "子任務",
-      "otherWorkTitle": "其他任務",
-      "unlinkedHelp": "未找到這些任務在目前顯示訊息中的原始請求。",
       "progress": "已完成 {{completed}} / {{total}} 項",
       "running": "{{count}} 項進行中",
       "finished": "{{count}} 項已結束",

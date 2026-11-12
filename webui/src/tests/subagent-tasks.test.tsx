@@ -138,9 +138,7 @@ describe("session-owned task UI", () => {
     const archive = await openArchive(user);
     expect(taskIds(archive)).toEqual(older.map(saved => saved.task_id));
     expect(within(archive).queryByRole("button", { name: /Config check Running/ })).not.toBeInTheDocument();
-    const other = await openArchive(user, "Other tasks");
-    await user.click(within(other).getByRole("button", { name: /Earlier check Completed/ }));
-    expect(within(screen.getByRole("dialog", { name: "Earlier check" })).getByText("Saved result")).toBeVisible();
+    expect(taskIds(screen.getByTestId("messages"))).toEqual(older.map(saved => saved.task_id));
     expect(requestMutation).not.toHaveBeenCalled();
   });
 
@@ -901,7 +899,7 @@ describe("session-owned task UI", () => {
     expect(screen.queryByTestId("subagent-task-dock")).not.toBeInTheDocument();
   });
 
-  it("keeps legacy work separate after refresh and preserves its disclosure through local history prepends", async () => {
+  it("keeps unmatched legacy work out of the transcript through refresh and unrelated history prepends", async () => {
     vi.mocked(fetch).mockImplementation(async () => response([
       task({ task_id: "legacy", revision: 0, label: "Nanjing weather", state: "done", completed_at: 102,
         origin_turn_id: "websocket:a:1791046873588004336", result: "## Nanjing\n\n- **Rain**" }),
@@ -910,61 +908,18 @@ describe("session-owned task UI", () => {
     const user = userEvent.setup();
     const view = render(layout());
     await screen.findByTestId("subagent-task-dock-trigger");
-    const otherWork = screen.getByRole("region", { name: "Other tasks" });
-    const header = within(otherWork).getByRole("button", { name: /Other tasks/ });
-    expect(header).toHaveAttribute("aria-expanded", "false");
-    expect(otherWork.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Subtasks" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("messages")).not.toHaveTextContent("Config check");
-    await user.click(header);
-    expect(within(otherWork).getByText("These tasks have no matching request in the displayed messages.")).toBeVisible();
-    await user.click(within(otherWork).getByRole("button", { name: /Nanjing weather Completed/ }));
-    const detail = screen.getByRole("dialog", { name: "Nanjing weather" });
-    expect(within(detail).getByRole("heading", { name: "Nanjing" })).toBeVisible();
-    expect(within(detail).getByRole("list")).toHaveTextContent("Rain");
-    await user.keyboard("{Escape}");
+    expect(taskIds(await openTaskList(user))).toEqual(["task-1"]);
+    expect(taskIds(screen.getByTestId("messages"))).toEqual([]);
     view.rerender(layout({ threadMessages: [
       { id: "cached-prompt", role: "user", content: "Earlier cached prompt", createdAt: 99_000 },
       ...messages,
     ] }));
-    const expanded = screen.getByRole("region", { name: "Other tasks" });
-    expect(within(expanded).getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "true");
-    expect(within(expanded).getByRole("button", { name: /Nanjing weather Completed/ })).toBeVisible();
+    expect(taskIds(screen.getByTestId("messages"))).toEqual([]);
     view.unmount();
     render(layout());
-    const restored = await screen.findByRole("region", { name: "Other tasks" });
-    expect(within(restored).getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "false");
-    expect(restored.compareDocumentPosition(screen.getByText("Inspect config")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(taskIds(await openTaskList(user))).toEqual(["task-1"]);
+    expect(taskIds(screen.getByTestId("messages"))).toEqual([]);
     expect(requestMutation).not.toHaveBeenCalled();
-  });
-
-  it("reattaches archived work when its prompt loads without duplicating it, closing details or losing focus", async () => {
-    vi.mocked(fetch).mockImplementation(async () => response([
-      task({ task_id: "older", label: "Earlier check", state: "done", completed_at: 102, result: "Earlier finding", origin_turn_id: "older-turn", origin_message_id: "older-prompt" }),
-      task({ created_at: 200 }),
-    ]));
-    const user = userEvent.setup();
-    const view = render(layout());
-    const otherWork = await openArchive(user, "Other tasks");
-    await user.click(within(otherWork).getByRole("button", { name: /Earlier check Completed/ }));
-    const detail = screen.getByRole("dialog", { name: "Earlier check" });
-    view.rerender(layout({ threadMessages: [
-      { id: "older-prompt", role: "user", content: "Inspect earlier work", turnId: "older-turn", createdAt: 99_000 },
-      ...messages,
-    ] }));
-    expect(detail).toBeVisible();
-    expect(within(detail).getByText("Earlier finding")).toBeVisible();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "Other tasks" })).not.toBeInTheDocument();
-    const archive = screen.getByRole("region", { name: "Subtasks" });
-    const summary = within(archive).getByRole("button", { name: /Subtasks/ });
-    expect(summary).toHaveAttribute("aria-expanded", "true");
-    expect(taskIds(screen.getByTestId("messages"))).toEqual(["older"]);
-    expect(screen.getByText("Inspect earlier work").compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText("Inspect config").compareDocumentPosition(archive) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-    const row = within(archive).getByRole("button", { name: /Earlier check Completed/ });
-    await waitFor(() => expect(row).toHaveFocus());
-    expect(row).toBeVisible();
   });
 
   it("merges live work before the initial read without polling or rolling back completed work", async () => {

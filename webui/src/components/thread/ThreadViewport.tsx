@@ -13,7 +13,7 @@ import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { PromptRail } from "@/components/thread/PromptRail";
-import { SubagentThreadMessages, useHasSubagentResults } from "@/components/thread/SubagentTaskResults";
+import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
 import { DiagramScope } from "@/components/markdown-diagrams/context";
 import { DiffViewportContext } from "./activity/DiffViewportContext";
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
@@ -460,8 +460,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       },
     });
   }
-  const hasTaskResults = useHasSubagentResults();
-  const hasMessages = messages.length > 0 || (hasTaskResults && conversationReady);
+  const hasMessages = messages.length > 0;
   const hasThreadLayout = hasMessages || initialLoading;
   useLayoutEffect(() => {
     scrollRef.current = hasMessages
