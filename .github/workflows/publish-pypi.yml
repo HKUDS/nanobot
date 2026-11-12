@@ -31,6 +31,7 @@ jobs:
       contents: read
     outputs:
       artifact_id: ${{ steps.staged.outputs.artifact-id }}
+      upload_required: ${{ steps.reconcile.outputs.upload_required }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -60,7 +61,24 @@ jobs:
             --pattern 'nanobot-tui-*.zip' --pattern 'nanobot-tui-*.zip.sha256'
           python -m scripts.prepare_pypi_release --release-dir "$RUNNER_TEMP/release" \
             --output "$RUNNER_TEMP/pypi" --version "$VERSION" --tag-commit "$commit"
+      - name: Check for an interrupted upload
+        id: reconcile
+        env:
+          VERSION: ${{ inputs.version }}
+          DESTINATION: ${{ inputs.destination }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m scripts.reconcile_pypi_release --directory "$RUNNER_TEMP/pypi" \
+            --version "$VERSION" --destination "$DESTINATION"
+          if [[ -n "$(find "$RUNNER_TEMP/pypi" -type f -print -quit)" ]]; then
+            echo 'upload_required=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'upload_required=false' >> "$GITHUB_OUTPUT"
+            echo 'The complete release is already present with matching hashes.'
+          fi
       - name: Transfer verified PyPI files
+        if: steps.reconcile.outputs.upload_required == 'true'
         id: staged
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -71,6 +89,7 @@ jobs:
 
   publish:
     needs: verify
+    if: needs.verify.outputs.upload_required == 'true'
     runs-on: ubuntu-latest
     environment: ${{ inputs.destination == 'pypi' && 'pypi' || 'testpypi' }}
     timeout-minutes: 20
