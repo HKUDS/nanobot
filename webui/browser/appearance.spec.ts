@@ -4,6 +4,13 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", (route) => route.abort());
 });
 
+test("appearance puts interface settings before activity display", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=appearance");
+  await expect(page.locator(".appearance-page > section > h2")).toHaveText([
+    "Theme", "Reading", "Interface", "Activity display",
+  ]);
+});
+
 test("system theme stays live, explicit choices persist, and tabs agree", async ({ page, context }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/browser/fixture.html?case=appearance");

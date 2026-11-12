@@ -103,7 +103,7 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
       await page.goto(fixture("settings", "loaded", "&section=appearance"));
       const target = page.locator('[data-settings-section="appearance"]');
       const ready = async () => {
-        await expect(target.locator("[data-reading-preview-content] strong")).toBeVisible();
+        await expect(target.locator("[data-reading-preview-content] .markdown-content p").first()).toBeVisible();
         await expect(target.locator("[data-reading-preview-content] .markdown-content p").first()).toHaveCSS("font-size", "24px");
         await settle(page);
       };

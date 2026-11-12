@@ -135,9 +135,6 @@ export function ReadingSettings({ preferences, onChange }: {
     <div className="reading-typography appearance-reading-preview"
       data-reading-text-size={preferences.readingTextSize}
       style={{ "--custom-reading-size": `${preferences.customReadingTextSize}px` } as CSSProperties}>
-      <div className="mb-4 flex items-center gap-2 text-caption font-medium text-foreground">
-        <img src="/brand/nanobot_mark.svg" className="h-5 w-5" alt="" />nanobot
-      </div>
       <div data-reading-preview-content>
         <MarkdownText>{t("settings.appearance.previewText")}</MarkdownText>
         <div className="mt-4 overflow-x-auto rounded-control bg-muted/60 px-4 py-3">
