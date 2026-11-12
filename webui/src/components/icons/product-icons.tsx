@@ -33,7 +33,6 @@ export const SystemIcon = productIcon("system", <><rect x="3" y="3" width="18" h
 export const AdvancedIcon = productIcon("advanced", <><path d="M3 6h5m4 0h9M3 12h11m4 0h3M3 18h2m4 0h12" /><circle cx="10" cy="6" r="2" /><circle cx="16" cy="12" r="2" /><circle cx="7" cy="18" r="2" /></>);
 export const AboutIcon = productIcon("about", <><circle cx="12" cy="12" r="9" /><path d="M12 11v6m0-10h.01" /></>);
 export const AttachIcon = productIcon("attach", <path d="M8.5 12.5 14 7a2.75 2.75 0 0 1 3.89 3.89l-7.43 7.43a4.25 4.25 0 0 1-6.01-6.01l7.43-7.43a5.75 5.75 0 0 1 8.13 8.13L12.5 20.5" />);
-export const SendIcon = productIcon("send", <><path d="m4 5 17 7-17 7 3-7-3-7Z" /><path d="M7 12h14" /></>);
 export const VoiceIcon = productIcon("voice", <><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6" /></>);
 export const StopIcon = productIcon("stop", <rect x="5" y="5" width="14" height="14" rx="2.5" />);
 export const RestrictedAccessIcon = productIcon("restricted-access", <><rect x="5" y="10" width="14" height="11" rx="2.5" /><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2" /></>);
@@ -46,7 +45,6 @@ export const DelegationIcon = productIcon("delegation", <><rect x="8" y="3" widt
 export const TaskInspectIcon = productIcon("task-inspect", <><rect x="3" y="3" width="13" height="18" rx="2" /><path d="M7 7h5M7 11h3" /><circle cx="16" cy="15" r="4" /><path d="m19 18 3 3" /></>);
 export const TaskMessageIcon = productIcon("task-message", <><path d="M12 19H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v4M7 8h10M7 12h4" /><path d="M14 17h7m-3-3 3 3-3 3" /></>);
 export const QueuedTaskIcon = productIcon("task-queued", <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></>);
-export const RunningTaskIcon = productIcon("task-running", <><path d="M12 3a9 9 0 1 1-9 9" /><path d="M3 7v.01M6 4v.01" /></>);
 export const StoppingTaskIcon = productIcon("task-stopping", <><path d="M12 3a9 9 0 1 1-9 9M3 7v.01M6 4v.01" /><rect x="9" y="9" width="6" height="6" rx="1" /></>);
 export const CompletedTaskIcon = productIcon("task-completed", <><circle cx="12" cy="12" r="9" /><path d="m7.5 12 3 3 6-6" /></>);
 export const CancelledTaskIcon = productIcon("task-cancelled", <><circle cx="12" cy="12" r="9" /><path d="m9 9 6 6m0-6-6 6" /></>);

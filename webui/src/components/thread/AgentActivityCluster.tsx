@@ -44,7 +44,6 @@ import {
 import { WebSearchRun } from "@/components/thread/activity/WebSearchRun";
 import { webSearchRunsByTraceLine } from "@/components/thread/activity/web-search-model";
 import {
-  isAgentActivityMember,
   isReasoningOnlyAssistant,
 } from "@/lib/activity-timeline";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
@@ -67,8 +66,6 @@ import type {
 
 const EMPTY_CLI_APPS: CliAppInfo[] = [];
 const EMPTY_MCP_PRESETS: McpPresetInfo[] = [];
-
-export { isAgentActivityMember };
 
 interface ActivityCounts {
   reasoningSteps: number;

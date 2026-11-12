@@ -8,22 +8,6 @@ export function completedAssistantTurnIds(messages: UIMessage[]): string[] {
   ))));
 }
 
-export function canonicalRunSnapshot(
-  messages: UIMessage[],
-  hasPendingToolCalls: boolean,
-  activeTurnId: string | null,
-  completionIdsProvided = false,
-): CanonicalRunSnapshot {
-  return {
-    observedTurnIds: Array.from(new Set(messages.flatMap((message) => (
-      message.role === "user" && message.turnId ? [message.turnId] : []
-    )))),
-    hasPendingToolCalls,
-    activeTurnId,
-    completionIdsProvided,
-  };
-}
-
 export function persistedCanonicalRunState(body: WebuiThreadPersistedPayload): {
   completedTurnIds: string[];
   snapshot: CanonicalRunSnapshot;
