@@ -248,10 +248,7 @@ def build_file_edit_end_event(
 ) -> dict[str, Any]:
     after = tracker.target.snapshot(_MAX_SNAPSHOT_BYTES)
     diff_payload: dict[str, Any] | None = None
-    if (
-        tracker.before.countable and after.countable
-        and tracker.before.text is not None and after.text is not None
-    ):
+    if tracker.before.text is not None and after.text is not None:
         if diff is None or not diff.matches(tracker.before.text, after.text):
             diff = FileDiff.from_text(tracker.before.text, after.text)
         added, deleted = diff.added, diff.deleted
@@ -265,14 +262,7 @@ def build_file_edit_end_event(
         binary = False
     else:
         added, deleted = 0, 0
-        binary = (
-            tracker.before.binary
-            or tracker.before.oversized
-            or tracker.before.unreadable
-            or after.binary
-            or after.oversized
-            or after.unreadable
-        )
+        binary = True
     payload = _event_payload(
         tracker,
         phase="end",

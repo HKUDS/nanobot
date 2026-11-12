@@ -8,6 +8,7 @@ import heapq
 import re
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -749,7 +750,7 @@ class GrepTool(_SearchTool):
             skipped_large = 0
             document_error: str | None = None
             document_continuations: list[str] = []
-            counts: dict[str, int] = {}
+            counts: Counter[str] = Counter()
             file_mtimes: dict[str, float] = {}
             root = tree.root if tree.is_directory else tree.root.parent
             max_file_bytes = (
@@ -835,7 +836,7 @@ class GrepTool(_SearchTool):
                         # A document can fail after yielding matches. Keep the count
                         # of those lines even though the failed file is not ranked.
                         if file_matches and output_mode == "count":
-                            counts[display_path] = counts.get(display_path, 0) + file_matches
+                            counts[display_path] += file_matches
                     if file_matches:
                         file_mtimes[display_path] = mtime
                     if content_page.stopped:

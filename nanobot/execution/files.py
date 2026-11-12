@@ -99,15 +99,10 @@ class ReadableFile:
 
 @dataclass(frozen=True, slots=True)
 class FileSnapshot:
+    """Text for the edit preview: empty for missing files, None if unavailable."""
+
     exists: bool
     text: str | None
-    unreadable: bool = False
-    binary: bool = False
-    oversized: bool = False
-
-    @property
-    def countable(self) -> bool:
-        return self.text is not None and not (self.binary or self.oversized or self.unreadable)
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,18 +135,16 @@ class WritableFile:
                 return FileSnapshot(exists=False, text="")
             with _open_regular_file(self.path) as (stream, size):
                 if size > max_bytes:
-                    return FileSnapshot(exists=True, text=None, oversized=True)
+                    return FileSnapshot(exists=True, text=None)
                 raw = stream.read(max_bytes + 1)
         except OSError:
-            return FileSnapshot(exists=self.exists(), text=None, unreadable=True)
-        if len(raw) > max_bytes:
-            return FileSnapshot(exists=True, text=None, oversized=True)
-        if b"\x00" in raw:
-            return FileSnapshot(exists=True, text=None, binary=True)
+            return FileSnapshot(exists=self.exists(), text=None)
+        if len(raw) > max_bytes or b"\x00" in raw:
+            return FileSnapshot(exists=True, text=None)
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
-            return FileSnapshot(exists=True, text=None, binary=True)
+            return FileSnapshot(exists=True, text=None)
         return FileSnapshot(exists=True, text=text.replace("\r\n", "\n"))
 
 

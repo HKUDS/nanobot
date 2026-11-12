@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from pathlib import Path
 from typing import Any, cast
 
 from nanobot.agent.tools.base import ToolResult, tool_parameters
@@ -102,8 +103,7 @@ class ApplyPatchTool(_WritableFsTool):
                 raise _PatchError("must provide edits")
 
             writes: dict[WritableFile, str] = {}
-            originals: dict[WritableFile, str] = {}
-            actions: dict[WritableFile, str] = {}
+            originals: dict[WritableFile, str | None] = {}
 
             for edit_value in edits:
                 if not isinstance(edit_value, dict):
@@ -124,21 +124,20 @@ class ApplyPatchTool(_WritableFsTool):
                     raise _PatchError(f"new_text required for {action}: {path}")
                 new_text = cast(str, new_text)
 
-                pending = writes.get(source)
-                content = pending
-                if content is None and source.exists():
-                    try:
-                        content = source.read_bytes().decode("utf-8")
-                    except UnicodeDecodeError:
-                        raise _PatchError(f"file is not UTF-8 text: {path}")
-                created = content is None
+                content = writes.get(source)
                 if content is None:
-                    if action == "replace":
+                    if source.exists():
+                        try:
+                            content = source.read_bytes().decode("utf-8")
+                        except UnicodeDecodeError:
+                            raise _PatchError(f"file is not UTF-8 text: {path}")
+                        if action == "replace" and not source.is_file():
+                            raise _PatchError(f"path to update is not a file: {path}")
+                    elif action == "replace":
                         raise _PatchError(f"file to update does not exist: {path}")
-                    content = ""
-
-                if action == "replace" and pending is None and not source.is_file():
-                    raise _PatchError(f"path to update is not a file: {path}")
+                    originals[source] = content
+                    if content is None:
+                        content = ""
 
                 norm_content = content.replace("\r\n", "\n")
                 if action == "add":
@@ -164,16 +163,14 @@ class ApplyPatchTool(_WritableFsTool):
                 if updated and not updated.endswith("\n"):
                     updated += "\n"
                 writes[source] = updated.replace("\n", "\r\n") if "\r\n" in content else updated
-                originals.setdefault(source, content)
-                actions.setdefault(source, "add" if created else "update")
 
-            diffs = {
-                source: FileDiff.from_text(originals[source], content)
-                for source, content in writes.items()
-            }
+            diffs: dict[Path, FileDiff] = {}
             summaries: list[str] = []
-            for source, diff in diffs.items():
-                action_name = actions[source]
+            for source, content in writes.items():
+                original = originals[source]
+                action_name = "add" if original is None else "update"
+                diff = FileDiff.from_text(original or "", content)
+                diffs[source.path] = diff
                 path = display_file_edit_path(source.path, self._files.display_workspace)
                 added, deleted = diff.added, diff.deleted
                 stats = f" (+{added}/-{deleted})" if added or deleted else ""
@@ -187,7 +184,7 @@ class ApplyPatchTool(_WritableFsTool):
                 self._file_states.record_write(target.path)
             return FileEditResult(
                 "Patch applied:\n" + "\n".join(summaries),
-                {target.path: diff for target, diff in diffs.items()},
+                diffs,
             )
         except PermissionError as exc:
             return ToolResult.error(f"Error: {exc}")

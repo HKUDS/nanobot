@@ -256,7 +256,6 @@ def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:
         params={"path": "data.bin", "old_text": "before", "new_text": "after"},
     )
     [tracker] = trackers
-    assert not tracker.before.countable
     target.write_bytes(b"\x00\x01after")
     event = build_file_edit_end_event(tracker)
     assert event["binary"] is True
@@ -264,9 +263,15 @@ def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:
     assert "diff" not in event
 
 
-def test_binary_before_file_is_reported_but_not_counted(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "before", [b"\x00\x01before", b"text\n" * 20], ids=["binary", "oversized"],
+)
+def test_unavailable_before_is_reported_but_not_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before: bytes,
+) -> None:
+    monkeypatch.setattr("nanobot.utils.file_edit_events._MAX_SNAPSHOT_BYTES", 64)
     target = tmp_path / "data.bin"
-    target.write_bytes(b"\x00\x01before")
+    target.write_bytes(before)
     trackers = prepare_file_edit_trackers(
         call_id="call-bin",
         tool_name="write_file",
