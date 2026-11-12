@@ -472,6 +472,46 @@ class SubagentManager:
             self._merge_session_statuses, session_key, runtime, include_history=True,
         )
 
+    async def read_window_statuses_for_session(
+        self, session_key: str, *, message_ids: list[str],
+        turn_ids: list[str], tracked_ids: list[str], include_active: bool,
+    ) -> Mapping[str, SubagentStatus]:
+        """Read a message window and reconcile previously observed active tasks."""
+        messages, turns, tracked = set(message_ids), set(turn_ids), set(tracked_ids)
+
+        def matches(status: SubagentStatus) -> bool:
+            return status.origin_message_id in messages or status.origin_turn_id in turns
+
+        runtime = {
+            **{task_id: record.snapshot() for task_id, record in self._tasks.items()
+               if record.status.owner == session_key and record.status.finished_at is None
+               and (include_active or task_id in tracked or matches(record.status))},
+            **{task_id: deepcopy(status) for task_id, status in self._terminal_statuses.items()
+               if status.owner == session_key and (task_id in tracked or matches(status))},
+        }
+
+        def read() -> Mapping[str, SubagentStatus]:
+            if self.sessions is not None and not self.sessions.exists(session_key):
+                return {}
+            statuses = self.sessions.load_window(
+                session_key, message_ids=message_ids, turn_ids=turn_ids,
+            ) if self.sessions is not None else {}
+            if self.sessions is not None:
+                for task_id in tracked:
+                    if task_id not in statuses:
+                        status = self.sessions.status(task_id, session_key)
+                        if status is not None:
+                            statuses[task_id] = status
+            for task_id, status in runtime.items():
+                if self.sessions is not None and not self.sessions.contains(task_id, session_key):
+                    continue
+                persisted = statuses.get(task_id)
+                if persisted is None or status.revision >= persisted.revision:
+                    statuses[task_id] = status
+            return statuses
+
+        return await asyncio.to_thread(read)
+
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         """Update the deprecated runtime source used by legacy ``spawn`` calls."""
         warnings.warn(

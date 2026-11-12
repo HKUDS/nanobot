@@ -544,6 +544,85 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
   });
 
+  it("queries only rendered task history as loaded pages and navigation windows change", async () => {
+    const client = makeClient();
+    const chatId = "task-window-pages";
+    const rows = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({
+      id: `${prefix}${index}`, role: "user" as const, content: `${prefix} prompt ${index}`, turnId: `${prefix}t${index}`,
+    }));
+    let resolveInitial!: (response: Response) => void;
+    const seen: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/subagents")) {
+        seen.push(url);
+        return Promise.resolve(httpJson({ tasks: [] }));
+      }
+      if (url.pathname.endsWith("/prompts")) return Promise.resolve(httpJson({ prompts: [{
+        id: "nav2", preview: "nav prompt 2", answerPreview: "", createdAt: 1,
+        cursor: "nav", turnId: "navt2",
+      }] }));
+      if (url.pathname.endsWith("/webui-thread")) {
+        if (url.searchParams.get("before") === "older") return Promise.resolve(httpJson({
+          ...transcriptFromSimpleMessages(rows("old", 5)),
+          page: { has_more_before: false, user_message_offset: 0 },
+        }));
+        if (url.searchParams.get("after") === "nav") return Promise.resolve(httpJson({
+          ...transcriptFromSimpleMessages(rows("nav", 3)),
+          page: { has_more_before: false, has_more_after: true },
+        }));
+        return new Promise<Response>((resolve) => { resolveInitial = resolve; });
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    }));
+    const { container } = render(<StrictMode>{wrap(client, <ThreadShell session={session(chatId)} title="Task pages"
+      onToggleSidebar={() => {}} />, null, "tok", ["webui.prompt-navigation.v1", "webui.subagents.v1", "webui.subagents.events.v1", "webui.subagents.window.v1"])}</StrictMode>);
+    await waitFor(() => expect(resolveInitial).toBeTypeOf("function"));
+    expect(seen).toHaveLength(0);
+    act(() => client._emitChat(chatId, { event: "subagent_task", chat_id: chatId, task: {
+      task_id: "live-during-load", revision: 1, label: "Live during load", task_description: "Background work",
+      origin_turn_id: "elsewhere", origin_message_id: null, created_at: 100, completed_at: null,
+      state: "running", phase: "awaiting_model", elapsed_seconds: 2, iteration: 1, tool_events: [],
+      usage: null, receipts: {}, result: null, partial: false, stop_reason: null, error: null,
+    } }));
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    await act(async () => resolveInitial(httpJson({ ...transcriptFromSimpleMessages(rows("new", 5)),
+      page: { before_cursor: "older", has_more_before: true, user_message_offset: 5 },
+    })));
+    await screen.findByText("new prompt 4");
+    await waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0].searchParams.getAll("message_id")).toEqual(rows("new", 5).map(row => row.id));
+    expect(seen[0].searchParams.getAll("turn_id")).toEqual(rows("new", 5).map(row => row.turnId));
+    expect(seen[0].searchParams.getAll("track")).toEqual(["live-during-load"]);
+
+    const scroller = container.querySelector(".thread-message-viewport") as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 }, clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    fireEvent.keyDown(scroller, { key: "Home" });
+    await screen.findByText("old prompt 0");
+    await waitFor(() => expect(seen).toHaveLength(2));
+    expect(seen[1].searchParams.getAll("message_id")).toEqual(rows("old", 5).map(row => row.id));
+    expect(seen[1].searchParams.getAll("turn_id")).toEqual(rows("old", 5).map(row => row.turnId));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Message navigation" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Jump to message: nav prompt 2" }));
+    await screen.findByText("nav prompt 2");
+    await waitFor(() => expect(seen).toHaveLength(3));
+    expect(seen[2].searchParams.getAll("message_id")).toEqual(rows("nav", 3).map(row => row.id));
+    expect(seen[2].searchParams.getAll("turn_id")).toEqual(rows("nav", 3).map(row => row.turnId));
+    fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+    await screen.findByText("new prompt 4");
+    await act(async () => { await Promise.resolve(); });
+    expect(seen).toHaveLength(3);
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(seen).toHaveLength(4));
+    const latest = [...rows("old", 5), ...rows("new", 5)];
+    expect(seen[3].searchParams.getAll("message_id")).toEqual(latest.map(row => row.id));
+    expect(seen[3].searchParams.getAll("turn_id")).toEqual(latest.map(row => row.turnId));
+  });
+
   it("keeps the dock and task events alive after the parent response finishes", async () => {
     const client = makeClient();
     const snapshot: SubagentTaskSnapshot = {

@@ -824,6 +824,7 @@ describe("session-owned task UI", () => {
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
     const user = userEvent.setup();
     const view = render(layout());
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
     vi.mocked(fetch).mockResolvedValue(response([task({ task_id: "task-b", label: "Other work" })]));
     view.rerender(layout({ sessionKey: "websocket:b" }));
     const list = await openTaskList(user);
@@ -980,6 +981,7 @@ describe("session-owned task UI", () => {
     const list = await openTaskList(user);
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
     fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
     emitTask(task({ revision: 3, state: "cancelled", completed_at: 102 }));
     vi.mocked(fetch).mockImplementationOnce(async () => response([
       task({ revision: 2 }), task({ task_id: "task-2", label: "Recovered check", created_at: 101 }),

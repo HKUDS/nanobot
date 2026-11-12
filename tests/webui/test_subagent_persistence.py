@@ -17,6 +17,7 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentControlError, SubagentManager
 from nanobot.agent.subagent_sessions import SUBAGENT, TASK_METADATA_KEY, SubagentSessions
+from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
 from nanobot.agent.tools.session_messages import SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
@@ -33,7 +34,7 @@ from nanobot.providers.base import (
 )
 from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
 from nanobot.session.location import SessionLocation
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import SessionManager, SessionPolicy
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
@@ -63,6 +64,64 @@ def gateway_for(manager, sessions, workspace):
     )
     token = gateway.tokens.issue_api_token(60)
     return gateway, SimpleNamespace(remote_address=("127.0.0.1", 12345)), Headers({"Authorization": f"Bearer {token}"})
+
+
+@pytest.mark.asyncio
+async def test_windowed_task_reads_limit_history_and_reconcile_active_work(tmp_path):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    await sessions.state.get("websocket:parent")
+    await sessions.state.get("websocket:other")
+
+    async def saved(task_id, owner, *, message_id="msg-a", turn_id="turn-a"):
+        status = SubagentStatus(
+            task_id=task_id, label=task_id, task_description=task_id, owner=owner,
+            started_at=0, finished_at=1, state="done", completed_at=1,
+            origin_message_id=message_id, origin_turn_id=turn_id,
+        )
+        await sessions.state.create_child(
+            owner, SubagentSessions.key(task_id),
+            metadata={SESSION_TYPE_KEY: SUBAGENT.name, TASK_METADATA_KEY: SubagentSessions._payload(status)},
+            content=task_id, policy=SessionPolicy(),
+        )
+
+    await saved("a", "websocket:parent")
+    await saved("b", "websocket:parent", message_id="msg-b", turn_id="turn-b")
+    # Turn-only matches stay visible; a task with no origin is only reachable by tracking.
+    await saved("turn-only", "websocket:parent", message_id=None)
+    await saved("unknown", "websocket:parent", message_id=None, turn_id=None)
+    await saved("foreign", "websocket:other")
+    entered = asyncio.Event()
+
+    async def blocked(spec):
+        entered.set()
+        await asyncio.Event().wait()
+
+    manager.runner.run = blocked
+    await manager.spawn("active", session_key="websocket:parent", runtime=runtime)
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    active_id, = manager._tasks
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    path = "/api/sessions/websocket%3Aparent/subagents"
+    try:
+        response = await gateway.http.dispatch(
+            connection, Request(path + "?scope=window&message_id=msg-a&turn_id=turn-a", headers),
+        )
+        assert response.status_code == 200
+        assert {task["task_id"] for task in json.loads(response.body)["tasks"]} == {
+            "a", "turn-only", active_id,
+        }
+        tracked = await gateway.http.dispatch(
+            connection, Request(path + "?scope=window&track=b&track=foreign&active=0", headers),
+        )
+        assert {task["task_id"] for task in json.loads(tracked.body)["tasks"]} == {"b"}
+        legacy_read = await gateway.http.dispatch(connection, Request(path, headers))
+        assert {task["task_id"] for task in json.loads(legacy_read.body)["tasks"]} == {
+            "a", "b", "turn-only", "unknown", active_id,
+        }
+        malformed = await gateway.http.dispatch(connection, Request(path + "?scope=window&active=no", headers))
+        assert malformed.status_code == 400
+    finally:
+        await manager.close()
 
 
 async def wait_for_model_requests(manager, task_id, requests, count):

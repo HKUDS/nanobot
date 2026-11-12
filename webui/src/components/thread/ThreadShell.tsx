@@ -485,6 +485,14 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
+  const [visibleWindow, setVisibleWindow] = useState<{ key: string | null; messages: UIMessage[]; hasMessages: boolean } | null>(null);
+  const reportVisibleMessages = useCallback((messages: UIMessage[]) => {
+    const users = messages.filter((message) => message.role === "user");
+    setVisibleWindow((current) => current?.key === historyKey && current.hasMessages === (messages.length > 0)
+      && current.messages.length === users.length && current.messages.every((message, index) => message.id === users[index].id
+        && message.inputId === users[index].inputId && message.turnId === users[index].turnId)
+      ? current : { key: historyKey, messages: users, hasMessages: messages.length > 0 });
+  }, [historyKey]);
   const previewSessionKey = session?.key ?? null;
   const mentionSessions = useMemo(
     () => sessions.filter((candidate) => candidate.key !== historyKey).map((candidate) => {
@@ -1527,6 +1535,9 @@ export function ThreadShell({
       sessionKey={session?.key ?? null}
       liveEvents={webuiCapabilities.includes("webui.subagents.events.v1")}
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
+      scopedHistory={webuiCapabilities.includes("webui.subagents.window.v1")}
+      messages={visibleWindow?.key === historyKey ? visibleWindow.messages : []}
+      windowReady={messagesReady && visibleWindow?.key === historyKey && (!initialHistoryLoading || visibleWindow.hasMessages)}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
     <section ref={setSidebarHost} style={{ "--sidebar-enter-width": `${sidebarEnterWidth}px`, "--sidebar-enter-mobile-width": sidebarEnterWidth ? "100%" : "0px" } as CSSProperties} data-preview-open={sidebarOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
@@ -1573,6 +1584,7 @@ export function ThreadShell({
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
             conversationReady={messagesReady}
+            onVisibleMessagesChange={webuiCapabilities.includes("webui.subagents.window.v1") ? reportVisibleMessages : undefined}
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}

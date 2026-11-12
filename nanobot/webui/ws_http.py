@@ -920,8 +920,24 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
+        query = _parse_query(request.path)
+        scope = query.get("scope")
+        if scope is not None and scope != ["window"]:
+            return _http_error(400, "invalid task scope")
+        active = query.get("active", ["1"])
+        groups = [query.get(key, []) for key in ("message_id", "turn_id", "track")]
+        if scope == ["window"] and (active not in (["0"], ["1"])
+                or sum(map(len, groups)) > 512
+                or any(not value or len(value) > 512 for group in groups for value in group)):
+            return _http_error(400, "invalid task window")
         try:
-            statuses = await self.subagent_manager.read_statuses_for_session(session_key)
+            if scope == ["window"]:
+                statuses = await self.subagent_manager.read_window_statuses_for_session(
+                    session_key, message_ids=groups[0], turn_ids=groups[1],
+                    tracked_ids=groups[2], include_active=active == ["1"],
+                )
+            else:
+                statuses = await self.subagent_manager.read_statuses_for_session(session_key)
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response({

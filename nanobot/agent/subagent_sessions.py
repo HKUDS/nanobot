@@ -120,6 +120,22 @@ class SubagentSessions:
                 result[task_id] = status
         return result
 
+    def load_window(
+        self, owner: str, *, message_ids: list[str], turn_ids: list[str],
+    ) -> dict[str, SubagentStatus]:
+        result: dict[str, SubagentStatus] = {}
+        for row in self.sessions.list_subagent_session_metadata(
+            owner, message_ids=message_ids, turn_ids=turn_ids,
+        ):
+            key = row["key"]
+            task_id = key.removeprefix("subagent:")
+            if key != self.key(task_id):
+                continue
+            status = self._status_from_metadata(task_id, owner, row["metadata"])
+            if status is not None:
+                result[task_id] = status
+        return result
+
     async def interrupt_pending(self) -> None:
         """Seal abandoned work after the gateway acquires execution ownership."""
         for row in self.sessions.list_sessions():
