@@ -1520,6 +1520,7 @@ export type InboundEvent =
   | {
       event: "attached";
       chat_id: string;
+      request_id?: string;
       temporary?: boolean;
       recovery_state?: RecoveryState;
       usage?: TurnUsage;
@@ -1704,6 +1705,7 @@ export type InboundEvent =
     }
   | {
       event: "error";
+      request_id?: string;
       chat_id?: string;
       detail?: string;
       reason?: string;
@@ -1840,15 +1842,15 @@ export type FilePreviewPayload = FilePreviewMetadata & (
 );
 
 export type Outbound =
-  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
-  | { type: "new_temporary_chat" }
+  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload; request_id?: string }
+  | { type: "new_temporary_chat"; request_id?: string }
   | {
       type: "webui_request";
       request_id: string;
       action: string;
       payload: Record<string, unknown>;
     }
-  | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
+  | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string; request_id?: string }
   | { type: "attach"; chat_id: string }
   | { type: "set_sidebar_state"; state: SidebarStatePayload }
   | { type: "discard_temporary_chat"; chat_id: string }

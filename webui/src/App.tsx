@@ -611,8 +611,9 @@ export default function App() {
   const bootstrapSecretRef = useRef("");
 
   const refreshReadyClient = useCallback(
-    async (client: NanobotClient, fallbackSurface: RuntimeSurface) => {
+    async (client: NanobotClient, fallbackSurface: RuntimeSurface, signal?: AbortSignal) => {
       const boot = await fetchBootstrap("", bootstrapSecretRef.current);
+      signal?.throwIfAborted();
       const url = deriveWsUrl(boot.ws_path, boot.token, boot.ws_url);
       const runtimeSurface = resolveRuntimeSurface(boot.runtime_surface, fallbackSurface);
       const runtimeHost = createRuntimeHost(runtimeSurface, boot.runtime_capabilities);
@@ -661,9 +662,9 @@ export default function App() {
             url,
             maxFrameBytes: boot.limits?.transport.max_frame_bytes,
             socketFactory: runtimeHost.socketFactory,
-            onReauth: async () => {
+            onReauth: async (signal) => {
               try {
-                const refreshed = await refreshReadyClient(client, runtimeSurface);
+                const refreshed = await refreshReadyClient(client, runtimeSurface, signal);
                 return refreshed.url;
               } catch {
                 return null;

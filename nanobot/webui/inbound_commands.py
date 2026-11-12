@@ -68,6 +68,7 @@ if TYPE_CHECKING:
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
+_WEBUI_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 
 
 @dataclass(frozen=True)
@@ -168,8 +169,13 @@ class WebUICommandRouter:
         self,
         connection: ServerConnection,
         detail: str,
+        *,
+        request_id: str | None = None,
     ) -> None:
-        await self._transport.webui_send_event(connection, "error", detail=detail)
+        await self._transport.webui_send_event(
+            connection, "error", detail=detail,
+            **({"request_id": request_id} if request_id is not None else {}),
+        )
 
     async def attach_webui_fork(
         self,
@@ -177,6 +183,7 @@ class WebUICommandRouter:
         *,
         fork_id: str,
         fork_key: str,
+        request_id: str | None = None,
     ) -> None:
         scope = await self._workspaces.async_scope_for_session_key(fork_key)
         self._transport.webui_attach(connection, fork_id)
@@ -184,6 +191,7 @@ class WebUICommandRouter:
             connection,
             "attached",
             chat_id=fork_id,
+            **({"request_id": request_id} if request_id is not None else {}),
             **(await self._session_projection.attach_fields(fork_key)),
         )
         await self._transport.webui_send_event(
@@ -271,6 +279,7 @@ class WebUICommandRouter:
         *,
         chat_id: str | None = None,
         turn_id: str | None = None,
+        request_id: str | None = None,
     ) -> Any | None:
         try:
             return await resolver()
@@ -280,6 +289,7 @@ class WebUICommandRouter:
                 "error",
                 detail="workspace_scope_rejected",
                 reason=exc.message,
+                **({"request_id": request_id} if request_id is not None else {}),
                 **({"chat_id": chat_id} if chat_id else {}),
                 **({"turn_id": turn_id} if turn_id else {}),
             )
@@ -326,6 +336,14 @@ class WebUICommandRouter:
         if command_type == "webui_request":
             await self.start_webui_request(connection, envelope)
             return
+        request_id: str | None = None
+        if command_type in ("new_chat", "new_temporary_chat", "fork_chat") and "request_id" in envelope:
+            raw_request_id = envelope["request_id"]
+            if not isinstance(raw_request_id, str) or _WEBUI_REQUEST_ID_RE.fullmatch(raw_request_id) is None:
+                await self.send_webui_protocol_error(connection, "invalid chat request_id")
+                return
+            request_id = raw_request_id
+        request_fields = {"request_id": request_id} if request_id is not None else {}
         if command_type == "new_chat":
             new_id = str(uuid.uuid4())
             scope = await self.workspace_scope_or_error(
@@ -334,6 +352,7 @@ class WebUICommandRouter:
                     envelope,
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
+                request_id=request_id,
             )
             if scope is None:
                 return
@@ -343,6 +362,7 @@ class WebUICommandRouter:
                 connection,
                 "attached",
                 chat_id=new_id,
+                **request_fields,
                 **(await self._session_projection.attach_fields(webui_session_key(new_id))),
             )
             await self._transport.webui_send_event(
@@ -361,7 +381,9 @@ class WebUICommandRouter:
                     trusted_webui=connection in self._webui_connections,
                 )
             except TemporaryChatError as exc:
-                await self._transport.webui_send_event(connection, "error", detail=exc.detail)
+                await self._transport.webui_send_event(
+                    connection, "error", detail=exc.detail, **request_fields,
+                )
                 return
             self._transport.webui_attach(connection, new_id)
             await self._transport.webui_send_event(
@@ -369,10 +391,11 @@ class WebUICommandRouter:
                 "attached",
                 chat_id=new_id,
                 temporary=True,
+                **request_fields,
             )
             return
         if command_type == "fork_chat":
-            await handle_webui_fork_chat(self, connection, envelope)
+            await handle_webui_fork_chat(self, connection, envelope, **request_fields)
             return
         if command_type == "discard_temporary_chat":
             chat_id = envelope.get("chat_id")
@@ -888,10 +911,7 @@ class WebUICommandRouter:
         envelope: dict[str, Any],
     ) -> None:
         request_id = envelope.get("request_id")
-        if not isinstance(request_id, str) or re.fullmatch(
-            r"[A-Za-z0-9._:-]{1,128}",
-            request_id,
-        ) is None:
+        if not isinstance(request_id, str) or _WEBUI_REQUEST_ID_RE.fullmatch(request_id) is None:
             await self._transport.webui_send_event(
                 connection,
                 "error",

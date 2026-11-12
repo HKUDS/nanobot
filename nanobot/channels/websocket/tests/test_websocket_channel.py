@@ -5632,6 +5632,89 @@ async def test_multiplex_legacy_still_works(bus: MagicMock, start_listener) -> N
         await server_task
 
 
+@pytest.mark.parametrize("command_type", ["new_chat", "new_temporary_chat", "fork_chat"])
+@pytest.mark.asyncio
+async def test_chat_requests_correlate_only_creation_responses(
+    bus, tmp_path, start_listener, command_type,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    source = sessions.get_or_create("websocket:source")
+    source.add_message("user", "first question")
+    source.add_message("assistant", "first answer")
+    sessions.save(source)
+    channel = _ch(bus, session_manager=sessions)
+    port, _ = await start_listener(channel)
+    token = channel.gateway.tokens.issue_token(300, audience="webui")
+    request_id = "Chat._:-" + "x" * 120
+
+    async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={token}") as client:
+        async with asyncio.timeout(5):
+            ready = json.loads(await client.recv())
+            assert ready["event"] == "ready"
+            envelope = {"type": command_type, "request_id": request_id}
+            if command_type == "fork_chat":
+                envelope.update(source_chat_id="source", before_user_index=1)
+            await client.send(json.dumps(envelope))
+            attached = await _recv_ws_event(client, "attached")
+            assert attached["chat_id"] not in {"source", ready["chat_id"]}
+            assert attached["request_id"] == request_id
+            if command_type == "new_temporary_chat":
+                assert attached["temporary"] is True
+
+            await client.send(json.dumps({
+                "type": "attach", "chat_id": "source", "request_id": "not-a-creation",
+            }))
+            attached = await _recv_ws_event(client, "attached")
+            assert attached["chat_id"] == "source"
+            assert "request_id" not in attached
+
+
+@pytest.mark.parametrize(("envelope", "trusted_webui", "detail"), [
+    ({"type": "new_chat", "workspace_scope": {"access_mode": "invalid"}}, True,
+     "workspace_scope_rejected"),
+    ({"type": "new_temporary_chat"}, False, "access_denied"),
+    ({"type": "fork_chat", "source_chat_id": "missing", "before_user_index": 0}, True,
+     "invalid fork source or index"),
+])
+@pytest.mark.asyncio
+async def test_chat_request_errors_preserve_correlation(
+    bus, tmp_path, envelope, trusted_webui, detail,
+) -> None:
+    channel = _ch(bus, session_manager=SessionManager(tmp_path))
+    connection = AsyncMock()
+    if trusted_webui:
+        channel._webui_connections.add(connection)
+    await channel._dispatch_envelope(connection, "client", {**envelope, "request_id": "create-request"})
+
+    [error] = _sent_ws_payloads(connection)
+    assert error["event"] == "error"
+    assert error["detail"] == detail
+    assert error["request_id"] == "create-request"
+    assert channel._conn_chats == {}
+
+
+@pytest.mark.parametrize(("command_type", "request_id"), [
+    ("new_chat", "bad/id"),
+    ("new_temporary_chat", "x" * 129),
+    ("fork_chat", None),
+])
+@pytest.mark.asyncio
+async def test_chat_request_rejects_invalid_id_before_execution(
+    bus, command_type, request_id,
+) -> None:
+    channel = _ch(bus)
+    connection = AsyncMock()
+    channel._webui_connections.add(connection)
+
+    await channel._dispatch_envelope(connection, "client", {
+        "type": command_type, "request_id": request_id,
+        "source_chat_id": "source", "before_user_index": 0,
+    })
+
+    assert _sent_ws_payloads(connection) == [{"event": "error", "detail": "invalid chat request_id"}]
+    assert channel._conn_chats == {}
+
+
 @pytest.mark.asyncio
 async def test_multiplex_new_chat_roundtrip(bus: MagicMock, start_listener) -> None:
     port = 0
