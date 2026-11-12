@@ -160,6 +160,7 @@ async def test_generated_image_download_delegates_unresolved_host_to_provider_pr
 
         def stream(self, method: str, url: str, **kwargs) -> _StreamContext:
             captured["request"] = (method, url)
+            captured["follow_redirects"] = kwargs["follow_redirects"]
             request = httpx.Request(method, url)
             return _StreamContext(httpx.Response(200, content=PNG_BYTES, request=request))
 
@@ -173,9 +174,10 @@ async def test_generated_image_download_delegates_unresolved_host_to_provider_pr
 
     assert result.startswith("data:image/png;base64,")
     assert captured["request"] == ("GET", "https://proxy-only.example/image.png")
+    assert captured["follow_redirects"] is False
     assert captured["kwargs"] == {
-        "follow_redirects": False,
         "timeout": image_generation._DEFAULT_TIMEOUT_S,
+        "transport": None,
         "trust_env": False,
         "proxy": proxy,
     }

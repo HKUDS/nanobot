@@ -23,7 +23,6 @@ async def open_redirected_get(
     url: str,
     *,
     check_target: Callable[[str], tuple[bool, str]] | None,
-    user_agent: str | None = None,
 ) -> AsyncGenerator[tuple[httpx.Response, tuple[str, ...]], None]:
     """Open the final response, closing every hop and retaining its URL chain.
 
@@ -31,14 +30,13 @@ async def open_redirected_get(
     Use None only when the transport itself validates and pins every request.
     """
     chain = [url]
-    headers = {"User-Agent": user_agent} if user_agent is not None else None
     for _ in range(MAX_REDIRECTS + 1):
         target = chain[-1]
         if check_target is not None:
             ok, error = check_target(target)
             if not ok:
                 raise UnsafeURLRequestError(error)
-        async with client.stream("GET", target, headers=headers, follow_redirects=False) as response:
+        async with client.stream("GET", target, follow_redirects=False) as response:
             location = response.headers.get("location") if 300 <= response.status_code < 400 else None
             if not location:
                 yield response, tuple(chain)

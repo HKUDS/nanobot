@@ -7,7 +7,8 @@ import html
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 from typing import Any, cast
 from urllib.parse import parse_qsl, quote, urlparse
 
@@ -30,7 +31,12 @@ from nanobot.agent.tools.web_config import (
     WebToolsConfig,
 )
 from nanobot.execution.http import RedirectLimitError, open_redirected_get
-from nanobot.security.network import UnsafeURLRequestError, validate_url_target
+from nanobot.security.network import (
+    PinnedDNSAsyncTransport,
+    UnsafeURLRequestError,
+    httpx_env_proxy_mounts,
+    validate_url_target,
+)
 from nanobot.utils.helpers import build_image_content_blocks
 
 _DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
@@ -100,29 +106,16 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def _pinned_dns_transport() -> httpx.AsyncBaseTransport:
-    from nanobot.security.network import PinnedDNSAsyncTransport
-
-    return PinnedDNSAsyncTransport()
-
-
-def _fetch_client_kwargs(proxy: str | None, timeout: float) -> dict[str, Any]:
-    from nanobot.security.network import httpx_env_proxy_mounts
-
-    kwargs: dict[str, Any] = {"timeout": timeout}
-    if proxy:
-        kwargs["proxy"] = proxy
-    else:
-        kwargs["transport"] = _pinned_dns_transport()
-        mounts = httpx_env_proxy_mounts()
-        if mounts:
-            kwargs["mounts"] = mounts
-    return kwargs
-
-
 def _redirect_error(url: str, error: UnsafeURLRequestError | RedirectLimitError) -> str:
     detail = f"Redirect blocked: {error}" if isinstance(error, UnsafeURLRequestError) else str(error)
     return ToolResult.error(json.dumps({"error": detail, "url": url}, ensure_ascii=False))
+
+
+def _image_content_type(content_type: str) -> str | None:
+    # Media types are case-insensitive; parameter values retain their case.
+    media_type, separator, parameters = content_type.partition(";")
+    media_type = media_type.strip().lower()
+    return media_type + separator + parameters if media_type.startswith("image/") else None
 
 
 # Forwarding a URL to the remote Jina reader discloses it to a third party, so
@@ -1216,21 +1209,12 @@ class WebFetchTool(Tool):
         # in the redirect chain before the original URL may be sent to Jina.
         jina_remote_safe = False
         try:
-            async with httpx.AsyncClient(
-                **_fetch_client_kwargs(self.proxy, 15.0),
-            ) as client:
-                async with open_redirected_get(
-                    client, url, check_target=validate_url_target, user_agent=self.user_agent,
-                ) as (r, chain):
-                    ctype = r.headers.get("content-type", "")
-                    # Media types are case-insensitive; parameter values retain their case.
-                    media_type, separator, parameters = ctype.partition(";")
-                    image_ctype = media_type.strip().lower() + separator + parameters
-                    if image_ctype.startswith("image/"):
-                        r.raise_for_status()
-                        raw = await r.aread()
-                        return build_image_content_blocks(raw, image_ctype, url, f"(Image fetched from: {url})")
-                    jina_remote_safe = not any(map(_url_carries_credentials, chain))
+            async with self._open_page(url, timeout=15.0) as (r, chain):
+                if image_ctype := _image_content_type(r.headers.get("content-type", "")):
+                    r.raise_for_status()
+                    raw = await r.aread()
+                    return build_image_content_blocks(raw, image_ctype, url, f"(Image fetched from: {url})")
+                jina_remote_safe = not any(map(_url_carries_credentials, chain))
         except (UnsafeURLRequestError, RedirectLimitError) as e:
             return _redirect_error(url, e)
         except Exception as e:
@@ -1246,6 +1230,23 @@ class WebFetchTool(Tool):
         if result is None:
             result = await self._fetch_readability(url, extract_mode, max_chars)
         return result
+
+    @asynccontextmanager
+    async def _open_page(
+        self, url: str, *, timeout: float,
+    ) -> AsyncGenerator[tuple[httpx.Response, tuple[str, ...]]]:
+        proxy = self.proxy or None
+        async with (
+            httpx.AsyncClient(
+                proxy=proxy,
+                timeout=timeout,
+                headers={"User-Agent": self.user_agent},
+                transport=None if proxy else PinnedDNSAsyncTransport(),
+                mounts=None if proxy else httpx_env_proxy_mounts(),
+            ) as client,
+            open_redirected_get(client, url, check_target=validate_url_target) as page,
+        ):
+            yield page
 
     async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
         if _url_carries_credentials(url):
@@ -1298,20 +1299,12 @@ class WebFetchTool(Tool):
 
     async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> Any:
         try:
-            async with httpx.AsyncClient(
-                **_fetch_client_kwargs(self.proxy, 30.0),
-            ) as client:
-                async with open_redirected_get(
-                    client, url, check_target=validate_url_target, user_agent=self.user_agent,
-                ) as (r, _):
-                    await r.aread()
-                    r.raise_for_status()
+            async with self._open_page(url, timeout=30.0) as (r, _):
+                await r.aread()
+                r.raise_for_status()
 
             ctype = r.headers.get("content-type", "")
-            # Media types are case-insensitive; parameter values retain their case.
-            media_type, separator, parameters = ctype.partition(";")
-            image_ctype = media_type.strip().lower() + separator + parameters
-            if image_ctype.startswith("image/"):
+            if image_ctype := _image_content_type(ctype):
                 return build_image_content_blocks(r.content, image_ctype, url, f"(Image fetched from: {url})")
 
             if "application/json" in ctype:

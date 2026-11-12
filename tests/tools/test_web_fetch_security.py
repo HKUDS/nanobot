@@ -83,7 +83,7 @@ def _patch_web_fetch_fake_client(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
             return FakeJinaResponse()
 
     monkeypatch.setattr(web_module.httpx, "AsyncClient", FakeClient)
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: object())
     monkeypatch.setattr(
         "nanobot.security.network.httpx.AsyncHTTPTransport",
         lambda **_kwargs: object(),
@@ -210,42 +210,37 @@ async def test_web_fetch_proxy_remains_supported(monkeypatch):
     data = json.loads(result)
     assert data["extractor"] == "jina"
     assert all(kwargs["proxy"] == "http://config-proxy.example:7890" for kwargs in client_kwargs)
-    assert all("mounts" not in kwargs for kwargs in client_kwargs)
-    assert all("transport" not in kwargs for kwargs in client_kwargs)
+    assert all(kwargs.get("mounts") is None for kwargs in client_kwargs)
+    assert all(kwargs.get("transport") is None for kwargs in client_kwargs)
 
 
 @pytest.mark.asyncio
-async def test_web_fetch_env_proxy_adds_proxy_mounts_and_keeps_pinned_transport(monkeypatch):
-    tool = WebFetchTool()
-    client_kwargs = _patch_web_fetch_fake_client(monkeypatch)
-
-    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
-    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
-
-    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
-        result = await tool.execute(url="https://example.com/page")
-
-    data = json.loads(result)
-    assert data["extractor"] == "jina"
-    fetch_kwargs = [kwargs for kwargs in client_kwargs if kwargs.get("timeout") == 15.0]
-    assert fetch_kwargs
-    assert all("transport" in kwargs for kwargs in fetch_kwargs)
-    assert all("mounts" in kwargs for kwargs in fetch_kwargs)
-
-
-def test_web_fetch_no_proxy_env_keeps_pinned_direct_route(monkeypatch):
+async def test_web_fetch_routes_no_proxy_hosts_directly(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:8080")
     monkeypatch.setenv("NO_PROXY", "example.com")
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    routes: list[str] = []
+
+    def reply(route):
+        def handle(request):
+            routes.append(route)
+            return httpx.Response(200, text=route, request=request)
+
+        return httpx.MockTransport(handle)
+
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: reply("direct"))
     monkeypatch.setattr(
         "nanobot.security.network.httpx.AsyncHTTPTransport",
-        lambda **_kwargs: object(),
+        lambda **_kwargs: reply("proxy"),
     )
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
 
-    kwargs = web_module._fetch_client_kwargs(None, 15.0)
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        direct = json.loads(await tool.execute(url="https://example.com/page"))
+        proxied = json.loads(await tool.execute(url="https://other.example/page"))
 
-    assert "transport" in kwargs
-    assert any(transport is None for transport in kwargs["mounts"].values())
+    assert direct["text"].endswith("direct")
+    assert proxied["text"].endswith("proxy")
+    assert routes == ["direct", "direct", "proxy", "proxy"]
 
 
 @pytest.mark.asyncio
@@ -275,7 +270,7 @@ async def test_web_fetch_does_not_fallback_after_pinned_dns_rebind_rejection(mon
 
     monkeypatch.setattr(
         web_module,
-        "_pinned_dns_transport",
+        "PinnedDNSAsyncTransport",
         lambda: PinnedDNSAsyncTransport(inner=FailTransport()),
     )
 
@@ -312,7 +307,7 @@ async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
 
     monkeypatch.setattr(tool, "_fetch_jina", _fail_jina)
     monkeypatch.setattr(tool, "_extract_readable_html", lambda html, mode: "Hello world")
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url="https://example.com/page")
@@ -342,7 +337,7 @@ async def test_web_fetch_closes_redirect_bodies_without_reading_them(monkeypatch
         events.append("end")
         return httpx.Response(200, text="page contents")
 
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url="https://example.com/start")
 
@@ -365,7 +360,7 @@ async def test_web_fetch_falls_back_when_readability_dependency_is_missing(monke
         raise ModuleNotFoundError("No module named 'lxml_html_clean'")
 
     monkeypatch.setattr(tool, "_extract_readable_html", _missing_readability)
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool._fetch_readability("https://example.com/page", "markdown", 5000)
@@ -387,7 +382,7 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
             return httpx.Response(200, headers={"content-type": "text/html"})
         return httpx.Response(302, headers={"location": "http://127.0.0.1:8765/metadata"})
 
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
 
     def resolve_public_start_only(hostname, port, family=0, type_=0):
         if hostname == "attacker.example":
@@ -439,7 +434,7 @@ async def test_web_fetch_image_media_type_is_case_insensitive(
             super().__init__(*args, transport=transport, **kwargs)
 
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", TransportAsyncClient)
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: object())
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url="https://example.com/image.png")
 
@@ -481,7 +476,7 @@ async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypa
             super().__init__(*args, transport=transport, **kwargs)
 
     monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", TransportAsyncClient)
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: object())
 
     def resolve_public_start_only(hostname, port, family=0, type_=0):
         if hostname == "example.com":
@@ -523,7 +518,7 @@ async def test_web_fetch_does_not_request_private_redirect_target(monkeypatch):
             super().__init__(*args, **kwargs)
 
     monkeypatch.setattr(web_module.httpx, "AsyncClient", TransportAsyncClient)
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: object())
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: object())
 
     def resolve_public_start_only(hostname, port, family=0, type_=0):
         if hostname == "attacker.example":
@@ -555,7 +550,7 @@ async def test_web_fetch_marks_terminal_fetch_failures_as_errors(monkeypatch, fa
             raise httpx.ProxyError("proxy unavailable", request=request)
         return httpx.Response(404, request=request)
 
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
 
     result = await tool.execute(url=url)
 
@@ -574,7 +569,7 @@ async def test_web_fetch_jina_fallback_keeps_json_error_content_successful(monke
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=source, request=request)
 
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
     monkeypatch.setattr(tool, "_fetch_jina", jina)
 
     result = await tool.execute(url=url)

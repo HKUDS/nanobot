@@ -177,7 +177,7 @@ async def test_execute_fetches_credential_urls_locally(monkeypatch, redirected: 
 
     monkeypatch.setattr(tool, "_fetch_jina", unexpected_jina)
     monkeypatch.setattr(tool, "_extract_readable_html", lambda html, mode: "ok")
-    monkeypatch.setattr(web_module, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
     monkeypatch.setattr("nanobot.security.network.getproxies", lambda: {})
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):

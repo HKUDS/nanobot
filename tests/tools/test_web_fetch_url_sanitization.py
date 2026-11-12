@@ -52,7 +52,7 @@ async def test_execute_accepts_cleanable_http_urls(url, monkeypatch):
         assert str(request.url) == "https://example.com/page"
         return httpx.Response(200, text="page contents")
 
-    monkeypatch.setattr(web, "_pinned_dns_transport", lambda: httpx.MockTransport(handler))
+    monkeypatch.setattr(web, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
     monkeypatch.setattr("nanobot.security.network.getproxies", lambda: {})
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         result = await tool.execute(url=url)

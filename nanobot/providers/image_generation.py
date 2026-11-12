@@ -157,17 +157,12 @@ async def _download_image_data_url(
         return ok, error
 
     try:
-        client_kwargs: dict[str, Any] = {
-            "follow_redirects": False,
-            "timeout": _DEFAULT_TIMEOUT_S,
-            "trust_env": False,
-        }
-        if proxy:
-            client_kwargs["proxy"] = proxy
-        else:
-            client_kwargs["transport"] = PinnedDNSAsyncTransport(inner=transport)
-
-        async with httpx.AsyncClient(**client_kwargs) as client:
+        async with httpx.AsyncClient(
+            proxy=proxy or None,
+            transport=None if proxy else PinnedDNSAsyncTransport(inner=transport),
+            timeout=_DEFAULT_TIMEOUT_S,
+            trust_env=False,
+        ) as client:
             async with open_redirected_get(
                 client, url, check_target=check_proxy_target if proxy else None,
             ) as (response, _):
