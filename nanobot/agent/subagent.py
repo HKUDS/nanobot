@@ -491,20 +491,21 @@ class SubagentManager:
         }
 
         def read() -> Mapping[str, SubagentStatus]:
-            if self.sessions is None:
+            sessions = self.sessions
+            if sessions is None:
                 return dict(runtime)
 
             def load() -> Mapping[str, SubagentStatus]:
-                if not self.sessions.exists(session_key):
+                if not sessions.exists(session_key):
                     return {}
-                statuses = self.sessions.load_window(
+                statuses = sessions.load_window(
                     session_key, message_ids=message_ids, turn_ids=turn_ids,
                 )
                 outside = [task_id for task_id in tracked if task_id not in statuses]
                 if outside:
-                    statuses.update(self.sessions.load_tracked(session_key, outside))
+                    statuses.update(sessions.load_tracked(session_key, outside))
                 for task_id, status in runtime.items():
-                    if not self.sessions.contains(task_id, session_key):
+                    if not sessions.contains(task_id, session_key):
                         continue
                     persisted = statuses.get(task_id)
                     if persisted is None or status.revision >= persisted.revision:
@@ -513,7 +514,7 @@ class SubagentManager:
 
             # One connection per request: the window read, tracked fallbacks and
             # ownership checks are separate transactions on the same worker.
-            return self.sessions.read_batch(load)
+            return sessions.read_batch(load)
 
         return await asyncio.to_thread(read)
 
