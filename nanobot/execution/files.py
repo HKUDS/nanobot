@@ -385,7 +385,6 @@ class WorkspaceFiles:
         self,
         workspace: Path | None = None,
         allowed_dir: Path | None = None,
-        extra_allowed_dirs: Iterable[Path] | None = None,
         extra_read_allowed_dirs: Iterable[Path] | None = None,
         extra_write_allowed_dirs: Iterable[Path] | None = None,
         extra_write_allowed_files: Iterable[Path] | None = None,
@@ -398,8 +397,7 @@ class WorkspaceFiles:
     ) -> None:
         self._workspace = workspace
         self._allowed_dir = allowed_dir
-        # The legacy extra_allowed_dirs option only grants reads.
-        self._read_dirs = (*tuple(extra_allowed_dirs or ()), *tuple(extra_read_allowed_dirs or ()))
+        self._read_dirs = tuple(extra_read_allowed_dirs or ())
         self._read_files = tuple(extra_read_allowed_files or ())
         self._write_dirs = tuple(extra_write_allowed_dirs or ())
         self._write_files = tuple(extra_write_allowed_files or ())
@@ -409,28 +407,6 @@ class WorkspaceFiles:
         self._sandbox_restricted = sandbox_restricts_workspace
         self._builtin_skills = builtin_skills
         self._plugin_skill_roots = plugin_skill_roots
-
-    @classmethod
-    def for_agent(
-        cls,
-        workspace: Path,
-        *,
-        restrict_to_workspace: bool,
-        sandbox_restricts_workspace: bool,
-        builtin_skills: Path,
-        plugin_skill_roots: Callable[[Path, Path], Iterable[Path]],
-    ) -> WorkspaceFiles:
-        root = workspace.expanduser().resolve(strict=False)
-        return cls(
-            workspace,
-            allowed_dir=workspace if restrict_to_workspace or sandbox_restricts_workspace else None,
-            extra_read_allowed_dirs=[builtin_skills, root / "skills"],
-            extra_read_allowed_files=[root / "memory" / "history.jsonl"],
-            restrict_to_workspace=restrict_to_workspace,
-            sandbox_restricts_workspace=sandbox_restricts_workspace,
-            builtin_skills=builtin_skills,
-            plugin_skill_roots=plugin_skill_roots,
-        )
 
     @property
     def display_workspace(self) -> Path | None:
