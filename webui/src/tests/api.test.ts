@@ -34,6 +34,7 @@ import {
   fetchTrendingMarketplaceSkills,
   fetchWebuiThread,
   fetchSubagentThread,
+  fetchSubagentTasks,
   fetchWebuiThreadTraceDetail,
   fetchWorkspaces,
   importMcpConfig,
@@ -103,6 +104,20 @@ describe("webui API helpers", () => {
       "/api/sessions/websocket%3Achat-1/subagents/task-1/webui-thread",
       expect.objectContaining({ headers: { Authorization: "Bearer tok" } }),
     );
+  });
+
+  it("splits a large subagent window into bounded reads", async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ tasks: [] }) } as Response);
+    const turnIds = Array.from({ length: 400 }, (_, index) => `turn-${index}-${"x".repeat(32)}`);
+    await expect(fetchSubagentTasks("tok", "websocket:chat-1", {
+      turnIds, trackedIds: ["task-1"],
+    })).resolves.toEqual({ tasks: [] });
+    const urls = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url), "http://localhost"));
+    expect(urls.length).toBeGreaterThan(1);
+    expect(urls.every((url) => url.search.length <= 5001)).toBe(true);
+    expect(urls.every((url) => url.searchParams.get("scope") === "window")).toBe(true);
+    expect(urls.flatMap((url) => url.searchParams.getAll("turn_id"))).toEqual(turnIds);
+    expect(urls.flatMap((url) => url.searchParams.getAll("track"))).toEqual(["task-1"]);
   });
 
   it("percent-encodes websocket keys when fetching webui-thread snapshot", async () => {

@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from concurrent.futures import CancelledError
 from contextlib import contextmanager, suppress
 from datetime import datetime
@@ -25,11 +25,26 @@ from nanobot.session.manager import (
     metadata_title,
 )
 from nanobot.session.summary import is_summary_checkpoint
-from nanobot.session.types import PARENT_SESSION_KEY
+from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
 _T = TypeVar("_T")
+
+# The expression below defines the v6 partial index and must stay stable for upgrades.
+_SUBAGENT_ORIGIN = "origin_turn_id"
+_SUBAGENT_PARENT = f"json_extract(metadata, '$.{PARENT_SESSION_KEY}')"
+_SUBAGENT_ORIGIN_FILTER = (
+    f"json_extract(metadata, '$.{SESSION_TYPE_KEY}')='subagent' "
+    f"AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text' "
+    f"AND json_type(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}')='text'"
+)
+
+# Field names above are fixed by the schema; all caller-supplied values are bound.
+_SUBAGENT_METADATA_QUERY = f"""SELECT key, created_at, updated_at, metadata FROM sessions
+    WHERE {_SUBAGENT_ORIGIN_FILTER}
+    AND {_SUBAGENT_PARENT}=?
+    AND json_extract(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}') IN (SELECT value FROM json_each(?))"""
 
 
 def _encode(value: object) -> str:
@@ -123,9 +138,16 @@ def _create_schema_v5(db: sqlite3.Connection) -> None:
     ) WHERE kind='input'""")
 
 
+def _create_schema_v6(db: sqlite3.Connection) -> None:
+    db.execute(f"""CREATE INDEX sessions_subagent_{_SUBAGENT_ORIGIN} ON sessions (
+        {_SUBAGENT_PARENT}, json_extract(metadata, '$.subagent_task.{_SUBAGENT_ORIGIN}')
+    ) WHERE {_SUBAGENT_ORIGIN_FILTER}""")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4, _create_schema_v5,
+    _create_schema_v6,
 )
 
 
@@ -726,6 +748,36 @@ class SqliteSessionStore:
                             AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text'
                             ORDER BY updated_at DESC""",
                         (parent_key,),
+                    )]
+
+    def list_subagent_session_metadata(
+        self, parent_key: str, *, turn_ids: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read only subagent headers attributed to the requested parent turns."""
+        turns = [value for value in turn_ids if value]
+        if not turns:
+            return []
+        with self.transaction(write=False) as db:
+            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
+                     "metadata": _object(row[3])}
+                    for row in db.execute(_SUBAGENT_METADATA_QUERY, (parent_key, _encode(turns)))]
+
+    def read_child_session_metadata(
+        self, parent_key: str, child_keys: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read named child headers in one query, excluding checkpoints and pending inputs."""
+        keys = [key for key in child_keys if key]
+        if not keys:
+            return []
+        with self.transaction(write=False) as db:
+            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
+                     "metadata": _object(row[3])}
+                    for row in db.execute(
+                        f"""SELECT key, created_at, updated_at, metadata FROM sessions
+                            WHERE key IN (SELECT value FROM json_each(?))
+                            AND json_extract(metadata, '$.{PARENT_SESSION_KEY}')=?
+                            AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text'""",
+                        (_encode(keys), parent_key),
                     )]
 
     def list_metadata(self) -> list[dict[str, Any]]:

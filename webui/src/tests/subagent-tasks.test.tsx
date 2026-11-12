@@ -72,7 +72,8 @@ interface LayoutOptions {
 }
 function layout({ enabled = true, liveEvents = true, historyEnabled = false, sessionKey = "websocket:a", visible = true, active = true, inputKey = null, threadMessages = messages }: LayoutOptions = {}) {
   return <ThreadVisibilityContext.Provider value={visible}>
-    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled} active={active}>
+    <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled={enabled} liveEvents={liveEvents} historyEnabled={historyEnabled} active={active}
+      turnIds={[...new Set(threadMessages.flatMap(message => message.role === "user" && message.turnId ? [message.turnId] : []))]}>
       <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} /></div>
       <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock inputKey={inputKey ?? latestSubagentInputKey(threadMessages)} /><textarea aria-label="Message" /></div>
     </SubagentTasksProvider>
@@ -117,7 +118,7 @@ describe("session-owned task UI", () => {
     const user = userEvent.setup();
     render(layout());
     const trigger = await screen.findByTestId("subagent-task-dock-trigger");
-    expect(fetch).toHaveBeenCalledWith("/api/sessions/websocket%3Aa/subagents", expect.any(Object));
+    expect(fetch).toHaveBeenCalledWith("/api/sessions/websocket%3Aa/subagents?scope=window&turn_id=turn-a", expect.any(Object));
     expect(screen.getAllByTestId("subagent-task-dock-trigger")).toEqual([trigger]);
     expect(screen.getByTestId("composer")).toContainElement(trigger);
     expect(trigger).toHaveTextContent("Running: 1");
@@ -824,6 +825,7 @@ describe("session-owned task UI", () => {
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
     const user = userEvent.setup();
     const view = render(layout());
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
     vi.mocked(fetch).mockResolvedValue(response([task({ task_id: "task-b", label: "Other work" })]));
     view.rerender(layout({ sessionKey: "websocket:b" }));
     const list = await openTaskList(user);
@@ -980,6 +982,7 @@ describe("session-owned task UI", () => {
     const list = await openTaskList(user);
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
     fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
     emitTask(task({ revision: 3, state: "cancelled", completed_at: 102 }));
     vi.mocked(fetch).mockImplementationOnce(async () => response([
       task({ revision: 2 }), task({ task_id: "task-2", label: "Recovered check", created_at: 101 }),

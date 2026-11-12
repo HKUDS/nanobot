@@ -8,7 +8,7 @@ function historyPage(start: number, count = 12, more = start > 0) {
     has_more_before: more, has_more_after: start + count < 52 } };
 }
 
-async function installHistory(page: Page, initialStart = 40, initialCount = 12) {
+async function installHistory(page: Page, initialStart = 40, initialCount = 12, pageContent = historyPage) {
   const reads: string[] = [];
   const pending: Array<(value: "success" | "error") => void> = [];
   let fastResponse = false;
@@ -19,9 +19,9 @@ async function installHistory(page: Page, initialStart = 40, initialCount = 12) 
       prompts: Array.from({ length: 52 }, (_, i) => ({ id: `u${i}`, preview: `Question ${i}`, answerPreview: "Historical answer", turnId: `turn${i}`, cursor: String(i), createdAt: i + 1 })),
     } });
     if (!url.pathname.endsWith("/webui-thread")) return route.fulfill({ json: {} });
-    if (url.pathname.includes("boundary-b")) return route.fulfill({ json: historyPage(0, 2, false) });
+    if (url.pathname.includes("boundary-b")) return route.fulfill({ json: pageContent(0, 2, false) });
     const cursor = url.searchParams.get("before") ?? url.searchParams.get("after");
-    if (cursor === null) return route.fulfill({ json: historyPage(initialStart, initialCount) });
+    if (cursor === null) return route.fulfill({ json: pageContent(initialStart, initialCount) });
     reads.push(url.search);
     const outcome = fastResponse
       ? await new Promise<"success">((resolve) => { releaseFastResponse = () => resolve("success"); })
@@ -29,7 +29,7 @@ async function installHistory(page: Page, initialStart = 40, initialCount = 12) 
     if (outcome === "error") return route.fulfill({ status: 503, body: "History unavailable" });
     const start = url.searchParams.has("after") ? Number(cursor) : Math.max(0, Number(cursor) - 12);
     const count = url.searchParams.has("after") ? 12 : Number(cursor) - start;
-    await route.fulfill({ json: historyPage(start, count, start > 0) });
+    await route.fulfill({ json: pageContent(start, count, start > 0) });
   });
   return {
     reads,
@@ -305,16 +305,28 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
 });
 
 test("task results stay with their prompts and retain the reading boundary when earlier messages load", async ({ page }) => {
-  const history = await installHistory(page);
-  await page.route("**/api/sessions/**/subagents", (route) => route.fulfill({ json: { tasks: [
-    { task_id: "current", label: "Current check", origin_message_id: "u40" },
-    { task_id: "earlier", label: "Earlier check", origin_message_id: "u28" },
-  ].map((task) => ({
-    ...task, revision: 1, task_description: "Check work",
-    state: "done", phase: "completed", elapsed_seconds: 2, iteration: 1,
-    tool_events: [], usage: null, receipts: {}, result: "Verified", partial: false,
-    stop_reason: null, error: null, origin_turn_id: null, created_at: 100, completed_at: 102,
-  })) } }));
+  const history = await installHistory(page, 40, 12, (start, count, more) => {
+    const payload = historyPage(start, count, more);
+    return { ...payload, events: payload.events.map(event => ({
+      ...event, turn_id: `turn${event.projection_id.slice(1)}`,
+    })) };
+  });
+  const taskReads: string[][] = [];
+  await page.route("**/api/sessions/**/subagents?*", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    expect(query.get("scope")).toBe("window");
+    const turns = query.getAll("turn_id");
+    taskReads.push(turns);
+    return route.fulfill({ json: { tasks: [
+      { task_id: "current", label: "Current check", origin_turn_id: "turn40" },
+      { task_id: "earlier", label: "Earlier check", origin_turn_id: "turn28" },
+    ].filter(task => turns.includes(task.origin_turn_id)).map((task) => ({
+      ...task, revision: 1, task_description: "Check work",
+      state: "done", phase: "completed", elapsed_seconds: 2, iteration: 1,
+      tool_events: [], usage: null, receipts: {}, result: "Verified", partial: false,
+      stop_reason: null, error: null, origin_message_id: null, created_at: 100, completed_at: 102,
+    })) } });
+  });
   await page.goto("/browser/fixture.html?case=history-boundary&tasks");
   const body = page.getByTestId("thread-message-region");
   const currentResults = body.locator('[data-user-prompt-id="u40"] + [data-subagent-results]');
@@ -347,6 +359,10 @@ test("task results stay with their prompts and retain the reading boundary when 
   expect(history.reads).toHaveLength(1);
   await earlierResults.locator("[data-subagent-results-summary]").click();
   await expect(earlierResults.getByRole("button", { name: /Earlier check Completed/ })).toBeVisible();
+  expect(taskReads).toEqual([
+    Array.from({ length: 12 }, (_, index) => `turn${40 + index}`),
+    Array.from({ length: 12 }, (_, index) => `turn${28 + index}`),
+  ]);
 });
 
 test("touch reveals a static partial ready header, arms only on release, and retains a stable full loading header", async ({ browser, baseURL }) => {
