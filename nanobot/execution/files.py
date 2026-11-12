@@ -336,7 +336,12 @@ class FileSearch:
         with _open_regular_file(opened_path, dir_fd=fd) as (stream, opened_size):
             if opened_size > limit:
                 return None
-            return SearchBytes(stream.read(limit + 1), modified)
+            # Avoid allocating the full scan limit for each small file. The
+            # extra byte detects growth (including streams with a reported size of zero).
+            data = stream.read(opened_size + 1)
+            if len(data) > opened_size:
+                data += stream.read(limit + 1 - len(data))
+            return SearchBytes(data, modified)
 
     @contextmanager
     def search_bytes_reader(self) -> Generator[Callable[[Path, int], SearchBytes | None]]:
