@@ -857,26 +857,29 @@ async def test_grep_files_with_matches_mode_returns_unique_paths(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_grep_files_with_matches_supports_head_limit_and_offset(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode", ["files_with_matches", "count"])
+async def test_grep_ranked_modes_preserve_order_and_totals_when_paging(tmp_path: Path, mode: str) -> None:
     (tmp_path / "src").mkdir()
-    for name in ("a.py", "b.py", "c.py"):
-        (tmp_path / "src" / name).write_text("needle\n", encoding="utf-8")
+    for name, mtime, matches in (("c.py", 2, 3), ("b.py", 2, 2), ("a.py", 1, 1)):
+        path = tmp_path / "src" / name
+        path.write_text("needle\n" * matches, encoding="utf-8")
+        os.utime(path, (mtime, mtime))
 
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
     result = await tool.execute(
         pattern="needle",
         path="src",
-        output_mode="files_with_matches",
+        output_mode=mode,
         head_limit=1,
         offset=1,
     )
 
-    # Filesystem order is not deterministic across platforms, so just verify:
-    # 1. Only one file path is returned (head_limit=1 after offset=1)
-    # 2. The pagination info is correct
-    assert "pagination: limit=1, offset=1" in result
-    file_lines = [line for line in result.splitlines() if line.startswith("src/")]
-    assert len(file_lines) == 1
+    assert result.splitlines() == [
+        "src/c.py: 3" if mode == "count" else "src/c.py",
+        "",
+        "(pagination: limit=1, offset=1; use offset=2 to continue)",
+        *(["(total matches: 6 in 3 files)"] if mode == "count" else []),
+    ]
 
 
 @pytest.mark.asyncio
@@ -934,6 +937,34 @@ async def test_grep_reports_skipped_binary_and_large_files(
     assert "No matches found" in result
     assert "skipped 1 binary/unreadable files" in result
     assert "skipped 1 large files" in result
+
+
+@pytest.mark.parametrize("exceeds_limit", [False, True])
+async def test_grep_keeps_read_limit_when_an_open_file_grows(tmp_path, monkeypatch, exceeds_limit):
+    from nanobot.execution import files
+
+    target = tmp_path / "growing.log"
+    target.write_bytes(b"start\n")
+    open_regular_file = files._open_regular_file
+
+    @contextmanager
+    def grow_after_stat(path, *, dir_fd=None):
+        with open_regular_file(path, dir_fd=dir_fd) as (stream, size):
+            with target.open("ab") as writer:
+                writer.write(b"needle\n" + (b"x" * 64 if exceeds_limit else b""))
+            yield stream, size
+
+    monkeypatch.setattr(files, "_open_regular_file", grow_after_stat)
+    monkeypatch.setattr(GrepTool, "_MAX_EXPLICIT_FILE_BYTES", 64)
+    result = await GrepTool(workspace=tmp_path).execute(
+        pattern="needle", path="growing.log", output_mode="files_with_matches",
+    )
+
+    if exceeds_limit:
+        assert result.startswith("No matches found")
+        assert "skipped 1 binary/unreadable files" in result
+    else:
+        assert result == "growing.log"
 
 
 @pytest.mark.asyncio

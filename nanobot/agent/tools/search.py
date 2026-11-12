@@ -181,6 +181,12 @@ def _text_page(
     return page, truncated
 
 
+def _ordered_prefix(
+    items: Iterable[T], size: int | None, *, key: Callable[[T], tuple[float, str]],
+) -> list[T]:
+    return sorted(items, key=key) if size is None else heapq.nsmallest(size, items, key=key)
+
+
 def _pagination_note(limit: int | None, offset: int, truncated: bool) -> str | None:
     if truncated:
         if limit is None:
@@ -523,14 +529,7 @@ class FindFilesTool(_SearchTool):
                 by_modified = self._iter_modified(
                     tree, include_dirs=include_dirs, matches=matches_entry, budget=budget,
                 )
-                if selection_size is None:
-                    matches = sorted(by_modified, key=lambda item: (-item[1], item[0]))
-                else:
-                    matches = heapq.nsmallest(
-                        selection_size,
-                        by_modified,
-                        key=lambda item: (-item[1], item[0]),
-                    )
+                matches = _ordered_prefix(by_modified, selection_size, key=lambda item: (-item[1], item[0]))
                 paths = [item[0] for item in matches]
             else:
                 matching_paths = (
@@ -762,7 +761,7 @@ class GrepTool(_SearchTool):
             content_page = ContentPage(limit, offset, self._MAX_RESULT_CHARS, self._MAX_RENDERED_LINE_CHARS)
             skipped_binary = 0
             skipped_large = 0
-            document_errors: list[str] = []
+            document_error: str | None = None
             document_continuations: list[str] = []
             counts: dict[str, int] = {}
             file_mtimes: dict[str, float] = {}
@@ -786,6 +785,7 @@ class GrepTool(_SearchTool):
 
                     source_iterator: Iterator[LocatedDocumentLine] | None = None
                     is_document = file_path.suffix.lower() in _DOCUMENT_EXTENSIONS
+                    file_matches = 0
                     try:
                         if is_document:
                             try:
@@ -812,24 +812,21 @@ class GrepTool(_SearchTool):
                             skipped_binary += 1
                             continue
                         source_iterator = source.lines
-                        if source.continuation:
+                        if source.continuation and len(document_continuations) < 10:
                             document_continuations.append(
                                 f"({display_path}: continue PDF search with {source.continuation})"
                             )
                         source_lines = checked_lines(source_iterator)
 
-                        file_had_match = False
                         if output_mode == "content":
                             content_page.scan(display_path, source_lines, regex, context_before, context_after)
                         else:
                             for line in source_lines:
                                 if not line.searchable or regex.search(line.text) is None:
                                     continue
-                                file_had_match = True
-                                if output_mode == "count":
-                                    counts[display_path] = counts.get(display_path, 0) + 1
-                                    continue
-                                break
+                                file_matches += 1
+                                if output_mode != "count":
+                                    break
                     except (_SearchCancelledError, _SearchBudgetExceededError, MatchTooLargeError):
                         raise
                     except Exception as e:
@@ -844,13 +841,18 @@ class GrepTool(_SearchTool):
                                 f"Error searching document {display_path}: {e!s}"
                             )
                         skipped_binary += 1
-                        document_errors.append(f"{display_path}: {e!s}")
+                        if document_error is None:
+                            document_error = f"{display_path}: {e!s}"
                         continue
                     finally:
                         close = getattr(source_iterator, "close", None)
                         if close is not None:
                             close()
-                    if file_had_match:
+                        # A document can fail after yielding matches. Keep the count
+                        # of those lines even though the failed file is not ranked.
+                        if file_matches and output_mode == "count":
+                            counts[display_path] = counts.get(display_path, 0) + file_matches
+                    if file_matches:
                         file_mtimes[display_path] = mtime
                     if content_page.stopped:
                         break
@@ -862,8 +864,9 @@ class GrepTool(_SearchTool):
                 if note:
                     notes.append(note)
             else:
-                ordered_files = sorted(
-                    file_mtimes, key=lambda name: (-file_mtimes.get(name, 0.0), name),
+                ordered_files = _ordered_prefix(
+                    file_mtimes, None if limit is None else offset + limit + 1,
+                    key=lambda name: (-file_mtimes[name], name),
                 )
                 entries = (
                     [f"{name}: {counts[name]}" for name in ordered_files]
@@ -882,9 +885,9 @@ class GrepTool(_SearchTool):
                 notes.append(f"(skipped {skipped_binary} binary/unreadable files)")
             if skipped_large:
                 notes.append(f"(skipped {skipped_large} large files)")
-            if document_errors:
-                notes.append(f"(first document error: {document_errors[0]})")
-            notes.extend(document_continuations[:10])
+            if document_error is not None:
+                notes.append(f"(first document error: {document_error})")
+            notes.extend(document_continuations)
             if output_mode == "count" and counts:
                 notes.append(
                     f"(total matches: {sum(counts.values())} in {len(counts)} files)"
