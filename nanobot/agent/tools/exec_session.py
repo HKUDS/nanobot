@@ -26,6 +26,7 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.agent.tools.shell_config import ExecToolConfig
 from nanobot.agent.tools.shell_output import ShellOutputFilter
+from nanobot.execution import processes
 
 DEFAULT_YIELD_MS = 1000
 MAX_YIELD_MS = 30_000
@@ -151,22 +152,21 @@ class _ExecSession:
         self,
         *,
         session_id: str,
-        process: asyncio.subprocess.Process,
+        process_tree: processes.ProcessTree,
         command: str,
         cwd: str,
         timeout: int | None,
         owner_session_key: str | None = None,
-        process_tree: bool = False,
         idle_timeout: int = 300,
         idle_action: Literal["report", "terminate"] = "report",
         started_at: float | None = None,
     ) -> None:
         self.session_id = session_id
-        self.process = process
+        self._process_tree = process_tree
+        process = process_tree.process
         self.command = command
         self.cwd = cwd
         self.owner_session_key = owner_session_key
-        self._process_tree = process_tree
         self.started_at = time.monotonic() if started_at is None else started_at
         self.deadline = self.started_at + timeout if timeout else float("inf")
         self.last_output_at: float | None = None
@@ -195,6 +195,10 @@ class _ExecSession:
         )
         if self._timeout_task is not None:
             self._timeout_task.add_done_callback(self._on_supervisor_done)
+
+    @property
+    def process(self) -> asyncio.subprocess.Process:
+        return self._process_tree.process
 
     @property
     def stopping(self) -> bool:
@@ -236,13 +240,7 @@ class _ExecSession:
         finally:
             stopped.cancel()
             await asyncio.gather(stopped, return_exceptions=True)
-        from nanobot.agent.tools.shell import (
-            ExecTool,
-            _reap_pid,  # pyright: ignore[reportPrivateUsage]
-        )
-
-        ExecTool._release_process_tree(self.process)  # pyright: ignore[reportPrivateUsage]
-        _reap_pid(self.process.pid)
+        self._process_tree.finish()
         self.finish_reason = self._stop_reason or "exit"
         self.finished_at = time.monotonic()
         self._state_changed.set()
@@ -410,12 +408,7 @@ class _ExecSession:
         # kill() replaces it on an explicit retry.
 
     async def _kill(self) -> None:
-        from nanobot.agent.tools.shell import ExecTool
-
-        if self._process_tree:
-            await ExecTool._kill_process_tree(self.process)  # pyright: ignore[reportPrivateUsage]
-        else:
-            await ExecTool._kill_process(self.process)  # pyright: ignore[reportPrivateUsage]
+        await self._process_tree.terminate()
         self._stop_complete.set()
 
 
@@ -503,12 +496,14 @@ class ExecSessionManager:
         session: _ExecSession | None = None
         try:
             started_at = time.monotonic()
-            process = await self._spawn(command, cwd, env, shell_program, login, stdin=stdin)
+            process_tree = await processes.spawn_process_tree(
+                command, cwd, env, shell_program, login, stdin=stdin,
+            )
             session = _ExecSession(
-                session_id=session_id, process=process,
+                session_id=session_id, process_tree=process_tree,
                 command=shlex.join(command) if isinstance(command, list) else command,
                 cwd=cwd, timeout=timeout, owner_session_key=owner_session_key,
-                process_tree=True, idle_timeout=idle_timeout, idle_action=idle_action,
+                idle_timeout=idle_timeout, idle_action=idle_action,
                 started_at=started_at,
             )
             async with self._lock:
@@ -668,24 +663,6 @@ class ExecSessionManager:
         ]
         for session_id in stale:
             self._sessions.pop(session_id)
-
-    async def _spawn(
-        self,
-        command: str | list[str],
-        cwd: str,
-        env: dict[str, str],
-        shell_program: str | None,
-        login: bool,
-        *,
-        stdin: int = asyncio.subprocess.PIPE,
-    ) -> asyncio.subprocess.Process:
-        from nanobot.agent.tools.shell import ExecTool
-
-        return await ExecTool._spawn(  # pyright: ignore[reportPrivateUsage]
-            command, cwd, env, shell_program, login,
-            stdin=stdin,
-            process_tree=True,
-        )
 
 
 DEFAULT_EXEC_SESSION_MANAGER = ExecSessionManager()

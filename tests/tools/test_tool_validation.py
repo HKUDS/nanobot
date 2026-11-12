@@ -21,6 +21,7 @@ from nanobot.agent.tools import (
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
+from nanobot.execution import processes
 from nanobot.security.network import configure_ssrf_whitelist
 
 
@@ -414,7 +415,7 @@ async def test_exec_rejects_unknown_user_home(tmp_path, monkeypatch, command) ->
         Path(home_path).expanduser()
 
     spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
-    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     result = await ExecTool(
         working_dir=str(tmp_path), restrict_to_workspace=True,
     ).execute(command=command)
@@ -439,7 +440,7 @@ async def test_exec_rejects_home_path_without_home_directory(tmp_path, monkeypat
         Path("~/file.txt").expanduser()
 
     spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
-    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     result = await ExecTool(
         working_dir=str(tmp_path), restrict_to_workspace=True,
     ).execute(command="cat ~/file.txt")
@@ -967,7 +968,7 @@ async def test_exec_runtime_rejects_out_of_range(
     monkeypatch, runtime_parameter, runtime,
 ) -> None:
     spawn = AsyncMock(side_effect=AssertionError("Invalid runtime must not start a process"))
-    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     tool = ExecTool(max_runtime=301, max_runtime_limit=300)
 
     result = await tool.execute(command="echo ok", **{runtime_parameter: runtime})
@@ -979,7 +980,7 @@ async def test_exec_runtime_rejects_out_of_range(
 
 async def test_exec_runtime_aliases_are_mutually_exclusive(monkeypatch) -> None:
     spawn = AsyncMock(side_effect=AssertionError("Conflicting runtime arguments must not spawn"))
-    monkeypatch.setattr(ExecTool, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     tool = ExecTool()
     params = {"command": "echo ok", "max_runtime": 5, "timeout": 5}
 
