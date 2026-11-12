@@ -709,7 +709,7 @@
       "small": "Petit",
       "standard": "Standard",
       "large": "Grand",
-      "previewText": "**Un peu d’espace pour réfléchir.**\n\nDes mots clairs, une lecture agréable. Faites de cet espace le vôtre.",
+      "previewText": "Des mots clairs, une lecture agréable. Faites de cet espace le vôtre.",
       "previewPlaceholder": "Par où commencer ?",
       "process": "Affichage de l’activité",
       "processHelp": "Choisissez le niveau de détail affiché pendant que nanobot travaille.",
