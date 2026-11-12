@@ -386,6 +386,22 @@ class TestListDirTool:
         assert "3 of 10" in result
 
     @pytest.mark.asyncio
+    async def test_recursive_limit_preserves_sorted_prefix_and_exact_total(self, tool, tmp_path):
+        (tmp_path / "z").mkdir()
+        (tmp_path / "z" / "a.txt").touch()
+        (tmp_path / "a").mkdir()
+        (tmp_path / "a" / "z.txt").touch()
+        (tmp_path / "b.txt").touch()
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "ignored").touch()
+
+        result = await tool.execute(path=".", recursive=True, max_entries=3)
+
+        assert result.replace("\\", "/").splitlines() == [
+            "a/", "a/z.txt", "b.txt", "", "(truncated, showing first 3 of 5 entries)",
+        ]
+
+    @pytest.mark.asyncio
     async def test_empty_dir(self, tool, tmp_path):
         d = tmp_path / "empty"
         d.mkdir()

@@ -8,6 +8,8 @@ import stat
 from collections.abc import Callable, Generator, Iterable
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass
+from heapq import nsmallest
+from operator import itemgetter
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
@@ -491,23 +493,29 @@ class WorkspaceFiles:
         if not directory.is_dir():
             raise NotADirectoryError(path)
         tree = FileSearch(directory, True, self._read_path)
-        pending = [directory]
-        entries: list[tuple[Path, bool]] = []
-        while pending:
-            parent = pending.pop()
-            try:
-                for entry in tree.entries(parent):
-                    if entry.name in ignored:
-                        continue
-                    child = parent / entry.name
-                    entries.append((child.relative_to(directory), entry.is_directory))
-                    if recursive and entry.is_directory and not entry.is_directory_link:
-                        pending.append(child)
-            except PermissionError:
-                if not recursive:
-                    raise
-        entries.sort(key=lambda entry: entry[0])
-        return DirectoryListing(entries[:max(0, limit)], len(entries))
+        total = 0
+
+        def walk() -> Generator[tuple[Path, bool]]:
+            nonlocal total
+            pending = [directory]
+            while pending:
+                parent = pending.pop()
+                try:
+                    for entry in tree.entries(parent):
+                        if entry.name in ignored:
+                            continue
+                        child = parent / entry.name
+                        if recursive and entry.is_directory and not entry.is_directory_link:
+                            pending.append(child)
+                        total += 1
+                        yield child.relative_to(directory), entry.is_directory
+                except PermissionError:
+                    if not recursive:
+                        raise
+
+        # Scan all entries for the exact total, but retain only the requested prefix.
+        entries = nsmallest(max(1, limit), walk(), key=itemgetter(0))
+        return DirectoryListing(entries if limit > 0 else [], total)
 
     def sibling_files(self, target: WritableFile) -> list[str]:
         """Suggest names only when the caller can read the directory itself."""
