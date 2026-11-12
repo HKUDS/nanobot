@@ -11,7 +11,11 @@ from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.webui.gateway_services import build_gateway_services
-from nanobot.webui.settings_api import settings_payload, update_agent_settings, update_api_settings
+from nanobot.webui.settings_api import (
+    settings_payload,
+    update_agent_settings,
+    update_runtime_config_settings,
+)
 from nanobot.webui.settings_services import (
     WebUIOAuthFlowRegistry,
     WebUISettingsServices,
@@ -56,9 +60,9 @@ def test_gateway_settings_services_isolate_config_paths_and_oauth_flows(
     first_path = tmp_path / "first" / "config.json"
     second_path = tmp_path / "second" / "config.json"
     first_config = Config()
-    first_config.api.host = "127.0.0.2"
+    first_config.gateway.host = "127.0.0.2"
     second_config = Config()
-    second_config.api.host = "127.0.0.3"
+    second_config.gateway.host = "127.0.0.3"
     save_config(first_config, first_path)
     save_config(second_config, second_path)
 
@@ -69,14 +73,14 @@ def test_gateway_settings_services_isolate_config_paths_and_oauth_flows(
     assert second.settings.config.path == second_path.resolve()
     assert first.http.settings_routes.settings is first.settings
     assert second.http.settings_routes.settings is second.settings
-    assert first.settings.config.load().api.host == "127.0.0.2"
-    assert second.settings.config.load().api.host == "127.0.0.3"
-    assert first.settings.read(settings_payload)["api"]["host"] == "127.0.0.2"
-    assert second.settings.read(settings_payload)["api"]["host"] == "127.0.0.3"
+    assert first.settings.config.load().gateway.host == "127.0.0.2"
+    assert second.settings.config.load().gateway.host == "127.0.0.3"
+    assert first.settings.read(settings_payload)["runtime_config"]["gateway.host"] == "127.0.0.2"
+    assert second.settings.read(settings_payload)["runtime_config"]["gateway.host"] == "127.0.0.3"
 
-    first.settings.mutate(update_api_settings, {"port": ["19001"]})
-    assert load_config(first_path).api.port == 19001
-    assert load_config(second_path).api.port != 19001
+    first.settings.mutate(update_runtime_config_settings, {"gateway.port": 19001})
+    assert load_config(first_path).gateway.port == 19001
+    assert load_config(second_path).gateway.port != 19001
 
     first_flow = _Flow()
     second_flow = _Flow()
@@ -94,9 +98,9 @@ def test_settings_service_supports_a_new_config_directory(tmp_path: Path) -> Non
     config_path = tmp_path / "new" / "nested" / "config.json"
 
     services = WebUISettingsServices.create(config_path)
-    services.mutate(update_api_settings, {"port": ["19001"]})
+    services.mutate(update_runtime_config_settings, {"gateway.port": 19001})
 
-    assert load_config(config_path).api.port == 19001
+    assert load_config(config_path).gateway.port == 19001
 
 
 def test_settings_mutations_serialize_read_modify_write(
@@ -137,7 +141,7 @@ def test_settings_mutations_serialize_read_modify_write(
     def run_second() -> None:
         try:
             second_started.set()
-            services.mutate(update_api_settings, {"host": ["127.0.0.9"]})
+            services.mutate(update_runtime_config_settings, {"gateway.host": "127.0.0.9"})
         except BaseException as exc:  # noqa: BLE001 - re-raised in the test thread
             errors.append(exc)
 
@@ -157,7 +161,7 @@ def test_settings_mutations_serialize_read_modify_write(
     assert not errors
     saved = load_config(config_path)
     assert saved.agents.defaults.timezone == "Asia/Tokyo"
-    assert saved.api.host == "127.0.0.9"
+    assert saved.gateway.host == "127.0.0.9"
 
 
 def test_distinct_gateways_serialize_mutations_for_the_same_config(
@@ -192,7 +196,7 @@ def test_distinct_gateways_serialize_mutations_for_the_same_config(
     def mutate(
         services: WebUISettingsServices,
         operation: Callable[..., object],
-        query: dict[str, list[str]],
+        query: dict[str, str],
     ) -> None:
         try:
             services.mutate(operation, query)
@@ -206,7 +210,7 @@ def test_distinct_gateways_serialize_mutations_for_the_same_config(
     )
     second = threading.Thread(
         target=mutate,
-        args=(second_services, update_api_settings, {"host": ["127.0.0.9"]}),
+        args=(second_services, update_runtime_config_settings, {"gateway.host": "127.0.0.9"}),
         name="gateway-second",
     )
     first.start()
@@ -222,7 +226,7 @@ def test_distinct_gateways_serialize_mutations_for_the_same_config(
     assert not errors
     saved = load_config(config_path)
     assert saved.agents.defaults.timezone == "Asia/Tokyo"
-    assert saved.api.host == "127.0.0.9"
+    assert saved.gateway.host == "127.0.0.9"
 
 
 def test_oauth_registry_preserves_expiry_capacity_completion_and_cancel() -> None:

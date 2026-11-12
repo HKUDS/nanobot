@@ -611,16 +611,12 @@ async def test_checkpoint2_preserves_final_response_in_history_before_followup()
     assert call_count["n"] == 2
     assert captured_messages[-1] == [
         {"role": "user", "content": "hello"},
-        {"role": "assistant", "content": "first answer"},
+        {"role": "assistant", "content": "first answer", "_meta": {"response_input_ids": []}},
         {"role": "user", "content": "follow-up question"},
     ]
-    assert [
-        {"role": message["role"], "content": message["content"]}
-        for message in result.messages
-        if message.get("role") == "assistant"
-    ] == [
-        {"role": "assistant", "content": "first answer"},
-        {"role": "assistant", "content": "second answer"},
+    assert [message for message in result.messages if message.get("role") == "assistant"] == [
+        {"role": "assistant", "content": "first answer", "_meta": {"response_input_ids": []}},
+        {"role": "assistant", "content": "second answer", "_meta": {"response_input_ids": []}},
     ]
 
 
@@ -1085,13 +1081,11 @@ async def test_no_injections_flag_is_false_by_default():
 @pytest.mark.asyncio
 async def test_followup_routed_to_pending_queue(tmp_path):
     from nanobot.bus.events import InboundMessage
-    from nanobot.session.keys import UNIFIED_SESSION_KEY
 
     loop = _make_loop(tmp_path)
-    loop._unified_session = True
 
     pending = asyncio.Queue(maxsize=20)
-    loop._pending_queues[UNIFIED_SESSION_KEY] = pending
+    loop._pending_queues["discord:c"] = pending
 
     run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(channel="discord", sender_id="u", chat_id="c", content="follow-up")
@@ -1104,7 +1098,7 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
     assert loop._active_tasks == {}
     assert queued_msg.content == "follow-up"
-    assert queued_msg.session_key == UNIFIED_SESSION_KEY
+    assert queued_msg.session_key == "discord:c"
 
 
 @pytest.mark.asyncio
@@ -1135,44 +1129,6 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
 
     loop.stop()
     await asyncio.wait_for(run_task, timeout=2)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("channel", ["websocket", "discord"])
-async def test_unified_followup_admits_effective_session(tmp_path, channel):
-    from nanobot.bus.events import InboundMessage
-    from nanobot.session.keys import UNIFIED_SESSION_KEY
-
-    admission = MagicMock()
-    admission.admit = AsyncMock(return_value=True)
-    loop = _make_loop(tmp_path, recovery_admission=admission)
-    loop._unified_session = True
-
-    pending = asyncio.Queue(maxsize=20)
-    loop._pending_queues[UNIFIED_SESSION_KEY] = pending
-
-    msg = InboundMessage(
-        channel=channel,
-        sender_id="u",
-        chat_id="chat",
-        content="new request",
-    )
-    try:
-        # Exercise the real routing/journaling boundary to completion. This is
-        # a session-key contract, not a two-second SQLite fsync benchmark.
-        await loop._dispatch_inbound(msg)
-        queued_msg = pending.get_nowait()
-        admission.admit.assert_awaited_once()
-        admitted_msg = admission.admit.await_args.args[0]
-        assert admitted_msg.session_key == UNIFIED_SESSION_KEY
-        assert queued_msg.session_key == UNIFIED_SESSION_KEY
-        assert queued_msg.content == msg.content
-        if channel == "websocket":
-            assert queued_msg.metadata["_recovery_followup_id"]
-        else:
-            assert queued_msg.metadata == msg.metadata
-    finally:
-        await loop.aclose()
 
 
 @pytest.mark.asyncio
@@ -2061,3 +2017,100 @@ async def test_error_path_is_not_stopped_by_an_arbitrary_injection_cap():
 
     assert result.had_injections is True
     assert call_count["n"] == 8
+
+
+@pytest.mark.asyncio
+async def test_cancelling_input_conversion_preserves_other_concurrent_run(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.context import current_request_context, request_context
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    requests = []
+
+    async def respond(*, messages, **kwargs):
+        requests.append((current_request_context().session_key, [dict(row) for row in messages]))
+        # Stop the first execution while the second is inside its model request.
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert current_request_context().session_key == "cli:second"
+        return LLMResponse(content="second run finished")
+
+    provider.chat_stream_with_retry = respond
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    conversion_started = asyncio.Event()
+    never_release = asyncio.Event()
+    prepared_for = []
+
+    async def prepare_context(request):
+        prepared_for.append((request.session_key, request.original_user_text))
+        assert current_request_context().session_key == request.session_key
+        if request.original_user_text == "first private input":
+            conversion_started.set()
+            await never_release.wait()
+        return None
+
+    loop.register_runtime_context_provider(prepare_context)
+    runtime = loop.llm_runtime()
+    first, second = asyncio.Queue(), asyncio.Queue()
+    for content in ["first private input", "first tail"]:
+        first.put_nowait(InboundMessage("cli", "u", "first", content))
+    for content in ["second input", "second tail"]:
+        second.put_nowait(InboundMessage("cli", "u", "second", content))
+    outer = RequestContext(channel="test", chat_id="outer", session_key="test:outer")
+    restored = []
+
+    async def first_run():
+        try:
+            return await loop._run_agent_loop(
+                TranscriptInput(history=[{"role": "user", "content": "first root"}], current_message=None),
+                runtime=runtime,
+                request_context=RequestContext(channel="cli", chat_id="first", session_key="cli:first", runtime=runtime),
+                pending_queue=first,
+            )
+        finally:
+            restored.append(current_request_context())
+
+    task = None
+    try:
+        with request_context(outer):
+            task = asyncio.create_task(first_run())
+            await asyncio.wait_for(conversion_started.wait(), timeout=5)
+            first.put_nowait(InboundMessage("cli", "u", "first", "first later arrival"))
+            result = await loop._run_agent_loop(
+                TranscriptInput(history=[{"role": "user", "content": "second root"}], current_message=None),
+                runtime=runtime,
+                request_context=RequestContext(channel="cli", chat_id="second", session_key="cli:second", runtime=runtime),
+                pending_queue=second,
+            )
+            assert current_request_context() is outer
+
+        assert result.final_content == "second run finished"
+        assert restored == [outer]
+        assert [first.get_nowait().content for _ in range(first.qsize())] == [
+            "first private input", "first tail", "first later arrival",
+        ]
+        assert second.empty()
+        assert prepared_for == [
+            ("cli:first", "first private input"),
+            ("cli:second", "second input"),
+            ("cli:second", "second tail"),
+        ]
+        assert len(requests) == 1
+        key, messages = requests[0]
+        assert key == "cli:second"
+        assert [visible_message(row)["content"] for row in messages if row["role"] == "user"] == [
+            "second root\n\nsecond input\n\nsecond tail",
+        ]
+        assert [visible_message(row)["content"] for row in result.messages if row["role"] == "user"] == [
+            "second root", "second input", "second tail",
+        ]
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await loop.aclose()

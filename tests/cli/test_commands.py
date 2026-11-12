@@ -1998,42 +1998,6 @@ def test_heartbeat_target_skips_archived_webui_sessions():
     assert target == ("websocket", "active")
 
 
-def test_heartbeat_target_uses_last_channel_for_unified_session():
-    from nanobot.cli.gateway_runtime import _pick_heartbeat_target_from_sessions
-    from nanobot.session.keys import LAST_CHANNEL_METADATA_KEY, UNIFIED_SESSION_KEY
-
-    target = _pick_heartbeat_target_from_sessions(
-        enabled_channels=["telegram", "discord"],
-        archived_keys=[],
-        sessions=[{"key": UNIFIED_SESSION_KEY}],
-        unified_session_metadata={LAST_CHANNEL_METADATA_KEY: "discord:chat-42"},
-    )
-
-    assert target == ("discord", "chat-42")
-
-
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        {"last_channel": "telegram:chat-42"},
-        {"last_channel": "cli:direct"},
-        {"last_channel": "invalid"},
-    ],
-)
-def test_heartbeat_target_rejects_unroutable_unified_metadata(metadata):
-    from nanobot.cli.gateway_runtime import _pick_heartbeat_target_from_sessions
-    from nanobot.session.keys import UNIFIED_SESSION_KEY
-
-    target = _pick_heartbeat_target_from_sessions(
-        enabled_channels=["discord"],
-        archived_keys=[],
-        sessions=[{"key": UNIFIED_SESSION_KEY}],
-        unified_session_metadata=metadata,
-    )
-
-    assert target == ("cli", "direct")
-
-
 def _write_instance_config(tmp_path: Path) -> Path:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
@@ -3157,54 +3121,6 @@ def test_webui_foreground_reports_an_existing_gateway_without_leaking_secret(
     assert "http://127.0.0.1:8765" in result.stdout
     assert "bootstrapSecret=" not in result.stdout
     assert "do-not-leak" not in result.stdout
-
-
-def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:
-    pytest.importorskip("aiohttp")
-
-    class _FakeApiApp:
-        def __init__(self) -> None:
-            self.on_startup: list[object] = []
-            self.on_cleanup: list[object] = []
-
-    class _FakeAgentLoop:
-        @classmethod
-        def from_config(cls, config, bus=None, **extra):
-            return cls(workspace=config.workspace_path, **extra)
-        def __init__(self, **kwargs) -> None:
-            seen["workspace"] = kwargs["workspace"]
-
-        async def aclose(self) -> None:
-            return None
-
-    def _fake_create_app(
-        agent_loop,
-        model_name: str,
-        request_timeout: float,
-        api_key: str = "",
-        prepare_agent=None,
-    ):
-        seen["agent_loop"] = agent_loop
-        seen["model_name"] = model_name
-        seen["request_timeout"] = request_timeout
-        seen["api_key"] = api_key
-        seen["prepare_agent"] = prepare_agent
-        return _FakeApiApp()
-
-    def _fake_run_app(api_app, host: str, port: int, print):
-        seen["api_app"] = api_app
-        seen["host"] = host
-        seen["port"] = port
-
-    _patch_cli_command_runtime(
-        monkeypatch,
-        config,
-        message_bus=MessageBus,
-        session_manager=lambda _workspace: _EmptyGatewaySessionManager(),
-    )
-    _patch_fake_agent_loop(monkeypatch, "nanobot.cli.commands.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
-    monkeypatch.setattr("aiohttp.web.run_app", _fake_run_app)
 
 
 def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
@@ -4476,34 +4392,6 @@ def test_gateway_shutdown_event_exits_forever_runtime_tasks(
     assert shutdown_order == ["channels_stopped", "channel_task_cleaned_up"]
 
 
-def test_serve_uses_api_config_defaults_and_workspace_override(
-    monkeypatch, tmp_path: Path
-) -> None:
-    config_file = _write_instance_config(tmp_path)
-    config = Config()
-    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
-    config.api.host = "127.0.0.2"
-    config.api.port = 18900
-    config.api.timeout = 45.0
-    config.api.api_key = "secret"
-    override_workspace = tmp_path / "override-workspace"
-    seen: dict[str, object] = {}
-
-    _patch_serve_runtime(monkeypatch, config, seen)
-
-    result = runner.invoke(
-        app,
-        ["serve", "--config", str(config_file), "--workspace", str(override_workspace)],
-    )
-
-    assert result.exit_code == 0
-    assert seen["workspace"] == override_workspace
-    assert seen["host"] == "127.0.0.2"
-    assert seen["port"] == 18900
-    assert seen["request_timeout"] == 45.0
-    assert seen["api_key"] == "secret"
-
-
 def test_trigger_cli_queues_message_in_workspace(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4534,103 +4422,6 @@ def test_trigger_cli_queues_message_in_workspace(
     assert len(deliveries) == 1
     assert deliveries[0].trigger_id == trigger.id
     assert deliveries[0].content == "Review PR #4502"
-
-
-def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> None:
-    config_file = _write_instance_config(tmp_path)
-    config = Config()
-    config.api.host = "127.0.0.2"
-    config.api.port = 18900
-    config.api.timeout = 45.0
-    config.api.api_key = "secret"
-    seen: dict[str, object] = {}
-
-    _patch_serve_runtime(monkeypatch, config, seen)
-
-    result = runner.invoke(
-        app,
-        [
-            "serve",
-            "--config",
-            str(config_file),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "18901",
-            "--timeout",
-            "46",
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert seen["host"] == "127.0.0.1"
-    assert seen["port"] == 18901
-    assert seen["request_timeout"] == 46.0
-    assert seen["api_key"] == "secret"
-
-
-def test_serve_allows_loopback_without_api_key(monkeypatch, tmp_path: Path) -> None:
-    config_file = _write_instance_config(tmp_path)
-    config = Config()
-    seen: dict[str, object] = {}
-
-    _patch_serve_runtime(monkeypatch, config, seen)
-
-    result = runner.invoke(app, ["serve", "--config", str(config_file)])
-
-    assert result.exit_code == 0
-    assert seen["host"] == "127.0.0.1"
-    assert seen["api_key"] == ""
-
-
-def test_serve_passes_configured_api_key(monkeypatch, tmp_path: Path) -> None:
-    config_file = _write_instance_config(tmp_path)
-    config = Config()
-    config.api.api_key = " secret "
-    seen: dict[str, object] = {}
-
-    _patch_serve_runtime(monkeypatch, config, seen)
-
-    result = runner.invoke(app, ["serve", "--config", str(config_file)])
-
-    assert result.exit_code == 0
-    assert seen["api_key"] == "secret"
-
-
-def test_serve_rejects_wildcard_host_without_api_key(monkeypatch, tmp_path: Path) -> None:
-    config_file = _write_instance_config(tmp_path)
-    config = Config()
-    seen: dict[str, object] = {}
-
-    _patch_serve_runtime(monkeypatch, config, seen)
-
-    result = runner.invoke(app, ["serve", "--config", str(config_file), "--host", "0.0.0.0"])
-
-    assert result.exit_code == 1
-    assert "api_key is not set" in result.stdout
-    assert "workspace" not in seen
-    assert "api_app" not in seen
-
-
-def test_serve_rejects_specific_network_interface_without_api_key(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    config_file = _write_instance_config(tmp_path)
-    config = Config()
-    seen: dict[str, object] = {}
-
-    _patch_serve_runtime(monkeypatch, config, seen)
-
-    result = runner.invoke(
-        app,
-        ["serve", "--config", str(config_file), "--host", "192.168.1.10"],
-    )
-
-    assert result.exit_code == 1
-    assert "api_key" in result.stdout
-    assert "prevent unauthenticated access" in result.stdout
-    assert "api_app" not in seen
 
 
 def test_channels_login_requires_channel_name() -> None:

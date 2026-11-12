@@ -1323,13 +1323,12 @@ export function ThreadComposer({
     void onInspectAttachment(path).then((attachment) => {
       if (generation !== pathCheckGeneration.current) return;
       setPathInspection((current) => current?.generation === generation ? { ...current, attachment } : current);
-    }).catch((error: unknown) => {
+    }).catch(() => {
       if (generation !== pathCheckGeneration.current || pathCheckScope.current !== scopeIdentity) return;
+      // Attachment recognition is optional; the pasted text is already in the draft.
       setPathInspection(null);
-      if (error instanceof Error && "status" in error && error.status === 404) return;
-      setInlineError(error instanceof Error ? error.message : t("message.attachmentUnavailable"));
     });
-  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, t, value]);
+  }, [interactionDisabled, isUserShell, onAttachmentPaste, onInspectAttachment, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   useLayoutEffect(() => {
     if (!pathInspection) return;
@@ -1341,16 +1340,12 @@ export function ThreadComposer({
     // Let the native IME commit before removing the confirmed path from its text.
     if (!pathInspection.attachment || mentionInput.isComposing) return;
     const edited = pathInspection.range.replace("", rawSelection().start);
-    if (edited) {
-      const rejection = addLocal(pathInspection.attachment);
-      if (rejection) setInlineError(formatRejection(rejection));
-      else {
-        replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
-        setInlineError(null);
-      }
+    if (edited && !addLocal(pathInspection.attachment)) {
+      replaceMentionInput(edited.value, edited.cursor, { preserveFocus: true });
+      setInlineError(null);
     }
     setPathInspection(null);
-  }, [addLocal, formatRejection, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
+  }, [addLocal, isUserShell, mentionInput.isComposing, pathInspection, rawSelection, replaceMentionInput, scopeIdentity, value]);
 
   const draftText = composerMentionText(mentionInput.segments).raw;
   const sessionDragInsertion = sessionDragPreview

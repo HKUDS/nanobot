@@ -477,8 +477,66 @@
       "password": "Password",
       "proxyReferenceAuth": "Set authentication in the referenced proxy URL."
     },
+    "sandbox": {
+      "title": "Command sandbox",
+      "method": "Isolation method",
+      "off": "No isolation",
+      "status": "Saved configuration",
+      "check": "Check sandbox",
+      "checking": "Checking…",
+      "scope": "Checks the saved launcher with temporary test files only. This is not a full security audit. Restart the gateway to apply saved changes to command execution.",
+      "path": "Trusted launcher path",
+      "launcher": "sandbox launcher",
+      "pathHelp": "Usually leave this blank for system lookup of {{launcher}}. For a custom installation, ask the package maintainer for the full launcher path. The file and its parent directories must be root-owned and not group- or world-writable, and outside writable agent paths.",
+      "automatic": "System lookup",
+      "checkError": "Could not complete the check. Reopen settings and try again.",
+      "saveError": "Could not save. Keep your draft and try again.",
+      "disableTitle": "Turn off command isolation?",
+      "disableHelp": "After restart, commands run with the gateway account’s permissions. File tools also lose the workspace restriction supplied by this sandbox; independently configured restrictions still apply.",
+      "keep": "Keep isolation",
+      "disable": "Turn off isolation",
+      "notice": {
+        "title": "Commands need attention",
+        "missing": "The gateway could not find {{launcher}}. If installed, set its full path. Otherwise, contact the package maintainer or administrator. You can keep chatting.",
+        "path": "The gateway cannot use the configured {{launcher}} path. Check its full path and access permissions.",
+        "permissions": "{{launcher}} is not in a protected location. Contact the package maintainer or administrator.",
+        "startup": "{{launcher}} could not start. Check the gateway installation and system restrictions.",
+        "configurePath": "Configure {{launcher}} path",
+        "openSettings": "Open sandbox settings"
+      },
+      "states": {
+        "disabled": "Commands disabled",
+        "off": "Isolation off",
+        "unsupported": "Not supported",
+        "unchecked": "Not checked",
+        "unavailable": "Unavailable",
+        "passed": "Basic check passed",
+        "checking": "Checking…"
+      },
+      "help": {
+        "disabled": "Enable commands to use a sandbox.",
+        "off": "Commands are not isolated. Choose an isolation method to protect the host.",
+        "unsupported": "This isolation method is not supported on the gateway’s operating system.",
+        "unchecked": "Run a check to test the saved sandbox configuration.",
+        "unsaved": "Save changes, then check the sandbox.",
+        "unavailable": "The sandbox cannot start. Commands will not run in this sandbox.",
+        "passed": "The launcher started, temporary workspace writes worked, and the external test file was blocked.",
+        "checking": "Starting a bounded sandbox test…"
+      },
+      "reasons": {
+        "launcher_missing": "{{launcher}} was not found on the gateway. If installed, enter its full path below. Otherwise, contact the package maintainer or administrator.",
+        "path_not_absolute": "Enter an absolute path, not a command name.",
+        "not_executable": "The path must point to an executable file.",
+        "agent_writable": "The launcher is in an agent-writable path. Ask the package maintainer for a protected installation.",
+        "unprotected_installation": "The launcher or a parent directory is writable by a non-root user. Ask the administrator for a protected installation.",
+        "path_unavailable": "Cannot read this path. Check that it exists on the gateway and is accessible.",
+        "platform_unsupported": "Choose the isolation method supported by this gateway’s operating system.",
+        "probe_failed": "The isolation test failed. Check the launcher installation, kernel namespace support and additional mounts.",
+        "probe_timeout": "The check timed out. Check the launcher installation and host restrictions, then try again.",
+        "unknown": "The launcher is unavailable. Check its installation and access permissions."
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "Saved. Restart the API service to apply changes.",
       "commandRuntime": {
         "custom": "Custom (seconds)",
         "customLabel": "Custom runtime (seconds)",
@@ -530,10 +588,6 @@
         "tools_max_session_messages_per_minute": {
           "label": "Message rate",
           "help": "Maximum tool messages to one session per minute.\n\nMaximum number of messages tools can send to the same session each minute."
-        },
-        "agents_defaults_unified_session": {
-          "label": "Shared sessions",
-          "help": "Share one user's chat history across platforms.\n\nShare conversation history across chat channels for a single user."
         },
         "tools_exec_enable": {
           "label": "Shell tool",
@@ -643,14 +697,6 @@
           "label": "Restart mode",
           "help": "Choose a restart method; Automatic follows your environment.\n\nChoose how the gateway restarts. Automatic selects a method for your environment."
         },
-        "api_host": {
-          "label": "API address",
-          "help": "Set a key before allowing network access; restart the API after changes.\n\nSet an API key in System before binding to a network address. Restart the API service to apply changes."
-        },
-        "api_timeout": {
-          "label": "API timeout",
-          "help": "Maximum seconds per API request; restart to apply.\n\nHow long each API request can take. Restart the API service to apply changes."
-        },
         "tools_image_generation_save_dir": {
           "label": "Save directory",
           "help": "Relative path inside the media directory; existing images stay put.\n\nSubdirectory of nanobot’s media directory. Use a relative path; existing images are not moved."
@@ -708,10 +754,6 @@
         "gateway": {
           "title": "Gateway",
           "help": "Set deployment and restart options."
-        },
-        "api": {
-          "title": "API settings",
-          "help": "Set the listening address and request timeout."
         },
         "storage": {
           "title": "Image storage",
@@ -902,7 +944,7 @@
       "small": "Small",
       "standard": "Standard",
       "large": "Large",
-      "previewText": "**A little room to think.**\n\nClear words, comfortable reading. Make this space your own.",
+      "previewText": "Clear words, comfortable reading. Make this space your own.",
       "previewPlaceholder": "Where should we begin?",
       "process": "Activity display",
       "processHelp": "Choose how much detail appears as nanobot works.",
@@ -1281,17 +1323,18 @@
       "shortTitle": "Token usage",
       "viewDetails": "View details",
       "cacheHitRate": "Cache hit rate",
-      "cacheRateHelp": "Cache hit rate excludes input with unknown cache status.",
       "dailyTrend": "Daily tokens",
       "bySource": "Usage by source",
       "modelTrend": "Model trends",
       "modelsUnavailable": "No model breakdown available.",
-      "otherModels": "Other / unattributed",
+      "otherModels": "Other models",
       "unclassified": "Unclassified",
       "unavailable": "Usage data is unavailable.",
       "noActivity": "No token usage in the last 30 days.",
+      "last30Days": "Last 30 days",
       "cachedInput": "Cached input",
       "cacheMiss": "Cache miss",
+      "cacheWrite": "Cache write",
       "cacheUnknown": "Unknown status",
       "outputTokens": "Output",
       "otherTokens": "Other tokens",
@@ -1305,7 +1348,9 @@
         "dream": "Memory",
         "system": "Auxiliary calls"
       },
-      "systemHelp": "Includes internal tasks and calls without a recorded source."
+      "systemHelp": "Includes internal tasks and calls without a recorded source.",
+      "failedRequests": "{{count}} failed",
+      "estimatedShare": "{{percent}} of tokens are estimated"
     },
     "providers": {
       "manageProviders": "Manage providers",
@@ -1373,27 +1418,6 @@
       "searchSupport": "Search dependencies",
       "searchInstallOnSave": "Required Olostep packages will be installed automatically when you save.",
       "installing": "Installing required packages…"
-    },
-    "api": {
-      "title": "API server",
-      "openaiCompatible": "OpenAI-compatible API",
-      "description": "Connect through an OpenAI-compatible API.",
-      "start": "Start API server",
-      "starting": "Starting...",
-      "stop": "Stop",
-      "stopping": "Stopping...",
-      "access": "Access",
-      "thisDevice": "This device",
-      "localNetwork": "Local network",
-      "localHelp": "Only this device can connect.",
-      "networkHelp": "LAN access requires an API key.\n\nOther devices can connect; an API key is required.",
-      "port": "Port",
-      "portHelp": "Local port used by the API service.",
-      "apiKey": "API key",
-      "apiKeyHelp": "Send the key as a Bearer token.",
-      "apiKeyRequired": "Required before exposing the API to your network.",
-      "apiKeyPlaceholder": "Enter an API key",
-      "autoInstall": "Required API server packages will be installed automatically when you start it."
     },
     "observability": {
       "title": "Run tracing",
@@ -1958,8 +1982,6 @@
       },
       "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically.",
       "workTitle": "Subtasks",
-      "otherWorkTitle": "Other tasks",
-      "unlinkedHelp": "These tasks have no matching request in the displayed messages.",
       "progress": "{{completed}} of {{total}} completed",
       "running": "Running: {{count}}",
       "finished": "Finished: {{count}}",

@@ -120,6 +120,10 @@ export interface UIMessage {
   renderAs?: "text";
   /** Invocation-time snapshots, never resolved from today's model presets. */
   responseSources?: ResponseSource[];
+  /** Stable input identity, independent of its arrival or execution turn. */
+  inputId?: string;
+  /** Inputs actually consumed by this response. An empty list means no user input. */
+  responseInputIds?: string[];
   kind?: MessageKind;
   isStreaming?: boolean;
   createdAt: number;
@@ -453,6 +457,8 @@ export interface ToolProgressEvent {
   arguments?: unknown;
   result?: unknown;
   error?: unknown;
+  /** Gateway-owned classification; never inferred from command output. */
+  error_code?: string;
   files?: unknown[];
   embeds?: unknown[];
 }
@@ -720,6 +726,14 @@ export type ProviderOAuthCompletionResult = SettingsPayload | ProviderOAuthPendi
 export type RuntimeConfigValue = string | number | boolean | string[] | null;
 
 
+export interface SandboxCheck {
+  state: "disabled" | "off" | "unsupported" | "unchecked" | "unavailable" | "passed";
+  reason: string;
+  launcher: string | null;
+  revision: string;
+  supported_backend: "bwrap" | "seatbelt" | null;
+}
+
 export interface SettingsPayload {
   runtime_config?: Record<string, RuntimeConfigValue>;
   surface?: RuntimeSurface;
@@ -835,12 +849,6 @@ export interface SettingsPayload {
       use_jina_reader: boolean;
     };
   };
-  api?: {
-    host: string;
-    port: number;
-    timeout: number;
-    api_key_hint?: string | null;
-  };
   observability?: {
     provider: "langfuse" | string;
     configured: boolean;
@@ -900,7 +908,6 @@ export interface SettingsPayload {
     dream: {
       schedule: string;
     };
-    unified_session: boolean;
   };
   usage?: {
     days: Array<{
@@ -911,6 +918,8 @@ export interface SettingsPayload {
       cache_write_tokens: number;
       cache_read_observed_input_tokens: number;
       cache_write_observed_input_tokens: number;
+      cache_miss_tokens?: number;
+      cache_unknown_tokens?: number;
       total_tokens: number;
       reported_tokens?: number;
       estimated_tokens?: number;
@@ -933,6 +942,8 @@ export interface SettingsPayload {
           cache_write_tokens: number;
           cache_read_observed_input_tokens: number;
           cache_write_observed_input_tokens: number;
+          cache_miss_tokens?: number;
+          cache_unknown_tokens?: number;
           total_tokens: number;
           reported_tokens?: number;
           estimated_tokens?: number;
@@ -949,14 +960,17 @@ export interface SettingsPayload {
         }
       >;
     }>;
-    total_tokens: number;
-    total_tokens_30d: number;
-    total_tokens_365d: number;
-    peak_day_tokens: number;
-    current_streak_days: number;
-    longest_streak_days: number;
-    active_days_30d: number;
-    requests_30d: number;
+    revision?: string;
+    range_start?: string;
+    range_end?: string;
+    total_tokens?: number;
+    total_tokens_30d?: number;
+    total_tokens_365d?: number;
+    peak_day_tokens?: number;
+    current_streak_days?: number;
+    longest_streak_days?: number;
+    active_days_30d?: number;
+    requests_30d?: number;
     failed_requests_30d?: number;
     reported_tokens_30d?: number;
     estimated_tokens_30d?: number;
@@ -972,6 +986,8 @@ export interface SettingsPayload {
       cache_write_tokens: number;
       cache_read_observed_input_tokens: number;
       cache_write_observed_input_tokens: number;
+      cache_miss_tokens?: number;
+      cache_unknown_tokens?: number;
       total_tokens: number;
       reported_tokens: number;
       estimated_tokens: number;
@@ -991,6 +1007,12 @@ export interface SettingsPayload {
       provider: string;
       model: string;
       total_tokens: number;
+      measured_output_tokens?: number;
+      generation_ms?: number;
+      ttft_ms?: number;
+      timed_requests?: number;
+      cache_read_tokens?: number;
+      cache_read_observed_input_tokens?: number;
     }>;
     updated_at?: string | null;
   };
@@ -1014,6 +1036,7 @@ export interface SettingsPayload {
     exec_enabled: boolean;
     exec_max_runtime_limit?: number;
     exec_sandbox?: string | null;
+    exec_sandbox_status?: SandboxCheck;
     exec_path_prepend_set: boolean;
     exec_path_append_set: boolean;
   };
@@ -1035,20 +1058,6 @@ export interface SettingsPayload {
     chat_apps_url: string;
     latest_url?: string;
   };
-}
-
-export interface ApiServicePayload {
-  installed: boolean;
-  running: boolean;
-  managed: boolean;
-  host: string;
-  port: number;
-  timeout: number;
-  api_key_hint?: string | null;
-  endpoint: string;
-  command: string;
-  log_path?: string | null;
-  last_action?: "started" | "stopped" | string;
 }
 
 interface AppPackageRef {
@@ -1526,6 +1535,7 @@ export type InboundEvent =
   | {
       event: "attached";
       chat_id: string;
+      request_id?: string;
       temporary?: boolean;
       recovery_state?: RecoveryState;
       usage?: TurnUsage;
@@ -1553,6 +1563,7 @@ export type InboundEvent =
       mcp_presets?: UIMcpPresetAttachment[];
       session_mentions?: SessionMention[];
       provenance?: { session_message?: UISessionMessage };
+      input_id?: string;
     } & InboundTurnMetadata)
   | ({
       event: "message";
@@ -1573,11 +1584,12 @@ export type InboundEvent =
       /** Lightweight provenance for proactive assistant messages. */
       source?: UIMessageSource;
       response_sources?: ResponseSource[];
+      response_input_ids?: string[];
       /** Optional structured payload on progress frames (channel-specific). */
       agent_ui?: AgentUIBlob;
     } & InboundTurnMetadata)
   | (Exclude<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata)
-  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection })
+  | (Extract<NotificationEvent, { event: "context_compaction" }> & InboundTurnMetadata & { context_snapshot?: ContextInspection; context_graph?: ContextGraph })
   | ({
       event: "file_edit";
       chat_id: string;
@@ -1591,15 +1603,19 @@ export type InboundEvent =
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
       response_sources?: ResponseSource[];
+      response_input_ids?: string[];
     } & InboundTurnMetadata)
   | ({
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
       text?: string;
+      /** Inclusive first turn sequence covered by this stream's cumulative text. */
+      text_from_seq?: number;
       /** Lightweight provenance for proactive streamed assistant messages. */
       source?: UIMessageSource;
       response_sources?: ResponseSource[];
+      response_input_ids?: string[];
       /** This answer segment ended, but the active agent turn will continue. */
       resuming?: boolean;
       /** The next answer segment continues this same assistant message. */
@@ -1615,8 +1631,8 @@ export type InboundEvent =
       event: "reasoning_end";
       chat_id: string;
       stream_id?: string;
-      /** Legacy persisted transcripts may carry the final reasoning text here. */
       text?: string;
+      text_from_seq?: number;
     } & InboundTurnMetadata)
   | { event: "pairing_changed" }
   | {
@@ -1704,6 +1720,7 @@ export type InboundEvent =
     }
   | {
       event: "error";
+      request_id?: string;
       chat_id?: string;
       detail?: string;
       reason?: string;
@@ -1763,7 +1780,17 @@ export interface OutboundMcpPresetMention {
   brand_color?: string | null;
 }
 
+export interface WebuiThreadRecordRange {
+  turn: number;
+  start: number;
+  end: number;
+}
+
 interface WebuiThreadPagePayload {
+  history_generation?: string | null;
+  record_range?: WebuiThreadRecordRange;
+  /** The fragment includes the canonical replacement for this turn's stored answers. */
+  recovered_answers?: boolean;
   before_cursor?: string | null;
   has_more_before?: boolean;
   after_cursor?: string | null;
@@ -1775,6 +1802,7 @@ interface WebuiThreadPagePayload {
 
 export interface PromptSummary {
   id: string;
+  inputId?: string;
   preview: string;
   answerPreview: string;
   createdAt: number;
@@ -1829,15 +1857,15 @@ export type FilePreviewPayload = FilePreviewMetadata & (
 );
 
 export type Outbound =
-  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
-  | { type: "new_temporary_chat" }
+  | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload; request_id?: string }
+  | { type: "new_temporary_chat"; request_id?: string }
   | {
       type: "webui_request";
       request_id: string;
       action: string;
       payload: Record<string, unknown>;
     }
-  | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
+  | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string; request_id?: string }
   | { type: "attach"; chat_id: string }
   | { type: "set_sidebar_state"; state: SidebarStatePayload }
   | { type: "discard_temporary_chat"; chat_id: string }

@@ -9,12 +9,14 @@ import type { ChatSummary, UIMessage } from "@/lib/types";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { ThemeProvider, useTheme } from "@/hooks/useTheme";
+import { StarPromptView } from "@/components/StarPromptView";
+import { Button } from "@/components/ui/button";
 
 export function ThemeToggleFixture() {
   const { theme, toggle } = useTheme();
   return (
     <ThemeProvider theme={theme}>
-      {new URLSearchParams(location.search).has("chat") ? <ThemeChatFixture theme={theme} toggle={toggle} /> : (
+      {new URLSearchParams(location.search).has("star") ? <ThemeInvitationFixture toggle={toggle} /> : new URLSearchParams(location.search).has("chat") ? <ThemeChatFixture theme={theme} toggle={toggle} /> : (
         <main data-theme-surface className="thread-workspace relative flex flex-col justify-center gap-8 bg-background px-6" style={{ height: "100vh" }}>
           <div className="absolute inset-x-0 top-0">
             <ThreadHeader title="Theme preview" hideTitle theme={theme} onToggleTheme={toggle} onToggleSidebar={() => {}} />
@@ -29,6 +31,16 @@ export function ThemeToggleFixture() {
       )}
     </ThemeProvider>
   );
+}
+
+function ThemeInvitationFixture({ toggle }: { toggle: () => void }) {
+  const [open, setOpen] = useState(false);
+  return <main className="flex h-full flex-col items-center justify-center gap-4 bg-background">
+    <Button onClick={toggle}>Toggle theme</Button>
+    <Button onClick={() => setOpen(true)}>Open invitation</Button>
+    <StarPromptView open={open} saving={false} error={false} onOpenChange={setOpen}
+      onDismissForever={() => setOpen(false)} onStar={() => {}} />
+  </main>;
 }
 
 const sessions: ChatSummary[] = ["Theme chat", "Another chat"].map((title, index) => ({

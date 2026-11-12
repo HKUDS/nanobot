@@ -421,7 +421,7 @@ async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tm
     assert (await preview(owner, str(outside)))["error"]["status"] == 403
     assert (await preview(owner, str(outside), probe=True))["result"] == {"available": False}
     assert (await preview(AsyncMock()))["error"]["status"] == 403
-    assert not channel._webui_request_operations
+    assert not channel._commands.request_operations
     assert {path for path in tmp_path.rglob("*") if path.is_file()} == disk_before
     assert sessions.list_sessions() == []
 
@@ -430,7 +430,7 @@ async def test_temporary_file_preview_is_owned_restricted_and_not_cached(bus, tm
     })
     assert (await preview(owner))["error"]["status"] == 404
     assert (await preview(owner, metadata=True))["error"]["status"] == 404
-    assert not channel._webui_request_operations
+    assert not channel._commands.request_operations
 
 
 @pytest.mark.asyncio
@@ -510,7 +510,6 @@ async def test_temporary_chat_is_transient_and_discarded(history, bus, tmp_path)
 
     inbound = bus.publish_inbound.await_args_list[0].args[0]
     assert inbound.session_key == f"websocket:{chat_id}"
-    assert inbound.session_key_override == f"websocket:{chat_id}"
     assert inbound.require_existing_session is True
     assert inbound.metadata["cli_apps"] == [{"name": "drawio"}]
     assert inbound.metadata[WORKSPACE_SCOPE_METADATA_KEY] == {
@@ -1220,7 +1219,7 @@ async def test_authenticated_webui_request_returns_correlated_success(bus: Magic
             "payload": {"provider": "openrouter", "apiKey": "secret"},
         },
     )
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     channel.gateway.http.dispatch_webui_mutation.assert_awaited_once_with(
         conn,
@@ -1281,7 +1280,7 @@ async def test_webui_mutations_preserve_request_and_response_order(bus: MagicMoc
     assert dispatch_order == ["settings.provider.update"]
 
     release_first.set()
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     assert dispatch_order == [
         "settings.provider.update",
@@ -1350,7 +1349,7 @@ async def test_webui_request_survives_disconnect_and_preserves_reconnect_order(
     await asyncio.sleep(0)
     assert dispatch_order == ["automation.run"]
 
-    pending = tuple(channel._webui_request_tasks.values())
+    pending = tuple(channel._commands.request_tasks.values())
     release.set()
     await asyncio.gather(*pending)
 
@@ -1361,7 +1360,7 @@ async def test_webui_request_survives_disconnect_and_preserves_reconnect_order(
         "request-queued",
         "request-next",
     ]
-    assert first_conn not in channel._webui_request_locks
+    assert first_conn not in channel._commands.request_locks
 
 
 @pytest.mark.asyncio
@@ -1381,9 +1380,9 @@ async def test_webui_request_replays_completed_result_after_reconnect(bus: Magic
     }
 
     await channel._dispatch_envelope(first_conn, "webui-client", envelope)
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
     await channel._dispatch_envelope(retry_conn, "webui-client", envelope)
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     channel.gateway.http.dispatch_webui_mutation.assert_awaited_once()
     assert json.loads(retry_conn.send.await_args.args[0]) == {
@@ -1416,7 +1415,7 @@ async def test_webui_request_rejects_request_id_reuse_with_different_payload(
             "payload": {"id": "job-a"},
         },
     )
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
     await channel._dispatch_envelope(
         retry_conn,
         "webui-client",
@@ -1449,7 +1448,7 @@ def test_webui_request_cache_prunes_expired_completed_but_keeps_pending(
     channel = _ch(bus)
     now = 1_000.0
     monkeypatch.setattr(websocket_module, "time", SimpleNamespace(monotonic=lambda: now))
-    operations = cast(dict[str, Any], channel._webui_request_operations)
+    operations = cast(dict[str, Any], channel._commands.request_operations)
     operations["pending"] = SimpleNamespace(completed_at=None)
     operations["expired"] = SimpleNamespace(
         completed_at=now - websocket_module._WEBUI_REQUEST_CACHE_TTL_S
@@ -1472,7 +1471,7 @@ def test_webui_request_cache_prunes_oldest_completed_at_capacity(
     channel = _ch(bus)
     now = 1_000.0
     monkeypatch.setattr(websocket_module, "time", SimpleNamespace(monotonic=lambda: now))
-    operations = cast(dict[str, Any], channel._webui_request_operations)
+    operations = cast(dict[str, Any], channel._commands.request_operations)
     operations["pending"] = SimpleNamespace(completed_at=None)
     for index in range(websocket_module._WEBUI_REQUEST_CACHE_MAX + 1):
         operations[f"completed-{index}"] = SimpleNamespace(
@@ -1507,7 +1506,7 @@ async def test_webui_request_returns_correlated_route_error(bus: MagicMock) -> N
             "payload": {},
         },
     )
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     assert json.loads(conn.send.await_args.args[0]) == {
         "event": "webui_response",
@@ -1570,7 +1569,7 @@ async def test_webui_persists_sidebar_state_larger_than_http_request_line(
     assert len(json.dumps(envelope).encode()) > 8_192
 
     await channel._dispatch_envelope(conn, "webui-client", envelope)
-    await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+    await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
 
     saved = json.loads((tmp_path / "webui" / "sidebar-state.json").read_text(encoding="utf-8"))
     assert saved["session_order"] == session_order
@@ -1624,7 +1623,7 @@ async def test_webui_sidebar_state_update_broadcasts_workbench_to_other_devices(
     }
     try:
         await channel._dispatch_envelope(source, "webui-client", envelope)
-        await asyncio.gather(*tuple(channel._webui_request_tasks.values()))
+        await asyncio.gather(*tuple(channel._commands.request_tasks.values()))
         event = json.loads(other_device.send.await_args.args[0])
         assert event["event"] == "sidebar_state_updated"
         assert event["state"]["archived_keys"] == ["websocket:b"]
@@ -2498,6 +2497,7 @@ async def test_send_projects_external_user_input_to_existing_wire_event() -> Non
             event=UserInputEvent(
                 content="hello from another session",
                 created_at_ms=1234,
+                input_id="session-message:external-input",
                 provenance={"name": "luma"},
             ),
         )
@@ -2510,6 +2510,7 @@ async def test_send_projects_external_user_input_to_existing_wire_event() -> Non
         "text": "hello from another session",
         "created_at_ms": 1234,
         "starts_turn": False,
+        "input_id": "session-message:external-input",
         "provenance": {"name": "luma"},
     }
 
@@ -5424,6 +5425,7 @@ async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
         "text": "hello from A",
         "starts_turn": True,
         "turn_id": "turn-a",
+        "input_id": "user:turn-a",
         "active_turn_id": "turn-a",
         "started_at": pytest.approx(wth.websocket_turn_wall_started_at("shared-chat")),
     }
@@ -5433,6 +5435,7 @@ async def test_user_messages_fan_out_to_other_clients_on_the_same_chat(
         "text": "one more detail",
         "starts_turn": False,
         "turn_id": "steer-a",
+        "input_id": "user:steer-a",
         "active_turn_id": "turn-a",
         "started_at": pytest.approx(wth.websocket_turn_wall_started_at("shared-chat")),
     }
@@ -5627,6 +5630,89 @@ async def test_multiplex_legacy_still_works(bus: MagicMock, start_listener) -> N
     finally:
         await channel.stop()
         await server_task
+
+
+@pytest.mark.parametrize("command_type", ["new_chat", "new_temporary_chat", "fork_chat"])
+@pytest.mark.asyncio
+async def test_chat_requests_correlate_only_creation_responses(
+    bus, tmp_path, start_listener, command_type,
+) -> None:
+    sessions = SessionManager(tmp_path)
+    source = sessions.get_or_create("websocket:source")
+    source.add_message("user", "first question")
+    source.add_message("assistant", "first answer")
+    sessions.save(source)
+    channel = _ch(bus, session_manager=sessions)
+    port, _ = await start_listener(channel)
+    token = channel.gateway.tokens.issue_token(300, audience="webui")
+    request_id = "Chat._:-" + "x" * 120
+
+    async with websockets.connect(f"ws://127.0.0.1:{port}/ws?token={token}") as client:
+        async with asyncio.timeout(5):
+            ready = json.loads(await client.recv())
+            assert ready["event"] == "ready"
+            envelope = {"type": command_type, "request_id": request_id}
+            if command_type == "fork_chat":
+                envelope.update(source_chat_id="source", before_user_index=1)
+            await client.send(json.dumps(envelope))
+            attached = await _recv_ws_event(client, "attached")
+            assert attached["chat_id"] not in {"source", ready["chat_id"]}
+            assert attached["request_id"] == request_id
+            if command_type == "new_temporary_chat":
+                assert attached["temporary"] is True
+
+            await client.send(json.dumps({
+                "type": "attach", "chat_id": "source", "request_id": "not-a-creation",
+            }))
+            attached = await _recv_ws_event(client, "attached")
+            assert attached["chat_id"] == "source"
+            assert "request_id" not in attached
+
+
+@pytest.mark.parametrize(("envelope", "trusted_webui", "detail"), [
+    ({"type": "new_chat", "workspace_scope": {"access_mode": "invalid"}}, True,
+     "workspace_scope_rejected"),
+    ({"type": "new_temporary_chat"}, False, "access_denied"),
+    ({"type": "fork_chat", "source_chat_id": "missing", "before_user_index": 0}, True,
+     "invalid fork source or index"),
+])
+@pytest.mark.asyncio
+async def test_chat_request_errors_preserve_correlation(
+    bus, tmp_path, envelope, trusted_webui, detail,
+) -> None:
+    channel = _ch(bus, session_manager=SessionManager(tmp_path))
+    connection = AsyncMock()
+    if trusted_webui:
+        channel._webui_connections.add(connection)
+    await channel._dispatch_envelope(connection, "client", {**envelope, "request_id": "create-request"})
+
+    [error] = _sent_ws_payloads(connection)
+    assert error["event"] == "error"
+    assert error["detail"] == detail
+    assert error["request_id"] == "create-request"
+    assert channel._conn_chats == {}
+
+
+@pytest.mark.parametrize(("command_type", "request_id"), [
+    ("new_chat", "bad/id"),
+    ("new_temporary_chat", "x" * 129),
+    ("fork_chat", None),
+])
+@pytest.mark.asyncio
+async def test_chat_request_rejects_invalid_id_before_execution(
+    bus, command_type, request_id,
+) -> None:
+    channel = _ch(bus)
+    connection = AsyncMock()
+    channel._webui_connections.add(connection)
+
+    await channel._dispatch_envelope(connection, "client", {
+        "type": command_type, "request_id": request_id,
+        "source_chat_id": "source", "before_user_index": 0,
+    })
+
+    assert _sent_ws_payloads(connection) == [{"event": "error", "detail": "invalid chat request_id"}]
+    assert channel._conn_chats == {}
 
 
 @pytest.mark.asyncio
@@ -5944,7 +6030,6 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
         ("abc", True),
         ("a1b2_c:d-e", True),
         ("x" * 64, True),
-        ("unified:default", True),
         ("", False),
         ("x" * 65, False),
         ("has space", False),

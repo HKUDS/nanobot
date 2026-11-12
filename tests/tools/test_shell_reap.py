@@ -11,7 +11,8 @@ import pytest
 
 from nanobot.agent.tools.exec_session import ExecSessionManager, ExecSessionTool, _ExecSession
 from nanobot.agent.tools.registry import is_tool_error_result
-from nanobot.agent.tools.shell import ExecTool, _reap_pid
+from nanobot.agent.tools.shell import ExecTool
+from nanobot.execution import processes
 
 
 def _python_command(code: str) -> str:
@@ -52,6 +53,11 @@ class _MockProcess:
         return self.returncode
 
 
+def _fake_tree(process: _MockProcess) -> processes.ProcessTree:
+    # A stand-in job keeps fabricated PIDs away from the host process table.
+    return processes.ProcessTree(process, MagicMock())
+
+
 async def _cleanup_session(session: _ExecSession) -> None:
     await asyncio.wait_for(session.kill(), timeout=5)
     tasks = (
@@ -65,73 +71,28 @@ async def _cleanup_session(session: _ExecSession) -> None:
 
 
 def test_reap_pid_noops_without_waitpid():
-    with patch("nanobot.agent.tools.shell.os") as mock_os:
+    with patch("nanobot.execution.processes.os") as mock_os:
         mock_os.waitpid = None
         mock_os.WNOHANG = None
-        _reap_pid(12345)
+        processes._reap_pid(12345)
 
 
 def test_reap_pid_calls_waitpid_wnohang():
-    with patch("nanobot.agent.tools.shell.os") as mock_os:
+    with patch("nanobot.execution.processes.os") as mock_os:
         mock_os.waitpid = MagicMock(return_value=(12345, 0))
         mock_os.WNOHANG = 1
-        _reap_pid(12345)
+        processes._reap_pid(12345)
         mock_os.waitpid.assert_called_once_with(12345, 1)
 
 
 def test_reap_pid_swallows_already_reaped_errors():
-    with patch("nanobot.agent.tools.shell.os") as mock_os:
+    with patch("nanobot.execution.processes.os") as mock_os:
         mock_os.WNOHANG = 1
         mock_os.waitpid = MagicMock(side_effect=ChildProcessError("no child"))
-        _reap_pid(99)
+        processes._reap_pid(99)
 
         mock_os.waitpid = MagicMock(side_effect=ProcessLookupError("gone"))
-        _reap_pid(99)
-
-
-@pytest.mark.asyncio
-async def test_kill_process_skips_kill_when_already_exited():
-    process = _MockProcess(pid=4242, returncode=0)
-    process.kill = MagicMock(side_effect=ProcessLookupError("already dead"))
-
-    with patch("nanobot.agent.tools.shell._reap_pid") as reap:
-        await ExecTool._kill_process(process)
-
-    process.kill.assert_not_called()
-    process.wait.assert_not_called()
-    reap.assert_called_once_with(4242)
-
-
-@pytest.mark.asyncio
-async def test_kill_process_kills_and_reaps_live_process():
-    process = _MockProcess(pid=77, returncode=None)
-
-    with patch("nanobot.agent.tools.shell._reap_pid") as reap:
-        await ExecTool._kill_process(process)
-
-    process.kill.assert_called_once()
-    process.wait.assert_awaited()
-    assert process.returncode == -9
-    reap.assert_called_once_with(77)
-
-
-@pytest.mark.asyncio
-async def test_kill_process_reaps_even_if_kill_races_exit():
-    process = _MockProcess(pid=88, returncode=None)
-
-    def raced_exit() -> None:
-        process.exit(0)
-        raise ProcessLookupError("raced exit")
-
-    process.kill.side_effect = raced_exit
-
-    with patch("nanobot.agent.tools.shell._reap_pid") as reap:
-        await ExecTool._kill_process(process)
-
-    process.kill.assert_called_once()
-    process.wait.assert_awaited()
-    assert process.returncode == 0
-    reap.assert_called_once_with(88)
+        processes._reap_pid(99)
 
 
 @pytest.mark.asyncio
@@ -139,8 +100,8 @@ async def test_execute_reaps_after_normal_completion():
     process = _MockProcess(pid=1001, returncode=0, stdout=b"ok\n")
     manager = ExecSessionManager()
     with (
-        patch.object(ExecTool, "_spawn", return_value=process),
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+        patch.object(processes, "spawn_process_tree", return_value=_fake_tree(process)),
+        patch("nanobot.execution.processes._reap_pid") as reap,
     ):
         try:
             result = await ExecTool(session_manager=manager).execute(command="echo ok")
@@ -160,9 +121,8 @@ async def test_execute_timeout_kills_and_reaps():
     process = _MockProcess(pid=1002, returncode=None)
     manager = ExecSessionManager()
     with (
-        patch.object(ExecTool, "_spawn", return_value=process) as spawn,
-        patch.object(ExecTool, "_kill_process_tree", side_effect=ExecTool._kill_process) as kill_tree,
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+        patch.object(processes, "spawn_process_tree", return_value=_fake_tree(process)) as spawn,
+        patch("nanobot.execution.processes._reap_pid") as reap,
     ):
         try:
             result = await asyncio.wait_for(
@@ -177,12 +137,11 @@ async def test_execute_timeout_kills_and_reaps():
     assert is_tool_error_result(result)
     assert "timed out" in result.lower()
     assert "Reason: max_runtime" in result
-    kill_tree.assert_awaited_once_with(process)
     process.kill.assert_called_once()
     process.wait.assert_awaited()
     assert process.returncode == -9
     reap.assert_any_call(1002)
-    assert spawn.await_args.kwargs["process_tree"] is True
+    spawn.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -197,10 +156,9 @@ async def test_execute_cancellation_kills_process_tree():
         return await poll(session, *args, **kwargs)
 
     with (
-        patch.object(ExecTool, "_spawn", return_value=process) as spawn,
-        patch.object(ExecTool, "_kill_process_tree", side_effect=ExecTool._kill_process) as kill_tree,
+        patch.object(processes, "spawn_process_tree", return_value=_fake_tree(process)) as spawn,
         patch.object(_ExecSession, "poll", new=initial_poll),
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+        patch("nanobot.execution.processes._reap_pid") as reap,
     ):
         execution = asyncio.create_task(
             ExecTool(session_manager=manager).execute(command="sleep 99"),
@@ -217,12 +175,11 @@ async def test_execute_cancellation_kills_process_tree():
             await asyncio.gather(execution, return_exceptions=True)
             await manager.close_all()
 
-    kill_tree.assert_awaited_once_with(process)
     process.kill.assert_called_once()
     process.wait.assert_awaited()
     assert process.returncode == -9
     reap.assert_any_call(1005)
-    assert spawn.await_args.kwargs["process_tree"] is True
+    spawn.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -231,9 +188,8 @@ async def test_exec_session_wait_cancellation_does_not_kill_process_tree():
     manager = ExecSessionManager()
     session_tool = ExecSessionTool(manager=manager)
     with (
-        patch.object(ExecTool, "_spawn", return_value=process),
-        patch.object(ExecTool, "_kill_process_tree", side_effect=ExecTool._kill_process) as kill_tree,
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+        patch.object(processes, "spawn_process_tree", return_value=_fake_tree(process)),
+        patch("nanobot.execution.processes._reap_pid") as reap,
     ):
         observer = None
         try:
@@ -254,7 +210,6 @@ async def test_exec_session_wait_cancellation_does_not_kill_process_tree():
             assert process.returncode is None
             assert not session._completion_task.done()
             process.kill.assert_not_called()
-            kill_tree.assert_not_awaited()
             assert [info.session_id for info in await manager.list()] == [session_id]
 
             result = await session_tool.execute(session_id=session_id, terminate=True)
@@ -266,7 +221,6 @@ async def test_exec_session_wait_cancellation_does_not_kill_process_tree():
                 await asyncio.gather(observer, return_exceptions=True)
             await manager.close_all()
 
-    kill_tree.assert_awaited_once_with(process)
     process.kill.assert_called_once()
     reap.assert_any_call(1007)
 
@@ -277,8 +231,8 @@ async def test_execute_exception_after_success_does_not_raise_on_dead_process():
     process.kill.side_effect = ProcessLookupError("already dead")
     manager = ExecSessionManager()
     with (
-        patch.object(ExecTool, "_spawn", return_value=process),
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
+        patch.object(processes, "spawn_process_tree", return_value=_fake_tree(process)),
+        patch("nanobot.execution.processes._reap_pid") as reap,
         patch(
             "nanobot.agent.tools.shell.format_session_poll",
             side_effect=RuntimeError("boom after exit"),
@@ -305,22 +259,21 @@ async def test_execute_exception_after_success_does_not_raise_on_dead_process():
 async def test_execute_stream_read_error_kills_live_process(tmp_path):
     manager = ExecSessionManager()
     tool = ExecTool(working_dir=str(tmp_path), session_manager=manager)
-    spawn_process = ExecTool._spawn
-    kill_process_tree = ExecTool._kill_process_tree
-    process = None
+    spawn_process = processes.spawn_process_tree
+    tree = None
 
     async def spawn_with_broken_stdout(*args, **kwargs):
-        nonlocal process
-        process = await spawn_process(*args, **kwargs)
+        nonlocal tree
+        tree = await spawn_process(*args, **kwargs)
+        process = tree.process
         assert process.returncode is None
         assert process.stdout is not None
         process.stdout.set_exception(OSError("pipe broken"))
-        return process
+        return tree
 
     with (
-        patch.object(ExecTool, "_spawn", side_effect=spawn_with_broken_stdout),
-        patch.object(ExecTool, "_kill_process_tree", wraps=kill_process_tree) as kill_tree,
-        patch("nanobot.agent.tools.shell._reap_pid", wraps=_reap_pid) as reap,
+        patch.object(processes, "spawn_process_tree", side_effect=spawn_with_broken_stdout),
+        patch.object(processes, "_reap_pid", wraps=processes._reap_pid) as reap,
     ):
         try:
             result = await asyncio.wait_for(tool.execute(
@@ -330,35 +283,17 @@ async def test_execute_stream_read_error_kills_live_process(tmp_path):
             try:
                 await manager.close_all()
             finally:
-                if process is not None and process.returncode is None:
-                    await kill_process_tree(process)
+                if tree is not None and tree.process.returncode is None:
+                    await tree.terminate()
 
     assert is_tool_error_result(result)
     assert "pipe broken" in result
     assert "Reason: execution_error" in result
     assert "output may be incomplete" in result
     assert "Process running" not in result
-    assert process is not None
-    assert process.returncode is not None and process.returncode != 0
-    kill_tree.assert_awaited_once_with(process)
-    reap.assert_any_call(process.pid)
-
-
-@pytest.mark.asyncio
-async def test_kill_process_tree_targets_group_after_root_exits():
-    process = _MockProcess(pid=1006, returncode=0)
-
-    with (
-        patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
-        patch("nanobot.agent.tools.shell.os.killpg", create=True) as kill_group,
-        patch("nanobot.agent.tools.shell.signal.SIGKILL", 9, create=True),
-        patch("nanobot.agent.tools.shell._reap_pid") as reap,
-    ):
-        await ExecTool._kill_process_tree(process)
-
-    kill_group.assert_called_once_with(1006, 9)
-    process.kill.assert_not_called()
-    reap.assert_called_once_with(1006)
+    assert tree is not None
+    assert tree.process.returncode is not None and tree.process.returncode != 0
+    reap.assert_any_call(tree.process.pid)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires Unix process groups")
@@ -403,12 +338,12 @@ async def test_kill_process_tree_kills_descendant_after_root_exits(tmp_path):
         "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
     )
     tool = ExecTool(working_dir=str(tmp_path), timeout=10)
-    process = await tool._spawn(
+    tree = await processes.spawn_process_tree(
         _python_command(parent_code),
         str(tmp_path),
         tool._build_env(),
-        process_tree=True,
     )
+    process = tree.process
     try:
         await asyncio.wait_for(process.wait(), timeout=10)
         assert process.returncode == 0
@@ -416,13 +351,13 @@ async def test_kill_process_tree_kills_descendant_after_root_exits(tmp_path):
             while not started.exists():
                 await asyncio.sleep(0.01)
 
-        await ExecTool._kill_process_tree(process)
+        await tree.terminate()
         await asyncio.wait_for(process.communicate(), timeout=5)
         release.write_text("go")
         await asyncio.sleep(1)
         assert not marker.exists()
     finally:
-        await ExecTool._kill_process_tree(process)
+        await tree.terminate()
 
 
 @pytest.mark.asyncio
@@ -430,14 +365,14 @@ async def test_exec_session_kill_reaps():
     process = _MockProcess(pid=2001, returncode=None)
     session = _ExecSession(
         session_id="abc",
-        process=process,
+        process_tree=_fake_tree(process),
         command="sleep 1",
         cwd="/tmp",
         timeout=30,
         owner_session_key=None,
     )
     try:
-        with patch("nanobot.agent.tools.shell._reap_pid") as reap:
+        with patch("nanobot.execution.processes._reap_pid") as reap:
             await session.kill()
         process.kill.assert_called_once()
         process.wait.assert_awaited()
@@ -460,14 +395,14 @@ async def test_exec_session_kill_reaps_if_process_exits_before_kill():
     process.kill.side_effect = raced_exit
     session = _ExecSession(
         session_id="raced",
-        process=process,
+        process_tree=_fake_tree(process),
         command="sleep 1",
         cwd="/tmp",
         timeout=30,
         owner_session_key=None,
     )
     try:
-        with patch("nanobot.agent.tools.shell._reap_pid") as reap:
+        with patch("nanobot.execution.processes._reap_pid") as reap:
             await session.kill()
         process.kill.assert_called_once()
         process.wait.assert_awaited()
@@ -485,7 +420,7 @@ async def test_exec_session_kill_waits_for_reader_tasks():
     process.kill.side_effect = lambda: process.exit(-9, close_streams=False)
     session = _ExecSession(
         session_id="readers",
-        process=process,
+        process_tree=_fake_tree(process),
         command="sleep 1",
         cwd="/tmp",
         timeout=30,
@@ -523,14 +458,14 @@ async def test_exec_session_poll_reaps_after_exit():
     process = _MockProcess(pid=2004, returncode=0, stdout=b"hi\n")
     session = _ExecSession(
         session_id="def",
-        process=process,
+        process_tree=_fake_tree(process),
         command="echo hi",
         cwd="/tmp",
         timeout=30,
         owner_session_key=None,
     )
     try:
-        with patch("nanobot.agent.tools.shell._reap_pid") as reap:
+        with patch("nanobot.execution.processes._reap_pid") as reap:
             await asyncio.wait_for(session.wait_exit(), timeout=5)
             poll = await session.poll(yield_time_ms=0, max_output_chars=1000)
         assert poll.done is True

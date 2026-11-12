@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -303,6 +303,12 @@ class Session:
                 if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
                     continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
+            if include_runtime_context and "input_id" in message and not is_hidden_history_message(message):
+                entry["_meta"] = {"input_id": message["input_id"]}
+            marker = message.get(HIDDEN_HISTORY_META)
+            if include_runtime_context and isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
+                # Attribution must distinguish persisted continuations from no-ID automation inputs.
+                entry[HIDDEN_HISTORY_META] = {"kind": "internal_continuation"}
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]
@@ -479,13 +485,8 @@ class SessionManager:
         return SessionLocation.safe_key(key)
 
     @staticmethod
-    def _storage_key(key: str) -> str:
-        """Collision-resistant encoding for internal session storage filenames."""
-        return SessionLocation.storage_key(key)
-
-    @staticmethod
     def _decode_storage_key(stem: str) -> str | None:
-        """Reverse _storage_key(): decode a base64url (no-padding) stem back to the original key."""
+        """Decode a base64url (no-padding) stem back to the original key."""
         return SessionLocation.decode_storage_key(stem)
 
     @staticmethod
@@ -514,6 +515,18 @@ class SessionManager:
     def list_child_session_metadata(self, parent_key: str) -> list[SessionMetadataPayload]:
         """Read persisted child headers without transcripts, checkpoints, or pending inputs."""
         return self._store.list_child_session_metadata(parent_key)
+
+    def list_subagent_session_metadata(
+        self, parent_key: str, *, turn_ids: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read persisted subagent headers attributed to the requested parent turns."""
+        return self._store.list_subagent_session_metadata(parent_key, turn_ids=turn_ids)
+
+    def read_child_session_metadata(
+        self, parent_key: str, child_keys: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read named persisted child headers without transcripts or pending inputs."""
+        return self._store.read_child_session_metadata(parent_key, child_keys)
 
     def save(self, session: Session) -> None:
         """Commit an offline administrative snapshot, rejecting obsolete history."""

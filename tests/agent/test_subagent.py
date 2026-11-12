@@ -12,6 +12,12 @@ from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
 from nanobot.agent.tools.filesystem import FileToolsConfig
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ToolsConfig
+from nanobot.context_sources import (
+    PromptSource,
+    capture_sources,
+    record_source,
+    system_source_scope,
+)
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.security.workspace_access import build_workspace_scope
@@ -297,11 +303,17 @@ async def test_subagent_pressure_uses_transient_summary(tmp_path):
         context_window_tokens=1_624,
     )
 
-    result = await manager.run_inline(
-        task="inspect the workspace",
-        session_key="test:direct",
-        runtime=runtime,
-    )
+    with capture_sources() as parent_sources:
+        with system_source_scope():
+            record_source(tmp_path / "SOUL.md", "parent prompt")
+        result = await manager.run_inline(
+            task="inspect the workspace",
+            session_key="test:direct",
+            runtime=runtime,
+        )
+        captured = parent_sources.drain()
+        assert captured.sources == ()
+        assert captured.system_sources == (PromptSource(tmp_path / "SOUL.md", "parent prompt"),)
 
     assert result == "done"
     consolidator.summarize_transcript.assert_awaited_once()

@@ -12,8 +12,6 @@ This guide shows when to use the Nanobot Python SDK instead of calling a model d
 
 Use the Python SDK for notebooks, evals, product backends, local scripts, workflow runners, and integrations that need direct access to agent sessions, memory, hooks, runtime state, or structured run results.
 
-Use the OpenAI-compatible API instead when another language or process should call nanobot over HTTP.
-
 ## Before you start
 
 Use an installation with a configured model that has already returned a reply. If this is your first setup, follow [Quick Start](../quick-start.md), then return here. Existing WebUI users can continue in the current instance.
@@ -58,6 +56,5 @@ asyncio.run(main())
 ## Related nanobot docs
 
 - [Nanobot Python SDK](../python-sdk.md)
-- [OpenAI-Compatible API](../openai-api.md)
 - [Configuration](../configuration.md)
 - [Concepts](../concepts.md)

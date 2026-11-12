@@ -56,6 +56,12 @@ History request hooks own loading, pagination and errors. `usePromptHistory.oper
 
 Prompt navigation retains at most three server pages. Static ready Blocks appear only during an uncommitted boundary pull; a completed header is hidden and offers no second pagination entry point. Loading continues at the new boundary, where the header binds to the current first display unit for wheel, touch and keyboard alike; page eviction therefore does not remove the header or the message being read. A failure animates the same Blocks in red without visible error text; hovering shows details, and selecting the red Blocks or a fresh boundary gesture starts another request. Failed reads suppress scroll-triggered automatic requests, not explicit user input.
 
+## Theme artwork and surface motion
+
+The application theme remains the single owner for paired day/night artwork. The Sidebar keeps the original daytime mark and uses a sleeping-cap variant in dark mode; the Star invitation pairs matching day/night illustrations. Both layers reserve the same geometry. `.theme-art` blends opacity for System changes and browsers without native snapshots; a native root View Transition owns the whole-frame fade instead. Reduced motion switches artwork directly. Entry and conversation surfaces keep their normal theme colors without decorative ambient glow.
+
+Dropdowns and popovers use Radix's resolved transform origin and side, so motion stays attached to the trigger after collision handling. Radix owns their presence and focus. `SidebarPanel` retains its content until the slot and surface finish their actual exit animations, ignores descendant activity, and cancels teardown when reopened. Closing content is inert and hidden from assistive navigation; callers still own focus restoration. Disclosures keep their existing in-flow height transition and draft retention.
+
 ## Typography
 
 Use the text roles in `tailwind.config.js` for shared metrics: `text-ui` for navigation, `text-control-label` for controls, `text-ui-label` for compact labels, `text-caption` for auxiliary text, and `text-title` / `text-ui-heading` for interface headings. These roles stay independent of reading preferences. Register new size utilities in `src/lib/utils.ts` so `cn()` distinguishes them from text colors.

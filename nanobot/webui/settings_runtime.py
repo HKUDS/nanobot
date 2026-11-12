@@ -3,13 +3,14 @@ from __future__ import annotations
 import ipaddress
 import math
 import re
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from nanobot.config.errors import ConfigLoadError
+from nanobot.config.loader import resolve_config_env_vars
 from nanobot.config.schema import Config
-from nanobot.security.network import is_loopback_host
 from nanobot.webui.settings_contracts import WebUISettingsError
 
 # Only these leaves may be read or patched through this surface. Model/provider,
@@ -17,7 +18,6 @@ from nanobot.webui.settings_contracts import WebUISettingsError
 RUNTIME_CONFIG_PATHS = (
     "agents.defaults.timezone",
     "agents.defaults.timezone_mode",
-    "agents.defaults.unified_session",
     "agents.defaults.session_ttl_minutes",
     "agents.defaults.max_tool_iterations",
     "agents.defaults.max_concurrent_subagents",
@@ -33,6 +33,7 @@ RUNTIME_CONFIG_PATHS = (
     "tools.exec.path_prepend",
     "tools.exec.path_append",
     "tools.exec.sandbox",
+    "tools.exec.sandbox_launcher",
     "tools.exec.sandbox_ro_binds",
     "tools.exec.sandbox_rw_binds",
     "tools.exec.allowed_env_keys",
@@ -54,8 +55,6 @@ RUNTIME_CONFIG_PATHS = (
     "tools.web.use_proxy",
     "tools.web.user_agent",
     "tools.image_generation.save_dir",
-    "api.host",
-    "api.timeout",
 )
 
 
@@ -120,7 +119,6 @@ def update_runtime_config(
         "agents.defaults.max_tool_iterations": 1,
         "agents.defaults.max_tool_result_chars": 1,
         "gateway.port": 1,
-        "api.timeout": 1,
     }
     for path, minimum in numeric_minima.items():
         if path in values:
@@ -129,15 +127,13 @@ def update_runtime_config(
                 raise WebUISettingsError(f"{path}: must be at least {minimum}")
     if "gateway.port" in values and validated.gateway.port > 65535:
         raise WebUISettingsError("gateway.port: must be at most 65535")
-    if "api.timeout" in values and validated.api.timeout > 3600:
-        raise WebUISettingsError("api.timeout: must be at most 3600 seconds")
     if "tools.exec.timeout" in values:
         limit = validated.tools.exec.max_runtime_limit
         if validated.tools.exec.max_runtime > limit:
             raise WebUISettingsError(
                 f"tools.exec.timeout: enter 1–{limit} seconds, or 0 for no time limit"
             )
-    for path in ("gateway.host", "api.host", "tools.image_generation.save_dir"):
+    for path in ("gateway.host", "tools.image_generation.save_dir"):
         if path in values:
             parent, leaf = _parent(validated, path)
             if not str(getattr(parent, leaf)).strip():
@@ -147,11 +143,25 @@ def update_runtime_config(
         if (PureWindowsPath(directory).drive or directory.startswith(("/", "\\"))
                 or ".." in PurePosixPath(directory.replace("\\", "/")).parts):
             raise WebUISettingsError("tools.image_generation.save_dir: use a relative path inside the media directory")
-    if "api.host" in values and not is_loopback_host(validated.api.host):
-        if not validated.api.api_key.strip():
-            raise WebUISettingsError("Set an API key in System before using a network bind address.")
     if "tools.exec.sandbox" in values and validated.tools.exec.sandbox not in {"", "bwrap", "seatbelt"}:
         raise WebUISettingsError("tools.exec.sandbox: choose no sandbox, bwrap, or seatbelt")
+    if {"tools.exec.sandbox_launcher", "tools.exec.sandbox_rw_binds"} & values.keys() and validated.tools.exec.sandbox_launcher:
+        from nanobot.agent.tools.sandbox_launcher import (
+            SandboxLauncherError,
+            resolve_sandbox_launcher,
+        )
+
+        try:
+            exec_config = resolve_config_env_vars(validated.tools.exec)
+            workspace = Path(resolve_config_env_vars(str(validated.workspace_path))).expanduser()
+            resolve_sandbox_launcher(
+                exec_config.sandbox, exec_config.sandbox_launcher,
+                writable_roots=(workspace, *map(Path, exec_config.sandbox_rw_binds)),
+            )
+        except ConfigLoadError:
+            raise WebUISettingsError("sandbox_launcher_path_unavailable") from None
+        except SandboxLauncherError as exc:
+            raise WebUISettingsError(f"sandbox_launcher_{exc.reason}") from None
     if "tools.ssrf_whitelist" in values:
         for cidr in validated.tools.ssrf_whitelist:
             try:
@@ -179,5 +189,4 @@ def update_runtime_config(
     config.tools = validated.tools
     config.network = validated.network
     config.gateway = validated.gateway
-    config.api = validated.api
     return True

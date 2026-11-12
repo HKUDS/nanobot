@@ -41,7 +41,7 @@ if [ "$RENDER" = "true" ]; then
         echo "[entrypoint] existing $config found — leaving it in place"
     fi
     set -- "$@" --config "$config"
-elif [ "$NANOBOT_DOCKER_BOOTSTRAP" = "1" ] && { [ "$1" = "gateway" ] || [ "$1" = "serve" ]; }; then
+elif [ "$NANOBOT_DOCKER_BOOTSTRAP" = "1" ] && [ "$1" = "gateway" ]; then
     # Explicit config selectors belong to the CLI; bootstrap only the default instance.
     initialize_default=1
     for argument in "$@"; do

@@ -7,6 +7,8 @@ import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
+import { projectThreadEvents } from "@/lib/thread-event-projection";
+import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 
 vi.mock("@/lib/api", async (original) => ({ ...await original<typeof api>(), fetchPromptIndex: vi.fn(), fetchWebuiThread: vi.fn() }));
 const index = Array.from({ length: 2000 }, (_, index) => ({ id: `u${index}`, preview: `question ${index}`,
@@ -53,6 +55,73 @@ it("loads the complete index without bodies, reads bounded windows and leaves li
   act(() => result.current.latest());
   expect(result.current.window).toBeNull();
   expect(latest).toHaveLength(1);
+});
+
+it("reprojects adjacent pages of a long turn when navigating forward", async () => {
+  const events = [
+    { event: "user_message" as const, chat_id: "a", projection_id: "u10", turn_id: "long", turn_seq: 1, text: "question", starts_turn: true },
+    { event: "stream_end" as const, chat_id: "a", projection_id: "answer-1", turn_id: "long", turn_seq: 2, stream_id: "wire", text: "First", resuming: true, merge_next: true },
+    { event: "message" as const, chat_id: "a", projection_id: "tool", turn_id: "long", turn_seq: 3, kind: "progress" as const, text: "tool()" },
+    { event: "stream_end" as const, chat_id: "a", projection_id: "answer-2", turn_id: "long", turn_seq: 4, stream_id: "wire", text: "First second" },
+    { event: "turn_end" as const, chat_id: "a", projection_id: "end", turn_id: "long", turn_seq: 5 },
+  ];
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: [{ ...index[10], id: "u10", turnId: "long" }] });
+  vi.mocked(api.fetchWebuiThread).mockImplementation(async (_token, _key, options) => {
+    if (typeof options === "string") throw new Error("expected page options");
+    const newer = options?.after === "next";
+    return { schemaVersion: 3, projection: "events", events: newer ? events.slice(2) : events.slice(0, 2),
+      page: { before_cursor: newer ? "next" : null, after_cursor: newer ? null : "next",
+        has_more_before: newer, has_more_after: !newer, truncated_oversized_turn: true,
+        record_range: { turn: 0, start: newer ? 2 : 0, end: newer ? 5 : 2 } } };
+  });
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts[0]?.id).toBe("u10"));
+  await act(async () => result.current.jump("u10"));
+  await act(async () => result.current.newer());
+  const visible = (rows: UIMessage[]) => rows.map((row) => ({
+    role: row.role, kind: row.kind, content: row.content, reasoning: row.reasoning, traces: row.traces,
+  }));
+  expect(visible(result.current.window!.messages)).toEqual(visible(projectWebuiThreadMessages(projectThreadEvents(events))));
+  expect(result.current.window?.messages.filter((row) => row.role === "user")).toHaveLength(1);
+});
+
+it("continues through telemetry-only fragments until another message is visible", async () => {
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: [{ ...index[10], id: "u10", turnId: "long" }] });
+  vi.mocked(api.fetchWebuiThread).mockImplementation(async (_token, _key, options) => {
+    if (typeof options === "string") throw new Error("expected page options");
+    const part = Number(options?.after === "10" ? 0 : options?.after);
+    const events = part === 0
+      ? [{ event: "user_message" as const, chat_id: "a", projection_id: "u10", turn_id: "long", turn_seq: 1, text: "question", starts_turn: true }]
+      : part === 4
+        ? [{ event: "message" as const, chat_id: "a", projection_id: "answer", turn_id: "long", turn_seq: 5, text: "Visible answer" }]
+        : [{ event: "model_request" as const, chat_id: "a", projection_id: `request-${part}`, turn_id: "long", turn_seq: part + 1,
+          request_id: `r${part}`, run_id: "run", sequence: part, phase: "started" as const }];
+    return { schemaVersion: 3, projection: "events", events,
+      page: { before_cursor: part ? String(part) : null, after_cursor: part < 4 ? String(part + 1) : null,
+        has_more_before: part > 0, has_more_after: part < 4, truncated_oversized_turn: true,
+        record_range: { turn: 0, start: part, end: part + 1 } } };
+  });
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts[0]?.id).toBe("u10"));
+  await act(async () => result.current.jump("u10"));
+  await act(async () => result.current.newer());
+  await act(async () => result.current.newer());
+  await act(async () => result.current.newer());
+  await waitFor(() => expect(result.current.window?.messages.map((row) => row.content)).toContain("Visible answer"));
+  expect(api.fetchWebuiThread).toHaveBeenCalledTimes(5);
+});
+
+it("does not mix navigation pages from a replaced session", async () => {
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(10),
+    page: { ...page(10).page, history_generation: "old" } });
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(11),
+    page: { ...page(11).page, history_generation: "new" } });
+  await act(async () => result.current.newer());
+  expect(result.current.error).toBe("History changed; select the message again");
+  expect(result.current.window?.messages.map((message) => message.content)).toEqual(["question 10", "answer"]);
 });
 
 it.each(["older", "newer"] as const)("keeps one pending %s page when boundary inputs arrive before the next render", async (operation) => {
@@ -220,4 +289,32 @@ it("keeps the request operation with failures and retries", async () => {
   }
   act(() => result.current.cancel());
   expect(result.current.operation).toBeNull();
+});
+
+
+it("associates live answers and merges the persisted directory by input ID across turns", async () => {
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: [], revision: "empty" });
+  const users: UIMessage[] = [
+    { id: "local-original", inputId: "user:original", role: "user", content: "same", createdAt: 1 },
+    { id: "local-session", inputId: "session-message:received", role: "user", content: "same", createdAt: 2 },
+  ];
+  const { result, rerender } = renderHook(({ messages, version }) => usePromptHistory("a", version, messages), {
+    wrapper: wrapper(), initialProps: { messages: users, version: 1 },
+  });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2));
+  const messages: UIMessage[] = [...users,
+    { id: "original-answer", role: "assistant", content: "Original answer", createdAt: 3, responseInputIds: ["user:original"] },
+  ];
+  rerender({ messages, version: 1 });
+  expect(result.current.prompts.map((prompt) => prompt.answerPreview)).toEqual(["Original answer", ""]);
+  messages.push({ id: "session-answer", role: "assistant", content: "Session answer", createdAt: 4,
+    responseInputIds: ["session-message:received"] });
+  rerender({ messages: [...messages], version: 1 });
+  expect(result.current.prompts.map((prompt) => prompt.answerPreview)).toEqual(["Original answer", "Session answer"]);
+  const persisted = result.current.prompts.map((prompt, index) => ({ ...prompt, id: `persisted-${index}`,
+    cursor: String(index), turnId: `execution-${index}` }));
+  vi.mocked(api.fetchPromptIndex).mockResolvedValue({ prompts: persisted, revision: "persisted" });
+  rerender({ messages, version: 2 });
+  await waitFor(() => expect(result.current.prompts.map((prompt) => prompt.id)).toEqual(["persisted-0", "persisted-1"]));
+  expect(result.current.prompts.map((prompt) => prompt.answerPreview)).toEqual(["Original answer", "Session answer"]);
 });

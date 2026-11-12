@@ -80,22 +80,33 @@ test("reduced motion keeps the canvas fade but switches the icon directly", asyn
   const icon = toggle.locator("svg");
   const core = icon.locator(":scope > circle");
   await expect(core).toHaveCSS("r", "5px");
+  const capture = await page.locator(".workbench-pane").evaluateHandle(node => {
+    const sample = { transitions: 0, middle: "" };
+    const observer = new MutationObserver(() => {
+      if (document.documentElement.classList.contains("dark")) return;
+      observer.disconnect();
+      // Capture at the class commit, before a protocol round-trip can outlive the fade.
+      const transitions = node.getAnimations().filter(animation => animation instanceof CSSTransition
+        && animation.transitionProperty === "background-color");
+      sample.transitions = transitions.length;
+      for (const transition of transitions) {
+        transition.pause();
+        transition.currentTime = 140;
+      }
+      sample.middle = getComputedStyle(node).backgroundColor;
+      for (const transition of transitions) transition.play();
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return sample;
+  });
   await toggle.click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await expect(core).toHaveCSS("r", "8px");
   expect(await icon.evaluate(node => node.getAnimations({ subtree: true }).length)).toBe(0);
-  const middle = await page.locator(".workbench-pane").evaluate(async node => {
-    await new Promise(requestAnimationFrame);
-    const transitions = node.getAnimations();
-    for (const transition of transitions) {
-      transition.pause();
-      transition.currentTime = 140;
-    }
-    const color = getComputedStyle(node).backgroundColor;
-    for (const transition of transitions) transition.play();
-    return color;
-  });
-  const red = Number(middle.match(/[\d.]+/)![0]);
+  const sample = await capture.jsonValue();
+  await capture.dispose();
+  expect(sample.transitions).toBe(1);
+  const red = Number(sample.middle.match(/[\d.]+/)![0]);
   expect(red).toBeGreaterThan(48);
   expect(red).toBeLessThan(255);
   await expect.poll(() => page.locator("html").getAttribute("data-theme-transition")).toBeNull();
@@ -177,18 +188,38 @@ for (const width of [1440, 390]) {
       await input.fill("Crossfade keeps the draft and layout");
       const box = await input.boundingBox();
       await expect(page.locator("[data-user-text-bubble]").first()).toBeInViewport();
+      const capture = await page.evaluateHandle(() => {
+        const sample: { ready: Promise<string | null> | null } = { ready: null };
+        const start = document.startViewTransition.bind(document);
+        document.startViewTransition = (...args) => {
+          const transition = start(...args);
+          document.startViewTransition = start;
+          sample.ready = transition.ready.then(() => {
+            // Capture in the renderer before a protocol round-trip can outlive the fade.
+            const fades = document.getAnimations().filter(animation => animation instanceof CSSAnimation
+              && animation.animationName.startsWith("theme-crossfade-"));
+            for (const fade of fades) {
+              fade.pause();
+              fade.currentTime = 100;
+            }
+            return null;
+          }, error => String(error));
+          return transition;
+        };
+        return sample;
+      });
       await toggle.focus();
       await page.keyboard.press("Space");
+      expect(await capture.evaluate(sample => sample.ready)).toBeNull();
+      await capture.dispose();
+      // Keep the observer later than the 200ms lifetime to guard the original race.
+      await page.waitForTimeout(350);
       await expect.poll(() => page.evaluate(() => document.getAnimations().filter(animation => animation instanceof CSSAnimation
         && animation.animationName.startsWith("theme-crossfade-")).length)).toBe(2);
       const middle = await page.evaluate(() => {
         const root = document.documentElement;
         const fades = document.getAnimations().filter(animation => animation instanceof CSSAnimation
           && animation.animationName.startsWith("theme-crossfade-"));
-        for (const fade of fades) {
-          fade.pause();
-          fade.currentTime = 100;
-        }
         const oldTheme = getComputedStyle(root, "::view-transition-old(root)");
         const newTheme = getComputedStyle(root, "::view-transition-new(root)");
         return {
@@ -199,6 +230,7 @@ for (const width of [1440, 390]) {
           oldBlend: oldTheme.mixBlendMode, newBlend: newTheme.mixBlendMode,
           isolation: getComputedStyle(root, "::view-transition-image-pair(root)").isolation,
           mask: newTheme.maskImage, clip: newTheme.clipPath,
+          artworkDuration: getComputedStyle(document.querySelector(".theme-art")!).transitionDuration,
         };
       });
       expect(middle.durations).toEqual([200, 200]);
@@ -212,6 +244,7 @@ for (const width of [1440, 390]) {
       expect(middle.isolation).toBe("isolate");
       expect(middle.mask).toBe("none");
       expect(middle.clip).toBe("none");
+      expect(middle.artworkDuration).toBe("0s");
       await expect(toggle).toBeFocused();
       expect(await input.boundingBox()).toEqual(box);
       await page.screenshot({ path: test.info().outputPath(`crossfade-${width}-${initial}-mid.png`), animations: "allow" });

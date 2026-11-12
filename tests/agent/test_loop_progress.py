@@ -819,6 +819,7 @@ class TestToolEventProgress:
             chat_id="chat-a",
             content="Can you include the key detail?",
             session_key_override=session_key,
+            metadata={WEBUI_TURN_METADATA_KEY: "followup"},
         ))
         release_first_request.set()
         # Events synchronize injection; the deadline only guards against a stuck worker.
@@ -855,6 +856,11 @@ class TestToolEventProgress:
             for message in outbound
             if isinstance(message.event, StreamDeltaEvent)
         ] == ["Checking", "The late result is ready"]
+        assert [
+            message.metadata["response_input_ids"]
+            for message in outbound
+            if isinstance(message.event, StreamDeltaEvent)
+        ] == [[], ["user:followup"]]
         assert any(isinstance(message.event, ProgressEvent) for message in outbound)
         assert len([
             message for message in outbound if isinstance(message.event, TurnEndEvent)
@@ -902,6 +908,7 @@ class TestToolEventProgress:
                 WEBUI_TURN_METADATA_KEY,
                 "_history_generation",
                 "latency_ms",
+                "response_input_ids",
             }
             for message in visible_events
         )
@@ -1108,13 +1115,13 @@ class TestToolEventProgress:
 
         captured: dict[str, object] = {}
 
-        async def fake_title_after_turn(**kwargs: object) -> bool:
+        async def fake_generate_title(**kwargs: object) -> bool:
             captured.update(kwargs)
             return False
 
         monkeypatch.setattr(
-            "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
-            fake_title_after_turn,
+            "nanobot.session.webui_turns.maybe_generate_webui_title",
+            fake_generate_title,
         )
         scheduled_title: list[object] = []
 
@@ -1149,39 +1156,6 @@ class TestToolEventProgress:
 
         assert captured["provider"] is provider
         assert captured["model"] == "test-model"
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
-    async def test_webui_title_requires_inbound_opt_in(
-        self,
-        tmp_path: Path,
-        metadata: dict[str, object],
-    ) -> None:
-        from nanobot.session.manager import SessionManager
-        from nanobot.session.webui_turns import maybe_generate_webui_title_after_turn
-
-        sessions = SessionManager(tmp_path)
-        session = sessions.get_or_create("websocket:chat1")
-        session.metadata["webui"] = True
-        session.add_message("user", "say hello")
-        session.add_message("assistant", "Hello")
-        sessions.save(session)
-        provider = MagicMock()
-        provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="Greeting"))
-
-        generated = await maybe_generate_webui_title_after_turn(
-            channel="websocket",
-            chat_id="chat1",
-            metadata=metadata,
-            sessions=sessions,
-            session_key=session.key,
-            provider=provider,
-            model="test-model",
-        )
-
-        assert generated is False
-        provider.chat_stream_with_retry.assert_not_awaited()
-        assert "title" not in session.metadata
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("metadata", [{}, {"webui": False}])
@@ -1225,7 +1199,6 @@ class TestToolEventProgress:
     async def test_webui_command_turn_does_not_schedule_title_generation(
         self,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         bus = MessageBus()
         provider = MagicMock()
@@ -1234,13 +1207,6 @@ class TestToolEventProgress:
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
         _attach_webui_runtime_events(loop, bus)
 
-        async def fake_title_after_turn(**_kwargs: object) -> bool:
-            raise AssertionError("command-only turns should not generate titles")
-
-        monkeypatch.setattr(
-            "nanobot.session.webui_turns.maybe_generate_webui_title_after_turn",
-            fake_title_after_turn,
-        )
         scheduled: list[object] = []
         loop.schedule_background = scheduled.append  # type: ignore[method-assign]
 

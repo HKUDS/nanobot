@@ -477,8 +477,66 @@
       "password": "Mật khẩu",
       "proxyReferenceAuth": "Thiết lập xác thực trong URL proxy được tham chiếu."
     },
+    "sandbox": {
+      "title": "Sandbox lệnh",
+      "method": "Cách cô lập",
+      "off": "Không cô lập",
+      "status": "Cấu hình đã lưu",
+      "check": "Kiểm tra sandbox",
+      "checking": "Đang kiểm tra…",
+      "scope": "Chỉ kiểm tra trình khởi chạy đã lưu bằng tệp tạm. Đây không phải kiểm toán bảo mật đầy đủ. Khởi động lại gateway để áp dụng thay đổi cho lệnh.",
+      "path": "Đường dẫn trình khởi chạy tin cậy",
+      "launcher": "trình khởi chạy sandbox",
+      "pathHelp": "Thông thường hãy để trống để tìm {{launcher}} trong hệ thống. Với cài đặt tùy chỉnh, hãy hỏi người duy trì gói về đường dẫn đầy đủ của trình khởi chạy. Tệp và thư mục cha phải thuộc root, không cho nhóm/người khác ghi, và nằm ngoài vùng ghi của Agent.",
+      "automatic": "Tìm trong hệ thống",
+      "checkError": "Chưa kiểm tra được. Mở lại cài đặt và thử lại.",
+      "saveError": "Không lưu được. Bản nháp được giữ lại; hãy thử lại.",
+      "disableTitle": "Tắt cô lập lệnh?",
+      "disableHelp": "Sau khi khởi động lại, lệnh chạy với quyền tài khoản gateway. Công cụ tệp cũng mất giới hạn vùng làm việc do sandbox này cung cấp; các giới hạn được đặt riêng vẫn có hiệu lực.",
+      "keep": "Giữ cô lập",
+      "disable": "Tắt cô lập",
+      "notice": {
+        "title": "Cần kiểm tra lệnh",
+        "missing": "Gateway không tìm thấy {{launcher}}. Nếu đã cài, hãy đặt đường dẫn đầy đủ. Nếu chưa, hãy liên hệ người duy trì gói hoặc quản trị viên. Bạn vẫn có thể trò chuyện.",
+        "path": "Gateway không thể dùng đường dẫn {{launcher}} đã cấu hình. Hãy kiểm tra đường dẫn đầy đủ và quyền truy cập.",
+        "permissions": "{{launcher}} không nằm ở vị trí được bảo vệ. Hãy liên hệ người duy trì gói hoặc quản trị viên.",
+        "startup": "{{launcher}} không khởi động được. Hãy kiểm tra cài đặt gateway và giới hạn hệ thống.",
+        "configurePath": "Đặt đường dẫn {{launcher}}",
+        "openSettings": "Mở cài đặt sandbox"
+      },
+      "states": {
+        "disabled": "Đã tắt lệnh",
+        "off": "Không cô lập",
+        "unsupported": "Không hỗ trợ",
+        "unchecked": "Chưa kiểm tra",
+        "unavailable": "Không khả dụng",
+        "passed": "Đạt kiểm tra cơ bản",
+        "checking": "Đang kiểm tra…"
+      },
+      "help": {
+        "disabled": "Bật lệnh để dùng sandbox.",
+        "off": "Lệnh chưa được cô lập. Chọn cách cô lập để bảo vệ máy chủ.",
+        "unsupported": "Hệ điều hành gateway không hỗ trợ cách này.",
+        "unchecked": "Chạy kiểm tra cấu hình sandbox đã lưu.",
+        "unsaved": "Lưu thay đổi rồi kiểm tra sandbox.",
+        "unavailable": "Không thể khởi chạy sandbox. Lệnh sẽ không chạy trong sandbox này.",
+        "passed": "Trình khởi chạy hoạt động, vùng làm việc tạm ghi được và tệp thử bên ngoài bị chặn.",
+        "checking": "Đang chạy kiểm tra sandbox có giới hạn thời gian…"
+      },
+      "reasons": {
+        "launcher_missing": "Gateway không tìm thấy {{launcher}}. Nếu đã cài, hãy nhập đường dẫn đầy đủ bên dưới. Nếu chưa, hãy liên hệ người duy trì gói hoặc quản trị viên.",
+        "path_not_absolute": "Nhập đường dẫn tuyệt đối, không phải tên lệnh.",
+        "not_executable": "Đường dẫn phải trỏ đến tệp thực thi.",
+        "agent_writable": "Agent có thể ghi vào đường dẫn này. Hãy nhờ người duy trì gói cung cấp vị trí cài đặt được bảo vệ.",
+        "unprotected_installation": "Người dùng không phải root có thể ghi vào trình khởi chạy hoặc thư mục cha. Nhờ quản trị viên cài ở vị trí được bảo vệ.",
+        "path_unavailable": "Không đọc được đường dẫn. Kiểm tra tệp và quyền truy cập trên gateway.",
+        "platform_unsupported": "Chọn cách cô lập được hệ điều hành gateway hỗ trợ.",
+        "probe_failed": "Kiểm tra thất bại. Kiểm tra cài đặt, hỗ trợ namespace của nhân và các mount bổ sung.",
+        "probe_timeout": "Hết thời gian. Kiểm tra cài đặt và giới hạn máy chủ rồi thử lại.",
+        "unknown": "Trình khởi chạy không khả dụng. Kiểm tra cài đặt và quyền truy cập."
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",
       "commandRuntime": {
         "custom": "Tùy chỉnh (giây)",
         "customLabel": "Thời gian chạy tùy chỉnh (giây)",
@@ -498,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "Tiếp tục thử lại", "help": "Thử lại khi lỗi có thể khắc phục; tắt để dùng cách thử lại tiêu chuẩn.\n\nTự động thử lại khi yêu cầu gửi đến mô hình gặp lỗi tạm thời. Tắt tùy chọn này để giới hạn số lần thử lại."},
         "agents_defaults_tool_hint_max_length": {"label": "Độ dài tóm tắt", "help": "Giới hạn ký tự tóm tắt hoạt động công cụ.\n\nĐộ dài tối đa của gợi ý ngắn về hoạt động công cụ."},
         "tools_max_session_messages_per_minute": {"label": "Tần suất tin nhắn", "help": "Số tin nhắn công cụ gửi đến một phiên mỗi phút tối đa.\n\nGiới hạn tần suất công cụ gửi tin nhắn vào cuộc trò chuyện."},
-        "agents_defaults_unified_session": {"label": "Phiên dùng chung", "help": "Chia sẻ lịch sử trò chuyện của một người dùng giữa các nền tảng.\n\nDùng chung một cuộc trò chuyện cho một người dùng trên nhiều nền tảng."},
         "tools_exec_enable": {"label": "Công cụ shell", "help": "Cho phép agent chạy lệnh Shell.\n\nCho phép tác nhân chạy lệnh shell."},
         "tools_file_enable": {"label": "Công cụ tệp", "help": "Cho phép công cụ đọc và chỉnh sửa tệp tích hợp.\n\nCho phép dùng công cụ đọc và chỉnh sửa tệp tích hợp."},
         "tools_web_enable": {"label": "Truy cập web", "help": "Cho phép tìm kiếm web và đọc trang.\n\nCho phép tìm kiếm và tải nội dung trang web."},
@@ -526,8 +583,6 @@
         "gateway_host": {"label": "Địa chỉ gateway", "help": "Địa chỉ gateway; đặt địa chỉ lắng nghe WebUI riêng.\n\nĐịa chỉ gateway dùng để nhận kết nối. Địa chỉ WebSocket và WebUI được cấu hình trong Kênh → WebSocket."},
         "gateway_port": {"label": "Cổng gateway", "help": "Cổng gateway; tham số khởi chạy được ưu tiên.\n\nCổng được lưu. Tham số dòng lệnh được ưu tiên."},
         "gateway_restart_mode": {"label": "Chế độ khởi động lại", "help": "Chọn cách khởi động lại; Tự động dựa theo môi trường.\n\nCách khởi động lại tiến trình. Chế độ tự động chọn theo môi trường máy chủ."},
-        "api_host": {"label": "Địa chỉ API", "help": "Đặt khóa trước khi cho phép truy cập mạng; khởi động lại API sau thay đổi.\n\nCần khóa API khi nhận kết nối trên địa chỉ khác localhost. Đặt khóa trong Hệ thống rồi khởi động lại dịch vụ API để áp dụng thay đổi."},
-        "api_timeout": {"label": "Thời hạn API", "help": "Số giây mỗi yêu cầu API tối đa; khởi động lại để áp dụng.\n\nThời gian tối đa của yêu cầu. Khởi động lại dịch vụ API để áp dụng."},
         "tools_image_generation_save_dir": {"label": "Thư mục lưu", "help": "Đường dẫn tương đối trong thư mục media; không chuyển ảnh có sẵn.\n\nĐường dẫn tương đối trong thư mục phương tiện của nanobot. Ảnh hiện có không bị di chuyển."}
       },
       "groups": {
@@ -544,7 +599,6 @@
         "safety": {"title": "Quyền chung", "help": "Đặt giới hạn vùng làm việc, ngoại lệ mạng và cài đặt từ xa.\n\nGiới hạn không gian làm việc, mạng riêng và cài đặt từ xa."},
         "cli": {"title": "Giới hạn CLI", "help": "Đặt thời hạn cài đặt, chạy và thời gian cache danh sách.\n\nGiới hạn thời gian cài đặt, thực thi và lưu đệm danh mục."},
         "gateway": {"title": "Gateway", "help": "Đặt cách triển khai và khởi động lại."},
-        "api": {"title": "Thiết lập API", "help": "Đặt địa chỉ lắng nghe và thời hạn yêu cầu."},
         "storage": {"title": "Lưu trữ ảnh", "help": "Chọn nơi lưu ảnh được tạo."},
         "maintenance": {"title": "Sắp xếp bộ nhớ", "help": ""},
         "web": {"title": "Truy cập web", "help": ""},
@@ -655,7 +709,7 @@
       "small": "Nhỏ",
       "standard": "Tiêu chuẩn",
       "large": "Lớn",
-      "previewText": "**Một chút không gian để suy nghĩ.**\n\nCâu chữ rõ ràng, đọc thật thoải mái. Biến không gian này thành của riêng bạn.",
+      "previewText": "Câu chữ rõ ràng, đọc thật thoải mái. Biến không gian này thành của riêng bạn.",
       "previewPlaceholder": "Chúng ta nên bắt đầu từ đâu?",
       "process": "Hiển thị hoạt động",
       "processHelp": "Chọn mức độ chi tiết hiển thị khi nanobot làm việc.",
@@ -881,18 +935,19 @@
       "shortTitle": "Mức dùng token",
       "viewDetails": "Xem chi tiết",
       "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",
-      "cacheRateHelp": "Tỷ lệ không tính đầu vào có trạng thái bộ nhớ đệm không rõ.",
       "dailyTrend": "Token mỗi ngày",
       "systemHelp": "Gồm tác vụ nội bộ và lệnh gọi chưa ghi nguồn.",
       "bySource": "Mức dùng theo nguồn",
       "modelTrend": "Xu hướng mô hình",
       "modelsUnavailable": "Chưa có chi tiết theo mô hình.",
-      "otherModels": "Khác / chưa phân loại",
+      "otherModels": "Mô hình khác",
       "unclassified": "Chưa phân loại",
       "unavailable": "Không có dữ liệu sử dụng.",
       "noActivity": "Không có token nào được sử dụng trong 30 ngày qua.",
+      "last30Days": "30 ngày qua",
       "cachedInput": "Đầu vào có trong bộ nhớ đệm",
       "cacheMiss": "Không khớp cache",
+      "cacheWrite": "Ghi bộ nhớ đệm",
       "cacheUnknown": "Trạng thái chưa rõ",
       "outputTokens": "Đầu ra",
       "otherTokens": "Token khác",
@@ -905,7 +960,9 @@
         "cron": "Tự động hóa",
         "dream": "Sắp xếp bộ nhớ",
         "system": "Lượt gọi phụ trợ"
-      }
+      },
+      "failedRequests": "{{count}} lần lỗi",
+      "estimatedShare": "{{percent}} token là ước tính"
     },
     "providers": {
       "manageProviders": "Quản lý nhà cung cấp",
@@ -1178,15 +1235,6 @@
         "github": "Quản lý kho mã, issue và PR.",
         "supabase": "Xem và quản lý dự án."
       }
-    },
-    "api": {
-      "title": "Máy chủ API", "openaiCompatible": "API tương thích OpenAI", "description": "Kết nối qua API tương thích OpenAI.",
-      "start": "Khởi động API", "starting": "Đang khởi động...", "stop": "Dừng", "stopping": "Đang dừng...",
-      "access": "Truy cập", "thisDevice": "Thiết bị này", "localNetwork": "Mạng nội bộ",
-      "localHelp": "Chỉ thiết bị này có thể kết nối.", "networkHelp": "Truy cập LAN cần khóa API.\n\nThiết bị khác có thể kết nối; cần khóa API.",
-      "port": "Cổng", "portHelp": "Cổng cục bộ dịch vụ API sử dụng.", "apiKey": "Khóa API", "apiKeyHelp": "Gửi khóa dưới dạng Bearer Token.",
-      "apiKeyRequired": "Bắt buộc trước khi mở API ra mạng.", "apiKeyPlaceholder": "Nhập khóa API",
-      "autoInstall": "Các gói cần thiết cho máy chủ API sẽ được cài tự động khi khởi động."
     },
     "observability": {
       "title": "Theo dõi chạy", "configured": "nanobot đã có thông tin xác thực để ghi lại quá trình xử lý.",
@@ -1752,8 +1800,6 @@
       },
       "interruptedHelp": "Máy chủ khởi động lại trước khi tác vụ hoàn thành. Tác vụ không tự động chạy lại.",
       "workTitle": "Tác vụ con",
-      "otherWorkTitle": "Tác vụ khác",
-      "unlinkedHelp": "Không tìm thấy yêu cầu tương ứng với các tác vụ này trong tin nhắn đang hiển thị.",
       "progress": "Hoàn thành {{completed}} / {{total}}",
       "running": "Đang chạy: {{count}}",
       "finished": "Đã kết thúc: {{count}}",

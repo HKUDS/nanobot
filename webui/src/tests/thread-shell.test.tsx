@@ -88,7 +88,6 @@ function makeClient() {
     },
     getRunState: lifecycle.getRunState.bind(lifecycle),
     restorePendingRun: lifecycle.restorePendingRun.bind(lifecycle),
-    getRunStartedAt: lifecycle.getRunStartedAt.bind(lifecycle),
     getRunTurnId: lifecycle.getRunTurnId.bind(lifecycle),
     isRunCompleted: lifecycle.isRunCompleted.bind(lifecycle),
     finishRunLocally: vi.fn(lifecycle.finishRunLocally.bind(lifecycle)),
@@ -96,6 +95,7 @@ function makeClient() {
     getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
     canReconcileCanonicalCompletion,
     reconcileCanonicalCompletion,
+    settleFragmentRunLifecycle: vi.fn(lifecycle.settleFragmentRunLifecycle.bind(lifecycle)),
     fenceCanonicalCompletedTurns: lifecycle.fenceCanonicalCompletedTurns.bind(lifecycle),
     getGoalState: lifecycle.getGoalState.bind(lifecycle),
     onTranscript: lifecycle.onTranscript.bind(lifecycle),
@@ -245,7 +245,7 @@ function streamedThreadPayload(
         projection_id: `answer:${row.turnId}:${row.streamId}:${endSeq}`,
         turn_id: row.turnId, turn_phase: "answer", turn_seq: endSeq,
         stream_id: row.streamId, text: row.content,
-        projection_receipts: [{ turn_id: row.turnId, ranges: [[textSeq, endSeq]] }],
+        text_from_seq: textSeq,
         ...(row.mergeNext ? { resuming: true, merge_next: true } : {}),
       });
     }
@@ -438,7 +438,6 @@ function modelSettings(model: string, provider: string): SettingsPayload {
       dream: {
         schedule: "every 2h",
       },
-      unified_session: false,
     },
     advanced: {
       restrict_to_workspace: false,
@@ -545,6 +544,81 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
   });
 
+  it("queries only rendered task history as loaded pages and navigation windows change", async () => {
+    const client = makeClient();
+    const chatId = "task-window-pages";
+    const rows = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({
+      id: `${prefix}${index}`, role: "user" as const, content: `${prefix} prompt ${index}`, turnId: `${prefix}t${index}`,
+    }));
+    let resolveInitial!: (response: Response) => void;
+    const seen: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/subagents")) {
+        seen.push(url);
+        return Promise.resolve(httpJson({ tasks: [] }));
+      }
+      if (url.pathname.endsWith("/prompts")) return Promise.resolve(httpJson({ prompts: [{
+        id: "nav2", preview: "nav prompt 2", answerPreview: "", createdAt: 1,
+        cursor: "nav", turnId: "navt2",
+      }] }));
+      if (url.pathname.endsWith("/webui-thread")) {
+        if (url.searchParams.get("before") === "older") return Promise.resolve(httpJson({
+          ...transcriptFromSimpleMessages(rows("old", 5)),
+          page: { has_more_before: false, user_message_offset: 0 },
+        }));
+        if (url.searchParams.get("after") === "nav") return Promise.resolve(httpJson({
+          ...transcriptFromSimpleMessages(rows("nav", 3)),
+          page: { has_more_before: false, has_more_after: true },
+        }));
+        return new Promise<Response>((resolve) => { resolveInitial = resolve; });
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    }));
+    const { container } = render(<StrictMode>{wrap(client, <ThreadShell session={session(chatId)} title="Task pages"
+      onToggleSidebar={() => {}} />, null, "tok", ["webui.prompt-navigation.v1", "webui.subagents.v1", "webui.subagents.events.v1"])}</StrictMode>);
+    await waitFor(() => expect(resolveInitial).toBeTypeOf("function"));
+    expect(seen).toHaveLength(0);
+    act(() => client._emitChat(chatId, { event: "subagent_task", chat_id: chatId, task: {
+      task_id: "live-during-load", revision: 1, label: "Live during load", task_description: "Background work",
+      origin_turn_id: "elsewhere", origin_message_id: null, created_at: 100, completed_at: null,
+      state: "running", phase: "awaiting_model", elapsed_seconds: 2, iteration: 1, tool_events: [],
+      usage: null, receipts: {}, result: null, partial: false, stop_reason: null, error: null,
+    } }));
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    await act(async () => resolveInitial(httpJson({ ...transcriptFromSimpleMessages(rows("new", 5)),
+      page: { before_cursor: "older", has_more_before: true, user_message_offset: 5 },
+    })));
+    await screen.findByText("new prompt 4");
+    await waitFor(() => expect(seen).toHaveLength(1));
+    expect(seen[0].searchParams.getAll("turn_id")).toEqual(rows("new", 5).map(row => row.turnId));
+    expect(seen[0].searchParams.getAll("track")).toEqual(["live-during-load"]);
+
+    const scroller = container.querySelector(".thread-message-viewport") as HTMLElement;
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2400 }, clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    fireEvent.keyDown(scroller, { key: "Home" });
+    await screen.findByText("old prompt 0");
+    await waitFor(() => expect(seen).toHaveLength(2));
+    expect(seen[1].searchParams.getAll("turn_id")).toEqual(rows("old", 5).map(row => row.turnId));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Message navigation" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Jump to message: nav prompt 2" }));
+    await screen.findByText("nav prompt 2");
+    await waitFor(() => expect(seen).toHaveLength(3));
+    expect(seen[2].searchParams.getAll("turn_id")).toEqual(rows("nav", 3).map(row => row.turnId));
+    fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
+    await screen.findByText("new prompt 4");
+    await act(async () => { await Promise.resolve(); });
+    expect(seen).toHaveLength(3);
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(seen).toHaveLength(4));
+    const latest = [...rows("old", 5), ...rows("new", 5)];
+    expect(seen[3].searchParams.getAll("turn_id")).toEqual(latest.map(row => row.turnId));
+  });
+
   it("keeps the dock and task events alive after the parent response finishes", async () => {
     const client = makeClient();
     const snapshot: SubagentTaskSnapshot = {
@@ -554,7 +628,7 @@ describe("ThreadShell", () => {
       usage: null, receipts: {}, result: null, partial: false, stop_reason: null, error: null,
     };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [snapshot] });
+      if (new URL(String(input), "http://localhost").pathname.endsWith("/subagents")) return httpJson({ tasks: [snapshot] });
       if (String(input).includes("/webui-thread")) return httpJson(transcriptFromSimpleMessages([
         { role: "user", content: "Delegate inspection", turnId: "parent-turn" },
       ]));
@@ -584,7 +658,7 @@ describe("ThreadShell", () => {
   it("renders one persisted task entry at the initiating prompt through the full shell", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [{
+      if (new URL(String(input), "http://localhost").pathname.endsWith("/subagents")) return httpJson({ tasks: [{
         task_id: "completed-task", label: "Inspect settings", task_description: "Inspect settings",
         origin_turn_id: "delegation-turn", origin_message_id: null, created_at: 100, completed_at: 102,
         state: "done", phase: "done", elapsed_seconds: 2, iteration: 1, tool_events: [],
@@ -1032,6 +1106,41 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument());
   });
 
+  it("closes the context sidebar when starting a new conversation", async () => {
+    const client = makeClient();
+    const envelope = { chat_id: "live-usage", turn_id: "live-turn" };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => Promise.resolve(
+      String(input).includes("websocket%3Alive-usage/webui-thread")
+        ? httpJson({ schemaVersion: 3, projection: "events", active_turn_id: "live-turn", has_pending_tool_calls: true,
+            events: [{ ...envelope, event: "user_message", text: "Waiting for answer", starts_turn: true, turn_seq: 0 }] })
+        : { ok: false, status: 404, json: async () => ({}) },
+    )));
+    const footer = document.createElement("div");
+    document.body.append(footer);
+    const view = render(wrap(client, <ThreadShell composerPortalTarget={footer}
+      session={session("live-usage")} title="Live usage" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")} />));
+    await screen.findByText("Waiting for answer");
+    act(() => client._emitChat("live-usage", { ...envelope, event: "model_request", request_id: "first", run_id: "run",
+      phase: "completed", sequence: 1, turn_seq: 1, context_window_tokens: 1000,
+      usage: { prompt_tokens: 100, context_tokens: 100 },
+      context_graph: { nodes: [{ path: "/first.md", name: "first.md", state: "loaded", tokens: 40 }], edges: [] },
+    }));
+    const trigger = await screen.findByTestId("composer-context-usage");
+    const host = document.querySelector(".thread-preview-layout")!;
+    Object.defineProperty(host, "clientWidth", { value: 1000 });
+    fireEvent(window, new Event("resize"));
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("button", { name: "first.md" })).toBeInTheDocument();
+    expect(screen.getByTestId("context-sidebar")).toBeInTheDocument();
+    await act(async () => view.rerender(wrap(client, <ThreadShell composerPortalTarget={footer}
+      session={null} title="New conversation" onToggleSidebar={() => {}}
+      settingsSnapshot={modelSettings("test-model", "deepseek")} />)));
+    await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
+    expect(footer).toContainElement(screen.getByRole("textbox"));
+    footer.remove();
+  });
+
   it.each([false, true])("switches context in the same side slot unless multiple panes are visible (%s)", async (multiplePanes) => {
     const geometry = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       const bottom = this.classList.contains("thread-preview-layout") ? 900
@@ -1165,11 +1274,16 @@ describe("ThreadShell", () => {
     expect(screen.getByRole("button", { name: "Play context history" })).toBeEnabled();
     expect(screen.getByText("Waiting for answer")).toBeInTheDocument();
     const sidebar = screen.getByTestId("context-sidebar");
+    // HappyDOM has no CSS timeline; retain a real pending exit for the close assertions.
+    let finishExit!: () => void;
+    const finished = new Promise<void>((resolve) => { finishExit = resolve; });
+    Object.defineProperty(sidebar, "getAnimations", { value: () => [{ finished }] });
     fireEvent.click(trigger);
     expect(screen.getByTestId("context-sidebar")).toBe(sidebar);
     expect(sidebar).toHaveAttribute("data-closing");
     expect(footer).toContainElement(input);
     expect(input).toHaveValue("Preserve this draft");
+    await act(async () => finishExit());
     await waitFor(() => expect(screen.queryByTestId("context-sidebar")).not.toBeInTheDocument());
     view.unmount();
     footer.remove();
@@ -1663,6 +1777,44 @@ describe("ThreadShell", () => {
     expect(screen.getByText("Default")).toBeInTheDocument();
     await openMessageActions("Reply from the actual provider");
     expect(await screen.findByText("backup")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["bwrap", "MacIntel", "Bubblewrap (bwrap)", "Configure bwrap path"],
+    ["seatbelt", "Linux x86_64", "macOS Seatbelt (sandbox-exec)", "Configure sandbox-exec path"],
+  ] as const)("uses the gateway's %s launcher and links to its path editor", async (backend, browserPlatform, launcher, action) => {
+    const platform = vi.spyOn(navigator, "platform", "get").mockReturnValue(browserPlatform);
+    try {
+      const client = makeClient();
+      const openSettings = vi.fn();
+      const settings = modelSettings("test-model", "deepseek");
+      settings.advanced.exec_sandbox_status = {
+        state: "unavailable", reason: "launcher_missing", launcher: null,
+        revision: "gateway-launcher", supported_backend: backend,
+      };
+      render(wrap(client, <ThreadShell session={session("sandbox-notice")} title="Sandbox notice"
+        onToggleSidebar={() => {}} settingsSnapshot={settings} onOpenSandboxSettings={openSettings}
+      />, undefined, "tok", ["webui.sandbox-settings.v1"]));
+      const input = await screen.findByRole("textbox");
+      fireEvent.change(input, { target: { value: "Keep my draft" } });
+      input.focus();
+      act(() => {
+        client._emitChat("sandbox-notice", { event: "user_message", chat_id: "sandbox-notice",
+          turn_id: "sandbox-turn", starts_turn: true, text: "Run a command" });
+        client._emitChat("sandbox-notice", { event: "message", chat_id: "sandbox-notice", text: "",
+          turn_id: "sandbox-turn", kind: "progress", tool_events: [{
+            name: "exec", phase: "error", error_code: "sandbox_launcher_missing", call_id: "sandbox-command",
+          }] });
+      });
+      const banner = (await screen.findByRole("button", { name: action })).closest<HTMLElement>('[role="status"]')!;
+      expect(banner).toHaveTextContent(launcher);
+      expect(input).toHaveFocus();
+      fireEvent.click(within(banner).getByRole("button", { name: action }));
+      expect(openSettings).toHaveBeenCalledWith("sandbox-launcher");
+      expect(input).toHaveValue("Keep my draft");
+    } finally {
+      platform.mockRestore();
+    }
   });
 
   it("shows a dismissible, session-scoped fallback notice without changing the composer preset", async () => {
@@ -3186,7 +3338,7 @@ describe("ThreadShell", () => {
     );
   });
 
-  it("recovers an uncommitted reset lineage on the next canonical hydrate", async () => {
+  it("adopts a disjoint latest window immediately when returning to a cached session", async () => {
     const client = makeClient();
     let chatACalls = 0;
     vi.stubGlobal(
@@ -3232,8 +3384,8 @@ describe("ThreadShell", () => {
     rerender(view("lineage-chat-a"));
     await waitFor(() => expect(chatACalls).toBe(2));
 
-    expect(screen.getByText("committed old lineage")).toBeInTheDocument();
-    expect(screen.queryByText("disjoint new lineage")).not.toBeInTheDocument();
+    expect(await screen.findByText("disjoint new lineage")).toBeInTheDocument();
+    expect(screen.queryByText("committed old lineage")).not.toBeInTheDocument();
 
     act(() => client._emitSessionUpdate("lineage-chat-a", "thread"));
 
@@ -4117,7 +4269,7 @@ describe("ThreadShell", () => {
     act(() => client._emitSessionUpdate("visibility-complete-a", "thread"));
     await waitFor(() => expect(screen.getByText("completed while hidden")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
-    expect(client.getRunStartedAt("visibility-complete-a")).toBeNull();
+    expect(client.getRunState("visibility-complete-a").startedAt).toBeNull();
 
     rerender(view("visibility-complete-b"));
     await waitFor(() => expect(screen.getByText("other thread")).toBeInTheDocument());
@@ -4224,7 +4376,7 @@ describe("ThreadShell", () => {
       expect(screen.getByText("saved answer prefix")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument();
       expect(client.reconcileCanonicalCompletion).not.toHaveBeenCalled();
-      expect(client.getRunStartedAt(chatId)).toBe(1_700);
+      expect(client.getRunState(chatId).startedAt).toBe(1_700);
 
       const input = screen.getByRole("textbox", { name: "Message input" });
       fireEvent.change(input, { target: { value: "queued guidance" } });
@@ -4491,7 +4643,7 @@ describe("ThreadShell", () => {
     ));
   });
 
-  it("keeps the live answer cursor when a resumed turn is still running", async () => {
+  it("catches up the active answer and keeps its cursor when a resumed turn is still running", async () => {
     const client = makeClient();
     let historyCalls = 0;
     const turnId = "turn-active-resume";
@@ -4567,6 +4719,7 @@ describe("ThreadShell", () => {
     expect(client.sendMessage).not.toHaveBeenCalled();
     act(() => client._emitStatus("open"));
     await waitFor(() => expect(historyCalls).toBe(2));
+    await screen.findByText("partial answer missed");
     expect(client.sendMessage).not.toHaveBeenCalled();
 
     act(() => {
@@ -4578,7 +4731,7 @@ describe("ThreadShell", () => {
       });
     });
 
-    await waitFor(() => expect(screen.getByText("partial answer resumed")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("partial answer missed resumed")).toBeInTheDocument());
     expect(screen.queryByText(" resumed")).not.toBeInTheDocument();
     expect(client.sendMessage).not.toHaveBeenCalled();
 

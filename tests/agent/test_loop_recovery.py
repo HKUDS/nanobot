@@ -13,6 +13,7 @@ from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.runtime_context import public_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import (
@@ -71,7 +72,7 @@ async def test_committed_model_failure_continues_with_tool_results_without_resen
     monkeypatch.setattr(read_tool, "execute", execute)
     request = InboundMessage(
         channel="websocket", sender_id="user", chat_id="chat", content="Read the note and summarize it",
-        metadata={"webui": True, "webui_turn_id": "request-1"},
+        metadata={"webui": True, "webui_turn_id": "request-1", "message_id": "original-input"},
     )
     try:
         with coordinator.connected():
@@ -83,9 +84,20 @@ async def test_committed_model_failure_continues_with_tool_results_without_resen
             await loop._dispatch_one(bus.inbound.get_nowait(), asyncio.Queue())
         final = await sessions.state.get(request.session_key)
         assert final.metadata[RECOVERY_METADATA_KEY]["status"] == "recovered"
+        answer = next(row for row in final.messages if row.get("content") == "Finished from the saved result.")
+        user = next(row for row in final.messages if row.get("role") == "user")
+        assert user["input_id"]
+        assert answer["response_input_ids"] == [user["input_id"]]
         assert execute.await_count == 1
         assert sum(message.get("role") == "user" for message in final.messages) == 1
         assert any(message.get("role") == "tool" and "saved evidence" in message["content"] for message in requests[-1]["messages"])
+        continuation = requests[-1]["messages"][-1]
+        assert continuation["_hidden_history"] == {"kind": "internal_continuation"}
+        # The marker is runner bookkeeping, not part of an OpenAI-compatible wire request.
+        wire_messages = OpenAICompatProvider._sanitize_messages(
+            OpenAICompatProvider(api_key="test"), requests[-1]["messages"], model="test-model",
+        )
+        assert all("_hidden_history" not in row for row in wire_messages)
         assert requests[0]["messages"][0] == requests[-1]["messages"][0]
         assert requests[0]["tools"] == requests[-1]["tools"]
         assert requests[-1]["messages"][:len(requests[1]["messages"])] == requests[1]["messages"]
@@ -115,7 +127,6 @@ async def test_recovery_continuation_runs_without_a_sustained_goal(
 
     loop = AgentLoop.__new__(AgentLoop)
     loop.sessions = sessions
-    loop._unified_session = False
     loop._recovery_admission = recovery
     loop._session_locks = {}
     loop._concurrency_gate = None
@@ -542,3 +553,80 @@ async def test_new_input_waits_for_real_recovery_cancellation_before_reading_dra
         assert RUNTIME_CHECKPOINT_KEY not in saved.metadata
     finally:
         await reopened.state.aclose()
+
+
+@pytest.mark.asyncio
+async def test_length_recovery_retains_original_prompt_attribution(tmp_path: Path, history) -> None:
+    bus = MessageBus()
+    sessions = history.sessions
+    session = sessions.get_or_create("websocket:chat")
+    session.metadata["title"] = "Saved recovery"
+    sessions.save(session)
+    recovery = RecoveryCoordinator(sessions, bus)
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.can_resume_conversation_state.return_value = False
+    requests = []
+    responses = iter([
+        LLMResponse(content=None, reasoning_content="thinking", finish_reason="length"),
+        LLMResponse(content="network failure", finish_reason="error", error_kind="connection"),
+        LLMResponse(content="Recovered answer"),
+    ])
+
+    async def respond(**kwargs):
+        requests.append(deepcopy(kwargs["messages"]))
+        return next(responses)
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+                     session_manager=sessions, recovery_admission=recovery)
+    loop.turn_delivery_factory = TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(sessions))
+    coordinator = WebuiTurnCoordinator(bus, sessions, loop.schedule_background, recovery=recovery)
+    request = InboundMessage(channel="websocket", sender_id="user", chat_id="chat", content="Original question",
+                             metadata={"webui": True, "webui_turn_id": "original", "message_id": "original"})
+    recorder = WebUITranscriptRecorder(sessions)
+    try:
+        await recorder.prepare_and_append("chat", {"event": "user", "chat_id": "chat", "text": request.content},
+                                          metadata=await history.metadata("chat", request.metadata))
+        with coordinator.connected():
+            await loop._dispatch_one(request, asyncio.Queue())
+            state = (await sessions.state.get(request.session_key)).metadata[RECOVERY_METADATA_KEY]
+            assert state["status"] == "awaiting_user"
+            persisted = SessionManager(tmp_path).get_or_create(request.session_key)
+            assert any(row.get("_hidden_history") == {"kind": "internal_continuation"} for row in persisted.messages)
+            await recovery.handle_action("continue", {"chat_id": "chat", "recovery_id": state["recovery_id"]})
+            await loop._dispatch_one(bus.inbound.get_nowait(), asyncio.Queue())
+        final = SessionManager(tmp_path).get_or_create(request.session_key)
+        answer = next(row for row in final.messages if row.get("content") == "Recovered answer")
+        assert answer["response_input_ids"] == ["user:original"]
+        outbound = [bus.outbound.get_nowait() for _ in range(bus.outbound.qsize())]
+        delivered = next(row for row in outbound if row.content == "Recovered answer")
+        await recorder.prepare_and_append("chat", {"event": "message", "chat_id": "chat", "text": delivered.content},
+                                          metadata=await history.metadata("chat", delivered.metadata), include_source=True)
+        assert history.prompts(request.session_key)[0]["answerPreview"] == "Recovered answer"
+        wire = OpenAICompatProvider._sanitize_messages(OpenAICompatProvider(api_key="test"), requests[-1], model="test-model")
+        assert all("_hidden_history" not in row for row in wire)
+    finally:
+        await loop.aclose()
+
+
+def test_persisted_automation_input_blocks_prior_prompt_attribution(tmp_path: Path) -> None:
+    from nanobot.agent.runner import AgentRunner
+    from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
+
+    sessions = SessionManager(tmp_path)
+    session = sessions.get_or_create("websocket:chat")
+    session.add_message("user", "Original question", input_id="user:original")
+    session.add_message("assistant", "Original answer")
+    session.add_message("user", "Scheduled task", **{AUTOMATION_HISTORY_META: True})
+    session.add_message("assistant", "Thinking", reasoning_content="thinking")
+    session.add_message("user", "Continue", _hidden_history={"kind": "internal_continuation"})
+    sessions.save(session)
+    replay = SessionManager(tmp_path).get_or_create("websocket:chat").get_history()
+    assert AgentRunner._response_input_ids(replay) == ()
+    assert replay[-1]["_hidden_history"] == {"kind": "internal_continuation"}
+    public = session.get_history(include_runtime_context=False)
+    assert all("_hidden_history" not in row for row in public)
+    wire = OpenAICompatProvider._sanitize_messages(OpenAICompatProvider(api_key="test"), replay, model="test-model")
+    assert all("_hidden_history" not in row and AUTOMATION_HISTORY_META not in row for row in wire)

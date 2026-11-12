@@ -477,8 +477,66 @@
       "password": "密码",
       "proxyReferenceAuth": "请在引用的代理 URL 中设置认证信息。"
     },
+    "sandbox": {
+      "title": "命令沙箱",
+      "method": "隔离方式",
+      "off": "不隔离",
+      "status": "已保存配置",
+      "check": "检测沙箱",
+      "checking": "检测中…",
+      "scope": "仅使用临时文件检测已保存的启动器，不代表完整安全审计。保存后需重启网关，命令执行才会使用新配置。",
+      "path": "可信启动器路径",
+      "launcher": "沙箱启动器",
+      "pathHelp": "通常留空，由系统自动查找 {{launcher}}。特殊安装请向安装包维护者索取启动器的完整路径。文件及上级目录须归 root 所有、不可被组或其他用户写入，且不在 Agent 可写范围内。",
+      "automatic": "系统自动查找",
+      "checkError": "检测未完成，请重新打开设置后重试。",
+      "saveError": "保存失败，草稿已保留，请重试。",
+      "disableTitle": "关闭命令隔离？",
+      "disableHelp": "重启后，命令将以网关账号的权限直接运行。文件工具也会失去此沙箱附带的目录限制；单独设置的目录限制仍然保留。",
+      "keep": "保留隔离",
+      "disable": "关闭隔离",
+      "notice": {
+        "title": "命令暂时不可用",
+        "missing": "网关未找到 {{launcher}}。已安装请填写完整路径；未安装请联系安装包维护者或管理员。聊天仍可继续。",
+        "path": "网关无法使用配置的 {{launcher}} 路径。请检查完整路径和访问权限。",
+        "permissions": "{{launcher}} 所在位置不符合安全要求。请联系安装包维护者或管理员。",
+        "startup": "{{launcher}} 未能启动。请检查网关的安装和系统限制。",
+        "configurePath": "配置 {{launcher}} 路径",
+        "openSettings": "打开沙箱设置"
+      },
+      "states": {
+        "disabled": "命令已停用",
+        "off": "未隔离",
+        "unsupported": "系统不支持",
+        "unchecked": "尚未检测",
+        "unavailable": "不可用",
+        "passed": "基础检测通过",
+        "checking": "检测中…"
+      },
+      "help": {
+        "disabled": "启用命令执行后可使用沙箱。",
+        "off": "命令未隔离，可选择隔离方式保护宿主机。",
+        "unsupported": "网关所在系统不支持此隔离方式。",
+        "unchecked": "点击检测沙箱，验证已保存的配置。",
+        "unsaved": "请先保存配置，再检测沙箱。",
+        "unavailable": "沙箱无法启动，命令不会在此沙箱中执行。",
+        "passed": "启动器可运行，临时工作区可写，外部测试文件访问已被阻止。",
+        "checking": "正在进行有时间限制的沙箱测试…"
+      },
+      "reasons": {
+        "launcher_missing": "网关未找到 {{launcher}}。已安装请在下方填写完整路径；未安装请联系安装包维护者或管理员。",
+        "path_not_absolute": "请填写绝对路径，而不是命令名称。",
+        "not_executable": "该路径必须指向可执行文件。",
+        "agent_writable": "启动器位于 Agent 可写范围，请联系安装包维护者提供受保护的安装位置。",
+        "unprotected_installation": "启动器或上级目录可被非 root 用户写入，请联系管理员调整安装位置。",
+        "path_unavailable": "无法读取路径，请确认文件在网关上存在且可访问。",
+        "platform_unsupported": "请选择网关所在系统支持的隔离方式。",
+        "probe_failed": "隔离测试失败，请检查启动器安装、内核命名空间支持和额外挂载。",
+        "probe_timeout": "检测超时，请检查启动器安装和宿主机限制后重试。",
+        "unknown": "启动器不可用，请检查安装和访问权限。"
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "已保存，重启 API 服务后生效。",
       "commandRuntime": {
         "custom": "自定义（秒）",
         "customLabel": "自定义运行时长（秒）",
@@ -530,10 +588,6 @@
         "tools_max_session_messages_per_minute": {
           "label": "消息频率",
           "help": "工具每分钟向同一会话发消息的上限"
-        },
-        "agents_defaults_unified_session": {
-          "label": "共享会话",
-          "help": "同一用户的跨平台对话共用记录\n\n让同一用户在不同聊天平台的对话共用会话记录。"
         },
         "tools_exec_enable": {
           "label": "执行命令",
@@ -643,14 +697,6 @@
           "label": "重启模式",
           "help": "选择重启方式，自动按环境决定\n\n选择网关的重启方式。“自动”会根据运行环境选择。"
         },
-        "api_host": {
-          "label": "API 地址",
-          "help": "对外开放须设密钥；修改后重启 API\n\n允许其他设备连接前，请先在“系统”中设置 API 密钥。修改后需重启 API 服务。"
-        },
-        "api_timeout": {
-          "label": "API 超时",
-          "help": "API 最长等待秒数，重启服务生效\n\n每次 API 请求最长等待多久。修改后需重启 API 服务。"
-        },
         "tools_image_generation_save_dir": {
           "label": "保存目录",
           "help": "媒体目录内相对路径，不迁移已有图片\n\nnanobot 媒体目录内的子目录。请使用相对路径，已有图片不会迁移。"
@@ -708,10 +754,6 @@
         "gateway": {
           "title": "网关",
           "help": "设置部署和重启方式"
-        },
-        "api": {
-          "title": "API 设置",
-          "help": "设置监听地址和请求超时"
         },
         "storage": {
           "title": "图片存储",
@@ -902,7 +944,7 @@
       "small": "小",
       "standard": "标准",
       "large": "大",
-      "previewText": "**给思考留一点空间。**\n\n清晰的文字，舒服的节奏。让每一个想法，都有自在展开的空间。",
+      "previewText": "清晰的文字，舒服的节奏。让每一个想法，都有自在展开的空间。",
       "previewPlaceholder": "接下来，想聊点什么？",
       "process": "过程展示",
       "processHelp": "选择 nanobot 工作时展示多少细节。",
@@ -1281,17 +1323,18 @@
       "shortTitle": "Token 用量",
       "viewDetails": "查看详情",
       "cacheHitRate": "缓存命中率",
-      "cacheRateHelp": "缓存命中率仅统计缓存状态已知的输入。",
       "dailyTrend": "每日 Token",
       "bySource": "用量来源",
       "modelTrend": "模型趋势",
       "modelsUnavailable": "暂无模型用量明细。",
-      "otherModels": "其他模型 / 未分类",
+      "otherModels": "其他模型",
       "unclassified": "未分类",
       "unavailable": "暂时无法获取用量数据。",
       "noActivity": "近 30 天暂无 Token 用量。",
+      "last30Days": "近 30 天",
       "cachedInput": "缓存命中",
       "cacheMiss": "未命中",
+      "cacheWrite": "缓存写入",
       "cacheUnknown": "状态未知",
       "outputTokens": "输出",
       "otherTokens": "其他 Token",
@@ -1305,7 +1348,9 @@
         "dream": "记忆整理",
         "system": "辅助调用"
       },
-      "systemHelp": "包括内部任务和未标注来源的调用"
+      "systemHelp": "包括内部任务和未标注来源的调用",
+      "failedRequests": "{{count}} 次失败",
+      "estimatedShare": "{{percent}} 的 Token 为本地估算"
     },
     "providers": {
       "manageProviders": "管理提供商",
@@ -1373,27 +1418,6 @@
       "searchSupport": "搜索服务支持包",
       "searchInstallOnSave": "保存时会自动安装 Olostep 所需的软件包。",
       "installing": "正在安装所需软件包…"
-    },
-    "api": {
-      "title": "API 服务",
-      "openaiCompatible": "OpenAI 兼容 API",
-      "description": "通过兼容 OpenAI 的 API 连接",
-      "start": "启动 API 服务",
-      "starting": "正在启动...",
-      "stop": "停止",
-      "stopping": "正在停止...",
-      "access": "访问范围",
-      "thisDevice": "仅此设备",
-      "localNetwork": "局域网",
-      "localHelp": "仅当前设备可连接",
-      "networkHelp": "局域网可连接，须设置 API 密钥\n\n局域网内其他设备可以连接，因此必须设置 API 密钥。",
-      "port": "端口",
-      "portHelp": "API 服务使用的本地端口",
-      "apiKey": "API 密钥",
-      "apiKeyHelp": "通过 Bearer Token 发送密钥",
-      "apiKeyRequired": "向局域网开放 API 前必须设置密钥。",
-      "apiKeyPlaceholder": "输入 API 密钥",
-      "autoInstall": "启动时会自动安装 API 服务所需的软件包。"
     },
     "observability": {
       "title": "运行追踪",
@@ -1958,8 +1982,6 @@
       },
       "interruptedHelp": "后端重启时此任务尚未结束，任务没有自动恢复或重新执行。",
       "workTitle": "子任务",
-      "otherWorkTitle": "其他任务",
-      "unlinkedHelp": "未找到这些任务在当前显示消息中的原始请求。",
       "progress": "已完成 {{completed}} / {{total}} 项",
       "running": "{{count}} 项进行中",
       "finished": "{{count}} 项已结束",

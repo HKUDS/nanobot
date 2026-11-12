@@ -759,6 +759,8 @@ export function WorkspaceAccessMenu({
       <DropdownMenuContent side="top" align="start" sideOffset={8} aria-label={t("thread.composer.workspace.accessAria")}
         onPointerDownCapture={() => { restoreTriggerFocus.current = false; }}
         onKeyDownCapture={() => { restoreTriggerFocus.current = true; }}
+        // Radix handles Escape at the document layer, before React's content key handler.
+        onEscapeKeyDown={() => { restoreTriggerFocus.current = true; }}
         onPointerDownOutside={() => { restoreTriggerFocus.current = false; }}
         onCloseAutoFocus={event => { if (!restoreTriggerFocus.current) event.preventDefault(); }}
         className="w-max min-w-[13rem] max-w-[calc(100vw-2rem)]">

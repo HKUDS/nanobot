@@ -179,6 +179,18 @@
     "reset": "重設預覽",
     "hint": "選擇復原狀態，再試用繼續或關閉。"
   },
+  "sandbox": {
+    "gateway": "範例閘道系統",
+    "unknownGateway": "未指定",
+    "title": "指令提示",
+    "description": "使用正式提示元件，體驗缺少元件、安裝位置受限與啟動異常三種狀態。",
+    "options": "提示不會搶焦點，也不會自動重試指令。可切換狀態、關閉提示並繼續輸入。",
+    "missing": "找不到元件",
+    "permissions": "安裝位置受限",
+    "startup": "啟動異常",
+    "hint": "這裡僅示範元件，不會執行指令或修改設定。",
+    "settingsAction": "已要求開啟沙箱設定（示範）。"
+  },
   "fallback": {
     "title": "ModelFallbackNotice · 模型備援",
     "description": "查看備援模型與授權失效提示。",

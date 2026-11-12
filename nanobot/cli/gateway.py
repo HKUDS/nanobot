@@ -180,11 +180,11 @@ def create_gateway_app(
             ):
                 console.print(
                     "[yellow]Gateway is already running in the foreground; "
-                    "an attached process cannot be detached in place.[/yellow]"
+                    "it cannot be detached in place.[/yellow]"
                 )
                 console.print(
-                    "[dim]Stop it in its current terminal, then run "
-                    "`nanobot gateway --background`.[/dim]"
+                    "[dim]Stop it with its service manager if supervised, or use "
+                    "`nanobot gateway stop`; then run `nanobot gateway --background`.[/dim]"
                 )
                 print_status(result.status)
                 raise typer.Exit(1)
@@ -329,12 +329,12 @@ def create_gateway_app(
             raise typer.Exit(1)
         if result.message == "gateway_foreground_restart_required":
             console.print(
-                "[yellow]Gateway is attached to a foreground terminal and cannot "
+                "[yellow]Gateway is running in the foreground and cannot "
                 "be restarted as a background process.[/yellow]"
             )
             console.print(
-                "[dim]Restart it in that terminal, or stop it and run "
-                "`nanobot gateway --background`.[/dim]"
+                "[dim]Restart it with its service manager if supervised, or stop it "
+                "and run `nanobot gateway --background`.[/dim]"
             )
             print_status(result.status)
             raise typer.Exit(1)

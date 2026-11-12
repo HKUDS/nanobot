@@ -13,11 +13,11 @@ import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { PromptRail } from "@/components/thread/PromptRail";
-import { SubagentThreadMessages, useHasSubagentResults } from "@/components/thread/SubagentTaskResults";
+import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults";
 import { DiagramScope } from "@/components/markdown-diagrams/context";
 import { DiffViewportContext } from "./activity/DiffViewportContext";
 import { ThreadHistoryStatus } from "@/components/thread/ThreadHistoryStatus";
-import { isAgentActivityMember } from "@/components/thread/AgentActivityCluster";
+import { isActivityWindowMember } from "@/lib/activity-timeline";
 import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { HISTORY_HOLD_PX, ThreadHistorySpring, type HistoryRevealPhase } from "@/components/thread/thread-history-spring";
 import {
@@ -60,6 +60,7 @@ interface ThreadViewportProps {
   /** Override when message ownership changes after the selected conversation. */
   messagesKey?: string | null;
   conversationReady?: boolean;
+  onVisibleMessagesChange?: (messages: UIMessage[]) => void;
   showScrollToBottomButton?: boolean;
   cliApps?: CliAppInfo[];
   mcpPresets?: McpPresetInfo[];
@@ -92,12 +93,24 @@ export const INITIAL_HISTORY_WINDOW = 120;
 export const HISTORY_WINDOW_INCREMENT = 120;
 
 interface HistoryScrollAnchor {
-  key: string;
+  sources: string[];
+  fallback?: string;
   offsetTop: number;
   scrollTop: number;
 }
 
 const THREAD_DISPLAY_UNIT_SELECTOR = "[data-thread-display-unit]";
+
+function scrollSourceKind(source: string): string {
+  return (JSON.parse(source) as string[])[1];
+}
+
+function scrollSourcesDisagree(left: string[], right: string[], kind: string): boolean {
+  const leftKeys = left.filter((source) => scrollSourceKind(source) === kind);
+  const rightKeys = right.filter((source) => scrollSourceKind(source) === kind);
+  return leftKeys.length > 0 && rightKeys.length > 0
+    && !leftKeys.some((source) => rightKeys.includes(source));
+}
 
 function promptTopInset(scroller: HTMLElement): number {
   const padding = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop);
@@ -148,8 +161,8 @@ export function windowMessages(messages: UIMessage[], visibleCount: number): UIM
   let start = Math.max(0, messages.length - visibleCount);
   while (
     start > 0
-    && isAgentActivityMember(messages[start])
-    && isAgentActivityMember(messages[start - 1])
+    && isActivityWindowMember(messages[start])
+    && isActivityWindowMember(messages[start - 1])
   ) {
     start -= 1;
   }
@@ -275,6 +288,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   conversationKey = null,
   messagesKey = conversationKey,
   conversationReady = true,
+  onVisibleMessagesChange,
   showScrollToBottomButton = true,
   cliApps = [],
   mcpPresets = [],
@@ -313,6 +327,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const composerLayoutChangeRef = useRef(onComposerLayoutChange);
   composerLayoutChangeRef.current = onComposerLayoutChange;
   const bottomRef = useRef<HTMLDivElement>(null);
+  const endGapRef = useRef<HTMLDivElement>(null);
   const lastConversationKeyRef = useRef<string | null>(conversationKey);
   const conversationHandoffPendingRef = useRef(false);
   const conversationHandoffAnimationRef = useRef<Animation | null>(null);
@@ -323,7 +338,27 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const historyScrollAnchorRef = useRef<HistoryScrollAnchor | null>(null);
   const previousLoadingOlderRef = useRef(loadingOlder);
   const composerDockHeightRef = useRef(0);
-  const [atBottom, setAtBottom] = useState(true);
+  const [contentBelowViewport, setContentBelowViewport] = useState(false);
+  const [navigatingToBottom, setNavigatingToBottom] = useState(false);
+  const lastMessageRowRef = useRef<HTMLElement | null>(null);
+  const refreshLastMessageRow = useCallback(() => {
+    const rows = messageContentRef.current?.querySelectorAll<HTMLElement>(".thread-message-row");
+    lastMessageRowRef.current = null;
+    if (!rows) return;
+    for (let index = rows.length - 1; index >= 0; index--) {
+      if (rows[index].getBoundingClientRect().height > 0) {
+        lastMessageRowRef.current = rows[index];
+        break;
+      }
+    }
+  }, []);
+  const updateContentVisibility = useCallback(() => {
+    const viewport = messageRegionRef.current;
+    const lastRow = lastMessageRowRef.current;
+    setContentBelowViewport(Boolean(viewport && lastRow
+      && lastRow.getBoundingClientRect().bottom > viewport.getBoundingClientRect().bottom
+        - (endGapRef.current?.getBoundingClientRect().height ?? 0)));
+  }, []);
   const [atHistoryTop, setAtHistoryTop] = useState(false);
   const [historyPhase, setHistoryPhase] = useState<HistoryRevealPhase>("hidden");
   const historyPhaseRef = useRef(historyPhase);
@@ -380,7 +415,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     useState(INITIAL_HISTORY_WINDOW);
   const threadMotionRef = useRef<ThreadMotionCoordinator | null>(null);
   if (threadMotionRef.current === null) {
-    const camera = new ThreadCameraController(() => scrollRef.current);
+    const camera = new ThreadCameraController(() => scrollRef.current, {
+      onSettled: () => threadMotionRef.current?.cameraSettled(),
+    });
     threadMotionRef.current = new ThreadMotionCoordinator({
       camera,
       measure: (promptId) => {
@@ -408,6 +445,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
             : null,
         };
       },
+      onLatestNavigationSettled: () => {
+        setNavigatingToBottom(false);
+        updateContentVisibility();
+      },
       onGeometry: (geometry: ThreadMotionGeometry) => {
         composerLayoutChangeRef.current?.();
         if (Math.abs(composerDockHeightRef.current - geometry.composerHeight) >= 1) {
@@ -419,11 +460,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           current === nextOverflow ? current : nextOverflow,
         );
       },
-      onAutoFollow: () => setAtBottom(true),
     });
   }
-  const hasTaskResults = useHasSubagentResults();
-  const hasMessages = messages.length > 0 || (hasTaskResults && conversationReady);
+  const hasMessages = messages.length > 0;
   const hasThreadLayout = hasMessages || initialLoading;
   useLayoutEffect(() => {
     scrollRef.current = hasMessages
@@ -434,6 +473,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     () => windowMessages(messages, visibleMessageCount),
     [messages, visibleMessageCount],
   );
+  useLayoutEffect(() => {
+    if (conversationReady) onVisibleMessagesChange?.(visibleMessages);
+  }, [conversationReady, onVisibleMessagesChange, visibleMessages]);
   const hiddenMessageCount = messages.length - visibleMessages.length;
   const historyUnknown = hasMoreBefore === null;
   const historyExhausted = hasMoreBefore === false && hiddenMessageCount === 0;
@@ -461,7 +503,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
   const yieldCameraToUser = useCallback(() => {
     threadMotionRef.current?.takeUserControl();
-  }, []);
+    setNavigatingToBottom(false);
+    updateContentVisibility();
+  }, [updateContentVisibility]);
 
   const captureHistoryScrollAnchor = useCallback(() => {
     const scroller = scrollRef.current;
@@ -472,13 +516,19 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     }
     const viewport = scroller.getBoundingClientRect();
     const element = visibleHistoryUnit(content, viewport);
-    const key = element?.dataset.threadDisplayUnit;
-    if (!element || !key) {
+    if (!element?.dataset.threadScrollSources) {
+      historyScrollAnchorRef.current = null;
+      return false;
+    }
+    const sources = JSON.parse(element.dataset.threadScrollSources) as string[];
+    const fallback = element.dataset.threadScrollFallback;
+    if (sources.length === 0 && !fallback) {
       historyScrollAnchorRef.current = null;
       return false;
     }
     historyScrollAnchorRef.current = {
-      key,
+      sources,
+      fallback,
       scrollTop: scroller.scrollTop,
       // Normalize out the reveal lease, even when reading above its inline slot.
       offsetTop: element.getBoundingClientRect().top - viewport.top
@@ -492,9 +542,30 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     const content = messageContentRef.current;
     const anchor = historyScrollAnchorRef.current;
     if (!scroller || !content || !anchor) return false;
-    const element = Array.from(
-      content.querySelectorAll<HTMLElement>("[data-thread-display-unit]"),
-    ).find((candidate) => candidate.dataset.threadDisplayUnit === anchor.key);
+    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    if (Math.abs(scroller.scrollTop - Math.min(anchor.scrollTop, maxScrollTop)) >= 0.5) {
+      return captureHistoryScrollAnchor();
+    }
+    const candidates = Array.from(content.querySelectorAll<HTMLElement>(THREAD_DISPLAY_UNIT_SELECTOR));
+    const bySource = new Map<string, { element: HTMLElement; sources: string[] }>();
+    for (const candidate of candidates) {
+      const sources = JSON.parse(candidate.dataset.threadScrollSources ?? "[]") as string[];
+      for (const source of sources) bySource.set(source, { element: candidate, sources });
+    }
+    let element: HTMLElement | undefined;
+    for (const source of anchor.sources) {
+      const candidate = bySource.get(source);
+      if (!candidate) continue;
+      const kind = scrollSourceKind(source);
+      // An index-generated replay id can be reused by a different message.
+      if (kind !== "stream" && scrollSourcesDisagree(anchor.sources, candidate.sources, "stream")) continue;
+      if (kind === "id" && scrollSourcesDisagree(anchor.sources, candidate.sources, "sequence")) continue;
+      element = candidate.element;
+      break;
+    }
+    if (!element && anchor.fallback) {
+      element = candidates.find((candidate) => candidate.dataset.threadScrollFallback === anchor.fallback);
+    }
     if (!element) {
       historyScrollAnchorRef.current = null;
       return false;
@@ -506,12 +577,11 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       - (historySlotRef.current ? HISTORY_HOLD_PX : 0);
     const delta = nextOffset - anchor.offsetTop;
     if (Math.abs(delta) < 0.5) return true;
-    const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const nextTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop + delta));
     threadMotionRef.current?.jumpTo(nextTop);
     anchor.scrollTop = scroller.scrollTop;
     return true;
-  }, []);
+  }, [captureHistoryScrollAnchor]);
 
   const resetHistoryHeader = useCallback(() => {
     setHistorySlotKey(null);
@@ -542,14 +612,14 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (el) {
       const top = Math.max(0, el.scrollHeight - el.clientHeight);
       if (smooth) {
-        threadMotionRef.current?.navigateLatestTo(top);
+        const result = threadMotionRef.current?.navigateLatestTo(top);
+        setNavigatingToBottom(result === "started" || result === "retargeted");
       } else {
         threadMotionRef.current?.jumpTo(top);
       }
     } else if (marker) {
       marker.scrollIntoView({ block: "end", behavior });
     }
-    setAtBottom(true);
   }, [resetHistoryHeader]);
 
   const scrollToBottom = useCallback(
@@ -576,7 +646,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       }
     }
     threadMotionRef.current?.takeUserControl();
-    setAtBottom(false);
     if (hiddenMessageCount > 0) {
       setVisibleMessageCount((count) =>
         Math.min(messages.length, count + HISTORY_WINDOW_INCREMENT),
@@ -615,7 +684,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (!scrollEl || !prompt) return false;
     historyScrollAnchorRef.current = null;
     resetHistoryHeader();
-    setAtBottom(false);
     threadMotionRef.current?.navigateHistoryToPrompt(promptId);
     return true;
   }, [resetHistoryHeader]);
@@ -636,7 +704,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (historyWindow) navigation?.latest();
     threadMotionRef.current?.takeUserControl();
     pendingPromptJumpRef.current = promptId;
-    setAtBottom(false);
     setVisibleMessageCount((count) => Math.max(count, localMessages.length - index));
   }, [historyWindow, latestMessages, messages, navigateToVisiblePrompt, navigation]);
 
@@ -647,7 +714,6 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     pendingConversationScrollRef.current = false;
     pendingPromptJumpRef.current = navigation.target.id;
     threadMotionRef.current?.takeUserControl();
-    setAtBottom(false);
     const index = messages.findIndex((message) => message.id === navigation.target!.id);
     setVisibleMessageCount(Math.max(INITIAL_HISTORY_WINDOW, messages.length - Math.max(0, index)));
   }, [navigation?.target]);
@@ -658,7 +724,9 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
 
   const cancelAutoScroll = useCallback(() => {
     threadMotionRef.current?.takeUserControl();
-  }, []);
+    setNavigatingToBottom(false);
+    updateContentVisibility();
+  }, [updateContentVisibility]);
 
   useImperativeHandle(
     ref,
@@ -724,7 +792,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     historyScrollAnchorRef.current = null;
     restoreScrollAfterPrependRef.current = null;
     threadMotionRef.current?.reset();
-    setAtBottom(true);
+    setNavigatingToBottom(false);
     setShowHistoryExhausted(false);
     setVisibleMessageCount(INITIAL_HISTORY_WINDOW);
 
@@ -878,8 +946,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   }, [conversationReady, hasMessages]);
 
   useLayoutEffect(() => {
+    refreshLastMessageRow();
+    updateContentVisibility();
     threadMotionRef.current?.invalidateGeometry();
-  }, [composer, hasMessages, visibleMessages.length]);
+  }, [composer, hasMessages, visibleMessages, refreshLastMessageRow, updateContentVisibility]);
 
   useEffect(() => () => {
     conversationHandoffAnimationRef.current?.cancel();
@@ -897,11 +967,15 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (!el) return;
 
     const invalidateGeometry = () => {
+      refreshLastMessageRow();
       threadMotionRef.current?.invalidateGeometry();
+      updateContentVisibility();
     };
     const reconcileObservedGeometry = () => {
+      refreshLastMessageRow();
       reconcileHistoryScrollAnchor();
       threadMotionRef.current?.reconcileObservedGeometry();
+      updateContentVisibility();
     };
     reconcileObservedGeometry();
     const observer = typeof ResizeObserver === "undefined"
@@ -911,29 +985,28 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (content) observer?.observe(content);
     if (contentRegion) observer?.observe(contentRegion);
     if (messageContent) observer?.observe(messageContent);
+    if (endGapRef.current) observer?.observe(endGapRef.current);
     if (composerDock) observer?.observe(composerDock);
     window.addEventListener("resize", invalidateGeometry);
     return () => {
       observer?.disconnect();
       window.removeEventListener("resize", invalidateGeometry);
     };
-  }, [hasMessages, reconcileHistoryScrollAnchor]);
+  }, [hasMessages, reconcileHistoryScrollAnchor, refreshLastMessageRow, updateContentVisibility]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
     const onScroll = (allowHistoryLoad = true) => {
+      updateContentVisibility();
       setAtHistoryTop(el.scrollTop <= 1);
       if (el.scrollTop > 1) historySpringRef.current?.leaveBoundary();
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
       const near = distance < NEAR_BOTTOM_PX;
       // A detached history page's bottom is not the live tail.
       const owner = threadMotionRef.current?.observeScroll(near && !historyWindow) ?? "automatic";
-      const logicallyAtBottom = !historyWindow && (owner === "automatic" || (owner === "navigation" && near));
-      setAtBottom((current) =>
-        current === logicallyAtBottom ? current : logicallyAtBottom,
-      );
+      if (threadMotionRef.current?.snapshot().mode !== "navigating-latest") setNavigatingToBottom(false);
       if (owner === "user") {
         // Restoring the anchor also emits scroll. Keep that reading position
         // through lazy content resizing instead of selecting a prepended row.
@@ -978,6 +1051,10 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         canScrollInDirection(el, direction),
         direction === "forward" && !historyWindow,
       );
+      if (threadMotionRef.current?.snapshot().mode !== "navigating-latest") {
+        setNavigatingToBottom(false);
+        updateContentVisibility();
+      }
     };
     const prepareHistoryPull = () => {
       if (loadingOlder || navigation?.loading) return;
@@ -1149,6 +1226,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     messages.length,
     olderError,
     yieldCameraToUser,
+    updateContentVisibility,
     historySlotKey,
     historyWindow,
     navigation,
@@ -1244,7 +1322,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 </DiagramScope>
                 </DiffViewportContext.Provider>
               </div>
-              <div aria-hidden className="thread-message-end-gap shrink-0" />
+              <div ref={endGapRef} aria-hidden className="thread-message-end-gap shrink-0" />
               <div ref={bottomRef} aria-hidden className="h-px shrink-0" />
             </div>
           ) : (
@@ -1319,7 +1397,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         />
       ) : null}
 
-      {showScrollToBottomButton && (!atBottom || historyWindow) && (
+      {showScrollToBottomButton && (historyWindow || (contentBelowViewport && !navigatingToBottom)) && (
         <div
           className="absolute left-1/2 z-20 -translate-x-1/2"
           style={{ bottom: scrollButtonBottom }}

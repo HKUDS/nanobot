@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { getDiffMetadata } from "@/components/thread/activity/PierreFileDiff";
+import { cancelDiffRender, scheduleDiffRender } from "@/components/thread/activity/diff-render-batch";
 import { DIFF_GAP_HEIGHT, diffRenderWindow, diffRowOffsets } from "@/components/thread/activity/diff-render-window";
 import { parseRenderableFileDiff } from "@/lib/file-diff";
 
@@ -82,4 +83,34 @@ describe("file diff render windows", () => {
     expect(tail.startingLine + tail.totalLines).toBe(400);
     expect(tail.bufferAfter).toBe(0);
   });
+});
+
+it("batches diff geometry before DOM writes and cancels an unmounted diff", () => {
+  const frames: FrameRequestCallback[] = [];
+  const cancel = vi.fn();
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", cancel);
+  const calls: string[] = [];
+  const first = () => { calls.push("read first"); return () => { calls.push("write first"); }; };
+  const second = () => { calls.push("read second"); return () => { calls.push("write second"); }; };
+  const unmounted = vi.fn();
+  try {
+    scheduleDiffRender(first);
+    scheduleDiffRender(second);
+    scheduleDiffRender(first);
+    scheduleDiffRender(unmounted);
+    cancelDiffRender(unmounted);
+    expect(frames).toHaveLength(1);
+    frames[0](0);
+    expect(calls).toEqual(["read first", "read second", "write first", "write second"]);
+    expect(unmounted).not.toHaveBeenCalled();
+    scheduleDiffRender(first);
+    cancelDiffRender(first);
+    expect(cancel).toHaveBeenCalledWith(2);
+  } finally {
+    cancelDiffRender(first);
+    cancelDiffRender(second);
+    cancelDiffRender(unmounted);
+    vi.unstubAllGlobals();
+  }
 });

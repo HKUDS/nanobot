@@ -21,7 +21,6 @@ from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronPayload, CronRunResult, CronSchedule
 from nanobot.optional_features import InstallResult
 from nanobot.security.workspace_access import WORKSPACE_SCOPE_METADATA_KEY
-from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.triggers.local_store import LocalTriggerStore
@@ -429,7 +428,7 @@ async def test_session_automations_route_ignores_unified_owner(
         name="Unified check",
         schedule=hourly,
         message="Check the shared session",
-        session_key=UNIFIED_SESSION_KEY,
+        session_key="unified:default",
         origin_channel="websocket",
         origin_chat_id="abc",
     )

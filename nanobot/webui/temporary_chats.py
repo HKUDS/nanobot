@@ -15,6 +15,7 @@ from nanobot.command.application import register_builtin_commands
 from nanobot.command.router import CommandRouter
 from nanobot.security.workspace_access import WorkspaceScope
 from nanobot.session.manager import SessionManager
+from nanobot.webui.session_identity import webui_session_key
 from nanobot.webui.workspaces import WebUIWorkspaceController
 
 _TEMPORARY_CHAT_DISABLED_TOOLS = frozenset({
@@ -38,12 +39,8 @@ class TemporaryChatError(ValueError):
 class TemporaryChatMessagePolicy:
     """Server-owned message rules for one active Temporary Chat."""
 
-    session_key: str
     session_generation: str
     workspace_scope: WorkspaceScope
-    require_existing_session: bool = True
-    hydrate_transcript: bool = False
-    persist_transcript: bool = False
 
 
 class WebUITemporaryChats:
@@ -56,13 +53,11 @@ class WebUITemporaryChats:
         session_manager: SessionManager | None,
         workspaces: WebUIWorkspaceController,
         logger: Any,
-        channel_name: str = "websocket",
     ) -> None:
         self._bus = bus
         self._sessions = session_manager
         self._workspaces = workspaces
         self._logger = logger
-        self._channel_name = channel_name
         self._commands = CommandRouter()
         register_builtin_commands(self._commands)
         self._owners: dict[str, object] = {}
@@ -72,13 +67,10 @@ class WebUITemporaryChats:
         self._known_transient_chat_ids: set[str] = set()
         self._media_paths: dict[str, set[str]] = {}
 
-    def _session_key(self, chat_id: str) -> str:
-        return f"{self._channel_name}:{chat_id}"
-
     def _cached_session_is_transient(self, chat_id: str) -> bool:
         if self._sessions is None:
             return False
-        identity = self._sessions.state.peek_identity(self._session_key(chat_id))
+        identity = self._sessions.state.peek_identity(webui_session_key(chat_id))
         return identity is not None and not identity.policy.persist
 
     async def create(self, owner: object, *, trusted_webui: bool) -> str:
@@ -90,7 +82,7 @@ class WebUITemporaryChats:
 
         chat_id = str(uuid.uuid4())
         session = await self._sessions.state.register_transient(
-            self._session_key(chat_id),
+            webui_session_key(chat_id),
             disabled_tools=_TEMPORARY_CHAT_DISABLED_TOOLS,
         )
         if session.policy.persist:
@@ -114,7 +106,7 @@ class WebUITemporaryChats:
         if self._owners.get(chat_id) is not owner or self._sessions is None:
             raise TemporaryChatError("temporary_chat_unavailable")
 
-        identity = self._sessions.state.peek_identity(self._session_key(chat_id))
+        identity = self._sessions.state.peek_identity(webui_session_key(chat_id))
         if identity is None:
             raise TemporaryChatError("temporary_chat_unavailable")
 
@@ -123,7 +115,6 @@ class WebUITemporaryChats:
             raise TemporaryChatError("temporary_chat_command_rejected")
 
         return TemporaryChatMessagePolicy(
-            session_key=self._session_key(chat_id),
             session_generation=identity.generation,
             workspace_scope=self._workspaces.restricted_default_scope(),
         )
@@ -187,21 +178,20 @@ class WebUITemporaryChats:
         ):
             raise TemporaryChatError("temporary_chat_unavailable")
 
-        session_key = self._session_key(chat_id)
+        session_key = webui_session_key(chat_id)
         self._forget_owner(owner, chat_id)
         self._discard_media(chat_id)
         if self._sessions is not None:
             await self._sessions.state.discard(session_key)
         await self._bus.publish_inbound(
             InboundMessage(
-                channel=self._channel_name,
+                channel="websocket",
                 sender_id="webui",
                 chat_id=chat_id,
                 content="",
                 metadata={
                     INBOUND_META_RUNTIME_CONTROL: RUNTIME_CONTROL_SESSION_DISCARD,
                 },
-                session_key_override=session_key,
             )
         )
 
@@ -210,7 +200,7 @@ class WebUITemporaryChats:
         for chat_id in tuple(self._owners):
             self._discard_media(chat_id)
             if self._sessions is not None:
-                self._sessions.state.forget_transient(self._session_key(chat_id))
+                self._sessions.state.forget_transient(webui_session_key(chat_id))
         self._owners.clear()
         self._owner_chat_ids.clear()
         self._known_transient_chat_ids.clear()

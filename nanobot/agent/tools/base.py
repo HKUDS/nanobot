@@ -198,15 +198,17 @@ class ToolResult(str):
     """String-compatible tool output with structured status."""
 
     is_error: bool
+    error_code: str | None
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(cls, content: str, *, is_error: bool = False, error_code: str | None = None) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.error_code = error_code
         return obj
 
     @classmethod
-    def error(cls, content: str) -> ToolResult:
-        return cls(content, is_error=True)
+    def error(cls, content: str, *, error_code: str | None = None) -> ToolResult:
+        return cls(content, is_error=True, error_code=error_code)
 
 
 class Tool(ABC):

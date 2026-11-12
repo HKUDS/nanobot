@@ -4,6 +4,7 @@ import asyncio
 import re
 import time
 import unicodedata
+from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
@@ -500,19 +501,44 @@ class TelegramConfig(Base):
         return self
 
 
+# Telegram exposes bot commands without "-", so each canonical command also
+# has an underscore spelling that stays tappable in chat.
 _TELEGRAM_COMMAND_ALIASES = {
     "/dream_log": "/dream-log",
     "/dream_restore": "/dream-restore",
     "/dream_prompt": "/dream-prompt",
     "/evaluator_prompt": "/evaluator-prompt",
 }
+# ``evaluator-prompt`` has no handler of its own, so the shared handler also
+# accepts its canonical spelling; the remaining canonical names keep theirs.
+_TELEGRAM_BUS_CANONICAL_COMMANDS = ("/evaluator-prompt",)
+_TELEGRAM_DEDICATED_CANONICAL_COMMANDS = tuple(
+    canonical
+    for canonical in _TELEGRAM_COMMAND_ALIASES.values()
+    if canonical not in _TELEGRAM_BUS_CANONICAL_COMMANDS
+)
+# Canonical spelling -> underscore spelling, for adapting control-reply text.
+_TELEGRAM_DISPLAY_NAMES = {
+    canonical: alias for alias, canonical in _TELEGRAM_COMMAND_ALIASES.items()
+}
+
+
+def _command_alternation(commands: Iterable[str]) -> str:
+    """Regex alternation of command spellings, without the leading slash."""
+    return "|".join(re.escape(command.removeprefix("/")) for command in commands)
+
+
 _TELEGRAM_DISPLAY_COMMAND_RE = re.compile(
-    r"(?<![\w/.-])/(?:dream-log|dream-restore|dream-prompt|evaluator-prompt)(?![\w/.-])"
+    rf"(?<![\w/.-])/(?:{_command_alternation(_TELEGRAM_COMMAND_ALIASES.values())})"
+    rf"(?![\w/.-])"
+)
+# Inline code is not tappable as a Telegram command.
+_TELEGRAM_INLINE_ALIAS_RE = re.compile(
+    rf"`(/(?:{_command_alternation(_TELEGRAM_COMMAND_ALIASES)})(?: [^`\n]*)?)`"
 )
 
 
 def _telegram_command_text(text: str) -> str:
-    display_names = {value: key for key, value in _TELEGRAM_COMMAND_ALIASES.items()}
     lines: list[str] = []
     fence: str | None = None
     for line in text.splitlines(keepends=True):
@@ -523,13 +549,10 @@ def _telegram_command_text(text: str) -> str:
         elif stripped.startswith(("```", "~~~")):
             fence = stripped[:3]
         else:
-            line = _TELEGRAM_DISPLAY_COMMAND_RE.sub(lambda match: display_names[match[0]], line)
-            # Inline code is not tappable as a Telegram command.
-            line = re.sub(
-                r"`(/(?:dream_log|dream_restore|dream_prompt|evaluator_prompt)(?: [^`\n]*)?)`",
-                r"\1",
-                line,
+            line = _TELEGRAM_DISPLAY_COMMAND_RE.sub(
+                lambda match: _TELEGRAM_DISPLAY_NAMES[match[0]], line,
             )
+            line = _TELEGRAM_INLINE_ALIAS_RE.sub(r"\1", line)
         lines.append(line)
     return "".join(lines)
 
@@ -571,8 +594,15 @@ class TelegramChannel(BaseChannel):
     # Telegram-safe aliases are normalized before reaching the core router.
     # Canonical hyphenated commands stay on a separate handler (below).
     TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
-        r"^/(?:new|compact|stop|restart|status|dream|history|goal|trigger|pairing|model|skill"
-        r"|dream_log|dream_restore|dream_prompt|evaluator_prompt|evaluator-prompt)(?:@\w+)?(?:\s+[\s\S]*)?$"
+        rf"^/(?:new|compact|stop|restart|status|dream|history|goal|trigger|pairing|model|skill"
+        rf"|{_command_alternation(_TELEGRAM_COMMAND_ALIASES)}"
+        rf"|{_command_alternation(_TELEGRAM_BUS_CANONICAL_COMMANDS)})(?:@\w+)?(?:\s+[\s\S]*)?$"
+    )
+    # Canonical spellings that need their own handler because Telegram tracks
+    # the command entity by its first token.
+    TELEGRAM_DEDICATED_COMMAND_RE = re.compile(
+        rf"^/(?:{_command_alternation(_TELEGRAM_DEDICATED_CANONICAL_COMMANDS)})"
+        rf"(?:@\w+)?(?:\s+[\s\S]*)?$"
     )
 
     @classmethod
@@ -729,9 +759,7 @@ class TelegramChannel(BaseChannel):
         )
         self._app.add_handler(
             MessageHandler(
-                filters.Regex(
-                    r"^/(?:dream-log|dream-restore|dream-prompt)(?:@\w+)?(?:\s+[\s\S]*)?$"
-                ),
+                filters.Regex(TelegramChannel.TELEGRAM_DEDICATED_COMMAND_RE),
                 self._forward_command,
             )
         )

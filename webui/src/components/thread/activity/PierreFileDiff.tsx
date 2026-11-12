@@ -10,6 +10,7 @@ import { CODE_TEXTMATE_THEME, CODE_THEME, CODE_THEME_NAME, codeHighlighterLangua
 import { DiffViewportContext } from "./DiffViewportContext";
 import type { DiffSyntaxHighlightProps } from "./DiffSyntaxHighlight";
 import { DIFF_GAP_HEIGHT, diffRenderWindow, diffRowOffsets } from "./diff-render-window";
+import { cancelDiffRender, scheduleDiffRender } from "./diff-render-batch";
 import { selectedDiffRows } from "./diff-selection";
 
 const THEME = CODE_THEME_NAME;
@@ -116,11 +117,9 @@ export function PierreFileDiff({ text, language, diff, lineLimit }: DiffSyntaxHi
     instance.setOptions(options);
     const scroller = viewport?.scroller.current;
     const eventTarget = scroller ?? window;
-    let frame = 0;
     let previous: RenderRange | undefined;
     let forceRender = true;
-    const render = () => {
-      frame = 0;
+    const measure = () => {
       const lineHeight = Math.floor((parseFloat(getComputedStyle(wrapper).lineHeight) + 2) * 64) / 64;
       const offsets = diffRowOffsets(diff, lineLimit, lineHeight);
       const rootRect = scroller?.getBoundingClientRect();
@@ -129,11 +128,13 @@ export function PierreFileDiff({ text, language, diff, lineLimit }: DiffSyntaxHi
       const height = rootRect?.height ?? window.innerHeight;
       const range = diffRenderWindow(diff, offsets, top - height, top + height * 2, lineHeight, selectedDiffRows(wrapper, metadata));
       if (!forceRender && previous && Object.keys(range).every(key => range[key as keyof RenderRange] === previous![key as keyof RenderRange])) return;
-      previous = range;
-      instance.render({ fileDiff: metadata, containerWrapper: wrapper, renderRange: range, forceRender });
-      forceRender = false;
+      return () => {
+        previous = range;
+        instance.render({ fileDiff: metadata, containerWrapper: wrapper, renderRange: range, forceRender });
+        forceRender = false;
+      };
     };
-    const schedule = () => { if (!frame) frame = requestAnimationFrame(render); };
+    const schedule = () => scheduleDiffRender(measure);
     // This observer projects a read-only window; ThreadCameraController remains the sole scroll writer.
     const resize = new ResizeObserver(schedule);
     resize.observe(wrapper);
@@ -144,9 +145,9 @@ export function PierreFileDiff({ text, language, diff, lineLimit }: DiffSyntaxHi
     eventTarget.addEventListener("scroll", schedule, { passive: true });
     document.addEventListener("selectionchange", schedule);
     window.addEventListener("resize", schedule);
-    render();
+    schedule();
     return () => {
-      cancelAnimationFrame(frame);
+      cancelDiffRender(measure);
       resize.disconnect();
       typography.disconnect();
       eventTarget.removeEventListener("scroll", schedule);

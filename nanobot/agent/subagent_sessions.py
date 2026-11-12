@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, cast
+from collections.abc import Callable, Sequence
+from typing import Any, TypeVar, cast
 
 from loguru import logger
 from pydantic import TypeAdapter, ValidationError
 
 from nanobot.agent.subagent_status import SubagentSessionError as SubagentSessionError
 from nanobot.agent.subagent_status import SubagentStatus
-from nanobot.session.manager import Session, SessionManager, SessionPolicy
+from nanobot.session.manager import (
+    Session,
+    SessionManager,
+    SessionMetadataPayload,
+    SessionPolicy,
+)
 from nanobot.session.sqlite_store import SessionConflictError
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionType
 
@@ -17,6 +23,7 @@ SUBAGENT = SessionType("subagent", needs_handle=False, public_history=False)
 TASK_METADATA_KEY = "subagent_task"
 _STATUS = TypeAdapter(SubagentStatus)
 _ACTIVE_STATES = {"queued", "running", "stopping"}
+_T = TypeVar("_T")
 
 
 class SubagentSessions:
@@ -109,8 +116,27 @@ class SubagentSessions:
         return status
 
     def load(self, owner: str) -> dict[str, SubagentStatus]:
+        return self._statuses(owner, self.sessions.list_child_session_metadata(owner))
+
+    def load_turns(self, owner: str, *, turn_ids: Sequence[str]) -> dict[str, SubagentStatus]:
+        """Read subagent headers attributed to the requested parent turns."""
+        return self._statuses(
+            owner, self.sessions.list_subagent_session_metadata(owner, turn_ids=turn_ids),
+        )
+
+    def load_tracked(self, owner: str, task_ids: Sequence[str]) -> dict[str, SubagentStatus]:
+        """Read already observed tasks in one query when they fall outside the loaded turns."""
+        return self._statuses(
+            owner, self.sessions.read_child_session_metadata(
+                owner, [self.key(task_id) for task_id in task_ids],
+            ),
+        )
+
+    def _statuses(
+        self, owner: str, rows: Sequence[SessionMetadataPayload],
+    ) -> dict[str, SubagentStatus]:
         result: dict[str, SubagentStatus] = {}
-        for row in self.sessions.list_child_session_metadata(owner):
+        for row in rows:
             key = row["key"]
             task_id = key.removeprefix("subagent:")
             if key != self.key(task_id):
@@ -119,6 +145,10 @@ class SubagentSessions:
             if status is not None:
                 result[task_id] = status
         return result
+
+    def read_batch(self, operation: Callable[[], _T]) -> _T:
+        """Share one store connection across the reads of a single request."""
+        return self.sessions.read_batch(operation)
 
     async def interrupt_pending(self) -> None:
         """Seal abandoned work after the gateway acquires execution ownership."""

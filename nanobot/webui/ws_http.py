@@ -212,11 +212,10 @@ _WEBUI_MUTATION_PATHS = {
     "settings.provider.oauth_complete": "/api/settings/provider/oauth-login/complete",
     "settings.provider.oauth_logout": "/api/settings/provider/oauth-logout",
     "settings.web_search.update": "/api/settings/web-search/update",
-    "settings.api_service.start": "/api/settings/api-service/start",
-    "settings.api_service.stop": "/api/settings/api-service/stop",
     "settings.image_generation.update": "/api/settings/image-generation/update",
     "settings.transcription.update": "/api/settings/transcription/update",
     "settings.runtime_config.update": "/api/settings/runtime-config/update",
+    "settings.sandbox.check": "/api/settings/sandbox/check",
     "settings.network_safety.update": "/api/settings/network-safety/update",
     "settings.cli_app.install": "/api/settings/cli-apps/install",
     "settings.cli_app.update": "/api/settings/cli-apps/update",
@@ -921,8 +920,22 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
+        query = _parse_query(request.path)
+        scope = query.get("scope")
+        if scope is not None and scope != ["window"]:
+            return _http_error(400, "invalid task scope")
+        turns = query.get("turn_id", [])
+        tracked = query.get("track", [])
+        if scope == ["window"] and (len(turns) + len(tracked) > 512
+                or any(not value or len(value) > 512 for value in (*turns, *tracked))):
+            return _http_error(400, "invalid task window")
         try:
-            statuses = await self.subagent_manager.read_statuses_for_session(session_key)
+            if scope == ["window"]:
+                statuses = await self.subagent_manager.read_statuses_for_session(
+                    session_key, turns=turns, tracked=tracked,
+                )
+            else:
+                statuses = await self.subagent_manager.read_statuses_for_session(session_key)
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response({

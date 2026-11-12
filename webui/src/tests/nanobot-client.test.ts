@@ -53,6 +53,12 @@ function lastSocket(): FakeSocket {
   return s;
 }
 
+function lastRequestId(socket: FakeSocket = lastSocket()): string {
+  const frame = JSON.parse(socket.sent.at(-1) ?? "{}");
+  if (typeof frame.request_id !== "string") throw new Error("Expected a request ID on the last sent frame");
+  return frame.request_id;
+}
+
 beforeEach(() => {
   FakeSocket.instances = [];
   vi.useFakeTimers();
@@ -64,6 +70,155 @@ afterEach(() => {
 });
 
 describe("NanobotClient", () => {
+  const chatRequests = [
+    { type: "new_chat", start: (client: NanobotClient, timeout: number) => client.newChat(timeout) },
+    { type: "new_temporary_chat", start: (client: NanobotClient, timeout: number) => client.newTemporaryChat(timeout) },
+    { type: "fork_chat", start: (client: NanobotClient, timeout: number) => client.forkChat("source", 1, undefined, timeout) },
+  ];
+
+  it("does not send an expired queued creation after reconnect", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().close();
+    const expired = expect(client.newChat(100)).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(100);
+    await expired;
+    await vi.advanceTimersByTimeAsync(400);
+    const socket = lastSocket();
+    socket.fakeOpen();
+    expect(socket.sent.map((frame) => JSON.parse(frame).type)).not.toContain("new_chat");
+    client.close();
+  });
+
+  it("does not confuse a reconnect attachment with fork creation", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    client.attach("existing");
+    lastSocket().close();
+    const resolved = vi.fn();
+    const creation = client.forkChat("source", 1).then(resolved);
+    await vi.advanceTimersByTimeAsync(500);
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "attached", chat_id: "existing" });
+    await Promise.resolve();
+    expect(resolved).not.toHaveBeenCalled();
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", request_id: lastRequestId(socket) });
+    await creation;
+    expect(resolved).toHaveBeenCalledWith("fresh");
+    client.close();
+  });
+
+  it.each(chatRequests)("matches $type replies by ID and ignores late successes and errors", async ({ type, start }) => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "webui" });
+    const expired = expect(start(client, 100)).rejects.toThrow("outcome is unknown");
+    const oldFrame = JSON.parse(socket.sent.at(-1)!);
+    await vi.advanceTimersByTimeAsync(100);
+    await expired;
+    const resolved = vi.fn();
+    const rejected = vi.fn();
+    const creation = start(client, 1_000).then(resolved, rejected);
+    const frame = JSON.parse(socket.sent.at(-1)!);
+    expect(frame.request_id).not.toBe(oldFrame.request_id);
+    const temporary = type === "new_temporary_chat";
+    socket.fakeMessage({ event: "attached", chat_id: "old", temporary, request_id: oldFrame.request_id });
+    socket.fakeMessage({ event: "error", detail: "workspace_scope_rejected", request_id: oldFrame.request_id });
+    // Ordinary attachment responses do not complete a creation request.
+    socket.fakeMessage({ event: "attached", chat_id: "unrelated", temporary });
+    socket.fakeMessage({ event: "error", detail: "fork_chat_failed" });
+    socket.fakeMessage({ event: "error", detail: "workspace_scope_rejected", chat_id: "another", turn_id: "turn" });
+    socket.fakeMessage({ event: "error", detail: "invalid_sidebar_state" });
+    await Promise.resolve();
+    expect(resolved).not.toHaveBeenCalled();
+    expect(rejected).not.toHaveBeenCalled();
+    if (temporary) {
+      expect(socket.sent.map((value) => JSON.parse(value))).toContainEqual({ type: "discard_temporary_chat", chat_id: "old" });
+    }
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", temporary, request_id: frame.request_id });
+    await creation;
+    expect(resolved).toHaveBeenCalledWith("fresh");
+    client.close();
+  });
+
+  it("does not replay a sent chat request after reconnect and correlates the next request", async () => {
+    const client = new NanobotClient({ url: "ws://test", onReauth: async () => "ws://refreshed",
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "ready", chat_id: "default", client_id: "webui" });
+    const interrupted = expect(client.newChat()).rejects.toThrow("socket closed");
+    const interruptedRequestId = lastRequestId();
+    lastSocket().close();
+    await interrupted;
+    await vi.advanceTimersByTimeAsync(500);
+    const socket = lastSocket();
+    expect(socket.url).toBe("ws://refreshed");
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "ready", chat_id: "default", client_id: "webui" });
+    expect(socket.sent.filter((value) => JSON.parse(value).type === "new_chat")).toHaveLength(0);
+    const creation = client.newChat();
+    expect(lastRequestId(socket)).not.toBe(interruptedRequestId);
+    socket.fakeMessage({ event: "attached", chat_id: "fresh", request_id: lastRequestId(socket) });
+    await expect(creation).resolves.toBe("fresh");
+    expect(socket.sent.filter((value) => JSON.parse(value).type === "new_chat")).toHaveLength(1);
+    client.close();
+  });
+
+  it("does not reconnect when closed while reauthentication is pending", async () => {
+    let finishAuth!: (url: string) => void;
+    const onReauth = vi.fn(() => new Promise<string>((resolve) => { finishAuth = resolve; }));
+    const client = new NanobotClient({ url: "ws://test", onReauth,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().close();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(onReauth).toHaveBeenCalledOnce();
+    client.close();
+    client.updateUrl("ws://replacement");
+    finishAuth("ws://stale-auth");
+    await Promise.resolve();
+    expect(client.status).toBe("closed");
+    expect(FakeSocket.instances).toHaveLength(1);
+    client.connect();
+    expect(lastSocket().url).toBe("ws://replacement");
+    client.close();
+  });
+
+  it("settles queued creation on close and ignores callbacks from the replaced socket", async () => {
+    const client = new NanobotClient({ url: "ws://test", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const previous = lastSocket();
+    // Browser close() returns before its queued close event is delivered.
+    previous.close = () => { previous.readyState = FakeSocket.CLOSING; };
+    const closed = expect(client.newChat()).rejects.toThrow("socket closed");
+    client.close();
+    await closed;
+    client.connect();
+    const current = lastSocket();
+    current.fakeOpen();
+    expect(current.sent.map((value) => JSON.parse(value).type)).not.toContain("new_chat");
+    const resolved = vi.fn();
+    const creation = client.newChat().then(resolved);
+    previous.fakeOpen();
+    previous.fakeMessage({ event: "attached", chat_id: "stale" });
+    previous.onerror?.();
+    previous.onclose?.();
+    await Promise.resolve();
+    expect(client.status).toBe("open");
+    expect(resolved).not.toHaveBeenCalled();
+    current.fakeMessage({ event: "attached", chat_id: "fresh", request_id: lastRequestId(current) });
+    await creation;
+    expect(resolved).toHaveBeenCalledWith("fresh");
+    client.close();
+  });
+
   it("notifies ready consumers after server ready frames, including reconnects", async () => {
     const client = new NanobotClient({ url: "ws://test?token=fixture-token", socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
     const ready = vi.fn();
@@ -128,7 +283,7 @@ describe("NanobotClient", () => {
     const socket = lastSocket();
     socket.fakeOpen();
     const created = client.newTemporaryChat();
-    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true });
+    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true, request_id: lastRequestId(socket) });
     await created;
     const notice = vi.fn();
     client.onTaskNotice(notice);
@@ -151,7 +306,7 @@ describe("NanobotClient", () => {
     const socket = lastSocket();
     socket.fakeOpen();
     const created = client.newTemporaryChat();
-    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true });
+    socket.fakeMessage({ event: "attached", chat_id: "temporary", temporary: true, request_id: lastRequestId(socket) });
     await created;
     for (let index = 0; index < 2_010; index++) {
       for (const chatId of ["regular", "temporary"]) {
@@ -171,6 +326,83 @@ describe("NanobotClient", () => {
     const discarded = vi.fn();
     client.onTranscript("temporary", discarded);
     expect(discarded).not.toHaveBeenCalled();
+    client.close();
+  });
+
+  it.each(["recovery_state", "attached"] as const)("waits for a canonical running identity after unscoped %s starts a new recovery", (event) => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "recovery:old-recovery", status: "running", started_at: 100 });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "recovery:old-recovery" });
+    const state = { status: "resuming", recovery_id: "new-recovery", attempts: 1 };
+    socket.fakeMessage(event === "recovery_state"
+      ? { event, chat_id: "chat", ...state }
+      : { event, chat_id: "chat", recovery_state: state });
+    expect(client.getRunState("chat")).toMatchObject({ active: true, unsettled: false, latestTurnId: "recovery:old-recovery" });
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "recovery:new-recovery", status: "running", started_at: 200 });
+    expect(client.getRunState("chat")).toMatchObject({ active: true, unsettled: true,
+      latestTurnId: "recovery:new-recovery", startedAt: 200 });
+    client.close();
+  });
+
+  it.each(["recovery_state", "attached"] as const)("prefers an explicit turn_id over recovery_id on %s", (event) => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "turn-explicit", status: "running", started_at: 100 });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "turn-explicit" });
+    const state = { status: "resuming", recovery_id: "new-recovery", attempts: 1 };
+    socket.fakeMessage(event === "recovery_state"
+      ? { event, chat_id: "chat", turn_id: "turn-explicit", ...state }
+      : { event, chat_id: "chat", turn_id: "turn-explicit", recovery_state: state });
+    expect(client.getRunState("chat")).toMatchObject({ active: false, unsettled: false, latestTurnId: "turn-explicit" });
+    client.close();
+  });
+
+  it("delivers a recovered state after the recovery turn ends", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    const received = vi.fn();
+    client.onTranscript("chat", received);
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1" });
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "recovery:r1" });
+    const recovered = { event: "recovery_state", chat_id: "chat", status: "recovered", recovery_id: "r1", reason: "continued" };
+    socket.fakeMessage(recovered);
+    expect(received).toHaveBeenCalledWith(recovered);
+    expect(client.getRunState("chat").active).toBe(false);
+    client.close();
+  });
+
+  it("allows Continue after fragment completion and loop guard, preserving the reused canonical id's live content", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1", attempts: 1 });
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "recovery:r1", status: "running", started_at: 100 });
+    client.settleFragmentRunLifecycle("chat", ["recovery:r1"]);
+    socket.fakeMessage({ event: "attached", chat_id: "chat", recovery_state: {
+      status: "awaiting_user", recovery_id: "r1", reason: "loop_guard", attempts: 1,
+    } });
+    expect(client.getRunState("chat").active).toBe(false);
+    socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1", attempts: 2 });
+    expect(client.getRunState("chat").active).toBe(true);
+    const content = { event: "delta", chat_id: "chat", turn_id: "recovery:r1", text: "Continued output" };
+    socket.fakeMessage(content);
+    const replay = vi.fn();
+    client.onTranscript("chat", replay);
+    expect(replay).toHaveBeenCalledWith(content);
+    socket.fakeMessage({ event: "turn_end", chat_id: "chat", turn_id: "recovery:r1" });
+    expect(client.getRunState("chat").active).toBe(false);
     client.close();
   });
 
@@ -199,7 +431,7 @@ describe("NanobotClient", () => {
     });
 
     expect(client.getRunTurnId("shared-chat")).toBe("turn-a");
-    expect(client.getRunStartedAt("shared-chat")).toBe(1_700_000_000);
+    expect(client.getRunState("shared-chat").startedAt).toBe(1_700_000_000);
     expect(client.hasUnsettledRun("shared-chat")).toBe(true);
   });
 
@@ -388,9 +620,9 @@ describe("NanobotClient", () => {
     lastSocket().fakeOpen();
     const creation = client.newTemporaryChat();
     expect(JSON.parse(lastSocket().sent.at(-1) as string)).toEqual({
-      type: "new_temporary_chat",
+      type: "new_temporary_chat", request_id: expect.any(String),
     });
-    lastSocket().fakeMessage({ event: "attached", chat_id: chatId, temporary: true });
+    lastSocket().fakeMessage({ event: "attached", chat_id: chatId, temporary: true, request_id: lastRequestId() });
     await expect(creation).resolves.toBe(chatId);
     lastSocket().sent = [];
     client.onChat(chatId, vi.fn());
@@ -433,6 +665,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({
       event: "attached",
       chat_id: "server-temporary-chat",
+      request_id: lastRequestId(),
       temporary: true,
     });
     await expect(creation).resolves.toBe("server-temporary-chat");
@@ -453,6 +686,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({
       event: "attached",
       chat_id: "temp-drop-a",
+      request_id: lastRequestId(),
       temporary: true,
     });
     await firstCreation;
@@ -460,6 +694,7 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({
       event: "attached",
       chat_id: "temp-drop-b",
+      request_id: lastRequestId(),
       temporary: true,
     });
     await secondCreation;
@@ -630,13 +865,13 @@ describe("NanobotClient", () => {
       status: "running",
       started_at: 12_345,
     });
-    expect(client.getRunStartedAt("chat-strip")).toBe(12_345);
+    expect(client.getRunState("chat-strip").startedAt).toBe(12_345);
     lastSocket().fakeMessage({
       event: "goal_status",
       chat_id: "chat-strip",
       status: "idle",
     });
-    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+    expect(client.getRunState("chat-strip").startedAt).toBeNull();
   });
 
   it("clears the local run strip immediately when a stop is requested", () => {
@@ -659,7 +894,7 @@ describe("NanobotClient", () => {
 
     client.finishRunLocally("chat-stop");
 
-    expect(client.getRunStartedAt("chat-stop")).toBeNull();
+    expect(client.getRunState("chat-stop").startedAt).toBeNull();
     expect(client.hasUnsettledRun("chat-stop")).toBe(false);
     expect(client.isRunCompleted("chat-stop", "turn-stop")).toBe(true);
     expect(handler).toHaveBeenLastCalledWith("chat-stop", expect.objectContaining({ active: false, startedAt: null }));
@@ -687,7 +922,7 @@ describe("NanobotClient", () => {
     lastSocket().close();
 
     expect(client.status).toBe("reconnecting");
-    expect(client.getRunStartedAt("chat-strip")).toBe(12_345);
+    expect(client.getRunState("chat-strip").startedAt).toBe(12_345);
     expect(client.getRunTurnId("chat-strip")).toBe("turn-strip");
     expect(client.isRunCompleted("chat-strip", "turn-strip")).toBe(false);
     expect(client.getUnsettledRunChatIds()).toEqual(["chat-strip"]);
@@ -695,12 +930,12 @@ describe("NanobotClient", () => {
     await vi.advanceTimersByTimeAsync(20);
     expect(FakeSocket.instances.length).toBeGreaterThan(1);
     lastSocket().fakeOpen();
-    expect(client.getRunStartedAt("chat-strip")).toBe(12_345);
+    expect(client.getRunState("chat-strip").startedAt).toBe(12_345);
     expect(handler).toHaveBeenCalledTimes(1);
     lastSocket().fakeMessage({
       event: "turn_end", chat_id: "chat-strip", turn_id: "turn-strip",
     });
-    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+    expect(client.getRunState("chat-strip").startedAt).toBeNull();
     expect(client.getUnsettledRunChatIds()).toEqual([]);
     expect(client.isRunCompleted("chat-strip", "turn-strip")).toBe(true);
     expect(client.isRunCompleted("another-chat", "turn-strip")).toBe(false);
@@ -728,7 +963,7 @@ describe("NanobotClient", () => {
       event: "turn_end",
       chat_id: "chat-strip",
     });
-    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+    expect(client.getRunState("chat-strip").startedAt).toBeNull();
     expect(handler).toHaveBeenLastCalledWith("chat-strip", expect.objectContaining({ active: false, startedAt: null }));
   });
 
@@ -753,7 +988,7 @@ describe("NanobotClient", () => {
     expect(
       client.reconcileCanonicalCompletion("chat-race", requestGeneration, ["turn-old"]),
     ).toBe(false);
-    expect(client.getRunStartedAt("chat-race")).toBe(12_345);
+    expect(client.getRunState("chat-race").startedAt).toBe(12_345);
   });
 
   it("rejects a user-only snapshot for a submitted turn that has not completed", () => {
@@ -945,7 +1180,7 @@ describe("NanobotClient", () => {
       reason: "text_too_large",
     });
 
-    expect(client.getRunStartedAt("chat-rejection-race")).toBe(2_000);
+    expect(client.getRunState("chat-rejection-race").startedAt).toBe(2_000);
     expect(
       client.reconcileCanonicalCompletion("chat-rejection-race", requestGeneration, []),
     ).toBe(false);
@@ -987,7 +1222,7 @@ describe("NanobotClient", () => {
       detail: "message_rejected",
     });
 
-    expect(client.getRunStartedAt("chat-reject-newer-clock")).toBe(1_000);
+    expect(client.getRunState("chat-reject-newer-clock").startedAt).toBe(1_000);
     expect(client.hasUnsettledRun("chat-reject-newer-clock")).toBe(true);
   });
 
@@ -1055,7 +1290,7 @@ describe("NanobotClient", () => {
       chatId: "chat-too-big-race",
       turnId: "turn-rejected",
     }]);
-    expect(client.getRunStartedAt("chat-too-big-race")).toBe(1_000);
+    expect(client.getRunState("chat-too-big-race").startedAt).toBe(1_000);
     expect(
       client.reconcileCanonicalCompletion(
         "chat-too-big-race",
@@ -1259,7 +1494,7 @@ describe("NanobotClient", () => {
     };
     expect(client.canReconcileCanonicalCompletion("chat-authority", requestGeneration, [], snapshot)).toBe(false);
     expect(client.reconcileCanonicalCompletion("chat-authority", requestGeneration, [], snapshot)).toBe(false);
-    expect(client.getRunStartedAt("chat-authority")).toBe(123);
+    expect(client.getRunState("chat-authority").startedAt).toBe(123);
     expect(client.hasUnsettledRun("chat-authority")).toBe(true);
     received.mockClear();
     lastSocket().fakeMessage({ event: "delta", chat_id: "chat-authority", turn_id: "turn-authority", text: "Still running" });
@@ -1392,7 +1627,7 @@ describe("NanobotClient", () => {
     });
 
     expect(client.hasUnsettledRun("chat-legacy-idle")).toBe(false);
-    expect(client.getRunStartedAt("chat-legacy-idle")).toBeNull();
+    expect(client.getRunState("chat-legacy-idle").startedAt).toBeNull();
     expect(handler).toHaveBeenLastCalledWith(expect.objectContaining({
       event: "goal_status",
       status: "idle",
@@ -1611,6 +1846,7 @@ describe("NanobotClient", () => {
       event: "error",
       detail: "workspace_scope_rejected",
       reason: "project_path must be an existing directory",
+      request_id: lastRequestId(),
     });
 
     await expect(pendingChat).rejects.toThrow("workspace_scope_rejected");
@@ -1656,7 +1892,7 @@ describe("NanobotClient", () => {
         event: "goal_status", chat_id: "chat-late", turn_id: "turn-late",
         status: "running", started_at: 123,
       });
-      expect(client.getRunStartedAt("chat-late")).toBe(123);
+      expect(client.getRunState("chat-late").startedAt).toBe(123);
       socket.fakeMessage({ event: "turn_end", chat_id: "chat-late", turn_id: "turn-late" });
       const message = {
         event: "message", chat_id: "chat-late", turn_id: "turn-late", kind, text: "Late detail",
@@ -1665,7 +1901,7 @@ describe("NanobotClient", () => {
 
       expect(handler).toHaveBeenLastCalledWith(message);
       expect(client.isRunCompleted("chat-late", "turn-late")).toBe(true);
-      expect(client.getRunStartedAt("chat-late")).toBeNull();
+      expect(client.getRunState("chat-late").startedAt).toBeNull();
       expect(client.hasUnsettledRun("chat-late")).toBe(false);
       client.close();
     },
@@ -1733,7 +1969,7 @@ describe("NanobotClient", () => {
       turn_id: "turn-old",
     });
 
-    expect(client.getRunStartedAt("chat-delayed-idle")).toBe(2_000);
+    expect(client.getRunState("chat-delayed-idle").startedAt).toBe(2_000);
     expect(runHandler).not.toHaveBeenCalled();
     expect(chatHandler).not.toHaveBeenCalled();
   });
@@ -1763,7 +1999,7 @@ describe("NanobotClient", () => {
         ["turn-complete"],
       ),
     ).toBe(true);
-    expect(client.getRunStartedAt("chat-delayed-run")).toBeNull();
+    expect(client.getRunState("chat-delayed-run").startedAt).toBeNull();
   });
 
   it("preflights canonical completion without fencing or settling the turn", () => {
@@ -1803,6 +2039,40 @@ describe("NanobotClient", () => {
     );
   });
 
+  it("bounds fragment lifecycle tombstones without pruning buffered content or releasing the latest owner", () => {
+    const client = new NanobotClient({ url: "ws://test", reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
+    client.connect();
+    const socket = lastSocket();
+    socket.fakeOpen();
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "current", status: "running", started_at: 100 });
+    const buffered = { event: "delta", chat_id: "chat", turn_id: "current", text: "Unconsumed live content" };
+    const oldContent = { event: "message", chat_id: "chat", turn_id: "history-0", text: "Unconsumed older content" };
+    socket.fakeMessage(buffered);
+    socket.fakeMessage(oldContent);
+    client.settleFragmentRunLifecycle("chat", ["current"]);
+    const history = Array.from({ length: 300 }, (_, index) => `history-${index}`);
+    client.settleFragmentRunLifecycle("chat", history);
+
+    expect(history.filter((id) => client.isRunCompleted("chat", id))).toHaveLength(255);
+    expect(client.isRunCompleted("chat", "history-0")).toBe(false);
+    expect(client.isRunCompleted("chat", "history-299")).toBe(true);
+    expect(client.isRunCompleted("chat", "current")).toBe(true);
+    const settled = client.getRunState("chat");
+    const late = { event: "delta", chat_id: "chat", turn_id: "current", text: "Late live content" };
+    const streamEnd = { event: "stream_end", chat_id: "chat", turn_id: "current", stream_id: "wire" };
+    socket.fakeMessage(late);
+    socket.fakeMessage(streamEnd);
+    socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "current", status: "running", started_at: 999 });
+    expect(client.getRunState("chat")).toEqual(settled);
+    expect(settled).toMatchObject({ active: false, unsettled: false, latestTurnId: "current", startedAt: null });
+    const replay = vi.fn();
+    client.onTranscript("chat", replay);
+    for (const content of [buffered, oldContent, late, streamEnd]) expect(replay).toHaveBeenCalledWith(content);
+    expect(replay).not.toHaveBeenCalledWith(expect.objectContaining({ event: "goal_status" }));
+    client.close();
+  });
+
   it("clears the run cache and fences delayed frames after canonical completion", () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -1831,7 +2101,7 @@ describe("NanobotClient", () => {
         ["turn-canonical"],
       ),
     ).toBe(true);
-    expect(client.getRunStartedAt("chat-canonical")).toBeNull();
+    expect(client.getRunState("chat-canonical").startedAt).toBeNull();
     expect(runHandler).toHaveBeenLastCalledWith("chat-canonical", expect.objectContaining({ active: false, startedAt: null }));
     const deliveredBeforeLateFrames = chatHandler.mock.calls.length;
 
@@ -1854,7 +2124,7 @@ describe("NanobotClient", () => {
     });
 
     expect(chatHandler).toHaveBeenCalledTimes(deliveredBeforeLateFrames);
-    expect(client.getRunStartedAt("chat-canonical")).toBeNull();
+    expect(client.getRunState("chat-canonical").startedAt).toBeNull();
     const otherChat = vi.fn();
     client.onChat("other-chat", otherChat);
     const taskUpdate = {
@@ -1866,7 +2136,7 @@ describe("NanobotClient", () => {
     expect(chatHandler).toHaveBeenCalledTimes(deliveredBeforeLateFrames + 1);
     expect(otherChat).not.toHaveBeenCalled();
     expect(client.hasUnsettledRun("chat-canonical")).toBe(false);
-    expect(client.getRunStartedAt("chat-canonical")).toBeNull();
+    expect(client.getRunState("chat-canonical").startedAt).toBeNull();
   });
 
   it("notifies run status subscribers and replays running chats", () => {
@@ -2073,8 +2343,8 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     const promise = client.newChat(1_000);
-    expect(lastSocket().sent).toContain(JSON.stringify({ type: "new_chat" }));
-    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
+    expect(lastSocket().sent.map((value) => JSON.parse(value))).toContainEqual({ type: "new_chat", request_id: expect.any(String) });
+    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id", request_id: lastRequestId() });
     await expect(promise).resolves.toBe("fresh-id");
   });
 
@@ -2094,10 +2364,10 @@ describe("NanobotClient", () => {
     lastSocket().fakeOpen();
 
     const promise = client.newChat(1_000, workspaceScope);
-    expect(lastSocket().sent).toContain(
-      JSON.stringify({ type: "new_chat", workspace_scope: workspaceScope }),
-    );
-    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id" });
+    expect(lastSocket().sent.map((value) => JSON.parse(value))).toContainEqual({
+      type: "new_chat", workspace_scope: workspaceScope, request_id: expect.any(String),
+    });
+    lastSocket().fakeMessage({ event: "attached", chat_id: "fresh-id", request_id: lastRequestId() });
     await expect(promise).resolves.toBe("fresh-id");
 
     client.sendMessage("fresh-id", "hello", undefined, { workspaceScope });
@@ -2564,8 +2834,9 @@ describe("NanobotClient", () => {
       event: "error",
       detail: "workspace_scope_rejected",
       reason: "project_path must be an existing directory",
+      request_id: lastRequestId(),
     });
-    await expect(pending).rejects.toThrow("workspace_scope_rejected");
+    await expect(pending).rejects.toThrow("workspace_scope_rejected:project_path must be an existing directory");
   });
 
   it("isolates throwing error handlers so reconnect bookkeeping still runs", async () => {

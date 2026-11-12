@@ -47,6 +47,7 @@ import { DisplayMathFixture } from "./display-math-fixture";
 import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
 import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
 import { AppearanceFixture } from "./appearance-fixture";
+import { ContinuityFixture } from "./continuity-fixture";
 import { installSubagentDockApi, SubagentDockFixture } from "./subagent-dock-fixture";
 
 const history: UIMessage[] = [
@@ -109,7 +110,9 @@ const parameters = new URLSearchParams(location.search);
 const railClient = new NanobotClient({ url: "ws://127.0.0.1:8765", reconnect: false });
 const railHistory: UIMessage[] = Array.from({ length: 5 }, (_, index) => [
   { id: `u${1995 + index}`, role: "user" as const, content: `Question ${1995 + index}`, createdAt: index + 1 },
-  { id: `a${1995 + index}`, role: "assistant" as const, content: "A synthetic answer.\n\n".repeat(8), createdAt: index + 1 },
+  { id: `a${1995 + index}`, role: "assistant" as const, content: parameters.has("focus-links") && index === 4
+    ? Array.from({ length: 45 }, (_, i) => `[Reference ${i}](https://example.test/ref${i})`).join("\n")
+    : "A synthetic answer.\n\n".repeat(8), createdAt: index + 1 },
 ]).flat();
 function RailFixture() {
   const [messages, setMessages] = useState(parameters.has("real") ? [] : railHistory);
@@ -147,7 +150,9 @@ function RailFixture() {
       <button onClick={() => setStreaming(true)} disabled={streaming}>{streaming ? "Streaming" : "Simulate stream"}</button>
     </div>}
     {parameters.has("workbench") ? <PaneWorkbench
-      panes={[{ key: "rail", title: "Rail conversation" }]} activePaneKey="rail" layout="columns" showLayoutControl={false}
+      panes={parameters.has("focus-links")
+        ? [{ key: "rail", title: "Rail conversation" }, { key: "other", title: "Other conversation" }]
+        : [{ key: "rail", title: "Rail conversation" }]} activePaneKey="rail" layout="columns" showLayoutControl={false}
       onActivatePane={() => {}} onAddPane={() => {}} onLayoutChange={() => {}} onPaneOrderChange={() => {}}
       renderPane={(_pane, context) => <>
         {viewport(context.composerPortalTarget !== undefined, context.navigationFrame)}
@@ -226,7 +231,9 @@ if (parameters.get("case") === "appearance" && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "appearance"
+  {parameters.get("case") === "continuity"
+    ? <ContinuityFixture />
+    : parameters.get("case") === "appearance"
     ? <AppearanceFixture />
     : parameters.get("case") === "loaded-session-search"
     ? <LoadedSessionSearchFixture />
@@ -279,7 +286,7 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     : parameters.get("case") === "new-chat-skeleton"
     ? <ClientProvider client={railClient} token="fixture"><NewChatSkeletonFixture /></ClientProvider>
     : parameters.get("case") === "skeleton-additions"
-    ? <ClientProvider client={railClient} token="fixture"><SkeletonAdditionsFixture /></ClientProvider>
+    ? <ClientProvider client={railClient} token="fixture" webuiCapabilities={parameters.has("sandboxSettings") ? ["webui.sandbox-settings.v1"] : []}><SkeletonAdditionsFixture /></ClientProvider>
     : parameters.get("case") === "skeleton"
     ? <ClientProvider client={railClient} token="fixture"><SkeletonFixture surface={parameters.get("surface") ?? "skills"} loading={parameters.has("loading")} /></ClientProvider>
     : parameters.get("case") === "tools-catalog"

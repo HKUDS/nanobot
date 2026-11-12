@@ -477,8 +477,66 @@
       "password": "パスワード",
       "proxyReferenceAuth": "参照先のプロキシ URL に認証情報を設定してください。"
     },
+    "sandbox": {
+      "title": "コマンドサンドボックス",
+      "method": "隔離方式",
+      "off": "隔離なし",
+      "status": "保存済みの設定",
+      "check": "サンドボックスを確認",
+      "checking": "確認中…",
+      "scope": "一時ファイルのみで保存済みのランチャーを確認します。完全なセキュリティ監査ではありません。コマンドに設定を適用するにはゲートウェイを再起動してください。",
+      "path": "信頼するランチャーのパス",
+      "launcher": "サンドボックスランチャー",
+      "pathHelp": "通常は空欄のままシステムで {{launcher}} を検索します。独自のインストールでは、パッケージ管理者にランチャーの完全なパスを確認してください。ファイルと親ディレクトリは root 所有で、グループや他のユーザーが書き込めず、Agent の書き込み範囲外である必要があります。",
+      "automatic": "システム検索",
+      "checkError": "確認できませんでした。設定を開き直して再試行してください。",
+      "saveError": "保存できませんでした。下書きを保持しています。再試行してください。",
+      "disableTitle": "コマンドの隔離を無効にしますか？",
+      "disableHelp": "再起動後、コマンドはゲートウェイのアカウント権限で実行されます。ファイルツールも、このサンドボックスによる作業領域の制限を失います。個別に設定した制限は引き続き適用されます。",
+      "keep": "隔離を維持",
+      "disable": "隔離を無効化",
+      "notice": {
+        "title": "コマンドの設定を確認してください",
+        "missing": "ゲートウェイで {{launcher}} が見つかりません。インストール済みなら完全なパスを設定してください。未導入の場合はパッケージ管理者にご相談ください。チャットは引き続き使えます。",
+        "path": "ゲートウェイで設定済みの {{launcher}} パスを使用できません。完全なパスとアクセス権限を確認してください。",
+        "permissions": "{{launcher}} が保護された場所にありません。パッケージ管理者にご相談ください。",
+        "startup": "{{launcher}} を起動できませんでした。ゲートウェイのインストール状態とシステムの制限を確認してください。",
+        "configurePath": "{{launcher}} のパスを設定",
+        "openSettings": "サンドボックス設定を開く"
+      },
+      "states": {
+        "disabled": "コマンド無効",
+        "off": "隔離なし",
+        "unsupported": "未対応",
+        "unchecked": "未確認",
+        "unavailable": "利用不可",
+        "passed": "基本確認に成功",
+        "checking": "確認中…"
+      },
+      "help": {
+        "disabled": "コマンドを有効にするとサンドボックスを使用できます。",
+        "off": "コマンドは隔離されていません。ホストを保護する隔離方式を選んでください。",
+        "unsupported": "ゲートウェイの OS はこの隔離方式に対応していません。",
+        "unchecked": "確認を実行して保存済みの設定を検証してください。",
+        "unsaved": "設定を保存してから確認してください。",
+        "unavailable": "サンドボックスを起動できません。このサンドボックス内ではコマンドを実行しません。",
+        "passed": "ランチャーの起動、一時作業領域への書き込み、外部テストファイルの遮断を確認しました。",
+        "checking": "時間制限付きのサンドボックステストを実行中…"
+      },
+      "reasons": {
+        "launcher_missing": "ゲートウェイで {{launcher}} が見つかりません。インストール済みなら下に完全なパスを入力してください。未導入の場合はパッケージ管理者にご相談ください。",
+        "path_not_absolute": "コマンド名ではなく絶対パスを入力してください。",
+        "not_executable": "実行可能なファイルを指定してください。",
+        "agent_writable": "Agent が書き込める場所です。パッケージ管理者に保護された場所へのインストールを依頼してください。",
+        "unprotected_installation": "ランチャーまたは親ディレクトリに root 以外が書き込めます。管理者に保護された場所を依頼してください。",
+        "path_unavailable": "パスを読めません。ゲートウェイ上の存在とアクセス権を確認してください。",
+        "platform_unsupported": "ゲートウェイの OS に対応した隔離方式を選んでください。",
+        "probe_failed": "隔離テストに失敗しました。インストール、カーネルの名前空間対応、追加マウントを確認してください。",
+        "probe_timeout": "確認がタイムアウトしました。インストールとホストの制限を確認して再試行してください。",
+        "unknown": "ランチャーを利用できません。インストールとアクセス権を確認してください。"
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "保存しました。API サービスを再起動すると反映されます。",
       "commandRuntime": {
         "custom": "カスタム（秒）",
         "customLabel": "カスタム実行時間（秒）",
@@ -498,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "再試行を継続", "help": "回復可能なエラーで再試行します。オフでは標準の再試行を使います。\n\nモデルへのリクエストが一時的なエラーで失敗した場合、成功するまで再試行します。オフにすると再試行回数を制限します。"},
         "agents_defaults_tool_hint_max_length": {"label": "概要の長さ", "help": "ツールの実行概要に表示する文字数上限です。\n\nツールの動作を簡潔に表示する説明文の最大文字数です。"},
         "tools_max_session_messages_per_minute": {"label": "メッセージ頻度", "help": "同じセッションにツールが送る毎分のメッセージ上限です。\n\nツールが会話にメッセージを送信する頻度を制限します。"},
-        "agents_defaults_unified_session": {"label": "セッション共有", "help": "同じユーザーのチャット履歴を複数のプラットフォームで共有します。\n\n1 人のユーザーが複数のチャットプラットフォームで同じ会話を使用します。"},
         "tools_exec_enable": {"label": "シェルツール", "help": "エージェントによる Shell コマンドの実行を許可します。\n\nエージェントによるシェルコマンドの実行を許可します。"},
         "tools_file_enable": {"label": "ファイルツール", "help": "組み込みのファイル読み取り・編集ツールを許可します。"},
         "tools_web_enable": {"label": "ウェブアクセス", "help": "ウェブ検索とページの読み取りを許可します。\n\nウェブ検索とページ取得を許可します。"},
@@ -526,8 +583,6 @@
         "gateway_host": {"label": "ゲートウェイアドレス", "help": "ゲートウェイのアドレスです。WebUI の待ち受けは別に設定します。\n\nゲートウェイの待ち受けアドレスです。WebSocket と WebUI のアドレスは「チャンネル → WebSocket」で設定します。"},
         "gateway_port": {"label": "ゲートウェイのポート", "help": "ゲートウェイのポートです。起動引数が優先されます。\n\n保存するポート番号。コマンドライン引数が優先されます。"},
         "gateway_restart_mode": {"label": "再起動モード", "help": "再起動方法を選びます。「自動」は環境に合わせます。\n\nプロセスの再起動方法。自動モードではホスト環境に応じて選択します。"},
-        "api_host": {"label": "API アドレス", "help": "ネットワーク公開前にキーを設定し、変更後は API を再起動します。\n\nlocalhost 以外のアドレスで待ち受けるには API キーが必要です。「システム」でキーを設定し、API サービスを再起動して変更を反映してください。"},
-        "api_timeout": {"label": "API 制限時間", "help": "API 要求の最大秒数です。適用には再起動が必要です。\n\nリクエストの時間制限です。API サービスの再起動後に反映されます。"},
         "tools_image_generation_save_dir": {"label": "保存先", "help": "メディア内の相対パスです。既存の画像は移動しません。\n\nnanobot のメディアディレクトリ内の相対パス。既存の画像は移動しません。"}
       },
       "groups": {
@@ -544,7 +599,6 @@
         "safety": {"title": "全体の権限", "help": "ワークスペース制限、ネットワーク例外、リモートインストールを設定します。\n\nワークスペース制限、プライベートネットワーク、リモートインストール。"},
         "cli": {"title": "CLI 制限", "help": "インストール・実行の制限時間と一覧のキャッシュ期間を設定します。\n\nインストール、実行、カタログキャッシュの時間制限。"},
         "gateway": {"title": "ゲートウェイ", "help": "配置と再起動の方法を設定します。"},
-        "api": {"title": "API 設定", "help": "待ち受けアドレスと要求の制限時間を設定します。"},
         "storage": {"title": "画像の保存", "help": "生成した画像の保存先を選びます。"},
         "maintenance": {"title": "メモリー整理", "help": ""},
         "web": {"title": "ウェブアクセス", "help": ""},
@@ -655,7 +709,7 @@
       "small": "小",
       "standard": "標準",
       "large": "大",
-      "previewText": "**考えるための、少しの余白。**\n\n明快な言葉と、心地よい読みやすさ。この空間を、あなたらしく。",
+      "previewText": "明快な言葉と、心地よい読みやすさ。この空間を、あなたらしく。",
       "previewPlaceholder": "何から始めましょうか？",
       "process": "処理状況の表示",
       "processHelp": "nanobot の作業中に表示する詳細の量を選びます。",
@@ -881,18 +935,19 @@
       "shortTitle": "トークン使用量",
       "viewDetails": "詳細を見る",
       "cacheHitRate": "キャッシュヒット率",
-      "cacheRateHelp": "キャッシュ状態が不明な入力はヒット率の計算から除外します。",
       "dailyTrend": "毎日の Token",
       "systemHelp": "内部タスクと記録された送信元がない呼び出しを含みます。",
       "bySource": "利用元別の使用量",
       "modelTrend": "モデルの推移",
       "modelsUnavailable": "モデル別の内訳はありません。",
-      "otherModels": "その他 / 未分類",
+      "otherModels": "その他のモデル",
       "unclassified": "未分類",
       "unavailable": "使用量データを取得できません。",
       "noActivity": "過去30日間のトークン使用はありません。",
+      "last30Days": "過去 30 日間",
       "cachedInput": "キャッシュヒット",
       "cacheMiss": "キャッシュ未使用",
+      "cacheWrite": "キャッシュ書き込み",
       "cacheUnknown": "状態不明",
       "outputTokens": "出力",
       "otherTokens": "その他のトークン",
@@ -905,7 +960,9 @@
         "cron": "自動タスク",
         "dream": "メモリ整理",
         "system": "補助処理"
-      }
+      },
+      "failedRequests": "失敗 {{count}} 件",
+      "estimatedShare": "トークンの {{percent}} は推定値"
     },
     "providers": {
       "manageProviders": "プロバイダーを管理",
@@ -1178,15 +1235,6 @@
         "github": "リポジトリ、Issue、PR を管理します。",
         "supabase": "プロジェクトを確認・管理します。"
       }
-    },
-    "api": {
-      "title": "API サーバー", "openaiCompatible": "OpenAI 互換 API", "description": "OpenAI 互換の API で接続します。",
-      "start": "API サーバーを起動", "starting": "起動中...", "stop": "停止", "stopping": "停止中...",
-      "access": "アクセス", "thisDevice": "このデバイス", "localNetwork": "ローカルネットワーク",
-      "localHelp": "この端末だけが接続できます。", "networkHelp": "LAN からのアクセスには API キーが必要です。\n\n他のデバイスも接続できるため API キーが必要です。",
-      "port": "ポート", "portHelp": "API サービスが使うローカルポートです。", "apiKey": "API キー", "apiKeyHelp": "キーを Bearer Token として送信します。",
-      "apiKeyRequired": "ネットワークに公開する前に必要です。", "apiKeyPlaceholder": "API キーを入力",
-      "autoInstall": "起動時に API サーバーに必要なパッケージを自動的にインストールします。"
     },
     "observability": {
       "title": "実行の追跡", "configured": "nanobot がトレース認証情報を利用できます。",
@@ -1752,8 +1800,6 @@
       },
       "interruptedHelp": "タスクの完了前にサーバーが再起動しました。タスクは自動的に再実行されていません。",
       "workTitle": "サブタスク",
-      "otherWorkTitle": "ほかのタスク",
-      "unlinkedHelp": "表示中のメッセージには、これらのタスクに対応する依頼がありません。",
       "progress": "{{total}} 件中 {{completed}} 件完了",
       "running": "実行中: {{count}}",
       "finished": "終了: {{count}}",

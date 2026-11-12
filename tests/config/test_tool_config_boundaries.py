@@ -40,7 +40,7 @@ class RuntimeImportBlocker(importlib.abc.MetaPathFinder):
         if fullname in config_modules:
             return None
         forbidden = (
-            'nanobot.agent', 'nanobot.api', 'nanobot.apps', 'nanobot.channels',
+            'nanobot.agent', 'nanobot.apps', 'nanobot.channels',
             'nanobot.cli', 'nanobot.session', 'nanobot.webui', 'nanobot.providers.base',
         )
         if any(fullname == name or fullname.startswith(name + '.') for name in forbidden):

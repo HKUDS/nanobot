@@ -676,6 +676,6 @@ def test_context_skills_observe_resolved_alias_and_share_discovery(tmp_path, mon
     with capture_sources() as sources:
         content = loader.load_skills_for_context(["legacy", "canonical"])
     assert content.count("# Instructions") == 2
-    assert [source.path for source in sources] == [path, path]
-    assert all(source.content == "# Instructions" for source in sources)
+    assert [source.path for source in sources.sources] == [path, path]
+    assert all(source.content == "# Instructions" for source in sources.sources)
     assert len(discoveries) == 1

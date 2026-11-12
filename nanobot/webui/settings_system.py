@@ -10,13 +10,14 @@ import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, cast
 from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import ValidationError
 from pydantic.alias_generators import to_snake
 
+from nanobot.agent.tools.sandbox_check import check_sandbox, sandbox_settings_status
 from nanobot.build_info import COMMIT
 from nanobot.channels._setup import channel_setup_spec
 from nanobot.channels.connect import ChannelConnectError, ChannelConnector, ManagedChannelConnector
@@ -99,7 +100,7 @@ class GatewayEnvironmentPayload(TypedDict):
 class SystemSettingsPayload(TypedDict):
     runtime_config: dict[str, Any]
     runtime: dict[str, Any]
-    usage: dict[str, Any]
+    usage: NotRequired[dict[str, Any]]
     advanced: dict[str, Any]
     version: dict[str, Any]
     environment: GatewayEnvironmentPayload
@@ -135,6 +136,7 @@ def system_settings_payload(
     *,
     config_path: Path,
     version: str,
+    include_usage: bool = True,
 ) -> SystemSettingsPayload:
     defaults = config.agents.defaults
     exec_config = config.tools.exec
@@ -142,7 +144,7 @@ def system_settings_payload(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         workspace=config.workspace_path,
     )
-    return {
+    payload: SystemSettingsPayload = {
         "runtime_config": runtime_config_payload(config),
         "runtime": {
             "config_path": str(config_path.expanduser()),
@@ -156,9 +158,7 @@ def system_settings_payload(
             "dream": {
                 "schedule": defaults.dream.describe_schedule(),
             },
-            "unified_session": defaults.unified_session,
         },
-        "usage": llm_usage_payload(timezone_name=defaults.timezone),
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,
             "workspace_sandbox": sandbox_status.as_dict(),
@@ -167,6 +167,7 @@ def system_settings_payload(
             "exec_enabled": exec_config.enable,
             "exec_max_runtime_limit": exec_config.max_runtime_limit,
             "exec_sandbox": exec_config.sandbox or None,
+            "exec_sandbox_status": sandbox_settings_status(exec_config, config.workspace_path),
             "exec_path_prepend_set": bool(exec_config.path_prepend),
             "exec_path_append_set": bool(exec_config.path_append),
         },
@@ -179,11 +180,17 @@ def system_settings_payload(
         },
         "docs": docs_payload(version),
     }
+    if include_usage:
+        payload["usage"] = llm_usage_payload(timezone_name=defaults.timezone)
+    return payload
 
 
-def settings_usage_payload(config: Config) -> dict[str, Any]:
-    """Return the lightweight token usage slice for Overview refreshes."""
-    return llm_usage_payload(timezone_name=config.agents.defaults.timezone)
+def settings_usage_payload(config: Config, *, details: bool = False) -> dict[str, Any]:
+    """Return only the 30-day usage projection currently displayed."""
+    return llm_usage_payload(
+        timezone_name=config.agents.defaults.timezone,
+        view="models" if details else "overview",
+    )
 
 
 def update_agent_system_settings(config: Config, query: QueryParams) -> tuple[bool, bool]:
@@ -457,6 +464,7 @@ class SystemSettingsHandler:
         self._closing_connectors = False
         self._update_jobs = UpdateJobService()
         self._remove_update_work: Callable[[], None] | None = None
+        self._sandbox_check_running = False
 
     def _has_pending_connectors(self) -> bool:
         return self._closing_connectors or any(
@@ -503,6 +511,17 @@ class SystemSettingsHandler:
         channel_name: str | None = None,
         connect_action: str | None = None,
     ) -> SettingsRouteResult:
+        if action == "sandbox-check":
+            if self._sandbox_check_running:
+                return SettingsRouteResult.failure(409, "sandbox_check_busy")
+            self._sandbox_check_running = True
+            try:
+                config = await asyncio.to_thread(self.settings.config.load)
+                return SettingsRouteResult.success({
+                    "sandbox": await check_sandbox(config.tools.exec, config.workspace_path),
+                })
+            finally:
+                self._sandbox_check_running = False
         if action == "runtime-config-update":
             values = (request.payload or {}).get("values")
             if not isinstance(values, dict):

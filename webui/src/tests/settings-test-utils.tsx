@@ -64,12 +64,6 @@ export function settingsPayload(): SettingsPayload {
       search: { max_results: 5, timeout: 30 },
       fetch: { use_jina_reader: true },
     },
-    api: {
-      host: "127.0.0.1",
-      port: 8900,
-      timeout: 120,
-      api_key_hint: null,
-    },
     observability: {
       provider: "langfuse",
       configured: false,
@@ -98,7 +92,6 @@ export function settingsPayload(): SettingsPayload {
       dream: {
         schedule: "every 2h",
       },
-      unified_session: false,
     },
     advanced: {
       restrict_to_workspace: false,
@@ -128,6 +121,7 @@ export function settingsPayload(): SettingsPayload {
 type SettingsViewTestOptions = Partial<Pick<
   React.ComponentProps<typeof SettingsView>,
   | "initialSection"
+  | "focusTarget"
   | "initialSettings"
   | "themePreference"
   | "onChangeTheme"
@@ -140,7 +134,7 @@ type SettingsViewTestOptions = Partial<Pick<
   | "onStartAutomationChat"
   | "onNativeEngineRestart"
   | "onRestart"
->> & { client?: NanobotClient };
+>> & { client?: NanobotClient; webuiCapabilities?: string[] };
 
 export function renderSettingsView(options: SettingsViewTestOptions = {}) {
   render(
@@ -151,10 +145,11 @@ export function renderSettingsView(options: SettingsViewTestOptions = {}) {
         handler("open");
         return () => {};
       },
-    } as never} token="tok">
+    } as never} token="tok" webuiCapabilities={options.webuiCapabilities}>
       <SettingsView
         themePreference={options.themePreference ?? "light"}
         initialSection={options.initialSection ?? "apps"}
+        focusTarget={options.focusTarget}
         initialSettings={options.initialSettings}
         skills={options.skills}
         skillsLoading={options.skillsLoading}

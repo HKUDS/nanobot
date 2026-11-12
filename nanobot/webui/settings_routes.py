@@ -11,7 +11,6 @@ from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
 from nanobot.agent.tools.mcp_oauth import MCP_OAUTH_CALLBACK_PATH
-from nanobot.api.runtime import ApiRuntime, api_runtime_paths
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.registry import load_channel_plugin
 from nanobot.channels.validation import validate_channel_config
@@ -22,6 +21,7 @@ from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as model_domain
 from nanobot.webui import settings_system as system_domain
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
+from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.http_utils import http_response as _http_response
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.mcp_oauth_api import McpOAuthManager
@@ -48,7 +48,6 @@ from nanobot.webui.settings_api import (
     settings_payload,
     settings_usage_payload,
     update_agent_settings,
-    update_api_settings,
     update_image_generation_settings,
     update_model_call_order,
     update_model_configuration,
@@ -122,15 +121,13 @@ _MODEL_ROUTES = {
 
 _CAPABILITY_ROUTES = {
     "/api/settings/web-search/update": "web-search-update",
-    "/api/settings/api-service": "api-status",
-    "/api/settings/api-service/start": "api-start",
-    "/api/settings/api-service/stop": "api-stop",
     "/api/settings/image-generation/update": "image-update",
     "/api/settings/transcription/update": "transcription-update",
     "/api/settings/network-safety/update": "network-update",
 }
 
 _SYSTEM_ROUTES = {
+    "/api/settings/sandbox/check": "sandbox-check",
     "/api/settings/runtime-config/update": "runtime-config-update",
     "/api/settings/cli-apps": "cli-list",
     "/api/settings/cli-apps/install": "cli-install",
@@ -162,6 +159,7 @@ _SYSTEM_ROUTES = {
 }
 
 _SETTINGS_MUTATION_PATHS = frozenset({
+    "/api/settings/sandbox/check",
     "/api/settings/nanobot-update/channel",
     "/api/settings/nanobot-update/plan/create",
     "/api/settings/nanobot-update/job/prepare",
@@ -181,8 +179,6 @@ _SETTINGS_MUTATION_PATHS = frozenset({
     "/api/settings/provider/oauth-login/complete",
     "/api/settings/provider/oauth-logout",
     "/api/settings/web-search/update",
-    "/api/settings/api-service/start",
-    "/api/settings/api-service/stop",
     "/api/settings/image-generation/update",
     "/api/settings/transcription/update",
     "/api/settings/network-safety/update",
@@ -317,7 +313,7 @@ class WebUISettingsRouter:
         if route == ("root", "settings"):
             return await asyncio.to_thread(self._handle_settings)
         if route == ("root", "usage"):
-            return await asyncio.to_thread(self._handle_settings_usage)
+            return await asyncio.to_thread(self._handle_settings_usage, request)
 
         domain, action = route
         if action.startswith("update-") and self._runtime_surface == "native":
@@ -332,7 +328,6 @@ class WebUISettingsRouter:
             request,
             needs_local_browser=(
                 action in {
-                    "api-start",
                     "runtime-config-update",
                     "features-enable",
                     "channel-configure",
@@ -506,8 +501,25 @@ class WebUISettingsRouter:
             )
         )
 
-    def _handle_settings_usage(self) -> Response:
-        return self._json_response(self.settings.read(settings_usage_payload))
+    def _handle_settings_usage(self, request: WsRequest) -> Response:
+        details = contracts.query_first(self._parse_query(request.path), "details")
+        if details not in (None, "true", "false"):
+            return self._error_response(400, "details must be true or false")
+        payload = self.settings.read(settings_usage_payload, details=details == "true")
+        revision = payload.get("revision")
+        headers = [("Cache-Control", "private, no-cache")]
+        if revision:
+            etag = f'W/"{revision}"'
+            headers.append(("ETag", etag))
+            if request.headers.get("If-None-Match") == etag:
+                return _http_response(
+                    b"", status=304, extra_headers=[*headers, ("Vary", "Accept-Encoding")],
+                )
+        return http_json_response(
+            payload,
+            accept_encoding=request.headers.get("Accept-Encoding", ""),
+            extra_headers=headers,
+        )
 
     def _model_operations(self) -> model_domain.ModelSettingsOperations:
         return model_domain.ModelSettingsOperations(
@@ -532,12 +544,9 @@ class WebUISettingsRouter:
     ) -> capability_domain.CapabilitySettingsOperations:
         return capability_domain.CapabilitySettingsOperations(
             update_web_search=update_web_search_settings,
-            update_api=update_api_settings,
             update_image=update_image_generation_settings,
             update_transcription=update_transcription_settings,
             update_network=update_network_safety_settings,
-            nanobot_features_action=nanobot_features_action,
-            api_runtime=self._api_runtime,
             reload_image=self._reload_image_generation_runtime,
         )
 
@@ -630,9 +639,6 @@ class WebUISettingsRouter:
 
     def _parse_mcp_settings_query(self, request: WsRequest) -> QueryParams:
         return self._query(request)
-
-    def _api_runtime(self) -> ApiRuntime:
-        return ApiRuntime(paths=api_runtime_paths(self.settings.config.path))
 
     def _save_channel_config_values(
         self,

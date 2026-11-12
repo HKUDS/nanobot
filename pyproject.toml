@@ -69,9 +69,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-api = [
-    "aiohttp>=3.9.0,<4.0.0",
-]
+# Keep this empty extra so older updaters can preserve recorded installations.
+api = []
 azure = [
     "azure-identity>=1.19.0,<2.0.0",
 ]

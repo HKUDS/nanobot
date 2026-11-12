@@ -17,6 +17,7 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentControlError, SubagentManager
 from nanobot.agent.subagent_sessions import SUBAGENT, TASK_METADATA_KEY, SubagentSessions
+from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
 from nanobot.agent.tools.session_messages import SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
@@ -33,8 +34,9 @@ from nanobot.providers.base import (
 )
 from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
 from nanobot.session.location import SessionLocation
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import SessionManager, SessionPolicy
 from nanobot.session.session_handles import SessionHandleResolver
+from nanobot.session.sqlite_store import SqliteSessionStore
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 from nanobot.session.webui_turns import WebuiTurnCoordinator
@@ -63,6 +65,106 @@ def gateway_for(manager, sessions, workspace):
     )
     token = gateway.tokens.issue_api_token(60)
     return gateway, SimpleNamespace(remote_address=("127.0.0.1", 12345)), Headers({"Authorization": f"Bearer {token}"})
+
+
+@pytest.mark.asyncio
+async def test_windowed_task_reads_limit_history_and_reconcile_active_work(tmp_path):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    await sessions.state.get("websocket:parent")
+    await sessions.state.get("websocket:other")
+
+    async def saved(task_id, owner, *, turn_id="turn-a"):
+        status = SubagentStatus(
+            task_id=task_id, label=task_id, task_description=task_id, owner=owner,
+            started_at=0, finished_at=1, state="done", completed_at=1,
+            origin_turn_id=turn_id,
+        )
+        await sessions.state.create_child(
+            owner, SubagentSessions.key(task_id),
+            metadata={SESSION_TYPE_KEY: SUBAGENT.name, TASK_METADATA_KEY: SubagentSessions._payload(status)},
+            content=task_id, policy=SessionPolicy(),
+        )
+
+    await saved("a", "websocket:parent")
+    await saved("b", "websocket:parent", turn_id="turn-b")
+    # A task with no origin is only reachable while the caller still tracks it.
+    await saved("unknown", "websocket:parent", turn_id=None)
+    await saved("foreign", "websocket:other")
+    entered = asyncio.Event()
+
+    async def blocked(spec):
+        entered.set()
+        await asyncio.Event().wait()
+
+    manager.runner.run = blocked
+    await manager.spawn("active", session_key="websocket:parent", runtime=runtime)
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    active_id, = manager._tasks
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    path = "/api/sessions/websocket%3Aparent/subagents"
+    try:
+        response = await gateway.http.dispatch(
+            connection, Request(path + "?scope=window&turn_id=turn-a", headers),
+        )
+        assert response.status_code == 200
+        assert {task["task_id"] for task in json.loads(response.body)["tasks"]} == {"a", active_id}
+        tracked = await gateway.http.dispatch(
+            connection, Request(path + "?scope=window&track=b&track=foreign", headers),
+        )
+        # Live work is always included; tracked tasks outside the loaded turns come along.
+        assert {task["task_id"] for task in json.loads(tracked.body)["tasks"]} == {active_id, "b"}
+        legacy_read = await gateway.http.dispatch(connection, Request(path, headers))
+        assert {task["task_id"] for task in json.loads(legacy_read.body)["tasks"]} == {
+            "a", "b", "unknown", active_id,
+        }
+        for invalid in ("?scope=window&turn_id=", "?scope=everything"):
+            malformed = await gateway.http.dispatch(connection, Request(path + invalid, headers))
+            assert malformed.status_code == 400, invalid
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_windowed_task_read_opens_one_store_connection(tmp_path, monkeypatch):
+    manager, sessions, _runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    await sessions.state.get("websocket:parent")
+    for task_id, turn_id in (
+        ("in-window", "turn-window"),
+        ("tracked-1", "turn-old"),
+        ("tracked-2", "turn-old"),
+        ("tracked-3", "turn-old"),
+    ):
+        status = SubagentStatus(
+            task_id=task_id, label=task_id, task_description=task_id, owner="websocket:parent",
+            started_at=0, finished_at=1, state="done", completed_at=1,
+            origin_turn_id=turn_id,
+        )
+        await sessions.state.create_child(
+            "websocket:parent", SubagentSessions.key(task_id),
+            metadata={SESSION_TYPE_KEY: SUBAGENT.name, TASK_METADATA_KEY: SubagentSessions._payload(status)},
+            content=task_id, policy=SessionPolicy(),
+        )
+
+    opened = 0
+    original = SqliteSessionStore._open_connection
+
+    def counting(self, *, worker: bool = False):
+        nonlocal opened
+        opened += 1
+        return original(self, worker=worker)
+
+    monkeypatch.setattr(SqliteSessionStore, "_open_connection", counting)
+    try:
+        statuses = await manager.read_statuses_for_session(
+            "websocket:parent", turns=["turn-window"],
+            tracked=["tracked-1", "tracked-2", "tracked-3"],
+        )
+        # Tracked work outside the window stays visible, and the whole read shares
+        # one connection instead of one per tracked task.
+        assert set(statuses) == {"in-window", "tracked-1", "tracked-2", "tracked-3"}
+        assert opened == 1
+    finally:
+        await manager.close()
 
 
 async def wait_for_model_requests(manager, task_id, requests, count):

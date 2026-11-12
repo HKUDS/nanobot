@@ -19,13 +19,12 @@ from nanobot.events import NO_EVENTS, ContextCompactionEvent
 from nanobot.providers.base import LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.sdk.clients import RuntimeClient
-from nanobot.session.keys import HEARTBEAT_SESSION_KEY, UNIFIED_SESSION_KEY
+from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 
 
 def _make_loop(
     tmp_path: Path,
     session_ttl_minutes: int = 15,
-    unified_session: bool = False,
 ) -> AgentLoop:
     """Create a minimal AgentLoop for testing."""
     bus = MessageBus()
@@ -41,7 +40,6 @@ def _make_loop(
         model="test-model",
         context_window_tokens=128_000,
         session_ttl_minutes=session_ttl_minutes,
-        unified_session=unified_session,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     return loop
@@ -226,33 +224,6 @@ async def test_idle_compaction_skips_subagent_sessions(tmp_path, monkeypatch, re
             assert len(child.messages) == 2
             assert child.last_archived == 0
             assert "_last_summary" not in child.metadata
-    finally:
-        await loop.aclose()
-
-
-async def test_expired_unified_turn_keeps_latest_delivery_route(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.config.home._home_path", tmp_path / "home")
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
-    loop = _make_loop(tmp_path / "workspace", unified_session=True)
-    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    session.metadata["last_channel"] = "telegram:old"
-    session.metadata["_compaction_route"] = {
-        "channel": "telegram", "chat_id": "old", "metadata": {},
-    }
-    session.updated_at = datetime.now() - timedelta(minutes=20)
-    loop.sessions.save(session)
-    try:
-        response = await loop.process_direct(
-            "hello", session_key=UNIFIED_SESSION_KEY, channel="discord", chat_id="new",
-        )
-
-        assert response is not None and response.content == "ok"
-        saved = await loop.sessions.state.get(UNIFIED_SESSION_KEY)
-        assert saved.generation == session.generation
-        assert saved.metadata["last_channel"] == "discord:new"
-        assert saved.metadata["_compaction_route"] == {
-            "channel": "discord", "chat_id": "new", "metadata": {},
-        }
     finally:
         await loop.aclose()
 
@@ -1361,7 +1332,7 @@ async def test_idle_compaction_rechecks_settled_activity(tmp_path, monkeypatch, 
     _add_turns(session, 2)
     session.updated_at = now[0] - timedelta(minutes=20)
     loop.sessions.save(session)
-    entered, release = asyncio.Event(), asyncio.Event()
+    entered, release, settled = asyncio.Event(), asyncio.Event(), asyncio.Event()
     archived = []
     other_responses = []
 
@@ -1381,30 +1352,30 @@ async def test_idle_compaction_rechecks_settled_activity(tmp_path, monkeypatch, 
         try:
             await asyncio.wait_for(entered.wait(), 5)
             now[0] += timedelta(minutes=20)
-            if ordering == "scan_during_turn":
-                loop._next_idle_compact_check_at = 0
-                await loop._check_expired_sessions_if_due()
-            other_responses.append(await asyncio.wait_for(
-                loop.process_direct("other input", session_key="cli:other"), 5,
-            ))
-            assert archived == []
+            async with asyncio.timeout(5):
+                if ordering == "scan_during_turn":
+                    loop._next_idle_compact_check_at = 0
+                    await loop._check_expired_sessions_if_due()
+                other_responses.append(await loop.process_direct("other input", session_key="cli:other"))
+                assert archived == []
         finally:
             release.set()
+        await asyncio.wait_for(settled.wait(), 5)
 
     loop.provider.chat_stream_with_retry.side_effect = respond
     loop.consolidator.archive_session = archive
-    finishing = None
     try:
         if ordering == "archive_queued_before_turn":
             loop._next_idle_compact_check_at = 0
             await loop._check_expired_sessions_if_due()
             assert key in loop.auto_compact._archiving
-        finishing = asyncio.create_task(finish_turn())
-        # Await inline: the direct call takes the free lock before the already
-        # scheduled archive task runs. No scheduler or lock is replaced.
-        async with asyncio.timeout(5):
+        # Each phase owns its watchdog; the held turn intentionally waits for
+        # another session. A phase failure cancels the inline turn through the group.
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(finish_turn())
+            # Await inline so admission still precedes the queued archive task.
             response = await loop.process_direct("new input", session_key=key)
-        await asyncio.wait_for(finishing, 5)
+            settled.set()
         await asyncio.wait_for(_drain_background_tasks(loop), 5)
         assert len(archived) == 0
         saved = await loop.sessions.state.get(key)
@@ -1426,6 +1397,4 @@ async def test_idle_compaction_rechecks_settled_activity(tmp_path, monkeypatch, 
         assert key not in loop.auto_compact._archiving
     finally:
         release.set()
-        if finishing is not None:
-            await asyncio.wait_for(asyncio.gather(finishing, return_exceptions=True), 5)
         await asyncio.wait_for(loop.aclose(), 10)

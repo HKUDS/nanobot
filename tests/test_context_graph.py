@@ -14,7 +14,7 @@ def graph_from_observations(sources):
 def graph_from_build(build):
     with capture_sources() as sources:
         build()
-    return graph_from_observations(sources)
+    return graph_from_observations([*sources.sources, *(sources.system_sources or [])])
 
 
 def test_markdown_discovers_only_real_local_links_without_reading_targets(tmp_path: Path):
@@ -226,7 +226,8 @@ async def test_queued_skill_sources_reach_the_request(tmp_path: Path):
     injected = [m for call in provider.chat_stream_with_retry.call_args_list
                 for m in call.kwargs['messages'] if m.get('role') == 'user' and '$example' in str(m.get('content'))]
     assert injected
-    graph = graph_from_observations([source for event in events if isinstance(event, PromptSourcesEvent) for source in event.sources])
+    graph = graph_from_observations([source for event in events if isinstance(event, PromptSourcesEvent)
+                                     for source in (*event.sources, *(event.system_sources or ()))])
     assert any(node['path'] == expected_path and node['state'] == 'loaded' for node in graph['nodes'])
     assert {'source': expected_path, 'target': str(skill / 'guide.md')} in graph['edges']
 
@@ -254,6 +255,6 @@ def test_image_with_explicit_skill_reports_sources(tmp_path: Path):
     with capture_sources() as sources:
         current = ContextBuilder(tmp_path).build_current_message("$example", media=[str(image)])
     assert isinstance(current["content"], list)
-    graph = graph_from_observations(sources)
+    graph = graph_from_observations(sources.sources)
     assert graph["nodes"][0]["state"] == "loaded"
     assert graph["edges"] == [{"source": str(skill / "SKILL.md"), "target": str(skill / "guide.md")}]

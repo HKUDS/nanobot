@@ -487,51 +487,6 @@ describe("Settings system domains", () => {
     });
   });
 
-  it("starts the managed API server from System", async () => {
-    const base = settingsPayload();
-    const stopped = {
-      installed: false,
-      running: false,
-      managed: false,
-      host: "127.0.0.1",
-      port: 8900,
-      timeout: 120,
-      api_key_hint: null,
-      endpoint: "http://127.0.0.1:8900/v1",
-      command: "nanobot serve",
-    };
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === "/api/settings") return jsonResponse(base);
-      if (url === "/api/settings/api-service") return jsonResponse(stopped);
-      if (url === "/api/settings/nanobot-features") {
-        return jsonResponse({ features: [], enabled_count: 0 });
-      }
-      return jsonResponse({});
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    requestMutationMock.mockResolvedValueOnce({
-      ...stopped,
-      installed: true,
-      running: true,
-      managed: true,
-    });
-
-    renderSettingsView({ initialSection: "runtime", initialSettings: base, showSidebar: true });
-
-    const startButton = await screen.findByRole("button", { name: "Start API server" });
-    await waitFor(() => expect(startButton).toBeEnabled());
-    fireEvent.click(startButton);
-
-    await waitFor(() => {
-      expect(requestMutationMock).toHaveBeenCalledWith(
-        "settings.api_service.start",
-        { host: "127.0.0.1", port: 8900, timeout: 120 },
-        150_000,
-      );
-    });
-  });
-
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

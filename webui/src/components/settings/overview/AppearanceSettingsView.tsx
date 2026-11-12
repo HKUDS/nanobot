@@ -40,6 +40,7 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
               <span className="appearance-theme-miniature" data-mode={value} aria-hidden>
                 <span className="appearance-mini-sidebar"><span /><span /><span /></span>
                 <span className="appearance-mini-main"><span /><span /><span /><span /></span>
+                <span className="appearance-mini-sky"><Sun /><Moon /></span>
               </span>
               <span className="appearance-theme-label text-ui-label">
                 <span className="flex min-w-0 items-center gap-1.5"><Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /><span>{label}</span></span>
@@ -67,6 +68,19 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
     </section>
 
     <section>
+      <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
+      <SettingsGroup>
+        <SettingsRow title={t("settings.rows.language")}><LanguageSwitcher /></SettingsRow>
+        <SettingsRow title={t("settings.rows.brandLogos")} description={t("settings.legal.thirdPartyBrands")}>
+          <ToggleButton checked={localPrefs.brandLogos}
+            onChange={(brandLogos) => onChangeLocalPrefs((previous) => ({ ...previous, brandLogos }))}
+            ariaLabel={t("settings.rows.brandLogos")}
+            label={t(localPrefs.brandLogos ? "settings.values.on" : "settings.values.off")} />
+        </SettingsRow>
+      </SettingsGroup>
+    </section>
+
+    <section>
       <SettingsSectionTitle>
         <SettingsHint description={t("settings.appearance.processHelp")}>{t("settings.appearance.process")}</SettingsHint>
       </SettingsSectionTitle>
@@ -91,19 +105,6 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
               onChange={(fileEditDisplayMode) => onChangeLocalPrefs((previous) => ({ ...previous, fileEditDisplayMode }))} />
           </SettingsRow>
         </div>
-      </SettingsGroup>
-    </section>
-
-    <section>
-      <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
-      <SettingsGroup>
-        <SettingsRow title={t("settings.rows.language")}><LanguageSwitcher /></SettingsRow>
-        <SettingsRow title={t("settings.rows.brandLogos")} description={t("settings.legal.thirdPartyBrands")}>
-          <ToggleButton checked={localPrefs.brandLogos}
-            onChange={(brandLogos) => onChangeLocalPrefs((previous) => ({ ...previous, brandLogos }))}
-            ariaLabel={t("settings.rows.brandLogos")}
-            label={t(localPrefs.brandLogos ? "settings.values.on" : "settings.values.off")} />
-        </SettingsRow>
       </SettingsGroup>
     </section>
   </div>;

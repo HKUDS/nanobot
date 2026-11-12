@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadTranscript } from "@/lib/thread-transcript";
-import type { ThreadProjectionEvent, WebuiThreadPersistedPayload } from "@/lib/types";
+import * as eventProjection from "@/lib/thread-event-projection";
+import type { ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
 
 const NOW = 1_800_000_000_000;
 let nextId = 0;
@@ -12,7 +13,7 @@ function at(turn_id: string, turn_seq: number) {
   return { chat_id: "hydration-chat", turn_id, turn_seq };
 }
 
-function input(turnId: string, text: string): ThreadProjectionEvent {
+function input(turnId: string, text: string): Extract<ThreadProjectionEvent, { event: "user_message" }> {
   return { ...at(turnId, 1), event: "user_message", text, starts_turn: true };
 }
 
@@ -41,6 +42,55 @@ function receive(thread: ThreadTranscript, ...events: ThreadProjectionEvent[]): 
 }
 
 describe("ThreadTranscript admission", () => {
+  it("reuses an unchanged fragment prefix but replaces a revised answer with the same identity", () => {
+    const thread = new ThreadTranscript();
+    const events: ThreadProjectionEvent[] = [
+      input("append", "Question"),
+      { ...at("append", 2), event: "stream_end", stream_id: "first", text: "First", text_from_seq: 2 },
+      { ...at("append", 3), event: "message", kind: "tool_hint", text: "Tool" },
+      { ...at("append", 4), event: "stream_end", stream_id: "second", text: "Second", text_from_seq: 4 },
+    ];
+    const page = (start: number, end: number, values = events) => history(values.slice(start, end), {
+      completed_turn_ids: [], has_pending_tool_calls: true,
+      page: { record_range: { turn: 0, start, end }, history_generation: "append-generation",
+        truncated_oversized_turn: true, before_cursor: start ? `before-${start}` : null,
+        has_more_before: start > 0, user_message_offset: 0 },
+    });
+    expect(thread.accept(page(0, 3), thread.begin("initial"))).toBe(true);
+    const saved = thread.save();
+    const project = vi.spyOn(eventProjection, "projectThreadEvent");
+    try {
+      expect(thread.accept(page(2, 4), thread.begin("latest"))).toBe(true);
+      expect(thread.messages.map((row) => row.content)).toEqual(["Question", "First", "Tool", "Second"]);
+      expect(project).toHaveBeenCalledTimes(1);
+      expect(project.mock.calls[0][1]).toMatchObject({ event: "stream_end", text: "Second" });
+      project.mockClear();
+      expect(thread.accept(page(2, 4), thread.begin("latest"))).toBe(true);
+      expect(project).toHaveBeenCalledTimes(0);
+      const revised = events.map((event) => event.event === "stream_end" && event.stream_id === "second"
+        ? { ...event, text: "Corrected second" } : event);
+      expect(thread.accept(page(2, 4, revised), thread.begin("latest"))).toBe(true);
+      expect(thread.messages.map((row) => row.content)).toEqual(["Question", "First", "Tool", "Corrected second"]);
+      const restored = new ThreadTranscript([], saved);
+      expect(restored.accept(page(2, 4), restored.begin("latest"))).toBe(true);
+      expect(restored.messages.map((row) => row.content)).toEqual(["Question", "First", "Tool", "Second"]);
+    } finally {
+      project.mockRestore();
+    }
+  });
+
+  it("updates a represented live input's final image URL without duplicating it", () => {
+    const thread = new ThreadTranscript();
+    const first: ThreadProjectionEvent = { ...at("upload", 1), event: "user_message", text: "look", starts_turn: true,
+      media_urls: [{ kind: "image", url: "data:image/png;base64,AAAA", name: "image.png" }] };
+    receive(thread, first);
+    receive(thread, { ...first, media_urls: [{ kind: "image", url: "/api/media/final", name: "image.png" }] });
+    expect(thread.messages).toHaveLength(1);
+    expect(thread.messages[0]).toMatchObject({ media: [{ url: "/api/media/final" }], images: [{ url: "/api/media/final" }] });
+    const restored = new ThreadTranscript([], thread.save());
+    expect(restored.messages[0].media?.[0].url).toBe("/api/media/final");
+  });
+
   it("keeps the history boundary unknown through live delivery and a failed first read", () => {
     const thread = new ThreadTranscript();
     const read = thread.begin("initial");
@@ -225,7 +275,7 @@ describe("ThreadTranscript admission", () => {
     const thread = new ThreadTranscript();
     const installed: ThreadProjectionEvent = {
       ...at("turn-history-first", 4), event: "stream_end", stream_id: "answer-first",
-      text: "Installed ", resuming: true, merge_next: true,
+      text: "Installed ", text_from_seq: 2, resuming: true, merge_next: true,
     };
     expect(thread.accept(history([input("turn-history-first", "Continue"), installed]), thread.begin("initial"))).toBe(true);
     const answerId = thread.messages[1].id;
@@ -269,9 +319,9 @@ describe("ThreadTranscript admission", () => {
     const thread = new ThreadTranscript();
     expect(thread.accept(history([
       input("turn-no-id", "Think in stages"),
-      { ...at("turn-no-id", 3), event: "reasoning_end", text: "First thought" },
+      { ...at("turn-no-id", 3), event: "reasoning_end", text: "First thought", text_from_seq: 2 },
       { ...at("turn-no-id", 4), event: "message", kind: "progress", text: "Read a file" },
-      { ...at("turn-no-id", 7), event: "reasoning_end", text: "Second thought" },
+      { ...at("turn-no-id", 7), event: "reasoning_end", text: "Second thought", text_from_seq: 6 },
     ]), thread.begin("initial"))).toBe(true);
 
     receive(thread,
@@ -395,8 +445,8 @@ describe("ThreadTranscript admission", () => {
     const original = new ThreadTranscript();
     expect(original.accept(history([
       input("turn-cached", "Continue after returning"),
-      { ...at("turn-cached", 3), event: "reasoning_end", text: "Plan." },
-      { ...at("turn-cached", 5), event: "stream_end", stream_id: "answer-cached", text: "First", resuming: true, merge_next: true },
+      { ...at("turn-cached", 3), event: "reasoning_end", text: "Plan.", text_from_seq: 2 },
+      { ...at("turn-cached", 5), event: "stream_end", stream_id: "answer-cached", text: "First", text_from_seq: 4, resuming: true, merge_next: true },
     ]), original.begin("initial"))).toBe(true);
     const sharedId = original.messages[1].id;
     expect(original.accept(history([
@@ -629,6 +679,520 @@ describe("ThreadTranscript admission", () => {
     expect(saved.units.every((unit) => Array.from(unit.members.keys()).every((turn) => turn === "turn-window-3"))).toBe(true);
   });
 
+  it("refreshes a disjoint latest fragment and pages back across the gap after restoring the cache", () => {
+    const events: ThreadProjectionEvent[] = [
+      input("growing", "Question"),
+      ...["B", "C", "D", "E", "F"].map((text, index) => ({
+        ...at("growing", index + 2), event: "message" as const, text,
+      })),
+    ];
+    const fragment = (start: number, end: number) => history(events.slice(start, end), {
+      active_turn_id: "growing",
+      page: { history_generation: "generation", record_range: { turn: 0, start, end },
+        before_cursor: start ? `before-${start}` : null, has_more_before: start > 0, truncated_oversized_turn: true },
+    });
+    const initial = new ThreadTranscript();
+    expect(initial.accept(fragment(1, 3), initial.begin("initial"))).toBe(true);
+    const thread = new ThreadTranscript([], initial.save());
+    const staleOlder = thread.begin("older");
+    // A restored owner issues an initial read even though it has a cached window.
+    expect(thread.accept(fragment(4, 6), thread.begin("initial"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["E", "F"]);
+    expect(thread.hasPendingFragmentGap).toBe(false);
+    expect(thread.paging).toMatchObject({ beforeCursor: "before-4", hasMoreBefore: true });
+    expect(thread.accept(fragment(0, 1), staleOlder)).toBe(false);
+    expect(thread.paging.beforeCursor).toBe("before-4");
+
+    expect(thread.accept(fragment(2, 4), thread.begin("older"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["B", "C", "D", "E", "F"]);
+    expect(thread.paging.beforeCursor).toBe("before-1");
+    expect(thread.accept(fragment(0, 1), thread.begin("older"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "B", "C", "D", "E", "F"]);
+    expect(thread.paging.hasMoreBefore).toBe(false);
+  });
+
+  it("keeps an unpersisted live contribution visible while paging across a multi-page gap", () => {
+    // D was delivered live but never persisted, so record positions and turn_seq differ.
+    const events: ThreadProjectionEvent[] = [
+      input("gap-live", "Question"),
+      ...[[2, "B"], [3, "C"], [5, "E"], [6, "F"], [7, "G"], [8, "H"], [9, "I"]].map(([seq, text]) => ({
+        ...at("gap-live", seq as number), event: "delta" as const, stream_id: "wire", text: text as string,
+      })),
+    ];
+    const fragment = (start: number, end: number) => history(events.slice(start, end), {
+      active_turn_id: "gap-live",
+      page: { history_generation: "generation", record_range: { turn: 0, start, end },
+        before_cursor: start ? `before-${start}` : null, has_more_before: start > 0, truncated_oversized_turn: true },
+    });
+    const thread = new ThreadTranscript();
+    expect(thread.accept(fragment(1, 3), thread.begin("initial"))).toBe(true);
+    receive(thread, { ...at("gap-live", 4), event: "delta", stream_id: "wire", text: "D" });
+    const staleOlder = thread.begin("older");
+    const staleLatest = thread.begin("latest");
+    expect(thread.accept(fragment(6, 8), thread.begin("latest"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["BCD"]);
+    expect(thread.hasPendingFragmentGap).toBe(true);
+    expect(thread.paging).toMatchObject({ beforeCursor: "before-6", hasMoreBefore: true, error: null });
+    expect(thread.accept(fragment(0, 1), staleOlder)).toBe(false);
+    expect(thread.accept(fragment(1, 3), staleLatest)).toBe(false);
+    expect(thread.accept(fragment(4, 6), thread.begin("older"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["BCD"]);
+    expect(thread.paging.beforeCursor).toBe("before-4");
+
+    const restored = new ThreadTranscript([], thread.save());
+    expect(restored.hasPendingFragmentGap).toBe(true);
+    expect(restored.accept(fragment(2, 4), restored.begin("older"))).toBe(true);
+    expect(restored.hasPendingFragmentGap).toBe(false);
+    expect(restored.messages.map((row) => row.content)).toEqual(["BCDEFGHI"]);
+    expect(restored.accept(fragment(0, 2), restored.begin("older"))).toBe(true);
+    expect(restored.messages.map((row) => row.content)).toEqual(["Question", "BCDEFGHI"]);
+    receive(restored, { ...at("gap-live", 10), event: "delta", stream_id: "wire", text: "J" });
+    expect(restored.messages.at(-1)?.content).toBe("BCDEFGHIJ");
+  });
+
+  it("loads the missing prefix before adopting an unknown-left media-signed snapshot", () => {
+    const turn = "gap-snapshot-conflict";
+    const chunk = (seq: number, text: string): ThreadProjectionEvent => ({ ...at(turn, seq), event: "delta", text });
+    const fragment = (start: number, end: number, events: ThreadProjectionEvent[], completed = false) => history(events, {
+      active_turn_id: completed ? null : turn,
+      completed_turn_ids: completed ? [turn] : [],
+      page: { history_generation: "generation", record_range: { turn: 0, start, end },
+        before_cursor: start ? `before-${start}` : null, has_more_before: start > 0, truncated_oversized_turn: true },
+    });
+    const thread = new ThreadTranscript();
+    expect(thread.accept(fragment(1, 3, [chunk(2, "B"), chunk(3, "C")]), thread.begin("initial"))).toBe(true);
+    receive(thread, chunk(4, "![image](images/photo.png)"));
+    expect(thread.accept(fragment(6, 8, [
+      { ...at(turn, 8), event: "stream_end", text: "BC![image](/api/media/signed.png)EFG" },
+      { ...at(turn, 9), event: "turn_end" },
+    ], true), thread.begin("latest"))).toBe(true);
+    receive(thread, chunk(5, "E"));
+
+    expect(thread.accept(fragment(3, 6, [chunk(5, "E"), chunk(6, "F"), chunk(7, "G")]), thread.begin("older"))).toBe(true);
+    expect(thread.paging.olderError).toBeNull();
+    expect(thread.paging.beforeCursor).toBe("before-1");
+    expect(thread.hasPendingFragmentGap).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["BC![image](images/photo.png)E"]);
+    expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([4, 5]);
+    expect(thread.accept(fragment(0, 1, [input(turn, "Question")]), thread.begin("older"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "BC![image](/api/media/signed.png)EFG"]);
+    expect(thread.hasPendingFragmentGap).toBe(false);
+    expect(thread.save().live).toEqual([]);
+  });
+
+  it("adopts a completed canonical message only after its missing prefix has loaded", () => {
+    const turn = "gap-message-conflict";
+    const chunk = (seq: number, text: string): ThreadProjectionEvent => ({ ...at(turn, seq), event: "delta", stream_id: "wire", text });
+    const fragment = (start: number, end: number, events: ThreadProjectionEvent[], completed = false) => history(events, {
+      active_turn_id: completed ? null : turn,
+      completed_turn_ids: completed ? [turn] : [],
+      page: { history_generation: "generation", record_range: { turn: 0, start, end },
+        before_cursor: start ? `before-${start}` : null, has_more_before: start > 0, truncated_oversized_turn: true },
+    });
+    const thread = new ThreadTranscript();
+    expect(thread.accept(fragment(1, 3, [chunk(2, "B"), chunk(3, "C")]), thread.begin("initial"))).toBe(true);
+    receive(thread, chunk(4, "D"));
+    expect(thread.accept(fragment(6, 8, [
+      { ...at(turn, 8), event: "message", text: "Canonical answer" },
+      { ...at(turn, 9), event: "turn_end" },
+    ], true), thread.begin("latest"))).toBe(true);
+    receive(thread, chunk(5, "E"));
+
+    expect(thread.accept(fragment(3, 6, [chunk(5, "E"), chunk(6, "F"), chunk(7, "G")]), thread.begin("older"))).toBe(true);
+    expect(thread.paging.olderError).toBeNull();
+    expect(thread.hasPendingFragmentGap).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["BCDE"]);
+    expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([4, 5]);
+    expect(thread.accept(fragment(0, 1, [input(turn, "Question")]), thread.begin("older"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "Canonical answer"]);
+    expect(thread.hasPendingFragmentGap).toBe(false);
+    expect(thread.save().live).toEqual([]);
+  });
+
+  it.each(["before", "after"] as const)("keeps live output ordered when a session input arrives %s it", (order) => {
+    const thread = new ThreadTranscript();
+    const turn = "injected-fragment";
+    const prefix: ThreadProjectionEvent[] = [input(turn, "Question"),
+      { ...at(turn, 2), event: "message", kind: "progress", text: "Working" }];
+    const provenance = { message_id: "injected", session: { id: "handle_0123456789abcdef0123456789abcdef", name: "mira" } };
+    const injected: ThreadProjectionEvent = { chat_id: "hydration-chat", event: "user_message", starts_turn: false,
+      text: "Please review", provenance: { session_message: provenance }, projection_id: "injected-record" };
+    const fragment = (events: ThreadProjectionEvent[], end: number) => history(events, { active_turn_id: turn,
+      page: { record_range: { turn: 0, start: 0, end }, truncated_oversized_turn: true } });
+    expect(thread.accept(fragment(prefix, 2), thread.begin("initial"))).toBe(true);
+    const admit = () => {
+      const row: UIMessage = { id: "session-message:injected", role: "user", content: "Please review", createdAt: NOW, sessionMessage: provenance };
+      thread.projection = { ...thread.projection, messages: [...thread.messages, row] };
+      thread.registerInput(row);
+    };
+    const output = () => receive(thread,
+      { ...at(turn, 3), event: "model_request", request_id: "new-request", run_id: turn, sequence: 2, phase: "started" },
+      { ...at(turn, 4), event: "delta", stream_id: "new-wire", text: "Answer" });
+    if (order === "before") { admit(); output(); } else { output(); admit(); }
+    expect(thread.accept(fragment([...prefix, injected], 3), thread.begin("latest"))).toBe(true);
+    const body = thread.messages.filter((message) => message.role === "user" || message.kind !== "trace").map((message) => message.content);
+    expect(body).toEqual(order === "before" ? ["Question", "Please review", "Answer"] : ["Question", "Answer", "Please review"]);
+    if (order === "before") {
+      receive(thread, { ...at(turn, 5), event: "delta", stream_id: "new-wire", text: " continued" });
+      expect(thread.messages.at(-1)?.content).toBe("Answer continued");
+    }
+  });
+
+  it("keeps a late unpersisted tool activity in its completed historical turn", () => {
+    const thread = new ThreadTranscript();
+    const turn = "late-history-tool";
+    const answer: ThreadProjectionEvent = { ...at(turn, 5), event: "stream_end", stream_id: "wire", text: "Answer" };
+    expect(thread.accept(history([answer,
+      { ...at(turn, 6), event: "turn_end" }], { completed_turn_ids: [turn],
+      page: { record_range: { turn: 0, start: 3, end: 5 }, before_cursor: "before", has_more_before: true } }), thread.begin("initial"))).toBe(true);
+    receive(thread, { ...at(turn, 4), event: "message", kind: "tool_hint", text: "read_file()" });
+    const tool = thread.messages.find((message) => message.kind === "trace")!;
+    expect(tool.turnId).toBe(turn);
+    expect(thread.messages.indexOf(tool)).toBeLessThan(thread.messages.findIndex((message) => message.content === "Answer"));
+    expect(thread.messages.at(-1)?.content).toBe("Answer");
+    expect(thread.projection.closedTurnIds.has(turn)).toBe(true);
+  });
+
+  it("stores each raw event once when many latest pages slide over each other", () => {
+    // Some raw positions have no projected event; equal text is not an identity.
+    const records = Array.from({ length: 28 }, (_, position): ThreadProjectionEvent | null =>
+      position % 7 === 0 ? null : { chat_id: "hydration-chat", event: "message",
+        projection_id: `raw-record-${position}`, text: position % 2 ? "same" : "other" });
+    const fragment = (start: number) => history(records.slice(start, start + 5).filter((event): event is ThreadProjectionEvent => !!event), {
+      page: { history_generation: "generation", record_range: { turn: 0, start, end: start + 5 },
+        before_cursor: `before-${start}`, has_more_before: true, truncated_oversized_turn: true },
+    });
+    const thread = new ThreadTranscript();
+    for (let start = 1; start <= 23; start++) {
+      expect(thread.accept(fragment(start), thread.begin(start === 1 ? "initial" : "latest"))).toBe(true);
+    }
+    const expected = records.slice(1, 28).filter((event): event is ThreadProjectionEvent => !!event);
+    expect(thread.messages.map((row) => row.content)).toEqual(expected.map((event) => "text" in event ? event.text : ""));
+    const stored = thread.save().fragments.flatMap((page) => page.events.map((event) => event.projection_id));
+    expect(stored).toEqual(expected.map((event) => event.projection_id));
+    expect(new Set(stored).size).toBe(stored.length);
+  });
+
+  it.each([{ position: 1, gap: false }, { position: 2, gap: false }, { position: 2, gap: true }])("withdraws recovered answers from an open fragment (%j)", ({ position, gap }) => {
+    const thread = new ThreadTranscript();
+    const partial: ThreadProjectionEvent = { ...at("recovery", position + 1), event: "stream_end", stream_id: "old-answer", text: "Partial answer" };
+    const reasoning: ThreadProjectionEvent = { ...at("recovery", 4), event: "reasoning_end", text: "Retained reasoning" };
+    const tool: ThreadProjectionEvent = { ...at("recovery", 5), event: "message", kind: "tool_hint", text: "read_file()" };
+    // Telemetry accounts for the raw positions that have no projected body event.
+    const active = history([partial, reasoning, tool], { active_turn_id: "recovery",
+      page: { history_generation: "generation", record_range: { turn: 0, start: 1, end: 4001 },
+        before_cursor: "before-1", has_more_before: true, truncated_oversized_turn: true } });
+    const recovered = history([...(gap ? [] : [reasoning, tool]),
+      { chat_id: "hydration-chat", turn_id: "recovery", event: "message", text: "Correct final answer", projection_id: "canonical-recovery" },
+      { ...at("recovery", gap ? 12000 : 4002), event: "turn_end" },
+    ], { completed_turn_ids: ["recovery"],
+      page: { history_generation: "generation", record_range: { turn: 0, start: gap ? 6002 : 2, end: gap ? 10002 : 4002 }, recovered_answers: true,
+        before_cursor: gap ? "before-6002" : "before-2", has_more_before: true, truncated_oversized_turn: true } });
+    expect(thread.accept(active, thread.begin("initial"))).toBe(true);
+    if (gap) receive(thread, { ...at("recovery", 9000), event: "delta", stream_id: "unpersisted", text: "Unconfirmed live tail" });
+    let restored = new ThreadTranscript([], thread.save());
+    expect(restored.accept(recovered, restored.begin("latest"))).toBe(true);
+    if (gap) {
+      restored = new ThreadTranscript([], restored.save());
+      expect(restored.accept(history([], {
+        page: { history_generation: "generation", record_range: { turn: 0, start: 4001, end: 6002 }, before_cursor: "before-4001", has_more_before: true },
+      }), restored.begin("older"))).toBe(true);
+    }
+    const reopened = new ThreadTranscript();
+    expect(reopened.accept(recovered, reopened.begin("initial"))).toBe(true);
+    const answers = (owner: ThreadTranscript) => owner.messages.filter((row) => row.role === "assistant" && row.kind !== "trace" && row.content).map((row) => row.content);
+    const expected = [...(gap ? ["Unconfirmed live tail"] : []), ...answers(reopened)];
+    expect(answers(reopened)).toEqual(["Correct final answer"]);
+    expect(answers(restored)).toEqual(expected);
+    expect(restored.messages.filter((row) => row.reasoning).map((row) => row.reasoning)).toEqual(["Retained reasoning"]);
+    expect(restored.messages.filter((row) => row.kind === "trace").map((row) => row.content)).toEqual(["read_file()"]);
+    expect(restored.accept(history([input("recovery", "Question")], {
+      page: { history_generation: "generation", record_range: { turn: 0, start: 0, end: 2 }, before_cursor: null, has_more_before: false },
+    }), restored.begin("older"))).toBe(true);
+    expect(answers(restored)).toEqual(expected);
+    expect(restored.messages.filter((row) => row.role === "user").map((row) => row.content)).toEqual(["Question"]);
+  });
+
+  it("reprojects adjacent pages of one turn without losing a cumulative answer", () => {
+    const events: ThreadProjectionEvent[] = [
+      input("long-turn", "Question"),
+      { ...at("long-turn", 2), event: "reasoning_end", text: "Earlier reasoning" },
+      { ...at("long-turn", 3), event: "stream_end", stream_id: "long-answer", text: "First", resuming: true, merge_next: true },
+      { ...at("long-turn", 4), event: "message", kind: "progress", text: "tool()" },
+      { ...at("long-turn", 5), event: "stream_end", stream_id: "long-answer", text: "First second" },
+      { ...at("long-turn", 6), event: "turn_end" },
+    ];
+    const complete = new ThreadTranscript();
+    expect(complete.accept(history(events, { completed_turn_ids: ["long-turn"] }), complete.begin("initial"))).toBe(true);
+
+    const thread = new ThreadTranscript();
+    expect(thread.accept(history(events.slice(3), {
+      completed_turn_ids: ["long-turn"],
+      page: { before_cursor: "inside-turn", has_more_before: true, truncated_oversized_turn: true,
+        record_range: { turn: 0, start: 3, end: 6 } },
+    }), thread.begin("initial"))).toBe(true);
+    expect(thread.accept(history(events.slice(0, 3), {
+      page: { before_cursor: null, has_more_before: false, truncated_oversized_turn: true,
+        record_range: { turn: 0, start: 0, end: 3 } },
+    }), thread.begin("older"))).toBe(true);
+
+    const visible = (value: ThreadTranscript) => value.messages.map((row) => ({
+      role: row.role, kind: row.kind, content: row.content, reasoning: row.reasoning, traces: row.traces,
+    }));
+    expect(visible(thread)).toEqual(visible(complete));
+    expect(thread.paging.hasMoreBefore).toBe(false);
+  });
+
+  it("keeps tool activity in order when an older fragment meets a live answer", () => {
+    const thread = new ThreadTranscript();
+    const question = input("long-tool", "Question");
+    const a: ThreadProjectionEvent = { ...at("long-tool", 2), event: "delta", stream_id: "wire", text: "A" };
+    const b: ThreadProjectionEvent = { ...at("long-tool", 3), event: "delta", stream_id: "wire", text: "B" };
+    const tool: ThreadProjectionEvent = { ...at("long-tool", 4), event: "message", kind: "progress", text: "tool()" };
+    const c: ThreadProjectionEvent = { ...at("long-tool", 5), event: "delta", stream_id: "wire", text: "C" };
+    expect(thread.accept(history([b], { active_turn_id: "long-tool", has_pending_tool_calls: true,
+      page: { before_cursor: "inside", has_more_before: true, truncated_oversized_turn: true,
+        record_range: { turn: 0, start: 2, end: 3 } } }), thread.begin("initial"))).toBe(true);
+    const read = thread.begin("older");
+    receive(thread, tool, c);
+    expect(thread.accept(history([question, a], {
+      page: { before_cursor: null, has_more_before: false, truncated_oversized_turn: true,
+        record_range: { turn: 0, start: 0, end: 2 } } }), read)).toBe(true);
+    const expected = new ThreadTranscript();
+    expect(expected.accept(history([question, a, b, tool, c], { active_turn_id: "long-tool", has_pending_tool_calls: true }),
+      expected.begin("initial"))).toBe(true);
+    const visible = (value: ThreadTranscript) => value.messages.map((row) => ({
+      role: row.role, kind: row.kind, content: row.content, reasoning: row.reasoning, traces: row.traces,
+    }));
+    expect(visible(thread)).toEqual(visible(expected));
+    receive(thread, { ...at("long-tool", 6), event: "delta", stream_id: "wire", text: "D" });
+    expect(thread.messages.at(-1)?.content).toBe("CD");
+  });
+
+  it("prunes only exactly persisted live records through repeated overlapping latest reads", () => {
+    const thread = new ThreadTranscript();
+    const delta = (seq: number): ThreadProjectionEvent => ({
+      ...at("journal", seq), event: "delta", stream_id: "wire", text: String(seq),
+    });
+    const fragment = (end: number) => history(Array.from({ length: end - 1 }, (_, index) => delta(index + 2)), {
+      active_turn_id: "journal",
+      page: { history_generation: "generation", record_range: { turn: 0, start: 1, end },
+        before_cursor: "before-1", has_more_before: true, truncated_oversized_turn: true },
+    });
+    expect(thread.accept(fragment(2), thread.begin("initial"))).toBe(true);
+    receive(thread, delta(3));
+    for (let seq = 3; seq <= 12; seq++) {
+      receive(thread, delta(seq + 1));
+      expect(thread.accept(fragment(seq), thread.begin("latest"))).toBe(true);
+      expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([seq + 1]);
+      expect(thread.messages.at(-1)?.content).toBe(Array.from({ length: seq }, (_, index) => String(index + 2)).join(""));
+    }
+  });
+
+  it("can project and restore temporary live output without retaining a raw journal", () => {
+    const thread = new ThreadTranscript([], undefined, { recordLiveContributions: false });
+    for (let seq = 1; seq <= 200; seq++) {
+      receive(thread, { ...at("temporary", seq), event: "delta", stream_id: "wire", text: "x" });
+    }
+    expect(thread.messages.at(-1)?.content).toBe("x".repeat(200));
+    expect(thread.save().live).toHaveLength(0);
+    const restored = new ThreadTranscript([], thread.save(), { recordLiveContributions: false });
+    receive(restored, { ...at("temporary", 201), event: "delta", stream_id: "wire", text: "y" });
+    expect(restored.messages.at(-1)?.content).toBe(`${"x".repeat(200)}y`);
+    expect(restored.save().live).toHaveLength(0);
+  });
+
+  it("retires live chunks after ordinary completed turns persist cumulative end snapshots without receipts", () => {
+    const thread = new ThreadTranscript();
+    const persisted: ThreadProjectionEvent[] = [];
+    const completed: string[] = [];
+    for (let index = 0; index < 6; index++) {
+      const turn = `ordinary-${index}`;
+      const stream_id = `ordinary-wire-${index}`;
+      const question = input(turn, `Question ${index}`);
+      const a: ThreadProjectionEvent = { ...at(turn, 2), event: "delta", stream_id, text: "First " };
+      const b: ThreadProjectionEvent = { ...at(turn, 3), event: "delta", stream_id, text: "second" };
+      const end: ThreadProjectionEvent = { ...at(turn, 4), event: "stream_end", stream_id };
+      const done: ThreadProjectionEvent = { ...at(turn, 5), event: "turn_end" };
+      const read = thread.begin(index ? "latest" : "initial");
+      receive(thread, question, a, b, end, done);
+      persisted.push(question, { ...end, text: "First second" }, done);
+      completed.push(turn);
+      expect(thread.accept(history(persisted, { completed_turn_ids: [...completed] }), read)).toBe(true);
+      expect(thread.save().live).toHaveLength(0);
+    }
+    expect(thread.messages.filter((row) => row.role === "assistant").map((row) => row.content))
+      .toEqual(Array(6).fill("First second"));
+  });
+
+  it("retires covered deltas across successive cumulative stream snapshots", () => {
+    const thread = new ThreadTranscript();
+    const question = input("ordinary-resume", "Question");
+    const a: ThreadProjectionEvent = { ...at("ordinary-resume", 2), event: "delta", stream_id: "wire", text: "A" };
+    const first: ThreadProjectionEvent = { ...at("ordinary-resume", 3), event: "stream_end", stream_id: "wire",
+      text_from_seq: 2, resuming: true, merge_next: true };
+    receive(thread, question, a, first);
+    expect(thread.accept(history([question, { ...first, text: "A" }]), thread.begin("initial"))).toBe(true);
+    expect(thread.save().live).toHaveLength(0);
+    const b: ThreadProjectionEvent = { ...at("ordinary-resume", 4), event: "delta", stream_id: "wire", text: "B" };
+    const last: ThreadProjectionEvent = { ...at("ordinary-resume", 5), event: "stream_end", stream_id: "wire", text_from_seq: 2 };
+    const done: ThreadProjectionEvent = { ...at("ordinary-resume", 6), event: "turn_end" };
+    receive(thread, b, last, done);
+    expect(thread.accept(history([question, { ...first, text: "A" }, { ...last, text: "AB" }, done], {
+      completed_turn_ids: ["ordinary-resume"],
+    }), thread.begin("latest"))).toBe(true);
+    expect(thread.messages.at(-1)?.content).toBe("AB");
+    expect(thread.save().live).toHaveLength(0);
+  });
+
+  it("retires completed legacy text without swallowing an intervening tool", () => {
+    const thread = new ThreadTranscript();
+    const question = input("ordinary-tool", "Question");
+    const a: ThreadProjectionEvent = { ...at("ordinary-tool", 2), event: "delta", stream_id: "wire", text: "A" };
+    const tool: ThreadProjectionEvent = { ...at("ordinary-tool", 3), event: "message", kind: "progress", text: "tool()" };
+    const b: ThreadProjectionEvent = { ...at("ordinary-tool", 4), event: "delta", stream_id: "wire", text: "B" };
+    const end: ThreadProjectionEvent = { ...at("ordinary-tool", 5), event: "stream_end", stream_id: "wire" };
+    const done: ThreadProjectionEvent = { ...at("ordinary-tool", 6), event: "turn_end" };
+    const read = thread.begin("initial");
+    receive(thread, question, a, tool, b, end, done);
+    expect(thread.accept(history([question, tool, { ...end, text: "AB" }, done], {
+      completed_turn_ids: ["ordinary-tool"],
+    }), read)).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "tool()", "AB"]);
+    expect(thread.save().live).toEqual([]);
+  });
+
+  it("uses a partial snapshot's coverage without fetching its prefix or comparing signed text", () => {
+    const thread = new ThreadTranscript();
+    const turn = "explicit-coverage";
+    receive(thread,
+      input(turn, "Question"),
+      { ...at(turn, 2), event: "reasoning_delta", stream_id: "wire", text: "Unpersisted reasoning" },
+      { ...at(turn, 3), event: "delta", stream_id: "wire", text: "![image](local.png)" },
+      { ...at(turn, 4), event: "message", kind: "progress", text: "Unpersisted tool" },
+      { ...at(turn, 5), event: "delta", stream_id: "other", text: "Other stream" },
+    );
+    const read = thread.begin("initial");
+    receive(thread, { ...at(turn, 7), event: "delta", stream_id: "wire", text: " fresh tail" });
+    expect(thread.accept(history([
+      { ...at(turn, 6), event: "stream_end", stream_id: "wire", text_from_seq: 3,
+        text: "![image](/api/media/signed)", resuming: true, merge_next: true },
+    ], { active_turn_id: turn, page: { record_range: { turn: 0, start: 5, end: 6 },
+      truncated_oversized_turn: true, has_more_before: true, before_cursor: "older" } }), read)).toBe(true);
+    expect(thread.messages.filter((row) => row.streamId === "wire").map((row) => row.content))
+      .toEqual(["![image](/api/media/signed) fresh tail"]);
+    expect(thread.messages.some((row) => row.reasoning === "Unpersisted reasoning")).toBe(true);
+    expect(thread.messages.some((row) => row.content === "Unpersisted tool")).toBe(true);
+    expect(thread.messages.some((row) => row.content === "Other stream")).toBe(true);
+    expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([1, 2, 4, 5, 7]);
+    expect(thread.hasPendingFragmentGap).toBe(false);
+    expect(thread.paging).toMatchObject({ beforeCursor: "older", hasMoreBefore: true });
+  });
+
+  it("retires live deltas covered by persisted stream snapshots", () => {
+    const thread = new ThreadTranscript();
+    const events: ThreadProjectionEvent[] = [input("journal-snapshots", "Question")];
+    const fragment = () => history(events, {
+      active_turn_id: "journal-snapshots",
+      page: { history_generation: "generation", record_range: { turn: 1, start: 0, end: events.length },
+        before_cursor: "before-turn", has_more_before: true, truncated_oversized_turn: true },
+    });
+    expect(thread.accept(fragment(), thread.begin("initial"))).toBe(true);
+    for (let index = 0; index < 8; index++) {
+      const stream_id = `wire-${index}`;
+      const text = `piece-${index}`;
+      const delta: ThreadProjectionEvent = { ...at("journal-snapshots", index * 2 + 2), event: "delta", stream_id, text };
+      const end: ThreadProjectionEvent = { ...at("journal-snapshots", index * 2 + 3), event: "stream_end", stream_id,
+        text_from_seq: delta.turn_seq };
+      receive(thread, delta, end);
+      events.push({ ...end, text });
+      expect(thread.accept(fragment(), thread.begin("latest"))).toBe(true);
+      expect(thread.save().live).toHaveLength(0);
+    }
+    expect(thread.messages.filter((row) => row.role === "assistant").map((row) => row.content))
+      .toEqual(Array.from({ length: 8 }, (_, index) => `piece-${index}`));
+  });
+
+  it("retains live records covered only by an incomplete cumulative snapshot", () => {
+    const thread = new ThreadTranscript();
+    const question = input("journal-hole", "Question");
+    const c: ThreadProjectionEvent = { ...at("journal-hole", 3), event: "reasoning_delta", text: "C" };
+    const end: ThreadProjectionEvent = { ...at("journal-hole", 4), event: "reasoning_end", text: "Earlier C" };
+    const e: ThreadProjectionEvent = { ...at("journal-hole", 5), event: "delta", stream_id: "wire", text: "E" };
+    const fragment = (events: ThreadProjectionEvent[], endPosition: number) => history(events, {
+      active_turn_id: "journal-hole",
+      page: { history_generation: "generation", record_range: { turn: 1, start: 0, end: endPosition },
+        before_cursor: "before-turn", has_more_before: true, truncated_oversized_turn: true },
+    });
+    expect(thread.accept(fragment([question], 1), thread.begin("initial"))).toBe(true);
+    receive(thread, c, e);
+    expect(thread.accept(fragment([question, end], 2), thread.begin("latest"))).toBe(true);
+    expect(thread.messages.at(-1)).toMatchObject({ content: "E", reasoning: "C" });
+    expect(thread.save().live.map(({ event }) => event.turn_seq)).toEqual([3, 5]);
+    const restored = new ThreadTranscript([], thread.save());
+    expect(restored.accept(fragment([question, end], 2), restored.begin("latest"))).toBe(true);
+    expect(restored.messages.at(-1)).toMatchObject({ content: "E", reasoning: "C" });
+    expect(restored.save().live.map(({ event }) => event.turn_seq)).toEqual([3, 5]);
+  });
+
+  it("reconciles partially persisted live batches after restoring a fragment cache", () => {
+    const thread = new ThreadTranscript();
+    const b: ThreadProjectionEvent = { ...at("long-cache", 3), event: "delta", stream_id: "wire", text: "B" };
+    const c: ThreadProjectionEvent = { ...at("long-cache", 4), event: "delta", stream_id: "wire", text: "C" };
+    const d: ThreadProjectionEvent = { ...at("long-cache", 5), event: "delta", stream_id: "wire", text: "D" };
+    const fragment = (events: ThreadProjectionEvent[], start: number, end: number, before: string | null) => history(events, {
+      page: { before_cursor: before, has_more_before: before !== null, truncated_oversized_turn: true,
+        record_range: { turn: 0, start, end } },
+    });
+    expect(thread.accept(fragment([b], 2, 3, "inside"), thread.begin("initial"))).toBe(true);
+    thread.project({ ...d, text: "CD", projection_receipts: [{ turn_id: "long-cache", ranges: [[4, 5]] }] }, {
+      createId: () => "live-batch", now: NOW, startSeq: 4, contributions: [c, d],
+    });
+    const restored = new ThreadTranscript([], thread.save());
+    expect(restored.accept(fragment([b, c], 2, 4, "inside"), restored.begin("latest"))).toBe(true);
+    expect(restored.messages.map((row) => row.content)).toEqual(["BCD"]);
+    expect(restored.accept(fragment([
+      input("long-cache", "Question"),
+      { ...at("long-cache", 2), event: "delta", stream_id: "wire", text: "A" },
+    ], 0, 2, null), restored.begin("older"))).toBe(true);
+    expect(restored.messages.map((row) => row.content)).toEqual(["Question", "ABCD"]);
+    receive(restored, { ...at("long-cache", 6), event: "delta", stream_id: "wire", text: "E" });
+    expect(restored.messages.at(-1)?.content).toBe("ABCDE");
+  });
+
+  it.each(["history", "live-user", "live-session-input"] as const)("does not join fragments from a deleted and recreated session (%s)", (delivery) => {
+    const fragment = (generation: string, events: ThreadProjectionEvent[], start: number, end: number, before: string | null) => history(events, {
+      page: { history_generation: generation, before_cursor: before, has_more_before: before !== null,
+        truncated_oversized_turn: true, record_range: { turn: 0, start, end } },
+    });
+    const thread = new ThreadTranscript();
+    expect(thread.accept(fragment("old", [
+      { ...at("same-turn", 3), event: "message", text: "Old tail" },
+      { ...at("same-turn", 4), event: "turn_end" },
+    ], 2, 4, "old-prefix"), thread.begin("initial"))).toBe(true);
+    const question: ThreadProjectionEvent = { ...input("same-turn", "Old question"), input_id: "user:old",
+      ...(delivery === "live-session-input" ? { input_id: "session-message:old", provenance: { session_message: {
+        message_id: "old", session: { id: "handle_0123456789abcdef0123456789abcdef", name: "mira" },
+      } } } : {}) };
+    if (delivery !== "history") receive(thread, { ...question, turn_seq: undefined });
+    expect(thread.accept(fragment("old", [question,
+      { ...at("same-turn", 2), event: "message", text: "Old middle" }], 0, 2, null), thread.begin("older"))).toBe(true);
+    expect(thread.accept(fragment("new", [
+      { ...at("same-turn", 3), event: "message", text: "New tail" },
+      { ...at("same-turn", 4), event: "turn_end" },
+    ], 2, 4, "new-prefix"), thread.begin("latest"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["New tail"]);
+    expect(thread.accept(fragment("new", [input("same-turn", "New question"),
+      { ...at("same-turn", 2), event: "message", text: "New middle" }], 0, 2, null), thread.begin("older"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["New question", "New middle", "New tail"]);
+    if (delivery !== "history") {
+      receive(thread, { ...question, turn_id: "pending-turn", turn_seq: undefined, input_id: "pending-input", text: "Pending question",
+        ...(question.provenance ? { provenance: { session_message: { ...question.provenance.session_message!, message_id: "pending-message" } } } : {}) });
+      expect(thread.accept(fragment("third", [input("third-turn", "Replacement")], 0, 1, null), thread.begin("latest"))).toBe(false);
+      expect(thread.messages.at(-1)?.content).toBe("Pending question");
+    }
+  });
+
   it("does not certify earlier reasoning from a truncated snapshot with an unknown left boundary", () => {
     const thread = new ThreadTranscript();
     expect(thread.accept(history([
@@ -669,6 +1233,75 @@ describe("ThreadTranscript admission", () => {
       { id: receivedId, content: "Received" },
     ]);
     expect(thread.paging.truncated).toBe(true);
+  });
+
+  it("restores a fragmented turn when the gateway signs a live markdown image", () => {
+    const thread = new ThreadTranscript();
+    const turn = "signed-image-fragment";
+    const question = input(turn, "Question");
+    const request: ThreadProjectionEvent = { ...at(turn, 2), event: "model_request", request_id: "request",
+      run_id: "run", sequence: 1, phase: "started", projection_id: "request" };
+    const answer: ThreadProjectionEvent = { ...at(turn, 4), event: "stream_end", stream_id: "wire",
+      text: "![image](/api/media/signed.png)", projection_id: "answer" };
+    const done: ThreadProjectionEvent = { ...at(turn, 5), event: "turn_end", projection_id: "done" };
+    const fragment = (events: ThreadProjectionEvent[], start: number, end: number, before: string | null) => history(events, {
+      completed_turn_ids: end === 4 ? [turn] : [],
+      page: { history_generation: "generation", record_range: { turn: 0, start, end },
+        before_cursor: before, has_more_before: before !== null, truncated_oversized_turn: true },
+    });
+    expect(thread.accept(fragment([request], 1, 2, "inside"), thread.begin("initial"))).toBe(true);
+    receive(thread, { ...at(turn, 3), event: "delta", stream_id: "wire", text: "![image](images/photo.png)" });
+    expect(thread.accept(fragment([request, answer, done], 1, 4, "inside"), thread.begin("latest"))).toBe(true);
+    expect(thread.accept(fragment([question], 0, 1, null), thread.begin("older"))).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "![image](/api/media/signed.png)"]);
+    expect(thread.paging.hasMoreBefore).toBe(false);
+  });
+
+  it("uses the signed canonical image and does not duplicate a delayed live suffix", () => {
+    const thread = new ThreadTranscript();
+    const read = thread.begin("initial");
+    const question = input("turn-completed-conflict", "Question");
+    const live: ThreadProjectionEvent = { ...at("turn-completed-conflict", 2), event: "delta", stream_id: "wire",
+      text: "![image](images/photo.png)" };
+    receive(thread, question, live);
+    // The completed HTTP read can precede the final live chunk. The gateway
+    // signs the image path for display.
+    const complete = history([
+      question,
+      { ...at("turn-completed-conflict", 4), event: "stream_end", stream_id: "wire",
+        text: "![image](/api/media/signed.png) tail" },
+      { ...at("turn-completed-conflict", 5), event: "turn_end" },
+    ], { completed_turn_ids: ["turn-completed-conflict"] });
+    expect(thread.accept(complete, read)).toBe(true);
+    expect(thread.messages.map((row) => row.content)).toEqual(["Question", "![image](/api/media/signed.png) tail"]);
+
+    const restored = new ThreadTranscript([], thread.save());
+    receive(restored, { ...at("turn-completed-conflict", 3), event: "delta", stream_id: "wire", text: " tail" });
+    expect(restored.messages.map((row) => row.content)).toEqual(["Question", "![image](/api/media/signed.png) tail"]);
+    expect(restored.accept(complete, restored.begin("latest"))).toBe(true);
+    expect(restored.messages.map((row) => row.content)).toEqual(["Question", "![image](/api/media/signed.png) tail"]);
+  });
+
+  it("does not duplicate a delayed local image chunk after the signed snapshot is installed", () => {
+    const thread = new ThreadTranscript();
+    const question = input("turn-prefix-conflict", "Question");
+    const first: ThreadProjectionEvent = { ...at("turn-prefix-conflict", 2), event: "delta", stream_id: "wire", text: "See " };
+    const complete = history([
+      question,
+      { ...at("turn-prefix-conflict", 4), event: "stream_end", stream_id: "wire",
+        text: "See ![image](/api/media/signed.png)" },
+      { ...at("turn-prefix-conflict", 5), event: "turn_end" },
+    ], { completed_turn_ids: ["turn-prefix-conflict"] });
+    const read = thread.begin("initial");
+    receive(thread, question, first);
+    expect(thread.accept(complete, read)).toBe(true);
+
+    const restored = new ThreadTranscript([], thread.save());
+    receive(restored, { ...at("turn-prefix-conflict", 3), event: "delta", stream_id: "wire",
+      text: "![image](images/photo.png)" });
+    expect(restored.messages.map((row) => row.content)).toEqual(["Question", "See ![image](/api/media/signed.png)"]);
+    expect(restored.accept(complete, restored.begin("latest"))).toBe(true);
+    expect(restored.messages.map((row) => row.content)).toEqual(["Question", "See ![image](/api/media/signed.png)"]);
   });
 
   it("can replace a fully represented received turn with a nontruncated explicit canonical completion", () => {

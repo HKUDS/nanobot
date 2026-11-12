@@ -6,7 +6,12 @@ import zlib
 import pytest
 
 from nanobot.session.display_history import HistoryFact, HistoryKind
-from nanobot.session.history_graph import decode_graph, encode_graph, graph_decoding
+from nanobot.session.history_graph import (
+    decode_graph,
+    decode_graph_parts,
+    encode_graph,
+    graph_decoding,
+)
 from nanobot.session.manager import SessionManager
 from nanobot.webui.history import fact_from_record, record_from_fact
 from nanobot.webui.transcript import build_webui_thread_response
@@ -14,6 +19,22 @@ from nanobot.webui.transcript import build_webui_thread_response
 
 def graph(count=5):
     return {"nodes": [{"path": f"/{n}.md", "name": f"{n}.md", "tokens": 10, "state": "loaded"} for n in range(count)], "edges": []}
+
+
+def test_graph_parts_keep_provenance_without_exposing_it_in_history():
+    system, reads = graph(1), graph(1)
+    system["nodes"][0]["tokens"] = 20
+    reads["nodes"][0]["tokens"] = 7
+    parts = {"kind": "context_graph_parts", "stage": graph(0), "system": system, "reads": reads}
+    fact = fact_from_record({"event": "model_request", "context_graph": parts, "turn_id": "turn"})
+    stored = HistoryFact.decode(fact.encode())
+    assert decode_graph_parts(stored.content["context_graph"]) == parts
+    projected = record_from_fact(stored, "websocket:test")
+    assert projected["context_graph"] == {
+        "nodes": [{"path": "/0.md", "name": "0.md", "tokens": 27, "state": "loaded"}], "edges": [],
+    }
+    copied = HistoryFact.decode(stored.encode())
+    assert record_from_fact(copied, "websocket:fork")["context_graph"] == projected["context_graph"]
 
 
 def test_graph_codec_roundtrip_is_self_contained_and_preserves_order():
@@ -40,6 +61,9 @@ def test_byte_limit_still_applies_before_graph_compression(monkeypatch):
     monkeypatch.setattr("nanobot.session.display_history.MAX_HISTORY_FACT_BYTES", 2000)
     with pytest.raises(ValueError, match="8 MiB"):
         HistoryFact(HistoryKind.MODEL_REQUEST, {"context_graph": graph(100)}).encode()
+    parts = {"kind": "context_graph_parts", "stage": graph(30), "system": graph(30), "reads": graph(30)}
+    with pytest.raises(ValueError, match="8 MiB"):
+        HistoryFact(HistoryKind.MODEL_REQUEST, {"context_graph": parts}).encode()
 
 
 @pytest.mark.parametrize("compressed", [False, True])

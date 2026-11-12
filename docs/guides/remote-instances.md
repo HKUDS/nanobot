@@ -100,7 +100,7 @@ When upgrading from the earlier remote-page mode, the first reconnect reserves a
 
 ### Versions and updating the right machine
 
-Open a server's **… → Version & compatibility** in **Manage connections…** to see the local and server versions and the compatibility result. Matching package versions are not required: both sides must support a common WebUI protocol. Compatible version differences do not show an update warning.
+Open a server's **… → Version & compatibility** in **Manage connections…** to see the local and server versions and the compatibility result. Support and test coverage are limited to same-version WebUI/gateway combinations. Different versions may work together, but cross-version functionality is not guaranteed even when protocol checks pass; align versions first when troubleshooting. The current compatibility check uses protocol metadata, not package-version equality, and does not block connections solely because versions differ.
 
 - **Compatibility not confirmed:** the host has not advertised a supported WebUI contract. This is not evidence of a broken key, VPN issue, or simply an old version. Local-client mode cannot safely proceed until support is confirmed. For older installations, update nanobot on that server and reconnect.
 - **Update this server:** its advertised contract lacks the client's required core features. Update the server, not merely this computer.

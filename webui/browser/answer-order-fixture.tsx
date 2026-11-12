@@ -8,7 +8,8 @@ import { ClientProvider } from "@/providers/ClientProvider";
 
 export function AnswerOrderFixture() {
   const [client] = useState(() => new NanobotClient({
-    url: `ws://${location.host}/answer-order-socket`, reconnect: false,
+    url: `ws://${location.host}/answer-order-socket`,
+    reconnect: new URLSearchParams(location.search).get("reconnect") === "1",
   }));
   const [cache] = useState(() => new ThreadMessageCache(() => false));
   const [chatId, setChatId] = useState("answer-order");

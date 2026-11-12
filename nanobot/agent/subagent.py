@@ -5,7 +5,7 @@ import json
 import time
 import uuid
 import warnings
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -16,7 +16,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.hooks import create_file_edit_activity_hook
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.runner import AgentCheckpoint, AgentRunner, AgentRunSpec
 from nanobot.agent.session_activity import SessionActivity
 from nanobot.agent.subagent_sessions import SubagentSessions
 from nanobot.agent.subagent_status import SubagentState as SubagentState
@@ -38,6 +38,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventContext, SubagentTaskChanged
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ToolsConfig
+from nanobot.context_sources import without_source_capture
 from nanobot.events import AgentEvent, EventSink
 from nanobot.llm_usage.context import LLMUsageSource, current_llm_usage_source
 from nanobot.providers.base import LLMProvider, ToolCallRequest
@@ -440,35 +441,78 @@ class SubagentManager:
                if status.owner == session_key},
         }
 
+    def _turn_statuses_for_session(
+        self, session_key: str, *, turns: Collection[str], tracked: Collection[str],
+    ) -> dict[str, SubagentStatus]:
+        """Keep live work plus the tasks the caller still tracks outside the loaded turns."""
+        return {
+            **{tid: record.snapshot() for tid, record in self._tasks.items()
+               if record.status.owner == session_key and record.status.finished_at is None},
+            **{tid: deepcopy(status) for tid, status in self._terminal_statuses.items()
+               if status.owner == session_key
+               and (tid in tracked or status.origin_turn_id in turns)},
+        }
+
+    def _runtime_for_request(
+        self, session_key: str, turns: Collection[str] | None, tracked: Collection[str],
+    ) -> dict[str, SubagentStatus]:
+        if turns is None:
+            return self._runtime_statuses_for_session(session_key)
+        return self._turn_statuses_for_session(session_key, turns=set(turns), tracked=set(tracked))
+
     def _merge_session_statuses(
         self, session_key: str, runtime: Mapping[str, SubagentStatus], *, include_history: bool,
+        turns: Collection[str] | None = None, tracked: Collection[str] = (),
     ) -> Mapping[str, SubagentStatus]:
-        if self.sessions is not None and not self.sessions.exists(session_key):
-            return {}
-        statuses = self.sessions.load(session_key) if include_history and self.sessions is not None else {}
-        for task_id, status in runtime.items():
-            if self.sessions is not None and not self.sessions.contains(task_id, session_key):
-                continue
-            persisted = statuses.get(task_id)
-            if persisted is None or status.revision >= persisted.revision:
-                statuses[task_id] = status
-        return statuses
+        sessions = self.sessions
+        if sessions is None:
+            return dict(runtime)
+
+        def read() -> Mapping[str, SubagentStatus]:
+            if not sessions.exists(session_key):
+                return {}
+            if not include_history:
+                statuses: dict[str, SubagentStatus] = {}
+            elif turns is None:
+                statuses = sessions.load(session_key)
+            else:
+                statuses = sessions.load_turns(session_key, turn_ids=list(turns))
+                outside = [task_id for task_id in tracked if task_id not in statuses]
+                if outside:
+                    statuses.update(sessions.load_tracked(session_key, outside))
+            for task_id, status in runtime.items():
+                if not sessions.contains(task_id, session_key):
+                    continue
+                persisted = statuses.get(task_id)
+                if persisted is None or status.revision >= persisted.revision:
+                    statuses[task_id] = status
+            return statuses
+
+        # One connection per request: existence, the turn read, tracked fallbacks and
+        # ownership checks are separate transactions on the same worker.
+        return sessions.read_batch(read)
 
     def statuses_for_session(
         self, session_key: str | None, *, include_history: bool = True,
+        turns: Collection[str] | None = None, tracked: Collection[str] = (),
     ) -> Mapping[str, SubagentStatus]:
         """Return only tasks owned by the given session, never a global fallback."""
         if not session_key:
             return {}
         return self._merge_session_statuses(
-            session_key, self._runtime_statuses_for_session(session_key), include_history=include_history,
+            session_key, self._runtime_for_request(session_key, turns, tracked),
+            include_history=include_history, turns=turns, tracked=tracked,
         )
 
-    async def read_statuses_for_session(self, session_key: str) -> Mapping[str, SubagentStatus]:
+    async def read_statuses_for_session(
+        self, session_key: str, *, turns: Collection[str] | None = None,
+        tracked: Collection[str] = (),
+    ) -> Mapping[str, SubagentStatus]:
         """Capture runtime observations on the owner loop; read stored metadata on a worker."""
-        runtime = self._runtime_statuses_for_session(session_key)
         return await asyncio.to_thread(
-            self._merge_session_statuses, session_key, runtime, include_history=True,
+            self._merge_session_statuses, session_key,
+            self._runtime_for_request(session_key, turns, tracked),
+            include_history=True, turns=turns, tracked=tracked,
         )
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
@@ -597,7 +641,8 @@ class SubagentManager:
         )
         self._tasks[task_id] = record
         self._publish_status(status)
-        execution = asyncio.create_task(self._run_subagent(record))
+        with without_source_capture():
+            execution = asyncio.create_task(self._run_subagent(record))
         self._running_tasks[task_id] = execution
         execution.add_done_callback(partial(self._task_done, record))
         logger.info("Started subagent [{}]: {}", task_id,
@@ -629,7 +674,8 @@ class SubagentManager:
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
         status = record.status
-        return f"Subagent [{status.label}] started (id: {status.task_id}). I'll notify you when it completes."
+        return (f"Subagent [{status.label}] started (id: {status.task_id}). "
+                "I'll notify you when it completes. Don't duplicate its work.")
 
     async def run_inline(
         self,
@@ -752,7 +798,7 @@ class SubagentManager:
         logger.info("Subagent [{}] starting task: {}", task_id,
                     label if record.session.policy.log_content else "[content hidden]")
 
-        async def _on_checkpoint(payload: dict[str, Any]) -> None:
+        async def _on_checkpoint(payload: AgentCheckpoint) -> None:
             record.raise_if_stopping()
             phase = payload.get("phase", status.phase)
             iteration = payload.get("iteration", status.iteration)
@@ -906,7 +952,7 @@ class SubagentManager:
 
         # Inject as system message to trigger main agent.
         # Use session_key_override to align with the main agent's effective
-        # session key (which accounts for unified sessions) so the result is
+        # session key (including any explicit override) so the result is
         # routed to the correct pending queue (mid-turn injection) instead of
         # being dispatched as a competing independent task.
         override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"

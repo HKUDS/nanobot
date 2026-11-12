@@ -13,6 +13,7 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.runtime_events import RuntimeModelChanged
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronSchedule
+from nanobot.execution import processes
 from nanobot.providers.base import LLMResponse
 from nanobot.runtime_admission import RuntimeBusyError, RuntimeMaintenanceError
 from nanobot.session.sqlite_store import SessionConflictError
@@ -465,7 +466,7 @@ async def test_cancelled_exec_startup_stays_busy_until_cleanup_finishes(agent, t
             cancelling.set()
             await release.wait()
 
-    monkeypatch.setattr(manager, "_spawn", spawn)
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     task = asyncio.create_task(manager.start(
         command=[sys.executable, "-c", "pass"], cwd=str(tmp_path), env=dict(os.environ),
         timeout=10, shell_program=None, login=False, yield_time_ms=0,

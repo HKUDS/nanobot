@@ -13,6 +13,8 @@ import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
+import { SandboxNotice } from "@/components/thread/SandboxNotice";
+import { useSandboxNotice } from "@/components/thread/useSandboxNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { SubagentTaskDock } from "@/components/thread/SubagentTaskDock";
@@ -254,6 +256,7 @@ interface ThreadShellProps {
   settingsSnapshot?: SettingsPayload | null;
   settingsLoading?: boolean;
   onOpenModelSettings?: () => void;
+  onOpenSandboxSettings?: (target: "sandbox" | "sandbox-launcher") => void;
   skills?: SkillSummary[];
 }
 
@@ -476,11 +479,23 @@ export function ThreadShell({
   settingsSnapshot = null,
   settingsLoading = false,
   onOpenModelSettings,
+  onOpenSandboxSettings,
   skills = [],
 }: ThreadShellProps) {
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
+  const [visibleWindow, setVisibleWindow] = useState<{ key: string | null; turnIds: string[]; hasMessages: boolean } | null>(null);
+  const reportVisibleMessages = useCallback((messages: UIMessage[]) => {
+    // Saved results attach to turns, so only the rendered user turns matter here.
+    const turnIds = [...new Set(messages.flatMap((message) => (
+      message.role === "user" && message.turnId ? [message.turnId] : []
+    )))];
+    setVisibleWindow((current) => current?.key === historyKey && current.hasMessages === (messages.length > 0)
+      && current.turnIds.length === turnIds.length
+      && current.turnIds.every((turnId, index) => turnId === turnIds[index])
+      ? current : { key: historyKey, turnIds, hasMessages: messages.length > 0 });
+  }, [historyKey]);
   const previewSessionKey = session?.key ?? null;
   const mentionSessions = useMemo(
     () => sessions.filter((candidate) => candidate.key !== historyKey).map((candidate) => {
@@ -534,13 +549,14 @@ export function ThreadShell({
     reauthProvider?: string;
     dismissed: boolean;
   } | null>(null);
+  const sandboxNotice = useSandboxNotice(client, chatId, webuiCapabilities.includes("webui.sandbox-settings.v1"));
   const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
   const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
   useLayoutEffect(() => {
-    if (multiplePanes) setContextSidebarOpen(false);
+    if (multiplePanes || !previewSessionKey) setContextSidebarOpen(false);
   }, [multiplePanes, previewSessionKey]);
   const [sidebarEnterWidth, setSidebarEnterWidth] = useState(0);
   const [contextSidebarHost, setContextSidebarHost] = useState<HTMLElement | null>(null);
@@ -658,7 +674,7 @@ export function ThreadShell({
     dismissStreamError,
   } = useNanobotStream(
     chatId, undefined, false, handleTurnEnd, undefined, undefined,
-    { key: historyKey, cache: messageCacheRef.current },
+    { key: historyKey, cache: messageCacheRef.current, temporary },
   );
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
   const initialHistoryLoading = loading;
@@ -1353,6 +1369,13 @@ export function ThreadShell({
           onOpenSettings={onOpenModelSettings}
         />
       ) : null}
+      {sandboxNotice.issue && onOpenSandboxSettings && !streamError && !recoveryState ? (
+        <SandboxNotice issue={sandboxNotice.issue} onDismiss={sandboxNotice.dismiss}
+          backend={settingsSnapshot?.advanced.exec_sandbox_status?.supported_backend}
+          onOpenSettings={() => onOpenSandboxSettings(
+            sandboxNotice.issue === "missing" || sandboxNotice.issue === "path" ? "sandbox-launcher" : "sandbox",
+          )} />
+      ) : null}
       {restoredFirstDraft?.chatId === chatId && restoredFirstDraft.error ? (
         <p role="alert" className="px-3 text-sm text-destructive">{restoredFirstDraft.error}</p>
       ) : null}
@@ -1515,6 +1538,8 @@ export function ThreadShell({
       sessionKey={session?.key ?? null}
       liveEvents={webuiCapabilities.includes("webui.subagents.events.v1")}
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
+      turnIds={visibleWindow?.key === historyKey ? visibleWindow.turnIds : []}
+      windowReady={messagesReady && visibleWindow?.key === historyKey && (!initialHistoryLoading || visibleWindow.hasMessages)}
       active={composerActive}
       enabled={!temporary && !!session?.key.startsWith("websocket:") && webuiCapabilities.includes("webui.subagents.v1")}>
     <section ref={setSidebarHost} style={{ "--sidebar-enter-width": `${sidebarEnterWidth}px`, "--sidebar-enter-mobile-width": sidebarEnterWidth ? "100%" : "0px" } as CSSProperties} data-preview-open={sidebarOpen || undefined} className="thread-preview-layout relative flex min-h-0 flex-1 overflow-hidden">
@@ -1561,6 +1586,7 @@ export function ThreadShell({
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
             conversationReady={messagesReady}
+            onVisibleMessagesChange={reportVisibleMessages}
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}

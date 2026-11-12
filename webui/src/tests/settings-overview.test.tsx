@@ -241,6 +241,26 @@ describe("Settings overview and appearance", () => {
     expect(readLocalPreferences().customReadingTextSize).toBe(22);
   });
 
+  it("keeps an invalid Enter edit focused until corrected or cancelled", async () => {
+    writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom" });
+    renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
+    const input = screen.getByRole("spinbutton", { name: "Custom text size" });
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "40" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Your text remains at 18 px.");
+    expect(readLocalPreferences().customReadingTextSize).toBe(18);
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input).toHaveValue(18);
+    expect(input).not.toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(input, { target: { value: "22" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).not.toHaveFocus();
+    expect(readLocalPreferences().customReadingTextSize).toBe(22);
+  });
+
   it.each(["", "40"])("restores the saved custom size after another tab interrupts draft %j", async (draft) => {
     writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, readingTextSize: "custom", customReadingTextSize: 24 });
     renderSettingsView({ initialSection: "appearance", initialSettings: settingsPayload() });
@@ -366,6 +386,7 @@ describe("Settings overview and appearance", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/usage") return jsonResponse(payload.usage);
         if (url === "/api/settings/cli-apps") {
           return jsonResponse({ apps: [], installed_count: 0 });
         }
@@ -378,7 +399,7 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView({ initialSection: "overview" });
 
-    expect(await screen.findByLabelText("1,500 tokens")).toBeInTheDocument();
+    expect(await screen.findByLabelText("1,500 tokens in the last 30 days")).toBeInTheDocument();
     expect(screen.getByText("Token usage")).toBeInTheDocument();
   });
 

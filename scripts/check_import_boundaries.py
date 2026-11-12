@@ -34,7 +34,6 @@ class Violation:
 
 
 _ADAPTERS = (
-    "nanobot.api",
     "nanobot.channels",
     "nanobot.cli",
     "nanobot.gateway",
@@ -63,7 +62,7 @@ IMPORT_RULES = (
         ("nanobot.update_service", "nanobot.update_plan", "nanobot.update_jobs",
          "nanobot.update_worker", "nanobot.update_stop",
          "nanobot.update_profiles", "nanobot.update_handoff", "nanobot.update_guidance"),
-        ("nanobot.agent", "nanobot.session", "nanobot.api", "nanobot.cli",
+        ("nanobot.agent", "nanobot.session", "nanobot.cli",
          "nanobot.channels", "nanobot.webui"),
     ),
     ImportRule(
@@ -82,6 +81,11 @@ IMPORT_RULES = (
         ("nanobot.agent.loop", "nanobot.agent.runner", "nanobot.agent.turn_delivery"),
         _ADAPTERS,
         allowed_targets=("nanobot.channels.notification_routes",),
+    ),
+    ImportRule(
+        "process-execution",
+        ("nanobot.execution.processes", "nanobot.execution._windows_job"),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.security", "nanobot.session"),
     ),
     ImportRule(
         "channel-routing-contracts",

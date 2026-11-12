@@ -477,8 +477,66 @@
       "password": "Contraseña",
       "proxyReferenceAuth": "Configura la autenticación en la URL del proxy referenciada."
     },
+    "sandbox": {
+      "title": "Sandbox de comandos",
+      "method": "Método de aislamiento",
+      "off": "Sin aislamiento",
+      "status": "Configuración guardada",
+      "check": "Comprobar sandbox",
+      "checking": "Comprobando…",
+      "scope": "Solo prueba el lanzador guardado con archivos temporales. No es una auditoría de seguridad completa. Reinicia la puerta de enlace para aplicar los cambios a los comandos.",
+      "path": "Ruta del lanzador de confianza",
+      "launcher": "lanzador del entorno aislado",
+      "pathHelp": "Normalmente, déjala vacía para buscar {{launcher}} en el sistema. Para una instalación personalizada, pide la ruta completa del lanzador al responsable del paquete. El archivo y sus directorios padre deben ser de root, sin escritura para grupos u otros usuarios, y estar fuera de las rutas de escritura del agente.",
+      "automatic": "Búsqueda del sistema",
+      "checkError": "No se pudo completar la prueba. Abre los ajustes de nuevo y reinténtalo.",
+      "saveError": "No se pudo guardar. El borrador se conserva; vuelve a intentarlo.",
+      "disableTitle": "¿Desactivar el aislamiento?",
+      "disableHelp": "Tras reiniciar, los comandos usarán los permisos de la cuenta de la puerta de enlace. Las herramientas de archivos también perderán la restricción de espacio de trabajo de este sandbox; las restricciones independientes se mantienen.",
+      "keep": "Mantener aislamiento",
+      "disable": "Desactivar aislamiento",
+      "notice": {
+        "title": "Los comandos requieren atención",
+        "missing": "La pasarela no encuentra {{launcher}}. Si está instalado, indica su ruta completa. Si no, contacta al responsable del paquete o al administrador. Puedes seguir chateando.",
+        "path": "La pasarela no puede usar la ruta configurada de {{launcher}}. Revisa la ruta completa y los permisos de acceso.",
+        "permissions": "{{launcher}} no está en una ubicación protegida. Contacta al responsable del paquete o al administrador.",
+        "startup": "{{launcher}} no pudo iniciarse. Revisa la instalación de la pasarela y las restricciones del sistema.",
+        "configurePath": "Configurar ruta de {{launcher}}",
+        "openSettings": "Abrir ajustes del entorno aislado"
+      },
+      "states": {
+        "disabled": "Comandos desactivados",
+        "off": "Sin aislamiento",
+        "unsupported": "No compatible",
+        "unchecked": "Sin comprobar",
+        "unavailable": "No disponible",
+        "passed": "Prueba básica superada",
+        "checking": "Comprobando…"
+      },
+      "help": {
+        "disabled": "Activa los comandos para usar un sandbox.",
+        "off": "Los comandos no están aislados. Elige un método para proteger el equipo.",
+        "unsupported": "El sistema de la puerta de enlace no admite este método.",
+        "unchecked": "Comprueba la configuración guardada del sandbox.",
+        "unsaved": "Guarda los cambios y comprueba el sandbox.",
+        "unavailable": "El sandbox no puede iniciarse. No se ejecutarán comandos en él.",
+        "passed": "El lanzador arrancó, se pudo escribir en el espacio de trabajo temporal y se bloqueó el archivo externo de prueba.",
+        "checking": "Ejecutando una prueba con tiempo limitado…"
+      },
+      "reasons": {
+        "launcher_missing": "La pasarela no encuentra {{launcher}}. Si está instalado, indica su ruta completa abajo. Si no, contacta al responsable del paquete o al administrador.",
+        "path_not_absolute": "Introduce una ruta absoluta, no un nombre de comando.",
+        "not_executable": "La ruta debe apuntar a un archivo ejecutable.",
+        "agent_writable": "El agente puede escribir en esta ruta. Pide una instalación protegida al responsable del paquete.",
+        "unprotected_installation": "Un usuario distinto de root puede modificar el lanzador o un directorio padre. Pide una instalación protegida al administrador.",
+        "path_unavailable": "No se puede leer la ruta. Comprueba su existencia y permisos en la puerta de enlace.",
+        "platform_unsupported": "Elige un método compatible con el sistema de la puerta de enlace.",
+        "probe_failed": "La prueba falló. Comprueba la instalación, los espacios de nombres del núcleo y los montajes adicionales.",
+        "probe_timeout": "La prueba agotó el tiempo. Comprueba la instalación y las restricciones del equipo y reinténtalo.",
+        "unknown": "Lanzador no disponible. Comprueba su instalación y permisos."
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "Guardado. Reinicia el servicio API para aplicar los cambios.",
       "commandRuntime": {
         "custom": "Personalizada (segundos)",
         "customLabel": "Duración personalizada (segundos)",
@@ -498,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "Seguir reintentando", "help": "Reintenta errores recuperables; desactívalo para usar reintentos estándar.\n\nVuelve a intentar las solicitudes al modelo tras un error temporal. Desactiva esta opción para limitar el número de reintentos."},
         "agents_defaults_tool_hint_max_length": {"label": "Longitud del resumen", "help": "Límite de caracteres de los resúmenes de herramientas.\n\nLongitud máxima de las indicaciones breves de actividad."},
         "tools_max_session_messages_per_minute": {"label": "Frecuencia de mensajes", "help": "Máximo de mensajes de herramientas a una sesión por minuto.\n\nLimita la frecuencia de los mensajes que envían las herramientas a una conversación."},
-        "agents_defaults_unified_session": {"label": "Sesiones compartidas", "help": "Comparte el historial de un usuario entre plataformas.\n\nUsa la misma conversación para un usuario en varias plataformas de chat."},
         "tools_exec_enable": {"label": "Herramienta de shell", "help": "Permite al agente ejecutar comandos Shell.\n\nPermite al agente ejecutar comandos de shell."},
         "tools_file_enable": {"label": "Herramientas de archivos", "help": "Permite las herramientas integradas de lectura y edición de archivos."},
         "tools_web_enable": {"label": "Acceso web", "help": "Permite buscar y leer páginas web.\n\nPermite buscar en la web y obtener páginas."},
@@ -526,8 +583,6 @@
         "gateway_host": {"label": "Dirección de la puerta de enlace", "help": "Dirección de la puerta de enlace; configura el listener WebUI aparte.\n\nDirección de escucha de la pasarela. Las direcciones de WebSocket y WebUI se configuran en Canales → WebSocket."},
         "gateway_port": {"label": "Puerto de la pasarela", "help": "Puerto de la puerta de enlace; los argumentos de inicio tienen prioridad.\n\nPuerto guardado. Los argumentos de línea de comandos tienen prioridad."},
         "gateway_restart_mode": {"label": "Modo de reinicio", "help": "Elige cómo reiniciar; Automático se adapta al entorno.\n\nMétodo de reinicio del proceso. El modo automático depende del entorno del host."},
-        "api_host": {"label": "Dirección API", "help": "Configura una clave antes del acceso por red; reinicia la API tras los cambios.\n\nSe requiere una clave API para escuchar en una dirección distinta de localhost. Configúrala en Sistema y reinicia el servicio API para aplicar los cambios."},
-        "api_timeout": {"label": "Tiempo límite de API", "help": "Segundos máximos por solicitud API; reinicia para aplicar.\n\nDuración máxima de las solicitudes. Reinicia el servicio API para aplicar los cambios."},
         "tools_image_generation_save_dir": {"label": "Directorio de guardado", "help": "Ruta relativa dentro del directorio multimedia; las imágenes existentes no se mueven.\n\nRuta relativa dentro de la carpeta multimedia de nanobot. Las imágenes existentes no se mueven."}
       },
       "groups": {
@@ -544,7 +599,6 @@
         "safety": {"title": "Permisos globales", "help": "Configura límites del espacio, excepciones de red e instalaciones remotas.\n\nRestricciones del espacio de trabajo, redes privadas e instalaciones remotas."},
         "cli": {"title": "Límites CLI", "help": "Configura tiempos límite de instalación y ejecución y la duración de caché.\n\nTiempos de instalación, ejecución y caché del catálogo."},
         "gateway": {"title": "Puerta de enlace", "help": "Configura el despliegue y el reinicio."},
-        "api": {"title": "Ajustes API", "help": "Configura la dirección de escucha y el tiempo límite de solicitudes."},
         "storage": {"title": "Almacenamiento de imágenes", "help": "Elige dónde guardar las imágenes generadas."},
         "maintenance": {"title": "Organización de memoria", "help": ""},
         "web": {"title": "Acceso web", "help": ""},
@@ -655,7 +709,7 @@
       "small": "Pequeño",
       "standard": "Estándar",
       "large": "Grande",
-      "previewText": "**Un poco de espacio para pensar.**\n\nPalabras claras, lectura cómoda. Haz tuyo este espacio.",
+      "previewText": "Palabras claras, lectura cómoda. Haz tuyo este espacio.",
       "previewPlaceholder": "¿Por dónde empezamos?",
       "process": "Visualización de actividad",
       "processHelp": "Elige cuánto detalle se muestra mientras nanobot trabaja.",
@@ -881,18 +935,19 @@
       "shortTitle": "Uso de tokens",
       "viewDetails": "Ver detalles",
       "cacheHitRate": "Tasa de aciertos de caché",
-      "cacheRateHelp": "La tasa excluye las entradas cuyo estado de caché se desconoce.",
       "dailyTrend": "Tokens diarios",
       "systemHelp": "Incluye tareas internas y llamadas sin origen registrado.",
       "bySource": "Uso por origen",
       "modelTrend": "Tendencias por modelo",
       "modelsUnavailable": "Sin desglose por modelo.",
-      "otherModels": "Otros / sin atribuir",
+      "otherModels": "Otros modelos",
       "unclassified": "Sin clasificar",
       "unavailable": "Los datos de uso no están disponibles.",
       "noActivity": "Sin uso de tokens en los últimos 30 días.",
+      "last30Days": "Últimos 30 días",
       "cachedInput": "Entrada en caché",
       "cacheMiss": "Fallo de caché",
+      "cacheWrite": "Escritura de caché",
       "cacheUnknown": "Estado desconocido",
       "outputTokens": "Salida",
       "otherTokens": "Otros tokens",
@@ -905,7 +960,9 @@
         "cron": "Automatizaciones",
         "dream": "Consolidación de memoria",
         "system": "Llamadas auxiliares"
-      }
+      },
+      "failedRequests": "{{count}} fallidas",
+      "estimatedShare": "El {{percent}} de los tokens es estimado"
     },
     "providers": {
       "manageProviders": "Gestionar proveedores",
@@ -1178,16 +1235,6 @@
         "github": "Gestiona repositorios, issues y PR.",
         "supabase": "Consulta y gestiona proyectos."
       }
-    },
-    "api": {
-      "title": "Servidor API", "openaiCompatible": "API compatible con OpenAI",
-      "description": "Conecta mediante una API compatible con OpenAI.",
-      "start": "Iniciar servidor API", "starting": "Iniciando...", "stop": "Detener", "stopping": "Deteniendo...",
-      "access": "Acceso", "thisDevice": "Este dispositivo", "localNetwork": "Red local",
-      "localHelp": "Solo este dispositivo puede conectarse.", "networkHelp": "El acceso desde la red local requiere una clave API.\n\nOtros dispositivos pueden conectarse; se requiere una clave API.",
-      "port": "Puerto", "portHelp": "Puerto local del servicio API.", "apiKey": "Clave API",
-      "apiKeyHelp": "Envía la clave como Bearer token.", "apiKeyRequired": "Obligatoria antes de exponer la API en la red.",
-      "apiKeyPlaceholder": "Introduce una clave API", "autoInstall": "Las dependencias del servidor API se instalarán automáticamente al iniciarlo."
     },
     "observability": {
       "title": "Trazas de ejecución", "configured": "Las credenciales de trazas están disponibles para nanobot.",
@@ -1753,8 +1800,6 @@
       },
       "interruptedHelp": "El servidor se reinició antes de terminar esta tarea. No se ha vuelto a ejecutar automáticamente.",
       "workTitle": "Subtareas",
-      "otherWorkTitle": "Otras tareas",
-      "unlinkedHelp": "No se encontró la solicitud correspondiente a estas tareas en los mensajes mostrados.",
       "progress": "{{completed}} de {{total}} completadas",
       "running": "En curso: {{count}}",
       "finished": "Finalizadas: {{count}}",

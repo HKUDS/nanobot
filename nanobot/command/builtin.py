@@ -888,18 +888,11 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
     if store is None:
         store = LocalTriggerStore(loop.workspace)
 
-    from nanobot.session.keys import UNIFIED_SESSION_KEY
-
-    session_key = (
-        ctx.msg.session_key
-        if ctx.key == UNIFIED_SESSION_KEY
-        else ctx.key
-    )
     trigger = store.create(
         name=name,
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        session_key=session_key,
+        session_key=ctx.key,
         sender_id="trigger",
         origin_metadata=dict(ctx.msg.metadata or {}),
     )

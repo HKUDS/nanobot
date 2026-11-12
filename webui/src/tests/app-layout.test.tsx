@@ -6,7 +6,7 @@ import type { Window as HappyWindow } from "happy-dom";
 import i18n from "@/i18n";
 import { DEFAULT_TRANSCRIPTION_SETTINGS } from "@/components/settings/capabilities/TranscriptionSettings";
 import { useSessions } from "@/hooks/useSessions";
-import type { RunState } from "@/lib/nanobot-client";
+import type { NanobotClientOptions, RunState } from "@/lib/nanobot-client";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
@@ -19,6 +19,7 @@ import type {
 (window as unknown as HappyWindow).happyDOM.settings.disableIframePageLoading = true;
 
 const connectSpy = vi.fn();
+let clientOptions: NanobotClientOptions | undefined;
 const refreshSpy = vi.fn();
 const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
@@ -71,7 +72,7 @@ function mockFetchRoutes(routes: Record<string, unknown>): void {
     vi.fn(async (input: RequestInfo | URL) => {
       const route = routes[String(input)]
         ?? (String(input) === "/api/webui/sidebar-state" ? {} : undefined)
-        ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(String(input)) ? { tasks: [] } : undefined);
+        ?? (/^\/api\/sessions\/[^/]+\/subagents$/.test(new URL(String(input), "http://localhost").pathname) ? { tasks: [] } : undefined);
       const body =
         typeof route === "function"
           ? await (route as () => unknown | Promise<unknown>)()
@@ -156,7 +157,6 @@ function baseSettingsPayload() {
       dream: {
         schedule: "every 2h",
       },
-      unified_session: false,
     },
     advanced: {
       restrict_to_workspace: false,
@@ -255,6 +255,7 @@ vi.mock("@/lib/bootstrap", () => ({
 vi.mock("@/lib/nanobot-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/nanobot-client")>();
   class MockClient {
+    constructor(options: NanobotClientOptions) { clientOptions = options; }
     onTaskNotice = () => () => {};
     status = "idle" as const;
     defaultChatId = mockDefaultChatId;
@@ -295,7 +296,6 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     onRunCompletion = () => () => {};
     getRunState = () => runState(null);
     restorePendingRun = vi.fn();
-    getRunStartedAt = () => null;
     getRunTurnId = () => null;
     getUnsettledRunChatIds = () => [];
     getRunGeneration = () => 0;
@@ -337,6 +337,7 @@ describe("App layout", () => {
     vi.mocked(useSessions).mockImplementation(defaultUseSessions);
     clearReloadCache();
     connectSpy.mockClear();
+    clientOptions = undefined;
     updateUrlSpy.mockClear();
     refreshSpy.mockReset();
     createChatSpy.mockClear();
@@ -414,7 +415,7 @@ describe("App layout", () => {
       terminal: { webui: { capabilities: supported ? ["webui.core.v1", "webui.subagents.v1"] : ["webui.core.v1"] } },
     });
     mockFetchRoutes({
-      "/api/sessions/websocket%3Achat-a/subagents": { tasks: [{
+      "/api/sessions/websocket%3Achat-a/subagents?scope=window": { tasks: [{
         task_id: "task-1", label: "Config check", task_description: "Inspect configuration",
         state: "running", phase: "awaiting_model", elapsed_seconds: 2, iteration: 1,
         tool_events: [], usage: null, receipts: {}, result: null, partial: false,
@@ -433,7 +434,7 @@ describe("App layout", () => {
       await userEvent.setup().click(trigger);
       expect(await screen.findByRole("button", { name: /Config check Running/ })).toBeVisible();
     } else expect(screen.queryByRole("button", { name: /Subtasks/ })).not.toBeInTheDocument();
-    const reads = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/subagents"));
+    const reads = vi.mocked(fetch).mock.calls.filter(([url]) => new URL(String(url), "http://localhost").pathname.endsWith("/subagents"));
     expect(reads).toHaveLength(supported ? 1 : 0);
     expect(requestMutationSpy).not.toHaveBeenCalled();
   });
@@ -659,6 +660,20 @@ describe("App layout", () => {
       (el) => el.className,
     );
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
+  });
+
+  it("loads settings once when opening the overview directly", async () => {
+    window.location.hash = "#/settings";
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload(), "/api/settings/usage": { days: [] } });
+    render(<App />);
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
+    expect(await screen.findByText("Token usage")).toBeInTheDocument();
+    const reads = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url) === "/api/settings");
+    expect(reads()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    expect(reads()).toHaveLength(1);
   });
 
   it("uses one main landmark and a page heading in desktop settings", async () => {
@@ -3658,7 +3673,6 @@ describe("App layout", () => {
                 dream: {
                   schedule: "every 2h",
                 },
-                unified_session: false,
               },
               advanced: {
                 restrict_to_workspace: false,
@@ -4476,6 +4490,28 @@ describe("App layout", () => {
     expect(within(sidebar).getByRole("button", { name: "Settings" })).toBeInTheDocument();
 
     expect(within(sidebar).getByText("Existing chat")).toBeInTheDocument();
+  });
+
+  it("does not apply a bootstrap refresh after its reconnect is cancelled", async () => {
+    const { unmount } = render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    let complete!: (boot: Awaited<ReturnType<typeof fetchBootstrap>>) => void;
+    vi.mocked(fetchBootstrap).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    vi.mocked(deriveWsUrl).mockImplementation((_path, token) => `ws://test?token=${token}`);
+    const controller = new AbortController();
+    const refresh = clientOptions!.onReauth!(controller.signal);
+    controller.abort();
+    await act(async () => {
+      complete({ token: "stale", api_token: "stale-api", ws_path: "/" });
+      await expect(refresh).resolves.toBeNull();
+    });
+    expect(updateUrlSpy).not.toHaveBeenCalled();
+    vi.mocked(fetchBootstrap).mockResolvedValueOnce({ token: "fresh", api_token: "fresh-api", ws_path: "/" });
+    await act(async () => {
+      await expect(clientOptions!.onReauth!(new AbortController().signal)).resolves.toBe("ws://test?token=fresh");
+    });
+    expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=fresh");
+    unmount();
   });
 
   it("refreshes the bootstrap token before REST settings auth expires", async () => {

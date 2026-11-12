@@ -477,8 +477,66 @@
       "password": "Kata sandi",
       "proxyReferenceAuth": "Atur autentikasi di URL proxy yang dirujuk."
     },
+    "sandbox": {
+      "title": "Sandbox perintah",
+      "method": "Metode isolasi",
+      "off": "Tanpa isolasi",
+      "status": "Konfigurasi tersimpan",
+      "check": "Periksa sandbox",
+      "checking": "Memeriksa…",
+      "scope": "Hanya menguji peluncur tersimpan dengan berkas sementara. Ini bukan audit keamanan lengkap. Mulai ulang gateway untuk menerapkan perubahan ke eksekusi perintah.",
+      "path": "Jalur peluncur tepercaya",
+      "launcher": "peluncur sandbox",
+      "pathHelp": "Biasanya biarkan kosong untuk mencari {{launcher}} di sistem. Untuk instalasi khusus, minta jalur lengkap peluncur kepada pengelola paket. Berkas dan direktori induk harus dimiliki root, tidak dapat ditulis grup/pengguna lain, dan di luar jalur tulis agen.",
+      "automatic": "Pencarian sistem",
+      "checkError": "Pemeriksaan gagal. Buka ulang pengaturan dan coba lagi.",
+      "saveError": "Gagal menyimpan. Draf tetap tersimpan; coba lagi.",
+      "disableTitle": "Nonaktifkan isolasi perintah?",
+      "disableHelp": "Setelah mulai ulang, perintah berjalan dengan izin akun gateway. Alat berkas juga kehilangan pembatasan ruang kerja dari sandbox ini; pembatasan yang diatur terpisah tetap berlaku.",
+      "keep": "Pertahankan isolasi",
+      "disable": "Nonaktifkan isolasi",
+      "notice": {
+        "title": "Perintah perlu diperiksa",
+        "missing": "Gateway tidak menemukan {{launcher}}. Jika sudah terpasang, atur jalur lengkapnya. Jika belum, hubungi pengelola paket atau administrator. Anda tetap bisa mengobrol.",
+        "path": "Gateway tidak dapat menggunakan jalur {{launcher}} yang dikonfigurasi. Periksa jalur lengkap dan izin aksesnya.",
+        "permissions": "{{launcher}} tidak berada di lokasi terlindungi. Hubungi pengelola paket atau administrator.",
+        "startup": "{{launcher}} tidak dapat dimulai. Periksa instalasi gateway dan pembatasan sistem.",
+        "configurePath": "Atur jalur {{launcher}}",
+        "openSettings": "Buka pengaturan sandbox"
+      },
+      "states": {
+        "disabled": "Perintah nonaktif",
+        "off": "Isolasi nonaktif",
+        "unsupported": "Tidak didukung",
+        "unchecked": "Belum diperiksa",
+        "unavailable": "Tidak tersedia",
+        "passed": "Uji dasar berhasil",
+        "checking": "Memeriksa…"
+      },
+      "help": {
+        "disabled": "Aktifkan perintah untuk memakai sandbox.",
+        "off": "Perintah tidak diisolasi. Pilih metode untuk melindungi host.",
+        "unsupported": "Sistem operasi gateway tidak mendukung metode ini.",
+        "unchecked": "Jalankan pemeriksaan konfigurasi sandbox tersimpan.",
+        "unsaved": "Simpan perubahan, lalu periksa sandbox.",
+        "unavailable": "Sandbox tidak bisa dimulai. Perintah tidak akan dijalankan di sandbox ini.",
+        "passed": "Peluncur berjalan, ruang kerja sementara dapat ditulis, dan berkas uji eksternal diblokir.",
+        "checking": "Menjalankan uji sandbox dengan batas waktu…"
+      },
+      "reasons": {
+        "launcher_missing": "Gateway tidak menemukan {{launcher}}. Jika sudah terpasang, masukkan jalur lengkapnya di bawah. Jika belum, hubungi pengelola paket atau administrator.",
+        "path_not_absolute": "Masukkan jalur absolut, bukan nama perintah.",
+        "not_executable": "Jalur harus menuju berkas yang dapat dieksekusi.",
+        "agent_writable": "Agen dapat menulis ke jalur ini. Minta pemasangan terlindungi kepada pengelola paket.",
+        "unprotected_installation": "Pengguna selain root dapat menulis ke peluncur atau induknya. Minta pemasangan terlindungi kepada administrator.",
+        "path_unavailable": "Jalur tidak dapat dibaca. Periksa keberadaan dan izinnya di gateway.",
+        "platform_unsupported": "Pilih metode yang didukung sistem operasi gateway.",
+        "probe_failed": "Uji isolasi gagal. Periksa pemasangan, namespace kernel, dan mount tambahan.",
+        "probe_timeout": "Waktu habis. Periksa pemasangan dan pembatasan host, lalu coba lagi.",
+        "unknown": "Peluncur tidak tersedia. Periksa pemasangan dan izin akses."
+      }
+    },
     "runtimeConfig": {
-      "apiSaved": "Tersimpan. Mulai ulang layanan API untuk menerapkan perubahan.",
       "commandRuntime": {
         "custom": "Kustom (detik)",
         "customLabel": "Durasi kustom (detik)",
@@ -498,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "Terus mencoba", "help": "Ulangi setelah kesalahan yang dapat dipulihkan; nonaktifkan untuk percobaan standar.\n\nMencoba kembali permintaan ke model saat terjadi kesalahan sementara. Nonaktifkan untuk membatasi jumlah percobaan ulang."},
         "agents_defaults_tool_hint_max_length": {"label": "Panjang ringkasan", "help": "Batas karakter ringkasan aktivitas alat.\n\nPanjang maksimum petunjuk singkat aktivitas alat."},
         "tools_max_session_messages_per_minute": {"label": "Frekuensi pesan", "help": "Batas pesan alat ke satu sesi per menit.\n\nMembatasi frekuensi alat mengirim pesan ke percakapan."},
-        "agents_defaults_unified_session": {"label": "Sesi bersama", "help": "Bagikan riwayat chat satu pengguna di berbagai platform.\n\nMenggunakan satu percakapan untuk satu pengguna di beberapa platform chat."},
         "tools_exec_enable": {"label": "Alat shell", "help": "Izinkan agen menjalankan perintah Shell.\n\nMengizinkan agen menjalankan perintah shell."},
         "tools_file_enable": {"label": "Alat file", "help": "Izinkan alat bawaan untuk membaca dan mengedit berkas.\n\nMengizinkan alat bawaan untuk membaca dan mengedit file."},
         "tools_web_enable": {"label": "Akses web", "help": "Izinkan pencarian dan pembacaan halaman web.\n\nMengizinkan pencarian web dan pengambilan halaman."},
@@ -526,8 +583,6 @@
         "gateway_host": {"label": "Alamat gateway", "help": "Alamat gateway; atur listener WebUI secara terpisah.\n\nAlamat tempat gateway menerima koneksi. Alamat WebSocket dan WebUI diatur di Kanal → WebSocket."},
         "gateway_port": {"label": "Port gateway", "help": "Port gateway; argumen peluncuran diutamakan.\n\nPort yang disimpan. Argumen baris perintah lebih diutamakan."},
         "gateway_restart_mode": {"label": "Mode mulai ulang", "help": "Pilih cara mulai ulang; Otomatis mengikuti lingkungan.\n\nCara memulai ulang proses. Mode otomatis memilih berdasarkan lingkungan host."},
-        "api_host": {"label": "Alamat API", "help": "Tetapkan kunci sebelum akses jaringan; mulai ulang API setelah perubahan.\n\nKunci API diperlukan untuk menerima koneksi pada alamat selain localhost. Atur kunci di Sistem, lalu mulai ulang layanan API untuk menerapkan perubahan."},
-        "api_timeout": {"label": "Batas waktu API", "help": "Batas detik tiap permintaan API; mulai ulang untuk menerapkan.\n\nDurasi maksimum permintaan. Mulai ulang layanan API untuk menerapkan perubahan."},
         "tools_image_generation_save_dir": {"label": "Direktori penyimpanan", "help": "Lokasi relatif dalam direktori media; gambar yang ada tidak dipindahkan.\n\nJalur relatif di dalam folder media nanobot. Gambar yang ada tidak dipindahkan."}
       },
       "groups": {
@@ -544,7 +599,6 @@
         "safety": {"title": "Izin global", "help": "Atur batas ruang kerja, pengecualian jaringan, dan pemasangan jarak jauh.\n\nPembatasan ruang kerja, jaringan privat, dan instalasi jarak jauh."},
         "cli": {"title": "Batas CLI", "help": "Atur batas waktu pemasangan dan eksekusi, serta durasi cache daftar.\n\nBatas waktu instalasi, eksekusi, dan cache katalog."},
         "gateway": {"title": "Gateway", "help": "Atur opsi penerapan dan mulai ulang."},
-        "api": {"title": "Pengaturan API", "help": "Atur alamat listener dan batas waktu permintaan."},
         "storage": {"title": "Penyimpanan gambar", "help": "Pilih lokasi penyimpanan gambar yang dibuat."},
         "maintenance": {"title": "Pengaturan memori", "help": ""},
         "web": {"title": "Akses web", "help": ""},
@@ -655,7 +709,7 @@
       "small": "Kecil",
       "standard": "Standar",
       "large": "Besar",
-      "previewText": "**Sedikit ruang untuk berpikir.**\n\nKata-kata yang jelas, nyaman dibaca. Jadikan ruang ini milik Anda.",
+      "previewText": "Kata-kata yang jelas, nyaman dibaca. Jadikan ruang ini milik Anda.",
       "previewPlaceholder": "Dari mana kita mulai?",
       "process": "Tampilan aktivitas",
       "processHelp": "Pilih seberapa banyak detail yang ditampilkan saat nanobot bekerja.",
@@ -881,18 +935,19 @@
       "shortTitle": "Penggunaan token",
       "viewDetails": "Lihat detail",
       "cacheHitRate": "Rasio cache hit",
-      "cacheRateHelp": "Rasio tidak mencakup input dengan status cache yang tidak diketahui.",
       "dailyTrend": "Token harian",
       "systemHelp": "Termasuk tugas internal dan panggilan tanpa sumber tercatat.",
       "bySource": "Penggunaan berdasarkan sumber",
       "modelTrend": "Tren model",
       "modelsUnavailable": "Rincian per model tidak tersedia.",
-      "otherModels": "Lainnya / belum dikategorikan",
+      "otherModels": "Model lain",
       "unclassified": "Tidak dikategorikan",
       "unavailable": "Data penggunaan tidak tersedia.",
       "noActivity": "Tidak ada penggunaan token dalam 30 hari terakhir.",
+      "last30Days": "30 hari terakhir",
       "cachedInput": "Input tersedia di cache",
       "cacheMiss": "Cache tidak ditemukan",
+      "cacheWrite": "Penulisan cache",
       "cacheUnknown": "Status tidak diketahui",
       "outputTokens": "Output",
       "otherTokens": "Token lainnya",
@@ -905,7 +960,9 @@
         "cron": "Otomasi",
         "dream": "Penataan memori",
         "system": "Panggilan pendukung"
-      }
+      },
+      "failedRequests": "{{count}} gagal",
+      "estimatedShare": "{{percent}} token diperkirakan"
     },
     "providers": {
       "manageProviders": "Kelola penyedia",
@@ -1178,15 +1235,6 @@
         "github": "Kelola repositori, issue, dan PR.",
         "supabase": "Lihat dan kelola proyek."
       }
-    },
-    "api": {
-      "title": "Server API", "openaiCompatible": "API kompatibel OpenAI", "description": "Hubungkan melalui API yang kompatibel dengan OpenAI.",
-      "start": "Mulai server API", "starting": "Memulai...", "stop": "Hentikan", "stopping": "Menghentikan...",
-      "access": "Akses", "thisDevice": "Perangkat ini", "localNetwork": "Jaringan lokal",
-      "localHelp": "Hanya perangkat ini yang dapat terhubung.", "networkHelp": "Akses LAN memerlukan kunci API.\n\nPerangkat lain dapat terhubung; kunci API diperlukan.",
-      "port": "Port", "portHelp": "Port lokal untuk layanan API.", "apiKey": "Kunci API", "apiKeyHelp": "Kirim kunci sebagai Bearer token.",
-      "apiKeyRequired": "Wajib sebelum membuka API ke jaringan.", "apiKeyPlaceholder": "Masukkan kunci API",
-      "autoInstall": "Paket yang diperlukan server API akan dipasang otomatis saat server dimulai."
     },
     "observability": {
       "title": "Pelacakan eksekusi", "configured": "Kredensial pelacakan sudah tersedia untuk nanobot.",
@@ -1752,8 +1800,6 @@
       },
       "interruptedHelp": "Server dimulai ulang sebelum tugas ini selesai. Tugas tidak dijalankan ulang secara otomatis.",
       "workTitle": "Subtugas",
-      "otherWorkTitle": "Tugas lain",
-      "unlinkedHelp": "Permintaan yang sesuai dengan tugas ini tidak ditemukan dalam pesan yang ditampilkan.",
       "progress": "{{completed}} dari {{total}} selesai",
       "running": "Berjalan: {{count}}",
       "finished": "Berakhir: {{count}}",

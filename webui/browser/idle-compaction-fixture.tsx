@@ -42,8 +42,6 @@ export function installIdleCompactionApi() {
     const bodies: Record<string, unknown> = {
       "/api/settings": persisted,
       "/api/settings/nanobot-features": { features: [], enabled_count: 0, requires_restart: false },
-      "/api/settings/api-service": { installed: false, running: false, managed: false, host: "127.0.0.1",
-        port: 8900, timeout: 120, endpoint: "http://127.0.0.1:8900/v1", command: "nanobot serve" },
     };
     return Response.json(bodies[url.pathname] ?? {});
   };

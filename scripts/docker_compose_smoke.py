@@ -1,4 +1,4 @@
-"""Verify Compose first boot, WebUI authentication, restart, and API readiness."""
+"""Verify Compose first boot, WebUI authentication, and restart."""
 
 import argparse
 import json
@@ -11,13 +11,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-def request(url: str, secret: str = "", body: dict[str, object] | None = None) -> tuple[int, bytes]:
+def request(url: str, secret: str = "") -> tuple[int, bytes]:
     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
-    if body is not None:
-        headers["Content-Type"] = "application/json"
-    data = json.dumps(body).encode() if body is not None else None
     try:
-        with urlopen(Request(url, data=data, headers=headers), timeout=3) as response:
+        with urlopen(Request(url, headers=headers), timeout=3) as response:
             return response.status, response.read()
     except HTTPError as exc:
         return exc.code, exc.read()
@@ -73,10 +70,20 @@ def main() -> None:
                     "target": "/home/nanobot/.nanobot",
                 }]
                 service["environment"].update(
-                    NANOBOT_WEB_TOKEN=secret, NANOBOT_API_KEY=secret,
+                    NANOBOT_WEB_TOKEN=secret,
                 )
             compose_path.write_text(json.dumps(config), encoding="utf-8")
             try:
+                if label == "generated":
+                    retired = subprocess.run(
+                        [*compose, "run", "--rm", "--no-deps", "-T", "nanobot-cli", "serve", "--port", "8900"],
+                        capture_output=True, text=True, timeout=45,
+                    )
+                    output = retired.stdout + retired.stderr
+                    assert retired.returncode == 2, output
+                    assert "'nanobot serve' has been removed" in output, output
+                    assert not (data / "config.json").exists()
+                    print("PASS retired serve command: migration hint without Compose bootstrap")
                 onboard = run("run", "--rm", "--no-deps", "-T", "nanobot-cli", "onboard")
                 assert "Overwrite?" not in onboard
                 assert "Created config" in onboard
@@ -90,46 +97,38 @@ def main() -> None:
                 webui = endpoint("nanobot-gateway", 8765)
                 wait_for(health + "/health")
                 wait_for(webui + "/")
-                assert set(run("ps", "--services").split()) == {"nanobot-gateway", "nanobot-api"}
+                assert set(run("ps", "--services").split()) == {"nanobot-gateway"}
                 path = data / "config.json"
                 saved = json.loads(path.read_text(encoding="utf-8"))
                 password = saved["channels"]["websocket"]["tokenIssueSecret"]
-                api_key = saved["api"]["apiKey"]
                 logs = run("logs", "--no-color")
                 assert logs.count("[entrypoint] initialized") == 1
-                assert password in logs and api_key in logs
+                assert password in logs
                 if secret:
-                    assert password == api_key == secret
+                    assert password == secret
                 else:
-                    assert len(password) == len(api_key) == 32 and password != api_key
+                    assert len(password) == 32
                 assert request(webui + "/webui/bootstrap", "wrong-password")[0] == 401
                 status, body = request(webui + "/webui/bootstrap", password)
                 assert status == 200 and json.loads(body)["token"]
-                api = endpoint("nanobot-api", 8900)
-                wait_for(api + "/health")
-                for stream in (False, True):
-                    status, body = request(api + "/v1/chat/completions", api_key, {
-                        "messages": [{"role": "user", "content": "hello"}], "stream": stream,
-                    })
-                    assert status == 503 and json.loads(body)["error"]["type"] == "configuration_error"
-                assert request(api + "/v1/models")[0] == 401
-                print(f"PASS {label}: both default services, authenticated WebUI, API model-setup errors")
+                print(f"PASS {label}: authenticated WebUI")
 
                 saved["providers"]["custom"] = {
                     "apiKey": "smoke-provider-key", "apiBase": "http://127.0.0.1:9/v1",
                 }
                 saved["agents"]["defaults"].update(provider="custom", model="smoke-model")
+                # Simulate the persisted block from the previous Compose deployment.
+                saved["api"] = {"host": "0.0.0.0", "apiKey": "${RETIRED_SERVE_TOKEN}"}
+                # Use the mounted owner to write the legacy config on Linux.
                 subprocess.run([
                     *compose, "exec", "-T", "--user", "1000:1000", "nanobot-gateway", "python", "-c",
-                    "import json, sys; from pathlib import Path; "
-                    "from nanobot.config.schema import Config; from nanobot.config.loader import save_config; "
-                    "save_config(Config.model_validate(json.load(sys.stdin)), "
-                    "Path('/home/nanobot/.nanobot/config.json'))",
+                    "import sys; from pathlib import Path; "
+                    "Path('/home/nanobot/.nanobot/config.json').write_text(sys.stdin.read(), encoding='utf-8')",
                 ], input=json.dumps(saved), text=True, check=True)
                 previous = path.read_bytes()
                 for service in config["services"].values():
                     service["environment"].update(
-                        NANOBOT_WEB_TOKEN="changed-env", NANOBOT_API_KEY="changed-env",
+                        NANOBOT_WEB_TOKEN="changed-env",
                     )
                 compose_path.write_text(json.dumps(config), encoding="utf-8")
                 run("up", "-d", "--force-recreate", "nanobot-gateway")
@@ -140,21 +139,6 @@ def main() -> None:
                 assert request(webui + "/webui/bootstrap", "changed-env")[0] == 401
                 print(f"PASS {label}: recreate preserves provider settings and credentials")
 
-                run("up", "-d", "--force-recreate", "nanobot-api")
-                api = endpoint("nanobot-api", 8900)
-                deadline = time.monotonic() + 60
-                while True:
-                    try:
-                        status, _body = request(api + "/v1/models", api_key)
-                        if status == 200:
-                            break
-                    except (URLError, ConnectionError, TimeoutError):
-                        pass
-                    if time.monotonic() >= deadline:
-                        raise RuntimeError("Configured API did not start")
-                    time.sleep(1)
-                assert request(api + "/v1/models")[0] == 401
-                print(f"PASS {label}: configured API starts and requires its persisted key")
             except Exception:
                 print(run("logs", "--no-color", "--tail", "80"), flush=True)
                 raise
@@ -176,46 +160,41 @@ def main() -> None:
             ("short", ["-c", selected_path]),
             ("short-attached", [f"-c{selected_path}"]),
         )
-        for service_name in ("nanobot-gateway", "nanobot-api"):
-            for label, selector in selectors:
-                data = root / f"{service_name}-{label}"
-                data.mkdir()
-                selected = data / "selected.json"
-                selected.write_text(json.dumps(saved), encoding="utf-8")
-                previous = selected.read_bytes()
-                for service in config["services"].values():
-                    service["volumes"] = [{
-                        "type": "bind", "source": str(data),
-                        "target": "/home/nanobot/.nanobot",
-                    }]
-                config["services"][service_name]["command"] = [*commands[service_name], *selector]
-                compose_path.write_text(json.dumps(config), encoding="utf-8")
-                try:
-                    run("up", "-d", "--no-deps", service_name)
-                    gateway = service_name == "nanobot-gateway"
-                    health = endpoint(service_name, 18790 if gateway else 8900)
-                    wait_for(health + "/health")
-                    if gateway:
-                        webui = endpoint(service_name, 8765)
-                        assert request(webui + "/webui/bootstrap", password)[0] == 200
-                    else:
-                        assert request(health + "/v1/models", api_key)[0] == 200
-                        assert request(health + "/v1/models", "changed-env")[0] == 401
-                    assert selected.read_bytes() == previous
-                    assert not (data / "config.json").exists()
-                    assert "[entrypoint] initialized" not in run("logs", "--no-color")
-                    print(f"PASS {service_name} {label}: explicit config preserved without default initialization")
-                except Exception:
-                    print(run("logs", "--no-color", "--tail", "80"), flush=True)
-                    raise
-                finally:
-                    subprocess.run([*compose, "down", "--volumes"], check=True)
-                    if os.name != "nt":
-                        subprocess.run([
-                            "docker", "run", "--rm", "--entrypoint", "chown",
-                            "-v", f"{data}:/data", args.image,
-                            "-R", f"{os.getuid()}:{os.getgid()}", "/data",
-                        ], check=True)
+        service_name = "nanobot-gateway"
+        for label, selector in selectors:
+            data = root / f"{service_name}-{label}"
+            data.mkdir()
+            selected = data / "selected.json"
+            selected.write_text(json.dumps(saved), encoding="utf-8")
+            previous = selected.read_bytes()
+            for service in config["services"].values():
+                service["volumes"] = [{
+                    "type": "bind", "source": str(data),
+                    "target": "/home/nanobot/.nanobot",
+                }]
+            config["services"][service_name]["command"] = [*commands[service_name], *selector]
+            compose_path.write_text(json.dumps(config), encoding="utf-8")
+            try:
+                run("up", "-d", "--no-deps", service_name)
+                health = endpoint(service_name, 18790)
+                wait_for(health + "/health")
+                webui = endpoint(service_name, 8765)
+                assert request(webui + "/webui/bootstrap", password)[0] == 200
+                assert selected.read_bytes() == previous
+                assert not (data / "config.json").exists()
+                assert "[entrypoint] initialized" not in run("logs", "--no-color")
+                print(f"PASS {service_name} {label}: explicit config preserved without default initialization")
+            except Exception:
+                print(run("logs", "--no-color", "--tail", "80"), flush=True)
+                raise
+            finally:
+                subprocess.run([*compose, "down", "--volumes"], check=True)
+                if os.name != "nt":
+                    subprocess.run([
+                        "docker", "run", "--rm", "--entrypoint", "chown",
+                        "-v", f"{data}:/data", args.image,
+                        "-R", f"{os.getuid()}:{os.getgid()}", "/data",
+                    ], check=True)
 
         readonly = root / "readonly"
         readonly.mkdir()

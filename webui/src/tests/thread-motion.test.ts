@@ -37,6 +37,8 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
       cameraFollowing = false;
     }),
     dispose: vi.fn(),
+    observeScroll: vi.fn(() => 0),
+    reset: vi.fn(() => { cameraFollowing = false; }),
     jumpTo: vi.fn(),
     followTo: vi.fn(() => "settled" as const),
     isFollowing: vi.fn(() => cameraFollowing),
@@ -447,6 +449,7 @@ describe("ThreadMotionCoordinator", () => {
     expect(coordinator.observeScroll(false)).toBe("user");
     expect(coordinator.snapshot().mode).toBe("browsing-history");
 
+    coordinator.handleUserScrollIntent(true, true);
     expect(coordinator.observeScroll(true)).toBe("automatic");
     expect(coordinator.snapshot().mode).toBe("anchor-prompt");
   });
@@ -533,6 +536,7 @@ describe("ThreadMotionCoordinator", () => {
       camera,
       coordinator,
       advanceFrame,
+      setGeometry,
     } = motionHarness();
     coordinator.updateTurn({
       id: "turn-1",
@@ -540,7 +544,8 @@ describe("ThreadMotionCoordinator", () => {
       hasOutput: true,
     });
     advanceFrame();
-    coordinator.navigateHistoryTo(900);
+    setGeometry({ promptTop: 900 });
+    coordinator.navigateHistoryToPrompt("prompt-2");
     camera.cancel.mockClear();
 
     coordinator.completeTurn();
@@ -554,13 +559,15 @@ describe("ThreadMotionCoordinator", () => {
       camera,
       coordinator,
       setCameraFollowing,
+      setGeometry,
     } = motionHarness();
 
     coordinator.handleUserScrollIntent(false);
     expect(coordinator.snapshot().mode).toBe("idle");
     expect(camera.cancel).not.toHaveBeenCalled();
 
-    coordinator.navigateHistoryTo(900);
+    setGeometry({ promptTop: 900 });
+    coordinator.navigateHistoryToPrompt("prompt-1");
     expect(camera.navigateTo).toHaveBeenCalledWith(900);
     expect(coordinator.snapshot().mode).toBe("navigating-history");
     expect(coordinator.observeScroll(false)).toBe("navigation");
@@ -571,7 +578,8 @@ describe("ThreadMotionCoordinator", () => {
     expect(coordinator.snapshot().mode).toBe("browsing-history");
     expect(coordinator.observeScroll(false)).toBe("user");
 
-    coordinator.navigateHistoryTo(700);
+    setGeometry({ promptTop: 700 });
+    coordinator.navigateHistoryToPrompt("prompt-2");
     camera.cancel.mockClear();
     coordinator.takeUserControl();
     expect(camera.cancel).toHaveBeenCalledTimes(1);
@@ -581,10 +589,39 @@ describe("ThreadMotionCoordinator", () => {
     coordinator.takeUserControl();
     expect(camera.cancel).not.toHaveBeenCalled();
 
-    coordinator.navigateHistoryTo(600);
+    setGeometry({ promptTop: 600 });
+    coordinator.navigateHistoryToPrompt("prompt-3");
     setCameraFollowing(false);
     expect(coordinator.observeScroll(false)).toBe("navigation");
     expect(coordinator.snapshot().mode).toBe("browsing-history");
+  });
+
+  it("settles camera navigation without relying on a scroll event", () => {
+    const { coordinator } = motionHarness({ promptTop: 200 });
+    coordinator.takeUserControl();
+    coordinator.navigateLatestTo(1_400);
+    coordinator.cameraSettled();
+    expect(coordinator.snapshot().mode).toBe("follow-latest");
+
+    coordinator.navigateHistoryToPrompt("prompt-1");
+    coordinator.cameraSettled();
+    expect(coordinator.snapshot().mode).toBe("navigating-history");
+  });
+
+  it("keeps explicit latest navigation in control when already following the tail", () => {
+    const { camera, coordinator, advanceFrame, setCameraFollowing } = motionHarness();
+    coordinator.resumeAutoFollow();
+    advanceFrame();
+
+    expect(coordinator.snapshot().mode).toBe("follow-latest");
+    expect(coordinator.navigateLatestTo(1_400)).toBe("started");
+    expect(coordinator.snapshot().mode).toBe("navigating-latest");
+    expect(coordinator.observeScroll(true)).toBe("navigation");
+    expect(camera.isFollowing()).toBe(true);
+
+    setCameraFollowing(false);
+    coordinator.cameraSettled();
+    expect(coordinator.snapshot().mode).toBe("follow-latest");
   });
 
   it("retargets smooth latest navigation before resuming automatic follow", () => {

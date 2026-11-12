@@ -27,6 +27,7 @@ from nanobot.agent.tools.exec_session import (
 )
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.execution import processes
 
 
 def _python_command(code: str) -> str:
@@ -270,7 +271,7 @@ async def test_exec_session_preserves_utf8_across_stdout_and_stderr_chunks():
     process, exited = _session_process(stdout=stdout, stderr=stderr)
     session = _ExecSession(
         session_id="utf8-output",
-        process=process,
+        process_tree=processes.ProcessTree(process),
         command="test",
         cwd=".",
         timeout=None,
@@ -1204,8 +1205,8 @@ def test_agent_loop_shutdown_preserves_single_cleanup_error():
 async def test_exec_session_shared_kill_survives_cancelled_caller(monkeypatch):
     process, exited = _session_process()
     session = _ExecSession(
-        session_id="shared-kill", process=process, command="test", cwd=".",
-        timeout=None, process_tree=True,
+        session_id="shared-kill", process_tree=processes.ProcessTree(process), command="test", cwd=".",
+        timeout=None,
     )
     kill_started = asyncio.Event()
     release_kill = asyncio.Event()
@@ -1219,7 +1220,7 @@ async def test_exec_session_shared_kill_survives_cancelled_caller(monkeypatch):
         exited.set()
 
     kill_tree = AsyncMock(side_effect=kill_process_tree)
-    monkeypatch.setattr(ExecTool, "_kill_process_tree", kill_tree)
+    monkeypatch.setattr(processes.ProcessTree, "terminate", lambda tree: kill_tree(tree.process))
 
     async def second_caller():
         second_started.set()
@@ -1253,8 +1254,8 @@ async def test_exec_session_shared_kill_survives_cancelled_caller(monkeypatch):
 async def test_exec_session_failed_kill_can_be_retried(monkeypatch, log_content):
     process, exited = _session_process()
     session = _ExecSession(
-        session_id="retry-kill", process=process, command="test", cwd=".",
-        timeout=None, process_tree=True,
+        session_id="retry-kill", process_tree=processes.ProcessTree(process), command="test", cwd=".",
+        timeout=None,
     )
     attempts = 0
 
@@ -1267,7 +1268,9 @@ async def test_exec_session_failed_kill_can_be_retried(monkeypatch, log_content)
         process.returncode = -9
         exited.set()
 
-    monkeypatch.setattr(ExecTool, "_kill_process_tree", kill_process_tree)
+    monkeypatch.setattr(
+        processes.ProcessTree, "terminate", lambda tree: kill_process_tree(tree.process),
+    )
     records = []
     sink = logger.add(lambda message: records.append(message.record), format="{message}")
     token = bind_request_context(RequestContext(
@@ -1296,8 +1299,8 @@ async def test_exec_session_failed_kill_can_be_retried(monkeypatch, log_content)
 async def test_exec_session_deadline_during_explicit_kill_is_not_timeout(monkeypatch):
     process, exited = _session_process()
     session = _ExecSession(
-        session_id="explicit-kill", process=process, command="test", cwd=".",
-        timeout=None, process_tree=True,
+        session_id="explicit-kill", process_tree=processes.ProcessTree(process), command="test", cwd=".",
+        timeout=None,
     )
     kill_started = asyncio.Event()
     release_kill = asyncio.Event()
@@ -1311,7 +1314,7 @@ async def test_exec_session_deadline_during_explicit_kill_is_not_timeout(monkeyp
         exited.set()
 
     kill_tree = AsyncMock(side_effect=kill_process_tree)
-    monkeypatch.setattr(ExecTool, "_kill_process_tree", kill_tree)
+    monkeypatch.setattr(processes.ProcessTree, "terminate", lambda tree: kill_tree(tree.process))
     explicit_kill = asyncio.create_task(session.kill())
     watcher = None
     try:

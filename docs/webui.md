@@ -89,6 +89,8 @@ Open **Settings → About** to check for updates automatically. Startup, reconne
 
 The sidebar is the topic switcher. Each topic keeps its own history, title, workspace selection, and linked automations. Use a new topic when you want a separate context; use fork when you want to continue from an existing point without changing the original thread.
 
+If creating or forking a topic times out, it may already have succeeded; it is not automatically retried. Reconnecting ends temporary chats.
+
 Drag topics within a sidebar group to reorder them. **Rename** edits a topic title in place; a failed save keeps the draft for retry.
 
 Use **Select** in a topic's action menu to archive or delete several topics with one confirmation. Click outside the topic rows and toolbar, or press **Esc**, to leave selection mode. Cancelling a confirmation keeps your selection. Archiving removes pins and hides topics from the default list while keeping their conversations. Use **Show archived** to find them again; selecting only archived topics offers **Unarchive**.
@@ -147,7 +149,7 @@ When nanobot delegates work to subagents, **Subtasks** appears above the message
 
 Finished tasks leave the live list when it is closed. If you are already reading the list, they remain until you close it. When all tasks finish with the list closed, a brief completion or failure summary appears and then disappears; focusing or hovering over it keeps it available.
 
-Saved results appear as compact, expandable records beside the requests that started the work, and scroll with the conversation. Tasks without a matching request in the displayed history remain under **Other tasks**. Refreshing or reopening the WebUI restores active work in the fixed entry and finished work in the conversation, without restarting tasks or bringing all old tasks back into the live list.
+Saved results appear as compact, expandable records beside their associated requests, and scroll with the conversation. Results for earlier requests appear when their turns are loaded; tasks without a matching request in the displayed history are not shown there. Refreshing or reopening the WebUI restores active work in the fixed entry and finished work in the conversation, without restarting tasks or bringing all old tasks back into the live list. The WebUI retrieves finished tasks only for the loaded turns.
 
 Select a task for its read-only conversation and tool activity. Closing the details leaves it running; its stop button cancels only that task. Give follow-up instructions to nanobot in the main conversation.
 
@@ -167,7 +169,7 @@ Temporary does not mean consequence-free. Requests still go to the configured mo
 
 Project selection and Full Access controls require an owner-authenticated WebUI connection. Ordinary WebSocket clients stay within the workspace and access mode configured by the operator; an owner's saved topic scope or WebUI preference does not grant a client additional access. Existing topics remain available to the owner, while clients attempting to resume a topic outside their configured authority receive an error instead of silently changing its scope. Legacy plain-text clients use the same permission boundary. Keep the configured `tokenIssueSecret` (or fallback `token`) private: it can issue owner credentials. Share short-lived client connection tokens, not that owner secret.
 
-With unified sessions, inputs with different workspace permissions wait for the active turn to finish, then run with their own permissions. Inputs with the same scope can still join the active turn.
+Inputs to the same session with different workspace permissions wait for the active turn to finish, then run with their own permissions. Inputs with the same scope can still join the active turn.
 
 Use the workspace picker to browse folders on the connected nanobot host, enter an absolute path, or return to recent and starred projects; favorites persist across gateway restarts. The host name appears above saved locations. Project paths refer to that machine, not the browser's filesystem.
 

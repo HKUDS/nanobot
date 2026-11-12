@@ -179,6 +179,18 @@
     "reset": "Réinitialiser l’aperçu",
     "hint": "Sélectionnez un état de reprise, puis essayez de continuer ou de fermer."
   },
+  "sandbox": {
+    "gateway": "Passerelle d’exemple",
+    "unknownGateway": "Non précisée",
+    "title": "Avis de commande",
+    "description": "Comparez les composants manquants, les installations non protégées et les échecs de démarrage avec le composant réel.",
+    "options": "L’avis ne prend pas le focus et ne relance aucune commande. Changez son état, fermez-le et continuez à saisir.",
+    "missing": "Composant introuvable",
+    "permissions": "Installation à vérifier",
+    "startup": "Démarrage indisponible",
+    "hint": "Démonstration uniquement. Aucune commande ni modification des paramètres.",
+    "settingsAction": "Paramètres du bac à sable demandés (démonstration)."
+  },
   "fallback": {
     "title": "ModelFallbackNotice · Modèle de secours",
     "description": "Consultez les avis de modèle de secours et d’autorisation expirée, puis les actions associées.",
