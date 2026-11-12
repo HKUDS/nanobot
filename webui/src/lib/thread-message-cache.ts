@@ -4,7 +4,7 @@ import type { UIMessage } from "./types";
 
 export type LoadedThreadMessages = readonly UIMessage[][];
 
-/** Bounded replay cache; temporary chats have no disk history and stay pinned outside its budget. */
+/** Bounded replay cache; temporary chats remain pinned because they have no disk history. */
 export class ThreadMessageCache extends MemoryLruCache<ThreadTranscriptSnapshot> {
   private loaded = new Map<string, LoadedThreadMessages>();
   private listeners = new Set<() => void>();
@@ -60,7 +60,6 @@ export class ThreadMessageCache extends MemoryLruCache<ThreadTranscriptSnapshot>
 
   override clear(): void {
     super.clear();
-    this.loaded.clear();
     this.changed();
   }
 

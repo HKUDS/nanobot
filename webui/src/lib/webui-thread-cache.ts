@@ -1,6 +1,6 @@
 import { MemoryLruCache } from "./memory-lru-cache";
 import { parseWebuiThreadPayload } from "./api";
-import { currentReloadScope, readReloadCache, removeReloadCache, writeReloadCache } from "./reload-cache";
+import { readReloadCache, removeReloadCache, writeReloadCache } from "./reload-cache";
 import type { ContextGraph, WebuiThreadPersistedPayload } from "./types";
 
 /** Persist shared graph entities instead of expanding them in every replay frame. */
@@ -58,7 +58,6 @@ function reloadPayload(body: WebuiThreadPersistedPayload): unknown {
 /** Bounded canonical replay cache; the most recent snapshot also survives tab reloads. */
 export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload> {
   private readonly listeners = new Map<string, Set<(body: WebuiThreadPersistedPayload) => void>>();
-  private readonly scope = currentReloadScope();
 
   constructor(
     maxBytes = 16 * 1024 * 1024,
@@ -70,7 +69,7 @@ export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload
   override get(key: string): WebuiThreadPersistedPayload | undefined {
     const cached = super.get(key);
     if (cached) return cached;
-    const stored = readReloadCache("thread", this.scope);
+    const stored = readReloadCache("thread");
     if (!stored || typeof stored !== "object" || !("key" in stored)
       || stored.key !== key || !("body" in stored)) return undefined;
     try {
@@ -85,7 +84,7 @@ export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload
 
   override set(key: string, body: WebuiThreadPersistedPayload): void {
     super.set(key, body);
-    if (super.get(key)) writeReloadCache("thread", { key, body: reloadPayload(body) }, this.scope);
+    if (super.get(key)) writeReloadCache("thread", { key, body: reloadPayload(body) });
     for (const listener of this.listeners.get(key) ?? []) listener(body);
   }
 
@@ -101,7 +100,7 @@ export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload
 
   override delete(key: string): void {
     super.delete(key);
-    const stored = readReloadCache("thread", this.scope);
+    const stored = readReloadCache("thread");
     if (stored && typeof stored === "object" && "key" in stored && stored.key === key) {
       removeReloadCache("thread");
     }
@@ -109,6 +108,8 @@ export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload
 
   override clear(): void {
     super.clear();
-    if (currentReloadScope() === this.scope) removeReloadCache("thread");
+    removeReloadCache("thread");
   }
 }
+
+export const webuiThreadCache = new WebuiThreadCache();

@@ -10,7 +10,7 @@ import i18n from "@/i18n";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { CLI_APPS_CHANGED_EVENT } from "@/lib/cli-app-events";
 import type { CanonicalRunSnapshot, StreamError } from "@/lib/nanobot-client";
-import { getSessionStore } from "@/lib/session-store";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { ThreadTranscript } from "@/lib/thread-transcript";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
@@ -270,7 +270,7 @@ function publishReconnectCompletion(
   const { completedTurnIds, snapshot } = persistedCanonicalRunState(body);
   expect(client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)).toBe(true);
   // useReconnectRuns publishes synchronously before settling/fencing the ledger.
-  getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.set(`websocket:${chatId}`, body);
+  webuiThreadCache.set(`websocket:${chatId}`, body);
   expect(client.reconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)).toBe(true);
 }
 
@@ -471,6 +471,7 @@ function settingsWithFastPreset(): SettingsPayload {
 
 describe("ThreadShell", () => {
   beforeEach(() => {
+    webuiThreadCache.clear();
     clearStoredComposerDrafts();
     vi.stubGlobal(
       "fetch",
@@ -670,7 +671,7 @@ describe("ThreadShell", () => {
   });
 
   it.each([false, true])("restores regular drafts after reload but excludes temporary chats (temporary=%s)", async (temporary) => {
-    let client = makeClient();
+    const client = makeClient();
     let draftStore = new ComposerDraftStore();
     draftStore.set("websocket:reload-draft", {
       text: "original", attachments: [], sessionMentions: [], quotedContext: "quoted answer",
@@ -682,7 +683,6 @@ describe("ThreadShell", () => {
     const first = render(shell());
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "  unsent draft\n第二行" } });
     first.unmount();
-    client = makeClient();
     draftStore = new ComposerDraftStore();
     const reloaded = render(shell());
     expect(screen.getByRole("textbox")).toHaveValue(temporary ? "" : "  unsent draft\n第二行");
@@ -693,7 +693,6 @@ describe("ThreadShell", () => {
       fireEvent.click(screen.getByRole("button", { name: "Send message" }));
       await waitFor(() => expect(client.sendMessage).toHaveBeenCalled());
       reloaded.unmount();
-      client = makeClient();
       draftStore = new ComposerDraftStore();
       render(shell());
       expect(screen.getByRole("textbox")).toHaveValue("");
@@ -871,7 +870,7 @@ describe("ThreadShell", () => {
       rejectDetail = reject;
     });
     const cachedB = traceDetailThread(false, "done-b", "rev-b");
-    getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.set("websocket:trace-failure-b", cachedB);
+    webuiThreadCache.set("websocket:trace-failure-b", cachedB);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/webui-thread/trace-detail?")) {
@@ -911,7 +910,7 @@ describe("ThreadShell", () => {
     const client = makeClient();
     const detailUrls: string[] = [];
     const cachedB = traceDetailThread(false, "cached-b", "rev-visible-b");
-    getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.set("websocket:visible-failure-b", cachedB);
+    webuiThreadCache.set("websocket:visible-failure-b", cachedB);
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/webui-thread/trace-detail?")) {
@@ -3135,7 +3134,7 @@ describe("ThreadShell", () => {
     expect(screen.getByText("externally published final answer")).toBeInTheDocument();
     expect(screen.queryByText("old active prefix")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
-    expect(getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.get(`websocket:${chatId}`)).toBe(completed);
+    expect(webuiThreadCache.get(`websocket:${chatId}`)).toBe(completed);
     expect(client.reconcileCanonicalCompletion).toHaveBeenCalledTimes(1);
   });
 
@@ -5670,14 +5669,13 @@ describe("ThreadShell", () => {
   });
 
   it("keeps cached messages visible while the first history revalidation is pending", async () => {
-    const client = makeClient();
-    getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.set("websocket:cached-topic", transcriptFromSimpleMessages([
+    webuiThreadCache.set("websocket:cached-topic", transcriptFromSimpleMessages([
       { role: "assistant", content: "Cached answer" },
     ]));
     vi.mocked(fetch).mockImplementation((input) => String(input).includes("/webui-thread")
       ? new Promise<Response>(() => {})
       : Promise.resolve(new Response(null, { status: 404 })));
-    render(wrap(client, <ThreadShell session={session("cached-topic")} title="Cached topic"
+    render(wrap(makeClient(), <ThreadShell session={session("cached-topic")} title="Cached topic"
       onToggleSidebar={() => {}} />));
 
     expect(await screen.findByText("Cached answer")).toBeVisible();

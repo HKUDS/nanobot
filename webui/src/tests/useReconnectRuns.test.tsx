@@ -8,7 +8,7 @@ import { useSessionHistory } from "@/hooks/useSessions";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import type { WebuiThreadPersistedPayload } from "@/lib/types";
-import { getSessionStore } from "@/lib/session-store";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 class TestSocket {
@@ -70,11 +70,13 @@ function setup() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  webuiThreadCache.clear();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  webuiThreadCache.clear();
 });
 
 describe("durable run recovery", () => {
@@ -105,7 +107,7 @@ describe("durable run recovery", () => {
 
     expect(client.getRunState(chatId)).toMatchObject({ active: false, unsettled: false, startedAt: null });
     expect(client.isRunCompleted(chatId, turnId)).toBe(true);
-    expect(getSessionStore(client).canonical.get(`websocket:${chatId}`)).toEqual(body);
+    expect(webuiThreadCache.get(`websocket:${chatId}`)).toEqual(body);
     act(() => {
       sockets.at(-1)!.receive(late);
       sockets.at(-1)!.receive(activity);
@@ -185,7 +187,7 @@ describe("durable run recovery", () => {
     await act(async () => { finishRead(response(body)); });
     expect(client.isRunCompleted(chatId, "turn-old")).toBe(true);
     expect(client.getRunState(chatId)).toMatchObject({ active: true, unsettled: true, latestTurnId: "turn-new", startedAt: 456 });
-    expect(getSessionStore(client).canonical.get(`websocket:${chatId}`)).toBeUndefined();
+    expect(webuiThreadCache.get(`websocket:${chatId}`)).toBeUndefined();
     const generationU = client.getRunGeneration(chatId);
     act(() => {
       sockets.at(-1)!.receive(lateT);
@@ -250,7 +252,7 @@ describe("durable run recovery", () => {
     await act(async () => {});
     await reopen();
     await act(async () => { finishLatest(response(latest)); });
-    expect(getSessionStore(client).canonical.get(`websocket:${chatId}`)).toEqual(latest);
+    expect(webuiThreadCache.get(`websocket:${chatId}`)).toEqual(latest);
     expect(mounted.result.current.messages.map((message) => message.content)).toContain("Answer");
     expect(client.getRunState(chatId).active).toBe(false);
     expect(mounted.result.current.isStreaming).toBe(false);
@@ -377,7 +379,7 @@ describe("durable run recovery", () => {
     if (trigger === "reconnect") await reopen();
     else await act(async () => { mounted.result.current.refreshHistory(); });
     await act(async () => { finishLatest(response(latest)); });
-    expect(getSessionStore(client).canonical.get(`websocket:${chatId}`)).toEqual(latest);
+    expect(webuiThreadCache.get(`websocket:${chatId}`)).toEqual(latest);
     expect(mounted.result.current.history.error).toBeNull();
     expect(mounted.result.current.history.loadingOlder).toBe(true);
     expect(finishMissing).toBeTypeOf("function");
@@ -435,7 +437,7 @@ describe("durable run recovery", () => {
     expect(peak).toBe(4);
     expect(client.getUnsettledRunChatIds()).toEqual(["chat-8"]);
     expect(client.getRunState("chat-8").startedAt).toBe(456);
-    expect(getSessionStore(client).canonical.get("websocket:chat-8")).toBeUndefined();
+    expect(webuiThreadCache.get("websocket:chat-8")).toBeUndefined();
     close();
   });
 
@@ -466,12 +468,12 @@ describe("durable run recovery", () => {
     cached.has_pending_tool_calls = true;
     cached.active_turn_id = "turn-old";
     cached.revision = "active-page";
+    webuiThreadCache.set("websocket:inactive", cached);
     let resolveRecovery!: (value: Response) => void;
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 304 }))
       .mockImplementation(() => new Promise<Response>((resolve) => { resolveRecovery = resolve; }));
     vi.stubGlobal("fetch", fetchMock);
     const { client, running, reopen, close } = setup();
-    getSessionStore(client).canonical.set("websocket:inactive", cached);
     running();
     const wrapper = ({ children }: { children: ReactNode }) => (
       <ClientProvider client={client} token="renewed-token">{children}</ClientProvider>
@@ -626,7 +628,7 @@ describe("durable run recovery", () => {
     sockets[0].receive({ event: "delta", chat_id: "inactive", turn_id: "turn-old", text: "The" });
     const cachedAtCompletion: WebuiThreadPersistedPayload[] = [];
     client.onRunStatus((chatId, state) => {
-      if (!state.active) cachedAtCompletion.push(getSessionStore(client).canonical.get(`websocket:${chatId}`)!);
+      if (!state.active) cachedAtCompletion.push(webuiThreadCache.get(`websocket:${chatId}`)!);
     });
 
     await reopen();
@@ -682,7 +684,7 @@ describe("durable run recovery", () => {
     await reopen();
     expect(client.getRunState("inactive").startedAt).toBe(123);
     expect(client.hasUnsettledRun("inactive")).toBe(true);
-    expect(getSessionStore(client).canonical.get("websocket:inactive")).toBeUndefined();
+    expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
     close();
   });
 
@@ -699,7 +701,7 @@ describe("durable run recovery", () => {
     expect(client.getRunState("inactive").startedAt).toBe(456);
     expect(client.getRunTurnId("inactive")).toBe("turn-new");
     expect(client.hasUnsettledRun("inactive")).toBe(true);
-    expect(getSessionStore(client).canonical.get("websocket:inactive")).toBeUndefined();
+    expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
     close();
   });
 
@@ -724,7 +726,7 @@ describe("durable run recovery", () => {
     await reopen();
     expect(client.getRunState("inactive").startedAt).toBeNull();
     expect(client.hasUnsettledRun("inactive")).toBe(false);
-    expect(getSessionStore(client).canonical.get("websocket:inactive")).toEqual(body);
+    expect(webuiThreadCache.get("websocket:inactive")).toEqual(body);
     close();
   });
 
@@ -738,7 +740,7 @@ describe("durable run recovery", () => {
     await reopen();
     expect(client.getRunState("inactive").startedAt).toBe(123);
     expect(client.hasUnsettledRun("inactive")).toBe(true);
-    expect(getSessionStore(client).canonical.get("websocket:inactive")).toBeUndefined();
+    expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
     close();
   });
 
@@ -760,7 +762,7 @@ describe("durable run recovery", () => {
     await act(async () => { resolveRead(response(body)); });
     expect(client.getRunState("inactive").startedAt).toBe(456);
     expect(client.hasUnsettledRun("inactive")).toBe(true);
-    expect(getSessionStore(client).canonical.get("websocket:inactive")).toBeUndefined();
+    expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
     const resumed = vi.fn();
     client.onTranscript("inactive", resumed);
     resumed.mockClear();
@@ -785,7 +787,7 @@ describe("durable run recovery", () => {
     await act(async () => { resolveRead(response(completedThread())); });
     expect(client.getRunState("inactive").startedAt).toBe(123);
     expect(client.hasUnsettledRun("inactive")).toBe(true);
-    expect(getSessionStore(client).canonical.get("websocket:inactive")).toBeUndefined();
+    expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
     close();
   });
 
@@ -800,7 +802,7 @@ describe("durable run recovery", () => {
     hook.unmount();
     await act(async () => { resolveRead(response(completedThread())); });
     expect(client.getRunState("inactive").startedAt).toBe(123);
-    expect(getSessionStore(client).canonical.get("websocket:inactive")).toBeUndefined();
+    expect(webuiThreadCache.get("websocket:inactive")).toBeUndefined();
     close();
   });
 });

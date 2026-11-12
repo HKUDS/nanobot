@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSessionHistory, useSessions } from "@/hooks/useSessions";
 import * as api from "@/lib/api";
-import { getSessionStore } from "@/lib/session-store";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
 import { canonicalThreadPayload } from "./thread-test-payload";
@@ -132,6 +132,7 @@ describe("useSessions", () => {
     vi.mocked(api.listSessions).mockReset();
     vi.mocked(api.deleteSession).mockReset();
     vi.mocked(api.fetchWebuiThread).mockReset();
+    webuiThreadCache.clear();
   });
 
   it("removes a session from the local list after delete succeeds", async () => {
@@ -658,16 +659,15 @@ describe("useSessions", () => {
     });
     vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(cached);
 
-    const client = fakeClient();
     const first = renderHook(() => useSessionHistory("websocket:cached"), {
-      wrapper: wrap(client),
+      wrapper: wrap(fakeClient()),
     });
     await waitFor(() => expect(first.result.current.loading).toBe(false));
     first.unmount();
 
     vi.mocked(api.fetchWebuiThread).mockImplementationOnce(() => new Promise(() => {}));
     const second = renderHook(() => useSessionHistory("websocket:cached"), {
-      wrapper: wrap(client),
+      wrapper: wrap(fakeClient()),
     });
 
     expect(second.result.current.loading).toBe(false);
@@ -720,12 +720,11 @@ describe("useSessions", () => {
       const options = typeof optionsOrBase === "string" ? undefined : optionsOrBase;
       requests.push({ resolve, signal: options?.signal });
     }));
-    const client = fakeClient();
     const first = renderHook(() => useSessionHistory("websocket:shared-reconnect"), {
-      wrapper: wrap(client),
+      wrapper: wrap(fakeClient()),
     });
     const second = renderHook(() => useSessionHistory("websocket:shared-reconnect"), {
-      wrapper: wrap(client),
+      wrapper: wrap(fakeClient()),
     });
     const completed = canonicalThreadPayload({
       schemaVersion: 3, revision: "completed-response", has_pending_tool_calls: false,
@@ -735,7 +734,7 @@ describe("useSessions", () => {
         turnId: "completed-turn", createdAt: 1,
       }],
     })!;
-    act(() => getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.set("websocket:shared-reconnect", completed));
+    act(() => webuiThreadCache.set("websocket:shared-reconnect", completed));
     expect(first.result.current.messages[0]?.content).toBe("published complete answer");
     expect(second.result.current.messages[0]?.content).toBe("published complete answer");
     expect(requests.every((request) => request.signal?.aborted)).toBe(true);
@@ -754,7 +753,7 @@ describe("useSessions", () => {
     expect(second.result.current.messages[0]?.content).toBe("published complete answer");
     expect(first.result.current.hasPendingToolCalls).toBe(false);
     expect(second.result.current.hasPendingToolCalls).toBe(false);
-    expect(getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.get("websocket:shared-reconnect")).toBe(completed);
+    expect(webuiThreadCache.get("websocket:shared-reconnect")).toBe(completed);
     first.unmount();
     second.unmount();
   });
@@ -771,15 +770,14 @@ describe("useSessions", () => {
       .mockResolvedValueOnce(loaded)
       .mockImplementationOnce(() => new Promise(() => {}));
 
-    const client = fakeClient();
     const { result, unmount } = renderHook(
       () => useSessionHistory("websocket:evicted"),
-      { wrapper: wrap(client) },
+      { wrapper: wrap(fakeClient()) },
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.messages[0]?.content).toBe("still visible");
 
-    getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.delete("websocket:evicted");
+    webuiThreadCache.delete("websocket:evicted");
     act(() => result.current.refresh());
     await waitFor(() => expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2));
 
@@ -1034,7 +1032,7 @@ describe("useSessions", () => {
     expect(api.fetchWebuiThread).toHaveBeenCalledTimes(2);
     expect(result.current.messages.map((message) => message.id)).toEqual(["current-host-answer"]);
     expect(result.current.error).toBeNull();
-    expect(getSessionStore(client as unknown as import("@/lib/nanobot-client").NanobotClient).canonical.get("websocket:host-switch")).toBe(currentBody);
+    expect(webuiThreadCache.get("websocket:host-switch")).toBe(currentBody);
   });
 
   it("aborts a superseded latest-history request without surfacing an error", async () => {
@@ -1721,19 +1719,4 @@ describe("useSessions", () => {
 
     expect(result.current.sessions.map((s) => s.key)).toEqual(["websocket:chat-a"]);
   });
-});
-
-it("does not resurrect a deleted session from an earlier list response", async () => {
-  const row = { key: "websocket:deleted", channel: "websocket", chatId: "deleted", preview: "", createdAt: null, updatedAt: null };
-  let finish!: (rows: typeof row[]) => void;
-  vi.mocked(api.listSessions).mockReset().mockResolvedValueOnce([row]).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-  vi.mocked(api.deleteSession).mockResolvedValue({ deleted: true });
-  const { result } = renderHook(() => useSessions(), { wrapper: wrap(fakeClient()) });
-  await waitFor(() => expect(result.current.sessions).toHaveLength(1));
-  let refresh!: Promise<void>;
-  act(() => { refresh = result.current.refresh(); });
-  await act(async () => { await result.current.deleteChat(row.key); });
-  expect(result.current.sessions).toEqual([]);
-  await act(async () => { finish([row]); await refresh; });
-  expect(result.current.sessions).toEqual([]);
 });

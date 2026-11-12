@@ -26,7 +26,7 @@ import type { SettingsSectionKey } from "@/components/settings/SettingsView";
 import { StartupShell } from "@/components/StartupShell";
 import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-draft";
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
-import { getSessionStore } from "@/lib/session-store";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
@@ -74,6 +74,7 @@ import { displayTitle, sortSessions } from "@/lib/chat-groups";
 import { deriveTitle } from "@/lib/format";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/components/BrowserNotifications";
+import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import { useVersionCheck } from "@/providers/VersionCheckProvider";
@@ -688,6 +689,7 @@ export default function App() {
           if (isBootstrapAuthRequired(e)) {
             clearReloadCache();
             clearStoredComposerDrafts();
+            webuiThreadCache.clear();
             setState({ status: "auth", failed: !!secret });
           } else {
             setState({
@@ -714,7 +716,7 @@ export default function App() {
         if (isBootstrapAuthRequired(e)) {
           clearReloadCache();
           clearStoredComposerDrafts();
-          getSessionStore(client).clear();
+          webuiThreadCache.clear();
           setState({ status: "auth", failed: !!bootstrapSecretRef.current });
         }
       }
@@ -760,12 +762,12 @@ export default function App() {
 
   const handleLogout = () => {
     if (state.status === "ready") {
-      getSessionStore(state.client).clear();
       state.client.close();
     }
     clearSavedSecret();
     clearReloadCache();
     clearStoredComposerDrafts();
+    webuiThreadCache.clear();
     setState({ status: "auth" });
   };
 
@@ -849,7 +851,7 @@ function Shell({
   }, [reportManagementSurface, theme]);
   const remoteConnectionsRef = useRef(remoteConnections);
   remoteConnectionsRef.current = remoteConnections;
-  const { client, getToken, sessions: sessionStore } = useClient();
+  const { client, getToken } = useClient();
   useReconnectRuns(client, getToken);
   const {
     sessions,
@@ -989,20 +991,20 @@ function Shell({
   const retainedTemporaryChatIdsRef = useRef(new Set<string>());
   const [draftStore] = useState(() => new ComposerDraftStore());
   const [filePreviewStore] = useState(() => new FilePreviewStore());
-  const threadMessageCache = sessionStore.messages;
+  const [threadMessageCache] = useState(() => new ThreadMessageCache(
+    (key) => retainedTemporaryChatIdsRef.current.has(key),
+  ));
   useEffect(() => {
     const retained = new Set(temporaryChatIds);
     for (const chatId of retainedTemporaryChatIdsRef.current) {
       if (!retained.has(chatId)) {
-        sessionStore.delete(`websocket:${chatId}`);
+        threadMessageCache.delete(chatId);
         filePreviewStore.delete(`websocket:${chatId}`);
         draftStore.delete(`websocket:${chatId}`);
       }
     }
     retainedTemporaryChatIdsRef.current = retained;
-    sessionStore.temporary.clear();
-    for (const chatId of retained) sessionStore.temporary.add(chatId);
-  }, [temporaryChatIds, sessionStore, threadMessageCache, filePreviewStore, draftStore]);
+  }, [temporaryChatIds, threadMessageCache, filePreviewStore, draftStore]);
 
   const commitNavigation = useCallback((route: ShellRoute, options?: { replace?: boolean }) => {
     // The visible sidebar always belongs to its existing host. Navigation
@@ -1227,7 +1229,7 @@ function Shell({
   ]);
 
   useEffect(() => {
-    if (!sessionsLoaded) return;
+    if (loading) return;
     const pendingCreatedKey = pendingCreatedSessionKeyRef.current;
     if (pendingCreatedKey && sessions.some((session) => session.key === pendingCreatedKey)) {
       pendingCreatedSessionKeyRef.current = null;
@@ -1254,7 +1256,7 @@ function Shell({
           },
       { replace: true },
     );
-  }, [activeKey, sessionsLoaded, navigate, sessions, temporarySessions]);
+  }, [activeKey, loading, navigate, sessions, temporarySessions]);
 
   useEffect(() => {
     return client.onSessionUpdate((chatId, scope, workspaceScope) => {
@@ -2626,7 +2628,6 @@ function Shell({
                       return (
                         <ThreadShell
                           session={paneSession}
-                          readingScope={`workbench:${activeTabKey}:${pane.key}`}
                           sessions={sessions}
                           titleOverrides={sidebarState.title_overrides}
                           title={pane.title}

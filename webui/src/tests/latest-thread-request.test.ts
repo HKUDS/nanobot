@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import { NanobotClient } from "@/lib/nanobot-client";
-import { getSessionStore } from "@/lib/session-store";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import type { WebuiThreadPersistedPayload } from "@/lib/types";
 
 const KEY = "websocket:shared";
@@ -26,19 +27,20 @@ function deferredResponse() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  webuiThreadCache.clear();
 });
 
 describe("shared latest thread requests", () => {
   it("shares a conditional read and lets one consumer cancel while another receives the owning 304 body", async () => {
     const client = connectedClient("ws://host");
     const body = cachedThread();
-    getSessionStore(client).canonical.set(KEY, body);
+    webuiThreadCache.set(KEY, body);
     const read = deferredResponse();
     const fetchMock = vi.fn().mockReturnValue(read.promise);
     vi.stubGlobal("fetch", fetchMock);
     const mounted = new AbortController();
-    const first = getSessionStore(client).latest("token", KEY, mounted.signal);
-    const surviving = getSessionStore(client).latest("token", KEY);
+    const first = fetchLatestWebuiThread(client, "token", KEY, mounted.signal);
+    const surviving = fetchLatestWebuiThread(client, "token", KEY);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/websocket%3Ashared/webui-thread?limit=40&direction=latest&include_model_requests=1&context_graph_encoding=references-v1",
@@ -52,21 +54,21 @@ describe("shared latest thread requests", () => {
     await expect(surviving).resolves.toBe(body);
   });
 
-  it("keeps a store-owned read across A-B-A navigation while cancelling the old view's delivery", async () => {
+  it("aborts the network after its final consumer cancels and starts a new read for recovery", async () => {
     const client = connectedClient("ws://host");
-    const read = deferredResponse();
-    const fetchMock = vi.fn().mockReturnValue(read.promise);
+    const reads = [deferredResponse(), deferredResponse()];
+    const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
-    const cancelled = getSessionStore(client).latest("token", KEY, controller.signal);
+    const cancelled = fetchLatestWebuiThread(client, "token", KEY, controller.signal);
     const rejected = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
     controller.abort();
     await rejected;
-    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(false);
-    const recovered = getSessionStore(client).latest("token", KEY);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+    const recovered = fetchLatestWebuiThread(client, "token", KEY);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const body = cachedThread("new");
-    read.resolve(new Response(JSON.stringify(body), { status: 200 }));
+    for (const read of reads) read.resolve(new Response(JSON.stringify(body), { status: 200 }));
     await expect(recovered).resolves.toEqual(body);
   });
 
@@ -81,8 +83,8 @@ describe("shared latest thread requests", () => {
     const reads = [deferredResponse(), deferredResponse()];
     const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
-    const first = getSessionStore(client).latest("token", KEY);
-    const surviving = getSessionStore(client).latest("token", KEY);
+    const first = fetchLatestWebuiThread(client, "token", KEY);
+    const surviving = fetchLatestWebuiThread(client, "token", KEY);
     const receive = (chatId: string, scope: string) => socket.onmessage?.({
       data: JSON.stringify({ event: "session_updated", chat_id: chatId, scope }),
     } as MessageEvent);
@@ -93,7 +95,7 @@ describe("shared latest thread requests", () => {
     else socket.onmessage?.({
       data: JSON.stringify({ event: "turn_end", chat_id: "shared", turn_id: "turn-shared" }),
     } as MessageEvent);
-    const fresh = getSessionStore(client).latest("token", KEY);
+    const fresh = fetchLatestWebuiThread(client, "token", KEY);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const body = cachedThread("complete");
     reads[0].resolve(new Response(JSON.stringify(cachedThread("stale")), { status: 200 }));
@@ -111,9 +113,9 @@ describe("shared latest thread requests", () => {
       .mockReturnValueOnce(reads[2].promise);
     vi.stubGlobal("fetch", fetchMock);
     const requests = [
-      getSessionStore(firstHost).latest("old-token", KEY),
-      getSessionStore(firstHost).latest("new-token", KEY),
-      getSessionStore(secondHost).latest("old-token", KEY),
+      fetchLatestWebuiThread(firstHost, "old-token", KEY),
+      fetchLatestWebuiThread(firstHost, "new-token", KEY),
+      fetchLatestWebuiThread(secondHost, "old-token", KEY),
     ];
     expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const read of reads) read.resolve(new Response(JSON.stringify(cachedThread()), { status: 200 }));
@@ -124,13 +126,13 @@ describe("shared latest thread requests", () => {
     const client = connectedClient("ws://host");
     const oldBody = cachedThread("old");
     const newBody = cachedThread("new");
-    getSessionStore(client).canonical.set(KEY, oldBody);
+    webuiThreadCache.set(KEY, oldBody);
     const reads = [deferredResponse(), deferredResponse()];
     const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
-    const oldRead = getSessionStore(client).latest("token", KEY);
-    getSessionStore(client).canonical.set(KEY, newBody);
-    const newRead = getSessionStore(client).latest("token", KEY);
+    const oldRead = fetchLatestWebuiThread(client, "token", KEY);
+    webuiThreadCache.set(KEY, newBody);
+    const newRead = fetchLatestWebuiThread(client, "token", KEY);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const read of reads) read.resolve(new Response(null, { status: 304 }));
     await expect(oldRead).resolves.toBe(oldBody);

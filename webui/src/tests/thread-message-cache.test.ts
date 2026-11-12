@@ -15,38 +15,25 @@ it("keeps recently visited chats within the entry budget", () => {
     .toEqual([rows, undefined, rows]);
 });
 
-it("bounds large replay snapshots while retaining temporary chats", () => {
+it("bounds large replay snapshots without charging temporary chats to the reusable budget", () => {
   const cache = new ThreadMessageCache((key) => key === "temporary", 4096, 2);
-  cache.set("temporary", snapshot);
-  cache.set("ordinary", snapshot);
-  cache.set("large", new ThreadTranscript([{ ...rows[0], content: "x".repeat(4096) }]).save());
-  expect(cache.get("large")).toBeUndefined();
-  expect(cache.get("temporary")?.projection.messages).toBe(rows);
-  expect(cache.get("ordinary")?.projection.messages).toBe(rows);
-  cache.delete("temporary");
-  cache.set("small", snapshot);
-  expect(cache.get("small")?.projection.messages).toBe(rows);
-});
-
-it("keeps the pinned temporary working set outside ordinary byte and entry budgets", () => {
-  const cache = new ThreadMessageCache((key) => key.startsWith("temporary"), 4096, 2);
-  cache.set("old", snapshot);
-  cache.set("recent", snapshot);
+  cache.set("ordinary-a", snapshot);
+  cache.set("ordinary-b", snapshot);
   const large = new ThreadTranscript([{ ...rows[0], content: "x".repeat(4096) }]).save();
-  cache.set("temporary-a", large);
-  cache.set("temporary-b", snapshot);
-  cache.set("temporary-a", new ThreadTranscript([{ ...rows[0], content: "x".repeat(8192) }]).save());
+  cache.set("large", large);
+  expect(cache.get("large")).toBeUndefined();
+  expect(cache.peek("ordinary-a")).toBe(snapshot);
+  expect(cache.peek("ordinary-b")).toBe(snapshot);
 
-  expect(cache.peek("old")).toBe(snapshot);
-  expect(cache.peek("recent")).toBe(snapshot);
-  expect(cache.get("temporary-a")?.projection.messages[0].content).toHaveLength(8192);
-  expect(cache.peek("temporary-b")).toBe(snapshot);
+  cache.set("temporary", large);
+  expect(cache.get("temporary")).toBe(large);
+  expect(cache.get("ordinary-a")).toBe(snapshot);
+  expect(cache.peek("ordinary-b")).toBe(snapshot);
 
-  cache.get("old");
-  cache.set("next", snapshot);
-  expect(cache.peek("old")).toBe(snapshot);
-  expect(cache.peek("recent")).toBeUndefined();
-  expect(cache.peek("next")).toBe(snapshot);
-  expect(cache.peek("temporary-a")).toBeDefined();
-  expect(cache.peek("temporary-b")).toBe(snapshot);
+  cache.set("small", snapshot);
+  expect(cache.peek("ordinary-a")).toBe(snapshot);
+  expect(cache.peek("ordinary-b")).toBeUndefined();
+  expect(cache.get("small")).toBe(snapshot);
+  cache.delete("temporary");
+  expect(cache.get("small")).toBe(snapshot);
 });

@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
+import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import type { NanobotClient } from "@/lib/nanobot-client";
-import { getSessionStore } from "@/lib/session-store";
+import { webuiThreadCache } from "@/lib/webui-thread-cache";
 
 const RECONNECT_READ_CONCURRENCY = 4;
 
@@ -25,14 +26,14 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
       }));
       const recover = async ({ chatId, generation, turnId }: typeof jobs[number]) => {
         const key = `websocket:${chatId}`;
-        const body = await getSessionStore(client).latest(getToken(), key, signal, false);
+        const body = await fetchLatestWebuiThread(client, getToken(), key, signal);
         if (!body || signal.aborted) return;
         const { completedTurnIds, snapshot } = persistedCanonicalRunState(body);
         if (body.page?.record_range) {
           if (!Array.isArray(body.completed_turn_ids)) return;
           const mounted = client.hasTranscript(chatId);
           if (client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)) {
-            getSessionStore(client).publish(key, body);
+            webuiThreadCache.set(key, body);
           }
           // A mounted owner must accept (or stage) the fragment before settling.
           // Explicit completion is otherwise independent of a newer run, but the
@@ -46,7 +47,7 @@ export function useReconnectRuns(client: NanobotClient, getToken: () => string):
         if (!client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)) return;
         // Preserve the result before completion fences prune queued fragments.
         // Returning to an inactive chat can hydrate from this canonical page.
-        getSessionStore(client).publish(key, body);
+        webuiThreadCache.set(key, body);
         client.reconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot);
       };
       let nextJob = 0;

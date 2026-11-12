@@ -6,24 +6,18 @@ import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 import { joinThreadFragments } from "@/lib/thread-page-fragments";
 import { isModelCommandText } from "@/lib/format";
 import { isSystemCommandTurnId } from "@/lib/nanobot-client";
-import type { PromptIndex, UIMessage } from "@/lib/types";
-import type { PromptHistoryPage as HistoryPage } from "@/lib/session-store";
-import { PROMPT_READING_PAGE_LIMIT, type PromptReadingPosition } from "@/lib/prompt-reading-position";
+import type { PromptIndex, UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
 import { type PromptAnchor, userPromptAnchors } from "@/components/thread/promptNavigation";
 
-function promptDirectory(key: string, snapshot: PromptIndex) {
-  return { key, prompts: snapshot.prompts.filter((item) => !isSystemCommandTurnId(item.turnId) && !isModelCommandText(item.preview)).map((item, position) => ({ ...item, index: position,
-    label: item.preview.replace(/\s+/g, " ").slice(0, 80) || `Prompt ${position + 1}`,
-  })) };
+interface HistoryPage {
+  messages: UIMessage[];
+  body: WebuiThreadPersistedPayload;
 }
 
-function readingPosition(pages: HistoryPage[]): PromptReadingPosition {
-  return { queries: pages.map((page) => page.query), generation: pages[0]?.body.page?.history_generation ?? undefined };
-}
+const HISTORY_PAGE_LIMIT = 3;
 
 export interface PromptHistoryNavigation {
   prompts: PromptAnchor[];
-  /** Empty but non-null while a saved window is loading, cancelled, or awaiting retry. */
   window: {
     messages: UIMessage[];
     userMessageOffset: number;
@@ -47,29 +41,16 @@ export interface PromptHistoryNavigation {
 
 /** Browsing pages never replace the canonical latest page or live turn state. */
 export function usePromptHistory(key: string | null, version: number, messages: UIMessage[]): PromptHistoryNavigation {
-  const { client, getToken, webuiCapabilities, sessions } = useClient();
+  const { client, getToken, webuiCapabilities } = useClient();
   const enabled = !!key && webuiCapabilities.includes("webui.prompt-navigation.v1");
-  const scope = useRef({ key, client, epoch: key ? sessions.epoch(key) : 0 });
-  const currentScope = scope.current.key === key && scope.current.client === client;
-  const [index, setIndex] = useState<{ key: string; prompts: PromptAnchor[] } | null>(() => {
-    const saved = enabled && key ? sessions.promptIndexes.get(key) : undefined;
-    return saved && key ? promptDirectory(key, saved) : null;
-  });
+  const [index, setIndex] = useState<{ key: string; prompts: PromptAnchor[] } | null>(null);
   const indexSnapshot = useRef<PromptIndex>();
-  const savedWindow = !currentScope && enabled && key ? sessions.promptWindows.get(key) : undefined;
-  const savedPosition = !currentScope && enabled && key ? sessions.navigationPositions.get(key) : undefined;
-  const [pages, setPages] = useState<HistoryPage[]>(() => enabled && key ? sessions.promptWindows.get(key)?.pages ?? [] : []);
+  const [pages, setPages] = useState<HistoryPage[]>([]);
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
-  const [restoration, setRestoration] = useState<PromptReadingPosition | null>(() => !pages.length && enabled && key
-    ? sessions.navigationPositions.get(key) ?? null : null);
-  const restorationRef = useRef(restoration);
-  restorationRef.current = restoration;
   const [target, setTarget] = useState<PromptHistoryNavigation["target"]>(null);
-  const targetRef = useRef(target);
-  targetRef.current = target;
   const [operation, setOperation] = useState<PromptHistoryNavigation["operation"]>(null);
-  const [loading, setLoading] = useState(!!restoration);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -77,154 +58,48 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   const sequence = useRef(0);
   const retry = useRef<() => void>(() => setRefresh((value) => value + 1));
   const emptyScan = useRef<{ direction: "before" | "after"; reversed: boolean }>({ direction: "after", reversed: false });
-  const pagesEpoch = useRef(scope.current.epoch);
-
-  const replacePages = useCallback((next: HistoryPage[]) => {
-    pagesRef.current = next;
-    pagesEpoch.current = scope.current.epoch;
-    setPages(next);
-  }, []);
+  const scope = useRef({ key, client });
+  const currentScope = scope.current.key === key && scope.current.client === client;
 
   const cancel = useCallback(() => {
     request.current?.abort();
     request.current = null;
     setTarget(null);
     setLoading(false);
-    setError(restorationRef.current ? "History loading cancelled" : null);
+    setError(null);
   }, []);
 
   const latest = useCallback(() => {
     cancel();
-    restorationRef.current = null;
-    setRestoration(null);
-    setError(null);
-    replacePages([]);
-    if (key) {
-      sessions.promptWindows.delete(key);
-      sessions.navigationPositions.delete(key);
-    }
-  }, [cancel, key, replacePages, sessions]);
-
-  const restore = useCallback(async (position: PromptReadingPosition) => {
-    if (!key || scope.current.key !== key || scope.current.epoch !== sessions.epoch(key)) return;
-    const epoch = scope.current.epoch;
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    restorationRef.current = position;
-    setRestoration(position);
-    setOperation("jump");
-    setLoading(true);
-    setError(null);
-    retry.current = () => { void restore(position); };
-    try {
-      const restored: HistoryPage[] = [];
-      let generation = position.generation;
-      for (const query of position.queries) {
-        const body = await fetchWebuiThread(getToken(), key, {
-          [query.direction]: query.cursor, limit: 24, signal: controller.signal,
-        });
-        if (controller.signal.aborted || request.current !== controller) return;
-        if (!body || sessions.epoch(key) !== epoch) throw new Error("History is no longer available");
-        const nextGeneration = body.page?.history_generation;
-        const canonicalGeneration = sessions.canonical.peek(key)?.page?.history_generation;
-        if (nextGeneration && ((generation && generation !== nextGeneration)
-          || (canonicalGeneration && canonicalGeneration !== nextGeneration))) {
-          throw new Error("History changed; select the message again");
-        }
-        generation ??= nextGeneration ?? undefined;
-        restored.push({ query, body, messages: projectWebuiThreadMessages(projectThreadEvents(body.events)) });
-      }
-      replacePages(restored);
-      sessions.navigationPositions.set(key, readingPosition(restored));
-      restorationRef.current = null;
-      setRestoration(null);
-      setTarget(null);
-    } catch (cause) {
-      if (!controller.signal.aborted && request.current === controller) {
-        if (sessions.epoch(key) !== epoch) {
-          setError("History is no longer available");
-          retry.current = () => setRefresh((value) => value + 1);
-        } else setError(cause instanceof Error ? cause.message : String(cause));
-      }
-    } finally {
-      if (request.current === controller) {
-        request.current = null;
-        setLoading(false);
-      }
-    }
-  }, [getToken, key, replacePages, sessions]);
+    setPages([]);
+  }, [cancel]);
 
   useEffect(() => {
-    const epoch = key ? sessions.epoch(key) : 0;
-    scope.current = { key, client, epoch };
-    request.current?.abort();
-    request.current = null;
-    setTarget(null);
-    setLoading(false);
-    setError(null);
-    const saved = enabled && key ? sessions.promptIndexes.get(key) : undefined;
-    const window = enabled && key ? sessions.promptWindows.get(key) : undefined;
-    const position = enabled && key ? sessions.navigationPositions.get(key) : undefined;
-    replacePages(window?.pages ?? []);
-    if (window && key) sessions.promptWindows.delete(key);
-    restorationRef.current = null;
-    setRestoration(null);
-    setIndex(saved && key ? promptDirectory(key, saved) : null);
-    indexSnapshot.current = saved;
+    scope.current = { key, client };
+    latest();
+    setIndex(null);
+    indexSnapshot.current = undefined;
     setIndexError(null);
-    retry.current = () => setRefresh((value) => value + 1);
-    if (!window?.pages.length && position) void restore(position);
-    return () => {
-      request.current?.abort();
-      if (enabled && key && sessions.epoch(key) === pagesEpoch.current && pagesRef.current.length) {
-        sessions.promptWindows.set(key, { pages: pagesRef.current, target: targetRef.current });
-        sessions.navigationPositions.set(key, readingPosition(pagesRef.current));
-      }
-    };
-  }, [key, client, enabled, sessions, replacePages, restore]);
+    return () => request.current?.abort();
+  }, [key, client, enabled, latest]);
 
   useEffect(() => {
     if (!enabled || !key) return;
-    const epoch = sessions.epoch(key);
     const controller = new AbortController();
     void fetchPromptIndex(getToken(), key, controller.signal, indexSnapshot.current).then((snapshot) => {
-      if (controller.signal.aborted || sessions.epoch(key) !== epoch) return;
+      if (controller.signal.aborted) return;
       if (snapshot === indexSnapshot.current) { setIndexError(null); return; }
       indexSnapshot.current = snapshot;
-      sessions.promptIndexes.set(key, snapshot);
-      setIndex(promptDirectory(key, snapshot));
+      setIndex({ key, prompts: snapshot.prompts.filter((item) => !isSystemCommandTurnId(item.turnId) && !isModelCommandText(item.preview)).map((item, position) => ({ ...item, index: position,
+        label: item.preview.replace(/\s+/g, " ").slice(0, 80) || `Prompt ${position + 1}`,
+      })) });
       setIndexError(null);
     }).catch((cause: unknown) => {
-      if (controller.signal.aborted || sessions.epoch(key) !== epoch) return;
+      if (controller.signal.aborted) return;
       setIndexError(cause instanceof Error ? cause.message : String(cause));
     });
     return () => controller.abort();
-  }, [client, enabled, getToken, key, sessions, version, refresh]);
-
-  useEffect(() => {
-    if (!enabled || !key) return;
-    return sessions.canonical.subscribe(key, (body) => {
-      const before = pagesRef.current[0]?.body.page?.history_generation ?? restorationRef.current?.generation;
-      const after = body.page?.history_generation;
-      const epoch = sessions.epoch(key);
-      if (scope.current.epoch === epoch && (!before || !after || before === after)) return;
-      request.current?.abort();
-      request.current = null;
-      scope.current.epoch = epoch;
-      replacePages([]);
-      const placeholder = restorationRef.current ? { ...restorationRef.current, generation: after ?? undefined } : null;
-      restorationRef.current = placeholder;
-      setRestoration(placeholder);
-      sessions.promptWindows.delete(key);
-      sessions.navigationPositions.delete(key);
-      setTarget(null);
-      setLoading(false);
-      setError("History changed; select the message again");
-      retry.current = () => setRefresh((value) => value + 1);
-      setRefresh((value) => value + 1);
-    });
-  }, [enabled, key, replacePages, sessions]);
+  }, [client, enabled, getToken, key, version, refresh]);
 
   const indexed = useMemo(() => {
     const ids = new Set<string>();
@@ -266,13 +141,12 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   }, [currentScope, enabled, index, indexed, key, messages]);
 
   const updateMessages = useCallback((update: (messages: UIMessage[]) => UIMessage[]) => {
-    replacePages(pagesRef.current.map((page) => ({ ...page, messages: update(page.messages) })));
-  }, [replacePages]);
+    setPages((current) => current.map((page) => ({ ...page, messages: update(page.messages) })));
+  }, []);
 
   const read = useCallback(async (cursor: string, direction: "before" | "after", id?: string, automatic = false) => {
     // Boundary inputs can arrive before loading renders; only a new jump supersedes a read.
-    if (!key || (!id && request.current) || scope.current.key !== key || scope.current.epoch !== sessions.epoch(key)) return;
-    const epoch = scope.current.epoch;
+    if (!key || (!id && request.current)) return;
     if (!automatic) emptyScan.current = { direction, reversed: false };
     request.current?.abort();
     const controller = new AbortController();
@@ -285,56 +159,47 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       const body = await fetchWebuiThread(getToken(), key, {
         [direction]: cursor, limit: 24, signal: controller.signal,
       });
-      if (controller.signal.aborted || request.current !== controller || sessions.epoch(key) !== epoch) return;
+      if (controller.signal.aborted) return;
       if (!body) throw new Error("History is no longer available");
       const generation = body.page?.history_generation;
       const previousGeneration = pagesRef.current[0]?.body.page?.history_generation;
       if (!id && generation && previousGeneration && generation !== previousGeneration) {
         throw new Error("History changed; select the message again");
       }
-      const page: HistoryPage = { query: { cursor, direction }, body, messages: projectWebuiThreadMessages(projectThreadEvents(body.events)) };
+      const page = { body, messages: projectWebuiThreadMessages(projectThreadEvents(body.events)) };
       if (id && !page.messages.some((message) => message.id === id)) {
         setRefresh((value) => value + 1);
         throw new Error("History changed; select the message again");
       }
       // At most three bounded server pages, even after many navigations.
-      const next = id ? [page] : direction === "before"
-        ? [page, ...pagesRef.current].slice(0, PROMPT_READING_PAGE_LIMIT) : [...pagesRef.current, page].slice(-PROMPT_READING_PAGE_LIMIT);
-      replacePages(next);
-      sessions.navigationPositions.set(key, readingPosition(next));
-      restorationRef.current = null;
-      setRestoration(null);
+      setPages((previous) => id ? [page] : direction === "before"
+        ? [page, ...previous].slice(0, HISTORY_PAGE_LIMIT) : [...previous, page].slice(-HISTORY_PAGE_LIMIT));
       if (id) setTarget({ id, sequence: ++sequence.current });
     } catch (cause) {
-      if (!controller.signal.aborted && request.current === controller && sessions.epoch(key) === epoch) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      }
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (request.current === controller) {
         request.current = null;
         setLoading(false);
       }
     }
-  }, [getToken, key, replacePages, sessions]);
+  }, [getToken, key]);
 
-  const visiblePages = currentScope ? pages : savedWindow?.pages ?? [];
-  const restoring = currentScope ? !!restoration : !savedWindow?.pages.length && !!savedPosition;
-  const visibleLoading = currentScope ? loading : restoring;
-  const first = visiblePages[0]?.body.page;
-  const last = visiblePages[visiblePages.length - 1]?.body.page;
+  const first = pages[0]?.body.page;
+  const last = pages[pages.length - 1]?.body.page;
   const window = useMemo(() => {
-    if (!visiblePages.length && !restoring) return null;
+    if (!currentScope || !pages.length) return null;
     const messages: UIMessage[] = [];
     let boundary: number | null = null;
-    for (let index = 0; index < visiblePages.length; index++) {
-      const page = visiblePages[index];
+    for (let index = 0; index < pages.length; index++) {
+      const page = pages[index];
       let body = page.body;
       let rows = page.messages;
       const range = body.page?.record_range;
       if (range) {
         let joined = joinThreadFragments([], body);
-        while (visiblePages[index + 1]?.body.page?.record_range?.turn === range.turn) {
-          joined = joinThreadFragments(joined.pages, visiblePages[++index].body);
+        while (pages[index + 1]?.body.page?.record_range?.turn === range.turn) {
+          joined = joinThreadFragments(joined.pages, pages[++index].body);
         }
         body = joined.body;
         rows = projectWebuiThreadMessages(projectThreadEvents(body.events));
@@ -347,10 +212,10 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       userMessageOffset: first?.user_message_offset ?? 0,
       hasMoreBefore: first?.has_more_before === true, hasMoreAfter: last?.has_more_after === true,
       forkBoundaryMessageCount: boundary };
-  }, [visiblePages, restoring, first, last]);
+  }, [currentScope, pages, first, last]);
 
   useEffect(() => {
-    if (!window || window.messages.length || visibleLoading || error || restoring) return;
+    if (!window || window.messages.length || loading || error) return;
     let direction = emptyScan.current.direction;
     let cursor = direction === "after" ? last?.after_cursor : first?.before_cursor;
     if (!cursor && !emptyScan.current.reversed) {
@@ -359,9 +224,9 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       cursor = direction === "after" ? last?.after_cursor : first?.before_cursor;
     }
     if (cursor) void read(cursor, direction, undefined, true);
-  }, [error, first?.before_cursor, last?.after_cursor, visibleLoading, read, restoring, window]);
+  }, [error, first?.before_cursor, last?.after_cursor, loading, read, window]);
 
-  return { prompts, window, target: currentScope ? target : null, loading: visibleLoading,
+  return { prompts, window, target: currentScope ? target : null, loading: currentScope && loading,
     operation: currentScope && (loading || error) ? operation : null,
     error: currentScope ? error ?? indexError : null, cancel, latest, updateMessages,
     retry: () => error ? retry.current() : setRefresh((value) => value + 1),

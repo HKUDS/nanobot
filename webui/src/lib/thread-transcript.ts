@@ -694,7 +694,7 @@ export class ThreadTranscript {
         && (appendedInputUnits.has(unit) || (unit.members.size > 0
           && Array.from(unit.members.keys()).every((turn) => appendedTurns.has(turn))))));
     if (read.kind !== "older" && this.messages.length > 0 && overlaps.size === 0 && !newTail && !reset) {
-      this.finishRead(read, "New history could not be reconciled with unconfirmed messages; retry after the active turn settles");
+      this.finishRead(read);
       return false;
     }
     const held = new Set<Unit>();
