@@ -3263,7 +3263,7 @@ describe("ThreadShell", () => {
     );
   });
 
-  it("recovers an uncommitted reset lineage on the next canonical hydrate", async () => {
+  it("adopts a disjoint latest window immediately when returning to a cached session", async () => {
     const client = makeClient();
     let chatACalls = 0;
     vi.stubGlobal(
@@ -3309,8 +3309,8 @@ describe("ThreadShell", () => {
     rerender(view("lineage-chat-a"));
     await waitFor(() => expect(chatACalls).toBe(2));
 
-    expect(screen.getByText("committed old lineage")).toBeInTheDocument();
-    expect(screen.queryByText("disjoint new lineage")).not.toBeInTheDocument();
+    expect(await screen.findByText("disjoint new lineage")).toBeInTheDocument();
+    expect(screen.queryByText("committed old lineage")).not.toBeInTheDocument();
 
     act(() => client._emitSessionUpdate("lineage-chat-a", "thread"));
 

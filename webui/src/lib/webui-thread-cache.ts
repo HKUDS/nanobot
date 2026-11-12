@@ -60,7 +60,7 @@ export class WebuiThreadCache extends MemoryLruCache<WebuiThreadPersistedPayload
   private readonly listeners = new Map<string, Set<(body: WebuiThreadPersistedPayload) => void>>();
 
   constructor(
-    maxBytes = 16 * 1024 * 1024,
+    maxBytes = 32 * 1024 * 1024,
     maxEntries = 12,
   ) {
     super(maxBytes, maxEntries);
