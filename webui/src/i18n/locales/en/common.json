@@ -1323,17 +1323,18 @@
       "shortTitle": "Token usage",
       "viewDetails": "View details",
       "cacheHitRate": "Cache hit rate",
-      "cacheRateHelp": "Cache hit rate excludes input with unknown cache status.",
       "dailyTrend": "Daily tokens",
       "bySource": "Usage by source",
       "modelTrend": "Model trends",
       "modelsUnavailable": "No model breakdown available.",
-      "otherModels": "Other / unattributed",
+      "otherModels": "Other models",
       "unclassified": "Unclassified",
       "unavailable": "Usage data is unavailable.",
       "noActivity": "No token usage in the last 30 days.",
+      "last30Days": "Last 30 days",
       "cachedInput": "Cached input",
       "cacheMiss": "Cache miss",
+      "cacheWrite": "Cache write",
       "cacheUnknown": "Unknown status",
       "outputTokens": "Output",
       "otherTokens": "Other tokens",
@@ -1347,7 +1348,9 @@
         "dream": "Memory",
         "system": "Auxiliary calls"
       },
-      "systemHelp": "Includes internal tasks and calls without a recorded source."
+      "systemHelp": "Includes internal tasks and calls without a recorded source.",
+      "failedRequests": "{{count}} failed",
+      "estimatedShare": "{{percent}} of tokens are estimated"
     },
     "providers": {
       "manageProviders": "Manage providers",

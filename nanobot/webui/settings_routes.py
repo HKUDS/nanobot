@@ -21,6 +21,7 @@ from nanobot.webui import settings_contracts as contracts
 from nanobot.webui import settings_models as model_domain
 from nanobot.webui import settings_system as system_domain
 from nanobot.webui.cli_apps_api import cli_apps_action, cli_apps_payload
+from nanobot.webui.http_utils import http_json_response
 from nanobot.webui.http_utils import http_response as _http_response
 from nanobot.webui.http_utils import is_local_browser_request as _is_local_browser_request
 from nanobot.webui.mcp_oauth_api import McpOAuthManager
@@ -312,7 +313,7 @@ class WebUISettingsRouter:
         if route == ("root", "settings"):
             return await asyncio.to_thread(self._handle_settings)
         if route == ("root", "usage"):
-            return await asyncio.to_thread(self._handle_settings_usage)
+            return await asyncio.to_thread(self._handle_settings_usage, request)
 
         domain, action = route
         if action.startswith("update-") and self._runtime_surface == "native":
@@ -500,8 +501,25 @@ class WebUISettingsRouter:
             )
         )
 
-    def _handle_settings_usage(self) -> Response:
-        return self._json_response(self.settings.read(settings_usage_payload))
+    def _handle_settings_usage(self, request: WsRequest) -> Response:
+        details = contracts.query_first(self._parse_query(request.path), "details")
+        if details not in (None, "true", "false"):
+            return self._error_response(400, "details must be true or false")
+        payload = self.settings.read(settings_usage_payload, details=details == "true")
+        revision = payload.get("revision")
+        headers = [("Cache-Control", "private, no-cache")]
+        if revision:
+            etag = f'W/"{revision}"'
+            headers.append(("ETag", etag))
+            if request.headers.get("If-None-Match") == etag:
+                return _http_response(
+                    b"", status=304, extra_headers=[*headers, ("Vary", "Accept-Encoding")],
+                )
+        return http_json_response(
+            payload,
+            accept_encoding=request.headers.get("Accept-Encoding", ""),
+            extra_headers=headers,
+        )
 
     def _model_operations(self) -> model_domain.ModelSettingsOperations:
         return model_domain.ModelSettingsOperations(

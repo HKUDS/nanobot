@@ -5,6 +5,7 @@ import json
 import time
 from datetime import date
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -1753,7 +1754,7 @@ def test_update_transcription_settings_validates_language(
         update_transcription_settings({"language": ["en-US"]})
 
 
-def test_settings_payload_includes_token_usage_summary(
+def test_settings_payload_includes_token_usage_only_when_requested(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1774,7 +1775,12 @@ def test_settings_payload_includes_token_usage_summary(
         )
     )
 
-    payload = settings_payload()
+    store = get_llm_usage_store()
+    with patch.object(store, "usage_payload", wraps=store.usage_payload) as aggregate:
+        assert "usage" not in settings_payload()
+        aggregate.assert_not_called()
+        payload = settings_payload(include_usage=True)
+        aggregate.assert_called_once()
 
     assert payload["usage"]["total_tokens_30d"] == 15
     assert payload["usage"]["total_tokens"] == 15
@@ -1808,9 +1814,13 @@ def test_settings_usage_payload_returns_lightweight_token_usage(
 
     payload = settings_usage_payload()
 
-    assert payload["total_tokens"] == 22
-    assert payload["requests_30d"] == 1
-    assert "agent" not in payload
+    assert sum(day["total_tokens"] for day in payload["days"]) == 22
+    assert sum(day["requests"] for day in payload["days"]) == 1
+    assert set(payload) == {"days", "range_start", "range_end", "revision"}
+    details = settings_usage_payload(details=True)
+    assert details["days"] == payload["days"]
+    assert details["providers_30d"][0]["total_tokens"] == 22
+    assert details["model_days_30d"][0]["total_tokens"] == 22
 
 
 def test_update_network_safety_settings_writes_local_service_flag(

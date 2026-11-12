@@ -935,18 +935,19 @@
       "shortTitle": "토큰 사용량",
       "viewDetails": "자세히 보기",
       "cacheHitRate": "캐시 적중률",
-      "cacheRateHelp": "캐시 상태가 알려진 입력만 적중률 계산에 포함됩니다.",
       "dailyTrend": "일일 Token",
       "systemHelp": "내부 작업과 출처가 기록되지 않은 호출을 포함합니다.",
       "bySource": "출처별 사용량",
       "modelTrend": "모델 추이",
       "modelsUnavailable": "모델별 내역이 없습니다.",
-      "otherModels": "기타 / 미분류",
+      "otherModels": "기타 모델",
       "unclassified": "미분류",
       "unavailable": "사용량 데이터를 사용할 수 없습니다.",
       "noActivity": "최근 30일 동안 토큰 사용량이 없습니다.",
+      "last30Days": "최근 30일",
       "cachedInput": "캐시 적중",
       "cacheMiss": "캐시 미스",
+      "cacheWrite": "캐시 쓰기",
       "cacheUnknown": "상태 알 수 없음",
       "outputTokens": "출력",
       "otherTokens": "기타 토큰",
@@ -959,7 +960,9 @@
         "cron": "자동화",
         "dream": "기억 정리",
         "system": "보조 호출"
-      }
+      },
+      "failedRequests": "실패 {{count}}회",
+      "estimatedShare": "토큰의 {{percent}}가 추정치"
     },
     "providers": {
       "manageProviders": "제공업체 관리",

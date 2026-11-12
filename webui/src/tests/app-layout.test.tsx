@@ -662,6 +662,20 @@ describe("App layout", () => {
     expect(asideClassNames.some((cls) => cls.includes("lg:block"))).toBe(true);
   });
 
+  it("loads settings once when opening the overview directly", async () => {
+    window.location.hash = "#/settings";
+    mockFetchRoutes({ "/api/settings": baseSettingsPayload(), "/api/settings/usage": { days: [] } });
+    render(<App />);
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
+    expect(await screen.findByText("Token usage")).toBeInTheDocument();
+    const reads = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url) === "/api/settings");
+    expect(reads()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+    await screen.findByRole("navigation", { name: "Sidebar navigation" });
+    expect(reads()).toHaveLength(1);
+  });
+
   it("uses one main landmark and a page heading in desktop settings", async () => {
     mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
     const { container } = render(<App />);

@@ -918,6 +918,8 @@ export interface SettingsPayload {
       cache_write_tokens: number;
       cache_read_observed_input_tokens: number;
       cache_write_observed_input_tokens: number;
+      cache_miss_tokens?: number;
+      cache_unknown_tokens?: number;
       total_tokens: number;
       reported_tokens?: number;
       estimated_tokens?: number;
@@ -940,6 +942,8 @@ export interface SettingsPayload {
           cache_write_tokens: number;
           cache_read_observed_input_tokens: number;
           cache_write_observed_input_tokens: number;
+          cache_miss_tokens?: number;
+          cache_unknown_tokens?: number;
           total_tokens: number;
           reported_tokens?: number;
           estimated_tokens?: number;
@@ -956,14 +960,17 @@ export interface SettingsPayload {
         }
       >;
     }>;
-    total_tokens: number;
-    total_tokens_30d: number;
-    total_tokens_365d: number;
-    peak_day_tokens: number;
-    current_streak_days: number;
-    longest_streak_days: number;
-    active_days_30d: number;
-    requests_30d: number;
+    revision?: string;
+    range_start?: string;
+    range_end?: string;
+    total_tokens?: number;
+    total_tokens_30d?: number;
+    total_tokens_365d?: number;
+    peak_day_tokens?: number;
+    current_streak_days?: number;
+    longest_streak_days?: number;
+    active_days_30d?: number;
+    requests_30d?: number;
     failed_requests_30d?: number;
     reported_tokens_30d?: number;
     estimated_tokens_30d?: number;
@@ -979,6 +986,8 @@ export interface SettingsPayload {
       cache_write_tokens: number;
       cache_read_observed_input_tokens: number;
       cache_write_observed_input_tokens: number;
+      cache_miss_tokens?: number;
+      cache_unknown_tokens?: number;
       total_tokens: number;
       reported_tokens: number;
       estimated_tokens: number;
@@ -998,6 +1007,12 @@ export interface SettingsPayload {
       provider: string;
       model: string;
       total_tokens: number;
+      measured_output_tokens?: number;
+      generation_ms?: number;
+      ttft_ms?: number;
+      timed_requests?: number;
+      cache_read_tokens?: number;
+      cache_read_observed_input_tokens?: number;
     }>;
     updated_at?: string | null;
   };

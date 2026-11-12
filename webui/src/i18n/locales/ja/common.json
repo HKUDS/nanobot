@@ -935,18 +935,19 @@
       "shortTitle": "トークン使用量",
       "viewDetails": "詳細を見る",
       "cacheHitRate": "キャッシュヒット率",
-      "cacheRateHelp": "キャッシュ状態が不明な入力はヒット率の計算から除外します。",
       "dailyTrend": "毎日の Token",
       "systemHelp": "内部タスクと記録された送信元がない呼び出しを含みます。",
       "bySource": "利用元別の使用量",
       "modelTrend": "モデルの推移",
       "modelsUnavailable": "モデル別の内訳はありません。",
-      "otherModels": "その他 / 未分類",
+      "otherModels": "その他のモデル",
       "unclassified": "未分類",
       "unavailable": "使用量データを取得できません。",
       "noActivity": "過去30日間のトークン使用はありません。",
+      "last30Days": "過去 30 日間",
       "cachedInput": "キャッシュヒット",
       "cacheMiss": "キャッシュ未使用",
+      "cacheWrite": "キャッシュ書き込み",
       "cacheUnknown": "状態不明",
       "outputTokens": "出力",
       "otherTokens": "その他のトークン",
@@ -959,7 +960,9 @@
         "cron": "自動タスク",
         "dream": "メモリ整理",
         "system": "補助処理"
-      }
+      },
+      "failedRequests": "失敗 {{count}} 件",
+      "estimatedShare": "トークンの {{percent}} は推定値"
     },
     "providers": {
       "manageProviders": "プロバイダーを管理",

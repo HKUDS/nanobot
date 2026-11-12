@@ -89,7 +89,10 @@ def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: 
             _call(
                 "2026-06-03T01:00:00+00:00",
                 source="api",
-                usage=LLMUsage.reported(input_tokens=50, output_tokens=5),
+                usage=LLMUsage.reported(input_tokens=50, output_tokens=5).with_timing(
+                    generation_ms=2500,
+                    ttft_ms=200,
+                ),
             ),
             _call(
                 "2026-06-03T02:00:00+00:00",
@@ -122,8 +125,30 @@ def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: 
     assert payload["cache_read_observed_input_tokens_30d"] == 100
     assert payload["cache_read_rate_30d"] == 0.4
     assert payload["model_days_30d"] == [
-        {"date": "2026-06-03", "provider": "anthropic", "model": "claude-sonnet-4", "total_tokens": 40},
-        {"date": "2026-06-03", "provider": "openai", "model": "gpt-5", "total_tokens": 175},
+        {
+            "date": "2026-06-03",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4",
+            "total_tokens": 40,
+            "measured_output_tokens": 0,
+            "generation_ms": 0,
+            "ttft_ms": 0,
+            "timed_requests": 0,
+            "cache_read_tokens": 0,
+            "cache_read_observed_input_tokens": 0,
+        },
+        {
+            "date": "2026-06-03",
+            "provider": "openai",
+            "model": "gpt-5",
+            "total_tokens": 175,
+            "measured_output_tokens": 5,
+            "generation_ms": 2500,
+            "ttft_ms": 200,
+            "timed_requests": 1,
+            "cache_read_tokens": 40,
+            "cache_read_observed_input_tokens": 100,
+        },
     ]
 
     day = payload["days"][0]
@@ -131,12 +156,46 @@ def test_usage_payload_aggregates_cache_coverage_sources_and_failures(tmp_path: 
     assert day["requests"] == 4
     assert day["reported_requests"] == 2
     assert day["estimated_requests"] == 1
+    assert day["cache_miss_tokens"] == 50
+    assert day["cache_unknown_tokens"] == 80
     assert day["sources"]["api"]["cache_read_observed_input_tokens"] == 0
     assert day["sources"]["user"]["cache_read_observed_input_tokens"] == 100
     assert {(row["provider"], row["model"]) for row in payload["providers_30d"]} == {
         ("openai", "gpt-5"),
         ("anthropic", "claude-sonnet-4"),
     }
+
+
+@pytest.mark.parametrize("with_read_call", [False, True], ids=["write-only", "mixed-observation"])
+def test_usage_payload_partitions_cache_tokens_before_aggregation(
+    tmp_path: Path, with_read_call: bool,
+) -> None:
+    store = LLMUsageStore(tmp_path / "llm_usage.sqlite3")
+    store.record(_call(
+        "2026-06-03T00:00:00+00:00",
+        usage=LLMUsage.reported(
+            input_tokens=100, output_tokens=20, cache_write_tokens=100,
+        ),
+    ))
+    if with_read_call:
+        store.record(_call(
+            "2026-06-03T00:01:00+00:00",
+            usage=LLMUsage.reported(
+                input_tokens=100, output_tokens=20,
+                cache_read_tokens=100, cache_write_tokens=0,
+            ),
+        ))
+
+    payload = store.usage_payload(now=datetime(2026, 6, 3, 12, tzinfo=timezone.utc))
+    day = payload["days"][0]
+    assert day["cache_write_tokens"] == 100
+    assert day["cache_read_tokens"] == (100 if with_read_call else 0)
+    assert day["cache_miss_tokens"] == 0
+    assert day["cache_unknown_tokens"] == 0
+    assert sum(day[key] for key in (
+        "cache_read_tokens", "cache_write_tokens", "cache_miss_tokens",
+        "cache_unknown_tokens", "output_tokens",
+    )) == day["total_tokens"]
 
 
 def test_usage_payload_preserves_zero_cache_observation(tmp_path: Path) -> None:
@@ -275,3 +334,50 @@ def test_usage_query_does_not_hold_writer_lock(
 
     assert not query_thread.is_alive()
     assert not record_thread.is_alive()
+
+
+def test_dashboard_views_are_bounded_and_cached_independently(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "llm_usage.sqlite3"
+    store = LLMUsageStore(path)
+    store.record_many([
+        _call("2026-05-04T12:00:00+00:00", usage=LLMUsage.reported(input_tokens=100, output_tokens=0)),
+        _call("2026-06-03T12:00:00+00:00", usage=LLMUsage.reported(input_tokens=10, output_tokens=2)),
+    ])
+    queries = []
+    daily_rows = store._daily_rows
+
+    def count_daily_rows(**kwargs):
+        queries.append((kwargs["start_ms"], kwargs["end_ms"]))
+        return daily_rows(**kwargs)
+
+    monkeypatch.setattr(store, "_daily_rows", count_daily_rows)
+    kwargs = {"now": datetime(2026, 6, 3, 23, tzinfo=timezone.utc), "timezone_name": "UTC"}
+    overview = store.usage_payload(view="overview", **kwargs)
+    models = store.usage_payload(view="models", **kwargs)
+    assert overview["range_start"] == "2026-05-05"
+    assert overview["range_end"] == "2026-06-03"
+    assert sum(day["total_tokens"] for day in overview["days"]) == 12
+    assert set(overview) == {"days", "range_start", "range_end", "revision"}
+    assert models["days"] == overview["days"]
+    assert models["providers_30d"][0]["total_tokens"] == 12
+    assert models["model_days_30d"][0]["total_tokens"] == 12
+    assert models["revision"] != overview["revision"]
+    assert store.usage_payload(view="overview", **kwargs) == overview
+    assert store.usage_payload(view="models", **kwargs) == models
+    assert queries == [(_timestamp("2026-05-05T00:00:00+00:00"),
+                        _timestamp("2026-06-04T00:00:00+00:00"))] * 2
+
+    # Another gateway writer must invalidate both projections, not just the last read view.
+    other = LLMUsageStore(path)
+    other.record(_call("2026-06-03T13:00:00+00:00", usage=LLMUsage.reported(input_tokens=5, output_tokens=0)))
+    other.close()
+    refreshed = store.usage_payload(view="overview", **kwargs)
+    assert sum(day["total_tokens"] for day in refreshed["days"]) == 17
+    assert refreshed["revision"] != overview["revision"]
+    assert store.usage_payload(view="models", **kwargs)["providers_30d"][0]["total_tokens"] == 17
+
+    next_day = store.usage_payload(view="overview", timezone_name="UTC",
+                                   now=datetime(2026, 6, 4, 1, tzinfo=timezone.utc))
+    assert next_day["days"] == refreshed["days"]
+    assert next_day["range_end"] == "2026-06-04"
+    assert next_day["revision"] != refreshed["revision"]

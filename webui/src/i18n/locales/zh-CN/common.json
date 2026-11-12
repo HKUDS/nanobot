@@ -1323,17 +1323,18 @@
       "shortTitle": "Token 用量",
       "viewDetails": "查看详情",
       "cacheHitRate": "缓存命中率",
-      "cacheRateHelp": "缓存命中率仅统计缓存状态已知的输入。",
       "dailyTrend": "每日 Token",
       "bySource": "用量来源",
       "modelTrend": "模型趋势",
       "modelsUnavailable": "暂无模型用量明细。",
-      "otherModels": "其他模型 / 未分类",
+      "otherModels": "其他模型",
       "unclassified": "未分类",
       "unavailable": "暂时无法获取用量数据。",
       "noActivity": "近 30 天暂无 Token 用量。",
+      "last30Days": "近 30 天",
       "cachedInput": "缓存命中",
       "cacheMiss": "未命中",
+      "cacheWrite": "缓存写入",
       "cacheUnknown": "状态未知",
       "outputTokens": "输出",
       "otherTokens": "其他 Token",
@@ -1347,7 +1348,9 @@
         "dream": "记忆整理",
         "system": "辅助调用"
       },
-      "systemHelp": "包括内部任务和未标注来源的调用"
+      "systemHelp": "包括内部任务和未标注来源的调用",
+      "failedRequests": "{{count}} 次失败",
+      "estimatedShare": "{{percent}} 的 Token 为本地估算"
     },
     "providers": {
       "manageProviders": "管理提供商",

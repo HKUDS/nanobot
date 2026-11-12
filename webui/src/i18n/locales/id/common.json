@@ -935,18 +935,19 @@
       "shortTitle": "Penggunaan token",
       "viewDetails": "Lihat detail",
       "cacheHitRate": "Rasio cache hit",
-      "cacheRateHelp": "Rasio tidak mencakup input dengan status cache yang tidak diketahui.",
       "dailyTrend": "Token harian",
       "systemHelp": "Termasuk tugas internal dan panggilan tanpa sumber tercatat.",
       "bySource": "Penggunaan berdasarkan sumber",
       "modelTrend": "Tren model",
       "modelsUnavailable": "Rincian per model tidak tersedia.",
-      "otherModels": "Lainnya / belum dikategorikan",
+      "otherModels": "Model lain",
       "unclassified": "Tidak dikategorikan",
       "unavailable": "Data penggunaan tidak tersedia.",
       "noActivity": "Tidak ada penggunaan token dalam 30 hari terakhir.",
+      "last30Days": "30 hari terakhir",
       "cachedInput": "Input tersedia di cache",
       "cacheMiss": "Cache tidak ditemukan",
+      "cacheWrite": "Penulisan cache",
       "cacheUnknown": "Status tidak diketahui",
       "outputTokens": "Output",
       "otherTokens": "Token lainnya",
@@ -959,7 +960,9 @@
         "cron": "Otomasi",
         "dream": "Penataan memori",
         "system": "Panggilan pendukung"
-      }
+      },
+      "failedRequests": "{{count}} gagal",
+      "estimatedShare": "{{percent}} token diperkirakan"
     },
     "providers": {
       "manageProviders": "Kelola penyedia",
