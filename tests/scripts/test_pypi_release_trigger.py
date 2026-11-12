@@ -105,7 +105,7 @@ def test_simulated_release_reaches_independently_approved_publisher(shell_env):
 
 
 @pytest.mark.parametrize("change", [{"UPSTREAM_SHA": "b" * 40}, {"UPSTREAM_TAG": "v1.2.3-rc1"},
-                                     {"UPSTREAM_ACTOR": "bad\nactor"}])
+                                     {"UPSTREAM_ACTOR": "bad\nactor"}, {"UPSTREAM_ACTOR": "publisher[bot]"}])
 def test_release_origin_rejects_changed_tag_or_invalid_actor(shell_env, change):
     assert run(release_step(), {**shell_env, **change}).returncode != 0
 

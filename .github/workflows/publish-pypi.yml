@@ -78,7 +78,7 @@ jobs:
           fi
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a final X.Y.Z version.' >&2; exit 1; }
           [[ "$destination" == pypi || "$destination" == testpypi ]] || { echo 'Invalid destination.' >&2; exit 1; }
-          [[ "$release_actor" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]] || { echo 'Invalid release actor.' >&2; exit 1; }
+          [[ "$release_actor" =~ ^[A-Za-z0-9-]+$ ]] || { echo 'A human release actor is required.' >&2; exit 1; }
           tag="v$VERSION"
           gh release view "$tag" --repo HKUDS/nanobot --json tagName,isDraft,isPrerelease \
             | jq -e --arg tag "$tag" '.tagName == $tag and .isDraft == false and .isPrerelease == false' >/dev/null
