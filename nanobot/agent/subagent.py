@@ -16,7 +16,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.hooks import create_file_edit_activity_hook
-from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.runner import AgentCheckpoint, AgentRunner, AgentRunSpec
 from nanobot.agent.session_activity import SessionActivity
 from nanobot.agent.subagent_sessions import SubagentSessions
 from nanobot.agent.subagent_status import SubagentState as SubagentState
@@ -755,7 +755,7 @@ class SubagentManager:
         logger.info("Subagent [{}] starting task: {}", task_id,
                     label if record.session.policy.log_content else "[content hidden]")
 
-        async def _on_checkpoint(payload: dict[str, Any]) -> None:
+        async def _on_checkpoint(payload: AgentCheckpoint) -> None:
             record.raise_if_stopping()
             phase = payload.get("phase", status.phase)
             iteration = payload.get("iteration", status.iteration)

@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal, ParamSpec, TypeVar, cast
+from typing import Any, Literal, NotRequired, ParamSpec, TypedDict, TypeVar, cast
 from uuid import uuid4
 
 from loguru import logger
@@ -70,8 +70,24 @@ def _raise_if_cancelling() -> None:
         raise asyncio.CancelledError
 
 
+class AgentCheckpointState(TypedDict):
+    """Runner state at a recovery boundary; omission retains private provider state."""
+
+    phase: Literal["model_input", "awaiting_tools", "tools_completed", "final_response"]
+    iteration: int
+    model: str
+    assistant_message: dict[str, Any] | None
+    completed_tool_results: list[dict[str, Any]]
+    pending_tool_calls: list[dict[str, Any]]
+    provider_state: NotRequired[ProviderConversationState | None]
+
+
+class AgentCheckpoint(AgentCheckpointState):
+    preceding_messages: list[dict[str, Any]]
+
+
 ContinuationCallback = Callable[[], Awaitable[str | None]]
-CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
+CheckpointCallback = Callable[[AgentCheckpoint], Awaitable[None]]
 InjectionCallback = Callable[[], Awaitable[Iterable[Any] | None]]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
@@ -1508,7 +1524,7 @@ class AgentRunner:
     async def _emit_checkpoint(
         self,
         spec: AgentRunSpec,
-        payload: dict[str, Any],
+        payload: AgentCheckpointState,
         messages: list[dict[str, Any]],
     ) -> None:
         callback = spec.checkpoint_callback
