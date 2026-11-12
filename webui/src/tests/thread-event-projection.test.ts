@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createThreadProjectionState, projectThreadEvent, projectThreadEvents } from "@/lib/thread-event-projection";
-import { normalizeActivityTimeline } from "@/lib/activity-timeline";
+import { hasPendingAgentActivity, isReasoningOnlyAssistant, normalizeActivityTimeline } from "@/lib/activity-timeline";
 import { ThreadProjectionIndex } from "@/lib/thread-projection-index";
 import type { ThreadProjectionEvent, UIMessage } from "@/lib/types";
 import projectionFixture from "./fixtures/live-replay-event-projection.json";
@@ -97,6 +97,33 @@ describe("canonical thread event projection", () => {
       .toEqual(["Same answer", "read_file(first)", "Same answer continued"]);
     expect(state.messages[0]).toMatchObject({ projectionStartSeq: 1, turnSeq: 5, responseSources: [source] });
     expect(state.messages[2]).toMatchObject({ projectionStartSeq: 4, turnSeq: 6, streamId: "second" });
+  });
+
+  it("keeps empty answer stream state without presenting it as reasoning", () => {
+    let state = createThreadProjectionState();
+    const emit = (event: ThreadProjectionEvent, persisted = false) => {
+      state = projectThreadEvent(state, event, { createId: () => `live-${state.messages.length}`, now: 100, persisted });
+    };
+    emit({ event: "user_message", chat_id: "chat", turn_id: "turn", turn_seq: 1, text: "Question", starts_turn: true }, true);
+    // Persisted stream snapshots contain text: "" even when the live frame does not.
+    emit({ event: "stream_end", chat_id: "chat", turn_id: "turn", turn_seq: 2, stream_id: "empty", text: "", resuming: true }, true);
+    const placeholder = state.messages[1];
+    expect(placeholder).toMatchObject({ content: "", isStreaming: true, streamId: "empty" });
+    expect(hasPendingAgentActivity(state.messages)).toBe(true);
+    expect(isReasoningOnlyAssistant(placeholder)).toBe(false);
+    expect(normalizeActivityTimeline(state.messages)).toMatchObject([
+      { type: "message", message: { content: "Question" }, sourceMessageCount: 2 },
+    ]);
+
+    emit({ event: "delta", chat_id: "chat", turn_id: "turn", turn_seq: 3, stream_id: "empty", text: "Stale" });
+    emit({ event: "message", chat_id: "chat", turn_id: "turn", turn_seq: 4, kind: "tool_hint", text: "read_file(first)" });
+    expect(hasPendingAgentActivity(state.messages)).toBe(true);
+    emit({ event: "reasoning_delta", chat_id: "chat", turn_id: "turn", turn_seq: 5, stream_id: "thought", text: "Real thought" });
+    emit({ event: "reasoning_end", chat_id: "chat", turn_id: "turn", turn_seq: 6, stream_id: "thought", text: "Real thought" });
+    emit({ event: "delta", chat_id: "chat", turn_id: "turn", turn_seq: 7, stream_id: "answer", text: "Answer" });
+    const units = normalizeActivityTimeline(state.messages);
+    expect(units.map((unit) => unit.type === "message" ? unit.message.content : unit.messages.map((row) => row.reasoning || row.content)))
+      .toEqual(["Question", ["read_file(first)", "Real thought"], "Answer"]);
   });
 
   it("can resume an earlier checkpoint after another branch closes the same stream", () => {
