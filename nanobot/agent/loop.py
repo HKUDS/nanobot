@@ -26,7 +26,8 @@ from nanobot.agent.execution_policy import ExecutionControlError, ExecutionPolic
 from nanobot.agent.hook import AgentHook, AgentTurnHookFactory
 from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
-from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
+from nanobot.agent.pending_inputs import PendingInputs
+from nanobot.agent.runner import AgentCheckpoint, AgentRunner, AgentRunResult, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -997,6 +998,97 @@ class AgentLoop:
             return
         delivery.remember_session_route(session.metadata)
 
+    async def _prepare_injected_input(
+        self,
+        message: InboundMessage,
+        *,
+        request: RequestContext,
+        runtime: LLMRuntime,
+        session: Session | None,
+        tools: ToolRegistry,
+    ) -> dict[str, Any] | None:
+        # Commands and independent turns retain their own worker and completion.
+        if not self._can_inject_message(message):
+            return None
+        content = message.content
+        image_paths = message.media if message.media else None
+        if image_paths:
+            content, image_paths = reference_non_image_attachments(content, image_paths)
+            image_paths = image_paths or None
+        user_content = self.context.build_user_content(content, image_paths=image_paths)
+        row: dict[str, Any] = {
+            "role": "user", "content": user_content,
+            "_meta": input_history_metadata(message),
+        }
+        if HIDDEN_HISTORY_META in message.metadata:
+            row[HIDDEN_HISTORY_META] = message.metadata[HIDDEN_HISTORY_META]
+        metadata_value = cast(object, message.metadata)
+        metadata = message.metadata if isinstance(metadata_value, dict) else {}
+        if message.is_user_input:
+            active_session_key = session.key if session is not None else request.session_key
+            route = self.turn_delivery_factory.input_route(message, active_session_key or message.session_key)
+            scope = await self.runner.prepare_prompt(
+                self.workspace_scopes.for_turn,
+                channel=route.channel,
+                message_metadata=_prompt_scope_metadata(metadata),
+                session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
+            )
+            # A follow-up cannot inherit another input's tool authority.
+            # Leave it for the FIFO worker to run with its own scope.
+            if scope != request.workspace_scope:
+                return None
+            pending_request = RequestContext(
+                channel=route.channel,
+                chat_id=route.chat_id,
+                message_id=metadata.get("message_id"),
+                session_key=active_session_key,
+                session_generation=session.generation if session is not None else None,
+                original_user_text=message.content,
+                runtime=runtime,
+                metadata=dict(metadata),
+                attributes=dict(request.attributes),
+                sender_id=message.sender_id,
+                turn_id=request.turn_id,
+                workspace=scope.project_path,
+                workspace_scope=request.workspace_scope,
+                log_content=request.log_content,
+            )
+            blocks = await self._resolve_runtime_context_for_request(pending_request, tools)
+            row["content"], runtime_marker = append_runtime_context(user_content, blocks)
+            if runtime_marker is not None:
+                row["_meta"][RUNTIME_CONTEXT_MESSAGE_META] = runtime_marker
+        if message.sender_id == "subagent" and metadata.get("injected_event") == "subagent_result":
+            subagent_marker: dict[str, Any] = {"kind": "subagent_result"}
+            task_id = metadata.get("subagent_task_id")
+            if isinstance(task_id, str) and task_id:
+                subagent_marker["subagent_task_id"] = task_id
+                row["subagent_task_id"] = task_id
+            row[HIDDEN_HISTORY_META] = subagent_marker
+            row["injected_event"] = "subagent_result"
+        followup_id = metadata.get(PENDING_FOLLOWUP_ID_KEY)
+        if isinstance(followup_id, str) and followup_id:
+            row[PENDING_FOLLOWUP_ID_KEY] = followup_id
+        return row
+
+    async def _checkpoint_turn(self, session: Session, payload: AgentCheckpoint) -> None:
+        public_payload: dict[str, Any] = dict(payload)
+        preceding = Session(key=session.key)
+        self._save_turn(preceding, payload["preceding_messages"], skip=0)
+        public_payload["preceding_messages"] = preceding.messages
+        public_payload["consumed_followup_ids"] = sorted(preceding.consumed_followup_ids)
+        public_payload.pop("provider_state", None)
+        previous_state = session.provider_state
+        if "provider_state" in payload:
+            session.provider_state = payload["provider_state"]
+            public_payload[self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY] = (
+                self._PROVIDER_STATE_CHECKPOINT_VERSION
+            )
+        try:
+            await self._set_runtime_checkpoint(session, public_payload)
+        except BaseException:
+            session.provider_state = previous_state
+            raise
+
     async def _run_agent_loop(
         self,
         transcript_input: TranscriptInput,
@@ -1023,193 +1115,6 @@ class AgentLoop:
         retain_session_state = (
             commit_session and session is not None and (not ephemeral or not session.policy.persist)
         )
-
-        async def _checkpoint(payload: dict[str, Any]) -> None:
-            if session is None or not retain_session_state:
-                return
-            public_payload = dict(payload)
-            preceding = Session(key=session.key)
-            self._save_turn(preceding, public_payload["preceding_messages"], skip=0)
-            public_payload["preceding_messages"] = preceding.messages
-            public_payload["consumed_followup_ids"] = sorted(preceding.consumed_followup_ids)
-            private_state = public_payload.pop("provider_state", None)
-            previous_state = session.provider_state
-            public_payload.pop(self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY, None)
-            if "provider_state" in payload and (
-                private_state is None
-                or isinstance(private_state, ProviderConversationState)
-            ):
-                session.provider_state = private_state
-                public_payload[self._PROVIDER_STATE_CHECKPOINT_VERSION_KEY] = (
-                    self._PROVIDER_STATE_CHECKPOINT_VERSION
-                )
-            try:
-                await self._set_runtime_checkpoint(session, public_payload)
-            except BaseException:
-                session.provider_state = previous_state
-                raise
-
-        async def _drain_pending(
-            *,
-            first_msg: InboundMessage | None = None,
-        ) -> list[dict[str, Any]]:
-            if pending_queue is None:
-                return []
-
-            # Capture the boundary before converting any message. Conversion
-            # resolves runtime context and may await, so reading until QueueEmpty
-            # afterwards would let later arrivals leak into this model step.
-            pending_messages: list[InboundMessage] = []
-            if first_msg is not None:
-                pending_messages.append(first_msg)
-            snapshot_size = pending_queue.qsize()
-            for _ in range(snapshot_size):
-                try:
-                    pending_messages.append(pending_queue.get_nowait())
-                except asyncio.QueueEmpty:
-                    break
-
-            async def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any] | None:
-                content = pending_msg.content
-                image_paths = pending_msg.media if pending_msg.media else None
-                if image_paths:
-                    content, image_paths = reference_non_image_attachments(
-                        content,
-                        image_paths,
-                    )
-                    image_paths = image_paths or None
-                user_content = self.context.build_user_content(
-                    content,
-                    image_paths=image_paths,
-                )
-                row: dict[str, Any] = {
-                    "role": "user", "content": user_content,
-                    "_meta": input_history_metadata(pending_msg),
-                }
-                if HIDDEN_HISTORY_META in pending_msg.metadata:
-                    row[HIDDEN_HISTORY_META] = pending_msg.metadata[HIDDEN_HISTORY_META]
-                metadata_value = cast(object, pending_msg.metadata)
-                metadata = (
-                    pending_msg.metadata
-                    if isinstance(metadata_value, dict)
-                    else {}
-                )
-                if pending_msg.is_user_input:
-                    route = self.turn_delivery_factory.input_route(pending_msg, active_session_key or pending_msg.session_key)
-                    scope = await self.runner.prepare_prompt(
-                        self.workspace_scopes.for_turn,
-                        channel=route.channel,
-                        message_metadata=_prompt_scope_metadata(metadata),
-                        session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
-                    )
-                    # A follow-up cannot inherit another input's tool authority.
-                    # Leave it for the FIFO worker to run with its own scope.
-                    if scope != effective_scope:
-                        return None
-                    pending_request = RequestContext(
-                        channel=route.channel,
-                        chat_id=route.chat_id,
-                        message_id=metadata.get("message_id"),
-                        session_key=active_session_key,
-                        session_generation=session.generation if session is not None else None,
-                        original_user_text=pending_msg.content,
-                        runtime=runtime,
-                        metadata=dict(metadata),
-                        attributes=dict(request_ctx.attributes),
-                        sender_id=pending_msg.sender_id,
-                        turn_id=request_ctx.turn_id,
-                        workspace=scope.project_path,
-                        # Injected input continues the active run's tool policy.
-                        workspace_scope=effective_scope,
-                        log_content=request_ctx.log_content,
-                    )
-                    blocks = await self._resolve_runtime_context_for_request(
-                        pending_request,
-                        effective_tools,
-                    )
-                    row["content"], runtime_marker = append_runtime_context(
-                        user_content,
-                        blocks,
-                    )
-                    if runtime_marker is not None:
-                        row["_meta"][RUNTIME_CONTEXT_MESSAGE_META] = runtime_marker
-                if (
-                    pending_msg.sender_id == "subagent"
-                    and metadata.get("injected_event") == "subagent_result"
-                ):
-                    subagent_marker: dict[str, Any] = {"kind": "subagent_result"}
-                    task_id = metadata.get("subagent_task_id")
-                    if isinstance(task_id, str) and task_id:
-                        subagent_marker["subagent_task_id"] = task_id
-                        row["subagent_task_id"] = task_id
-                    row[HIDDEN_HISTORY_META] = subagent_marker
-                    row["injected_event"] = "subagent_result"
-                followup_id = metadata.get(PENDING_FOLLOWUP_ID_KEY)
-                if isinstance(followup_id, str) and followup_id:
-                    row[PENDING_FOLLOWUP_ID_KEY] = followup_id
-                return row
-
-            consumed = 0
-            try:
-                converted: list[dict[str, Any]] = []
-                consumed_inputs: list[InboundMessage] = []
-                for pending_msg in pending_messages:
-                    # Independent turns are FIFO barriers. Their worker path
-                    # owns completion, command dispatch, and control metadata.
-                    if not self._can_inject_message(pending_msg):
-                        break
-                    row = await _to_user_message(pending_msg)
-                    if row is None:
-                        break
-                    converted.append(row)
-                    consumed_inputs.append(pending_msg)
-                if execution_scope is not None:
-                    try:
-                        execution_scope.consume_inputs(consumed_inputs)
-                    except Exception as exc:
-                        raise ExecutionControlError("could not accept consumed inputs") from exc
-                consumed = len(converted)
-                return converted
-            finally:
-                # Commit only a successfully converted prefix. On failure or
-                # cancellation, return the whole snapshot ahead of later arrivals.
-                unconsumed = pending_messages[consumed:]
-                if unconsumed:
-                    later = [pending_queue.get_nowait() for _ in range(pending_queue.qsize())]
-                    for pending_msg in [*unconsumed, *later]:
-                        pending_queue.put_nowait(pending_msg)
-
-        terminal_wait_deadline: float | None = None
-
-        async def _wait_for_pending() -> list[dict[str, Any]]:
-            nonlocal terminal_wait_deadline
-
-            items = await _drain_pending()
-            if (
-                items
-                or pending_queue is None
-                or session is None
-                or self.subagents.get_running_count_by_session(session.key) == 0
-            ):
-                return items
-
-            now = asyncio.get_running_loop().time()
-            if terminal_wait_deadline is None:
-                terminal_wait_deadline = now + _SUBAGENT_TERMINAL_WAIT_SECONDS
-            remaining = terminal_wait_deadline - now
-            if remaining <= 0:
-                return []
-
-            try:
-                msg = await asyncio.wait_for(pending_queue.get(), timeout=remaining)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "Timeout waiting for sub-agent completion before session {} exits",
-                    session.key,
-                )
-                return []
-
-            return await _drain_pending(first_msg=msg)
 
         request_ctx = request_context or RequestContext(
             channel="cli",
@@ -1263,12 +1168,13 @@ class AgentLoop:
             ),
         )
         effective_tools = tools if tools is not None else self.tools
-        file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
-        request_token = bind_request_context(request_ctx)
-        workspace_token = bind_workspace_scope(effective_scope)
-        turn_scope_stack = ExitStack()
-        execution_scope: ExecutionScope | None = None
-        try:
+        with ExitStack() as turn_scope_stack:
+            turn_scope_stack.callback(
+                reset_file_states, bind_file_states(self._file_state_store.for_session(active_session_key)),
+            )
+            turn_scope_stack.callback(reset_request_context, bind_request_context(request_ctx))
+            turn_scope_stack.callback(reset_workspace_scope, bind_workspace_scope(effective_scope))
+            execution_scope: ExecutionScope | None = None
             if self.execution_policy is not None:
                 execution_scope = turn_scope_stack.enter_context(self.execution_policy.scope(
                     active_session_key,
@@ -1278,6 +1184,20 @@ class AgentLoop:
                 if initial_message is not None:
                     execution_scope.consume_inputs((initial_message,))
 
+            pending_inputs = PendingInputs(
+                queue=pending_queue,
+                prepare=partial(
+                    self._prepare_injected_input,
+                    request=request_ctx, runtime=runtime, session=session, tools=effective_tools,
+                ),
+                consume=execution_scope.consume_inputs if execution_scope is not None else None,
+                session_key=session.key if session is not None else None,
+                running_subagents=(
+                    partial(self.subagents.get_running_count_by_session, session.key)
+                    if session is not None else None
+                ),
+                terminal_wait_seconds=_SUBAGENT_TERMINAL_WAIT_SECONDS,
+            ) if pending_queue is not None else None
             hook = build_agent_turn_hook(AgentTurnHookSpec(
                 events=events,
                 streaming=streaming,
@@ -1311,7 +1231,10 @@ class AgentLoop:
                 workspace=None if ephemeral else effective_scope.project_path,
                 session_key=session.key if session else None,
                 provider_retry_mode=self.provider_retry_mode,
-                checkpoint_callback=_checkpoint,
+                checkpoint_callback=(
+                    partial(self._checkpoint_turn, session)
+                    if session is not None and retain_session_state else None
+                ),
                 consolidate_history=partial(
                     self.consolidator.summarize_transcript,
                     runtime=runtime,
@@ -1326,8 +1249,10 @@ class AgentLoop:
                     tools=effective_tools.get_definitions(),
                     persist=session is not None and not ephemeral,
                 ),
-                injection_callback=_drain_pending,
-                terminal_injection_callback=_wait_for_pending,
+                injection_callback=pending_inputs.drain if pending_inputs is not None else None,
+                terminal_injection_callback=(
+                    pending_inputs.wait_at_terminal if pending_inputs is not None else None
+                ),
                 continuation_callback=(
                     execution_scope.continuation_prompt if execution_scope is not None else None
                 ),
@@ -1339,11 +1264,6 @@ class AgentLoop:
                 ),
                 events=events,
             ))
-        finally:
-            turn_scope_stack.close()
-            reset_workspace_scope(workspace_token)
-            reset_request_context(request_token)
-            reset_file_states(file_state_token)
         if session is not None and retain_session_state:
             session.provider_state = result.provider_state
         if result.stop_reason == "max_iterations":
