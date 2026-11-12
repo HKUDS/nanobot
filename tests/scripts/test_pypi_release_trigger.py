@@ -16,6 +16,8 @@ def workflow(name):
 
 @pytest.fixture
 def shell_env(tmp_path):
+    if os.name == "nt":
+        pytest.skip("Release workflows run their Bash steps on Ubuntu")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh = bin_dir / "gh"
