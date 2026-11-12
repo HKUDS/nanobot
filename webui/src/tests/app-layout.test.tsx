@@ -156,7 +156,6 @@ function baseSettingsPayload() {
       dream: {
         schedule: "every 2h",
       },
-      unified_session: false,
     },
     advanced: {
       restrict_to_workspace: false,
@@ -3657,7 +3656,6 @@ describe("App layout", () => {
                 dream: {
                   schedule: "every 2h",
                 },
-                unified_session: false,
               },
               advanced: {
                 restrict_to_workspace: false,

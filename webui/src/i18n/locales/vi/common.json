@@ -556,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "Tiếp tục thử lại", "help": "Thử lại khi lỗi có thể khắc phục; tắt để dùng cách thử lại tiêu chuẩn.\n\nTự động thử lại khi yêu cầu gửi đến mô hình gặp lỗi tạm thời. Tắt tùy chọn này để giới hạn số lần thử lại."},
         "agents_defaults_tool_hint_max_length": {"label": "Độ dài tóm tắt", "help": "Giới hạn ký tự tóm tắt hoạt động công cụ.\n\nĐộ dài tối đa của gợi ý ngắn về hoạt động công cụ."},
         "tools_max_session_messages_per_minute": {"label": "Tần suất tin nhắn", "help": "Số tin nhắn công cụ gửi đến một phiên mỗi phút tối đa.\n\nGiới hạn tần suất công cụ gửi tin nhắn vào cuộc trò chuyện."},
-        "agents_defaults_unified_session": {"label": "Phiên dùng chung", "help": "Chia sẻ lịch sử trò chuyện của một người dùng giữa các nền tảng.\n\nDùng chung một cuộc trò chuyện cho một người dùng trên nhiều nền tảng."},
         "tools_exec_enable": {"label": "Công cụ shell", "help": "Cho phép agent chạy lệnh Shell.\n\nCho phép tác nhân chạy lệnh shell."},
         "tools_file_enable": {"label": "Công cụ tệp", "help": "Cho phép công cụ đọc và chỉnh sửa tệp tích hợp.\n\nCho phép dùng công cụ đọc và chỉnh sửa tệp tích hợp."},
         "tools_web_enable": {"label": "Truy cập web", "help": "Cho phép tìm kiếm web và đọc trang.\n\nCho phép tìm kiếm và tải nội dung trang web."},

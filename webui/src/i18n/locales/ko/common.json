@@ -556,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "계속 재시도", "help": "복구 가능한 오류는 계속 재시도합니다. 끄면 기본 재시도를 사용합니다.\n\n일시적인 오류로 모델 요청이 실패하면 계속 재시도합니다. 끄면 재시도 횟수를 제한합니다."},
         "agents_defaults_tool_hint_max_length": {"label": "요약 길이", "help": "도구 실행 요약의 글자 수 상한입니다.\n\n도구 활동을 나타내는 짧은 안내의 최대 길이입니다."},
         "tools_max_session_messages_per_minute": {"label": "메시지 빈도", "help": "도구가 한 세션에 보내는 분당 메시지 수 상한입니다.\n\n도구가 대화에 메시지를 보내는 빈도를 제한합니다."},
-        "agents_defaults_unified_session": {"label": "세션 공유", "help": "동일 사용자의 채팅 기록을 여러 플랫폼에서 공유합니다.\n\n한 사용자가 여러 채팅 플랫폼에서 같은 대화를 사용합니다."},
         "tools_exec_enable": {"label": "셸 도구", "help": "에이전트의 Shell 명령 실행을 허용합니다.\n\n에이전트의 셸 명령 실행을 허용합니다."},
         "tools_file_enable": {"label": "파일 도구", "help": "내장 파일 읽기와 편집 도구를 허용합니다.\n\n기본 파일 읽기 및 편집 도구를 허용합니다."},
         "tools_web_enable": {"label": "웹 접근", "help": "웹 검색과 페이지 읽기를 허용합니다.\n\n웹 검색과 페이지 가져오기를 허용합니다."},

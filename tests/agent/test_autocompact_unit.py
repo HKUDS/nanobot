@@ -492,14 +492,14 @@ class TestPrepareSession:
         ac = _make_autocompact(ttl=15)
         session = _make_session(
             updated_at=datetime.now() - timedelta(minutes=20),
-            metadata={"last_channel": "discord:new"},
+            metadata={"title": "Project notes"},
         )
         if archiving:
             ac._archiving.add(session.key)
 
         prepared, _ = await ac.prepare_session(session, session.key)
 
-        assert prepared.metadata["last_channel"] == "discord:new"
+        assert prepared.metadata["title"] == "Project notes"
 
     async def test_hot_path_summary_from_summaries(self):
         ac = _make_autocompact()

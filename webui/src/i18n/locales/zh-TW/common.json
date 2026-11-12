@@ -556,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "持續重試", "help": "可恢復錯誤持續重試；關閉用標準策略\n\n遇到可恢復的請求錯誤時持續重試。關閉後使用標準重試策略。"},
         "agents_defaults_tool_hint_max_length": {"label": "提示長度", "help": "工具執行提示的字元數上限\n\n工具執行時顯示的簡短提示最多包含多少個字元。"},
         "tools_max_session_messages_per_minute": {"label": "訊息頻率", "help": "工具每分鐘向同一會話發訊息的上限"},
-        "agents_defaults_unified_session": {"label": "共享會話", "help": "同一使用者的跨平臺對話共用記錄\n\n讓同一使用者在不同聊天平臺的對話共用會話記錄。"},
         "tools_exec_enable": {"label": "Shell 工具", "help": "允許智慧體執行 Shell 命令"},
         "tools_file_enable": {"label": "檔案工具", "help": "允許使用內建檔案讀取和編輯工具"},
         "tools_web_enable": {"label": "網頁訪問", "help": "允許搜尋網頁和讀取網頁內容"},

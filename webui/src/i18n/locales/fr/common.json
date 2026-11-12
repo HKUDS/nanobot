@@ -556,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "Réessayer en continu", "help": "Réessayez les erreurs récupérables ; désactivez pour les tentatives standard.\n\nRelance les requêtes après une erreur temporaire du modèle. Désactivez cette option pour limiter le nombre de tentatives."},
         "agents_defaults_tool_hint_max_length": {"label": "Longueur du résumé", "help": "Limite de caractères des résumés d’activité des outils.\n\nLongueur maximale des brèves indications d’activité."},
         "tools_max_session_messages_per_minute": {"label": "Fréquence des messages", "help": "Nombre maximal de messages d’outils vers une session par minute.\n\nLimite la fréquence des messages envoyés par les outils dans une conversation."},
-        "agents_defaults_unified_session": {"label": "Sessions partagées", "help": "Partagez l’historique d’un utilisateur entre plateformes.\n\nUtilise une même conversation pour un utilisateur sur plusieurs plateformes."},
         "tools_exec_enable": {"label": "Outil shell", "help": "Autorisez l’agent à exécuter des commandes Shell.\n\nAutorise l’agent à exécuter des commandes shell."},
         "tools_file_enable": {"label": "Outils de fichiers", "help": "Autorisez les outils intégrés de lecture et d’édition de fichiers.\n\nAutorise les outils intégrés de lecture et de modification de fichiers."},
         "tools_web_enable": {"label": "Accès web", "help": "Autorisez la recherche et la lecture de pages web.\n\nAutorise la recherche et la récupération de pages web."},

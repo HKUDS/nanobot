@@ -85,10 +85,6 @@ class _WebsocketTurn:
 _WEBSOCKET_ACTIVE_TURNS: dict[str, dict[str, _WebsocketTurn]] = {}
 
 
-def _validated_llm_runtime(value: object) -> LLMRuntime | None:
-    return value if isinstance(value, LLMRuntime) else None
-
-
 def _sync_websocket_turn_projection(chat_id: str) -> None:
     turns = _WEBSOCKET_ACTIVE_TURNS.get(chat_id)
     if not turns:
@@ -155,62 +151,20 @@ def _title_inputs(session: Session) -> tuple[str, str]:
     return user_text, assistant_text
 
 
-def _latest_title_inputs(session: Session) -> tuple[str, str]:
-    user_text = ""
-    assistant_text = ""
-    for message in reversed(session.messages):
-        if message.get("_command") is True:
-            continue
-        if is_hidden_history_message(message):
-            continue
-        message = public_history_message(message)
-        role = message.get("role")
-        content = message.get("content")
-        if not isinstance(content, str) or not content.strip():
-            continue
-        content = strip_think(content)
-        if not content:
-            continue
-        if role == "user" and not user_text:
-            user_text = content.strip()
-        elif role == "assistant" and not assistant_text:
-            assistant_text = content.strip()
-        if user_text and assistant_text:
-            break
-    return user_text, assistant_text
-
-
 async def maybe_generate_webui_title(
     *,
     sessions: SessionManager,
     session_key: str,
     provider: LLMProvider,
     model: str,
-    target_session_key: str | None = None,
 ) -> bool:
-    """Generate and persist a short title for WebUI-owned sessions.
-
-    ``session_key`` owns the conversation content. Under unified-session
-    routing this is the shared session while WebUI renders per-chat sessions,
-    so pass ``target_session_key`` to project the title onto that per-chat
-    session instead of storing it on the shared one.
-    """
-    routed_session = await sessions.state.read(session_key)
-    if routed_session is None:
+    """Generate and persist a short title for a WebUI-owned session."""
+    session = await sessions.state.read(session_key)
+    if session is None or session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
         return False
-    target_is_routed = target_session_key is None or target_session_key == session_key
-    if target_is_routed or target_session_key is None:
-        target_session = routed_session
-    else:
-        target_session = await sessions.state.get(target_session_key)
-    if (
-        routed_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
-        and target_session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
-    ):
+    if session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
         return False
-    if target_session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
-        return False
-    current_title = target_session.metadata.get(WEBUI_TITLE_METADATA_KEY)
+    current_title = session.metadata.get(WEBUI_TITLE_METADATA_KEY)
     if isinstance(current_title, str) and current_title.strip():
         cleaned_current_title = clean_generated_title(current_title)
         if cleaned_current_title:
@@ -220,17 +174,12 @@ async def maybe_generate_webui_title(
                             and metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is not True):
                         metadata[WEBUI_TITLE_METADATA_KEY] = cleaned_current_title
                 await sessions.state.mutate_metadata(
-                    target_session.key, clean_title, expected_generation=target_session.generation,
+                    session.key, clean_title, expected_generation=session.generation,
                 )
             return False
-        target_session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
+        session.metadata.pop(WEBUI_TITLE_METADATA_KEY, None)
 
-    if target_is_routed:
-        user_text, assistant_text = _title_inputs(routed_session)
-    else:
-        # Shared-session content mixes every channel; generation runs right
-        # after this turn, so its exchange is the latest pair.
-        user_text, assistant_text = _latest_title_inputs(routed_session)
+    user_text, assistant_text = _title_inputs(session)
     if not user_text:
         return False
 
@@ -250,7 +199,7 @@ async def maybe_generate_webui_title(
     try:
         with (
             llm_usage_source("system"),
-            logger.contextualize(purpose="webui_title", session_key=target_session.key),
+            logger.contextualize(purpose="webui_title", session_key=session.key),
         ):
             response = await provider.chat_stream_with_retry(
                 [
@@ -293,35 +242,11 @@ async def maybe_generate_webui_title(
         return True
     try:
         changed, _ = await sessions.state.mutate_metadata(
-            target_session.key, set_title, expected_generation=target_session.generation,
+            session.key, set_title, expected_generation=session.generation,
         )
     except SessionConflictError:
         return False
     return changed
-
-
-async def maybe_generate_webui_title_after_turn(
-    *,
-    channel: str,
-    chat_id: str,
-    metadata: dict[str, Any],
-    sessions: SessionManager,
-    session_key: str,
-    provider: LLMProvider,
-    model: str,
-) -> bool:
-    if channel != "websocket" or metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
-        return False
-    origin_session_key = f"{channel}:{chat_id}"
-    return await maybe_generate_webui_title(
-        sessions=sessions,
-        session_key=session_key,
-        provider=provider,
-        model=model,
-        target_session_key=(
-            origin_session_key if origin_session_key != session_key else None
-        ),
-    )
 
 
 def websocket_turn_wall_started_at(chat_id: str) -> float | None:
@@ -528,7 +453,7 @@ class WebuiTurnRoutePolicy:
         if revision is None:
             raise SessionConflictError("display destination is no longer active")
         admitted = metadata.get(HISTORY_GENERATION_METADATA_KEY)
-        # A distinct alias admitted by the WebSocket edge must still be current.
+        # An admitted display destination must still be current.
         if admitted not in (None, generation, revision[0]):
             raise SessionConflictError("display destination generation was replaced")
         metadata[HISTORY_GENERATION_METADATA_KEY] = revision[0]
@@ -831,30 +756,27 @@ class WebuiTurnCoordinator:
         )
 
     def _schedule_title_update_from_event(self, event: TurnCompleted) -> None:
-        title_context = _validated_llm_runtime(event.runtime)
+        ctx = event.context
+        title_llm = event.runtime
         if (
-            event.context.metadata.get("webui") is not True
-            or title_context is None
+            ctx.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True
+            or ctx.session_key != webui_session_key(ctx.chat_id)
+            or not isinstance(title_llm, LLMRuntime)
         ):
             return
 
-        async def _generate_title_and_notify(
-            title_llm: LLMRuntime = title_context,
-        ) -> None:
-            generated = await maybe_generate_webui_title_after_turn(
-                channel=event.context.channel,
-                chat_id=event.context.chat_id,
-                metadata=event.context.metadata,
+        async def _generate_title_and_notify() -> None:
+            generated = await maybe_generate_webui_title(
                 sessions=self.sessions,
-                session_key=event.context.session_key,
+                session_key=ctx.session_key,
                 provider=title_llm.provider,
                 model=title_llm.model,
             )
             if generated:
                 await self._publish_session_metadata_updated(
-                    channel=event.context.channel,
-                    chat_id=event.context.chat_id,
-                    metadata=event.context.metadata,
+                    channel=ctx.channel,
+                    chat_id=ctx.chat_id,
+                    metadata=ctx.metadata,
                 )
 
         self.schedule_background(_generate_title_and_notify())

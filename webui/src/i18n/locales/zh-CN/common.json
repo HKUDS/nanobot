@@ -589,10 +589,6 @@
           "label": "消息频率",
           "help": "工具每分钟向同一会话发消息的上限"
         },
-        "agents_defaults_unified_session": {
-          "label": "共享会话",
-          "help": "同一用户的跨平台对话共用记录\n\n让同一用户在不同聊天平台的对话共用会话记录。"
-        },
         "tools_exec_enable": {
           "label": "执行命令",
           "help": "允许智能体执行 Shell 命令"

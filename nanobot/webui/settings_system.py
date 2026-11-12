@@ -158,7 +158,6 @@ def system_settings_payload(
             "dream": {
                 "schedule": defaults.dream.describe_schedule(),
             },
-            "unified_session": defaults.unified_session,
         },
         "advanced": {
             "restrict_to_workspace": config.tools.restrict_to_workspace,

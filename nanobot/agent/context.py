@@ -17,7 +17,6 @@ from nanobot.runtime_context import (
     append_runtime_context,
 )
 from nanobot.security.workspace_access import WorkspaceScopeResolver
-from nanobot.session.keys import last_channel_from_metadata
 from nanobot.session.manager import Session
 from nanobot.session.summary import SessionSummary
 from nanobot.utils.helpers import detect_image_mime, image_placeholder_text, load_bundled_template
@@ -38,14 +37,9 @@ class PersistedPromptContextResolver:
     """Restore prompt routing context when no inbound message is available."""
 
     workspace_scopes: WorkspaceScopeResolver
-    unified_session: bool = False
 
     def __call__(self, session: Session) -> tuple[str | None, Path]:
         channel = session.key.split(":", 1)[0] if ":" in session.key else None
-        if self.unified_session:
-            route = last_channel_from_metadata(session.metadata)
-            if route is not None:
-                channel = route[0]
         scope = self.workspace_scopes.for_turn(
             channel=channel,
             message_metadata=None,

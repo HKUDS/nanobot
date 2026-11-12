@@ -44,10 +44,6 @@ from nanobot.runtime_context import (
 )
 from nanobot.session.automation_turns import AUTOMATION_HISTORY_META
 from nanobot.session.goal_state import GOAL_STATE_KEY
-from nanobot.session.keys import (
-    LAST_CHANNEL_METADATA_KEY,
-    UNIFIED_SESSION_KEY,
-)
 from nanobot.session.manager import Session
 from nanobot.session.recovery import (
     PENDING_FOLLOWUP_ID_KEY,
@@ -71,7 +67,6 @@ from nanobot.session.webui_turns import (
     WebuiTurnCoordinator,
     clean_generated_title,
     maybe_generate_webui_title,
-    maybe_generate_webui_title_after_turn,
 )
 from nanobot.triggers.local_session_turns import LOCAL_TRIGGER_META
 
@@ -463,69 +458,6 @@ async def test_generate_webui_title_ignores_cron_internal_turns(tmp_path: Path) 
 
     assert generated is False
     assert WEBUI_TITLE_METADATA_KEY not in session.metadata
-    loop.provider.chat_stream_with_retry.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_generate_webui_title_projects_onto_chat_session_under_unified_routing(
-    tmp_path: Path,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop.provider.chat_stream_with_retry = AsyncMock(
-        return_value=LLMResponse(content='"查询临期 IP"', finish_reason="stop")
-    )
-    unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    unified.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    unified.metadata[WEBUI_TITLE_METADATA_KEY] = "开启私聊Topic功能"
-    unified.add_message("user", "很早以前的问题")
-    unified.add_message("assistant", "很久以前的回答。")
-    unified.add_message("user", "帮我查一下临期IP有哪些")
-    unified.add_message("assistant", "以下是临期 IP 列表。")
-    loop.sessions.save(unified)
-
-    generated = await maybe_generate_webui_title_after_turn(
-        channel="websocket",
-        chat_id="chat-projection",
-        metadata={WEBUI_SESSION_METADATA_KEY: True},
-        sessions=loop.sessions,
-        session_key=UNIFIED_SESSION_KEY,
-        provider=loop.provider,
-        model=loop.model,
-    )
-
-    assert generated is True
-    chat = loop.sessions.get_or_create("websocket:chat-projection")
-    assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "查询临期 IP"
-    assert unified.metadata[WEBUI_TITLE_METADATA_KEY] == "开启私聊Topic功能"
-    prompt = loop.provider.chat_stream_with_retry.await_args.args[0][1]["content"]
-    assert "帮我查一下临期IP有哪些" in prompt
-    assert "很早以前的问题" not in prompt
-
-
-@pytest.mark.asyncio
-async def test_projected_title_generation_skips_existing_chat_title(tmp_path: Path) -> None:
-    loop = _make_full_loop(tmp_path)
-    unified = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    unified.metadata[WEBUI_SESSION_METADATA_KEY] = True
-    unified.add_message("user", "帮我查一下临期IP有哪些")
-    unified.add_message("assistant", "以下是临期 IP 列表。")
-    chat = loop.sessions.get_or_create("websocket:chat-existing")
-    chat.metadata[WEBUI_TITLE_METADATA_KEY] = "Existing title"
-    loop.sessions.save(chat)
-    loop.sessions.save(unified)
-
-    generated = await maybe_generate_webui_title_after_turn(
-        channel="websocket",
-        chat_id="chat-existing",
-        metadata={WEBUI_SESSION_METADATA_KEY: True},
-        sessions=loop.sessions,
-        session_key=UNIFIED_SESSION_KEY,
-        provider=loop.provider,
-        model=loop.model,
-    )
-
-    assert generated is False
-    assert chat.metadata[WEBUI_TITLE_METADATA_KEY] == "Existing title"
     loop.provider.chat_stream_with_retry.assert_not_awaited()
 
 
@@ -1203,9 +1135,8 @@ async def test_subagent_followup_clears_state_before_compatibility_failure(
 
 
 @pytest.mark.asyncio
-async def test_process_message_persists_unified_session_delivery_route(tmp_path: Path) -> None:
+async def test_process_message_persists_delivery_route_on_failure(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
-    loop._unified_session = True
     loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
 
     msg = InboundMessage(
@@ -1213,77 +1144,15 @@ async def test_process_message_persists_unified_session_delivery_route(tmp_path:
         sender_id="u1",
         chat_id="oc_123",
         content="persist my route",
-        session_key_override=UNIFIED_SESSION_KEY,
     )
     with pytest.raises(RuntimeError, match="boom"):
         await loop._process_message(msg)
 
-    loop.sessions.invalidate(UNIFIED_SESSION_KEY)
-    persisted = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    assert persisted.metadata[LAST_CHANNEL_METADATA_KEY] == "feishu:oc_123"
+    loop.sessions.invalidate("feishu:oc_123")
+    persisted = loop.sessions.get_or_create("feishu:oc_123")
     assert persisted.metadata["_compaction_route"] == {
         "channel": "feishu", "chat_id": "oc_123", "metadata": {},
     }
-
-
-@pytest.mark.parametrize(
-    ("msg", "is_user_turn"),
-    [
-        (
-            InboundMessage(
-                channel="cli",
-                sender_id="u1",
-                chat_id="direct",
-                content="cli input",
-            ),
-            True,
-        ),
-        (
-            InboundMessage(
-                channel="system",
-                sender_id="system",
-                chat_id="discord:automation",
-                content="system event",
-            ),
-            False,
-        ),
-        (
-            InboundMessage(
-                channel="discord",
-                sender_id="subagent",
-                chat_id="subagent-result",
-                content="subagent result",
-            ),
-            True,
-        ),
-        (
-            InboundMessage(
-                channel="discord",
-                sender_id="u1",
-                chat_id="automation",
-                content="scheduled turn",
-                metadata={CRON_TRIGGER_META: {"job_id": "job-1"}},
-            ),
-            True,
-        ),
-    ],
-)
-def test_unified_session_route_ignores_non_user_destinations(
-    tmp_path: Path,
-    msg: InboundMessage,
-    is_user_turn: bool,
-) -> None:
-    loop = _make_full_loop(tmp_path)
-    loop._unified_session = True
-    session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-    session.metadata[LAST_CHANNEL_METADATA_KEY] = "telegram:existing"
-
-    loop._remember_session_route(
-        session, msg, is_user_turn=is_user_turn,
-        delivery=loop.turn_delivery_factory.unrouted(msg, session.key),
-    )
-
-    assert session.metadata[LAST_CHANNEL_METADATA_KEY] == "telegram:existing"
 
 
 # 1x1 PNG used by the media-persistence tests. Attachment preparation filters

@@ -18,7 +18,6 @@ from nanobot.webui.settings_contracts import WebUISettingsError
 RUNTIME_CONFIG_PATHS = (
     "agents.defaults.timezone",
     "agents.defaults.timezone_mode",
-    "agents.defaults.unified_session",
     "agents.defaults.session_ttl_minutes",
     "agents.defaults.max_tool_iterations",
     "agents.defaults.max_concurrent_subagents",

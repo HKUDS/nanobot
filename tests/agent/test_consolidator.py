@@ -21,7 +21,6 @@ from nanobot.runtime_context import (
     RuntimeContextBlock,
     append_runtime_context,
 )
-from nanobot.session.keys import UNIFIED_SESSION_KEY, remember_last_channel
 from nanobot.session.manager import Session
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
@@ -1481,7 +1480,7 @@ class TestCompactIdleSession:
         assert sent[-1]["content"] == _ARCHIVE_PROMPT
 
     @pytest.mark.asyncio
-    async def test_reuses_real_prefix_for_unified_session_workspace(
+    async def test_reuses_real_prefix_for_webui_session_workspace(
         self,
         loop_factory,
         mock_provider,
@@ -1491,14 +1490,13 @@ class TestCompactIdleSession:
         project.mkdir()
         (tmp_path / "AGENTS.md").write_text("GLOBAL_WORKSPACE_MARKER", encoding="utf-8")
         (project / "AGENTS.md").write_text("PROJECT_WORKSPACE_MARKER", encoding="utf-8")
-        loop = loop_factory(provider=mock_provider, unified_session=True)
+        loop = loop_factory(provider=mock_provider)
         runtime = loop.llm_runtime()
         runtime.provider.chat_stream_with_retry.return_value = LLMResponse(
             content="Summary.",
             finish_reason="stop",
         )
-        session = loop.sessions.get_or_create(UNIFIED_SESSION_KEY)
-        remember_last_channel(session.metadata, "websocket", "scope")
+        session = loop.sessions.get_or_create("websocket:scope")
         session.metadata["workspace_scope"] = {
             "project_path": str(project),
             "access_mode": "restricted",

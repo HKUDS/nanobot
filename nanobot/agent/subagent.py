@@ -908,7 +908,7 @@ class SubagentManager:
 
         # Inject as system message to trigger main agent.
         # Use session_key_override to align with the main agent's effective
-        # session key (which accounts for unified sessions) so the result is
+        # session key (including any explicit override) so the result is
         # routed to the correct pending queue (mid-turn injection) instead of
         # being dispatched as a competing independent task.
         override = origin.get("session_key") or f"{origin['channel']}:{origin['chat_id']}"

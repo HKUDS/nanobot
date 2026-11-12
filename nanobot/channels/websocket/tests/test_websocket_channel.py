@@ -510,7 +510,6 @@ async def test_temporary_chat_is_transient_and_discarded(history, bus, tmp_path)
 
     inbound = bus.publish_inbound.await_args_list[0].args[0]
     assert inbound.session_key == f"websocket:{chat_id}"
-    assert inbound.session_key_override == f"websocket:{chat_id}"
     assert inbound.require_existing_session is True
     assert inbound.metadata["cli_apps"] == [{"name": "drawio"}]
     assert inbound.metadata[WORKSPACE_SCOPE_METADATA_KEY] == {
@@ -5948,7 +5947,6 @@ def test_sessions_list_includes_active_run_started_at(monkeypatch) -> None:
         ("abc", True),
         ("a1b2_c:d-e", True),
         ("x" * 64, True),
-        ("unified:default", True),
         ("", False),
         ("x" * 65, False),
         ("has space", False),

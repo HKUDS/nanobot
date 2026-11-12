@@ -30,11 +30,7 @@ from nanobot.events import (
 )
 from nanobot.providers.base import LLMUsage
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
-from nanobot.session.keys import (
-    UNIFIED_SESSION_KEY,
-    is_internal_session,
-    last_channel_from_metadata,
-)
+from nanobot.session.keys import is_internal_session
 from nanobot.session.message_metadata import input_history_metadata
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import strip_think
@@ -165,12 +161,8 @@ class TurnDeliveryFactory:
         else:
             # Older sessions have no route snapshot. Only direct clients have a
             # session key that is also an unambiguous delivery address.
-            route = (
-                last_channel_from_metadata(session_metadata)
-                if session_key == UNIFIED_SESSION_KEY
-                else tuple(session_key.split(":", 1))
-            )
-            if not route or len(route) != 2 or route[0] not in {"websocket", "cli"}:
+            route = session_key.split(":", 1)
+            if len(route) != 2 or route[0] not in {"websocket", "cli"}:
                 return EventSink()
             channel, chat_id = route
             metadata = {}

@@ -62,6 +62,10 @@ Back up the configuration and data before updating. The old top-level `api` bloc
 
 To read old API conversations after updating, open the same configuration and workspace with [the Python SDK](./python-sdk.md#botsessions). Use `await bot.sessions.list()` to find keys such as `api:default` and `api:<session_id>`, then use `await bot.sessions.get(key)` to read their messages. If the old launcher used a separate API workspace, pass that workspace to `Nanobot.from_config(config_path, workspace=workspace)` instead of using the Gateway's workspace.
 
+## Shared sessions removal
+
+The shared sessions feature has been removed. The old `agents.defaults.unifiedSession` or `unified_session` setting is ignored.
+
 ## Recover an interrupted update
 
 Refreshing restores saved progress, **not installation consent**. A staged update may ask you to review and confirm it again. A disconnected page cannot tell whether the worker stopped: do not start another installation while it reconnects. Closing the browser does not stop the managed update or its recovery.
