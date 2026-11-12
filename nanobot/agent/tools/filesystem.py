@@ -466,7 +466,7 @@ class ReadFileTool(_FsTool):
         return result
 
     def _read_pdf(self, source: ReadableFile, pages: str | None) -> str:
-        from nanobot.utils.document import PdfPageRangeError, PdfSafetyError
+        from nanobot.utils.document import PdfPageRangeError
 
         try:
             extraction = source.pdf_pages(
@@ -476,8 +476,6 @@ class ReadFileTool(_FsTool):
             )
         except PdfPageRangeError as e:
             return ToolResult.error(f"Error: Invalid page range '{pages}': {e!s}.")
-        except PdfSafetyError as e:
-            return ToolResult.error(f"Error reading PDF: {e}")
         except Exception as e:
             return ToolResult.error(f"Error reading PDF: {e}")
 
@@ -508,12 +506,11 @@ class ReadFileTool(_FsTool):
         fp = file.path
         offset = max(1, offset)
         requested_limit = limit or self._DEFAULT_LIMIT
-        source_iterator = None
+        source = None
         try:
             source = file.document_lines()
             if source is None:
                 return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
-            source_iterator = source.lines
             numbered: list[str] = []
             output_chars = 0
             total_seen = 0
@@ -521,7 +518,7 @@ class ReadFileTool(_FsTool):
             has_more = False
             line_was_clipped = False
 
-            for line in source_iterator:
+            for line in source.lines:
                 total_seen = line.extracted_line
                 if line.extracted_line < offset:
                     continue
@@ -574,9 +571,8 @@ class ReadFileTool(_FsTool):
         except Exception as e:
             return ToolResult.error(f"Error reading {fp.suffix.upper()} file: {e!s}")
         finally:
-            close = getattr(source_iterator, "close", None)
-            if close is not None:
-                close()
+            if source is not None:
+                source.close()
 
 
 @tool_parameters(
