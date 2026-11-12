@@ -99,24 +99,6 @@ def test_log_label_preserves_ipv6_origin_without_credentials() -> None:
     assert _redact_url_for_log(url) == "https://[2001:db8::1]:8443"
 
 
-async def test_jina_is_skipped_for_credential_urls(jina_client) -> None:
-    tool = WebFetchTool()
-    result = await tool._fetch_jina(
-        "https://example.com/download?token=abc123", max_chars=1000
-    )
-    assert result is None
-    assert jina_client.requested == []
-
-
-async def test_jina_is_skipped_for_userinfo_urls(jina_client) -> None:
-    tool = WebFetchTool()
-    result = await tool._fetch_jina(
-        "https://user:secret@example.com/report", max_chars=1000
-    )
-    assert result is None
-    assert jina_client.requested == []
-
-
 async def test_jina_skip_log_does_not_contain_url_credentials(
     jina_client, monkeypatch
 ) -> None:
@@ -124,7 +106,7 @@ async def test_jina_skip_log_does_not_contain_url_credentials(
     monkeypatch.setattr(web_module.logger, "debug", lambda *args: logged.append(args))
 
     result = await WebFetchTool()._fetch_jina(
-        "https://user:secret@example.com/private/webhook-token?token=abc",
+        ("https://user:secret@example.com/private/webhook-token?token=abc",),
         max_chars=1000,
     )
 
@@ -138,7 +120,7 @@ async def test_jina_skip_log_does_not_contain_url_credentials(
 
 async def test_jina_still_used_for_plain_urls(jina_client) -> None:
     tool = WebFetchTool()
-    result = await tool._fetch_jina("https://example.com/watch?v=abc123", max_chars=1000)
+    result = await tool._fetch_jina(("https://example.com/watch?v=abc123",), max_chars=1000)
     assert result is not None
     assert json.loads(result)["extractor"] == "jina"
     assert jina_client.requested == [
@@ -149,40 +131,52 @@ async def test_jina_still_used_for_plain_urls(jina_client) -> None:
 async def test_fragment_is_never_forwarded(jina_client) -> None:
     tool = WebFetchTool()
     result = await tool._fetch_jina(
-        "https://example.com/page?q=1#access_token=leaked", max_chars=1000
+        ("https://example.com/page?q=1#access_token=leaked",), max_chars=1000
     )
     assert result is not None
     assert jina_client.requested == ["https://r.jina.ai/https://example.com/page?q=1"]
 
 
-@pytest.mark.parametrize("redirected", [False, True], ids=["direct", "redirected"])
-async def test_execute_fetches_credential_urls_locally(monkeypatch, redirected: bool) -> None:
+@pytest.mark.parametrize("scenario", ["direct", "userinfo", "final-hop", "middle-hop", "failed-preflight"])
+async def test_execute_keeps_unverified_or_credentialed_urls_local(monkeypatch, scenario: str) -> None:
     tool = WebFetchTool()
     requested: list[str] = []
     short_url = "https://example.com/short"
     signed_url = "https://cdn.example.com/file?token=secret"
+    public_url = "https://cdn.example.com/result"
+    chains = {
+        "direct": [signed_url],
+        "userinfo": ["https://user:secret@example.com/report"],
+        "final-hop": [short_url, signed_url],
+        "middle-hop": [short_url, signed_url, public_url],
+        "failed-preflight": [short_url, public_url],
+    }
+    chain = chains[scenario]
+    redirects = dict(zip(chain, chain[1:]))
 
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         requested.append(url)
-        if url == short_url:
-            return httpx.Response(302, headers={"location": signed_url})
-        assert url == signed_url
+        if scenario == "failed-preflight" and len(requested) == len(chain):
+            raise httpx.ReadError("preflight interrupted", request=request)
+        if url in redirects:
+            return httpx.Response(302, headers={"location": redirects[url]})
+        assert url == chain[-1]
         return httpx.Response(
             200, headers={"content-type": "text/html"}, text="<html><body>ok</body></html>",
         )
 
     async def unexpected_jina(*args, **kwargs):
-        pytest.fail("Credential-bearing URLs must not be forwarded to Jina")
+        pytest.fail("No HTTP request to Jina is allowed for this chain")
 
-    monkeypatch.setattr(tool, "_fetch_jina", unexpected_jina)
+    monkeypatch.setattr(httpx.AsyncClient, "get", unexpected_jina)
     monkeypatch.setattr(tool, "_extract_readable_html", lambda html, mode: "ok")
     monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
     monkeypatch.setattr("nanobot.security.network.getproxies", lambda: {})
 
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
-        result = await tool.execute(url=short_url if redirected else signed_url)
+        result = await tool.execute(url=chain[0])
 
     data = json.loads(result)
     assert data["extractor"] == "readability"
-    assert requested == ([short_url, signed_url] if redirected else [signed_url]) * 2
+    assert requested == chain * 2

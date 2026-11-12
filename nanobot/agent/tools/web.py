@@ -1205,16 +1205,15 @@ class WebFetchTool(Tool):
             return ToolResult.error(json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False))
 
         # Detect and fetch images directly to avoid Jina's textual image captioning.
-        # This local preflight also proves that no credential-bearing URL occurs
-        # in the redirect chain before the original URL may be sent to Jina.
-        jina_remote_safe = False
+        # Only a completed local preflight supplies a redirect chain to Jina.
+        redirect_chain: tuple[str, ...] = ()
         try:
             async with self._open_page(url, timeout=15.0) as (r, chain):
                 if image_ctype := _image_content_type(r.headers.get("content-type", "")):
                     r.raise_for_status()
                     raw = await r.aread()
                     return build_image_content_blocks(raw, image_ctype, url, f"(Image fetched from: {url})")
-                jina_remote_safe = not any(map(_url_carries_credentials, chain))
+            redirect_chain = chain
         except (UnsafeURLRequestError, RedirectLimitError) as e:
             return _redirect_error(url, e)
         except Exception as e:
@@ -1224,9 +1223,7 @@ class WebFetchTool(Tool):
                 type(e).__name__,
             )
 
-        result = None
-        if self.config.use_jina_reader and jina_remote_safe:
-            result = await self._fetch_jina(url, max_chars)
+        result = await self._fetch_jina(redirect_chain, max_chars) if self.config.use_jina_reader else None
         if result is None:
             result = await self._fetch_readability(url, extract_mode, max_chars)
         return result
@@ -1248,8 +1245,11 @@ class WebFetchTool(Tool):
         ):
             yield page
 
-    async def _fetch_jina(self, url: str, max_chars: int) -> str | None:
-        if _url_carries_credentials(url):
+    async def _fetch_jina(self, redirect_chain: tuple[str, ...], max_chars: int) -> str | None:
+        if not redirect_chain:
+            return None
+        url = redirect_chain[0]
+        if any(map(_url_carries_credentials, redirect_chain)):
             logger.debug(
                 "Skipping Jina Reader for {}: URL carries credential material",
                 _redact_url_for_log(url),
