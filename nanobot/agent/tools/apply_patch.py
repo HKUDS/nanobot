@@ -31,17 +31,6 @@ def _validate_patch_path(path: object) -> str:
     return normalized
 
 
-def _append_text(content: str, addition: str) -> str:
-    base = content.replace("\r\n", "\n")
-    extra = addition.replace("\r\n", "\n")
-    if base and extra and not base.endswith("\n") and not extra.startswith("\n"):
-        base += "\n"
-    combined = base + extra
-    if combined and not combined.endswith("\n"):
-        combined += "\n"
-    return combined
-
-
 @tool_parameters(
     tool_parameters_schema(
         edits=ArraySchema(
@@ -125,70 +114,40 @@ class ApplyPatchTool(_WritableFsTool):
                 if not isinstance(action, str):
                     raise _PatchError(f"action required for edit: {path}")
                 source = self._files.edit_target(path)
+                if action not in ("add", "replace"):
+                    raise _PatchError(f"unknown action: {action}")
+                old_text = edit.get("old_text") or ""
+                if action == "replace" and not old_text:
+                    raise _PatchError(f"old_text required for replace: {path}")
+                new_text = edit.get("new_text")
+                if new_text is None:
+                    raise _PatchError(f"new_text required for {action}: {path}")
+                new_text = cast(str, new_text)
 
-                if action == "add":
-                    new_text = edit.get("new_text")
-                    if new_text is None:
-                        raise _PatchError(f"new_text required for add: {path}")
-                    new_text = cast(str, new_text)
-
-                    pending = writes.get(source)
-                    if pending is not None:
-                        content = pending
-                        exists = True
-                    elif source.exists():
-                        raw = source.read_bytes()
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            raise _PatchError(f"file is not UTF-8 text: {path}")
-                        exists = True
-                    else:
-                        content = ""
-                        exists = False
-
-                    if exists:
-                        uses_crlf = "\r\n" in content
-                        new_norm = _append_text(content, new_text)
-                        if uses_crlf:
-                            new_norm = new_norm.replace("\n", "\r\n")
-                        writes[source] = new_norm
-                        action_name = "update"
-                    else:
-                        new_norm = new_text.replace("\r\n", "\n")
-                        if new_norm and not new_norm.endswith("\n"):
-                            new_norm += "\n"
-                        writes[source] = new_norm
-                        action_name = "add"
-
-                elif action == "replace":
-                    old_text = edit.get("old_text") or ""
-                    if not old_text:
-                        raise _PatchError(f"old_text required for replace: {path}")
-                    old_text = cast(str, old_text)
-                    new_text = edit.get("new_text")
-                    if new_text is None:
-                        raise _PatchError(f"new_text required for replace: {path}")
-                    new_text = cast(str, new_text)
-
-                    pending = writes.get(source)
-                    if pending is not None:
-                        content = pending
-                    elif source.exists():
-                        raw = source.read_bytes()
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            raise _PatchError(f"file is not UTF-8 text: {path}")
-                    else:
+                pending = writes.get(source)
+                content = pending
+                if content is None and source.exists():
+                    try:
+                        content = source.read_bytes().decode("utf-8")
+                    except UnicodeDecodeError:
+                        raise _PatchError(f"file is not UTF-8 text: {path}")
+                created = content is None
+                if content is None:
+                    if action == "replace":
                         raise _PatchError(f"file to update does not exist: {path}")
+                    content = ""
 
-                    if pending is None and not source.is_file():
-                        raise _PatchError(f"path to update is not a file: {path}")
+                if action == "replace" and pending is None and not source.is_file():
+                    raise _PatchError(f"path to update is not a file: {path}")
 
-                    uses_crlf = "\r\n" in content
-                    norm_content = content.replace("\r\n", "\n")
-                    norm_old = old_text.replace("\r\n", "\n")
+                norm_content = content.replace("\r\n", "\n")
+                if action == "add":
+                    norm_new = new_text.replace("\r\n", "\n")
+                    if norm_content and norm_new and not norm_content.endswith("\n") and not norm_new.startswith("\n"):
+                        norm_content += "\n"
+                    updated = norm_content + norm_new
+                else:
+                    norm_old = cast(str, old_text).replace("\r\n", "\n")
 
                     pos = norm_content.find(norm_old)
                     if pos < 0:
@@ -196,24 +155,17 @@ class ApplyPatchTool(_WritableFsTool):
                     if norm_content.find(norm_old, pos + 1) >= 0:
                         raise _PatchError(f"old_text appears multiple times in {path}")
 
-                    new_norm = (
+                    updated = (
                         norm_content[:pos]
                         + new_text.replace("\r\n", "\n")
                         + norm_content[pos + len(norm_old) :]
                     )
-                    if new_norm and not new_norm.endswith("\n"):
-                        new_norm += "\n"
-                    if uses_crlf:
-                        new_norm = new_norm.replace("\n", "\r\n")
 
-                    writes[source] = new_norm
-                    action_name = "update"
-
-                else:
-                    raise _PatchError(f"unknown action: {action}")
-
+                if updated and not updated.endswith("\n"):
+                    updated += "\n"
+                writes[source] = updated.replace("\n", "\r\n") if "\r\n" in content else updated
                 originals.setdefault(source, content)
-                actions.setdefault(source, action_name)
+                actions.setdefault(source, "add" if created else "update")
 
             diffs = {
                 source: FileDiff.from_text(originals[source], content)

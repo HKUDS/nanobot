@@ -210,6 +210,18 @@ def test_unified_diff_payload_truncates_large_diffs() -> None:
     assert len(body_lines) == 5
 
 
+def test_unified_diff_clips_long_content_without_changing_header_counts() -> None:
+    payload = build_unified_diff_payload(
+        "old line\nkeep this\n", "new line\nkeep this\n", max_line_chars=3,
+    )
+    assert payload == {
+        "format": "unified",
+        "context": 3,
+        "truncated": True,
+        "text": "--- before\n+++ after\n@@ -1,2 +1,2 @@\n+new\n-old\n kee",
+    }
+
+
 @pytest.mark.parametrize(("max_lines", "expected_tail", "truncated"), [
     (2, "", True),
     (3, "\n@@ -3,0 +3 @@\n+new last", True),
