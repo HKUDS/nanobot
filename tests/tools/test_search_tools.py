@@ -1081,3 +1081,23 @@ async def test_grep_closes_document_stream_and_preserves_locators(tmp_path, monk
     else:
         assert result.startswith("source.pdf\n")
         assert visited == [2]
+
+
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+@pytest.mark.asyncio
+async def test_grep_searches_bom_marked_unicode_text(tmp_path: Path, encoding: str) -> None:
+    """A byte-order mark declares the encoding read_file already accepts."""
+    target = tmp_path / "unicode.txt"
+    target.write_bytes("Hello 世界\nSecond line\n".encode(encoding))
+
+    result = await GrepTool(workspace=tmp_path, allowed_dir=tmp_path).execute(
+        pattern="^Hello",
+        path="unicode.txt",
+        output_mode="content",
+        context_before=0,
+        context_after=0,
+    )
+
+    assert "Hello 世界" in result
+    assert "\ufeff" not in result
+    assert "binary/unreadable" not in result

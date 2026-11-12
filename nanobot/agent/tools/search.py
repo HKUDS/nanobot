@@ -22,6 +22,7 @@ from nanobot.utils.document import (
     DocumentLineSource,
     LocatedDocumentLine,
     PdfPageRangeError,
+    _decode_bom_text,
     open_document_line_source,
 )
 
@@ -632,12 +633,20 @@ class GrepTool(_SearchTool):
             return open_document_line_source(path, pages=pages)
         with path.open("rb") as file:
             raw = file.read(max_bytes + 1)
-        if _is_binary(raw):
-            return None
+        # Honor a leading byte-order mark before the NUL-byte binary check.
+        # UTF-16 and UTF-32 text contain NULs, and a UTF-8 mark would otherwise
+        # stay on the first line and hide anchored matches.
         try:
-            content = raw.decode("utf-8")
+            content = _decode_bom_text(raw)
         except UnicodeDecodeError:
             return None
+        if content is None:
+            if _is_binary(raw):
+                return None
+            try:
+                content = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return None
         return DocumentLineSource(
             LocatedDocumentLine(text, line_no, "")
             for line_no, text in enumerate(content.splitlines(), 1)
