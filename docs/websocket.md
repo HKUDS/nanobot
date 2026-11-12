@@ -238,11 +238,13 @@ See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
 
 ### Chat-request correlation
 
-WebUI and its gateway are released together. WebUI sends a `request_id` with every `new_chat`, `new_temporary_chat`, and `fork_chat`; the gateway echoes it on `attached` and expected `error` responses. IDs must match `[A-Za-z0-9._:-]{1,128}`; malformed IDs are rejected before creation. The shared WebSocket API also accepts requests without IDs for callers such as the TUI; those responses have no `request_id`.
+WebUI sends a `request_id` with every `new_chat`, `new_temporary_chat`, and `fork_chat`; the gateway echoes it on `attached` and expected `error` responses. IDs must match `[A-Za-z0-9._:-]{1,128}`; malformed IDs are rejected before creation. The shared WebSocket API also accepts requests without IDs for callers such as the TUI; those responses have no `request_id`.
 
 Clients must correlate tagged responses by ID, not by arrival order or the temporary-chat flag. Ordinary `attach` replies cannot complete a creation request. IDs provide correlation, not deduplication: a sent request that times out has an unknown outcome and must not be automatically replayed. Expired unsent requests must be removed before reconnecting.
 
 A timeout ends the client's pending request, allowing a new user-initiated request with a different ID. A late response cannot complete that newer request. Late temporary-chat creations are discarded rather than selected.
+
+Support and testing cover same-version WebUI/gateway combinations. Cross-version combinations may work, but a passing protocol check does not guarantee all features work; align versions first when troubleshooting. See [Versions and updating the right machine](guides/remote-instances.md#versions-and-updating-the-right-machine).
 
 ### Binary attachments (WebUI and TUI)
 
