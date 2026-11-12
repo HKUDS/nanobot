@@ -9,7 +9,7 @@ import html
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
@@ -781,17 +781,24 @@ class WebSearchTool(Tool):
 
             timeout = f"{max(1, int(self.config.timeout))}s"
 
-            mst_search = cast(Callable[..., dict[str, Any]], mst_lib.search)
-            # The native binding performs blocking network I/O; keep the event loop free.
-            result: dict[str, Any] = await asyncio.to_thread(
-                mst_search,
-                query=query,
-                engines=list(engines) if isinstance(engines, list) else engines,
-                limit=n,
-                rrf_k=60,
-                timeout=timeout,
-                weights=weights,
-            )
+            search_kwargs: dict[str, Any] = {
+                "query": query,
+                "engines": list(engines) if isinstance(engines, list) else engines,
+                "limit": n,
+                "rrf_k": 60,
+                "timeout": timeout,
+                "weights": weights,
+            }
+            search_async = getattr(mst_lib, "search_async", None)
+            if callable(search_async):
+                result: dict[str, Any] = await cast(
+                    Callable[..., Awaitable[dict[str, Any]]], search_async,
+                )(**search_kwargs)
+            else:
+                # mst-python < 0.5 exposes only the blocking native call.
+                result = await asyncio.to_thread(
+                    cast(Callable[..., dict[str, Any]], mst_lib.search), **search_kwargs,
+                )
 
             # Format mst results into shared output
             items: list[dict[str, Any]] = [

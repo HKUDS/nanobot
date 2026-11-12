@@ -979,7 +979,59 @@ async def test_web_search_mst_no_results_is_not_an_error(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_search_mst_passes_config_and_runs_off_event_loop(monkeypatch) -> None:
+async def test_web_search_mst_prefers_search_async(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def blocking_search(**_kwargs: object) -> dict[str, object]:
+        raise AssertionError("blocking search must not run when search_async exists")
+
+    async def fake_search_async(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"results": [{"title": "A", "url": "https://example.com/a", "snippet": "B"}]}
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mst",
+        SimpleNamespace(
+            search=blocking_search, search_async=fake_search_async, MSTError=_FakeMSTError,
+        ),
+    )
+    tool = WebSearchTool(config=WebSearchConfig(
+        provider="mst", mst_engines=["ddg"], mst_weights={"ddg": 2.0}, timeout=12,
+    ))
+
+    result = await tool.execute("q", count=4)
+
+    assert captured["query"] == "q"
+    assert captured["engines"] == ["ddg"]
+    assert captured["weights"] == {"ddg": 2.0}
+    assert captured["timeout"] == "12s"
+    assert captured["limit"] == 4
+    assert "https://example.com/a" in result
+
+
+@pytest.mark.asyncio
+async def test_web_search_mst_async_no_results_is_not_an_error(monkeypatch) -> None:
+    def unused_search(**_kwargs: object) -> dict[str, object]:
+        return {}
+
+    async def fake_search_async(**_kwargs: object) -> dict[str, object]:
+        raise _FakeMSTError("no_results")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "mst",
+        SimpleNamespace(
+            search=unused_search, search_async=fake_search_async, MSTError=_FakeMSTError,
+        ),
+    )
+    tool = WebSearchTool(config=WebSearchConfig(provider="mst"))
+
+    assert await tool.execute("nothing here") == "No results for: nothing here"
+
+
+@pytest.mark.asyncio
+async def test_web_search_mst_legacy_search_stays_off_event_loop(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def fake_search(**kwargs: object) -> dict[str, object]:
