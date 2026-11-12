@@ -5,7 +5,9 @@ import base64
 import binascii
 import re
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 
@@ -175,26 +177,16 @@ async def _download_image_data_url(
                         f"failed to download generated image (HTTP {response.status_code})"
                     ) from exc
 
-                declared_size = response.headers.get("content-length")
-                if declared_size:
-                    try:
-                        if int(declared_size) > _IMAGE_DOWNLOAD_MAX_BYTES:
-                            raise ImageGenerationError(
-                                "generated image exceeded the 32 MiB download limit"
-                            )
-                    except ValueError:
-                        pass
-
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in response.aiter_bytes():
-                    total += len(chunk)
-                    if total > _IMAGE_DOWNLOAD_MAX_BYTES:
-                        raise ImageGenerationError(
-                            "generated image exceeded the 32 MiB download limit"
-                        )
-                    chunks.append(chunk)
-                raw = b"".join(chunks)
+                limit_error = "generated image exceeded the 32 MiB download limit"
+                with suppress(ValueError):
+                    if int(response.headers.get("content-length", "0")) > _IMAGE_DOWNLOAD_MAX_BYTES:
+                        raise ImageGenerationError(limit_error)
+                with BytesIO() as body:
+                    async for chunk in response.aiter_bytes():
+                        if body.tell() + len(chunk) > _IMAGE_DOWNLOAD_MAX_BYTES:
+                            raise ImageGenerationError(limit_error)
+                        body.write(chunk)
+                    raw = body.getvalue()
     except RedirectLimitError as exc:
         raise ImageGenerationError("generated image URL exceeded the redirect limit") from exc
     except UnsafeURLRequestError as exc:

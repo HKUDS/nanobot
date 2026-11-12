@@ -37,7 +37,7 @@ async def open_redirected_get(
             if not ok:
                 raise UnsafeURLRequestError(error)
         async with client.stream("GET", target, follow_redirects=False) as response:
-            location = response.headers.get("location") if 300 <= response.status_code < 400 else None
+            location = response.headers.get("location") if response.is_redirect else None
             if not location:
                 yield response, tuple(chain)
                 return
