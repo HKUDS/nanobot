@@ -149,7 +149,7 @@ When nanobot delegates work to subagents, **Subtasks** appears above the message
 
 Finished tasks leave the live list when it is closed. If you are already reading the list, they remain until you close it. When all tasks finish with the list closed, a brief completion or failure summary appears and then disappears; focusing or hovering over it keeps it available.
 
-Saved results appear as compact, expandable records beside the requests that started the work, and scroll with the conversation. Tasks without a matching request in the displayed history remain under **Other tasks**. Refreshing or reopening the WebUI restores active work in the fixed entry and finished work in the conversation, without restarting tasks or bringing all old tasks back into the live list.
+Saved results appear as compact, expandable records beside their associated requests, and scroll with the conversation. Results for earlier requests appear when their turns are loaded; tasks without a matching request in the displayed history are not shown there. Refreshing or reopening the WebUI restores active work in the fixed entry and finished work in the conversation, without restarting tasks or bringing all old tasks back into the live list. The WebUI retrieves finished tasks only for the loaded turns.
 
 Select a task for its read-only conversation and tool activity. Closing the details leaves it running; its stop button cancels only that task. Give follow-up instructions to nanobot in the main conversation.
 

@@ -730,7 +730,7 @@ async def test_terminal_drain_timeout(tmp_path):
         awaitable.close()
         raise asyncio.TimeoutError
 
-    with patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_timeout):
+    with patch("nanobot.agent.pending_inputs.asyncio.wait_for", side_effect=_timeout):
         results = await terminal_injection_callback()
         assert results == []
 
@@ -800,10 +800,10 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
     loop.tools.get_runtime_context_providers = MagicMock(return_value=[])
     fake_loop = MagicMock(wraps=asyncio.get_running_loop())
     fake_loop.time = clock
-    loop_asyncio = SimpleNamespace(**vars(asyncio))
-    loop_asyncio.get_running_loop = lambda: fake_loop
-    loop_asyncio.wait_for = _deliver
-    with patch("nanobot.agent.loop.asyncio", loop_asyncio):
+    pending_asyncio = SimpleNamespace(**vars(asyncio))
+    pending_asyncio.get_running_loop = lambda: fake_loop
+    pending_asyncio.wait_for = _deliver
+    with patch("nanobot.agent.pending_inputs.asyncio", pending_asyncio):
         assert await terminal_injection_callback()
         assert await terminal_injection_callback()
 

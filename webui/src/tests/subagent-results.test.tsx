@@ -1,4 +1,5 @@
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,17 +8,22 @@ import { SubagentThreadMessages } from "@/components/thread/SubagentTaskResults"
 import { SubagentTasksProvider } from "@/components/thread/SubagentTasks";
 import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
-import type { InboundEvent, SubagentTaskSnapshot, UIMessage } from "@/lib/types";
+import type { ConnectionStatus, InboundEvent, SubagentTaskSnapshot, UIMessage } from "@/lib/types";
 
 const requestMutation = vi.fn();
 const chatHandlers = new Set<(event: InboundEvent) => void>();
+const statusHandlers = new Set<(status: ConnectionStatus) => void>();
 const client = {
   requestMutation,
   onChat: vi.fn((_chatId: string, handler: (event: InboundEvent) => void) => {
     chatHandlers.add(handler);
     return () => { chatHandlers.delete(handler); };
   }),
-  onStatus: vi.fn(() => () => {}),
+  onStatus: vi.fn((handler: (status: ConnectionStatus) => void) => {
+    statusHandlers.add(handler);
+    handler("open");
+    return () => { statusHandlers.delete(handler); };
+  }),
 };
 const messages: UIMessage[] = [
   { id: "prompt-a", role: "user", content: "Inspect config", turnId: "turn-a", createdAt: 100_000 },
@@ -47,14 +53,17 @@ function emitTask(snapshot: SubagentTaskSnapshot) {
     chatHandlers.forEach((handler) => handler({ event: "subagent_task", chat_id: "a", task: snapshot }));
   });
 }
-function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEvents = true, historyEnabled = false, onActivityToggle }: {
+function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEvents = true, historyEnabled = false, active = true, onActivityToggle }: {
   threadMessages?: UIMessage[];
   sessionKey?: string;
   liveEvents?: boolean;
   historyEnabled?: boolean;
+  active?: boolean;
   onActivityToggle?: () => void;
 } = {}) {
-  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled}>
+  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled} active={active}
+    turnIds={[...new Set(threadMessages.filter((message) => message.role === "user" && message.turnId)
+      .map((message) => message.turnId as string))]}>
     <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} onActivityToggle={onActivityToggle} /></div>
     <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock /><textarea aria-label="Message" /></div>
   </SubagentTasksProvider>;
@@ -74,6 +83,7 @@ describe("subagent result archives", () => {
     client.onChat.mockClear();
     client.onStatus.mockClear();
     chatHandlers.clear();
+    statusHandlers.clear();
     vi.stubGlobal("fetch", vi.fn(async () => response([task()])));
   });
   afterEach(() => {
@@ -229,6 +239,172 @@ describe("subagent result archives", () => {
     expect(within(archives[0]).getByRole("button", { name: "Turn fallback Completed 4s" })).toBeVisible();
     expect(within(archives[1]).getByRole("button", { name: "Exact check Completed 4s" })).toBeVisible();
     expect(screen.getByTestId("messages").querySelectorAll("[data-subagent-id]")).toHaveLength(2);
+  });
+
+  it.each([
+    { name: "loaded", threadMessages: [messages[0]], turnIds: ["turn-a"] },
+    { name: "empty", threadMessages: [], turnIds: [] },
+  ])("reads the $name history window while keeping active tasks available", async ({ threadMessages, turnIds }) => {
+    const old: UIMessage = { id: "old", role: "user", content: "Earlier prompt", turnId: "old", createdAt: 99_000 };
+    const seen: URL[] = [];
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      seen.push(url);
+      return response([
+        task({ task_id: "live", label: "Live", state: "running", completed_at: null, origin_message_id: "elsewhere", origin_turn_id: "elsewhere" }),
+        ...(url.searchParams.getAll("turn_id").includes("old")
+          ? [task({ task_id: "old", label: "Earlier check", origin_message_id: "old", origin_turn_id: "old" })] : []),
+      ]);
+    });
+    const user = userEvent.setup();
+    const view = render(layout({ threadMessages }));
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
+    expect(seen[0].searchParams.get("scope")).toBe("window");
+    expect(seen[0].searchParams.getAll("turn_id")).toEqual(turnIds);
+    view.rerender(layout({ threadMessages: [old, messages[0]] }));
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    await user.click(summary(archive));
+    expect(within(archive).getByRole("button", { name: /Earlier check/ })).toBeVisible();
+    expect(seen.some((url) => url.searchParams.getAll("turn_id").includes("old"))).toBe(true);
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+  });
+
+  it("coalesces window changes and refreshes while reads are in flight, retaining the newest task revision", async () => {
+    const first = messages[0];
+    const second: UIMessage = { id: "second", role: "user", content: "Second prompt", turnId: "turn-second", createdAt: 1 };
+    const seen: URL[] = [];
+    let resolveFirst!: (response: Response) => void;
+    let resolveSecond!: (response: Response) => void;
+    const running = task({ state: "running", completed_at: null, origin_message_id: "elsewhere", origin_turn_id: "elsewhere" });
+    vi.mocked(fetch).mockImplementation((input) => {
+      seen.push(new URL(String(input), "http://localhost"));
+      if (seen.length === 1) return new Promise<Response>((resolve) => { resolveFirst = resolve; });
+      if (seen.length === 2) return new Promise<Response>((resolve) => { resolveSecond = resolve; });
+      return Promise.resolve(response([task({ revision: 3, label: "Live revision 3", origin_message_id: "elsewhere", origin_turn_id: "elsewhere" })]));
+    });
+    const tree = (threadMessages: UIMessage[], active = true) => <StrictMode>{layout({ threadMessages, active })}</StrictMode>;
+    const view = render(tree([first]));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    view.rerender(tree([second]));
+    fireEvent(window, new Event("focus"));
+    expect(seen).toHaveLength(1);
+    emitTask({ ...running, revision: 2, label: "Live revision 2" });
+    await act(async () => resolveFirst(response([running])));
+    await waitFor(() => expect(seen).toHaveLength(2));
+    expect(seen[1].searchParams.getAll("turn_id")).toEqual(["turn-second"]);
+    expect(seen[1].searchParams.getAll("track")).toEqual(["task-1"]);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("subagent-task-dock-trigger"));
+    expect(screen.getByRole("button", { name: /Live revision 2 Running/ })).toBeVisible();
+    view.rerender(tree([first]));
+    await act(async () => resolveSecond(response([running])));
+    // Focus invalidated the first page while its original read was in flight;
+    // revisiting it must not treat that old response as fresh.
+    await waitFor(() => expect(seen).toHaveLength(3));
+    expect(seen[2].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
+    expect(seen[2].searchParams.getAll("track")).toEqual(["task-1"]);
+    expect(await screen.findByRole("button", { name: /Live revision 3 Completed/ })).toBeVisible();
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    await waitFor(() => expect(seen).toHaveLength(4));
+    expect(seen[3].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
+    expect(seen[3].searchParams.getAll("track")).toEqual([]);
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(seen).toHaveLength(5));
+    expect(seen[4].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
+    view.rerender(tree([first], false));
+    view.rerender(tree([first]));
+    await waitFor(() => expect(seen).toHaveLength(6));
+    expect(seen[5].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
+  });
+
+  it("retries a failed history page when revisited without rereading a cached page", async () => {
+    const first = messages[0];
+    const second: UIMessage = { id: "second", role: "user", content: "Second prompt", turnId: "turn-second", createdAt: 1 };
+    const seen: URL[] = [];
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      seen.push(url);
+      if (seen.length === 2) return new Response("unavailable", { status: 503 });
+      return response(url.searchParams.getAll("turn_id").includes("turn-second")
+        ? [task({ origin_message_id: "second", origin_turn_id: "turn-second", label: "Recovered result" })] : []);
+    });
+    const view = render(layout({ threadMessages: [first] }));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    view.rerender(layout({ threadMessages: [second] }));
+    await waitFor(() => expect(seen).toHaveLength(2));
+    view.rerender(layout({ threadMessages: [first] }));
+    await act(async () => { await Promise.resolve(); });
+    expect(seen).toHaveLength(2);
+    view.rerender(layout({ threadMessages: [second] }));
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    await userEvent.setup().click(summary(archive));
+    expect(within(archive).getByRole("button", { name: /Recovered result/ })).toBeVisible();
+    expect(seen).toHaveLength(3);
+    expect(seen[2].searchParams.getAll("turn_id")).toEqual(["turn-second"]);
+  });
+
+  it("revalidates a cached off-window page after reconnect misses a completed task", async () => {
+    const first = messages[0];
+    const second: UIMessage = { id: "second", role: "user", content: "Second prompt", turnId: "turn-second", createdAt: 1 };
+    const seen: URL[] = [];
+    let completedWhileOffline = false;
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      seen.push(url);
+      return response(completedWhileOffline && url.searchParams.getAll("turn_id").includes("turn-a")
+        ? [task({ origin_message_id: "prompt-a", label: "Completed while offline" })] : []);
+    });
+    const view = render(layout({ threadMessages: [first] }));
+    await waitFor(() => expect(seen).toHaveLength(1));
+    view.rerender(layout({ threadMessages: [second] }));
+    await waitFor(() => expect(seen).toHaveLength(2));
+    completedWhileOffline = true;
+    act(() => statusHandlers.forEach((handler) => handler("open")));
+    await waitFor(() => expect(seen).toHaveLength(3));
+    expect(seen[2].searchParams.getAll("turn_id")).toEqual(["turn-second"]);
+    view.rerender(layout({ threadMessages: [first] }));
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    await userEvent.setup().click(summary(archive));
+    expect(within(archive).getByRole("button", { name: /Completed while offline/ })).toBeVisible();
+    expect(seen[3].searchParams.getAll("turn_id")).toEqual(["turn-a"]);
+  });
+
+  it("does not let an old session's delayed scoped read contaminate the new session", async () => {
+    let resolveOld!: (response: Response) => void;
+    const seen: URL[] = [];
+    vi.mocked(fetch).mockImplementation((input) => {
+      const url = new URL(String(input), "http://localhost");
+      seen.push(url);
+      if (url.pathname.includes("websocket%3Aa")) return new Promise<Response>((resolve) => { resolveOld = resolve; });
+      return Promise.resolve(response([task({ task_id: "new", label: "New session", state: "running", completed_at: null })]));
+    });
+    const view = render(layout());
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
+    view.rerender(layout({ sessionKey: "websocket:b" }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("subagent-task-dock-trigger"));
+    expect(await screen.findByRole("button", { name: /New session Running/ })).toBeVisible();
+    await act(async () => resolveOld(response([task({ label: "Old session", state: "running", completed_at: null })])));
+    expect(screen.queryByRole("button", { name: /Old session/ })).not.toBeInTheDocument();
+    expect(seen).toHaveLength(2);
+  });
+
+  it("reconciles a previously active off-window task after focus", async () => {
+    const seen: URL[] = [];
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      seen.push(url);
+      return response(url.searchParams.getAll("track").includes("task-1")
+        ? [task({ revision: 2, origin_message_id: "other", origin_turn_id: "other" })]
+        : [task({ state: "running", completed_at: null, origin_message_id: "other", origin_turn_id: "other" })]);
+    });
+    render(layout({ threadMessages: [messages[0]] }));
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    act(() => { window.dispatchEvent(new Event("focus")); });
+    await waitFor(() => expect(seen.some((url) => url.searchParams.getAll("track").includes("task-1"))).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Completed: 1"));
+    expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
   });
 
   it("shows older results only with their loaded prompt and preserves details through history navigation", async () => {
