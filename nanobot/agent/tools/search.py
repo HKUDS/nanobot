@@ -12,7 +12,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
-from itertools import islice
+from itertools import count, islice
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, TypeVar
 
@@ -348,21 +348,6 @@ class FindFilesTool(_SearchTool):
             # to propagate from the explicit checkpoints above.
             pass
 
-    def _push_directory_entries(
-        self,
-        tree: FileSearch,
-        directory: Path,
-        root: Path,
-        frontier: list[tuple[str, int, _FindFilesEntry]],
-        sequence: int,
-        budget: _SearchBudget,
-    ) -> int:
-        for entry in self._directory_entries(tree, directory, root, budget):
-            sort_path = entry.display_path + ("/" if entry.is_dir else "")
-            heapq.heappush(frontier, (sort_path, sequence, entry))
-            sequence += 1
-        return sequence
-
     def _iter_paths(
         self,
         tree: FileSearch,
@@ -380,22 +365,23 @@ class FindFilesTool(_SearchTool):
         if include_dirs:
             yield self._entry(root, root, is_dir=True)
 
-        frontier: list[tuple[str, int, _FindFilesEntry]] = []
-        sequence = self._push_directory_entries(tree, root, root, frontier, 0, budget)
+        sequence = count()
+
+        def queue(directory: Path) -> Iterator[tuple[str, int, _FindFilesEntry]]:
+            for entry in self._directory_entries(tree, directory, root, budget):
+                sort_path = entry.display_path + ("/" if entry.is_dir else "")
+                yield sort_path, next(sequence), entry
+
+        frontier = list(queue(root))
+        heapq.heapify(frontier)
         while frontier:
             budget.checkpoint()
             _, _, entry = heapq.heappop(frontier)
             if entry.is_dir:
                 if include_dirs:
                     yield entry
-                sequence = self._push_directory_entries(
-                    tree,
-                    entry.path,
-                    root,
-                    frontier,
-                    sequence,
-                    budget,
-                )
+                for item in queue(entry.path):
+                    heapq.heappush(frontier, item)
             else:
                 yield entry
 
