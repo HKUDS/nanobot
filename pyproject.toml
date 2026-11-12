@@ -95,7 +95,7 @@ pdf = [
     "pypdf>=6.21.3,<7.0.0",
 ]
 mst = [
-    "mst-python>=0.5.0",
+    "mst-python>=0.6.0",
 ]
 olostep = [
     "olostep>=0.1.0; python_version < '3.14'",

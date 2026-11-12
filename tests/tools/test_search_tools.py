@@ -963,22 +963,47 @@ async def test_web_search_mst_custom_timeout(monkeypatch) -> None:
     await tool.execute("test query")
 
     assert captured["timeout"] == "15s"
+    assert "proxy" not in captured
 
 
 @pytest.mark.asyncio
-async def test_web_search_mst_rejects_shared_proxy(monkeypatch) -> None:
-    def unexpected_search(**_kwargs: object) -> dict[str, object]:
-        raise AssertionError("mst must not run when the shared proxy is enabled")
+async def test_web_search_mst_forwards_shared_proxy(monkeypatch) -> None:
+    captured: dict[str, object] = {}
 
-    monkeypatch.setitem(sys.modules, "mst", _mst_module(search=unexpected_search))
+    async def fake_search_async(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {"results": []}
+
+    monkeypatch.setitem(sys.modules, "mst", _mst_module(search_async=fake_search_async))
+    proxy = "socks5h://user:pass@127.0.0.1:1080"
+    tool = WebSearchTool(config=WebSearchConfig(provider="mst"), proxy=proxy)
+
+    assert await tool.execute("test query") == "No results for: test query"
+    assert captured["proxy"] == proxy
+
+
+@pytest.mark.asyncio
+async def test_web_search_mst_proxy_requires_supported_binding(monkeypatch) -> None:
+    def legacy_search(
+        query: str,
+        engines: object = None,
+        limit: int = 10,
+        offset: int = 0,
+        rrf_k: int = 60,
+        timeout: str = "8s",
+        weights: object = None,
+    ) -> dict[str, object]:
+        raise AssertionError("mst without proxy support must not run when a proxy is configured")
+
+    monkeypatch.setitem(sys.modules, "mst", _mst_module(search=legacy_search))
     tool = WebSearchTool(
         config=WebSearchConfig(provider="mst"),
-        proxy="http://127.0.0.1:9",
+        proxy="http://127.0.0.1:8080",
     )
 
     result = await tool.execute("test query")
 
-    assert "shared proxy" in result
+    assert "0.6.0" in result
 
 
 @pytest.mark.asyncio
@@ -1083,6 +1108,7 @@ async def test_web_search_mst_prefers_search_async(monkeypatch) -> None:
     assert captured["weights"] == {"ddg": 2.0}
     assert captured["timeout"] == "12s"
     assert captured["limit"] == 4
+    assert "proxy" not in captured
     assert "https://example.com/a" in result
 
 
@@ -1129,6 +1155,7 @@ async def test_web_search_mst_legacy_search_stays_off_event_loop(monkeypatch) ->
     assert captured["weights"] == {"ddg": 2.0}
     assert captured["timeout"] == "15s"
     assert captured["limit"] == 3
+    assert "proxy" not in captured
     assert captured["thread"] != threading.get_ident()
     assert "https://example.com" in result
 

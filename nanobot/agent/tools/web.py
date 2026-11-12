@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import inspect
 import json
 import os
 import re
@@ -305,6 +306,18 @@ _MST_STATUS_LABELS = {
     "missing-key": "missing API key",
     "disabled": "disabled",
 }
+
+
+def _mst_accepts_proxy(search: Callable[..., object]) -> bool:
+    """Whether the installed mst callable accepts the v0.6 ``proxy`` argument."""
+    try:
+        parameters = inspect.signature(search).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == "proxy" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
 
 
 def _mst_no_results_diagnostic(mst_lib: object, engines: list[str] | None) -> str | None:
@@ -763,11 +776,6 @@ class WebSearchTool(Tool):
         ``MST_ENGINES`` env var (comma-separated). Override weights via
         ``mst_weights`` or ``MST_WEIGHTS`` env var (JSON object).
         """
-        if self.proxy:
-            return ToolResult.error(
-                "Error: mst does not support the shared proxy. "
-                "Disable 'Use proxy' for Web access or choose another search provider."
-            )
         try:
             import mst as mst_lib  # pyright: ignore[reportMissingImports, reportMissingTypeStubs]
             from mst import (
@@ -829,6 +837,17 @@ class WebSearchTool(Tool):
                 "weights": weights,
             }
             search_async = getattr(mst_lib, "search_async", None)
+            search_callable = cast(
+                Callable[..., object],
+                search_async if callable(search_async) else mst_lib.search,
+            )
+            if self.proxy:
+                if not _mst_accepts_proxy(search_callable):
+                    return ToolResult.error(
+                        "Error: mst-python 0.6.0 or newer is required for proxy support. "
+                        "Run `nanobot plugins enable mst` to upgrade."
+                    )
+                search_kwargs["proxy"] = self.proxy
             if callable(search_async):
                 result: dict[str, Any] = await cast(
                     Callable[..., Awaitable[dict[str, Any]]], search_async,
