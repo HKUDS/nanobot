@@ -141,6 +141,24 @@ def test_apply_patch_edits_add_to_existing_crlf_file_without_final_newline(tmp_p
     assert target.read_bytes() == b"alpha\r\nbravo\r\ncharlie\r\n"
 
 
+@pytest.mark.parametrize("existing", [False, True], ids=["new-file", "existing-crlf"])
+def test_apply_patch_replaces_text_from_an_earlier_edit_in_the_batch(tmp_path, existing):
+    target = tmp_path / "notes.txt"
+    if existing:
+        target.write_bytes(b"alpha\r\nbravo")
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(tool.execute(edits=[
+        {"path": "notes.txt", "action": "add", "new_text": "charlie"},
+        {"path": "./notes.txt", "action": "replace", "old_text": "charlie", "new_text": "delta"},
+    ]))
+
+    assert result.startswith("Patch applied:\n")
+    assert result.count("notes.txt") == 1
+    assert f"{'update' if existing else 'add'} notes.txt" in result
+    assert target.read_bytes() == (b"alpha\r\nbravo\r\ndelta\r\n" if existing else b"delta\n")
+
+
 def test_apply_patch_rejects_delete_action(tmp_path):
     target = tmp_path / "utils.py"
     target.write_text("def unused():\n    pass\ndef used():\n    return 1\n")

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from itertools import groupby, islice
+from itertools import islice
 from pathlib import Path
 from typing import Any, Protocol, cast, runtime_checkable
 
@@ -100,34 +99,58 @@ class FileDiff:
         if any(code.tag != "equal" for code in group):
             yield group
 
-    def unified_lines(self, fromfile: str, tofile: str, context: int) -> Iterator[str]:
-        if not self.added and not self.deleted:
-            return
-        yield f"--- {fromfile}"
-        yield f"+++ {tofile}"
-        for group in self._groups(context):
+    def _hunk_lines(self, group: list[Opcode]) -> Iterator[str]:
+        for code in group:
+            if code.tag != "insert":
+                marker = " " if code.tag == "equal" else "-"
+                yield from (
+                    marker + self.before_lines[index]
+                    for index in range(code.src_start, code.src_end)
+                )
+            if code.tag in ("replace", "insert"):
+                yield from (
+                    "+" + self.after_lines[index]
+                    for index in range(code.dest_start, code.dest_end)
+                )
+
+
+    def unified_payload(
+        self, fromfile: str, tofile: str, *, context_lines: int, max_lines: int, max_line_chars: int,
+    ) -> dict[str, Any] | None:
+        remaining = max(0, int(max_lines))
+        line_width = max(0, int(max_line_chars))
+        lines = [f"--- {fromfile}", f"+++ {tofile}"]
+        truncated = False
+        for group in self._groups(max(0, int(context_lines))):
+            if not remaining:
+                truncated = True
+                break
+            body = list(islice(self._hunk_lines(group), remaining + 1))
+            if len(body) > remaining:
+                body.pop()
+                truncated = True
             first, last = group[0], group[-1]
-            old_count = last.src_end - first.src_start
-            new_count = last.dest_end - first.dest_start
-            old_range = _format_hunk_range(first.src_start + bool(old_count), old_count)
-            new_range = _format_hunk_range(first.dest_start + bool(new_count), new_count)
-            yield f"@@ -{old_range} +{new_range} @@"
-            for code in group:
-                if code.tag == "equal":
-                    yield from (
-                        " " + self.before_lines[index]
-                        for index in range(code.src_start, code.src_end)
-                    )
-                if code.tag in ("replace", "delete"):
-                    yield from (
-                        "-" + self.before_lines[index]
-                        for index in range(code.src_start, code.src_end)
-                    )
-                if code.tag in ("replace", "insert"):
-                    yield from (
-                        "+" + self.after_lines[index]
-                        for index in range(code.dest_start, code.dest_end)
-                    )
+            # Clipping changes the displayed line counts, not the original hunk starts.
+            old_start = first.src_start + (last.src_end > first.src_start)
+            new_start = first.dest_start + (last.dest_end > first.dest_start)
+            old_range = _format_hunk_range(old_start, sum(line[0] != "+" for line in body))
+            new_range = _format_hunk_range(new_start, sum(line[0] != "-" for line in body))
+            lines.append(f"@@ -{old_range} +{new_range} @@")
+            for line in body:
+                if line_width and len(line) > line_width + 1:
+                    line = line[:line_width + 1]  # The diff marker is not part of the content.
+                    truncated = True
+                lines.append(line)
+            remaining -= len(body)
+
+        if len(lines) == 2:
+            return None
+        return {
+            "format": "unified",
+            "context": context_lines,
+            "truncated": truncated,
+            "text": "\n".join(lines),
+        }
 
 
 class FileEditResult(str):
@@ -154,8 +177,6 @@ def display_file_edit_path(path: Path, workspace: Path | None) -> str:
     return path.as_posix()
 
 
-
-
 def build_unified_diff_payload(
     before: str | None,
     after: str | None,
@@ -172,122 +193,9 @@ def build_unified_diff_payload(
         return None
     if diff is None:
         diff = FileDiff.from_text(before, after)
-    limited_lines, truncated, emitted_body_lines = _limit_unified_diff_lines(
-        diff.unified_lines(fromfile, tofile, max(0, int(context_lines))),
-        max_lines=max_lines,
+    return diff.unified_payload(
+        fromfile, tofile, context_lines=context_lines, max_lines=max_lines,
         max_line_chars=max_line_chars,
-    )
-    if emitted_body_lines == 0:
-        return None
-    return {
-        "format": "unified",
-        "context": context_lines,
-        "truncated": truncated,
-        "text": "\n".join(limited_lines),
-    }
-
-
-def _limit_unified_diff_lines(
-    diff_lines: Iterable[str],
-    *,
-    max_lines: int,
-    max_line_chars: int,
-) -> tuple[list[str], bool, int]:
-    body_limit = max(0, int(max_lines))
-    line_char_limit = max(0, int(max_line_chars))
-    limited: list[str] = []
-    emitted_body_lines = 0
-    truncated = False
-    line_groups = groupby(diff_lines, key=lambda line: line.startswith("@@ "))
-
-    for is_hunk_header, lines in line_groups:
-        if not is_hunk_header:
-            limited.extend(lines)
-            continue
-
-        hunk_header = next(lines)
-        remaining = body_limit - emitted_body_lines
-        if remaining <= 0:
-            truncated = True
-            break
-
-        _, hunk_lines = next(line_groups)
-        hunk_body = list(islice(hunk_lines, remaining + 1))
-        selected_body = hunk_body[:remaining]
-        if len(selected_body) < len(hunk_body):
-            truncated = True
-
-        selected_body, truncated_line = _limit_unified_diff_line_chars(
-            selected_body,
-            max_line_chars=line_char_limit,
-        )
-        truncated = truncated or truncated_line
-        limited.append(
-            hunk_header
-            if len(selected_body) == len(hunk_body)
-            else _rewrite_hunk_header_for_body(hunk_header, selected_body)
-        )
-        limited.extend(selected_body)
-        emitted_body_lines += len(selected_body)
-
-        if truncated and emitted_body_lines >= body_limit:
-            break
-
-    return limited, truncated, emitted_body_lines
-
-
-def _limit_unified_diff_line_chars(
-    lines: list[str],
-    *,
-    max_line_chars: int,
-) -> tuple[list[str], bool]:
-    if max_line_chars <= 0:
-        return lines, False
-
-    limited: list[str] = []
-    truncated = False
-    for line in lines:
-        if not line or line[0] not in (" ", "+", "-"):
-            limited.append(line)
-            continue
-        marker = line[0]
-        content = line[1:]
-        if len(content) > max_line_chars:
-            limited.append(f"{marker}{content[:max_line_chars]}")
-            truncated = True
-        else:
-            limited.append(line)
-    return limited, truncated
-
-
-_HUNK_HEADER_RE = re.compile(
-    r"^@@ -(?P<old_start>\d+)(?:,(?P<old_lines>\d+))? "
-    r"\+(?P<new_start>\d+)(?:,(?P<new_lines>\d+))? @@(?P<section>.*)$"
-)
-
-
-def _rewrite_hunk_header_for_body(header: str, body: list[str]) -> str:
-    match = _HUNK_HEADER_RE.match(header)
-    if match is None:
-        return header
-
-    old_lines = 0
-    new_lines = 0
-    for line in body:
-        if not line:
-            continue
-        marker = line[0]
-        if marker in (" ", "-"):
-            old_lines += 1
-        if marker in (" ", "+"):
-            new_lines += 1
-
-    old_start = int(match.group("old_start"))
-    new_start = int(match.group("new_start"))
-    section = match.group("section")
-    return (
-        f"@@ -{_format_hunk_range(old_start, old_lines)} "
-        f"+{_format_hunk_range(new_start, new_lines)} @@{section}"
     )
 
 
