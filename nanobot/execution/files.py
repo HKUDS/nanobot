@@ -474,13 +474,21 @@ class WorkspaceFiles:
 
     def edit_target(self, path: str) -> WritableFile:
         workspace, root = self._roots()
-        return WritableFile(resolve_allowed_path(
+        target = resolve_allowed_path(
             path,
             workspace=workspace,
             allowed_root=root,
             extra_allowed_roots=self._write_dirs if root is not None else (),
             extra_allowed_files=self._write_files,
-        ))
+        )
+        try:
+            mode = target.stat().st_mode
+        except FileNotFoundError:
+            pass  # Write operations can create regular files.
+        else:
+            if not stat.S_ISREG(mode):
+                raise NotRegularFileError(f"Not a regular file: {path}")
+        return WritableFile(target)
 
     def read_file(self, path: str) -> ReadableFile:
         _reject_device(path)

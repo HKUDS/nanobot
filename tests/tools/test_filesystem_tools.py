@@ -1,5 +1,9 @@
+import os
+from pathlib import Path
+
 import pytest
 
+from nanobot.agent.tools.apply_patch import ApplyPatchTool
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.filesystem import (
     EditFileTool,
@@ -7,6 +11,32 @@ from nanobot.agent.tools.filesystem import (
     ReadFileTool,
     WriteFileTool,
 )
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires a POSIX named pipe")
+@pytest.mark.parametrize("operation", ["write", "patch"])
+async def test_file_mutation_rejects_named_pipe_without_opening_it(tmp_path, monkeypatch, operation):
+    pipe = (tmp_path / "pipe").resolve()
+    os.mkfifo(pipe)
+    open_file = Path.open
+
+    def reject_blocking_open(path, *args, **kwargs):
+        if path == pipe:
+            raise AssertionError("Opening a named pipe can block the agent")
+        return open_file(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", reject_blocking_open)
+    if operation == "write":
+        result = await WriteFileTool(workspace=tmp_path, allowed_dir=tmp_path).execute(
+            path="pipe", content="hello",
+        )
+    else:
+        result = await ApplyPatchTool(workspace=tmp_path, allowed_dir=tmp_path).execute(
+            edits=[{"path": "pipe", "action": "add", "new_text": "hello"}],
+        )
+
+    assert result.is_error
+    assert "Not a regular file: pipe" in result
 
 
 async def test_exact_edit_grant_does_not_list_sibling_files(tmp_path):
