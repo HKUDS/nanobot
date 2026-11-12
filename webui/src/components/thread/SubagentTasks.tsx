@@ -47,14 +47,13 @@ interface SubagentTasksProviderProps {
   enabled: boolean;
   liveEvents: boolean;
   historyEnabled?: boolean;
-  scopedHistory?: boolean;
-  turnIds?: string[];
+  turnIds: string[];
   windowReady?: boolean;
   active?: boolean;
   children: ReactNode;
 }
 
-export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, scopedHistory = false, turnIds = [], windowReady = true, active = true, children }: SubagentTasksProviderProps) {
+export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, turnIds, windowReady = true, active = true, children }: SubagentTasksProviderProps) {
   const { t } = useTranslation("common");
   const pageVisible = usePageVisibility();
   const paneVisible = useThreadVisibility();
@@ -70,7 +69,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   const taskRef = useRef(tasks);
   taskRef.current = tasks;
   const windowScope = { turnIds };
-  const windowKey = scopedHistory ? JSON.stringify(windowScope) : "";
+  const windowKey = JSON.stringify(windowScope);
   const windowRef = useRef(windowScope);
   windowRef.current = windowScope;
   const windowKeyRef = useRef(windowKey);
@@ -120,8 +119,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   }, [client, enabled, liveEvents, active, sessionKey, token, pageVisible, paneVisible, readState]);
 
   useEffect(() => {
-    if (!enabled || !active || !pageVisible || !paneVisible || !sessionKey || !token
-      || (scopedHistory && !windowReady)) return;
+    if (!enabled || !active || !pageVisible || !paneVisible || !sessionKey || !token || !windowReady) return;
     let cancelled = false;
     let scheduled = false;
     const read = () => {
@@ -131,15 +129,15 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       const requested = {
         turnIds: current.turnIds.filter((id) => full || !readState.turnIds.has(id)),
       };
-      if (!full && (!scopedHistory || requested.turnIds.length === 0)) return;
+      if (!full && requested.turnIds.length === 0) return;
       readState.force = false;
       readState.inFlight = true;
       const requestedKey = windowKeyRef.current;
       const requestedEpoch = readState.epoch;
-      const window = scopedHistory ? {
+      const window = {
         ...requested,
         trackedIds: taskRef.current.filter(isActiveSubagentTask).map((task) => task.task_id),
-      } : undefined;
+      };
       let succeeded = false;
       void fetchSubagentTasks(token, sessionKey, window).then((payload) => {
         if (!mounted.current || readStateRef.current !== readState) return;
@@ -179,7 +177,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       refreshRef.current = null;
       window.removeEventListener("focus", focus);
     };
-  }, [client, enabled, scopedHistory, active, sessionKey, token, pageVisible, paneVisible, windowReady, readState]);
+  }, [client, enabled, active, sessionKey, token, pageVisible, paneVisible, windowReady, readState]);
 
   useEffect(() => { refreshRef.current?.(false); }, [windowKey]);
 

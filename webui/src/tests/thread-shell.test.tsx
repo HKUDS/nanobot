@@ -576,7 +576,7 @@ describe("ThreadShell", () => {
       return Promise.resolve(new Response(null, { status: 404 }));
     }));
     const { container } = render(<StrictMode>{wrap(client, <ThreadShell session={session(chatId)} title="Task pages"
-      onToggleSidebar={() => {}} />, null, "tok", ["webui.prompt-navigation.v1", "webui.subagents.v1", "webui.subagents.events.v1", "webui.subagents.window.v1"])}</StrictMode>);
+      onToggleSidebar={() => {}} />, null, "tok", ["webui.prompt-navigation.v1", "webui.subagents.v1", "webui.subagents.events.v1"])}</StrictMode>);
     await waitFor(() => expect(resolveInitial).toBeTypeOf("function"));
     expect(seen).toHaveLength(0);
     act(() => client._emitChat(chatId, { event: "subagent_task", chat_id: chatId, task: {
@@ -628,7 +628,7 @@ describe("ThreadShell", () => {
       usage: null, receipts: {}, result: null, partial: false, stop_reason: null, error: null,
     };
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [snapshot] });
+      if (new URL(String(input), "http://localhost").pathname.endsWith("/subagents")) return httpJson({ tasks: [snapshot] });
       if (String(input).includes("/webui-thread")) return httpJson(transcriptFromSimpleMessages([
         { role: "user", content: "Delegate inspection", turnId: "parent-turn" },
       ]));
@@ -658,7 +658,7 @@ describe("ThreadShell", () => {
   it("renders one persisted task entry at the initiating prompt through the full shell", async () => {
     const client = makeClient();
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/subagents")) return httpJson({ tasks: [{
+      if (new URL(String(input), "http://localhost").pathname.endsWith("/subagents")) return httpJson({ tasks: [{
         task_id: "completed-task", label: "Inspect settings", task_description: "Inspect settings",
         origin_turn_id: "delegation-turn", origin_message_id: null, created_at: 100, completed_at: 102,
         state: "done", phase: "done", elapsed_seconds: 2, iteration: 1, tool_events: [],

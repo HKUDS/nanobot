@@ -115,7 +115,7 @@ describe("webui API helpers", () => {
     const urls = vi.mocked(fetch).mock.calls.map(([url]) => new URL(String(url), "http://localhost"));
     expect(urls.length).toBeGreaterThan(1);
     expect(urls.every((url) => url.search.length <= 5001)).toBe(true);
-    expect(urls.every((url) => url.searchParams.get("active") === null)).toBe(true);
+    expect(urls.every((url) => url.searchParams.get("scope") === "window")).toBe(true);
     expect(urls.flatMap((url) => url.searchParams.getAll("turn_id"))).toEqual(turnIds);
     expect(urls.flatMap((url) => url.searchParams.getAll("track"))).toEqual(["task-1"]);
   });

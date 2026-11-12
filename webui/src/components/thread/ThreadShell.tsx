@@ -1538,7 +1538,6 @@ export function ThreadShell({
       sessionKey={session?.key ?? null}
       liveEvents={webuiCapabilities.includes("webui.subagents.events.v1")}
       historyEnabled={webuiCapabilities.includes("webui.subagents.history.v1")}
-      scopedHistory={webuiCapabilities.includes("webui.subagents.window.v1")}
       turnIds={visibleWindow?.key === historyKey ? visibleWindow.turnIds : []}
       windowReady={messagesReady && visibleWindow?.key === historyKey && (!initialHistoryLoading || visibleWindow.hasMessages)}
       active={composerActive}
@@ -1587,7 +1586,7 @@ export function ThreadShell({
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
             conversationReady={messagesReady}
-            onVisibleMessagesChange={webuiCapabilities.includes("webui.subagents.window.v1") ? reportVisibleMessages : undefined}
+            onVisibleMessagesChange={reportVisibleMessages}
             showScrollToBottomButton={!!session}
             cliApps={cliApps}
             mcpPresets={mcpPresets}
