@@ -304,23 +304,27 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   expect(history.reads).toHaveLength(1);
 });
 
-test("archived task results stay with the retained boundary when earlier messages load", async ({ page }) => {
+test("task results stay with their prompts and retain the reading boundary when earlier messages load", async ({ page }) => {
   const history = await installHistory(page);
-  await page.route("**/api/sessions/**/subagents", (route) => route.fulfill({ json: { tasks: [{
-    task_id: "legacy", revision: 1, label: "Earlier check", task_description: "Check earlier work",
+  await page.route("**/api/sessions/**/subagents", (route) => route.fulfill({ json: { tasks: [
+    { task_id: "current", label: "Current check", origin_message_id: "u40" },
+    { task_id: "earlier", label: "Earlier check", origin_message_id: "u28" },
+  ].map((task) => ({
+    ...task, revision: 1, task_description: "Check work",
     state: "done", phase: "completed", elapsed_seconds: 2, iteration: 1,
     tool_events: [], usage: null, receipts: {}, result: "Verified", partial: false,
-    stop_reason: null, error: null, origin_turn_id: "legacy-turn", origin_message_id: null,
-    created_at: 100, completed_at: 102,
-  }] } }));
+    stop_reason: null, error: null, origin_turn_id: null, created_at: 100, completed_at: 102,
+  })) } }));
   await page.goto("/browser/fixture.html?case=history-boundary&tasks");
   const body = page.getByTestId("thread-message-region");
-  const otherTasks = body.getByRole("region", { name: "Other tasks" });
-  await expect(otherTasks).toBeAttached();
+  const currentResults = body.locator('[data-user-prompt-id="u40"] + [data-subagent-results]');
+  const earlierResults = body.locator('[data-user-prompt-id="u28"] + [data-subagent-results]');
+  await expect(body.locator("[data-subagent-results]")).toHaveCount(1);
+  await expect(currentResults).toHaveCount(1);
   // Clicking an offscreen disclosure scrolls it into view and can prefetch history.
   await positionAtTop(body);
-  await otherTasks.getByRole("button", { name: /Other tasks/ }).click();
-  await expect(otherTasks.getByRole("button", { name: /Earlier check Completed/ })).toBeVisible();
+  await currentResults.locator("[data-subagent-results-summary]").click();
+  await expect(currentResults.getByRole("button", { name: /Current check Completed/ })).toBeVisible();
   await stableLayout(body);
   const originalTop = await positionAtTop(body);
   await body.hover();
@@ -336,9 +340,13 @@ test("archived task results stay with the retained boundary when earlier message
   await expect(page.locator(".thread-history-slot")).toHaveCount(0);
   await stableLayout(body);
   await expectAnchorCoordinate(body, "Question 40", preCompletionAnchorTop);
-  await expect(otherTasks).toHaveCount(1);
-  await expect(otherTasks.getByRole("button", { name: /Other tasks/ })).toHaveAttribute("aria-expanded", "true");
+  await expect(body.locator("[data-subagent-results]")).toHaveCount(2);
+  await expect(currentResults.locator("[data-subagent-results-summary]")).toHaveAttribute("aria-expanded", "true");
+  await expect(currentResults.getByRole("button", { name: /Current check Completed/ })).toBeVisible();
+  await expect(earlierResults.locator("[data-subagent-results-summary]")).toHaveAttribute("aria-expanded", "false");
   expect(history.reads).toHaveLength(1);
+  await earlierResults.locator("[data-subagent-results-summary]").click();
+  await expect(earlierResults.getByRole("button", { name: /Earlier check Completed/ })).toBeVisible();
 });
 
 test("touch reveals a static partial ready header, arms only on release, and retains a stable full loading header", async ({ browser, baseURL }) => {
