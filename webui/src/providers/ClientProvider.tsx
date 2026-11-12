@@ -2,18 +2,21 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   type ReactNode,
 } from "react";
 
 import type { NanobotClient } from "@/lib/nanobot-client";
+import { getSessionStore, type SessionStore } from "@/lib/session-store";
 import type { WebUIIngressLimits } from "@/lib/types";
 import { VersionCheckProvider } from "@/providers/VersionCheckProvider";
 import { UpdateFlowProvider } from "@/providers/UpdateFlowProvider";
 
 interface ClientContextValue {
   client: NanobotClient;
+  sessions: SessionStore;
   token: string;
   getToken: () => string;
   modelName: string | null;
@@ -43,8 +46,9 @@ export function ClientProvider({
   const tokenRef = useRef(token);
   tokenRef.current = token;
   const getToken = useCallback(() => tokenRef.current, []);
+  useEffect(() => () => { getSessionStore(client).cancelReads(); }, [client]);
   const value = useMemo(
-    () => ({ client, token, getToken, modelName, ingressLimits, webuiCapabilities }),
+    () => ({ client, sessions: getSessionStore(client), token, getToken, modelName, ingressLimits, webuiCapabilities }),
     [client, getToken, ingressLimits, modelName, token, webuiCapabilities],
   );
 

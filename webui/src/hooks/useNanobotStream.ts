@@ -5,9 +5,8 @@ import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import { useClient } from "@/providers/ClientProvider";
 import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { ApiError, fetchWebuiThread, fetchWebuiThreadTraceDetail } from "@/lib/api";
-import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
-import { webuiThreadCache } from "@/lib/webui-thread-cache";
+
 import { ThreadTranscript, type ThreadPaging, type ThreadRead, type ThreadTranscriptSnapshot } from "@/lib/thread-transcript";
 import type { ThreadMessageCache } from "@/lib/thread-message-cache";
 import type { StreamError } from "@/lib/nanobot-client";
@@ -156,17 +155,24 @@ export function useNanobotStream(
   streamError: StreamError | null;
   dismissStreamError: () => void;
 } {
-  const { client, getToken } = useClient();
+  const { client, getToken, sessions } = useClient();
   const historyKey = history?.key ?? null;
   const temporary = history?.temporary === true;
-  const messageCache = history?.cache;
-  const [initialTranscript] = useState(() => createTranscript(initialMessages,
-    chatId ? messageCache?.get(chatId) : undefined, historyKey, temporary));
-  const transcriptRef = useRef(initialTranscript);
-  const [historyState, setHistoryState] = useState(initialTranscript.paging);
+  const messageCache = history?.cache ?? sessions.messages;
+  const ownerKey = historyKey ?? (chatId ? `websocket:${chatId}` : null);
+  const snapshotKey = chatId ?? historyKey;
+  const acquireTranscript = () => ownerKey && snapshotKey
+    ? sessions.transcript(ownerKey, initialMessages, temporary, messageCache, snapshotKey)
+    : createTranscript(initialMessages, undefined, historyKey, temporary);
+  const [transcriptRef] = useState(() => ({ current: acquireTranscript() }));
+  const [historyState, setHistoryState] = useState(() => transcriptRef.current.paging);
   const publishHistory = useCallback(() => setHistoryState(transcriptRef.current.paging), []);
   const [refreshSeq, setRefreshSeq] = useState(0);
-  const refreshHistory = useCallback(() => setRefreshSeq((value) => value + 1), []);
+  const latestControllerRef = useRef<AbortController | null>(null);
+  const refreshHistory = useCallback(() => {
+    if (latestControllerRef.current) sessions.invalidateRead(latestControllerRef.current.signal);
+    setRefreshSeq((value) => value + 1);
+  }, [sessions]);
   const threadVisible = useThreadVisibility();
   const threadVisibleRef = useRef(threadVisible);
   threadVisibleRef.current = threadVisible;
@@ -177,8 +183,8 @@ export function useNanobotStream(
   if (historyRunGenerationRef.current.chatId !== chatId) {
     historyRunGenerationRef.current = { chatId, generation: chatId ? client.getRunGeneration(chatId) : 0 };
   }
-  const [messages, setRenderedMessages] = useState<UIMessage[]>(initialTranscript.messages);
-  const [modelRequests, setModelRequests] = useState(initialTranscript.modelRequests);
+  const [messages, setRenderedMessages] = useState<UIMessage[]>(() => transcriptRef.current.messages);
+  const [modelRequests, setModelRequests] = useState(() => transcriptRef.current.modelRequests);
   const messagesRef = useRef(messages);
   // Keep received state ahead of React's batched render: navigation can unmount
   // this hook after a stream flush but before the queued render commits.
@@ -482,7 +488,8 @@ export function useNanobotStream(
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.
   useEffect(() => {
-    transcriptRef.current = createTranscript(initialMessages, chatId ? messageCache?.get(chatId) : undefined, historyKey, temporary);
+    transcriptRef.current = acquireTranscript();
+    const owner = transcriptRef.current;
     setMessages(transcriptRef.current.messages);
     setMessageScope({ chatId, historyKey, client });
     setRunState(chatId ? client.getRunState(chatId) : null);
@@ -491,7 +498,11 @@ export function useNanobotStream(
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
     setRecoveryState(null);
     clearPendingStreamWork();
-  }, [chatId, client, historyKey, temporary, clearActivitySegment, clearPendingStreamWork, setMessages]);
+    return () => {
+      if (transcriptRef.current === owner) flushPendingStreamEvents();
+      if (ownerKey && snapshotKey) sessions.release(ownerKey, owner, messageCache, snapshotKey);
+    };
+  }, [chatId, client, historyKey, temporary, sessions, clearActivitySegment, clearPendingStreamWork, setMessages]);
 
   useEffect(() => {
     if (!chatId || (!hasPendingToolCalls && !initialStreaming)) return;
@@ -520,7 +531,6 @@ export function useNanobotStream(
     pending.owner.finishRead(pending.read);
     if (transcriptRef.current === pending.owner) publishHistory();
   }, [publishHistory]);
-  const latestReadOwnerRef = useRef<ThreadTranscript>();
   const detailRequestsRef = useRef(new Map<string, Promise<{ ref: string; events: ThreadProjectionEvent[] } | null>>());
   const reconcileCanonical = useCallback((generation: number, canonical: ReturnType<typeof persistedCanonicalRunState>, accepted: boolean) => {
     if (!chatId) return;
@@ -542,28 +552,30 @@ export function useNanobotStream(
     const owner = transcriptRef.current;
     const controller = new AbortController();
     const generation = chatId ? client.getRunGeneration(chatId) : 0;
-    const read = owner.begin(latestReadOwnerRef.current === owner ? "latest" : "initial");
-    latestReadOwnerRef.current = owner;
+    latestControllerRef.current = controller;
+    const cached = sessions.canonical.get(historyKey);
+    if (cached && owner.paging.version === 0) owner.accept(cached, owner.begin("initial"));
+    setMessages(owner.messages);
+    const read = owner.begin(owner.paging.version > 0 ? "latest" : "initial");
     publishHistory();
     let disposed = false;
     let superseded = false;
     let publishing = false;
-    const install = (body: Awaited<ReturnType<typeof fetchWebuiThread>>, ownRead: boolean, seed = false) => {
+    const install = (body: Awaited<ReturnType<typeof fetchWebuiThread>>, ownRead: boolean) => {
       if (disposed || (ownRead && superseded) || transcriptRef.current !== owner) return;
       flushPendingStreamEvents();
-      const decision = ownRead ? read : owner.begin(seed ? "initial" : "latest");
+      const decision = ownRead ? read : owner.begin("latest");
       const canonical = body ? persistedCanonicalRunState(body) : null;
       const accepted = owner.accept(body, decision);
       // Commit the received owner before cache listeners/ledger callbacks can reenter.
       setMessages(owner.messages);
-      if (accepted && chatId) messageCache?.set(chatId, owner.save());
       if (ownRead) {
         publishing = true;
-        if (body) webuiThreadCache.set(historyKey, body);
-        else webuiThreadCache.delete(historyKey);
+        if (body) sessions.publish(historyKey, body);
+        else sessions.canonical.delete(historyKey);
         publishing = false;
       }
-      if (chatId && canonical && (ownRead || !seed)) {
+      if (chatId && canonical) {
         if (body?.page?.record_range) {
           if (accepted) settleFragment(owner);
         } else if (ownRead && !owner.hasPendingFragmentGap) {
@@ -571,16 +583,15 @@ export function useNanobotStream(
         }
       }
     };
-    const cached = webuiThreadCache.get(historyKey);
-    if (cached && owner.paging.version === 0) install(cached, false, true);
-    const unsubscribe = webuiThreadCache.subscribe(historyKey, (body) => {
+    const unsubscribe = sessions.canonical.subscribe(historyKey, (body) => {
       if (publishing) return;
       superseded = true;
+      sessions.invalidateRead(controller.signal);
       controller.abort();
       cancelOlderRead();
       install(body, false);
     });
-    void fetchLatestWebuiThread(client, getToken(), historyKey, controller.signal)
+    void sessions.latest(getToken(), historyKey, controller.signal)
       .then((body) => install(body, true))
       .catch((error: unknown) => {
         if (disposed || superseded || controller.signal.aborted || transcriptRef.current !== owner) return;
@@ -588,7 +599,7 @@ export function useNanobotStream(
         else { owner.finishRead(read, (error as Error).message); publishHistory(); }
       });
     return () => { disposed = true; controller.abort(); cancelOlderRead(); unsubscribe(); };
-  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, publishHistory, reconcileCanonical, refreshSeq, setMessages, settleFragment]);
+  }, [cancelOlderRead, chatId, client, flushPendingStreamEvents, getToken, historyKey, messageCache, sessions, publishHistory, reconcileCanonical, refreshSeq, setMessages, settleFragment]);
 
   const loadOlder = useCallback(async () => {
     const owner = transcriptRef.current;
@@ -606,7 +617,6 @@ export function useNanobotStream(
       const accepted = owner.accept(body, read);
       setMessages(owner.messages);
       if (accepted) {
-        if (chatId) messageCache?.set(chatId, owner.save());
         settleFragment(owner);
       }
     } catch (error) {
@@ -633,8 +643,9 @@ export function useNanobotStream(
       const id = `${historyKey}:${ref}`;
       const existing = detailRequestsRef.current.get(id);
       if (existing) return existing;
+      const lineage = owner.paging.lineage;
       const request = fetchWebuiThreadTraceDetail(getToken(), historyKey, ref).then((detail) => {
-        if (transcriptRef.current !== owner) return null;
+        if (transcriptRef.current !== owner || owner.paging.lineage !== lineage) return null;
         flushPendingStreamEvents();
         owner.expandDetail(ref, detail.events);
         setMessages(owner.messages);
@@ -913,7 +924,6 @@ export function useNanobotStream(
         : messagesRef.current;
       onStreamDetach?.(snapshot);
       if (pending.length > 0) setMessages(snapshot);
-      messageCache?.set(chatId, transcriptRef.current.save());
       clearPendingStreamWork();
     };
   }, [
@@ -929,7 +939,6 @@ export function useNanobotStream(
     isSideChannelEvent,
     onTurnEnd,
     onStreamDetach,
-    messageCache,
     schedulePendingStreamFlush,
     setMessages,
   ]);

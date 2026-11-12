@@ -14,6 +14,7 @@ import { ThreadCameraController } from "@/components/thread/thread-camera";
 import { ThreadMotionCoordinator } from "@/components/thread/thread-motion";
 import type { PromptHistoryNavigation } from "@/hooks/usePromptHistory";
 import type { UIMessage } from "@/lib/types";
+import { ThreadReadingStateStore } from "@/lib/thread-reading-state";
 
 const messages: UIMessage[] = [
   {
@@ -2492,6 +2493,191 @@ describe("ThreadViewport", () => {
 
     expect(visible[0].id).toBe("r0");
     expect(visible).toHaveLength(INITIAL_HISTORY_WINDOW + 2);
+  });
+
+  it("restores an expanded A-B-A window from the outgoing DOM before it is replaced", async () => {
+    const readingState = new ThreadReadingStateStore();
+    const a = makeLongMessages(300);
+    const b = makeLongMessages(10).map((message) => ({ ...message, id: `b-${message.id}`, content: `B ${message.content}` }));
+    const viewport = (key: string, transcript: UIMessage[], ready = true, messagesKey = key) => (
+      <ThreadViewport messages={transcript} isStreaming={false} conversationKey={key}
+        messagesKey={messagesKey} conversationReady={ready} readingState={readingState} />
+    );
+    const { container, rerender } = render(viewport("a", a));
+    const scroller = getScroller(container);
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, get: () => scroller.querySelectorAll("[data-thread-display-unit]").length * 40 },
+      clientHeight: { configurable: true, value: 600 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === scroller) return DOMRect.fromRect({ width: 800, height: 600 });
+      if (this.hasAttribute("data-thread-display-unit")) {
+        const index = Array.from(scroller.querySelectorAll("[data-thread-display-unit]")).indexOf(this);
+        return DOMRect.fromRect({ y: index * 40 - scroller.scrollTop, width: 800, height: 40 });
+      }
+      return originalRect.call(this);
+    });
+    act(() => dispatchUserScroll(scroller));
+    expect(scroller.querySelectorAll("[data-thread-display-unit]")).toHaveLength(240);
+    // No final scroll event: detaching must measure the old DOM, not B's much shorter list.
+    scroller.scrollTop = 1_615;
+    rerender(viewport("b", b));
+    expect(readingState.get("a")?.anchor?.relativeOffset).toBe(-15);
+    expect(readingState.get("a")?.visibleMessageCount).toBe(240);
+    expect(readingState.get("a")?.followTail).toBe(false);
+    expect(scroller.scrollTop).toBe(0);
+
+    const saved = readingState.get("a");
+    rerender(viewport("a", b, false, "b"));
+    act(() => { fireEvent.scroll(scroller); window.dispatchEvent(new Event("resize")); });
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(0);
+    expect(readingState.get("a")).toEqual(saved);
+    rerender(viewport("a", a));
+    expect(scroller.querySelectorAll("[data-thread-display-unit]")).toHaveLength(240);
+    expect(scroller.scrollTop).toBe(1_615);
+    expect(screen.getByText("message 100").closest<HTMLElement>("[data-thread-display-unit]")!
+      .getBoundingClientRect().top).toBe(-15);
+    act(() => window.dispatchEvent(new Event("resize")));
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_615);
+  });
+
+  it("keeps a viewport-owned store across A-B-A without sharing it with another instance", () => {
+    const viewport = (key: string) => <ThreadViewport messages={makeLongMessages(300)} isStreaming={false} conversationKey={key} />;
+    const { container, rerender, unmount } = render(viewport("a"));
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 9_600, 600);
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this === scroller) return DOMRect.fromRect({ width: 800, height: 600 });
+      if (this.hasAttribute("data-thread-display-unit")) {
+        const index = Array.from(scroller.querySelectorAll("[data-thread-display-unit]")).indexOf(this);
+        return DOMRect.fromRect({ y: index * 40 - scroller.scrollTop, width: 800, height: 40 });
+      }
+      return originalRect.call(this);
+    });
+    act(() => dispatchUserScroll(scroller));
+    expect(screen.getByText("message 60")).toBeInTheDocument();
+    scroller.scrollTop = 800;
+    rerender(viewport("b"));
+    expect(screen.queryByText("message 60")).not.toBeInTheDocument();
+    rerender(viewport("a"));
+    expect(screen.getByText("message 60")).toBeInTheDocument();
+    expect(scroller.scrollTop).toBe(800);
+    unmount();
+    render(viewport("a"));
+    expect(screen.queryByText("message 60")).not.toBeInTheDocument();
+  });
+
+  it("restores from an external store after unmount, but never records temporary chats", () => {
+    const readingState = new ThreadReadingStateStore();
+    const viewport = (temporary = false) => <ThreadViewport messages={messages} isStreaming={false}
+      conversationKey="a" temporary={temporary} readingState={readingState} />;
+    const first = render(viewport());
+    const scroller = getScroller(first.container);
+    mockScrollGeometry(scroller, 2_400, 600, 900);
+    act(() => dispatchUserScroll(scroller));
+    first.unmount();
+    expect(readingState.get("a")?.followTail).toBe(false);
+    expect(readingState.get("a")?.anchor?.scrollTop).toBe(900);
+
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
+    const second = render(viewport());
+    // Even pre-layout geometry keeps the restored viewport user-owned.
+    const restoredScroller = getScroller(second.container);
+    mockScrollGeometry(restoredScroller, 2_400, 600, 0);
+    act(() => window.dispatchEvent(new Event("resize")));
+    expect(jumpTo).not.toHaveBeenCalledWith(1_800);
+    second.unmount();
+    readingState.clear();
+    const temporary = render(viewport(true));
+    const temporaryScroller = getScroller(temporary.container);
+    mockScrollGeometry(temporaryScroller, 2_400, 600, 700);
+    act(() => dispatchUserScroll(temporaryScroller));
+    temporary.unmount();
+    expect(readingState.entries()).toEqual([]);
+  });
+
+  it("restores follow-tail as a policy rather than an old pixel position", async () => {
+    const readingState = new ThreadReadingStateStore([["a", {
+      anchor: null, followTail: true, visibleMessageCount: 240,
+    }]]);
+    const { container, rerender } = render(<ThreadViewport messages={messages} isStreaming={false}
+      conversationKey="a" conversationReady={false} readingState={readingState} />);
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 2_400, 600, 0);
+    rerender(<ThreadViewport messages={messages} isStreaming={false}
+      conversationKey="a" readingState={readingState} />);
+    expect(scroller.scrollTop).toBe(1_800);
+    mockScrollGeometry(scroller, 3_000, 600, 1_800);
+    act(() => window.dispatchEvent(new Event("resize")));
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(2_400);
+  });
+
+  it("does not treat a previously submitted active turn as a new send when restoring history", async () => {
+    const activeMessages: UIMessage[] = [
+      { id: "active-user", role: "user", content: "question", createdAt: 1, turnId: "active" },
+      { id: "active-answer", role: "assistant", content: "answer", createdAt: 2, turnId: "active", isStreaming: true },
+    ];
+    const readingState = new ThreadReadingStateStore([["a", {
+      anchor: { sources: ['["message","id","active-user"]'], relativeOffset: -15, scrollTop: 915 },
+      followTail: false, visibleMessageCount: 120,
+    }]]);
+    const viewport = (ready: boolean) => <ThreadViewport messages={activeMessages} isStreaming
+      conversationKey="a" conversationReady={ready} readingState={readingState}
+      activeTurnId="active" activeTurnStartedHere />;
+    const { container, rerender } = render(viewport(false));
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 2_400, 600);
+    scroller.getBoundingClientRect = () => DOMRect.fromRect({ width: 800, height: 600 });
+    const prompt = scroller.querySelector<HTMLElement>('[data-user-prompt-id="active-user"]')!;
+    prompt.getBoundingClientRect = () => DOMRect.fromRect({ y: 900 - scroller.scrollTop, width: 800, height: 40 });
+    rerender(viewport(true));
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(915);
+    act(() => window.dispatchEvent(new Event("resize")));
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(915);
+  });
+
+  it("shows a cold 503 error and retry instead of the welcome layout", () => {
+    const retry = vi.fn();
+    const { rerender } = render(<ThreadViewport messages={[]} isStreaming={false} conversationKey="a"
+      initialError="HTTP 503: unavailable" onRetryInitial={retry} emptyState={<p>welcome</p>} composer={<div />} />);
+    expect(screen.queryByText("welcome")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thread-welcome-layout")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Loading failed. Retry" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+    rerender(<ThreadViewport messages={messages} isStreaming={false} conversationKey="a"
+      emptyState={<p>welcome</p>} composer={<div />} />);
+    expect(screen.getByText("hello")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Loading failed. Retry" })).not.toBeInTheDocument();
+  });
+
+  it("keeps cached revalidation errors and retry visible without moving the camera or history header", () => {
+    const retry = vi.fn();
+    const viewport = (error: string | null) => <ThreadViewport messages={messages} isStreaming={false}
+      conversationKey="a" hasMoreBefore initialError={error} onRetryInitial={retry} />;
+    const { container, rerender } = render(viewport(null));
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 2_400, 600, 1_800);
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
+    rerender(viewport("HTTP 503: unavailable"));
+    expect(screen.getByRole("button", { name: "Loading failed. Retry" })).toBeVisible();
+    expect(scroller.scrollTop).toBe(1_800);
+    expect(jumpTo).not.toHaveBeenCalled();
+    scroller.scrollTop = 900;
+    act(() => dispatchUserScroll(scroller));
+    fireEvent.click(screen.getByRole("button", { name: "Loading failed. Retry" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+    rerender(viewport(null));
+    expect(scroller.scrollTop).toBe(900);
+    expect(jumpTo).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Loading failed. Retry" })).not.toBeInTheDocument();
   });
 
   it("resets to the bottom when opening a different conversation", async () => {

@@ -2913,6 +2913,7 @@ describe("App layout", () => {
       return Response.json({}, { status: 404 });
     }));
 
+    window.history.replaceState(null, "", "/#/chat/websocket%3Achat-b");
     const markersKey = "nanobot-webui.sidebar.session-updates.v1";
     localStorage.setItem(markersKey, JSON.stringify(["chat-b", "deleted"]));
     render(<App />);
@@ -2925,6 +2926,7 @@ describe("App layout", () => {
     expect(within(sidebar).queryByText("Loading…")).not.toBeInTheDocument();
     expect(setSidebarStateSpy).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem(markersKey)!)).toEqual(["chat-b", "deleted"]);
+    expect(window.location.hash).toBe("#/chat/websocket%3Achat-b");
 
     // A successful full list can authorize removal; the failed read and cache cannot.
     sessionsFail = false;

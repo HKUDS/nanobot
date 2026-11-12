@@ -77,7 +77,7 @@ import type {
 } from "@/lib/types";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
-import { ThreadMessageCache } from "@/lib/thread-message-cache";
+import type { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { providerDisplayLabel } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 import { composerContextSnapshots } from "@/lib/context-graph";
@@ -216,6 +216,7 @@ interface ThreadShellProps {
   temporary?: boolean;
   temporaryChatIds?: readonly string[];
   messageCache?: ThreadMessageCache;
+  readingScope?: string;
   filePreviewStore?: FilePreviewStore;
   draftStore?: ComposerDraftStore;
   temporaryChatEnabled?: boolean;
@@ -443,6 +444,7 @@ export function ThreadShell({
   temporary = false,
   temporaryChatIds = [],
   messageCache,
+  readingScope = "primary",
   filePreviewStore,
   draftStore,
   temporaryChatEnabled = false,
@@ -493,7 +495,7 @@ export function ThreadShell({
     }),
     [historyKey, sessions, titleOverrides],
   );
-  const { client, getToken, ingressLimits, modelName, token, webuiCapabilities } = useClient();
+  const { client, getToken, ingressLimits, modelName, token, webuiCapabilities, sessions: sessionStore } = useClient();
   const favoriteWorkspaceProject = useCallback(
     async (path: string, pinned: boolean) => {
       const response = await client.requestMutation<{ favorite_projects: ProjectDirectory[] }>("workspace.favorite", { path, pinned });
@@ -617,11 +619,8 @@ export function ThreadShell({
   const viewportRef = useRef<ThreadViewportHandle | null>(null);
   const activeViewportTurnByChatIdRef = useRef<Map<string, string>>(new Map());
   const knownTemporaryChatIdsRef = useRef(new Set<string>());
-  const localMessageCacheRef = useRef(new ThreadMessageCache(
-    (key) => knownTemporaryChatIdsRef.current.has(key),
-  ));
-  const messageCacheRef = useRef(messageCache ?? localMessageCacheRef.current);
-  messageCacheRef.current = messageCache ?? localMessageCacheRef.current;
+  const messageCacheRef = useRef(messageCache ?? sessionStore.messages);
+  messageCacheRef.current = messageCache ?? sessionStore.messages;
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
@@ -666,10 +665,13 @@ export function ThreadShell({
     { key: historyKey, cache: messageCacheRef.current, temporary },
   );
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
-  const initialHistoryLoading = loading;
   const showTemporaryChatControl =
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
   const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
+  const restoringWindow = promptNavigation.window !== null && promptNavigation.window.messages.length === 0;
+  const initialHistoryLoading = loading || restoringWindow && promptNavigation.loading;
+  const initialHistoryError = historyError ?? (restoringWindow ? promptNavigation.error : null);
+  const retryInitialHistory = restoringWindow ? promptNavigation.retry : refreshHistory;
   const updateNavigationMessages = promptNavigation.updateMessages;
   useEffect(() => {
     if (!chatId || !messagesReady) return;
@@ -1565,13 +1567,14 @@ export function ThreadShell({
             retryStatus={retryStatus}
             emptyState={emptyState}
             initialLoading={initialHistoryLoading}
-            initialError={historyError}
-            onRetryInitial={refreshHistory}
+            initialError={initialHistoryError}
+            onRetryInitial={retryInitialHistory}
             composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
             onComposerLayoutChange={alignSidebar}
             activeTurnId={viewportTurnId}
             activeTurnStartedHere={activeTurnStartedHere}
             conversationKey={historyKey}
+            readingState={sessionStore.readingState(readingScope)}
             conversationReady={messagesReady}
             showScrollToBottomButton={!!session}
             cliApps={cliApps}

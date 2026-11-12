@@ -8,7 +8,6 @@ import {
   fetchSessionAutomations,
   listSessions,
 } from "@/lib/api";
-import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { readReloadSessions, writeReloadCache } from "@/lib/reload-cache";
 import type {
   ChatSummary,
@@ -36,13 +35,14 @@ export function useSessions(): {
   ) => Promise<SessionDeleteResult>;
   getSessionAutomations: (key: string) => Promise<SessionAutomationJob[]>;
 } {
-  const { client, token } = useClient();
+  const { client, token, sessions: sessionStore } = useClient();
   const [sessions, setSessions] = useState<ChatSummary[]>(readReloadSessions);
   const [loadedOnce, setLoadedOnce] = useState(() => sessions.length > 0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
   const optimisticKeysRef = useRef<Set<string>>(new Set());
+  const deletedKeysRef = useRef(new Set<string>());
   const refreshPendingRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   tokenRef.current = token;
@@ -60,7 +60,10 @@ export function useSessions(): {
         while (refreshPendingRef.current) {
           refreshPendingRef.current = false;
           try {
-            const rows = await listSessions(tokenRef.current);
+            const listed = await listSessions(tokenRef.current);
+            const listedKeys = new Set(listed.map((row) => row.key));
+            for (const key of deletedKeysRef.current) if (!listedKeys.has(key)) deletedKeysRef.current.delete(key);
+            const rows = listed.filter((row) => !deletedKeysRef.current.has(row.key));
             setLoadedOnce(true);
             const serverKeys = new Set(rows.map((row) => row.key));
             setSessions((prev) => {
@@ -178,13 +181,14 @@ export function useSessions(): {
       const result = await apiDeleteSession(client, key, options);
       if (result.blocked_by_automations || (!result.deleted && !optimistic)) return result;
       optimisticKeysRef.current.delete(key);
-      webuiThreadCache.delete(key);
+      deletedKeysRef.current.add(key);
+      sessionStore.delete(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
       // The gateway may have restarted and forgotten an unpersisted chat's
       // draft scope, but removing that optimistic session is still a deletion.
       return result.deleted ? result : { ...result, deleted: true };
     },
-    [client],
+    [client, sessionStore],
   );
 
   const getSessionAutomations = useCallback(async (key: string) => {

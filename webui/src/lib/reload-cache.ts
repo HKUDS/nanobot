@@ -10,22 +10,24 @@ export function activateReloadCache(wsUrl: string): void {
   scope = `${url.origin}${url.pathname}`;
 }
 
-export function readReloadCache(name: string): unknown {
-  if (!scope) return undefined;
+export function currentReloadScope(): string | null { return scope; }
+
+export function readReloadCache(name: string, ownerScope = scope): unknown {
+  if (!ownerScope) return undefined;
   try {
     const raw = sessionStorage.getItem(PREFIX + name);
     if (!raw || raw.length > MAX_CHARS) return undefined;
     const stored: unknown = JSON.parse(raw);
-    return isRecord(stored) && stored.scope === scope ? stored.value : undefined;
+    return isRecord(stored) && stored.scope === ownerScope ? stored.value : undefined;
   } catch {
     return undefined;
   }
 }
 
-export function writeReloadCache(name: string, value: unknown): void {
-  if (!scope) return;
+export function writeReloadCache(name: string, value: unknown, ownerScope = scope): void {
+  if (!ownerScope || ownerScope !== scope) return;
   try {
-    const raw = JSON.stringify({ scope, value });
+    const raw = JSON.stringify({ scope: ownerScope, value });
     if (raw.length <= MAX_CHARS) sessionStorage.setItem(PREFIX + name, raw);
     else sessionStorage.removeItem(PREFIX + name);
   } catch {
@@ -41,6 +43,8 @@ export function clearReloadCache(): void {
   scope = null;
   removeReloadCache("sessions");
   removeReloadCache("thread");
+  removeReloadCache("reading");
+  removeReloadCache("navigation");
 }
 
 export function readReloadSessions(): ChatSummary[] {

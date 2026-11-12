@@ -126,6 +126,14 @@ bun run build          # writes to ../nanobot/web/dist
 
 The gateway picks up the new bundle on the next restart.
 
+## Session replay and reading state
+
+Each authenticated client owns a `SessionStore`. Canonical latest pages and their validators, resumable transcript snapshots, and prompt navigation data share that lifecycle; they are not global across hosts. Switching a pane restores reusable data immediately, then conditionally revalidates it. A history GET on return is expected and does not mean the in-memory cache was cleared.
+
+Inactive replay snapshots and canonical pages each have a 16 MiB / 12-entry estimated budget; prompt navigation bodies have a separate smaller budget. Oversized entries are rejected before evicting unrelated sessions. Mounted transcripts and temporary chats are working state outside the recyclable budget: temporary chats cannot be recovered from the server and are released when closed. These budgets are not a hard cap on total browser memory.
+
+Reading state is scoped to the host, pane, and session. It retains the visible window, stable display-unit anchor, offset, and follow-tail preference, not DOM trees or disclosure animations. Tab-local reload storage is optional and size-bounded; it contains no credentials or temporary-chat bodies. Logout clears it. Failed refreshes keep readable cached messages and expose retry; failed initial reads do not appear as an empty new conversation.
+
 ## Test
 
 ```bash
