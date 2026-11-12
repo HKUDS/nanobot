@@ -304,10 +304,12 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
     )):
         first_result = await tool.execute(action="create", task="first task")
         assert "started" in first_result
+        assert first_result.endswith("Don't duplicate its work.")
         await asyncio.wait_for(first_entered.wait(), timeout=1.0)
 
         second_result = await tool.execute(action="create", task="second task")
         assert "started" in second_result
+        assert second_result.endswith("Don't duplicate its work.")
         tasks = list(mgr._running_tasks.values())
         await asyncio.sleep(0)
         assert not second_entered.is_set()
