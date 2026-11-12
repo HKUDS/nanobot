@@ -7,20 +7,20 @@ import hashlib
 import json
 import os
 import shlex
-import signal
 import tempfile
 from pathlib import Path
 from typing import TypedDict
 
-from nanobot.agent.tools.sandbox import wrap_command
-from nanobot.agent.tools.sandbox_launcher import (
+from nanobot.agent.tools.shell_config import ExecToolConfig
+from nanobot.config.errors import ConfigLoadError
+from nanobot.config.loader import resolve_config_env_vars
+from nanobot.execution import processes
+from nanobot.execution.sandbox import build_sandbox_argv
+from nanobot.security.sandbox_launcher import (
     SandboxLauncherError,
     resolve_sandbox_launcher,
     sandbox_platform,
 )
-from nanobot.agent.tools.shell_config import ExecToolConfig
-from nanobot.config.errors import ConfigLoadError
-from nanobot.config.loader import resolve_config_env_vars
 
 _PROBE_TIMEOUT_S = 5
 
@@ -92,40 +92,33 @@ async def check_sandbox(config: ExecToolConfig, workspace: Path) -> SandboxCheck
             # same path. What must stay unchanged is the host-side canary.
             f"(printf changed > {shlex.quote(str(canary))} || true)"
         )
-        argv = shlex.split(wrap_command(
-            config.sandbox, script, str(project), str(project),
-            sandbox_ro_binds=config.sandbox_ro_binds,
-            sandbox_rw_binds=config.sandbox_rw_binds,
-        ))
-        # Same resolver and wrapper as ExecTool. Recheck against the probe root.
         try:
-            argv[0] = resolve_sandbox_launcher(
-                config.sandbox, config.sandbox_launcher,
-                writable_roots=(project, *map(Path, config.sandbox_rw_binds)),
+            argv = build_sandbox_argv(
+                config.sandbox, script, str(project), str(project),
+                launcher=config.sandbox_launcher,
+                sandbox_ro_binds=config.sandbox_ro_binds,
+                sandbox_rw_binds=config.sandbox_rw_binds,
             )
             result["launcher"] = argv[0]
         except SandboxLauncherError as exc:
             result.update(state="unavailable", reason=exc.reason)
             return result
-        process: asyncio.subprocess.Process | None = None
+        tree: processes.ProcessTree | None = None
         try:
-            process = await asyncio.create_subprocess_exec(
-                *argv, cwd=str(project), env={"PATH": os.defpath, "HOME": str(project)},
-                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL, start_new_session=True,
+            tree = await processes.spawn_process_tree(
+                argv, str(project), {"PATH": os.defpath, "HOME": str(project)}, capture_output=False,
             )
-            await asyncio.wait_for(process.wait(), timeout=_PROBE_TIMEOUT_S)
-            success = process.returncode == 0 and (project / "inside").read_text() == "checked" and canary.read_text() == "unchanged"
+            code = await asyncio.wait_for(tree.process.wait(), timeout=_PROBE_TIMEOUT_S)
+            success = code == 0 and (project / "inside").read_text() == "checked" and canary.read_text() == "unchanged"
             result.update(state="passed" if success else "unavailable", reason="" if success else "probe_failed")
         except TimeoutError:
             result.update(state="unavailable", reason="probe_timeout")
         except OSError:
             result.update(state="unavailable", reason="probe_failed")
         finally:
-            if process is not None and process.returncode is None:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                await process.wait()
+            if tree is not None:
+                if tree.process.returncode is None:
+                    await tree.terminate()
+                else:
+                    tree.finish()
         return result

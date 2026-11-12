@@ -10,8 +10,9 @@ from typing import Literal
 
 
 class SandboxLauncherError(ValueError):
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, *, launcher: str = ""):
         self.reason = reason
+        self.launcher = launcher
         super().__init__(reason)
 
 
@@ -36,7 +37,7 @@ def resolve_sandbox_launcher(
     if not custom_path:
         launcher = shutil.which(name, path=os.defpath)
         if launcher is None:
-            raise SandboxLauncherError("launcher_missing")
+            raise SandboxLauncherError("launcher_missing", launcher=name)
         return str(Path(launcher).absolute())
     if os.name != "posix":
         raise SandboxLauncherError("platform_unsupported")

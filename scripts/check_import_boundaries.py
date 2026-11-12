@@ -93,6 +93,12 @@ IMPORT_RULES = (
         (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.providers", "nanobot.session"),
     ),
     ImportRule(
+        "sandbox-execution",
+        ("nanobot.execution.sandbox",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.session"),
+        allowed_targets=("nanobot.config.paths.get_media_dir",),
+    ),
+    ImportRule(
         "channel-routing-contracts",
         ("nanobot.channels.notification_routes",),
         ("nanobot",),

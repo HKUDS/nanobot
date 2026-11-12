@@ -24,6 +24,6 @@ HTTP/SSE MCP transports are part of this boundary: validate configured MCP URLs 
 
 ## Shell Sandbox
 
-`tools/sandbox.py` provides optional command wrapping: `bwrap` (bubblewrap) on Linux and `seatbelt` (`sandbox-exec`) on macOS. Seatbelt must not expose shared host temporary directories; scratch stays in the workspace. On Windows a configured backend warns and leaves only the application guard. On Unix a configured backend that cannot start must fail, not silently execute without isolation.
+`execution/sandbox.py` builds the sandbox argument vector for both shell execution and the settings probe. `security/sandbox_launcher.py` resolves the trusted host launcher. Backends are `bwrap` (bubblewrap) on Linux and `seatbelt` (`sandbox-exec`) on macOS. Seatbelt must not expose shared host temporary directories; scratch stays in the workspace. On Windows a configured backend warns and leaves only the application guard. On Unix a configured backend that cannot start must fail, not silently execute without isolation.
 
-**Rule**: If adding a sandbox backend, match the backend callable contract in `nanobot/agent/tools/sandbox.py` and register it in `_BACKENDS`. Preserve read/write root handling and the configured backend's failure behavior.
+**Rule**: If adding a sandbox backend, match the backend callable contract in `nanobot/execution/sandbox.py` and register it in `_BACKENDS`. Preserve read/write root handling and the configured backend's failure behavior.
