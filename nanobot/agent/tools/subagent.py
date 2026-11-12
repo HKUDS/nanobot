@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
-from nanobot.agent.tools.context import current_request_context, current_request_session_key
+from nanobot.agent.tools.context import (
+    current_model_input_id,
+    current_request_context,
+    current_request_session_key,
+)
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     NumberSchema,
@@ -138,6 +142,7 @@ class SubagentTool(Tool):
             session_key=session_key,
             origin_message_id=request_ctx.message_id,
             origin_turn_id=request_ctx.turn_id,
+            origin_input_id=current_model_input_id(),
             temperature=temperature,
             workspace_scope=current_workspace_scope(),
             session_policy=SessionPolicy(

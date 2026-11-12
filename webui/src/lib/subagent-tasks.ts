@@ -34,6 +34,7 @@ export function isSubagentTask(value: unknown): value is SubagentTaskSnapshot {
     && typeof value.iteration === "number" && Number.isInteger(value.iteration) && value.iteration >= 0
     && typeof value.created_at === "number" && Number.isFinite(value.created_at)
     && (value.completed_at === null || (typeof value.completed_at === "number" && Number.isFinite(value.completed_at)))
+    && (value.origin_input_id === undefined || nullableText(value.origin_input_id))
     && nullableText(value.origin_turn_id) && nullableText(value.origin_message_id)
     && nullableText(value.result) && nullableText(value.error) && nullableText(value.stop_reason)
     && typeof value.partial === "boolean"

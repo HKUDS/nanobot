@@ -11,7 +11,12 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage
 from nanobot.session.manager import Session
-from nanobot.session.message_metadata import persisted_message
+from nanobot.session.message_metadata import (
+    CONSUMED_INPUT_CURSOR_KEY,
+    CONSUMED_INPUT_ID_KEY,
+    persisted_message,
+    set_consumed_input_cursor,
+)
 from nanobot.session.session_messages import session_message_envelope, session_message_input
 
 RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
@@ -331,6 +336,25 @@ def restore_runtime_checkpoint(session: Session) -> bool:
     if not isinstance(checkpoint, dict):
         return False
     data = cast(dict[str, Any], checkpoint)
+    # A later model request can already have consumed another queued input
+    # while this checkpoint still describes the previous response. The
+    # generation-bound cursor wins, including an unconfirmed dispatch marker.
+    cursor: object = session.metadata.get(CONSUMED_INPUT_CURSOR_KEY)
+    if CONSUMED_INPUT_ID_KEY not in data:
+        # A legacy checkpoint may contain newer consumed inputs than the last
+        # cursor written by this version, but has no reliable ownership marker.
+        set_consumed_input_cursor(session.metadata, session.generation, None)
+    elif isinstance(cursor, dict) and cast(dict[str, object], cursor).get("generation") != session.generation:
+        set_consumed_input_cursor(session.metadata, session.generation, None)
+    elif not isinstance(cursor, dict):
+        # Compaction can checkpoint model_input before a request is sent. Only
+        # a checkpoint with a model response can establish consumption itself.
+        consumed_input: object = data[CONSUMED_INPUT_ID_KEY]
+        confirmed = data.get("phase") in {"awaiting_tools", "tools_completed", "final_response"}
+        set_consumed_input_cursor(
+            session.metadata, session.generation,
+            consumed_input if confirmed and isinstance(consumed_input, str) and consumed_input else None,
+        )
     assistant = cast(object, data.get("assistant_message"))
     completed_value = cast(object, data.get("completed_tool_results"))
     pending_value = cast(object, data.get("pending_tool_calls"))
@@ -438,7 +462,10 @@ def discard_runtime_checkpoint(session: Session) -> bool:
     """Drop checkpoint state that cannot be projected into valid history."""
     if RUNTIME_CHECKPOINT_KEY not in session.metadata:
         return False
-    session.metadata.pop(RUNTIME_CHECKPOINT_KEY, None)
+    checkpoint: object = session.metadata.pop(RUNTIME_CHECKPOINT_KEY, None)
+    if not isinstance(checkpoint, dict) or CONSUMED_INPUT_ID_KEY not in checkpoint:
+        # A legacy/corrupt checkpoint may have consumed an unrecorded input.
+        set_consumed_input_cursor(session.metadata, session.generation, None)
     session.provider_state = None
     session.updated_at = datetime.now()
     return True

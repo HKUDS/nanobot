@@ -17,6 +17,7 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import SubagentControlError, SubagentManager
 from nanobot.agent.subagent_sessions import SUBAGENT, TASK_METADATA_KEY, SubagentSessions
+from nanobot.agent.subagent_status import SubagentStatus
 from nanobot.agent.tools.context import RequestContext, current_request_context, request_context
 from nanobot.agent.tools.session_messages import SendSessionMessageTool
 from nanobot.agent.tools.sessions import ReadSessionTool, SearchSessionsTool
@@ -33,7 +34,7 @@ from nanobot.providers.base import (
 )
 from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
 from nanobot.session.location import SessionLocation
-from nanobot.session.manager import SessionManager
+from nanobot.session.manager import SessionManager, SessionPolicy
 from nanobot.session.session_handles import SessionHandleResolver
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
@@ -63,6 +64,70 @@ def gateway_for(manager, sessions, workspace):
     )
     token = gateway.tokens.issue_api_token(60)
     return gateway, SimpleNamespace(remote_address=("127.0.0.1", 12345)), Headers({"Authorization": f"Bearer {token}"})
+
+
+@pytest.mark.asyncio
+async def test_windowed_task_reads_limit_history_and_reconcile_active_work(tmp_path):
+    manager, sessions, runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    await sessions.state.get("websocket:parent")
+    await sessions.state.get("websocket:other")
+
+    async def saved(task_id, owner, *, input_marker, message_id="prompt-a", turn_id="turn-a"):
+        status = SubagentStatus(
+            task_id=task_id, label=task_id, task_description=task_id, owner=owner,
+            started_at=0, finished_at=1, state="done", completed_at=1,
+            origin_message_id=message_id, origin_turn_id=turn_id,
+        )
+        payload = SubagentSessions._payload(status)
+        if input_marker == "legacy":
+            payload.pop("origin_input_id", None)
+        else:
+            payload["origin_input_id"] = input_marker
+        await sessions.state.create_child(
+            owner, SubagentSessions.key(task_id),
+            metadata={SESSION_TYPE_KEY: SUBAGENT.name, TASK_METADATA_KEY: payload}, content=task_id,
+            policy=SessionPolicy(),
+        )
+
+    for task_id, owner, marker in (
+        ("a", "websocket:parent", "user:a"), ("b", "websocket:parent", "user:b"),
+        ("legacy", "websocket:parent", "legacy"), ("unknown", "websocket:parent", None),
+        ("foreign", "websocket:other", "user:a"),
+    ):
+        await saved(task_id, owner, input_marker=marker)
+    entered = asyncio.Event()
+
+    async def blocked(spec):
+        entered.set()
+        await asyncio.Event().wait()
+
+    manager.runner.run = blocked
+    await manager.spawn("active", session_key="websocket:parent", runtime=runtime)
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    active_id, = manager._tasks
+    gateway, connection, headers = gateway_for(manager, sessions, tmp_path / "agent")
+    path = "/api/sessions/websocket%3Aparent/subagents"
+    try:
+        response = await gateway.http.dispatch(
+            connection, Request(path + "?scope=window&input_id=user%3Aa&message_id=prompt-a&turn_id=turn-a", headers),
+        )
+        assert response.status_code == 200
+        tasks = {task["task_id"]: task for task in json.loads(response.body)["tasks"]}
+        assert set(tasks) == {"a", "legacy", active_id}
+        assert tasks["a"]["origin_input_id"] == "user:a"
+        assert "origin_input_id" not in tasks["legacy"]
+        tracked = await gateway.http.dispatch(
+            connection, Request(path + "?scope=window&track=b&track=foreign&active=0", headers),
+        )
+        assert {task["task_id"] for task in json.loads(tracked.body)["tasks"]} == {"b"}
+        legacy_read = await gateway.http.dispatch(connection, Request(path, headers))
+        assert {task["task_id"] for task in json.loads(legacy_read.body)["tasks"]} == {
+            "a", "b", "legacy", "unknown", active_id,
+        }
+        malformed = await gateway.http.dispatch(connection, Request(path + "?scope=window&active=no", headers))
+        assert malformed.status_code == 400
+    finally:
+        await manager.close()
 
 
 async def wait_for_model_requests(manager, task_id, requests, count):

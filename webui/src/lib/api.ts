@@ -696,15 +696,55 @@ export async function updateAutomation(
   return mutation<AutomationsPayload>(transport, "automation.update", { id, values });
 }
 
-export async function fetchSubagentTasks(token: string, sessionKey: string): Promise<SubagentTasksPayload> {
-  const payload = await request<unknown>(
-    `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`, token, undefined, API_READ_TIMEOUT_MS,
-  );
-  if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)
-    || new Set(payload.tasks.map((task) => task.task_id)).size !== payload.tasks.length) {
-    throw new Error("Invalid subagent tasks response");
+export interface SubagentTaskWindow {
+  inputIds: string[];
+  messageIds: string[];
+  turnIds: string[];
+  trackedIds: string[];
+}
+
+export async function fetchSubagentTasks(
+  token: string, sessionKey: string, window?: SubagentTaskWindow,
+): Promise<SubagentTasksPayload> {
+  const path = `/api/sessions/${encodeURIComponent(sessionKey)}/subagents`;
+  const queries: URLSearchParams[] = [];
+  if (window) {
+    let query = new URLSearchParams({ scope: "window" });
+    let count = 0;
+    for (const [key, values] of [
+      ["input_id", window.inputIds], ["message_id", window.messageIds],
+      ["turn_id", window.turnIds], ["track", window.trackedIds],
+    ] as const) {
+      for (const value of values) {
+        const next = new URLSearchParams(query);
+        next.append(key, value);
+        // Keep request targets bounded, including percent-encoded identifiers.
+        if (count && (next.toString().length > 5000 || count >= 400)) {
+          queries.push(query);
+          query = new URLSearchParams({ scope: "window", active: "0" });
+          count = 0;
+        }
+        query.append(key, value);
+        count += 1;
+      }
+    }
+    queries.push(query);
   }
-  return { tasks: payload.tasks };
+  const tasks = new Map<string, SubagentTasksPayload["tasks"][number]>();
+  for (const query of window ? queries : [null]) {
+    const payload = await request<unknown>(
+      query ? `${path}?${query}` : path, token, undefined, API_READ_TIMEOUT_MS,
+    );
+    if (!isRecord(payload) || !Array.isArray(payload.tasks) || !payload.tasks.every(isSubagentTask)
+      || new Set(payload.tasks.map((task) => task.task_id)).size !== payload.tasks.length) {
+      throw new Error("Invalid subagent tasks response");
+    }
+    for (const task of payload.tasks) {
+      const previous = tasks.get(task.task_id);
+      if (!previous || (task.revision ?? 0) > (previous.revision ?? 0)) tasks.set(task.task_id, task);
+    }
+  }
+  return { tasks: [...tasks.values()] };
 }
 
 export async function fetchSubagentThread(

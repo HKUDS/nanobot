@@ -23,7 +23,7 @@ from nanobot.agent.context_governance import (
 )
 from nanobot.agent.execution_policy import ExecutionControlError
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.tools.context import tool_log_content_allowed
+from nanobot.agent.tools.context import model_input_context, tool_log_content_allowed
 from nanobot.agent.tools.execution import ToolCallResult, execute_tool_calls
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.events import NO_EVENTS, EventSink, ModelRequestEvent, ResponseInputsEvent
@@ -43,6 +43,7 @@ from nanobot.providers.base import (
 from nanobot.providers.compaction import ProviderStateCommitError
 from nanobot.providers.conversation_state import ProviderConversationStateController
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
+from nanobot.session.message_metadata import CONSUMED_INPUT_ID_KEY, MODEL_INPUT_ROLE_KEY
 from nanobot.session.summary import SessionSummaryCheckpoint
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import (
@@ -72,6 +73,7 @@ def _raise_if_cancelling() -> None:
 
 ContinuationCallback = Callable[[], Awaitable[str | None]]
 CheckpointCallback = Callable[[dict[str, Any]], Awaitable[None]]
+ModelInputCallback = Callable[[str | None, bool], Awaitable[None]]
 InjectionCallback = Callable[[], Awaitable[Iterable[Any] | None]]
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
@@ -114,6 +116,8 @@ class AgentRunSpec:
     workspace: Path | None = None
     session_key: str | None = None
     provider_retry_mode: str = "standard"
+    initial_consumed_input_id: str | None = None
+    model_input_callback: ModelInputCallback | None = None
     checkpoint_callback: CheckpointCallback | None = None
     consolidate_history: HistoryConsolidator | None = None
     consolidate_provider_compaction: ProviderCompactionConsolidator | None = None
@@ -405,6 +409,14 @@ class AgentRunner:
         pending_length_segment: tuple[AgentHookContext, str] | None = None
         had_injections = False
         pending_stream_content: str | None = None
+        consumed_input_id = spec.initial_consumed_input_id
+        # History may contain inputs persisted before dispatch. Only the fresh
+        # turn and subsequently injected messages are eligible to advance it.
+        scanned_messages = (
+            len(messages) - 1
+            if spec.transcript_input is not None and spec.transcript_input.current_message is not None
+            else len(messages)
+        )
 
         async def checkpoint_compaction(state: ProviderConversationState) -> None:
             await self._emit_checkpoint(spec, {
@@ -415,7 +427,7 @@ class AgentRunner:
                 "completed_tool_results": [],
                 "pending_tool_calls": [],
                 "provider_state": state,
-            }, messages)
+            }, messages, consumed_input_id=consumed_input_id)
 
         conversation_state = ProviderConversationStateController(
             provider=spec.runtime.provider,
@@ -483,6 +495,16 @@ class AgentRunner:
             if drained_before_request:
                 had_injections = True
             await end_length_segment(interrupted=drained_before_request)
+            for message in messages[scanned_messages:]:
+                metadata = message.get("_meta")
+                if message.get("role") != "user" or not isinstance(metadata, dict):
+                    continue
+                metadata = cast(dict[str, Any], metadata)
+                if metadata.get(MODEL_INPUT_ROLE_KEY) is not True:
+                    continue
+                input_id = metadata.get("input_id")
+                consumed_input_id = input_id if isinstance(input_id, str) and input_id else None
+            scanned_messages = len(messages)
             response_input_ids = self._response_input_ids(messages)
             if spec.events.accepts(ResponseInputsEvent):
                 await spec.events.emit(ResponseInputsEvent(response_input_ids))
@@ -504,6 +526,7 @@ class AgentRunner:
                 context,
                 request_state=request_state,
                 transcript=messages,
+                consumed_input_id=consumed_input_id,
             )
             assert request_state.messages is not None
             messages_for_model = request_state.messages
@@ -558,6 +581,7 @@ class AgentRunner:
                         "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
                     },
                     messages,
+                    consumed_input_id=consumed_input_id,
                 )
 
                 await hook.before_execute_tools(context)
@@ -620,20 +644,23 @@ class AgentRunner:
                             ) if not interrupted else None,
                         },
                         messages,
+                        consumed_input_id=consumed_input_id,
                     )
 
-                await execute_tool_calls(
-                    spec.tools,
-                    response.tool_calls,
-                    concurrent=spec.concurrent_tools,
-                    external_lookup_counts=external_lookup_counts,
-                    workspace_violation_counts=workspace_violation_counts,
-                    hook=hook,
-                    context=context,
-                    model_messages=messages_for_model,
-                    compacted_tool_results=request_state.compacted_tool_results,
-                    on_settled=settle_tool_results,
-                )
+                # Concurrent tool tasks inherit this immutable request snapshot.
+                with model_input_context(consumed_input_id):
+                    await execute_tool_calls(
+                        spec.tools,
+                        response.tool_calls,
+                        concurrent=spec.concurrent_tools,
+                        external_lookup_counts=external_lookup_counts,
+                        workspace_violation_counts=workspace_violation_counts,
+                        hook=hook,
+                        context=context,
+                        model_messages=messages_for_model,
+                        compacted_tool_results=request_state.compacted_tool_results,
+                        on_settled=settle_tool_results,
+                    )
                 empty_content_retries = 0
                 length_recovery_parts.clear()
                 await hook.after_iteration(context)
@@ -758,6 +785,7 @@ class AgentRunner:
                         "provider_state": conversation_state.checkpoint(messages),
                     },
                     messages,
+                    consumed_input_id=consumed_input_id,
                 )
 
             if response.finish_reason == "error":
@@ -954,6 +982,8 @@ class AgentRunner:
     async def _invoke_model(
         self, spec: AgentRunSpec, state: ModelRequestState, kwargs: dict[str, Any],
         *, record_timing: Callable[[LLMResponse], None] | None = None,
+        record_input: bool = False,
+        consumed_input_id: str | None = None,
     ) -> LLMResponse:
         """Observe the logical provider invocation, after request preparation.
 
@@ -983,8 +1013,13 @@ class AgentRunner:
                 await spec.hook.before_model_request()
             await emit("started")
             _raise_if_cancelling()
+            if record_input and spec.model_input_callback is not None:
+                await spec.model_input_callback(consumed_input_id, False)
+            _raise_if_cancelling()
             response = await spec.runtime.provider.chat_stream_with_retry(**kwargs)
             _raise_if_cancelling()
+            if record_input and spec.model_input_callback is not None and response.finish_reason != "error":
+                await spec.model_input_callback(consumed_input_id, True)
         except asyncio.CancelledError:
             try:
                 await shield_and_drain(emit("cancelled"))
@@ -1019,6 +1054,7 @@ class AgentRunner:
         request_state: ModelRequestState,
         malformed_retry: bool = False,
         transcript: list[dict[str, Any]] | None,
+        consumed_input_id: str | None,
     ) -> tuple[LLMResponse, LLMUsage]:
         _raise_if_cancelling()
         messages, kwargs = await self._prepare_model_request(
@@ -1149,7 +1185,10 @@ class AgentRunner:
             if generation_elapsed_s > 0:
                 response.generation_ms = max(1, round(generation_elapsed_s * 1000))
 
-        coro = self._invoke_model(spec, request_state, kwargs, record_timing=record_timing)
+        coro = self._invoke_model(
+            spec, request_state, kwargs, record_timing=record_timing,
+            record_input=True, consumed_input_id=consumed_input_id,
+        )
 
         # Providers bound the wait for each stream event, including reasoning and tool deltas.
         request_started_at = time.perf_counter()
@@ -1201,6 +1240,7 @@ class AgentRunner:
                 request_state=request_state,
                 malformed_retry=True,
                 transcript=None,
+                consumed_input_id=consumed_input_id,
             )
             return retry_response, round_usage + retry_usage
         if (
@@ -1510,6 +1550,8 @@ class AgentRunner:
         spec: AgentRunSpec,
         payload: dict[str, Any],
         messages: list[dict[str, Any]],
+        *,
+        consumed_input_id: str | None,
     ) -> None:
         callback = spec.checkpoint_callback
         if callback is not None:
@@ -1526,6 +1568,7 @@ class AgentRunner:
             )
             await callback({
                 **payload,
+                CONSUMED_INPUT_ID_KEY: consumed_input_id,
                 "preceding_messages": messages[start:len(messages) - batch_size],
             })
 

@@ -274,6 +274,9 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         assert child.state == "done"
         assert child.origin_message_id == expected_origin["message_id"]
         assert child.origin_turn_id == expected_origin["turn_id"]
+        # An interrupted first request has no confirmed model response. A late
+        # system result instead retains the last successfully consumed input.
+        assert child.origin_input_id == ("user:request-b" if late_result else None)
         assert persisted_origin == expected_origin
         assert continuation.metadata["webui_turn_id"] == f"recovery:{state['recovery_id']}"
         assert sessions.get_or_create(request.session_key).metadata[RECOVERY_METADATA_KEY]["status"] == "recovered"
@@ -289,6 +292,10 @@ async def test_recovery_preserves_turn_origin_until_the_next_user_turn(
         } == {
             (expected_origin["message_id"], expected_origin["turn_id"]), ("next-message", "next-request"),
         }
+        assert {
+            status.origin_input_id
+            for task_id, status in statuses.items() if task_id not in existing_tasks
+        } == {"user:request-b" if late_result else None, "user:next-request"}
     finally:
         await loop.aclose()
 

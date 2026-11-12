@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, cast
 
 from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_TURN_ID, InboundMessage
 from nanobot.runtime_context import RUNTIME_CONTEXT_HISTORY_META, RUNTIME_CONTEXT_MESSAGE_META
 from nanobot.session.session_messages import session_message_input, session_message_public_metadata
+
+# A consumed cursor is distinct from admitted input and from response ownership.
+# Generation-binding prevents reset/branch operations from inheriting it.
+CONSUMED_INPUT_CURSOR_KEY = "_model_consumed_input"
+CONSUMED_INPUT_ID_KEY = "consumed_input_id"
+MODEL_INPUT_ROLE_KEY = "_is_user_input"
+
+
+def consumed_input_cursor(metadata: Mapping[str, Any], generation: str) -> str | None:
+    value: object = metadata.get(CONSUMED_INPUT_CURSOR_KEY)
+    if not isinstance(value, dict):
+        return None
+    cursor = cast(dict[str, object], value)
+    if cursor.get("generation") != generation or cursor.get("pending") is True:
+        return None
+    input_id = cursor.get("input_id")
+    return input_id if isinstance(input_id, str) and input_id else None
+
+
+def set_consumed_input_cursor(metadata: dict[str, Any], generation: str, input_id: str | None) -> None:
+    metadata[CONSUMED_INPUT_CURSOR_KEY] = {"generation": generation, "input_id": input_id}
 
 
 def input_history_metadata(message: InboundMessage) -> dict[str, Any]:

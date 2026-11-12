@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterator, Sequence
 from concurrent.futures import CancelledError
 from contextlib import contextmanager, suppress
 from datetime import datetime
@@ -25,11 +25,40 @@ from nanobot.session.manager import (
     metadata_title,
 )
 from nanobot.session.summary import is_summary_checkpoint
-from nanobot.session.types import PARENT_SESSION_KEY
+from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
 _T = TypeVar("_T")
+
+# These expressions define the v6 partial indexes and must remain stable for upgrades.
+_SUBAGENT_ORIGINS = ("origin_input_id", "origin_message_id", "origin_turn_id")
+_SUBAGENT_PARENT = f"json_extract(metadata, '$.{PARENT_SESSION_KEY}')"
+
+
+def _subagent_origin(field: str) -> str:
+    return f"json_extract(metadata, '$.subagent_task.{field}')"
+
+
+def _subagent_origin_filter(field: str) -> str:
+    # Only a missing key is legacy; explicit null/empty input IDs are unknown.
+    # Keep the partial-index predicate identical to the lookup predicate.
+    legacy = " AND json_type(metadata, '$.subagent_task.origin_input_id') IS NULL" if field != "origin_input_id" else ""
+    return (
+        f"json_extract(metadata, '$.{SESSION_TYPE_KEY}')='subagent' "
+        f"AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text' "
+        f"AND json_type(metadata, '$.subagent_task.{field}')='text'{legacy}"
+    )
+
+
+# Field names above are fixed by the schema; all caller-supplied values are bound.
+_SUBAGENT_METADATA_QUERY = """SELECT key, created_at, updated_at, metadata FROM sessions
+    WHERE key IN (""" + " UNION ".join(
+        f"""SELECT key FROM sessions WHERE {_subagent_origin_filter(field)}
+            AND {_SUBAGENT_PARENT}=?
+            AND {_subagent_origin(field)} IN (SELECT value FROM json_each(?))"""
+        for field in _SUBAGENT_ORIGINS
+    ) + ") ORDER BY updated_at DESC"
 
 
 def _encode(value: object) -> str:
@@ -123,9 +152,17 @@ def _create_schema_v5(db: sqlite3.Connection) -> None:
     ) WHERE kind='input'""")
 
 
+def _create_schema_v6(db: sqlite3.Connection) -> None:
+    for field in _SUBAGENT_ORIGINS:
+        db.execute(f"""CREATE INDEX sessions_subagent_{field} ON sessions (
+            {_SUBAGENT_PARENT}, {_subagent_origin(field)}
+        ) WHERE {_subagent_origin_filter(field)}""")
+
+
 # Entries upgrade version N to N+1. Preserve released entries and append upgrades.
 _SCHEMA_MIGRATIONS: tuple[Callable[[sqlite3.Connection], None], ...] = (
     _create_schema_v1, _create_schema_v2, _create_schema_v3, _create_schema_v4, _create_schema_v5,
+    _create_schema_v6,
 )
 
 
@@ -727,6 +764,20 @@ class SqliteSessionStore:
                             ORDER BY updated_at DESC""",
                         (parent_key,),
                     )]
+
+    def list_subagent_session_metadata(
+        self, parent_key: str, *, input_ids: Sequence[str], message_ids: Sequence[str],
+        turn_ids: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read only subagent headers attributed to the requested parent inputs."""
+        origins = [[value for value in ids if value] for ids in (input_ids, message_ids, turn_ids)]
+        if not any(origins):
+            return []
+        params = tuple(value for ids in origins for value in (parent_key, _encode(ids)))
+        with self.transaction(write=False) as db:
+            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
+                     "metadata": _object(row[3])}
+                    for row in db.execute(_SUBAGENT_METADATA_QUERY, params)]
 
     def list_metadata(self) -> list[dict[str, Any]]:
         with self.transaction(write=False) as db:

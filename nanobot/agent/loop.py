@@ -82,7 +82,13 @@ from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
-from nanobot.session.message_metadata import input_history_metadata, persisted_message
+from nanobot.session.message_metadata import (
+    CONSUMED_INPUT_CURSOR_KEY,
+    MODEL_INPUT_ROLE_KEY,
+    consumed_input_cursor,
+    input_history_metadata,
+    persisted_message,
+)
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
     model_preset_from_metadata,
@@ -105,7 +111,7 @@ from nanobot.session.summary import (
     SessionSummaryCheckpoint,
 )
 from nanobot.triggers.local_turns import LocalTriggerTurnCoordinator
-from nanobot.utils.cancellation import task_is_cancelling
+from nanobot.utils.cancellation import shield_and_drain, task_is_cancelling
 from nanobot.utils.document import reference_non_image_attachments
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -746,7 +752,11 @@ class AgentLoop:
             input_metadata=(
                 None
                 if turn_continuation.internal_continuation_inbound(ctx.msg.metadata)
-                else input_history_metadata(ctx.msg)
+                else input_history_metadata(ctx.msg) | {
+                    MODEL_INPUT_ROLE_KEY: (
+                        ctx.msg.is_user_input and not automation_history_overrides(ctx.msg.metadata)[1]
+                    ),
+                }
             ),
         )
 
@@ -1024,6 +1034,45 @@ class AgentLoop:
             commit_session and session is not None and (not ephemeral or not session.policy.persist)
         )
 
+        async def _record_model_input(input_id: str | None, confirmed: bool) -> None:
+            if session is None or not retain_session_state:
+                return
+            cursor: dict[str, Any] = {"generation": session.generation, "input_id": input_id}
+            current = session.metadata.get(CONSUMED_INPUT_CURSOR_KEY)
+            if current == cursor:
+                return
+            if not confirmed:
+                # A crash between dispatch and response must not turn a merely
+                # attempted request into a claimed consumed input on recovery.
+                cursor["pending"] = True
+                if current == cursor:
+                    return
+            missing = object()
+            previous = session.metadata.get(CONSUMED_INPUT_CURSOR_KEY, missing)
+            try:
+                await self.sessions.state.update_metadata(
+                    session.key, {CONSUMED_INPUT_CURSOR_KEY: cursor}, expected_generation=session.generation,
+                )
+            except asyncio.CancelledError:
+                # Admission may commit even when the caller is cancelled while
+                # waiting. No provider call has started: undo only our own write.
+                def rollback(metadata: dict[str, Any]) -> None:
+                    if metadata.get(CONSUMED_INPUT_CURSOR_KEY) != cursor:
+                        return
+                    if previous is missing:
+                        metadata.pop(CONSUMED_INPUT_CURSOR_KEY, None)
+                    else:
+                        metadata[CONSUMED_INPUT_CURSOR_KEY] = previous
+
+                try:
+                    await shield_and_drain(self.sessions.state.mutate_metadata(
+                        session.key, rollback, expected_generation=session.generation,
+                    ))
+                except SessionConflictError:
+                    pass  # A reset/deletion already revoked this generation.
+                raise
+            session.metadata[CONSUMED_INPUT_CURSOR_KEY] = cursor
+
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None or not retain_session_state:
                 return
@@ -1084,7 +1133,7 @@ class AgentLoop:
                 )
                 row: dict[str, Any] = {
                     "role": "user", "content": user_content,
-                    "_meta": input_history_metadata(pending_msg),
+                    "_meta": input_history_metadata(pending_msg) | {MODEL_INPUT_ROLE_KEY: pending_msg.is_user_input},
                 }
                 if HIDDEN_HISTORY_META in pending_msg.metadata:
                     row[HIDDEN_HISTORY_META] = pending_msg.metadata[HIDDEN_HISTORY_META]
@@ -1311,6 +1360,10 @@ class AgentLoop:
                 workspace=None if ephemeral else effective_scope.project_path,
                 session_key=session.key if session else None,
                 provider_retry_mode=self.provider_retry_mode,
+                initial_consumed_input_id=(
+                    consumed_input_cursor(session.metadata, session.generation) if session is not None else None
+                ),
+                model_input_callback=_record_model_input,
                 checkpoint_callback=_checkpoint,
                 consolidate_history=partial(
                     self.consolidator.summarize_transcript,

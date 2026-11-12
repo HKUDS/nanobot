@@ -25,6 +25,9 @@ _CURRENT_REQUEST_CONTEXT: ContextVar["RequestContext | None"] = ContextVar(
     "nanobot_tool_request_context",
     default=None,
 )
+_CURRENT_MODEL_INPUT_ID: ContextVar[str | None] = ContextVar(
+    "nanobot_tool_model_input_id", default=None,
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,20 @@ def request_context(ctx: RequestContext):
 
 def current_request_context() -> RequestContext | None:
     return _CURRENT_REQUEST_CONTEXT.get()
+
+
+@contextmanager
+def model_input_context(input_id: str | None):
+    """Bind the input consumed by the model response whose tools are executing."""
+    token = _CURRENT_MODEL_INPUT_ID.set(input_id)
+    try:
+        yield
+    finally:
+        _CURRENT_MODEL_INPUT_ID.reset(token)
+
+
+def current_model_input_id() -> str | None:
+    return _CURRENT_MODEL_INPUT_ID.get()
 
 
 def tool_log_content_allowed() -> bool:

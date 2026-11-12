@@ -7,12 +7,13 @@ import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { isActiveSubagentTask, type ObservedSubagentTask } from "@/lib/subagent-tasks";
 import type { UIMessage } from "@/lib/types";
 
-/** Exact initiating prompts win; replayed IDs fall back to the turn's first user message. */
 function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
+  const promptsByInput = new Map<string, UIMessage>();
   const promptsById = new Map<string, UIMessage>();
   const firstPromptByTurn = new Map<string, UIMessage>();
   for (const message of messages) {
     if (message.role !== "user") continue;
+    if (message.inputId) promptsByInput.set(message.inputId, message);
     promptsById.set(message.id, message);
     if (message.turnId && !firstPromptByTurn.has(message.turnId)) {
       firstPromptByTurn.set(message.turnId, message);
@@ -22,8 +23,10 @@ function groupResults(messages: UIMessage[], tasks: ObservedSubagentTask[]) {
   const byMessage = new Map<string, ObservedSubagentTask[]>();
   for (const task of tasks) {
     if (isActiveSubagentTask(task)) continue;
-    const prompt = (task.origin_message_id ? promptsById.get(task.origin_message_id) : undefined)
-      ?? (task.origin_turn_id ? firstPromptByTurn.get(task.origin_turn_id) : undefined);
+    const prompt = task.origin_input_id !== undefined
+      ? (task.origin_input_id ? promptsByInput.get(task.origin_input_id) : undefined)
+      : (task.origin_message_id ? promptsById.get(task.origin_message_id) : undefined)
+        ?? (task.origin_turn_id ? firstPromptByTurn.get(task.origin_turn_id) : undefined);
     if (!prompt) continue;
     const group = byMessage.get(prompt.id) ?? [];
     group.push(task);

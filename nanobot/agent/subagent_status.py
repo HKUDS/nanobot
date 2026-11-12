@@ -36,6 +36,10 @@ class SubagentStatus:
     error: str | None = None
     origin_message_id: str | None = None
     origin_turn_id: str | None = None
+    origin_input_id: str | None = None
+    # Old persisted tasks lack the field; a new task with an unknown owner has
+    # an explicit null. Keep that distinction across loads and status updates.
+    origin_input_id_present: bool = field(default=True, repr=False)
     created_at: float = field(default_factory=time.time)
     completed_at: float | None = None
     revision: int = 0
@@ -48,6 +52,7 @@ class SubagentStatus:
             "revision": self.revision,
             "origin_message_id": self.origin_message_id,
             "origin_turn_id": self.origin_turn_id,
+            **({"origin_input_id": self.origin_input_id} if self.origin_input_id_present else {}),
             "created_at": self.created_at,
             "completed_at": self.completed_at,
             "label": self.label,

@@ -472,6 +472,48 @@ class SubagentManager:
             self._merge_session_statuses, session_key, runtime, include_history=True,
         )
 
+    async def read_window_statuses_for_session(
+        self, session_key: str, *, input_ids: list[str], message_ids: list[str],
+        turn_ids: list[str], tracked_ids: list[str], include_active: bool,
+    ) -> Mapping[str, SubagentStatus]:
+        """Read a message window and reconcile previously observed active tasks."""
+        inputs, messages, turns, tracked = set(input_ids), set(message_ids), set(turn_ids), set(tracked_ids)
+
+        def matches(status: SubagentStatus) -> bool:
+            if status.origin_input_id_present:
+                return status.origin_input_id in inputs
+            return status.origin_message_id in messages or status.origin_turn_id in turns
+
+        runtime = {
+            **{task_id: record.snapshot() for task_id, record in self._tasks.items()
+               if record.status.owner == session_key and record.status.finished_at is None
+               and (include_active or task_id in tracked or matches(record.status))},
+            **{task_id: deepcopy(status) for task_id, status in self._terminal_statuses.items()
+               if status.owner == session_key and (task_id in tracked or matches(status))},
+        }
+
+        def read() -> Mapping[str, SubagentStatus]:
+            if self.sessions is not None and not self.sessions.exists(session_key):
+                return {}
+            statuses = self.sessions.load_window(
+                session_key, input_ids=input_ids, message_ids=message_ids, turn_ids=turn_ids,
+            ) if self.sessions is not None else {}
+            if self.sessions is not None:
+                for task_id in tracked:
+                    if task_id not in statuses:
+                        status = self.sessions.status(task_id, session_key)
+                        if status is not None:
+                            statuses[task_id] = status
+            for task_id, status in runtime.items():
+                if self.sessions is not None and not self.sessions.contains(task_id, session_key):
+                    continue
+                persisted = statuses.get(task_id)
+                if persisted is None or status.revision >= persisted.revision:
+                    statuses[task_id] = status
+            return statuses
+
+        return await asyncio.to_thread(read)
+
     def set_provider(self, provider: LLMProvider, model: str) -> None:
         """Update the deprecated runtime source used by legacy ``spawn`` calls."""
         warnings.warn(
@@ -540,7 +582,7 @@ class SubagentManager:
         session_key: str | None, origin_message_id: str | None,
         temperature: float | None, workspace_scope: WorkspaceScope | None,
         runtime: LLMRuntime | None, *, announce: bool, origin_turn_id: str | None,
-        session_policy: SessionPolicy | None,
+        origin_input_id: str | None, session_policy: SessionPolicy | None,
     ) -> _SubagentTask:
         self.bus.admission.check()
         if runtime is None:
@@ -561,6 +603,7 @@ class SubagentManager:
             owner=owner,
             origin_message_id=origin_message_id,
             origin_turn_id=origin_turn_id,
+            origin_input_id=origin_input_id,
         )
         self._admitting += 1
         try:
@@ -619,6 +662,7 @@ class SubagentManager:
         *,
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
+        origin_input_id: str | None = None,
         session_policy: SessionPolicy | None = None,
     ) -> str:
         """Start background work and route its terminal result to the parent."""
@@ -626,7 +670,7 @@ class SubagentManager:
             record = await self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=True, origin_turn_id=origin_turn_id,
-                session_policy=session_policy,
+                origin_input_id=origin_input_id, session_policy=session_policy,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")
@@ -647,6 +691,7 @@ class SubagentManager:
         *,
         runtime: LLMRuntime | None = None,
         origin_turn_id: str | None = None,
+        origin_input_id: str | None = None,
         session_policy: SessionPolicy | None = None,
     ) -> str:
         """Wait for the same task lifecycle without a background notice."""
@@ -654,7 +699,7 @@ class SubagentManager:
             record = await self._create_task(
                 task, label, origin_channel, origin_chat_id, session_key,
                 origin_message_id, temperature, workspace_scope, runtime, announce=False, origin_turn_id=origin_turn_id,
-                session_policy=session_policy,
+                origin_input_id=origin_input_id, session_policy=session_policy,
             )
         except SubagentControlError as exc:
             return ToolResult.error(f"Error: {exc}")

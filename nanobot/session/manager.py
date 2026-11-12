@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -515,6 +515,19 @@ class SessionManager:
     def list_child_session_metadata(self, parent_key: str) -> list[SessionMetadataPayload]:
         """Read persisted child headers without transcripts, checkpoints, or pending inputs."""
         return self._store.list_child_session_metadata(parent_key)
+
+    def list_subagent_session_metadata(
+        self, parent_key: str, *, input_ids: Sequence[str], message_ids: Sequence[str],
+        turn_ids: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read matching persisted subagent headers without transcripts or runtime state.
+
+        Only records without an origin_input_id key can match legacy message/turn IDs.
+        Null or empty input IDs do not match; blank requested IDs are ignored.
+        """
+        return self._store.list_subagent_session_metadata(
+            parent_key, input_ids=input_ids, message_ids=message_ids, turn_ids=turn_ids,
+        )
 
     def save(self, session: Session) -> None:
         """Commit an offline administrative snapshot, rejecting obsolete history."""

@@ -52,7 +52,11 @@ class SubagentSessions:
     @staticmethod
     def _payload(status: SubagentStatus) -> dict[str, Any]:
         return {
-            **_STATUS.dump_python(status, mode="json", exclude={"started_at", "finished_at"}),
+            **_STATUS.dump_python(
+                status, mode="json",
+                exclude={"started_at", "finished_at", "origin_input_id_present"}
+                | (set() if status.origin_input_id_present else {"origin_input_id"}),
+            ),
             "elapsed_seconds": status.as_dict()["elapsed_seconds"],
         }
 
@@ -101,6 +105,7 @@ class SubagentSessions:
             status = _STATUS.validate_python({
                 **value, "started_at": now - elapsed,
                 "finished_at": now if value.get("completed_at") is not None else None,
+                "origin_input_id_present": "origin_input_id" in value,
             })
         except ValidationError as exc:
             raise SubagentSessionError("invalid task session metadata") from exc
@@ -111,6 +116,22 @@ class SubagentSessions:
     def load(self, owner: str) -> dict[str, SubagentStatus]:
         result: dict[str, SubagentStatus] = {}
         for row in self.sessions.list_child_session_metadata(owner):
+            key = row["key"]
+            task_id = key.removeprefix("subagent:")
+            if key != self.key(task_id):
+                continue
+            status = self._status_from_metadata(task_id, owner, row["metadata"])
+            if status is not None:
+                result[task_id] = status
+        return result
+
+    def load_window(
+        self, owner: str, *, input_ids: list[str], message_ids: list[str], turn_ids: list[str],
+    ) -> dict[str, SubagentStatus]:
+        result: dict[str, SubagentStatus] = {}
+        for row in self.sessions.list_subagent_session_metadata(
+            owner, input_ids=input_ids, message_ids=message_ids, turn_ids=turn_ids,
+        ):
             key = row["key"]
             task_id = key.removeprefix("subagent:")
             if key != self.key(task_id):

@@ -72,6 +72,8 @@ export type SubagentTaskState = "queued" | "running" | "stopping" | "done" | "in
 export interface SubagentTaskSnapshot {
   task_id: string;
   revision?: number;
+  /** Absent on older tasks; null means the consuming input is unknown. */
+  origin_input_id?: string | null;
   origin_message_id: string | null;
   origin_turn_id: string | null;
   created_at: number;

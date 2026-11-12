@@ -47,14 +47,15 @@ function emitTask(snapshot: SubagentTaskSnapshot) {
     chatHandlers.forEach((handler) => handler({ event: "subagent_task", chat_id: "a", task: snapshot }));
   });
 }
-function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEvents = true, historyEnabled = false, onActivityToggle }: {
+function layout({ threadMessages = messages, sessionKey = "websocket:a", liveEvents = true, historyEnabled = false, scopedHistory = false, onActivityToggle }: {
   threadMessages?: UIMessage[];
   sessionKey?: string;
   liveEvents?: boolean;
   historyEnabled?: boolean;
+  scopedHistory?: boolean;
   onActivityToggle?: () => void;
 } = {}) {
-  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled}>
+  return <SubagentTasksProvider client={client} sessionKey={sessionKey} token="tok" enabled liveEvents={liveEvents} historyEnabled={historyEnabled} scopedHistory={scopedHistory} messages={threadMessages}>
     <div data-testid="messages"><SubagentThreadMessages messages={threadMessages} onActivityToggle={onActivityToggle} /></div>
     <div data-testid="composer" className="thread-composer-stack"><SubagentTaskDock /><textarea aria-label="Message" /></div>
   </SubagentTasksProvider>;
@@ -229,6 +230,70 @@ describe("subagent result archives", () => {
     expect(within(archives[0]).getByRole("button", { name: "Turn fallback Completed 4s" })).toBeVisible();
     expect(within(archives[1]).getByRole("button", { name: "Exact check Completed 4s" })).toBeVisible();
     expect(screen.getByTestId("messages").querySelectorAll("[data-subagent-id]")).toHaveLength(2);
+  });
+
+  it("uses consumed input identity instead of a misleading turn, and only falls back for legacy tasks", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetch).mockImplementation(async () => response([
+      task({ task_id: "consumed", label: "Consumed input", origin_input_id: "user:b", origin_turn_id: "turn-a", origin_message_id: "prompt-a" }),
+      task({ task_id: "unknown", label: "Unknown input", origin_input_id: null }),
+      task({ task_id: "legacy", label: "Legacy input" }),
+    ]));
+    render(layout({ threadMessages: [
+      { ...messages[0], inputId: "user:a" },
+      { id: "prompt-b", inputId: "user:b", role: "user", content: "Follow-up", turnId: "turn-a", createdAt: 101_000 },
+    ] }));
+    const archives = await screen.findAllByRole("region", { name: "Subtasks" });
+    expect(archives).toHaveLength(2);
+    await user.click(summary(archives[0]));
+    await user.click(summary(archives[1]));
+    expect(within(archives[0]).getByRole("button", { name: /Legacy input/ })).toBeVisible();
+    expect(within(archives[1]).getByRole("button", { name: /Consumed input/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Unknown input/ })).not.toBeInTheDocument();
+  });
+
+  it("requests completed tasks for the current history window while keeping active tasks available", async () => {
+    const old = { id: "old", inputId: "user:old", role: "user", content: "Earlier prompt", turnId: "old", createdAt: 99_000 } as UIMessage;
+    const current = { ...messages[0], inputId: "user:current" };
+    const seen: URL[] = [];
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      seen.push(url);
+      return response([
+        task({ task_id: "live", label: "Live", state: "running", completed_at: null, origin_input_id: "user:elsewhere" }),
+        ...(url.searchParams.getAll("input_id").includes("user:old")
+          ? [task({ task_id: "old", label: "Earlier check", origin_input_id: "user:old" })] : []),
+      ]);
+    });
+    const user = userEvent.setup();
+    const view = render(layout({ scopedHistory: true, threadMessages: [current] }));
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
+    expect(seen[0].searchParams.get("scope")).toBe("window");
+    expect(seen[0].searchParams.getAll("input_id")).toEqual(["user:current"]);
+    view.rerender(layout({ scopedHistory: true, threadMessages: [old, current] }));
+    const archive = await screen.findByRole("region", { name: "Subtasks" });
+    await user.click(summary(archive));
+    expect(within(archive).getByRole("button", { name: /Earlier check/ })).toBeVisible();
+    expect(seen.some((url) => url.searchParams.getAll("input_id").includes("user:old"))).toBe(true);
+    expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+  });
+
+  it("reconciles a previously active off-window task after focus", async () => {
+    const seen: URL[] = [];
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      seen.push(url);
+      return response(url.searchParams.getAll("track").includes("task-1")
+        ? [task({ revision: 2, origin_input_id: "user:other" })]
+        : [task({ state: "running", completed_at: null, origin_input_id: "user:other" })]);
+    });
+    render(layout({ scopedHistory: true, threadMessages: [{ ...messages[0], inputId: "user:current" }] }));
+    expect(await screen.findByTestId("subagent-task-dock-trigger")).toHaveTextContent("Running: 1");
+    act(() => { window.dispatchEvent(new Event("focus")); });
+    await waitFor(() => expect(seen.some((url) => url.searchParams.getAll("track").includes("task-1"))).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("subagent-task-dock-trigger")).toHaveTextContent("Completed: 1"));
+    expect(screen.getByTestId("messages").querySelector("[data-subagent-results]")).toBeNull();
   });
 
   it("shows older results only with their loaded prompt and preserves details through history navigation", async () => {

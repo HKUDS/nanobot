@@ -1,0 +1,549 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import subprocess
+import sys
+import textwrap
+from copy import deepcopy
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from agent.session_helpers import save_completed_subagent
+from nanobot.agent.loop import AgentLoop
+from nanobot.agent.subagent_sessions import TASK_METADATA_KEY
+from nanobot.agent.tools.context import RequestContext, request_context
+from nanobot.agent.tools.subagent import SubagentTool
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+from nanobot.session.manager import Session, SessionManager
+from nanobot.session.message_metadata import (
+    CONSUMED_INPUT_CURSOR_KEY,
+    CONSUMED_INPUT_ID_KEY,
+    consumed_input_cursor,
+)
+from nanobot.session.recovery import RUNTIME_CHECKPOINT_KEY, restore_runtime_checkpoint
+from nanobot.session.session_messages import SESSION_MESSAGE_METADATA_KEY
+
+
+def user(content: str, turn: str | None, *, chat: str = "chat") -> InboundMessage:
+    metadata = {"message_id": f"ui-{content}"}
+    if turn is not None:
+        metadata["webui_turn_id"] = turn
+    return InboundMessage(channel="websocket", sender_id="user", chat_id=chat, content=content, metadata=metadata)
+
+
+def system_result(task_id: str, *, chat: str = "chat") -> InboundMessage:
+    key = f"websocket:{chat}"
+    return InboundMessage(
+        channel="system", sender_id="subagent", chat_id=key, session_key_override=key,
+        require_existing_session=True, content=f"Result from {task_id}",
+        metadata={"injected_event": "subagent_result", "subagent_task_id": task_id},
+    )
+
+
+def provider() -> MagicMock:
+    result = MagicMock(aclose=AsyncMock())
+    result.get_default_model.return_value = "test-model"
+    result.generation = GenerationSettings()
+    result.can_resume_conversation_state.return_value = False
+    return result
+
+
+def main_request(kwargs: dict) -> bool:
+    return any(item["function"]["name"] == "subagent" for item in kwargs["tools"])
+
+
+def create_call(label: str, *, wait: bool = True) -> LLMResponse:
+    return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+        label, "subagent", {"action": "create", "task": label, "label": label, "wait": wait},
+    )])
+
+
+async def dispatch_and_wait(loop: AgentLoop, message: InboundMessage) -> None:
+    await loop._dispatch_inbound(message)
+    tasks = tuple(loop._active_tasks.get(message.session_key, ()))
+    if tasks:
+        await asyncio.wait_for(asyncio.gather(*tasks), 10)
+
+
+@pytest.mark.parametrize("arrival", ["model", "tool"])
+async def test_creation_uses_request_snapshot_not_later_queued_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, arrival: str,
+) -> None:
+    backend = provider()
+    entered, release = asyncio.Event(), asyncio.Event()
+    main_calls = []
+
+    async def respond(**kwargs):
+        if not main_request(kwargs):
+            return LLMResponse(content="child done")
+        main_calls.append(deepcopy(kwargs["messages"]))
+        if len(main_calls) == 1:
+            if arrival == "model":
+                entered.set()
+                await release.wait()
+            return create_call("first")
+        if len(main_calls) == 2:
+            return create_call("second")
+        return LLMResponse(content="finished")
+
+    backend.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    loop = AgentLoop(bus=MessageBus(), provider=backend, workspace=tmp_path, model="test-model")
+    run_inline = loop.subagents.run_inline
+
+    async def delayed_child(*args, **kwargs):
+        if kwargs["label"] == "first" and arrival == "tool":
+            entered.set()
+            await release.wait()
+        return await run_inline(*args, **kwargs)
+
+    monkeypatch.setattr(loop.subagents, "run_inline", delayed_child)
+    try:
+        await save_completed_subagent(loop, "queued-result", "websocket:chat")
+        await loop._dispatch_inbound(user("A", "turn-a"))
+        await asyncio.wait_for(entered.wait(), 5)
+        await loop._dispatch_inbound(user("B", "turn-b"))
+        await loop._dispatch_inbound(system_result("queued-result"))
+        assert loop._pending_queues["websocket:chat"].qsize() == 2
+        release.set()
+        await asyncio.wait_for(asyncio.gather(*loop._active_tasks["websocket:chat"]), 10)
+        statuses = {
+            status.label: status for status in loop.subagents.statuses_for_session("websocket:chat").values()
+            if status.label in {"first", "second"}
+        }
+        assert {name: status.origin_input_id for name, status in statuses.items()} == {
+            "first": "user:turn-a", "second": "user:turn-b",
+        }
+        assert all(status.origin_message_id == "ui-A" for status in statuses.values())
+        assert not any(row.get("_meta", {}).get("input_id") == "user:turn-b" for row in main_calls[0])
+        assert any(row.get("_meta", {}).get("input_id") == "user:turn-b" for row in main_calls[1])
+        stored = await loop.sessions.state.get("websocket:chat")
+        tool_responses = [row for row in stored.messages if row.get("tool_calls")]
+        # The existing response-input semantics stop at a system result; they
+        # intentionally differ from the last consumed user-input cursor.
+        assert [row["response_input_ids"] for row in tool_responses] == [["user:turn-a"], []]
+        reloaded = SessionManager(tmp_path)
+        try:
+            from nanobot.agent.subagent_sessions import SubagentSessions
+            children = SubagentSessions(reloaded).load("websocket:chat")
+            assert {
+                status.label: status.as_dict()["origin_input_id"] for status in children.values()
+                if status.label in {"first", "second"}
+            } == {"first": "user:turn-a", "second": "user:turn-b"}
+        finally:
+            await reloaded.state.aclose()
+    finally:
+        release.set()
+        await loop.aclose()
+
+
+async def test_system_run_unknown_input_session_message_and_reset(tmp_path: Path) -> None:
+    backend = provider()
+    next_label: str | None = None
+
+    async def respond(**kwargs):
+        nonlocal next_label
+        if main_request(kwargs) and next_label is not None:
+            label, next_label = next_label, None
+            return create_call(label)
+        return LLMResponse(content="done")
+
+    backend.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    loop = AgentLoop(bus=MessageBus(), provider=backend, workspace=tmp_path, model="test-model")
+    key = "websocket:chat"
+    try:
+        await dispatch_and_wait(loop, user("A", "turn-a"))
+        await save_completed_subagent(loop, "background-1", key)
+        next_label = "independent"
+        await dispatch_and_wait(loop, system_result("background-1"))
+        status = next(s for s in loop.subagents.statuses_for_session(key).values() if s.label == "independent")
+        assert status.origin_input_id == "user:turn-a"
+
+        # Bound automation is delivered on the user's channel, but it is not a
+        # user input even when it carries a turn identifier.
+        next_label = "scheduled"
+        await dispatch_and_wait(loop, InboundMessage(
+            channel="websocket", sender_id="cron", chat_id="chat", content="scheduled check",
+            metadata={"webui_turn_id": "scheduled-turn", "_cron_trigger": {"job_id": "job"}},
+        ))
+        status = next(s for s in loop.subagents.statuses_for_session(key).values() if s.label == "scheduled")
+        assert status.origin_input_id == "user:turn-a"
+
+        envelope = {
+            "message_id": "session-1", "created_at_ms": 1, "expect_reply": False,
+            "source_handle": "peer", "source_session_key": "websocket:peer", "target_session_key": key,
+        }
+        next_label = "session-input"
+        await dispatch_and_wait(loop, InboundMessage(
+            channel="system", sender_id="session", chat_id=key, session_key_override=key,
+            input_role="user", content="B", metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
+        ))
+        status = next(s for s in loop.subagents.statuses_for_session(key).values() if s.label == "session-input")
+        assert status.origin_input_id == "session-message:session-1"
+
+        next_label = "unknown"
+        await dispatch_and_wait(loop, user("C", None))
+        status = next(s for s in loop.subagents.statuses_for_session(key).values() if s.label == "unknown")
+        assert status.origin_message_id == "ui-C"
+        assert status.as_dict()["origin_input_id"] is None
+        await save_completed_subagent(loop, "background-2", key)
+        next_label = "after-unknown"
+        await dispatch_and_wait(loop, system_result("background-2"))
+        status = next(s for s in loop.subagents.statuses_for_session(key).values() if s.label == "after-unknown")
+        assert status.as_dict()["origin_input_id"] is None
+
+        await loop.sessions.state.reset(key)
+        await save_completed_subagent(loop, "background-after-reset", key)
+        next_label = "after-reset"
+        await dispatch_and_wait(loop, system_result("background-after-reset"))
+        status = next(s for s in loop.subagents.statuses_for_session(key).values() if s.label == "after-reset")
+        assert status.as_dict()["origin_input_id"] is None
+    finally:
+        await loop.aclose()
+
+
+async def test_legacy_missing_key_and_new_unknown_survive_persistence(tmp_path: Path) -> None:
+    backend = provider()
+    calls = 0
+
+    async def respond(**kwargs):
+        nonlocal calls
+        if main_request(kwargs):
+            calls += 1
+            if calls == 1:
+                return create_call("unknown")
+        return LLMResponse(content="done")
+
+    backend.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    loop = AgentLoop(bus=MessageBus(), provider=backend, workspace=tmp_path, model="test-model")
+    try:
+        await dispatch_and_wait(loop, user("no-id", None))
+        status = next(iter(loop.subagents.statuses_for_session("websocket:chat").values()))
+        sessions = loop.subagents.sessions
+        assert sessions is not None
+        child_key = sessions.key(status.task_id)
+        child = await loop.sessions.state.get(child_key)
+        assert child.metadata[TASK_METADATA_KEY]["origin_input_id"] is None
+        with request_context(RequestContext(channel="websocket", chat_id="chat", session_key="websocket:chat")):
+            public = json.loads(await SubagentTool(loop.subagents).execute(action="check", task_id=status.task_id))
+        assert public["origin_input_id"] is None
+        legacy = dict(child.metadata[TASK_METADATA_KEY])
+        legacy.pop("origin_input_id")
+        await loop.sessions.state.update_metadata(child_key, {TASK_METADATA_KEY: legacy})
+        restored = sessions.status(status.task_id, "websocket:chat")
+        assert restored is not None and not restored.origin_input_id_present
+        assert "origin_input_id" not in restored.as_dict()
+        await sessions.save(restored)
+        child = await loop.sessions.state.get(child_key)
+        assert "origin_input_id" not in child.metadata[TASK_METADATA_KEY]
+    finally:
+        await loop.aclose()
+
+    restarted = AgentLoop(bus=MessageBus(), provider=backend, workspace=tmp_path, model="test-model")
+    try:
+        with request_context(RequestContext(channel="websocket", chat_id="chat", session_key="websocket:chat")):
+            public = json.loads(await SubagentTool(restarted.subagents).execute(action="check", task_id=status.task_id))
+        assert "origin_input_id" not in public
+    finally:
+        await restarted.aclose()
+
+
+async def test_concurrent_sessions_keep_tool_snapshots_isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    backend = provider()
+    seen: set[str] = set()
+    both = asyncio.Event()
+
+    async def respond(**kwargs):
+        if not main_request(kwargs):
+            return LLMResponse(content="child done")
+        input_ids = [row.get("_meta", {}).get("input_id") for row in kwargs["messages"]]
+        owner = next(value for value in input_ids if value in {"user:one", "user:two"})
+        if owner not in seen:
+            seen.add(owner)
+            if len(seen) == 2:
+                both.set()
+            await asyncio.wait_for(both.wait(), 5)
+            return create_call(owner)
+        return LLMResponse(content="done")
+
+    backend.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    loop = AgentLoop(bus=MessageBus(), provider=backend, workspace=tmp_path, model="test-model")
+    tool_started = 0
+    both_tools = asyncio.Event()
+    run_inline = loop.subagents.run_inline
+
+    async def overlap(*args, **kwargs):
+        nonlocal tool_started
+        tool_started += 1
+        if tool_started == 2:
+            both_tools.set()
+        await asyncio.wait_for(both_tools.wait(), 5)
+        return await run_inline(*args, **kwargs)
+
+    monkeypatch.setattr(loop.subagents, "run_inline", overlap)
+    try:
+        await asyncio.gather(
+            dispatch_and_wait(loop, user("one", "one", chat="one")),
+            dispatch_and_wait(loop, user("two", "two", chat="two")),
+        )
+        for name in ("one", "two"):
+            child = next(iter(loop.subagents.statuses_for_session(f"websocket:{name}").values()))
+            assert child.origin_input_id == f"user:{name}"
+    finally:
+        await loop.aclose()
+
+
+async def test_restart_does_not_treat_an_unconfirmed_request_as_consumed(tmp_path: Path) -> None:
+    backend = provider()
+    model_started, release, next_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def interrupted(**kwargs):
+        nonlocal calls
+        if not main_request(kwargs):
+            return LLMResponse(content="child done")
+        calls += 1
+        if calls == 1:
+            model_started.set()
+            await release.wait()
+            return create_call("first")
+        next_started.set()
+        await asyncio.Event().wait()
+
+    backend.chat_stream_with_retry = AsyncMock(side_effect=interrupted)
+    loop = AgentLoop(bus=MessageBus(), provider=backend, workspace=tmp_path, model="test-model")
+    key = "websocket:chat"
+    try:
+        await save_completed_subagent(loop, "late-result", key)
+        await loop._dispatch_inbound(user("A", "turn-a"))
+        await asyncio.wait_for(model_started.wait(), 5)
+        await loop._dispatch_inbound(user("B", "turn-b"))
+        release.set()
+        await asyncio.wait_for(next_started.wait(), 10)
+        saved = await loop.sessions.state.get(key)
+        assert saved.metadata[RUNTIME_CHECKPOINT_KEY][CONSUMED_INPUT_ID_KEY] == "user:turn-a"
+        assert saved.metadata[CONSUMED_INPUT_CURSOR_KEY] == {
+            "generation": saved.generation, "input_id": "user:turn-b", "pending": True,
+        }
+        loop.preserve_inflight_turns_on_shutdown()
+    finally:
+        release.set()
+        await loop.aclose()
+
+    calls = 0
+
+    async def resumed(**kwargs):
+        nonlocal calls
+        if main_request(kwargs):
+            calls += 1
+            if calls == 1:
+                return create_call("restored")
+        return LLMResponse(content="done")
+
+    backend.chat_stream_with_retry = AsyncMock(side_effect=resumed)
+    restarted = AgentLoop(bus=MessageBus(), provider=backend, workspace=tmp_path, model="test-model")
+    try:
+        await dispatch_and_wait(restarted, system_result("late-result"))
+        child = next(s for s in restarted.subagents.statuses_for_session(key).values() if s.label == "restored")
+        assert child.origin_input_id is None
+        saved = await restarted.sessions.state.get(key)
+        assert consumed_input_cursor(saved.metadata, saved.generation) is None
+    finally:
+        await restarted.aclose()
+
+
+async def test_real_background_completion_starts_independent_run_with_consumed_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("nanobot.agent.loop._SUBAGENT_TERMINAL_WAIT_SECONDS", 0.05)
+    backend = provider()
+    child_started, release = asyncio.Event(), asyncio.Event()
+    main_calls = 0
+
+    async def respond(**kwargs):
+        nonlocal main_calls
+        if not main_request(kwargs):
+            if any(row.get("role") == "user" and row.get("content") == "background" for row in kwargs["messages"]):
+                child_started.set()
+                await release.wait()
+            return LLMResponse(content="child done")
+        main_calls += 1
+        if main_calls == 1:
+            return create_call("background", wait=False)
+        if main_calls == 3:
+            return create_call("after-result")
+        return LLMResponse(content="parent done")
+
+    backend.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    bus = MessageBus()
+    loop = AgentLoop(bus=bus, provider=backend, workspace=tmp_path, model="test-model")
+    worker = asyncio.create_task(loop.run())
+    key = "websocket:chat"
+    try:
+        await bus.publish_inbound(user("A", "turn-a"))
+        await asyncio.wait_for(child_started.wait(), 5)
+        async with asyncio.timeout(10):
+            while key in loop._pending_queues:
+                await asyncio.sleep(0.01)
+        assert main_calls == 2
+        release.set()
+        async with asyncio.timeout(10):
+            while True:
+                statuses = loop.subagents.statuses_for_session(key)
+                result = next((s for s in statuses.values() if s.label == "after-result"), None)
+                if result is not None and result.state == "done" and key not in loop._pending_queues:
+                    break
+                await asyncio.sleep(0.01)
+        assert {s.label: s.origin_input_id for s in statuses.values()} == {
+            "background": "user:turn-a", "after-result": "user:turn-a",
+        }
+    finally:
+        release.set()
+        loop.stop()
+        await asyncio.wait_for(worker, 10)
+
+
+async def test_cancel_while_recording_before_provider_dispatch_rolls_back_cursor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = provider()
+    backend.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    loop = AgentLoop(bus=MessageBus(), provider=backend, workspace=tmp_path, model="test-model")
+    saved = asyncio.Event()
+    original = loop.sessions.state.update_metadata
+
+    async def pause_after_commit(key, updates, **kwargs):
+        await original(key, updates, **kwargs)
+        cursor = updates.get(CONSUMED_INPUT_CURSOR_KEY)
+        if isinstance(cursor, dict) and cursor.get("input_id") == "user:turn-b":
+            saved.set()
+            await asyncio.Event().wait()
+
+    try:
+        await dispatch_and_wait(loop, user("A", "turn-a"))
+        monkeypatch.setattr(loop.sessions.state, "update_metadata", pause_after_commit)
+        await loop._dispatch_inbound(user("B", "turn-b"))
+        await asyncio.wait_for(saved.wait(), 5)
+        worker = next(iter(loop._active_tasks["websocket:chat"]))
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        assert backend.chat_stream_with_retry.await_count == 1
+        session = await loop.sessions.state.get("websocket:chat")
+        assert session.metadata[CONSUMED_INPUT_CURSOR_KEY]["input_id"] == "user:turn-a"
+    finally:
+        await loop.aclose()
+
+
+async def test_crash_before_provider_dispatch_does_not_claim_unconsumed_input(tmp_path: Path) -> None:
+    workspace, runtime = tmp_path / "workspace", tmp_path / "runtime"
+    backend = provider()
+    backend.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    loop = AgentLoop(bus=MessageBus(), provider=backend, workspace=workspace, model="test-model",
+                     session_manager=SessionManager(workspace, sessions_root=runtime / "sessions"))
+    key = "websocket:chat"
+    try:
+        await dispatch_and_wait(loop, user("A", "turn-a"))
+        await save_completed_subagent(loop, "after-crash", key)
+    finally:
+        await loop.aclose()
+
+    script = textwrap.dedent('''
+        import asyncio
+        import os
+        import sys
+        from pathlib import Path
+        from unittest.mock import AsyncMock, MagicMock
+        from nanobot.agent.loop import AgentLoop
+        from nanobot.bus.events import InboundMessage
+        from nanobot.bus.queue import MessageBus
+        from nanobot.config.home import set_home_path
+        from nanobot.providers.base import GenerationSettings, LLMResponse
+        from nanobot.session.manager import SessionManager
+        from nanobot.session.message_metadata import CONSUMED_INPUT_CURSOR_KEY
+
+        async def main():
+            backend = MagicMock(aclose=AsyncMock())
+            backend.get_default_model.return_value = "test-model"
+            backend.generation = GenerationSettings()
+            backend.can_resume_conversation_state.return_value = False
+            backend.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unexpected"))
+            workspace, runtime = Path(sys.argv[1]), Path(sys.argv[2])
+            set_home_path(runtime)
+            loop = AgentLoop(bus=MessageBus(), provider=backend, workspace=workspace, model="test-model",
+                             session_manager=SessionManager(workspace, sessions_root=runtime / "sessions"))
+            update = loop.sessions.state.update_metadata
+
+            async def crash_after_pending(key, updates, **kwargs):
+                result = await update(key, updates, **kwargs)
+                cursor = updates.get(CONSUMED_INPUT_CURSOR_KEY)
+                if isinstance(cursor, dict) and cursor.get("input_id") == "user:turn-b" and cursor.get("pending") is True:
+                    os._exit(73)
+                return result
+
+            loop.sessions.state.update_metadata = crash_after_pending
+            message = InboundMessage(channel="websocket", sender_id="user", chat_id="chat", content="B",
+                                     metadata={"webui_turn_id": "turn-b"})
+            await loop._dispatch_inbound(message)
+            await asyncio.gather(*loop._active_tasks[message.session_key])
+            await loop.aclose()
+
+        asyncio.run(main())
+    ''')
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    child = subprocess.run([sys.executable, "-c", script, str(workspace), str(runtime)], capture_output=True, text=True,
+                           timeout=30, creationflags=creationflags, check=False)
+    assert child.returncode == 73, child.stderr
+    reader = SessionManager(workspace, sessions_root=runtime / "sessions")
+    try:
+        raw = reader.read_session_metadata(key)
+        assert raw is not None
+        assert raw["metadata"][CONSUMED_INPUT_CURSOR_KEY]["pending"] is True
+    finally:
+        await reader.state.aclose()
+
+    next_label = "recovered"
+
+    async def respond(**kwargs):
+        nonlocal next_label
+        if main_request(kwargs) and next_label:
+            label, next_label = next_label, ""
+            return create_call(label)
+        return LLMResponse(content="done")
+
+    backend = provider()
+    backend.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    restarted = AgentLoop(bus=MessageBus(), provider=backend, workspace=workspace, model="test-model",
+                          session_manager=SessionManager(workspace, sessions_root=runtime / "sessions"))
+    try:
+        session = await restarted.sessions.state.get(key)
+        assert consumed_input_cursor(session.metadata, session.generation) is None
+        await dispatch_and_wait(restarted, system_result("after-crash"))
+        status = next(s for s in restarted.subagents.statuses_for_session(key).values() if s.label == "recovered")
+        assert status.origin_input_id is None
+    finally:
+        await restarted.aclose()
+
+
+@pytest.mark.parametrize("pending,expected", [(False, "user:turn-b"), (True, None)])
+def test_recovery_prefers_newer_cursor_to_older_response_checkpoint(pending, expected) -> None:
+    session = Session(key="websocket:chat")
+    session.metadata[CONSUMED_INPUT_CURSOR_KEY] = {
+        "generation": session.generation, "input_id": "user:turn-b", **({"pending": True} if pending else {}),
+    }
+    session.metadata[RUNTIME_CHECKPOINT_KEY] = {
+        "phase": "awaiting_tools", CONSUMED_INPUT_ID_KEY: "user:turn-a",
+        "assistant_message": {"role": "assistant", "content": "previous response"},
+    }
+    assert restore_runtime_checkpoint(session)
+    assert consumed_input_cursor(session.metadata, session.generation) == expected
+
+
+def test_pre_request_compaction_checkpoint_does_not_claim_consumption() -> None:
+    session = Session(key="websocket:chat")
+    session.metadata[RUNTIME_CHECKPOINT_KEY] = {"phase": "model_input", CONSUMED_INPUT_ID_KEY: "user:turn-a"}
+    assert restore_runtime_checkpoint(session)
+    assert consumed_input_cursor(session.metadata, session.generation) is None

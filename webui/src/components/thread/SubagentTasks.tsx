@@ -21,7 +21,7 @@ import { useThreadVisibility } from "@/hooks/useThreadVisibility";
 import { cancelSubagentTask, fetchSubagentTasks } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
 import { isActiveSubagentTask, isSubagentTask, mergeSubagentTasks, type ObservedSubagentTask } from "@/lib/subagent-tasks";
-import type { SubagentTaskSnapshot } from "@/lib/types";
+import type { SubagentTaskSnapshot, UIMessage } from "@/lib/types";
 
 interface TaskContext {
   sessionKey: string | null;
@@ -47,11 +47,13 @@ interface SubagentTasksProviderProps {
   enabled: boolean;
   liveEvents: boolean;
   historyEnabled?: boolean;
+  scopedHistory?: boolean;
+  messages?: UIMessage[];
   active?: boolean;
   children: ReactNode;
 }
 
-export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, active = true, children }: SubagentTasksProviderProps) {
+export function SubagentTasksProvider({ client, sessionKey, token, enabled, liveEvents, historyEnabled = false, scopedHistory = false, messages = [], active = true, children }: SubagentTasksProviderProps) {
   const { t } = useTranslation("common");
   const pageVisible = usePageVisibility();
   const paneVisible = useThreadVisibility();
@@ -64,9 +66,23 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
   const trigger = useRef<HTMLButtonElement | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const detailPanel = useRef<HTMLDivElement | null>(null);
+  const taskRef = useRef(tasks);
+  taskRef.current = tasks;
+  const userMessages = messages.filter((message) => message.role === "user");
+  const windowScope = {
+    inputIds: [...new Set(userMessages.flatMap((message) => message.inputId ? [message.inputId] : []))],
+    messageIds: [...new Set(userMessages.map((message) => message.id))],
+    turnIds: [...new Set(userMessages.flatMap((message) => message.turnId ? [message.turnId] : []))],
+  };
+  const windowKey = scopedHistory ? JSON.stringify(windowScope) : "";
+  const windowRef = useRef(windowScope);
+  windowRef.current = windowScope;
+  const previousWindowKey = useRef(windowKey);
+  const refreshRef = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
     scopeGeneration.current += 1;
+    taskRef.current = [];
     setTasks([]);
     setSelectedId(null);
     setStoppingId(null);
@@ -92,7 +108,11 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
       if (refreshing) { refreshPending = true; return; }
       refreshing = true;
       try {
-        const payload = await fetchSubagentTasks(token, sessionKey);
+        const window = scopedHistory ? {
+          ...windowRef.current,
+          trackedIds: taskRef.current.filter(isActiveSubagentTask).map((task) => task.task_id),
+        } : undefined;
+        const payload = await fetchSubagentTasks(token, sessionKey, window);
         if (!cancelled) {
           setTasks((current) => mergeSubagentTasks(current, payload.tasks));
         }
@@ -106,6 +126,7 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
         }
       }
     };
+    refreshRef.current = () => { void refresh(); };
     const unsubscribeChat = liveEvents ? client.onChat(sessionKey.slice("websocket:".length), (event) => {
       if (cancelled || event.event !== "subagent_task") return;
       if (!isSubagentTask(event.task)) return;
@@ -119,11 +140,19 @@ export function SubagentTasksProvider({ client, sessionKey, token, enabled, live
     window.addEventListener("focus", focus);
     return () => {
       cancelled = true;
+      refreshRef.current = null;
       unsubscribeChat?.();
       unsubscribeStatus?.();
       window.removeEventListener("focus", focus);
     };
-  }, [client, enabled, liveEvents, active, sessionKey, token, pageVisible, paneVisible]);
+  }, [client, enabled, liveEvents, scopedHistory, active, sessionKey, token, pageVisible, paneVisible]);
+
+  useEffect(() => {
+    if (previousWindowKey.current !== windowKey) {
+      previousWindowKey.current = windowKey;
+      refreshRef.current?.();
+    }
+  }, [windowKey]);
 
   const stop = async (task: SubagentTaskSnapshot) => {
     if (!sessionKey) return;
