@@ -12,6 +12,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Iterator, TypeVar
 
@@ -198,14 +199,6 @@ def _matches_type(name: str, file_type: str | None) -> bool:
         return True
     patterns = _TYPE_GLOB_MAP.get(lowered, (f"*.{lowered}",))
     return any(fnmatch.fnmatch(name.lower(), pattern.lower()) for pattern in patterns)
-
-
-def _matches_query(rel_path: str, query: str | None) -> bool:
-    if not query:
-        return True
-    haystack = rel_path.lower()
-    terms = [part for part in query.lower().split() if part]
-    return all(term in haystack for term in terms)
 
 
 class _SearchTool(_FsTool):
@@ -438,23 +431,6 @@ class FindFilesTool(_SearchTool):
                 for entry, mtime in zip(selected, times, strict=True):
                     yield entry.display_path + ("/" if entry.is_dir else ""), mtime
 
-    @staticmethod
-    def _matches_entry(
-        entry: _FindFilesEntry,
-        *,
-        query: str | None,
-        glob: str | None,
-        file_type: str | None,
-    ) -> bool:
-        if glob and not _match_glob(entry.rel_path, entry.name, glob):
-            return False
-        if entry.is_dir:
-            if file_type:
-                return False
-        elif not _matches_type(entry.name, file_type):
-            return False
-        return _matches_query(entry.display_path, query)
-
     async def execute(
         self,
         path: str = ".",
@@ -529,40 +505,40 @@ class FindFilesTool(_SearchTool):
             max_paths=self._MAX_SCAN_PATHS,
         )
 
+        terms = query.lower().split() if query else []
+
         def matches_entry(entry: _FindFilesEntry) -> bool:
-            return self._matches_entry(entry, query=query, glob=glob, file_type=file_type)
+            if glob and not _match_glob(entry.rel_path, entry.name, glob):
+                return False
+            if file_type and (entry.is_dir or not _matches_type(entry.name, file_type)):
+                return False
+            if not terms:
+                return True
+            haystack = entry.display_path.lower()
+            return all(term in haystack for term in terms)
 
-        def matching_paths() -> Iterator[tuple[str, float]]:
-            for entry in self._iter_paths(
-                tree,
-                include_dirs=include_dirs,
-                budget=budget,
-            ):
-                if matches_entry(entry):
-                    yield entry.display_path + ("/" if entry.is_dir else ""), 0.0
-
-        matches: list[tuple[str, float]]
+        selection_size = None if limit is None else offset + limit + 1
         try:
             if sort == "modified":
                 by_modified = self._iter_modified(
                     tree, include_dirs=include_dirs, matches=matches_entry, budget=budget,
                 )
-                if limit is None:
+                if selection_size is None:
                     matches = sorted(by_modified, key=lambda item: (-item[1], item[0]))
                 else:
-                    selection_size = offset + limit + 1
                     matches = heapq.nsmallest(
                         selection_size,
                         by_modified,
                         key=lambda item: (-item[1], item[0]),
                     )
+                paths = [item[0] for item in matches]
             else:
-                selection_size = None if limit is None else offset + limit + 1
-                matches = []
-                for match in matching_paths():
-                    matches.append(match)
-                    if selection_size is not None and len(matches) >= selection_size:
-                        break
+                matching_paths = (
+                    entry.display_path + ("/" if entry.is_dir else "")
+                    for entry in self._iter_paths(tree, include_dirs=include_dirs, budget=budget)
+                    if matches_entry(entry)
+                )
+                paths = list(islice(matching_paths, selection_size))
             budget.checkpoint()
         except _SearchBudgetExceededError as exc:
             if str(exc) == "paths":
@@ -574,7 +550,6 @@ class FindFilesTool(_SearchTool):
                 "narrow path, query, glob, or type and retry."
             )
 
-        paths = [item[0] for item in matches]
         paged, truncated = _text_page(paths, limit, offset, self._MAX_RESULT_CHARS)
         if not paged:
             return "No files found"
