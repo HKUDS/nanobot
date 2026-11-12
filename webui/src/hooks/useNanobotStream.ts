@@ -541,7 +541,6 @@ export function useNanobotStream(
     const owner = transcriptRef.current;
     const controller = new AbortController();
     const generation = chatId ? client.getRunGeneration(chatId) : 0;
-    let read: ThreadRead;
     let disposed = false;
     let superseded = false;
     let publishing = false;
@@ -572,7 +571,7 @@ export function useNanobotStream(
     if (cached && owner.paging.version === 0) install(cached, false, true);
     // A restored projection or cached seed already has history. Revalidate it
     // as latest so a safe disjoint window can replace its durable baseline.
-    read = owner.begin(owner.paging.version > 0 ? "latest" : "initial");
+    const read = owner.begin(owner.paging.version > 0 ? "latest" : "initial");
     publishHistory();
     const unsubscribe = webuiThreadCache.subscribe(historyKey, (body) => {
       if (publishing) return;
