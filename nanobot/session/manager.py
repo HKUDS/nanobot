@@ -524,6 +524,12 @@ class SessionManager:
             parent_key, message_ids=message_ids, turn_ids=turn_ids,
         )
 
+    def read_child_session_metadata(
+        self, parent_key: str, child_keys: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read named persisted child headers without transcripts or pending inputs."""
+        return self._store.read_child_session_metadata(parent_key, child_keys)
+
     def save(self, session: Session) -> None:
         """Commit an offline administrative snapshot, rejecting obsolete history."""
         self._require_offline_mutation()

@@ -776,6 +776,24 @@ class SqliteSessionStore:
                      "metadata": _object(row[3])}
                     for row in db.execute(_SUBAGENT_METADATA_QUERY, params)]
 
+    def read_child_session_metadata(
+        self, parent_key: str, child_keys: Sequence[str],
+    ) -> list[SessionMetadataPayload]:
+        """Read named child headers in one query, excluding checkpoints and pending inputs."""
+        keys = [key for key in child_keys if key]
+        if not keys:
+            return []
+        with self.transaction(write=False) as db:
+            return [{"key": row[0], "created_at": row[1], "updated_at": row[2],
+                     "metadata": _object(row[3])}
+                    for row in db.execute(
+                        f"""SELECT key, created_at, updated_at, metadata FROM sessions
+                            WHERE key IN (SELECT value FROM json_each(?))
+                            AND json_extract(metadata, '$.{PARENT_SESSION_KEY}')=?
+                            AND json_type(metadata, '$.{PARENT_SESSION_KEY}')='text'""",
+                        (_encode(keys), parent_key),
+                    )]
+
     def list_metadata(self) -> list[dict[str, Any]]:
         with self.transaction(write=False) as db:
             # Fetch one value so a large list does not cross the Python/SQLite

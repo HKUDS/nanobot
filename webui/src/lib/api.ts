@@ -709,20 +709,23 @@ export async function fetchSubagentTasks(
   const queries: URLSearchParams[] = [];
   if (window) {
     let query = new URLSearchParams({ scope: "window" });
+    // Track the encoded length as it grows; re-serializing the whole target per id would be quadratic.
+    let length = query.toString().length;
     let count = 0;
     for (const [key, values] of [
       ["message_id", window.messageIds], ["turn_id", window.turnIds], ["track", window.trackedIds],
     ] as const) {
       for (const value of values) {
-        const next = new URLSearchParams(query);
-        next.append(key, value);
+        const pair = new URLSearchParams({ [key]: value }).toString();
         // Keep request targets bounded, including percent-encoded identifiers.
-        if (count && (next.toString().length > 5000 || count >= 400)) {
+        if (count && (length + 1 + pair.length > 5000 || count >= 400)) {
           queries.push(query);
           query = new URLSearchParams({ scope: "window", active: "0" });
+          length = query.toString().length;
           count = 0;
         }
         query.append(key, value);
+        length += 1 + pair.length;
         count += 1;
       }
     }

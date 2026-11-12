@@ -36,6 +36,7 @@ from nanobot.session.jsonl_migration import WORKSPACE_BACKUP_DIR
 from nanobot.session.location import SessionLocation
 from nanobot.session.manager import SessionManager, SessionPolicy
 from nanobot.session.session_handles import SessionHandleResolver
+from nanobot.session.sqlite_store import SqliteSessionStore
 from nanobot.session.summary import SessionSummaryCheckpoint, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 from nanobot.session.webui_turns import WebuiTurnCoordinator
@@ -120,6 +121,49 @@ async def test_windowed_task_reads_limit_history_and_reconcile_active_work(tmp_p
         }
         malformed = await gateway.http.dispatch(connection, Request(path + "?scope=window&active=no", headers))
         assert malformed.status_code == 400
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_windowed_task_read_opens_one_store_connection(tmp_path, monkeypatch):
+    manager, sessions, _runtime = manager_with_storage(tmp_path / "agent", tmp_path / "sessions")
+    await sessions.state.get("websocket:parent")
+    for task_id, message_id, turn_id in (
+        ("in-window", "msg-window", "turn-window"),
+        ("tracked-1", "msg-old", "turn-old"),
+        ("tracked-2", "msg-old", "turn-old"),
+        ("tracked-3", "msg-old", "turn-old"),
+    ):
+        status = SubagentStatus(
+            task_id=task_id, label=task_id, task_description=task_id, owner="websocket:parent",
+            started_at=0, finished_at=1, state="done", completed_at=1,
+            origin_message_id=message_id, origin_turn_id=turn_id,
+        )
+        await sessions.state.create_child(
+            "websocket:parent", SubagentSessions.key(task_id),
+            metadata={SESSION_TYPE_KEY: SUBAGENT.name, TASK_METADATA_KEY: SubagentSessions._payload(status)},
+            content=task_id, policy=SessionPolicy(),
+        )
+
+    opened = 0
+    original = SqliteSessionStore._open_connection
+
+    def counting(self, *, worker: bool = False):
+        nonlocal opened
+        opened += 1
+        return original(self, worker=worker)
+
+    monkeypatch.setattr(SqliteSessionStore, "_open_connection", counting)
+    try:
+        statuses = await manager.read_window_statuses_for_session(
+            "websocket:parent", message_ids=["msg-window"], turn_ids=["turn-window"],
+            tracked_ids=["tracked-1", "tracked-2", "tracked-3"], include_active=False,
+        )
+        # Tracked work outside the window stays visible, and the whole read shares
+        # one connection instead of one per tracked task.
+        assert set(statuses) == {"in-window", "tracked-1", "tracked-2", "tracked-3"}
+        assert opened == 1
     finally:
         await manager.close()
 

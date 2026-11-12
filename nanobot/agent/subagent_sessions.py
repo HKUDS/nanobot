@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, cast
+from collections.abc import Callable, Sequence
+from typing import Any, TypeVar, cast
 
 from loguru import logger
 from pydantic import TypeAdapter, ValidationError
@@ -17,6 +18,7 @@ SUBAGENT = SessionType("subagent", needs_handle=False, public_history=False)
 TASK_METADATA_KEY = "subagent_task"
 _STATUS = TypeAdapter(SubagentStatus)
 _ACTIVE_STATES = {"queued", "running", "stopping"}
+_T = TypeVar("_T")
 
 
 class SubagentSessions:
@@ -135,6 +137,25 @@ class SubagentSessions:
             if status is not None:
                 result[task_id] = status
         return result
+
+    def load_tracked(self, owner: str, task_ids: Sequence[str]) -> dict[str, SubagentStatus]:
+        """Read already observed tasks in one query when they fall outside the window."""
+        result: dict[str, SubagentStatus] = {}
+        for row in self.sessions.read_child_session_metadata(
+            owner, [self.key(task_id) for task_id in task_ids],
+        ):
+            key = row["key"]
+            task_id = key.removeprefix("subagent:")
+            if key != self.key(task_id):
+                continue
+            status = self._status_from_metadata(task_id, owner, row["metadata"])
+            if status is not None:
+                result[task_id] = status
+        return result
+
+    def read_batch(self, operation: Callable[[], _T]) -> _T:
+        """Share one store connection across the reads of a single request."""
+        return self.sessions.read_batch(operation)
 
     async def interrupt_pending(self) -> None:
         """Seal abandoned work after the gateway acquires execution ownership."""

@@ -491,24 +491,29 @@ class SubagentManager:
         }
 
         def read() -> Mapping[str, SubagentStatus]:
-            if self.sessions is not None and not self.sessions.exists(session_key):
-                return {}
-            statuses = self.sessions.load_window(
-                session_key, message_ids=message_ids, turn_ids=turn_ids,
-            ) if self.sessions is not None else {}
-            if self.sessions is not None:
-                for task_id in tracked:
-                    if task_id not in statuses:
-                        status = self.sessions.status(task_id, session_key)
-                        if status is not None:
-                            statuses[task_id] = status
-            for task_id, status in runtime.items():
-                if self.sessions is not None and not self.sessions.contains(task_id, session_key):
-                    continue
-                persisted = statuses.get(task_id)
-                if persisted is None or status.revision >= persisted.revision:
-                    statuses[task_id] = status
-            return statuses
+            if self.sessions is None:
+                return dict(runtime)
+
+            def load() -> Mapping[str, SubagentStatus]:
+                if not self.sessions.exists(session_key):
+                    return {}
+                statuses = self.sessions.load_window(
+                    session_key, message_ids=message_ids, turn_ids=turn_ids,
+                )
+                outside = [task_id for task_id in tracked if task_id not in statuses]
+                if outside:
+                    statuses.update(self.sessions.load_tracked(session_key, outside))
+                for task_id, status in runtime.items():
+                    if not self.sessions.contains(task_id, session_key):
+                        continue
+                    persisted = statuses.get(task_id)
+                    if persisted is None or status.revision >= persisted.revision:
+                        statuses[task_id] = status
+                return statuses
+
+            # One connection per request: the window read, tracked fallbacks and
+            # ownership checks are separate transactions on the same worker.
+            return self.sessions.read_batch(load)
 
         return await asyncio.to_thread(read)
 
