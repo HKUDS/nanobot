@@ -1841,12 +1841,6 @@
     },
     "loadingConversation": "Cargando conversación…",
     "empty": {
-      "greetings": {
-        "workOn": "¿En qué trabajamos juntos?",
-        "start": "¿Por dónde empezamos?",
-        "build": "¿Qué construimos hoy?",
-        "tackle": "¿Qué resolvemos juntos?"
-      },
       "quickActions": {
         "plan": {
           "title": "Crear un plan",

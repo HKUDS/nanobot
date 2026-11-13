@@ -22,6 +22,7 @@ import { latestSubagentInputKey } from "@/lib/subagent-tasks";
 import { SessionInfoPopover } from "@/components/thread/SessionInfoPopover";
 import type { ComposerDraft, ComposerDraftStore } from "@/lib/composer-draft";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { ThreadWelcomeMark } from "@/components/thread/ThreadWelcomeMark";
 import {
   ComposerUsagePopover,
   type ComposerContextUsage,
@@ -260,89 +261,6 @@ interface ThreadShellProps {
   skills?: SkillSummary[];
 }
 
-const HERO_GREETING_KEYS = [
-  "thread.empty.greetings.workOn",
-  "thread.empty.greetings.start",
-  "thread.empty.greetings.build",
-  "thread.empty.greetings.tackle",
-] as const;
-
-function HeroGreeting({ text }: { text: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const headingRef = useRef<HTMLHeadingElement>(null);
-
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    const heading = headingRef.current;
-    if (!container || !heading) return;
-
-    const fitToWidth = () => {
-      heading.style.removeProperty("font-size");
-      const availableWidth = container.clientWidth;
-      if (availableWidth <= 0) return;
-
-      const naturalWidth = heading.scrollWidth;
-      const maximumFontSize = Number.parseFloat(window.getComputedStyle(heading).fontSize);
-      if (
-        naturalWidth <= availableWidth
-        || !Number.isFinite(maximumFontSize)
-        || maximumFontSize <= 0
-      ) {
-        return;
-      }
-
-      const fittedFontSize = Math.max(
-        12,
-        Math.floor(maximumFontSize * ((availableWidth - 2) / naturalWidth) * 100) / 100,
-      );
-      heading.style.fontSize = `${fittedFontSize}px`;
-    };
-
-    fitToWidth();
-
-    let lastObservedWidth = container.clientWidth;
-    const resizeObserver = typeof ResizeObserver === "undefined"
-      ? null
-      : new ResizeObserver(([entry]) => {
-          const nextWidth = entry?.contentRect.width ?? container.clientWidth;
-          if (nextWidth === lastObservedWidth) return;
-          lastObservedWidth = nextWidth;
-          fitToWidth();
-        });
-    resizeObserver?.observe(container);
-    window.addEventListener("resize", fitToWidth);
-
-    let cancelled = false;
-    void document.fonts?.ready.then(() => {
-      if (!cancelled) fitToWidth();
-    });
-
-    return () => {
-      cancelled = true;
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", fitToWidth);
-    };
-  }, [text]);
-
-  return (
-    <div ref={containerRef} className="min-w-0 w-full max-w-[44rem]">
-      <h1
-        ref={headingRef}
-        data-testid="hero-greeting"
-        data-theme-ink
-        className="select-none whitespace-nowrap text-[34px] font-normal leading-[1.08] tracking-normal text-foreground sm:text-[48px] sm:leading-tight"
-      >
-        {text}
-      </h1>
-    </div>
-  );
-}
-
-function randomHeroGreetingKey(): (typeof HERO_GREETING_KEYS)[number] {
-  const index = Math.floor(Math.random() * HERO_GREETING_KEYS.length);
-  return HERO_GREETING_KEYS[index] ?? HERO_GREETING_KEYS[0];
-}
-
 interface PendingFirstMessage {
   finish?: (accepted: boolean) => void;
   content: string;
@@ -550,7 +468,6 @@ export function ThreadShell({
     dismissed: boolean;
   } | null>(null);
   const sandboxNotice = useSandboxNotice(client, chatId, webuiCapabilities.includes("webui.sandbox-settings.v1"));
-  const [heroGreetingKey, setHeroGreetingKey] = useState(randomHeroGreetingKey);
   const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
@@ -853,7 +770,6 @@ export function ThreadShell({
   const composerVariant = showHeroComposer ? emptyComposerVariant : "thread";
   // Only unpersisted drafts can choose a project; history pages do not own this state.
   const projectLocked = !!session && session.projectLocked !== false;
-  const wasShowingHeroComposerRef = useRef(showHeroComposer);
   const sessionModelPreset = session?.modelPreset?.trim() || null;
   const [localModelPreset, setLocalModelPreset] = useState<string | null>(null);
   useEffect(() => {
@@ -923,13 +839,6 @@ export function ThreadShell({
   const modelBadgeLabel = modelBadge.needsSetup
     ? t("thread.composer.chooseAI", { defaultValue: "Choose your AI" })
     : modelBadge.label;
-  useEffect(() => {
-    if (showHeroComposer && !wasShowingHeroComposerRef.current) {
-      setHeroGreetingKey(randomHeroGreetingKey());
-    }
-    wasShowingHeroComposerRef.current = showHeroComposer;
-  }, [showHeroComposer]);
-
   const withWorkspaceScope = useCallback(
     (options?: SendOptions): SendOptions | undefined => {
       if (!workspaceScope) return options;
@@ -1494,9 +1403,7 @@ export function ThreadShell({
   const emptyState = initialHistoryLoading ? (
     <ThreadLoadingSkeleton />
   ) : (
-    <div className="flex w-full flex-col items-center text-center animate-in fade-in-0 slide-in-from-bottom-2 [animation-duration:220ms] motion-reduce:animate-none">
-      <HeroGreeting text={t(heroGreetingKey)} />
-    </div>
+    <ThreadWelcomeMark />
   );
   const sessionInfoAction = historyKey ? (
     <SessionInfoPopover client={client} sessionKey={historyKey} token={token} />

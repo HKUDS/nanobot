@@ -48,8 +48,6 @@ const sidebarStateUpdateHandlers = new Set<(state: SidebarStatePayload) => void>
 const pairingChangeHandlers = new Set<() => void>();
 const readyHandlers = new Set<() => void>();
 let mockSessions: ChatSummary[] = [];
-const HERO_GREETING_PATTERN =
-  /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
 
 function setNavigatorPlatform(platform: string): void {
   Object.defineProperty(window.navigator, "platform", {
@@ -1368,7 +1366,7 @@ describe("App layout", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     await waitFor(() => expect(window.location.hash).toBe("#/new"));
-    expect(await screen.findByText(HERO_GREETING_PATTERN, {}, { timeout: 10_000 })).toBeInTheDocument();
+    expect(await screen.findByTestId("thread-welcome-mark", {}, { timeout: 10_000 })).toBeInTheDocument();
   }, 30_000);
 
   it("opens Skills from the main sidebar", async () => {
@@ -1489,7 +1487,7 @@ describe("App layout", () => {
     expect(document.title).toBe("Skills");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
-    expect(await screen.findByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(await screen.findByTestId("thread-welcome-mark")).toBeInTheDocument();
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
     expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
@@ -3708,7 +3706,7 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
     await waitFor(() => expect(document.title).toBe("nanobot"));
-    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(screen.getByTestId("thread-welcome-mark")).toBeInTheDocument();
   });
 
   it("filters sessions in the centered search dialog", async () => {
@@ -4484,7 +4482,7 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
     expect(createChatSpy).not.toHaveBeenCalled();
-    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(screen.getByTestId("thread-welcome-mark")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start a new topic" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Toggle theme from header" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "Settings" })).toBeInTheDocument();
