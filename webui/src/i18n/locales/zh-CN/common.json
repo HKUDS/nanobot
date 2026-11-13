@@ -2573,6 +2573,7 @@
     "completed": "任务已完成",
     "failed": "任务恢复失败",
     "failedHelp": "无法安全恢复已保存的任务，继续前请先检查。",
+    "imagesUnavailable": "请重新发送图片后继续，已完成的工具未重复执行。",
     "resuming": "正在恢复中断的任务…",
     "review": "继续前请检查任务。工具不会被自动重放。",
     "replyPreserved": "回复已保留，可继续生成。",

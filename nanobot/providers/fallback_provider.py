@@ -22,6 +22,7 @@ from nanobot.providers.base import (
     RetryStatusCallback,
 )
 from nanobot.providers.compaction import ProviderStateCommitError, provider_compaction_scope
+from nanobot.providers.images import image_inputs_available, state_image_input_ids
 from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name
 
@@ -223,7 +224,6 @@ class FallbackProvider(LLMProvider):
     async def _run_chat_with_retry(
         self,
         kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
         *,
         stream: bool,
         retry_mode: str,
@@ -293,7 +293,6 @@ class FallbackProvider(LLMProvider):
             return await self._retry_with_fallback(
                 _call_provider,
                 call_kwargs,
-                original_messages,
                 retry_mode=retry_mode,
                 on_retry_wait=on_retry_wait,
                 on_retry_exhausted=on_retry_exhausted,
@@ -348,7 +347,6 @@ class FallbackProvider(LLMProvider):
         self,
         call: Callable[[LLMProvider, dict[str, Any]], Awaitable[LLMResponse]],
         kwargs: dict[str, Any],
-        original_messages: list[dict[str, Any]],
         *,
         retry_mode: str,
         on_retry_wait: RetryEventCallback | None,
@@ -430,7 +428,6 @@ class FallbackProvider(LLMProvider):
         return await self._run_with_retry(
             _call_chain,
             dict(kwargs),
-            original_messages,
             retry_mode="persistent",
             on_retry_wait=on_retry_wait,
             on_retry_exhausted=on_retry_exhausted,
@@ -618,6 +615,17 @@ class FallbackProvider(LLMProvider):
                     state,
                     fallback_model,
                 ):
+                    # Public history can contain only path placeholders for images
+                    # held by native state. Do not count a text-only replay as failover.
+                    if not image_inputs_available(
+                        state_image_input_ids(state), fallback_kwargs["messages"],
+                    ):
+                        logger.warning(
+                            "Skipping fallback '{}': native image input cannot be replayed",
+                            fallback_model,
+                        )
+                        await fallback_provider.aclose()
+                        continue
                     state = None
                 if provider_context.compaction_input_budget is not None and (
                     state is None
@@ -627,6 +635,7 @@ class FallbackProvider(LLMProvider):
                         "Skipping fallback '{}': required pre-request compaction cannot resume",
                         fallback_model,
                     )
+                    await fallback_provider.aclose()
                     continue
                 context_window_tokens = (
                     fallback.context_window_tokens

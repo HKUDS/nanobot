@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import codecs
 import hashlib
@@ -9,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools import file_state
+from nanobot.agent.tools.base import ToolResult
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.utils.document import (
     DocumentExtractionError,
@@ -44,6 +46,102 @@ class TestReadDescriptionFix:
     def test_description_mentions_image_support(self):
         tool = ReadFileTool()
         assert "image" in tool.description.lower()
+
+
+class TestReadImageFormats:
+
+    @pytest.mark.asyncio
+    async def test_mixed_svg_and_png_reads_preserve_text_range_and_native_raster(self, tmp_path):
+        svg = tmp_path / "drawing.svg"
+        svg.write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg">\n'
+            '<title>Source title</title>\n<rect width="1" height="1"/>\n</svg>\n',
+            encoding="utf-8",
+        )
+        png = tmp_path / "image.png"
+        raw = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/"
+            "iZk9HQAAAABJRU5ErkJggg=="
+        )
+        png.write_bytes(raw)
+        tool = ReadFileTool(workspace=tmp_path)
+
+        text, image = await asyncio.gather(
+            tool.execute(path=str(svg), offset=2, limit=1),
+            tool.execute(path=str(png)),
+        )
+
+        assert text == (
+            "2| <title>Source title</title>\n\n"
+            "(Showing lines 2-2 of 4. Use offset=3 to continue.)"
+        )
+        assert isinstance(image, list)
+        assert image[0]["image_url"]["url"] == (
+            f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"
+        )
+        assert image[0]["_meta"]["path"] == str(png)
+
+    @pytest.mark.asyncio
+    async def test_svg_uses_text_character_bound_and_visible_read_receipt(self, tmp_path, monkeypatch):
+        svg = tmp_path / "large.svg"
+        svg.write_text("<svg>" + "x" * 500 + "</svg>\n", encoding="utf-8")
+        tool = ReadFileTool(workspace=tmp_path)
+        monkeypatch.setattr(tool, "_MAX_CHARS", 40)
+        monkeypatch.setattr(tool, "_READ_CHUNK_SIZE", 16)
+
+        with file_state.file_read_context("svg-1", lambda: {}):
+            first = await tool.execute(path=str(svg))
+        with file_state.file_read_context("svg-2", lambda: {"svg-1": first}):
+            second = await tool.execute(path=str(svg))
+
+        assert first.splitlines()[0] == "1| <svg>" + "x" * 32
+        assert "Line 1 truncated" in first
+        assert second == f"[File unchanged since last read: {svg}]"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("suffix,raw", [
+        (".png", b"\x89PNG\r\n\x1a\nfixture"),
+        (".jpg", b"\xff\xd8\xfffixture"),
+        (".gif", b"GIF89afixture"),
+        (".webp", b"RIFF\x00\x00\x00\x00WEBPfixture"),
+    ])
+    async def test_supported_raster_signatures_are_native(self, tmp_path, suffix, raw):
+        path = tmp_path / f"raster{suffix}"
+        path.write_bytes(raw)
+
+        result = await ReadFileTool(workspace=tmp_path).execute(path=str(path))
+
+        assert isinstance(result, list)
+        encoded = result[0]["image_url"]["url"].split(";base64,", 1)[1]
+        assert base64.b64decode(encoded, validate=True) == raw
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("suffix,raw", [
+        (".bmp", b"BM" + b"\x00" * 30),
+        (".tiff", b"II\x2a\x00" + b"\x00" * 30),
+        (".ico", b"\x00\x00\x01\x00" + b"\x00" * 30),
+        (".avif", b"\x00\x00\x00\x20ftypavif" + b"\x00" * 30),
+        (".heic", b"\x00\x00\x00\x20ftypheic" + b"\x00" * 30),
+        (".png", b'<svg xmlns="http://www.w3.org/2000/svg"/>'),
+        (".png", b"plain text with image extension"),
+    ])
+    async def test_unsupported_image_error_does_not_disrupt_valid_raster(self, tmp_path, suffix, raw):
+        unsupported = tmp_path / f"unsupported{suffix}"
+        unsupported.write_bytes(raw)
+        png = tmp_path / "valid.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+        tool = ReadFileTool(workspace=tmp_path)
+
+        error, image = await asyncio.gather(
+            tool.execute(path=str(unsupported)), tool.execute(path=str(png)),
+        )
+
+        assert isinstance(error, ToolResult)
+        assert error.is_error
+        assert "PNG" in error and "JPEG" in error
+        assert "convert" in error.lower()
+        assert isinstance(image, list)
+        assert image[0]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
 class TestReadDedup:
@@ -767,21 +865,16 @@ class TestBoundedTextReads:
         assert result == f"Error reading file: {exc.value}"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("filename", "raw", "mime"),
-        [
-            ("image.dat", b"\x89PNG\r\n\x1a\ncontents", "image/png"),
-            ("image.png", b"plain text with image extension", "image/png"),
-        ],
-    )
-    async def test_magic_and_extension_image_reads_are_unchanged(self, tmp_path, filename, raw, mime):
+    @pytest.mark.parametrize("filename", ["image.dat", "image.png"])
+    async def test_raster_magic_is_used_independently_of_extension(self, tmp_path, filename):
         f = tmp_path / filename
+        raw = b"\x89PNG\r\n\x1a\ncontents"
         f.write_bytes(raw)
         tool = ReadFileTool(workspace=tmp_path)
 
         result = await tool.execute(path=str(f), limit=1)
 
-        assert result[0]["image_url"]["url"] == f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+        assert result[0]["image_url"]["url"] == f"data:image/png;base64,{base64.b64encode(raw).decode()}"
         assert result[1] == {"type": "text", "text": f"(Image file: {f})"}
 
     @pytest.mark.asyncio

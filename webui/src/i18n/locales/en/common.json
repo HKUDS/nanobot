@@ -2573,6 +2573,7 @@
     "completed": "Task completed",
     "failed": "Task recovery failed",
     "failedHelp": "The saved task could not be restored safely. Review it before continuing.",
+    "imagesUnavailable": "Send the images again to continue. Completed tools have not been repeated.",
     "resuming": "Restoring interrupted task…",
     "review": "Review the task before continuing. Tools will not be replayed automatically.",
     "replyPreserved": "Reply saved. You can continue.",

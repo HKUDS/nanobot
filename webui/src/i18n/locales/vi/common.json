@@ -2391,6 +2391,7 @@
     "completed": "Tác vụ đã hoàn tất",
     "failed": "Khôi phục tác vụ thất bại",
     "failedHelp": "Không thể khôi phục an toàn tác vụ đã lưu. Hãy xem lại trước khi tiếp tục.",
+    "imagesUnavailable": "Gửi lại hình ảnh để tiếp tục. Các công cụ đã hoàn tất chưa được chạy lại.",
     "resuming": "Đang khôi phục tác vụ bị gián đoạn…",
     "review": "Hãy xem lại tác vụ trước khi tiếp tục. Công cụ sẽ không tự động chạy lại.",
     "replyPreserved": "Câu trả lời đã được lưu. Bạn có thể tiếp tục.",

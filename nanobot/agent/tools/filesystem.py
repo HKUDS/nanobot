@@ -445,8 +445,9 @@ class ReadFileTool(_FsTool):
                     if len(first) > self._MAX_FILE_SIZE_BYTES:
                         return self._file_too_large(len(first))
 
-                    mime = detect_image_mime(first) or mimetypes.guess_type(path)[0]
-                    if mime and mime.startswith("image/"):
+                    image_mime = detect_image_mime(first)
+                    mime = image_mime or mimetypes.guess_type(path)[0]
+                    if image_mime:
                         chunks = [first]
                         bytes_read = len(first)
                         # Bound each read without preallocating from a size that
@@ -462,7 +463,13 @@ class ReadFileTool(_FsTool):
                             chunks.append(chunk)
                         raw = b"".join(chunks)
                         del chunks
-                        return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
+                        return build_image_content_blocks(raw, image_mime, str(fp), f"(Image file: {path})")
+                    if mime and mime.startswith("image/") and mime != "image/svg+xml":
+                        return ToolResult.error(
+                            f"Error: Unsupported or invalid image file {path} (MIME: {mime}). "
+                            "Native images must be PNG, JPEG, GIF, or WebP. "
+                            "Convert the image to a supported raster format; SVG source can be read as text."
+                        )
 
                     previous_hash = (
                         self._file_states.visible_read_hash(fp, offset=offset, limit=limit)

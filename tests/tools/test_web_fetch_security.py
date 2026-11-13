@@ -381,6 +381,9 @@ async def test_web_fetch_blocks_private_redirect_before_readability_request(monk
     ("image/png", "image/png"),
     ("Image/PNG", "image/png"),
     ("Image/PNG; profile=MiXeD", "image/png; profile=MiXeD"),
+    ("Image/JPEG", "image/jpeg"),
+    ("Image/GIF", "image/gif"),
+    ("Image/WebP", "image/webp"),
 ])
 async def test_web_fetch_image_media_type_is_case_insensitive(
     monkeypatch, preflight_fails, content_type, expected_mime,
@@ -390,6 +393,12 @@ async def test_web_fetch_image_media_type_is_case_insensitive(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/"
         "iZk9HQAAAABJRU5ErkJggg=="
     )
+    raw = {
+        "image/png": png,
+        "image/jpeg": b"\xff\xd8\xfffixture",
+        "image/gif": b"GIF89afixture",
+        "image/webp": b"RIFF\x00\x00\x00\x00WEBPfixture",
+    }[expected_mime.split(";", 1)[0]]
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -397,7 +406,7 @@ async def test_web_fetch_image_media_type_is_case_insensitive(
         if preflight_fails and len(requests) == 1:
             raise httpx.ConnectError("Image preflight unavailable", request=request)
         return httpx.Response(
-            200, headers={"Content-Type": content_type}, content=png, request=request,
+            200, headers={"Content-Type": content_type}, content=raw, request=request,
         )
 
     transport = httpx.MockTransport(handler)
@@ -418,12 +427,75 @@ async def test_web_fetch_image_media_type_is_case_insensitive(
     image = next(block for block in result if block["type"] == "image_url")
     prefix, encoded = image["image_url"]["url"].split(";base64,", 1)
     assert prefix == f"data:{expected_mime}"
-    assert base64.b64decode(encoded, validate=True) == png
+    assert base64.b64decode(encoded, validate=True) == raw
     assert len(requests) == (2 if preflight_fails else 1)
 
 
 @pytest.mark.asyncio
-async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypatch):
+@pytest.mark.parametrize("preflight_fails", [False, True], ids=["stream", "fallback"])
+@pytest.mark.parametrize("content_type", [
+    "image/svg+xml", "Image/SVG+XML; charset=UTF-8", "image/bmp", "image/tiff",
+    "image/x-icon", "image/avif", "image/heic",
+])
+async def test_web_fetch_rejects_unsupported_image_endpoints_without_reading_body(
+    monkeypatch, preflight_fails, content_type,
+):
+    tool = WebFetchTool()
+    requests: list[str] = []
+    body_reads: list[str] = []
+
+    class ImageBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            body_reads.append("read")
+            yield b'<svg xmlns="http://www.w3.org/2000/svg"/>'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        if preflight_fails and len(requests) == 1:
+            raise httpx.ConnectError("Image preflight unavailable", request=request)
+        return httpx.Response(200, headers={"content-type": content_type}, stream=ImageBody())
+
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/image")
+
+    assert is_tool_error_result(result)
+    data = json.loads(result)
+    assert data["untrusted"] is True
+    assert "unsupported" in data["error"].lower()
+    assert "PNG" in data["error"] and "JPEG" in data["error"]
+    assert "source" in data["error"].lower()
+    assert requests == ["https://example.com/image"] * (2 if preflight_fails else 1)
+    assert body_reads == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preflight_fails", [False, True], ids=["stream", "fallback"])
+async def test_web_fetch_does_not_promote_svg_mislabeled_as_png(monkeypatch, preflight_fails):
+    tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        if preflight_fails and len(requests) == 1:
+            raise httpx.ConnectError("Image preflight unavailable", request=request)
+        return httpx.Response(
+            200, headers={"content-type": "image/png"},
+            content=b'<svg xmlns="http://www.w3.org/2000/svg"/>',
+        )
+
+    monkeypatch.setattr(web_module, "PinnedDNSAsyncTransport", lambda: httpx.MockTransport(handler))
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/image.png")
+
+    assert is_tool_error_result(result)
+    assert "PNG" in json.loads(result)["error"]
+    assert len(requests) == (2 if preflight_fails else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content_type", ["image/png", "image/svg+xml", "image/bmp"])
+async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypatch, content_type):
     tool = WebFetchTool(config=WebFetchConfig(use_jina_reader=False))
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -436,7 +508,7 @@ async def test_web_fetch_blocks_private_redirect_before_returning_image(monkeypa
         if str(request.url) == "http://127.0.0.1/secret.png":
             return httpx.Response(
                 200,
-                headers={"content-type": "image/png"},
+                headers={"content-type": content_type},
                 content=b"\x89PNG\r\n\x1a\n",
                 request=request,
             )

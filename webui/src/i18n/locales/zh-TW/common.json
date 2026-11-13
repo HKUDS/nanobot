@@ -2391,6 +2391,7 @@
     "completed": "任務已完成",
     "failed": "任務復原失敗",
     "failedHelp": "無法安全復原已儲存的任務，繼續前請先檢查。",
+    "imagesUnavailable": "請重新傳送圖片後繼續，已完成的工具未重複執行。",
     "resuming": "正在復原中斷的任務…",
     "review": "繼續前請檢查任務。工具不會自動重播。",
     "replyPreserved": "回覆已保留，可繼續生成。",

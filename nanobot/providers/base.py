@@ -276,6 +276,7 @@ class ProviderCallContext:
     """
 
     conversation_state: ProviderConversationState | None = field(default=None, repr=False)
+    required_image_inputs: tuple[str, ...] = field(default=(), repr=False)
     context_window_tokens: int | None = None
     session_id: str | None = field(default=None, repr=False)
     events: EventSink = field(default=NO_EVENTS, repr=False, compare=False)
@@ -1012,31 +1013,6 @@ class LLMProvider(ABC):
         return merged
 
     @staticmethod
-    def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
-        """Replace image_url blocks with text placeholder. Returns None if no images found."""
-        found = False
-        result: list[dict[str, Any]] = []
-        for msg in messages:
-            content = msg.get("content")
-            if isinstance(content, list):
-                new_content: list[Any] = []
-                for raw_block in cast(list[object], content):
-                    block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
-                    if block is not None and block.get("type") == "image_url":
-                        placeholder = (
-                            "[Image not delivered to model — "
-                            "do not describe or reference it]"
-                        )
-                        new_content.append({"type": "text", "text": placeholder})
-                        found = True
-                    else:
-                        new_content.append(raw_block)
-                result.append({**msg, "content": new_content})
-            else:
-                result.append(msg)
-        return result if found else None
-
-    @staticmethod
     def _contains_image_content(value: object) -> bool:
         """Return whether a JSON-like provider payload contains an input image."""
         if isinstance(value, dict):
@@ -1050,29 +1026,6 @@ class LLMProvider(ABC):
                 for item in cast(list[object], value)
             )
         return False
-
-    @staticmethod
-    def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
-        """Replace image_url blocks with text placeholder *in-place*.
-
-        Mutates the content lists of the original message dicts so that
-        callers holding references to those dicts also see the stripped
-        version.
-        """
-        found = False
-        for msg in messages:
-            content = msg.get("content")
-            if isinstance(content, list):
-                for i, raw_block in enumerate(cast(list[object], content)):
-                    block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
-                    if block is not None and block.get("type") == "image_url":
-                        placeholder = (
-                            "[Image not delivered to model — "
-                            "do not describe or reference it]"
-                        )
-                        content[i] = {"type": "text", "text": placeholder}
-                        found = True
-        return found
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         started_at_ms = time.time_ns() // 1_000_000
@@ -1316,7 +1269,6 @@ class LLMProvider(ABC):
         )
         return await self._run_chat_with_retry(
             kw,
-            messages,
             stream=True,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
@@ -1369,7 +1321,6 @@ class LLMProvider(ABC):
         )
         return await self._run_chat_with_retry(
             kw,
-            messages,
             stream=False,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
@@ -1404,7 +1355,6 @@ class LLMProvider(ABC):
     async def _run_chat_with_retry(
         self,
         kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
         *,
         stream: bool,
         retry_mode: str,
@@ -1414,6 +1364,23 @@ class LLMProvider(ABC):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
+        context = kw.get("provider_context")
+        if isinstance(context, ProviderCallContext) and context.required_image_inputs:
+            from nanobot.providers.images import image_inputs_available
+
+            state = context.current_conversation_state
+            if state is not None and not self.can_resume_conversation_state(state, kw.get("model")):
+                state = None
+            if not image_inputs_available(context.required_image_inputs, kw["messages"], state):
+                return LLMResponse(
+                    content=(
+                        "Images from the interrupted request are unavailable. Send the images again "
+                        "to continue; completed tools have not been repeated."
+                    ),
+                    finish_reason="error",
+                    error_kind="input_unavailable",
+                    error_should_retry=False,
+                )
         call = self._safe_chat_stream if stream else self._safe_chat
 
         async def attributed_call(**kwargs: Any) -> LLMResponse:
@@ -1464,7 +1431,6 @@ class LLMProvider(ABC):
             return await self._run_with_retry(
                 attributed_call,
                 kw,
-                original_messages,
                 retry_mode=retry_mode,
                 on_retry_wait=on_retry_wait,
                 on_retry_exhausted=on_retry_exhausted,
@@ -1617,7 +1583,6 @@ class LLMProvider(ABC):
         self,
         call: Callable[..., Awaitable[LLMResponse]],
         kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
         *,
         retry_mode: str,
         on_retry_wait: RetryEventCallback | None,
@@ -1681,13 +1646,7 @@ class LLMProvider(ABC):
                 identical_error_count = 1 if error_key else 0
 
             if not self.is_transient_response(response):
-                response = await self._retry_without_images(
-                    call, kw, original_messages, response,
-                )
-                await _finish_retry_status(
-                    "recovered" if response.finish_reason != "error" else "cleared",
-                    response,
-                )
+                await _finish_retry_status("cleared", response)
                 return response
 
             if (
@@ -1746,52 +1705,6 @@ class LLMProvider(ABC):
             await on_retry_exhausted(exhausted_message)
         await _finish_retry_status("exhausted", response)
         return response
-
-    async def _retry_without_images(
-        self,
-        call: Callable[..., Awaitable[LLMResponse]],
-        kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
-        response: LLMResponse,
-    ) -> LLMResponse:
-        # Removing the user's images cannot repair account access.
-        if (
-            (response.error_kind or "").lower() in {"authentication", "oauth_auth_required"}
-            or response.error_status_code in {401, 403}
-            or self.is_arrearage_response(response)
-        ):
-            return response
-        provider_context = kw.get("provider_context")
-        if (
-            isinstance(provider_context, ProviderCallContext)
-            and provider_context.compaction_input_budget is not None
-        ):
-            # Stateless image repair cannot satisfy required native compaction.
-            return response
-        stripped = self._strip_image_content(kw["messages"])
-        stripped_context: ProviderCallContext | None = None
-        if isinstance(provider_context, ProviderCallContext):
-            state = provider_context.conversation_state
-            if state is not None and (
-                stripped is not None
-                or self._strip_image_content(state.pending_messages) is not None
-                or self._contains_image_content(state.payload)
-            ):
-                # Native payloads may retain images: rebuild from the public transcript.
-                stripped_context = replace(provider_context, conversation_state=None)
-        if stripped is None and stripped_context is None:
-            return response
-        logger.warning("Non-transient LLM error with image content, retrying without images")
-        retry_kw = dict(kw)
-        if stripped is not None:
-            retry_kw["messages"] = stripped
-        if stripped_context is not None:
-            retry_kw["provider_context"] = stripped_context
-        result = await call(**retry_kw)
-        # Keep later iterations from repeating the same image repair.
-        if result.finish_reason != "error":
-            self._strip_image_content_inplace(original_messages)
-        return result
 
     async def aclose(self) -> None:
         """Close provider-owned transports after their active requests have stopped."""

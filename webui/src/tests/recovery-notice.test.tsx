@@ -183,3 +183,18 @@ it("shows a saved reply without treating the failed request as completed", async
   expect(screen.getByRole("alert")).toHaveTextContent("Model connection failed");
   expect(screen.getByRole("alert")).toHaveTextContent("Try again later or choose another model.");
 });
+
+
+it("requires images to be resent instead of offering an incomplete continuation", () => {
+  render(
+    <RecoveryNotice
+      state={{ ...INTERRUPTED, reason: "image_input_unavailable", failure_error_kind: "connection", can_continue: false }}
+      onContinue={vi.fn().mockResolvedValue(undefined)}
+      onDismiss={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent("Model connection failed");
+  expect(screen.getByRole("alert")).toHaveTextContent("Send the images again to continue");
+  expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dismiss" })).toBeEnabled();
+});

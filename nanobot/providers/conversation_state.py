@@ -10,6 +10,7 @@ from nanobot.providers.base import (
     ProviderCallContext,
     ProviderConversationState,
 )
+from nanobot.providers.images import image_input_ids, state_image_input_ids
 from nanobot.utils.helpers import estimate_prompt_tokens_chain
 
 _PROVIDER_STATE_OUTPUT_META = "provider_state_output"
@@ -43,6 +44,7 @@ class ProviderConversationStateController:
         messages: list[dict[str, Any]],
         state: ProviderConversationState | None = None,
         session_id: str | None = None,
+        required_image_inputs: tuple[str, ...] = (),
         checkpoint_callback: Callable[[ProviderConversationState], Awaitable[None]] | None = None,
     ) -> None:
         self._provider = provider
@@ -57,6 +59,14 @@ class ProviderConversationStateController:
         )
         self._boundary = len(messages)
         self._request_messages: list[dict[str, Any]] = []
+        self._request_state: ProviderConversationState | None = None
+        self._request_input: list[dict[str, Any]] = []
+        self.failed_image_inputs: tuple[str, ...] = ()
+        self._required_image_inputs = required_image_inputs
+
+    @property
+    def required_image_inputs(self) -> tuple[str, ...]:
+        return self._required_image_inputs
 
     def independent_request_context(
         self,
@@ -107,6 +117,8 @@ class ProviderConversationStateController:
         self._state = None
         self._boundary = len(messages)
         self._request_messages = []
+        if self._required_image_inputs:
+            self._required_image_inputs = image_input_ids(messages)
 
     def prepare_request(
         self,
@@ -117,6 +129,8 @@ class ProviderConversationStateController:
         supplemental_messages: list[dict[str, Any]] | None = None,
     ) -> ProviderCallContext | None:
         """Build context for the next request and remember its durable delta."""
+        self._request_state = None
+        self._request_input = model_messages if model_messages is not None else messages
         independent_context = self.independent_request_context(
             context_window_tokens=context_window_tokens,
         )
@@ -146,6 +160,7 @@ class ProviderConversationStateController:
         self._request_messages = deepcopy(request_messages)
         durable_pending = deepcopy([*self._state.pending_messages, *request_messages])
         request_state = self._state.with_pending_messages([*durable_pending, *supplemental])
+        self._request_state = request_state
         boundary = len(messages)
 
         async def accept_compaction(state: ProviderConversationState) -> None:
@@ -153,6 +168,9 @@ class ProviderConversationStateController:
             if self._checkpoint_callback is not None:
                 await self._checkpoint_callback(durable)
             self._state = durable
+            self._request_state = durable.with_pending_messages([*durable_pending, *supplemental])
+            if self._required_image_inputs:
+                self._required_image_inputs = state_image_input_ids(self._request_state)
             self._boundary = boundary
             self._seal_boundary(messages)
             self._request_messages = []
@@ -176,6 +194,18 @@ class ProviderConversationStateController:
         adopt_candidate_state: bool = True,
     ) -> None:
         """Advance, preserve, or discard state after one provider response."""
+        self.failed_image_inputs = (
+            state_image_input_ids(self._request_state)
+            if self._request_state is not None
+            else image_input_ids(self._request_input)
+        ) if response.finish_reason == "error" else ()
+        if (
+            response.finish_reason == "error" and response.error_kind == "input_unavailable"
+            and self._required_image_inputs
+        ):
+            self.failed_image_inputs = self._required_image_inputs
+        self._request_state = None
+        self._request_input = []
         candidate = response.provider_state if adopt_candidate_state else None
         candidate_is_replayable = response.finish_reason in {
             "stop",
@@ -191,6 +221,8 @@ class ProviderConversationStateController:
             )
         ):
             self._state = candidate
+            if self._required_image_inputs:
+                self._required_image_inputs = state_image_input_ids(candidate)
             self._boundary = len(messages)
             self._seal_boundary(messages)
         elif response.finish_reason == "error" and (

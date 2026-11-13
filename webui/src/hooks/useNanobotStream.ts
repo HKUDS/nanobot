@@ -854,7 +854,7 @@ export function useNanobotStream(
             : {}),
         };
         setRecoveryState(next);
-        if (ev.reason === "model_request_failed" || ev.status === "resuming") {
+        if (ev.reason === "model_request_failed" || ev.reason === "image_input_unavailable" || ev.status === "resuming") {
           setStreamError(null);
         }
         if (
@@ -873,7 +873,7 @@ export function useNanobotStream(
       if (ev.event === "attached") {
         setRecoveryState(ev.recovery_state ?? null);
         if (
-          ev.recovery_state?.reason === "model_request_failed"
+          ["model_request_failed", "image_input_unavailable"].includes(ev.recovery_state?.reason ?? "")
           || ev.recovery_state?.status === "resuming"
         ) {
           setStreamError(null);

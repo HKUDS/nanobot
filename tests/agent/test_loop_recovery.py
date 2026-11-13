@@ -17,6 +17,7 @@ from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.runtime_context import public_history_message
 from nanobot.session.manager import SessionManager
 from nanobot.session.recovery import (
+    FAILED_IMAGE_INPUTS_KEY,
     PENDING_USER_TURN_KEY,
     RECOVERY_METADATA_KEY,
     REQUEST_ORIGIN_METADATA_KEY,
@@ -24,7 +25,7 @@ from nanobot.session.recovery import (
 )
 from nanobot.session.turn_continuation import INTERNAL_CONTINUATION_META
 from nanobot.session.webui_turns import WebuiTurnCoordinator, WebuiTurnRoutePolicy
-from nanobot.webui.recovery import RecoveryCoordinator
+from nanobot.webui.recovery import RecoveryActionError, RecoveryCoordinator
 from nanobot.webui.transcript import WebUITranscriptRecorder
 
 
@@ -630,3 +631,87 @@ def test_persisted_automation_input_blocks_prior_prompt_attribution(tmp_path: Pa
     assert all("_hidden_history" not in row for row in public)
     wire = OpenAICompatProvider._sanitize_messages(OpenAICompatProvider(api_key="test"), replay, model="test-model")
     assert all("_hidden_history" not in row and AUTOMATION_HISTORY_META not in row for row in wire)
+
+
+@pytest.mark.asyncio
+async def test_failed_image_request_requires_resend_without_replaying_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from PIL import Image
+
+    from nanobot.providers.images import image_input_ids
+
+    image = tmp_path / "synthetic.png"
+    Image.new("RGB", (8, 8), "red").save(image)
+    bus = MessageBus()
+    sessions = SessionManager(tmp_path)
+    recovery = RecoveryCoordinator(sessions, bus)
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.can_resume_conversation_state.return_value = False
+    requests: list[dict] = []
+    responses = iter([
+        LLMResponse(content=None, tool_calls=[ToolCallRequest("read-image-once", "read_file", {"path": str(image)})]),
+        LLMResponse(content="bad request", finish_reason="error", error_status_code=400),
+        LLMResponse(content="Continued with the newly supplied image."),
+    ])
+
+    async def respond(**kwargs):
+        requests.append(deepcopy(kwargs["messages"]))
+        return next(responses)
+
+    provider.chat_stream_with_retry = AsyncMock(side_effect=respond)
+    loop = AgentLoop(
+        bus=bus, provider=provider, workspace=tmp_path, model="test-model",
+        session_manager=sessions, recovery_admission=recovery,
+    )
+    loop.turn_delivery_factory = TurnDeliveryFactory(bus, WebuiTurnRoutePolicy(sessions))
+    coordinator = WebuiTurnCoordinator(bus, sessions, loop.schedule_background, recovery=recovery)
+    tool = loop.tools.get("read_file")
+    assert tool is not None
+    execute = AsyncMock(wraps=tool.execute)
+    monkeypatch.setattr(tool, "execute", execute)
+    try:
+        with coordinator.connected():
+            await loop._dispatch_one(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="image-chat", content="Read the image",
+                metadata={"webui": True, "webui_turn_id": "image-request"},
+            ), asyncio.Queue())
+            saved = await sessions.state.get("websocket:image-chat")
+            state = saved.metadata[RECOVERY_METADATA_KEY]
+            assert state["reason"] == "image_input_unavailable"
+            assert state["can_continue"] is False
+            assert state["failure_error_kind"] == "unknown"
+            assert saved.provider_state is None
+            required = saved.metadata[FAILED_IMAGE_INPUTS_KEY]
+            assert required == list(image_input_ids(requests[-1]))
+            assert required
+            # Public history keeps the completed tool and its reference, not base64.
+            assert any(row.get("tool_call_id") == "read-image-once" for row in saved.messages)
+            assert not image_input_ids(saved.messages)
+            reopened = SessionManager(tmp_path)
+            reloaded = await reopened.state.get(saved.key)
+            assert reloaded.metadata[FAILED_IMAGE_INPUTS_KEY] == required
+            # Changing/removing the original never turns a path placeholder into a new input.
+            image.unlink()
+            with pytest.raises(RecoveryActionError, match="unavailable"):
+                await recovery.handle_action("continue", {
+                    "chat_id": "image-chat", "recovery_id": state["recovery_id"],
+                })
+            assert bus.inbound.empty()
+            assert execute.await_count == 1
+            Image.new("RGB", (8, 8), "blue").save(image)
+            await loop._dispatch_one(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="image-chat", content="Use this image instead",
+                media=[str(image)], metadata={"webui": True, "webui_turn_id": "replacement"},
+            ), asyncio.Queue())
+        final = await sessions.state.get(saved.key)
+        assert FAILED_IMAGE_INPUTS_KEY not in final.metadata
+        assert final.metadata[RECOVERY_METADATA_KEY]["status"] == "recovered"
+        assert image_input_ids(requests[-1])
+        assert list(image_input_ids(requests[-1])) != required
+        assert execute.await_count == 1
+        assert len(requests) == 3
+    finally:
+        await loop.aclose()

@@ -1715,7 +1715,7 @@ def test_deepseek_chat_keeps_tool_history_when_effort_implicit() -> None:
 def test_deepseek_coerces_list_content_to_string() -> None:
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        p = OpenAICompatProvider(api_key="k", default_model="deepseek-chat", spec=spec)
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
 
     kw = p._build_kwargs(
         messages=[{
@@ -1726,7 +1726,7 @@ def test_deepseek_coerces_list_content_to_string() -> None:
             ],
         }],
         tools=None,
-        model="deepseek-chat",
+        model="deepseek-v4-pro",
         max_tokens=1024,
         temperature=0.7,
         reasoning_effort=None,
@@ -1791,18 +1791,18 @@ def test_deepseek_pro_remains_text_only(responses: bool) -> None:
     build_request = provider._build_responses_body if responses else provider._build_kwargs
     body = build_request(
         messages=[{"role": "user", "content": [
-            {"type": "text", "text": "describe the image"},
-            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+            {"type": "text", "text": "hello "},
+            {"type": "text", "text": "world"},
         ]}],
         tools=None, model="deepseek-v4-pro", max_tokens=1024,
         temperature=0.7, reasoning_effort=None, tool_choice=None,
     )
     if responses:
         assert body["input"] == [{
-            "role": "user", "content": [{"type": "input_text", "text": "describe the image"}],
+            "role": "user", "content": [{"type": "input_text", "text": "hello world"}],
         }]
     else:
-        assert body["messages"] == [{"role": "user", "content": "describe the image"}]
+        assert body["messages"] == [{"role": "user", "content": "hello world"}]
 
 
 def test_non_deepseek_keeps_list_content() -> None:

@@ -2391,6 +2391,7 @@
     "completed": "Tugas selesai",
     "failed": "Pemulihan tugas gagal",
     "failedHelp": "Tugas tersimpan tidak dapat dipulihkan dengan aman. Tinjau sebelum melanjutkan.",
+    "imagesUnavailable": "Kirim ulang gambar untuk melanjutkan. Alat yang sudah selesai tidak dijalankan ulang.",
     "resuming": "Memulihkan tugas yang terputus…",
     "review": "Tinjau tugas sebelum melanjutkan. Alat tidak akan dijalankan ulang secara otomatis.",
     "replyPreserved": "Balasan tersimpan. Anda dapat melanjutkan.",

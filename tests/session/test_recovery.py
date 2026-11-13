@@ -12,6 +12,7 @@ from nanobot.providers.base import ProviderConversationState
 from nanobot.session.display_history import HistoryFact, HistoryKind
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import (
+    FAILED_IMAGE_INPUTS_KEY,
     PENDING_FOLLOWUPS_KEY,
     PENDING_USER_TURN_KEY,
     RECOVERY_METADATA_KEY,
@@ -957,3 +958,38 @@ async def test_bus_remains_quiet_after_recovered_state(tmp_path: Path) -> None:
     await asyncio.sleep(0)
     assert bus.inbound.empty()
     assert bus.outbound.empty()
+
+
+@pytest.mark.asyncio
+async def test_image_recovery_requires_complete_retained_native_input(tmp_path: Path) -> None:
+    from nanobot.providers.images import state_image_input_ids
+
+    coordinator, bus, sessions = _coordinator(tmp_path)
+    session = sessions.get_or_create("websocket:images")
+    session.add_message("user", "[image: screenshot.png]")
+    session.provider_state = ProviderConversationState(
+        kind="openai_responses", provider="synthetic", model="vision", version=1,
+        payload={"items": [{"role": "user", "content": [
+            {"type": "input_image", "image_url": "data:image/png;base64,c3ludGhldGlj"},
+        ]}]},
+    )
+    session.metadata[FAILED_IMAGE_INPUTS_KEY] = list(state_image_input_ids(session.provider_state))
+    _persist(sessions, session)
+    await coordinator.turn_completed(session.key, failure_kind="model", failure_error_kind="server")
+    saved = await sessions.state.get(session.key)
+    state = saved.metadata[RECOVERY_METADATA_KEY]
+    assert state.get("can_continue", True)
+    assert state["reason"] == "model_request_failed"
+    await coordinator.handle_action("continue", {"chat_id": "images", "recovery_id": state["recovery_id"]})
+    queued = bus.inbound.get_nowait()
+    assert queued.sender_id == "system:recovery"
+    assert queued.media == []
+    # A notice is not authority to continue after its private input was invalidated.
+    await coordinator.turn_completed(session.key, failure_kind="model", failure_error_kind="server")
+    saved = await sessions.state.get(session.key)
+    state = saved.metadata[RECOVERY_METADATA_KEY]
+    saved.provider_state = None
+    await sessions.state.restore_interruption(saved)
+    with pytest.raises(RecoveryActionError, match="images are unavailable"):
+        await coordinator.handle_action("continue", {"chat_id": "images", "recovery_id": state["recovery_id"]})
+    assert bus.inbound.empty()

@@ -35,13 +35,16 @@ export function RecoveryNotice({ state, onContinue, onDismiss, onOpenSettings }:
   if (!waiting || hiddenRecoveryId === state.recovery_id) return null;
 
   const contextUnavailable = state.can_continue === false;
-  const modelFailure = state.reason === "model_request_failed"
+  const imagesUnavailable = state.reason === "image_input_unavailable";
+  const modelFailure = state.reason === "model_request_failed" || imagesUnavailable
     ? resolveModelRequestFailureCopy({ errorKind: state.failure_error_kind }, t)
     : null;
   const title = modelFailure?.title ?? (state.status === "failed"
     ? t("recovery.failed", { defaultValue: "Task recovery failed" })
     : t("recovery.interrupted", { defaultValue: "Task interrupted" }));
-  const detail = contextUnavailable || state.status === "failed"
+  const detail = imagesUnavailable
+    ? t("recovery.imagesUnavailable", { defaultValue: "Send the images again to continue. Completed tools have not been repeated." })
+    : contextUnavailable || state.status === "failed"
     ? t("recovery.failedHelp", {
         defaultValue: "The saved task could not be restored safely. Review it before continuing.",
       })

@@ -2391,6 +2391,7 @@
     "completed": "Tarea completada",
     "failed": "La recuperación de la tarea falló",
     "failedHelp": "La tarea guardada no se pudo restaurar de forma segura. Revísala antes de continuar.",
+    "imagesUnavailable": "Vuelve a enviar las imágenes para continuar. Las herramientas completadas no se han vuelto a ejecutar.",
     "resuming": "Restaurando la tarea interrumpida…",
     "review": "Revisa la tarea antes de continuar. Las herramientas no se repetirán automáticamente.",
     "replyPreserved": "La respuesta está guardada. Puedes continuar.",

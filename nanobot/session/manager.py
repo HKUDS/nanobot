@@ -47,6 +47,7 @@ _FORK_VOLATILE_METADATA_KEYS = {
     "pending_user_turn",
     "pending_user_followups",
     "runtime_checkpoint",
+    "failed_image_inputs",
     "session_handle",
     "webui_recovery",
     "title",

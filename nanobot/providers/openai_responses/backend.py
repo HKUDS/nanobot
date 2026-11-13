@@ -16,7 +16,7 @@ from nanobot.providers.base import (
     ProviderConversationState,
     resolve_stream_idle_timeout_s,
 )
-from nanobot.providers.images import prepare_inline_images
+from nanobot.providers.images import prepare_inline_images, preserve_image_input_ids
 from nanobot.providers.openai_responses.compaction import (
     retained_compaction_messages,
     split_compaction_input,
@@ -254,9 +254,12 @@ class ResponsesBackend:
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         on_response_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        images_prepared: bool = False,
     ) -> LLMResponse:
         options: dict[str, Any] = {"timeout": resolve_stream_idle_timeout_s()}
-        body = await prepare_inline_images(body)
+        source_body = body
+        if not images_prepared:
+            body = await prepare_inline_images(body)
         if verify is not None:
             options["verify"] = verify
         if proxy:
@@ -266,11 +269,12 @@ class ResponsesBackend:
                 if response.status_code != 200:
                     raw = (await response.aread()).decode("utf-8", "ignore")
                     raise error_factory(response.status_code, response.headers, raw)
-                return await ResponsesBackend.consume(
+                result = await ResponsesBackend.consume(
                     iter_sse(response), provider=provider, body=body,
                     on_content_delta=on_content_delta, on_thinking_delta=on_thinking_delta,
                     on_tool_call_delta=on_tool_call_delta, on_response_event=on_response_event,
                 )
+                return preserve_image_input_ids(result, source_body, body)
 
     async def sdk_request(
         self,
@@ -284,6 +288,7 @@ class ResponsesBackend:
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         options: dict[str, Any] = {}
+        source_body = body
         body = await prepare_inline_images(body)
         if extra_headers is not None:
             options["extra_headers"] = extra_headers
@@ -308,10 +313,11 @@ class ResponsesBackend:
             )
             response = await client.responses.create(**body, **options)
         if not body.get("stream"):
-            return parse_response_output(
+            result = parse_response_output(
                 response, state_provider=provider, state_model=str(body["model"]),
                 state_input_items=cast(list[dict[str, Any]], body["input"]),
             )
+            return preserve_image_input_ids(result, source_body, body)
 
         async def timed_events() -> AsyncIterable[dict[str, Any]]:
             events = iter_sdk_events(response).__aiter__()
@@ -328,4 +334,4 @@ class ResponsesBackend:
                 on_tool_call_delta=on_tool_call_delta,
             )
         result.content = result.content or None
-        return result
+        return preserve_image_input_ids(result, source_body, body)

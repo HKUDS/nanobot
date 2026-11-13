@@ -16,6 +16,7 @@ from nanobot.bus.outbound_events import (
     outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.providers.images import image_inputs_available
 from nanobot.session import turn_continuation
 from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
 from nanobot.session.manager import Session, SessionManager
@@ -33,6 +34,7 @@ from nanobot.session.recovery import (
     pending_followups,
     recovery_state_from_metadata,
     request_origin_from_metadata,
+    required_image_inputs,
     restore_pending_interruption,
     restore_runtime_checkpoint,
     runtime_checkpoint_is_well_formed,
@@ -155,7 +157,7 @@ class RecoveryCoordinator:
             state = recovery_state_from_metadata(session.metadata)
             if not state or state["status"] not in {"resuming", "awaiting_user", "failed"}:
                 return True
-            if state.get("reason") != "model_request_failed":
+            if state.get("reason") not in {"model_request_failed", "image_input_unavailable"}:
                 restore_runtime_checkpoint(session)
                 if not restore_pending_interruption(session, superseded=True):
                     append_recovery_interruption(session, superseded=True)
@@ -183,13 +185,18 @@ class RecoveryCoordinator:
         if failure_kind == "model":
             # The turn has already saved its transcript and tool results. Use
             # that context, never resend the user's message or replay tools.
+            images_available = image_inputs_available(
+                required_image_inputs(session), [], session.provider_state,
+            )
             waiting = self._set_state(
                 session,
                 status="awaiting_user",
                 recovery_id=uuid4().hex,
                 attempts=cast(int, state.get("attempts", 0)) if state else 0,
-                reason="model_request_failed",
-                can_continue=any(message.get("role") == "user" for message in session.messages),
+                reason="model_request_failed" if images_available else "image_input_unavailable",
+                can_continue=images_available and any(
+                    message.get("role") == "user" for message in session.messages
+                ),
             )
             waiting["failure_error_kind"] = failure_error_kind or "unknown"
             if session.messages and session.messages[-1].get("_interrupted") is True:
@@ -241,6 +248,8 @@ class RecoveryCoordinator:
             raise RecoveryActionError("recovery is not waiting for confirmation", status=409)
         if state.get("can_continue") is False:
             raise RecoveryActionError("recovery context is unavailable", status=409)
+        if not image_inputs_available(required_image_inputs(session), [], session.provider_state):
+            raise RecoveryActionError("images are unavailable; send the images again", status=409)
         next_state = self._set_state(
             session,
             status="resuming",
