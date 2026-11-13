@@ -556,3 +556,38 @@ class TestWorkspaceRestriction:
         )
         assert "Patch applied:" in result
         assert target.read_text(encoding="utf-8") == "after\n"
+
+
+@pytest.mark.parametrize("offset, limit", [(2.0, 1), (2, 1.0)])
+async def test_read_file_accepts_json_integers_without_changing_arguments(tmp_path, offset, limit):
+    from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+
+    path = tmp_path / "integer-offset.txt"
+    path.write_text("first\nsecond\nthird\n", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(ReadFileTool(workspace=tmp_path))
+    arguments = {"path": str(path), "offset": offset, "limit": limit}
+
+    result = await registry.execute("read_file", arguments)
+
+    assert not is_tool_error_result(result)
+    assert result.startswith("2| second\n")
+    assert "Use offset=3 to continue" in result
+    assert type(arguments["offset"]) is type(offset)
+    assert type(arguments["limit"]) is type(limit)
+
+
+async def test_edit_file_accepts_json_integer_occurrence(tmp_path):
+    from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
+
+    path = tmp_path / "integer-occurrence.txt"
+    path.write_text("first first", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(EditFileTool(workspace=tmp_path))
+    arguments = {"path": str(path), "old_text": "first", "new_text": "second", "occurrence": 2.0}
+
+    result = await registry.execute("edit_file", arguments)
+
+    assert not is_tool_error_result(result)
+    assert path.read_text(encoding="utf-8") == "first second"
+    assert type(arguments["occurrence"]) is float

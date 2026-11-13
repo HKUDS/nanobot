@@ -102,3 +102,21 @@ async def test_execute_rejects_invalid_url_after_cleaning(url):
     data = json.loads(result)
     assert "error" in data
     assert "URL validation failed" in data["error"]
+
+
+async def test_web_fetch_accepts_json_integer_character_limit(monkeypatch):
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    monkeypatch.setattr(FakeResponse, "headers", {"content-type": "text/plain"})
+    monkeypatch.setattr(FakeResponse, "text", "x" * 200)
+    registry = ToolRegistry()
+    registry.register(WebFetchTool())
+    arguments = {"url": "https://example.com/page", "maxChars": 100.0}
+
+    with _patched_web_fetch():
+        result = await registry.execute("web_fetch", arguments)
+
+    data = json.loads(result)
+    assert data["text"].partition("\n\n")[2] == "x" * 100
+    assert data["truncated"] is True
+    assert type(arguments["maxChars"]) is float
