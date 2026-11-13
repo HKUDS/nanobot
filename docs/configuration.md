@@ -2093,7 +2093,7 @@ Create a key at [serper.dev](https://serper.dev). You can also set `SERPER_API_K
 
 </details>
 
-Install the optional binding with `nanobot plugins enable mst` (mst-python 0.6.0 or newer). By default mst queries every engine it reports as ready. Some engines require their own API keys in the gateway environment. `mstEngines` or `MST_ENGINES` limits the engine list, and `mstWeights` or `MST_WEIGHTS` overrides ranking weights. The shared Web access proxy is supported and applied to every engine in the search; HTTP, HTTPS, SOCKS5, and SOCKS5H proxy URLs are accepted.
+Install the optional binding with `nanobot plugins enable mst` (mst-python 0.6.1 or newer). By default mst queries every engine it reports as ready. Some engines require their own API keys in the gateway environment. `mstEngines` or `MST_ENGINES` limits the engine list, and `mstWeights` or `MST_WEIGHTS` overrides ranking weights. The shared Web access proxy is supported and applied to every engine in the search; HTTP, HTTPS, SOCKS5, and SOCKS5H proxy URLs are accepted.
 
 **AnySearch** (key-optional, anonymous quota):
 <details>
