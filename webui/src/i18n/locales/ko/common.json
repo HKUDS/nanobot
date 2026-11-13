@@ -1841,12 +1841,6 @@
     },
     "loadingConversation": "대화 불러오는 중…",
     "empty": {
-      "greetings": {
-        "workOn": "우리 무엇을 함께 해볼까요?",
-        "start": "오늘은 어디서 시작할까요?",
-        "build": "오늘은 무엇을 만들어볼까요?",
-        "tackle": "함께 무엇을 해결할까요?"
-      },
       "quickActions": {
         "plan": {
           "title": "계획 세우기",

@@ -1841,12 +1841,6 @@
     },
     "loadingConversation": "正在載入話題…",
     "empty": {
-      "greetings": {
-        "workOn": "我們要一起做點什麼？",
-        "start": "今天從哪裡開始？",
-        "build": "今天要一起打造什麼？",
-        "tackle": "我們要一起解決什麼？"
-      },
       "quickActions": {
         "plan": {
           "title": "制定計劃",

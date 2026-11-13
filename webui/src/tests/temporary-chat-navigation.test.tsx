@@ -386,7 +386,7 @@ describe("temporary chat navigation", () => {
     expect(within(screen.getByTestId("thread-message-region")).getByText(
       "Count from one to three",
     )).toBeInTheDocument();
-    expect(screen.queryByTestId("hero-greeting")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thread-welcome-mark")).not.toBeInTheDocument();
   });
 
   it.each(["before leaving", "while away", "after returning"])(
@@ -520,7 +520,7 @@ describe("temporary chat navigation", () => {
     expect(window.location.hash).toBe(`#/temporary/${secondChatId}`);
     await selectTopic("Close temporary chat: List three colors");
     expect(deleteCache).toHaveBeenCalledWith(secondChatId);
-    expect(await screen.findByTestId("hero-greeting")).toBeInTheDocument();
+    expect(await screen.findByTestId("thread-welcome-mark")).toBeInTheDocument();
     for (const cache of deleteCache.mock.contexts) {
       if (!(cache instanceof ThreadMessageCache)) throw new Error("Expected thread message cache");
       expect(cache.get(firstChatId)).toBeUndefined();

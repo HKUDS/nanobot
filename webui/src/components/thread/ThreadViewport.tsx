@@ -1330,7 +1330,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
               ref={emptyStateRef}
               data-testid="thread-empty-region"
               className={cn(
-                "row-start-1 min-h-0 min-w-0 w-full",
+                "relative row-start-1 min-h-0 min-w-0 w-full [container-type:inline-size]",
                 initialLoading
                   ? "overflow-hidden"
                   : cn("flex items-center justify-center", hasComposer && "sm:items-end sm:pb-8"),
