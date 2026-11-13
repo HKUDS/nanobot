@@ -1060,6 +1060,8 @@
       "contextWindowError": "200k、1m、131072 など、正のトークン数を入力してください。",
       "maxTokens": "最大出力トークン",
       "temperature": "温度",
+      "imageInput": "画像入力",
+      "imageInputHelp": "オフにすると、画像を含むリクエストではこのプリセットをスキップします。",
       "reasoningEffort": "推論の強度",
       "convertTitle": "設定を変換",
       "convertHelp": "主モデルと予備モデルをプリセットに変換します。",

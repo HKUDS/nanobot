@@ -1060,6 +1060,8 @@
       "contextWindowError": "Saisissez un nombre positif de tokens, par exemple 200k, 1m ou 131072.",
       "maxTokens": "Tokens de sortie max.",
       "temperature": "Température",
+      "imageInput": "Entrée d’images",
+      "imageInputHelp": "Si désactivée, les requêtes contenant des images ignorent ce préréglage.",
       "reasoningEffort": "Effort de raisonnement",
       "convertTitle": "Convertir les réglages",
       "convertHelp": "Convertissez les modèles principal et de secours en préréglages.",

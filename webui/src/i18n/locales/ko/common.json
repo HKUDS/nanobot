@@ -1060,6 +1060,8 @@
       "contextWindowError": "200k, 1m, 131072처럼 양수 토큰 수를 입력하세요.",
       "maxTokens": "최대 출력 토큰",
       "temperature": "온도",
+      "imageInput": "이미지 입력",
+      "imageInputHelp": "끄면 이미지가 포함된 요청에서 이 프리셋을 건너뜁니다.",
       "reasoningEffort": "추론 강도",
       "convertTitle": "설정 변환",
       "convertHelp": "주 모델과 대체 모델을 프리셋으로 변환하세요.",

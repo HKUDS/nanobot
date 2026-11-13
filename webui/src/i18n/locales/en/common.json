@@ -880,6 +880,8 @@
       "contextWindowError": "Enter a positive token count, such as 200k, 1m, or 131072.",
       "maxTokens": "Max output tokens",
       "temperature": "Temperature",
+      "imageInput": "Image input",
+      "imageInputHelp": "When off, requests containing images skip this preset.",
       "reasoningEffort": "Reasoning effort",
       "convertTitle": "Convert setup",
       "convertHelp": "Convert primary and fallback models to presets.",

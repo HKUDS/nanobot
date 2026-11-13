@@ -1060,6 +1060,8 @@
       "contextWindowError": "Introduce una cantidad positiva de tokens, como 200k, 1m o 131072.",
       "maxTokens": "Máx. tokens de salida",
       "temperature": "Temperatura",
+      "imageInput": "Entrada de imágenes",
+      "imageInputHelp": "Al desactivarla, las solicitudes con imágenes omiten este preajuste.",
       "reasoningEffort": "Esfuerzo de razonamiento",
       "convertTitle": "Convertir ajustes",
       "convertHelp": "Convierte los modelos principal y de respaldo en preajustes.",

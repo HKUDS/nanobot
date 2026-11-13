@@ -59,6 +59,7 @@ export interface AgentSettingsDraft {
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  supportsImages: boolean;
   api: ModelAPIConfig | null;
   extraHeaders: string;
   extraQuery: string;
@@ -103,6 +104,7 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   contextWindowTokens: 200_000,
   temperature: 0.1,
   reasoningEffort: "",
+  supportsImages: true,
   api: null,
   extraHeaders: "",
   extraQuery: "",
@@ -130,6 +132,7 @@ export function agentDraftFromPayload(
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
+    supportsImages: (activePreset ? activePreset.supports_images : payload.agent.supports_images) ?? true,
     api: activePreset ? activePreset.api ?? null : payload.agent.api ?? null,
     extraHeaders: providerJsonValue(activePreset?.extra_headers),
     extraQuery: providerJsonValue(activePreset?.extra_query),
@@ -403,6 +406,7 @@ export function ModelsSettings({
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
+      supportsImages: preset.supports_images ?? true,
       api: preset.api ?? null,
       extraHeaders: providerJsonValue(preset.extra_headers),
       extraQuery: providerJsonValue(preset.extra_query),
@@ -539,6 +543,20 @@ export function ModelsSettings({
               api: model === prev.model ? prev.api : null,
               modelPreset: canSuggestName ? suggestion : prev.modelPreset,
             }));
+          }}
+        />
+      </SettingsRow>
+      <SettingsRow
+        title={t("settings.models.imageInput")}
+        description={t("settings.models.imageInputHelp")}
+      >
+        <ToggleButton
+          checked={form.supportsImages}
+          label={t("settings.models.imageInput")}
+          disabled={saving || creatingSaving}
+          onChange={(supportsImages) => {
+            edits.complete();
+            setForm((prev) => ({ ...prev, supportsImages }));
           }}
         />
       </SettingsRow>

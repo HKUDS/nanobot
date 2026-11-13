@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView as renderSettingsViewBase, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
@@ -1194,6 +1194,7 @@ describe("Settings models", () => {
       ...payload.model_presets[0],
       name: "Writer",
       label: "Writer",
+      supports_images: false,
       active: false,
       model: "openai/gpt-4o-mini",
       provider: "openai",
@@ -1246,6 +1247,8 @@ describe("Settings models", () => {
       target: { value: "openai/gpt-4o-mini" },
     });
     fireEvent.keyDown(modelSearch, { key: "Enter" });
+    expect(screen.getByRole("switch", { name: "Image input" })).toBeChecked();
+    fireEvent.click(screen.getByRole("switch", { name: "Image input" }));
     const saveButton = presetSaveButton();
     expect(saveButton).toBeEnabled();
     fireEvent.click(saveButton);
@@ -1254,8 +1257,8 @@ describe("Settings models", () => {
       expect(requestMutationMock).toHaveBeenCalledWith(
         "settings.model_configuration.create",
         expect.objectContaining(optimized
-          ? { name: "Writer", append_to_order: true, include_usage: false }
-          : { name: "Writer" }),
+          ? { name: "Writer", supports_images: false, append_to_order: true, include_usage: false }
+          : { name: "Writer", supports_images: false }),
         20_000,
       );
       if (optimized) {
@@ -2275,5 +2278,58 @@ describe("Settings models", () => {
         "settings.model_configuration.update", expect.objectContaining({ reasoning_effort: "provider-native-mode" }), 20_000,
       );
     });
+  });
+});
+
+
+describe("Model preset image input", () => {
+  installSettingsViewTestHooks();
+
+  it("saves image input capability per preset and restores it after reopening", async () => {
+    let { payload } = settingsPayloadWithBackup();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    requestMutationMock.mockImplementation(async (_action: string, args: Record<string, unknown>) => {
+      payload = {
+        ...payload,
+        model_presets: payload.model_presets.map((preset) => preset.name === args.name
+          ? { ...preset, supports_images: args.supports_images as boolean } : preset),
+      };
+      return payload;
+    });
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+    const control = screen.getByRole("switch", { name: "Image input" });
+    expect(control).toBeChecked();
+    fireEvent.click(control);
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { name: "primary", supports_images: false, include_usage: false }, 20_000,
+    ));
+    await waitFor(() => expect(control).toBeEnabled());
+    expect(control).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await togglePresetEditor("backup");
+    expect(screen.getByRole("switch", { name: "Image input" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(requestMutationMock).toHaveBeenCalledTimes(1);
+    cleanup();
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    await togglePresetEditor();
+    expect(screen.getByRole("switch", { name: "Image input" })).not.toBeChecked();
+  });
+
+  it("starts new presets with image input enabled and discards cancelled changes", async () => {
+    const { payload } = settingsPayloadWithBackup();
+    payload.model_presets[0] = { ...payload.model_presets[0], supports_images: false };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(payload)));
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
+    const control = screen.getByRole("switch", { name: "Image input" });
+    expect(control).toBeChecked();
+    fireEvent.click(control);
+    expect(control).not.toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "New preset" }));
+    expect(screen.getByRole("switch", { name: "Image input" })).toBeChecked();
   });
 });

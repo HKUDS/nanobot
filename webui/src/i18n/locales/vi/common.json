@@ -1060,6 +1060,8 @@
       "contextWindowError": "Nhập số lượng token dương, chẳng hạn 200k, 1m hoặc 131072.",
       "maxTokens": "Token đầu ra tối đa",
       "temperature": "Nhiệt độ",
+      "imageInput": "Đầu vào hình ảnh",
+      "imageInputHelp": "Khi tắt, yêu cầu chứa hình ảnh sẽ bỏ qua cấu hình này.",
       "reasoningEffort": "Mức suy luận",
       "convertTitle": "Chuyển thiết lập",
       "convertHelp": "Chuyển mô hình chính và dự phòng thành bộ thiết lập.",

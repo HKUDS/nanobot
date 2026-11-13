@@ -1060,6 +1060,8 @@
       "contextWindowError": "Masukkan jumlah token positif, seperti 200k, 1m, atau 131072.",
       "maxTokens": "Maks. token keluaran",
       "temperature": "Temperatur",
+      "imageInput": "Input gambar",
+      "imageInputHelp": "Jika dinonaktifkan, permintaan berisi gambar akan melewati preset ini.",
       "reasoningEffort": "Upaya penalaran",
       "convertTitle": "Konversi pengaturan",
       "convertHelp": "Ubah model utama dan cadangan menjadi preset.",
