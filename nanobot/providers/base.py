@@ -276,7 +276,6 @@ class ProviderCallContext:
     """
 
     conversation_state: ProviderConversationState | None = field(default=None, repr=False)
-    required_image_inputs: tuple[str, ...] = field(default=(), repr=False)
     context_window_tokens: int | None = None
     session_id: str | None = field(default=None, repr=False)
     events: EventSink = field(default=NO_EVENTS, repr=False, compare=False)
@@ -468,6 +467,7 @@ class LLMProvider(ABC):
         self.api_base = api_base
         self.provider_name = provider_name
         self.generation: GenerationSettings = GenerationSettings()
+        self.supports_images = True
         self._llm_call_observer: LLMCallObserver | None = None
         self._usage_estimation_slots = asyncio.Semaphore(2)
 
@@ -1027,6 +1027,24 @@ class LLMProvider(ABC):
             )
         return False
 
+    @staticmethod
+    def _request_contains_images(messages: list[dict[str, Any]], context: ProviderCallContext | None = None) -> bool:
+        state = context.current_conversation_state if context is not None else None
+        return LLMProvider._contains_image_content([
+            messages, state.payload if state else None, state.pending_messages if state else None,
+        ])
+
+    def _image_input_error(
+        self, messages: list[dict[str, Any]], context: ProviderCallContext | None = None,
+    ) -> LLMResponse | None:
+        if self.supports_images or not self._request_contains_images(messages, context):
+            return None
+        return LLMResponse(
+            content="This model preset does not support image input. Select an image-capable preset in model settings.",
+            finish_reason="error", error_kind="invalid_request", error_code="unsupported_image",
+            error_should_retry=False,
+        )
+
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         started_at_ms = time.time_ns() // 1_000_000
         started_at_ns = time.monotonic_ns()
@@ -1364,23 +1382,8 @@ class LLMProvider(ABC):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        context = kw.get("provider_context")
-        if isinstance(context, ProviderCallContext) and context.required_image_inputs:
-            from nanobot.providers.images import image_inputs_available
-
-            state = context.current_conversation_state
-            if state is not None and not self.can_resume_conversation_state(state, kw.get("model")):
-                state = None
-            if not image_inputs_available(context.required_image_inputs, kw["messages"], state):
-                return LLMResponse(
-                    content=(
-                        "Images from the interrupted request are unavailable. Send the images again "
-                        "to continue; completed tools have not been repeated."
-                    ),
-                    finish_reason="error",
-                    error_kind="input_unavailable",
-                    error_should_retry=False,
-                )
+        if error := self._image_input_error(kw["messages"], kw.get("provider_context")):
+            return error
         call = self._safe_chat_stream if stream else self._safe_chat
 
         async def attributed_call(**kwargs: Any) -> LLMResponse:

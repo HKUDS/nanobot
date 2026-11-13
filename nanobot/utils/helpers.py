@@ -323,11 +323,8 @@ def extract_reasoning(
     return None, content
 
 
-SUPPORTED_IMAGE_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
-
-
 def detect_image_mime(data: bytes) -> str | None:
-    """Detect a supported raster image MIME type from magic bytes."""
+    """Detect image MIME type from magic bytes, ignoring file extension."""
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"
     if data[:3] == b"\xff\xd8\xff":

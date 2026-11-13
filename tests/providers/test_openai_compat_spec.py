@@ -1715,7 +1715,7 @@ def test_deepseek_chat_keeps_tool_history_when_effort_implicit() -> None:
 def test_deepseek_coerces_list_content_to_string() -> None:
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-chat", spec=spec)
 
     kw = p._build_kwargs(
         messages=[{
@@ -1726,7 +1726,7 @@ def test_deepseek_coerces_list_content_to_string() -> None:
             ],
         }],
         tools=None,
-        model="deepseek-v4-pro",
+        model="deepseek-chat",
         max_tokens=1024,
         temperature=0.7,
         reasoning_effort=None,
@@ -1784,25 +1784,31 @@ def test_deepseek_vision_preserves_multimodal_content(
 
 
 @pytest.mark.parametrize("responses", [False, True])
-def test_deepseek_pro_remains_text_only(responses: bool) -> None:
+def test_deepseek_text_coercion_preserves_image_content(responses: bool) -> None:
     provider = OpenAICompatProvider(
         api_key="k", default_model="deepseek-v4-pro", spec=find_by_name("deepseek"),
     )
     build_request = provider._build_responses_body if responses else provider._build_kwargs
     body = build_request(
         messages=[{"role": "user", "content": [
-            {"type": "text", "text": "hello "},
-            {"type": "text", "text": "world"},
+            {"type": "text", "text": "describe the image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
         ]}],
         tools=None, model="deepseek-v4-pro", max_tokens=1024,
         temperature=0.7, reasoning_effort=None, tool_choice=None,
     )
     if responses:
         assert body["input"] == [{
-            "role": "user", "content": [{"type": "input_text", "text": "hello world"}],
+            "role": "user", "content": [
+                {"type": "input_text", "text": "describe the image"},
+                {"type": "input_image", "image_url": "data:image/png;base64,AA==", "detail": "auto"},
+            ],
         }]
     else:
-        assert body["messages"] == [{"role": "user", "content": "hello world"}]
+        assert body["messages"][0]["content"] == [
+            {"type": "text", "text": "describe the image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+        ]
 
 
 def test_non_deepseek_keeps_list_content() -> None:

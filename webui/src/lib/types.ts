@@ -754,6 +754,7 @@ export interface SettingsPayload {
     context_window_tokens: number;
     temperature: number;
     reasoning_effort: string | null;
+    supports_images?: boolean;
     api?: ModelAPIConfig | null;
     timezone: string;
     tool_hint_max_length: number;
@@ -772,6 +773,7 @@ export interface SettingsPayload {
     temperature: number;
     reasoning_effort: string | null;
     reasoning_effort_values?: string[];
+    supports_images?: boolean;
     api?: ModelAPIConfig | null;
     extra_headers?: Record<string, string> | null;
     extra_query?: Record<string, string> | null;
@@ -1407,6 +1409,7 @@ export interface ModelConfigurationCreate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  supportsImages?: boolean;
   api?: ModelAPIConfig | null;
   extraHeaders?: string;
   extraQuery?: string;
@@ -1422,6 +1425,7 @@ export interface ModelConfigurationUpdate {
   contextWindowTokens?: number;
   temperature?: number;
   reasoningEffort?: string | null;
+  supportsImages?: boolean;
   api?: ModelAPIConfig | null;
   extraHeaders?: string;
   extraQuery?: string;

@@ -89,7 +89,6 @@ from nanobot.session.model_selection import (
     model_preset_from_metadata,
 )
 from nanobot.session.recovery import (
-    FAILED_IMAGE_INPUTS_KEY,
     PENDING_FOLLOWUP_ID_KEY,
     RECOVERY_INBOUND_METADATA_KEY,
     REQUEST_ORIGIN_METADATA_KEY,
@@ -97,7 +96,6 @@ from nanobot.session.recovery import (
     RequestOrigin,
     pending_followups,
     request_origin_from_metadata,
-    required_image_inputs,
     restore_pending_interruption,
     restore_runtime_checkpoint,
 )
@@ -1259,12 +1257,6 @@ class AgentLoop:
                     execution_scope.continuation_prompt if execution_scope is not None else None
                 ),
                 provider_state=provider_state,
-                required_image_inputs=(
-                    required_image_inputs(session)
-                    if session is not None and initial_message is not None
-                    and turn_continuation.internal_continuation_inbound(initial_message.metadata)
-                    else ()
-                ),
                 llm_usage_source=source_from_request(
                     active_session_key,
                     channel=request_ctx.channel,
@@ -1274,10 +1266,6 @@ class AgentLoop:
             ))
         if session is not None and retain_session_state:
             session.provider_state = result.provider_state
-            if result.required_image_inputs:
-                session.metadata[FAILED_IMAGE_INPUTS_KEY] = list(result.required_image_inputs)
-            else:
-                session.metadata.pop(FAILED_IMAGE_INPUTS_KEY, None)
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
         if result.stop_reason == "max_iterations" or result.pending_stream_content is not None:

@@ -19,7 +19,6 @@ PENDING_USER_TURN_KEY = "pending_user_turn"
 REQUEST_ORIGIN_METADATA_KEY = "request_origin"
 RECOVERY_METADATA_KEY = "webui_recovery"
 RECOVERY_INBOUND_METADATA_KEY = "_webui_recovery_id"
-FAILED_IMAGE_INPUTS_KEY = "failed_image_inputs"
 PENDING_FOLLOWUPS_KEY = "pending_user_followups"
 PENDING_FOLLOWUP_ID_KEY = "_recovery_followup_id"
 PROVIDER_STATE_CHECKPOINT_VERSION_KEY = "provider_state_checkpoint_version"
@@ -30,12 +29,6 @@ UNCERTAIN_TOOL_PHASES = frozenset({"awaiting_tools"})
 KNOWN_CHECKPOINT_PHASES = frozenset(
     {"model_input", "final_response", "tools_completed", "awaiting_tools", "error"}
 )
-
-
-def required_image_inputs(session: Session) -> tuple[str, ...]:
-    """Read image identities retained independently of disposable native state."""
-    values = session.metadata.get(FAILED_IMAGE_INPUTS_KEY, [])
-    return tuple(value for value in cast(list[object], values) if isinstance(value, str))
 
 
 class RequestOrigin(TypedDict):

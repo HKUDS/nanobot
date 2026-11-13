@@ -33,7 +33,7 @@ from nanobot.providers.compaction import (
     ProviderStateCommitError,
     provider_compaction_scope,
 )
-from nanobot.providers.images import prepare_inline_images, preserve_image_input_ids
+from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.oauth_catalog_cache import (
     OAuthCatalogAuthRequiredError,
     OAuthModelCatalog,
@@ -341,7 +341,6 @@ class OpenAICodexProvider(LLMProvider):
                             on_thinking_delta=on_thinking_delta if emit_deltas else None,
                             on_tool_call_delta=on_tool_call_delta if emit_deltas else None,
                         )
-                    preserve_image_input_ids(result, request_body, wire_body)
                     if validate is not None:
                         validate(result)
                 except Exception as exc:
@@ -612,8 +611,6 @@ async def _request_codex(
 ) -> LLMResponse:
     return await ResponsesBackend.sse_request(
         url, headers, body, provider=f"openai_codex:{url.rstrip('/')}",
-        # The shared WebSocket/HTTP send path already prepared this exact body.
-        images_prepared=True,
         verify=verify, proxy=proxy, error_factory=_build_codex_http_error,
         on_content_delta=on_content_delta, on_thinking_delta=on_thinking_delta,
         on_tool_call_delta=on_tool_call_delta,

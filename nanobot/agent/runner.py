@@ -138,7 +138,6 @@ class AgentRunSpec:
     continuation_callback: ContinuationCallback | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
-    required_image_inputs: tuple[str, ...] = ()
     llm_usage_source: LLMUsageSource | None = None
     events: EventSink = NO_EVENTS
 
@@ -162,7 +161,6 @@ class AgentRunResult:
     # Unstreamed terminal content or tail; excludes any prefix already delivered.
     pending_stream_content: str | None = None
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
-    required_image_inputs: tuple[str, ...] = field(default=(), repr=False)
     summary_checkpoint: SessionSummaryCheckpoint | None = field(default=None, repr=False)
     provider_compaction_applied: bool = field(default=False, repr=False)
 
@@ -441,7 +439,6 @@ class AgentRunner:
             messages=messages,
             state=spec.provider_state,
             session_id=spec.session_key,
-            required_image_inputs=spec.required_image_inputs,
             checkpoint_callback=checkpoint_compaction,
         )
         governance_config = ContextGovernanceConfig(
@@ -936,7 +933,6 @@ class AgentRunner:
             had_injections=had_injections,
             pending_stream_content=pending_stream_content,
             provider_state=conversation_state.finish(messages),
-            required_image_inputs=conversation_state.failed_image_inputs if stop_reason == "error" else (),
             summary_checkpoint=request_state.compaction.summary_checkpoint,
             provider_compaction_applied=request_state.provider_compaction_applied,
         )
@@ -968,7 +964,6 @@ class AgentRunner:
             "provider_context": replace(
                 provider_context or ProviderCallContext(),
                 response_preset=spec.runtime.model_preset or "",
-                required_image_inputs=request_state.conversation.required_image_inputs,
             ),
         }
 

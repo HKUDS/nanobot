@@ -22,7 +22,6 @@ from nanobot.providers.base import (
     RetryStatusCallback,
 )
 from nanobot.providers.compaction import ProviderStateCommitError, provider_compaction_scope
-from nanobot.providers.images import image_inputs_available, state_image_input_ids
 from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name
 
@@ -503,7 +502,12 @@ class FallbackProvider(LLMProvider):
         # continuation, so the incoming primary state remains reusable.
         preserve_primary_state = True
 
-        if self._primary_available():
+        has_images = self._request_contains_images(kwargs["messages"], kwargs.get("provider_context"))
+        image_error = self._primary._image_input_error(kwargs["messages"], kwargs.get("provider_context"))
+        if image_error is not None:
+            primary_response = image_error
+            primary_error = image_error.content or primary_error
+        elif self._primary_available():
             primary_was_attempted = True
             response, primary_exception = await self._call_provider(
                 call, self._primary, kwargs
@@ -560,6 +564,8 @@ class FallbackProvider(LLMProvider):
         last_response = primary_response
         primary_skipped = not primary_was_attempted
         for idx, fallback in enumerate(self._fallback_presets):
+            if has_images and not fallback.supports_images:
+                continue
             fallback_model = fallback.model
             if has_streamed is not None and has_streamed[0]:
                 is_timeout = (
@@ -576,7 +582,9 @@ class FallbackProvider(LLMProvider):
                     await on_stream_recover()
                 else:
                     break
-            if idx == 0 and primary_skipped:
+            if image_error is not None:
+                logger.info("Primary model '{}' does not accept images; trying '{}'", primary_model, fallback_model)
+            elif idx == 0 and primary_skipped:
                 logger.info(
                     "Primary model '{}' circuit open, trying fallback '{}'",
                     primary_model, fallback_model,
@@ -615,17 +623,6 @@ class FallbackProvider(LLMProvider):
                     state,
                     fallback_model,
                 ):
-                    # Public history can contain only path placeholders for images
-                    # held by native state. Do not count a text-only replay as failover.
-                    if not image_inputs_available(
-                        state_image_input_ids(state), fallback_kwargs["messages"],
-                    ):
-                        logger.warning(
-                            "Skipping fallback '{}': native image input cannot be replayed",
-                            fallback_model,
-                        )
-                        await fallback_provider.aclose()
-                        continue
                     state = None
                 if provider_context.compaction_input_budget is not None and (
                     state is None
@@ -635,7 +632,6 @@ class FallbackProvider(LLMProvider):
                         "Skipping fallback '{}': required pre-request compaction cannot resume",
                         fallback_model,
                     )
-                    await fallback_provider.aclose()
                     continue
                 context_window_tokens = (
                     fallback.context_window_tokens

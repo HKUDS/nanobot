@@ -31,11 +31,7 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_json_for_replay,
 )
-from nanobot.providers.images import (
-    image_inputs_available,
-    prepare_inline_images,
-    state_image_input_ids,
-)
+from nanobot.providers.images import prepare_inline_images
 from nanobot.providers.model_api import (
     ModelAPICapabilities,
     ResponsesCapabilities,
@@ -114,10 +110,6 @@ _MIMO_THINKING_MODELS: frozenset[str] = frozenset({
     "mimo-v2-omni",
 })
 _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
-
-
-class _UnsupportedImageInputError(ValueError):
-    """The selected model's metadata explicitly excludes image input."""
 
 
 class _ChatStreamCloseError(Exception):
@@ -644,15 +636,10 @@ class OpenAICompatProvider(LLMProvider):
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
         id_map: dict[str, str] = {}
         pending_tool_ids: dict[str, deque[str]] = {}
-        metadata = self._spec.model_metadata(model or self.default_model) if self._spec else None
-        excludes_images = bool(
-            metadata and metadata.input_modalities and "image" not in metadata.input_modalities
-        )
-        if excludes_images and self._contains_image_content(sanitized):
-            raise _UnsupportedImageInputError(
-                "The selected model does not support image input. Select an image-capable model and retry."
-            )
-        force_string_content = bool(self._spec and self._spec.name == "deepseek" and excludes_images)
+        force_string_content = False
+        if self._spec and self._spec.name == "deepseek":
+            metadata = self._spec.model_metadata(model or self.default_model)
+            force_string_content = metadata is None or "image" not in metadata.input_modalities
         normalize_tool_ids = self._should_normalize_tool_call_ids()
         strip_reasoning = bool(
             self._spec
@@ -731,6 +718,7 @@ class OpenAICompatProvider(LLMProvider):
                 clean["tool_call_id"] = map_tool_result_id(clean["tool_call_id"])
             if (
                 force_string_content
+                and not self._contains_image_content(clean.get("content"))
                 and not (clean.get("role") == "assistant" and clean.get("tool_calls"))
             ):
                 clean["content"] = self._coerce_content_to_string(clean.get("content"))
@@ -1146,25 +1134,6 @@ class OpenAICompatProvider(LLMProvider):
         status, body = response_error_details(e)
         return is_unsupported_feature_error(status, body, RESPONSES_FEATURES)
 
-    @staticmethod
-    def _chat_image_replay_error(
-        messages: list[dict[str, Any]],
-        provider_context: ProviderCallContext | None,
-    ) -> LLMResponse | None:
-        """Require portable images before Chat discards provider-native state."""
-        state = provider_context.current_conversation_state if provider_context is not None else None
-        if image_inputs_available(state_image_input_ids(state), messages):
-            return None
-        return LLMResponse(
-            content=(
-                "Images from this conversation are unavailable for this request. "
-                "Send the images again to continue."
-            ),
-            finish_reason="error",
-            error_kind="input_unavailable",
-            error_should_retry=False,
-        )
-
     def _build_responses_body(
         self,
         messages: list[dict[str, Any]],
@@ -1557,14 +1526,6 @@ class OpenAICompatProvider(LLMProvider):
         spec: ProviderSpec | None = None,
         api_base: str | None = None,
     ) -> LLMResponse:
-        if isinstance(e, _UnsupportedImageInputError):
-            return LLMResponse(
-                content=str(e),
-                finish_reason="error",
-                error_kind="invalid_request",
-                error_code="unsupported_image",
-                error_should_retry=False,
-            )
         body = (
             getattr(e, "doc", None)
             or getattr(e, "body", None)
@@ -1648,12 +1609,7 @@ class OpenAICompatProvider(LLMProvider):
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
                     self._record_responses_failure(model, reasoning_effort)
-                    if self._chat_image_replay_error(messages, provider_context) is not None:
-                        raise
 
-            replay_error = self._chat_image_replay_error(messages, provider_context)
-            if replay_error is not None:
-                return replay_error
             kwargs = self._build_kwargs(
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
@@ -1707,12 +1663,7 @@ class OpenAICompatProvider(LLMProvider):
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
                     self._record_responses_failure(model, reasoning_effort)
-                    if self._chat_image_replay_error(messages, provider_context) is not None:
-                        raise
 
-            replay_error = self._chat_image_replay_error(messages, provider_context)
-            if replay_error is not None:
-                return replay_error
             kwargs = self._build_kwargs(
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,

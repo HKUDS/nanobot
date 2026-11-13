@@ -3,49 +3,22 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
-from collections import Counter
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
-from hashlib import sha256
 from math import ceil
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from loguru import logger
 from PIL import Image, ImageOps
-
-if TYPE_CHECKING:
-    from nanobot.providers.base import LLMResponse, ProviderConversationState
 
 # A soft transport target, including base64 expansion, rather than an API size limit.
 INLINE_IMAGE_BYTE_BUDGET = 1_000_000
 _SMALL_IMAGE_BYTES = 64_000
 
 
-def image_input_ids(value: object) -> tuple[str, ...]:
-    """Identify actual image inputs, retaining their identity after transport preparation."""
-    return tuple(image.input_id for image in _image_urls(value))
-
-
-def state_image_input_ids(state: ProviderConversationState | None) -> tuple[str, ...]:
-    if state is None:
-        return ()
-    return image_input_ids([state.payload, state.pending_messages])
-
-
-def image_inputs_available(
-    required: tuple[str, ...],
-    messages: list[dict[str, Any]],
-    state: ProviderConversationState | None = None,
-) -> bool:
-    """Require the complete image multiset in the input that will actually be sent."""
-    available = state_image_input_ids(state) if state is not None else image_input_ids(messages)
-    return not (Counter(required) - Counter(available))
-
-
 @dataclass(frozen=True)
 class _InlineImage:
-    block: dict[str, Any]
     container: dict[str, Any]
     key: str
     detail: object
@@ -54,73 +27,30 @@ class _InlineImage:
     def url(self) -> str:
         return cast(str, self.container[self.key])
 
-    @property
-    def input_id(self) -> str:
-        meta = self.block.get("_meta")
-        if isinstance(meta, dict):
-            identifier = cast(dict[str, Any], meta).get("image_input_id")
-            if isinstance(identifier, str) and identifier:
-                return identifier
-        return sha256(self.url.encode()).hexdigest()
-
-
-def _image_urls(value: object) -> Iterator[_InlineImage]:
-    if isinstance(value, dict):
-        block = cast(dict[str, Any], value)
-        container = block
-        key = "image_url"
-        if block.get("type") == "image_url" and isinstance(block.get("image_url"), dict):
-            container = cast(dict[str, Any], block["image_url"])
-            key = "url"
-        if block.get("type") in ("image_url", "input_image") and isinstance(container.get(key), str):
-            yield _InlineImage(block, container, key, container.get("detail"))
-            return
-        for child in block.values():
-            yield from _image_urls(child)
-    elif isinstance(value, (list, tuple)):
-        for child in cast(list[object], value):
-            yield from _image_urls(child)
-
 
 def _inline_images(body: dict[str, Any]) -> Iterator[_InlineImage]:
-    for image in _image_urls(body):
-        if image.url.startswith("data:image/") and ";base64," in image.url:
-            yield image
-
-
-def preserve_image_input_ids(
-    result: LLMResponse, source_body: dict[str, Any], sent_body: dict[str, Any],
-) -> LLMResponse:
-    """Keep only the sent pixels and a logical ID in newly returned private state."""
-    states = [result.provider_state, result.provider_compaction_state]
-    if not any(state is not None for state in states):
-        return result
-    sent_ids: dict[str, list[str]] = {}
-    for source, sent in zip(_image_urls(source_body), _image_urls(sent_body), strict=True):
-        sent_ids.setdefault(sent.url, []).append(source.input_id)
-    if not sent_ids:
-        return result
-    for state in states:
-        if state is None:
+    items = body.get("input", body.get("messages"))
+    # Responses also accepts a plain-text input string.
+    if not isinstance(items, list):
+        return
+    for item in cast(list[dict[str, Any]], items):
+        content = item.get("output") if item.get("type") == "function_call_output" else item.get("content")
+        if not isinstance(content, list):
             continue
-        remaining = {url: ids.copy() for url, ids in sent_ids.items()}
-        # Compaction can prune a prefix; match repeated sent URLs from the end
-        # so identical encodings retain the IDs of the surviving occurrences.
-        for image in reversed(list(_image_urls([state.payload, state.pending_messages]))):
-            identifiers = remaining.get(image.url)
-            if identifiers:
-                meta = image.block.get("_meta")
-                metadata = dict(cast(dict[str, Any], meta)) if isinstance(meta, dict) else {}
-                metadata["image_input_id"] = identifiers.pop()
-                image.block["_meta"] = metadata
-    return result
-
-
-def _transport_copy(body: dict[str, Any]) -> dict[str, Any]:
-    prepared = deepcopy(body)
-    for image in _image_urls(prepared):
-        image.block.pop("_meta", None)
-    return prepared
+        for block in cast(list[dict[str, Any]], content):
+            container = block
+            key = "image_url"
+            if block.get("type") == "image_url" and isinstance(block.get("image_url"), dict):
+                container = cast(dict[str, Any], block["image_url"])
+                key = "url"
+            elif block.get("type") != "input_image":
+                continue
+            url = container.get(key)
+            if (
+                isinstance(url, str)
+                and url.startswith("data:image/") and ";base64," in url
+            ):
+                yield _InlineImage(container, key, container.get("detail"))
 
 
 @dataclass
@@ -152,13 +82,11 @@ class _ImageCopy:
 
 
 async def prepare_inline_images(body: dict[str, Any]) -> dict[str, Any]:
-    """Strip private image metadata and prepare large batches off the event loop."""
+    """Keep small requests unchanged and prepare large image batches off the event loop."""
     total_bytes = sum(len(image.url) for image in _inline_images(body))
-    if total_bytes > INLINE_IMAGE_BYTE_BUDGET:
-        return await asyncio.to_thread(_prepare_copies, body, total_bytes)
-    if any("_meta" in image.block for image in _image_urls(body)):
-        return _transport_copy(body)
-    return body
+    if total_bytes <= INLINE_IMAGE_BYTE_BUDGET:
+        return body
+    return await asyncio.to_thread(_prepare_copies, body, total_bytes)
 
 
 async def prepare_message_images(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -168,7 +96,7 @@ async def prepare_message_images(messages: list[dict[str, Any]]) -> list[dict[st
 
 
 def _prepare_copies(body: dict[str, Any], total_bytes: int) -> dict[str, Any]:
-    prepared = _transport_copy(body)
+    prepared = deepcopy(body)
     blocks = list(_inline_images(prepared))
     copies: list[_ImageCopy] = []
     try:
