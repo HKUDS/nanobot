@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { FilePreviewAvailabilityProvider } from "@/components/FilePreviewAvailabilityContext";
 import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
+import dollarRefsFixture from "@/tests/fixtures/markdown-dollar-refs.md?raw";
 
 
 // Exercise the asynchronous math boundary once, then test the loaded grammar cases.
@@ -1099,29 +1100,130 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelectorAll("strong")).toHaveLength(3);
   });
 
-  it("keeps prose with dollar identifiers out of inline math", () => {
-    const { container } = render(
-      <MarkdownTextRenderer>
-        {
-          "另外有个作者和我之前都没提的事：`mcp.py` 里**已经有一份完整的 $ref 解析器** `_resolve_local_schema_ref`，支持 JSON Pointer 全路径、`~0`/`~1` 转义、嵌套。它在构造 wrapper 时就把 server 给的本地 ref 全部提升到根 `$defs`。"
-        }
-      </MarkdownTextRenderer>,
+  it.each([false, true])("preserves the reported dollar references through completion (streaming=%s)", (streaming) => {
+    const source = dollarRefsFixture.replaceAll("\r\n", "\n");
+    const { container, rerender } = render(
+      <MarkdownTextRenderer streaming={streaming} preserveStreamingLayout>{source}</MarkdownTextRenderer>,
     );
 
-    expect(container.querySelector(".katex")).toBeNull();
-    expect(container.querySelector("strong")).toHaveTextContent("已经有一份完整的 $ref 解析器");
-    expect(screen.getByText("_resolve_local_schema_ref").tagName).toBe("CODE");
-    expect(screen.getByText("$defs").tagName).toBe("CODE");
-    expect(container).toHaveTextContent("提升到根 $defs。");
+    function expectReportedMessage() {
+      const strong = [...container.querySelectorAll("strong")].map((element) => element.textContent);
+      const code = [...container.querySelectorAll("code")].map((element) => element.textContent);
+      expect(strong).toContain("已经有一份完整的 $ref 解析器");
+      expect(code).toEqual(expect.arrayContaining(["_resolve_local_schema_ref", "~0", "~1", "$defs", "#/$defs/x", "#/definitions/x"]));
+      expect(container.querySelector(".katex")).toBeNull();
+      expect(container).toHaveTextContent("用一个词总结这个 PR");
+    }
+
+    expectReportedMessage();
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expectReportedMessage();
   });
 
-  it("keeps adjacent identifier dollars literal instead of pairing them as math", () => {
-    const { container } = render(
-      <MarkdownTextRenderer>{"变量$x，常量$y 混在一起，公式 $x$ 仍然渲染。"}</MarkdownTextRenderer>,
-    );
+  it("keeps the reported formatting while its code span streams and after completion", () => {
+    const source = dollarRefsFixture.replaceAll("\r\n", "\n");
+    const codeStart = source.indexOf("`$defs`");
+    const { container, rerender } = render(<MarkdownTextRenderer streaming preserveStreamingLayout>{""}</MarkdownTextRenderer>);
 
-    expect(container.querySelectorAll(".katex")).toHaveLength(1);
-    expect(container).toHaveTextContent("变量$x，常量$y 混在一起");
+    for (const end of [codeStart, codeStart + 1, codeStart + 2, codeStart + 4, codeStart + 7, source.length]) {
+      rerender(<MarkdownTextRenderer streaming preserveStreamingLayout>{source.slice(0, end)}</MarkdownTextRenderer>);
+      expect(container.querySelector(".katex"), `code prefix length: ${end - codeStart}`).toBeNull();
+      expect([...container.querySelectorAll("strong")].some((node) => node.textContent === "已经有一份完整的 $ref 解析器")).toBe(true);
+    }
+    rerender(<MarkdownTextRenderer preserveStreamingLayout>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(screen.getByText("_resolve_local_schema_ref").tagName).toBe("CODE");
+    expect(screen.getByText("$defs").tagName).toBe("CODE");
+  });
+
+  it.each([
+    "**$ref** followed by `value=$defs`.",
+    "**$ref** followed by `` `value=$defs` ``.",
+    "**$ref** followed by `first` then `value=$defs`.",
+    "**$ref** followed by `resolve(` then `value=$defs`.",
+    "**$ref** followed by `\\n` then `value=$defs`.",
+    "**$ref** (see `$defs`).",
+    "**$ref** followed by `\\path=$defs`.",
+    "**$ref** followed by `\\$escaped and $defs`.",
+    "**$ref** followed by \\{literal `value=$defs`.",
+  ])("preserves a closing dollar inside a complete code span: %s", (source) => {
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector("strong")).toHaveTextContent("$ref");
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.querySelector("code:last-child")).toHaveTextContent("$defs");
+  });
+
+  it("keeps code immediately after a literal dollar renderable", () => {
+    const { container } = render(<MarkdownTextRenderer>{"$`$defs`"}</MarkdownTextRenderer>);
+    expect(container).toHaveTextContent("$$defs");
+    expect(screen.getByText("$defs").tagName).toBe("CODE");
+    expect(container.querySelector(".katex")).toBeNull();
+  });
+
+  it.each(["$x$km", "$x$2", "$a+b$meters"])("keeps inline math before an adjacent suffix: %s", (source) => {
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent).toBe(source.slice(1, source.indexOf("$", 1)));
+  });
+
+  it.each(["$x`$", "$\\text{`value`}$", "$\\text{`\\$`}$"])(
+    "keeps literal backticks in valid inline math: %s", (source) => {
+      const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+      expect(container.querySelector(".katex-error")).toBeNull();
+      expect(container.querySelector("annotation")?.textContent).toBe(source.slice(1, -1));
+    },
+  );
+
+  it.each(["\\text{`quoted'}", "f(`quoted')"])(
+    "keeps grouped math with an unpaired backtick when followed by code: %s", (formula) => {
+      const { container } = render(
+        <MarkdownTextRenderer>{`$${formula}$ and \`code\``}</MarkdownTextRenderer>,
+      );
+      expect(container.querySelector(".katex-error")).toBeNull();
+      expect(container.querySelector("annotation")?.textContent).toBe(formula);
+      expect(screen.getByText("code").tagName).toBe("CODE");
+    },
+  );
+
+  it.each([false, true])("keeps TeX verbatim text, emphasis, and following code (streaming=%s)", (streaming) => {
+    const source = "A $\\verb|`|$ **important** then `code`.";
+    const { container } = render(<MarkdownTextRenderer streaming={streaming}>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent).toBe("\\verb|`|");
+    expect(screen.getByText("important").tagName).toBe("STRONG");
+    expect(screen.getByText("code").tagName).toBe("CODE");
+  });
+
+  it.each([
+    ["x`", " and "],
+    ["x`", "th and "],
+    ["\\verb|`|", "th and "],
+  ])("keeps math with backticks and following code: %s", (formula, suffix) => {
+    const { container } = render(
+      <MarkdownTextRenderer>{`$${formula}$${suffix}\`code\``}</MarkdownTextRenderer>,
+    );
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent).toBe(formula);
+    expect(screen.getByText("code").tagName).toBe("CODE");
+  });
+
+  it("keeps a TeX group after a matched pair of mathematical backticks", () => {
+    const source = "$x`\\text{hello `a `b}$ **important** then `code`.";
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.querySelector("annotation")?.textContent).toBe("x`\\text{hello `a `b}");
+    expect(screen.getByText("important").tagName).toBe("STRONG");
+    expect(screen.getByText("code").tagName).toBe("CODE");
+  });
+
+  it("preserves escaped dollar references, code, and ordinary inline formulas", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>{"Escaped \\$ref and &#36;defs, code `$x$`, math $a*b*c$ and $x_i$."}</MarkdownTextRenderer>,
+    );
+    expect(container).toHaveTextContent("Escaped $ref and $defs");
+    expect(screen.getByText("$x$").tagName).toBe("CODE");
+    expect([...container.querySelectorAll("annotation")].map((node) => node.textContent)).toEqual(["a*b*c", "x_i"]);
+    expect(container.querySelector(".katex-error")).toBeNull();
   });
 
   it("renders guarded single-dollar inline math", () => {

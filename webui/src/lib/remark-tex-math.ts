@@ -1,6 +1,7 @@
 import type { Root } from "mdast";
+import { codeText } from "micromark-core-commonmark";
 import { factorySpace } from "micromark-factory-space";
-import type { Code, Construct, Effects, Extension, State, Token } from "micromark-util-types";
+import type { Code, Construct, Effects, Extension, State, Token, TokenizeContext } from "micromark-util-types";
 import type { Plugin } from "unified";
 import type {} from "micromark-extension-math";
 
@@ -125,11 +126,41 @@ const nonLazyContinuation: Construct = {
 };
 
 // Model output commonly uses `$...$`; numeric-only spans are usually prices, not formulas.
-function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State): State {
+function tokenizeGuardedDollarMathText(
+  this: TokenizeContext, effects: Effects, ok: State, nok: State,
+): State {
+  const currentOffset = () => this.now().offset;
   let hasMathSignal = false;
   let hasContent = false;
   let firstDataCode: Code = null;
   let previousDataCode: Code = null;
+  let hasTexCommand = false;
+  let codeSpanEnd = 0;
+  let codeSpanHasDollarIdentifier = false;
+  const codeSpan: Construct = {
+    partial: true,
+    tokenize(effects, ok, nok) {
+      return codeText.tokenize.call(this, effects, (code) => {
+        const token = this.events[this.events.length - 1][1];
+        const source = this.sliceSerialize(token);
+        let fenceLength = 0;
+        while (source[fenceLength] === "`") fenceLength++;
+        codeSpanEnd = token.end.offset;
+        codeSpanHasDollarIdentifier = false;
+        for (let index = fenceLength; index < source.length - fenceLength; index++) {
+          // Find the first dollar the math scanner would treat as a closer.
+          if (source[index] === "\\") index++;
+          else if (source[index] === "$") {
+            const tail = source.slice(index + 1, source.length - fenceLength).trimEnd();
+            // Streaming repair can temporarily end the code span just after `$`.
+            codeSpanHasDollarIdentifier = tail === "" || /^[\p{L}\p{N}_${(]\S*$/u.test(tail);
+            break;
+          }
+        }
+        return ok(code);
+      }, nok);
+    },
+  };
 
   return start;
 
@@ -154,12 +185,10 @@ function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State):
       return nok(code);
     }
 
-    // A backtick opens a code span, so a dollar pair like `$ref` ... `$defs` is
-    // prose, not a formula: without this guard the span swallows the code spans,
-    // emphasis, and text that follow it.
-    if (code === BACKTICK) {
-      effects.exit("mathTextData");
-      return nok(code);
+    // Prefer code when the would-be closer starts an identifier at the end of
+    // a code span. A preceding TeX command keeps math precedence in this ambiguous case.
+    if (code === BACKTICK && !hasTexCommand && currentOffset() >= codeSpanEnd) {
+      return effects.check(codeSpan, afterCodeSpan, unmatchedBackticks)(code);
     }
 
     if (code === DOLLAR) {
@@ -175,12 +204,23 @@ function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State):
     return code === BACKSLASH ? escaped : data;
   }
 
+  function afterCodeSpan(code: Code): State | undefined {
+    return codeSpanHasDollarIdentifier ? nok(code) : data(code);
+  }
+
+  function unmatchedBackticks(code: Code): State | undefined {
+    if (code !== BACKTICK) return data(code);
+    consumeData(code);
+    return unmatchedBackticks;
+  }
+
   function escaped(code: Code): State | undefined {
     if (code === null || isLineEnding(code)) {
       effects.exit("mathTextData");
       return nok(code);
     }
 
+    if (currentOffset() >= codeSpanEnd) hasTexCommand ||= isAsciiLetter(code);
     consumeData(code);
     return data;
   }
@@ -188,9 +228,6 @@ function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State):
   function close(code: Code): State | undefined {
     if (!hasContent || previousDataCode === SPACE) return nok(code);
     if (isDigit(firstDataCode) && !hasMathSignal) return nok(code);
-    // Prose pairs such as `变量$x，常量$y` continue with an identifier after the
-    // closing dollar; a formula ends at whitespace, punctuation, or CJK text.
-    if (isAsciiLetter(code) || isDigit(code)) return nok(code);
     return ok(code);
   }
 
