@@ -84,15 +84,49 @@ describe("host session lifecycle", () => {
     await act(async () => {});
     let stop!: () => void;
     await act(async () => { stop = result.current.watchDirectory(); });
-    expect(mocks.read).toHaveBeenCalledWith("token", [ids[0], ids[1]]);
+    expect(mocks.read).toHaveBeenCalledWith("token", ids.slice(0, 3));
     mocks.read.mockClear();
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
-    expect(mocks.read).toHaveBeenCalledWith("token", [ids[0], ids[1]]);
+    expect(mocks.read.mock.calls).toEqual([["token", ids.slice(0, 3)]]);
     act(stop);
     mocks.read.mockClear();
     await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
     expect(mocks.read).not.toHaveBeenCalled();
     expect(mocks.request).not.toHaveBeenCalled();
+  });
+
+  it("discovers connections and then updates the directory through targeted polls", async () => {
+    mocks.read.mockResolvedValue({ ...directory, profiles: [] });
+    const { result } = renderHook(useHostSessions);
+    await act(async () => {});
+    await act(async () => { result.current.watchDirectory(); });
+    mocks.read.mockResolvedValue({ ...directory, profiles: [directory.profiles[0]] });
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(mocks.read.mock.calls).toEqual([["token", []], ["token", [ids[0]]]]);
+    mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.slice(0, 2) });
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(mocks.read.mock.calls).toEqual([["token", [ids[0]]]]);
+    expect(result.current.directory?.profiles).toHaveLength(2);
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(mocks.read.mock.calls).toEqual([["token", ids.slice(0, 2)]]);
+  });
+
+  it("keeps checking an observed host after a setup error and notices its recovery", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) =>
+      p.id === ids[0] ? { ...p, connected: false, connection_error: "remote_auth_failed", health_check: 1 } : p) });
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(result.current.frames[0].offline).toBe(true);
+    mocks.read.mockResolvedValue(directory);
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(mocks.read.mock.calls).toEqual([["token", [ids[0]]]]);
+    expect(result.current.frames[0].offline).toBe(false);
+    expect(mocks.request.mock.calls.filter(([action]) => action === "remote.connect")).toHaveLength(1);
   });
 
   it("counts distinct failed probes rather than repeated reads of a cached failure", async () => {
@@ -235,7 +269,9 @@ describe("host session lifecycle", () => {
     await ready(result, 0);
     mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) =>
       p.id === ids[0] ? { ...p, gateway_id: "restarted-gateway" } : p) });
+    mocks.read.mockClear();
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(mocks.read.mock.calls).toEqual([["token", [ids[0]]], ["token", [ids[0]]]]);
     expect(result.current.frames[0].offline).toBe(true);
     expect(result.current.selected?.id).toBe(ids[0]);
   });

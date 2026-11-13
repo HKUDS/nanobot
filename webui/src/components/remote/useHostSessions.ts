@@ -165,10 +165,7 @@ export function useHostSessions() {
     const profiles = directoryRef.current?.profiles ?? [];
     const ids = observers.current ? profiles.filter((profile) => profile.gateway_id).map((profile) => profile.id) : [];
     if (selectedRef.current && cache.current.has(selectedRef.current.id)) ids.push(selectedRef.current.id);
-    return [...new Set(ids)].filter((id) => {
-      const error = cache.current.get(id)?.error || profiles.find((profile) => profile.id === id)?.connection_error || "";
-      return id !== pendingRef.current?.id && !needsRemoteSetup(error) && error !== "instance_changed";
-    });
+    return [...new Set(ids)].filter((id) => id !== pendingRef.current?.id);
   }, []);
   const refresh = useCallback(async () => {
     const next = await readDirectory();
@@ -319,7 +316,7 @@ export function useHostSessions() {
       try {
         do {
           refreshPending = false;
-          if (readList || observing) await readDirectory([], () => !disposed && !hidden());
+          if (readList || (observing && !healthTargets().length)) await readDirectory([], () => !disposed && !hidden());
           if (disposed || hidden()) break;
           const ids = healthTargets();
           if (ids.length) await readDirectory(ids, () => !disposed && !hidden());
