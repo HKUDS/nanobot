@@ -30,6 +30,7 @@ import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
+import { transitionSession } from "@/components/thread/session-transition";
 import {
   MAX_WORKBENCH_PANES,
   addWorkbenchPane,
@@ -1023,15 +1024,24 @@ function Shell({
       temporary: route.temporary || Boolean(route.activeKey && temporarySessionsRef.current[route.activeKey]),
     }, options?.replace);
   }, []);
+  const changesVisibleSession = useCallback((current: ShellRoute, next: ShellRoute) => {
+    if (current.view !== "chat" || next.view !== "chat" || current.activeKey === next.activeKey) return false;
+    if (mobileWorkbench || !current.activeKey || !next.activeKey) return true;
+    return workbenchTabForPane(workbenchState, current.activeKey).tabKey
+      !== workbenchTabForPane(workbenchState, next.activeKey).tabKey;
+  }, [mobileWorkbench, workbenchState]);
   const navigate = useCallback(
-    (route: ShellRoute, options?: { replace?: boolean }) => {
-      const leave = () => commitNavigation(route, options);
+    (route: ShellRoute, options?: { replace?: boolean; animate?: boolean }) => {
       const current = currentShellRouteRef.current;
+      const leave = () => transitionSession(
+        () => commitNavigation(route, options),
+        options?.animate !== false && changesVisibleSession(current, route),
+      );
       if (changesSettingsSurface(current, route) && settingsExitGuardRef.current) {
         settingsExitGuardRef.current(leave, { promptRestart: current.view !== route.view });
       } else leave();
     },
-    [commitNavigation],
+    [commitNavigation, changesVisibleSession],
   );
 
   useEffect(() => {
@@ -1052,14 +1062,16 @@ function Shell({
         }, { promptRestart: current.view !== route.view });
         return;
       }
-      setActiveKey(route.activeKey);
-      setView(route.view);
-      setSettingsInitialSection(route.settingsSection);
-      setSettingsFocus(route.settingsFocus);
-      setWorkspaceError(null);
-      if (route.view === "chat" && !route.activeKey) {
-        setDraftWorkspaceScope(null);
-      }
+      transitionSession(() => {
+        setActiveKey(route.activeKey);
+        setView(route.view);
+        setSettingsInitialSection(route.settingsSection);
+        setSettingsFocus(route.settingsFocus);
+        setWorkspaceError(null);
+        if (route.view === "chat" && !route.activeKey) {
+          setDraftWorkspaceScope(null);
+        }
+      }, changesVisibleSession(current, route));
     };
     window.addEventListener("hashchange", applyRoute);
     window.addEventListener("popstate", applyRoute);
@@ -1067,7 +1079,7 @@ function Shell({
       window.removeEventListener("hashchange", applyRoute);
       window.removeEventListener("popstate", applyRoute);
     };
-  }, []);
+  }, [changesVisibleSession]);
 
   useEffect(() => {
     temporarySessionsRef.current = temporarySessions;
@@ -1562,12 +1574,15 @@ function Shell({
     if (activeKey === key) {
       if (remaining.length === 0) setDraftWorkspaceScope(null);
       setWorkspaceError(null);
+      // Closing invalidates the source session immediately. Commit its replacement
+      // in the same batch rather than leaving cleanup an invalid active route
+      // while a view-transition capture is pending.
       navigate({
         view: "chat",
         activeKey: remaining[0]?.key ?? null,
         settingsSection: "overview",
         ...(remaining[0] ? { temporary: true } : {}),
-      }, { replace: true });
+      }, { replace: true, animate: false });
     }
     setMobileSidebarOpen(false);
   }, [activeKey, client, navigate, temporarySessionList]);

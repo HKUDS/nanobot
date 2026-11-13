@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · Goal",
+    "description": "Preview the goal and its details.",
+    "options": "Pass the goal status, summary, objective and optional recap.",
+    "state": "Status",
+    "summary": "Prepare the release",
+    "objective": "Review the changes and verify the release.\n\n- Check tests\n- Review documentation\n- Confirm readiness",
+    "recap": "Waiting for approval."
+  },
   "rename": {
     "title": "RenameDialog · Rename groups and projects",
     "description": "Try the rename dialog for groups and projects. Topics are renamed inline in the chat list.",

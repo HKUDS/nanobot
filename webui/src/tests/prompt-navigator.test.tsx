@@ -79,3 +79,16 @@ it("keeps an unknown recovered time blank while the prompt remains navigable", a
   await user.click(prompt);
   expect(onJumpToPrompt).toHaveBeenCalledWith("undated");
 });
+
+it("returns shortcut-opened search to the interrupted editor", async () => {
+  const user = userEvent.setup();
+  render(<><input aria-label="Draft" /><PromptNavigator messages={[
+    { id: "one", role: "user", content: "alpha", createdAt: 1 },
+  ]} onJumpToPrompt={vi.fn()} /></>);
+  const editor = screen.getByRole("textbox", { name: "Draft" });
+  await user.click(editor);
+  await user.keyboard("{Control>}f{/Control}");
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Search messages" })).toHaveFocus());
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(editor).toHaveFocus());
+});

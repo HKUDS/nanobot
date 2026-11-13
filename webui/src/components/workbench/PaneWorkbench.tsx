@@ -8,6 +8,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  type CSSProperties,
   type FocusEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -723,7 +724,10 @@ export function PaneWorkbench({
                     "workbench-pane relative flex min-h-0 min-w-0 overflow-hidden bg-background",
                     chrome && displayedPanes.length > 1 && "shadow-[0_0_0_1px_hsl(var(--border)/0.55)]",
                   )}
-                  style={layoutGeometry.paneStyles[index]}
+                  style={{
+                    ...layoutGeometry.paneStyles[index],
+                    "--session-thread-name": `session-thread-${index}`,
+                  } as CSSProperties}
                 >
                   {renderPane(pane, {
                     active,

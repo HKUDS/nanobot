@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · 目標",
+    "description": "預覽目標及其詳情。",
+    "options": "傳入目標狀態、摘要、內容及選用的進度說明。",
+    "state": "狀態",
+    "summary": "準備發布",
+    "objective": "檢查變更並驗證發布。\n\n- 檢查測試\n- 審閱文件\n- 確認發布準備就緒",
+    "recap": "等待批准。"
+  },
   "rename": {
     "title": "RenameDialog · 群組與專案改名",
     "description": "預覽群組與專案改名；話題在清單內改名。",
