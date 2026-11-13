@@ -69,7 +69,7 @@ nanobot webui --dev
 
 The command safely prepares the local WebSocket channel, starts both the gateway and Vite, and opens `http://127.0.0.1:5173`. Vite proxies HTTP requests to the gateway and applies frontend changes with HMR; the application WebSocket connects directly to the gateway. Ctrl+C stops Vite and releases this gateway client. An on-demand gateway stops when its last interactive client exits; a persistent gateway keeps running.
 
-Use `--no-open` to skip opening a browser. `--dev` is foreground-only and cannot be combined with `--background`.
+Use `--no-open` to skip opening a browser. `--dev-port 5174` selects a different Vite port when running multiple development instances; each instance also needs its own config, workspace, WebUI port, and gateway port. `--dev` is foreground-only and cannot be combined with `--background`.
 
 ## Manual development setup
 
