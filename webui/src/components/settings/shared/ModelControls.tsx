@@ -39,6 +39,7 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "orcarouter",
   "ovms",
   "siliconflow",
+  "shengsuanyun",
   "vllm",
   "volcengine",
   "volcengine_coding_plan",
