@@ -2117,6 +2117,7 @@
       "goalStateStrip": "目标：{{label}}",
       "goalStateFallback": "目标",
       "goalStateExpandAria": "查看完整目标",
+      "goalBlocked": "已阻塞",
       "goalStateSheetTitle": "目标",
       "send": "发送消息",
       "stop": "停止响应",
@@ -2310,7 +2311,6 @@
         "total_too_large": "附件总大小过大，请移除部分文件或使用更小的文件",
         "io": "无法读取该文件"
       },
-      "goalStateCloseAria": "关闭目标",
       "workspace": {
         "accessAria": "工作区访问权限",
         "projectAria": "选择项目",

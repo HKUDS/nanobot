@@ -34,6 +34,7 @@ import {
   toModelBadgeInfo,
 } from "@/components/thread/model-preset";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
+import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
@@ -1427,6 +1428,8 @@ export function ThreadShell({
     <ThreadHeader
       className={previewOpen ? "h-10" : undefined}
       title={title}
+      goal={currentGoalState && (currentGoalState.active || currentGoalState.status === "blocked")
+        ? <GoalIsland key={historyKey} goal={currentGoalState} /> : undefined}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}

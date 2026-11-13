@@ -926,13 +926,13 @@ describe("App layout", () => {
     expect(await screen.findByText(firstMessage)).toBeInTheDocument();
   });
 
-  it("creates a new temporary chat from the hero each time", async () => {
+  it.each([false, true])("closes the active temporary chat without losing its replacement (pending capture=%s)", async (pendingCapture) => {
     const { unmount } = render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(within(sidebar).queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
-    const firstToggle = screen.getByRole("button", { name: "Temporary chat" });
+    const firstToggle = await screen.findByRole("button", { name: "Temporary chat" });
     expect(firstToggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(firstToggle);
     expect(firstToggle).toHaveAttribute("aria-pressed", "true");
@@ -974,36 +974,66 @@ describe("App layout", () => {
       name: "second private message",
     })).toBeInTheDocument();
 
-    fireEvent.click(within(sidebar).getByRole("button", {
-      name: "first private message",
-    }));
-    await waitFor(() => expect(window.location.hash).toBe(firstHash));
-    expect(within(screen.getByTestId("thread-header")).getByText(
-      "first private message",
-    )).toBeInTheDocument();
-    await waitFor(() => expect(document.title).toBe("first private message"));
-    expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
+    // Native capture delays the update callback, so React can run the route
+    // cleanup effect before it. Do not replace transitionSession with a sync mock.
+    const descriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
+    const captures: (() => void)[] = [];
+    const capture = vi.fn((update: () => void) => {
+      const finished = new Promise<void>((resolve) => {
+        captures.push(() => { update(); resolve(); });
+      });
+      return { ready: finished, finished, skipTransition: vi.fn() };
+    });
+    const completeCaptures = async () => {
+      while (captures.length) await act(async () => { captures.shift()!(); });
+    };
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: capture });
+    try {
+      fireEvent.click(within(sidebar).getByRole("button", {
+        name: "first private message",
+      }));
+      expect(capture).toHaveBeenCalledTimes(1);
+      expect(window.location.hash).toBe(secondHash);
+      await completeCaptures();
+      await waitFor(() => expect(window.location.hash).toBe(firstHash));
+      expect(within(screen.getByTestId("thread-header")).getByText(
+        "first private message",
+      )).toBeInTheDocument();
+      await waitFor(() => expect(document.title).toBe("first private message"));
+      expect(screen.queryByRole("button", { name: "Temporary chat" })).not.toBeInTheDocument();
 
-    fireEvent.click(within(sidebar).getByRole("button", {
-      name: "Close temporary chat: first private message",
-    }));
-    await waitFor(() => expect(window.location.hash).toBe(secondHash));
-    expect(within(sidebar).queryByRole("button", {
-      name: "first private message",
-    })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", {
-      name: "second private message",
-    })).toBeInTheDocument();
-    expect(discardTemporaryChatSpy).toHaveBeenCalledTimes(1);
+      if (pendingCapture) {
+        fireEvent.click(within(sidebar).getByRole("button", { name: "second private message" }));
+        expect(window.location.hash).toBe(firstHash);
+        expect(captures).toHaveLength(1);
+      }
+      fireEvent.click(within(sidebar).getByRole("button", {
+        name: "Close temporary chat: first private message",
+      }));
+      await completeCaptures();
+      await waitFor(() => expect(window.location.hash).toBe(secondHash));
+      expect(within(screen.getByTestId("thread-header")).getByText("second private message")).toBeInTheDocument();
+      expect(within(sidebar).queryByRole("button", {
+        name: "first private message",
+      })).not.toBeInTheDocument();
+      expect(within(sidebar).getByRole("button", {
+        name: "second private message",
+      })).toBeInTheDocument();
+      expect(discardTemporaryChatSpy).toHaveBeenCalledTimes(1);
 
-    unmount();
-    await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledTimes(2));
-    const discardedChatIds = discardTemporaryChatSpy.mock.calls.map(([chatId]) => chatId);
-    expect(new Set(discardedChatIds).size).toBe(2);
-    expect(discardedChatIds).toEqual([
-      "00000000-0000-4000-8000-000000000001",
-      "00000000-0000-4000-8000-000000000002",
-    ]);
+      unmount();
+      await waitFor(() => expect(discardTemporaryChatSpy).toHaveBeenCalledTimes(2));
+      const discardedChatIds = discardTemporaryChatSpy.mock.calls.map(([chatId]) => chatId);
+      expect(new Set(discardedChatIds).size).toBe(2);
+      expect(discardedChatIds).toEqual([
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000002",
+      ]);
+    } finally {
+      await completeCaptures();
+      if (descriptor) Object.defineProperty(document, "startViewTransition", descriptor);
+      else Reflect.deleteProperty(document, "startViewTransition");
+    }
   });
 
   it("shows the temporary-chat control only on the new-topic hero", async () => {
@@ -3925,6 +3955,43 @@ describe("App layout", () => {
     expect(await screen.findByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Remove" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Move to" })).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("animates replaced threads rather than focusing a visible pane (mobile=%s)", async mobile => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: mobile && query.includes("max-width: 767px"), media: query, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    })));
+    mockSessions = ["alpha", "child", "other"].map(chatId => ({
+      key: `websocket:${chatId}`, channel: "websocket", chatId,
+      createdAt: null, updatedAt: null, title: `${chatId} topic`, preview: "",
+    }));
+    window.history.replaceState(null, "", "/#/chat/websocket%3Aalpha");
+    mockFetchRoutes({ "/api/webui/sidebar-state": { workbench: { version: 1, tabs: {
+      "tab:alpha": { explicit: true, title: "Group", paneKeys: ["websocket:alpha", "websocket:child"], layout: "columns" },
+    } } } });
+    render(<App />);
+    await act(async () => { await import("@/components/thread/ThreadShell"); });
+    await screen.findByTestId("workbench-pane-websocket:alpha");
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await within(sidebar).findByRole("button", { name: "Group: Group" });
+    const descriptor = Object.getOwnPropertyDescriptor(document, "startViewTransition");
+    const capture = vi.fn((update: () => void) => {
+      update();
+      return { ready: Promise.resolve(), finished: Promise.resolve(), skipTransition: vi.fn() };
+    });
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: capture });
+    try {
+      fireEvent.click(within(sidebar).getByRole("button", { name: "child topic" }));
+      await waitFor(() => expect(screen.getByTestId("workbench-pane-websocket:child")).toHaveAttribute("data-active", "true"));
+      expect(capture).toHaveBeenCalledTimes(mobile ? 1 : 0);
+      fireEvent.click(within(sidebar).getByRole("button", { name: "other topic" }));
+      await screen.findByTestId("workbench-pane-websocket:other");
+      expect(capture).toHaveBeenCalledTimes(mobile ? 2 : 1);
+    } finally {
+      if (descriptor) Object.defineProperty(document, "startViewTransition", descriptor);
+      else Reflect.deleteProperty(document, "startViewTransition");
+    }
   });
 
   it("materializes a singleton tab without linking it to another pane", async () => {
