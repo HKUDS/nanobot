@@ -474,7 +474,10 @@ describe("MessageBubble", () => {
     expect(quote).toHaveTextContent("selected assistant excerpt");
     expect(quote).not.toHaveAttribute("title");
     expect(screen.queryByText("Quoted context")).not.toBeInTheDocument();
-    expect(screen.getByText("What about this?")).toBeInTheDocument();
+    const messageBubble = screen.getByText("What about this?");
+    expect(messageBubble).toBeInTheDocument();
+    expect(quote).toHaveClass("rounded-floating");
+    expect(messageBubble).toHaveClass("rounded-floating");
 
     rerender(
       <MessageBubble
