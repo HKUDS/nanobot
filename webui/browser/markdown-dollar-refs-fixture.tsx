@@ -6,6 +6,12 @@ import dollarRefsFixture from "@/tests/fixtures/markdown-dollar-refs.md?raw";
 const source = dollarRefsFixture.replaceAll("\r\n", "\n");
 const codeStart = source.indexOf("`$defs`");
 const ends = [codeStart + 1, codeStart + 2, codeStart + 4, codeStart + 7, source.length];
+const precedenceExamples = [
+  "**$ref** supports `$defs / definitions`.",
+  "**$ref** in C:\\Users\\me uses `$defs`.",
+  "A $x`$th`",
+  "Explicit \\(f(`x')\\)th`code`.",
+].join("\n\n");
 
 export function MarkdownDollarRefsFixture() {
   const [step, setStep] = useState(0);
@@ -20,6 +26,9 @@ export function MarkdownDollarRefsFixture() {
     </section>
     <section aria-label="Inline formulas">
       <MessageBubble message={{ id: "math", role: "assistant", content: "The $n$th term: $\\text{`value`}$.", createdAt: 2 }} />
+    </section>
+    <section aria-label="Code and math precedence">
+      <MessageBubble message={{ id: "precedence", role: "assistant", content: precedenceExamples, createdAt: 3, isStreaming: streaming }} />
     </section>
   </main>;
 }

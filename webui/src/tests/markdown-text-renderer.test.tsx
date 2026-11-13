@@ -1146,6 +1146,9 @@ describe("MarkdownTextRenderer", () => {
     "**$ref** followed by `\\path=$defs`.",
     "**$ref** followed by `\\$escaped and $defs`.",
     "**$ref** followed by \\{literal `value=$defs`.",
+    "**$ref** supports `$defs / definitions`.",
+    "**$ref** in C:\\Users\\me uses `$defs`.",
+    "**$ref** followed by `$ / literal dollar and $defs`.",
   ])("preserves a closing dollar inside a complete code span: %s", (source) => {
     const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
     expect(container.querySelector("strong")).toHaveTextContent("$ref");
@@ -1166,7 +1169,7 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelector("annotation")?.textContent).toBe(source.slice(1, source.indexOf("$", 1)));
   });
 
-  it.each(["$x`$", "$\\text{`value`}$", "$\\text{`\\$`}$"])(
+  it.each(["$x`$", "$\\text{`value`}$", "$\\text{`\\$`}$", "$\\verb|`|$"])(
     "keeps literal backticks in valid inline math: %s", (source) => {
       const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
       expect(container.querySelector(".katex-error")).toBeNull();
@@ -1174,47 +1177,31 @@ describe("MarkdownTextRenderer", () => {
     },
   );
 
-  it.each(["\\text{`quoted'}", "f(`quoted')"])(
-    "keeps grouped math with an unpaired backtick when followed by code: %s", (formula) => {
-      const { container } = render(
-        <MarkdownTextRenderer>{`$${formula}$ and \`code\``}</MarkdownTextRenderer>,
-      );
-      expect(container.querySelector(".katex-error")).toBeNull();
-      expect(container.querySelector("annotation")?.textContent).toBe(formula);
-      expect(screen.getByText("code").tagName).toBe("CODE");
+  it.each([
+    ["A $x`$th`", "$th"],
+    ["A $f(`x')$th`code`.", "x')$th"],
+    ["A $\\verb|`|$th`code`.", "|$th"],
+  ])("prefers complete code over a crossing single-dollar formula: %s", (source, code) => {
+    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.querySelector("code")).toHaveTextContent(code);
+  });
+
+  it.each(["x`", "\\text{`quoted'}", "f(`quoted')", "\\verb|`|", "x`\\text{hello `a `b}"])(
+    "keeps explicit TeX math separate from following Markdown code: %s", (formula) => {
+      const source = `\\(${formula}\\)th **important** then \`code\`.`;
+      const { container, rerender } = render(<MarkdownTextRenderer streaming>{source}</MarkdownTextRenderer>);
+      function expectMathAndCode() {
+        expect(container.querySelector(".katex-error")).toBeNull();
+        expect(container.querySelector("annotation")?.textContent).toBe(formula);
+        expect(screen.getByText("important").tagName).toBe("STRONG");
+        expect(screen.getByText("code").tagName).toBe("CODE");
+      }
+      expectMathAndCode();
+      rerender(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
+      expectMathAndCode();
     },
   );
-
-  it.each([false, true])("keeps TeX verbatim text, emphasis, and following code (streaming=%s)", (streaming) => {
-    const source = "A $\\verb|`|$ **important** then `code`.";
-    const { container } = render(<MarkdownTextRenderer streaming={streaming}>{source}</MarkdownTextRenderer>);
-    expect(container.querySelector(".katex-error")).toBeNull();
-    expect(container.querySelector("annotation")?.textContent).toBe("\\verb|`|");
-    expect(screen.getByText("important").tagName).toBe("STRONG");
-    expect(screen.getByText("code").tagName).toBe("CODE");
-  });
-
-  it.each([
-    ["x`", " and "],
-    ["x`", "th and "],
-    ["\\verb|`|", "th and "],
-  ])("keeps math with backticks and following code: %s", (formula, suffix) => {
-    const { container } = render(
-      <MarkdownTextRenderer>{`$${formula}$${suffix}\`code\``}</MarkdownTextRenderer>,
-    );
-    expect(container.querySelector(".katex-error")).toBeNull();
-    expect(container.querySelector("annotation")?.textContent).toBe(formula);
-    expect(screen.getByText("code").tagName).toBe("CODE");
-  });
-
-  it("keeps a TeX group after a matched pair of mathematical backticks", () => {
-    const source = "$x`\\text{hello `a `b}$ **important** then `code`.";
-    const { container } = render(<MarkdownTextRenderer>{source}</MarkdownTextRenderer>);
-    expect(container.querySelector(".katex-error")).toBeNull();
-    expect(container.querySelector("annotation")?.textContent).toBe("x`\\text{hello `a `b}");
-    expect(screen.getByText("important").tagName).toBe("STRONG");
-    expect(screen.getByText("code").tagName).toBe("CODE");
-  });
 
   it("preserves escaped dollar references, code, and ordinary inline formulas", () => {
     const { container } = render(

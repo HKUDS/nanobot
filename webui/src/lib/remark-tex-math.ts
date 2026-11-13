@@ -81,10 +81,6 @@ function isDigit(code: Code): boolean {
   return code !== null && code >= 48 && code <= 57;
 }
 
-function isAsciiLetter(code: Code): boolean {
-  return code !== null && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122));
-}
-
 function isOpeningDollarBlocked(code: Code): boolean {
   return code === null || code === DOLLAR || code === SPACE || isLineEnding(code);
 }
@@ -134,29 +130,12 @@ function tokenizeGuardedDollarMathText(
   let hasContent = false;
   let firstDataCode: Code = null;
   let previousDataCode: Code = null;
-  let hasTexCommand = false;
   let codeSpanEnd = 0;
-  let codeSpanHasDollarIdentifier = false;
   const codeSpan: Construct = {
     partial: true,
     tokenize(effects, ok, nok) {
       return codeText.tokenize.call(this, effects, (code) => {
-        const token = this.events[this.events.length - 1][1];
-        const source = this.sliceSerialize(token);
-        let fenceLength = 0;
-        while (source[fenceLength] === "`") fenceLength++;
-        codeSpanEnd = token.end.offset;
-        codeSpanHasDollarIdentifier = false;
-        for (let index = fenceLength; index < source.length - fenceLength; index++) {
-          // Find the first dollar the math scanner would treat as a closer.
-          if (source[index] === "\\") index++;
-          else if (source[index] === "$") {
-            const tail = source.slice(index + 1, source.length - fenceLength).trimEnd();
-            // Streaming repair can temporarily end the code span just after `$`.
-            codeSpanHasDollarIdentifier = tail === "" || /^[\p{L}\p{N}_${(]\S*$/u.test(tail);
-            break;
-          }
-        }
+        codeSpanEnd = this.events[this.events.length - 1][1].end.offset;
         return ok(code);
       }, nok);
     },
@@ -185,13 +164,14 @@ function tokenizeGuardedDollarMathText(
       return nok(code);
     }
 
-    // Prefer code when the would-be closer starts an identifier at the end of
-    // a code span. A preceding TeX command keeps math precedence in this ambiguous case.
-    if (code === BACKTICK && !hasTexCommand && currentOffset() >= codeSpanEnd) {
-      return effects.check(codeSpan, afterCodeSpan, unmatchedBackticks)(code);
+    if (code === BACKTICK && currentOffset() >= codeSpanEnd) {
+      return effects.check(codeSpan, data, unmatchedBackticks)(code);
     }
 
     if (code === DOLLAR) {
+      // A single-dollar formula cannot end inside a complete Markdown code span.
+      // Formulas with crossing backticks can use the explicit TeX delimiters.
+      if (currentOffset() < codeSpanEnd) return nok(code);
       effects.exit("mathTextData");
       effects.enter("mathTextSequence");
       effects.consume(code);
@@ -202,10 +182,6 @@ function tokenizeGuardedDollarMathText(
 
     consumeData(code);
     return code === BACKSLASH ? escaped : data;
-  }
-
-  function afterCodeSpan(code: Code): State | undefined {
-    return codeSpanHasDollarIdentifier ? nok(code) : data(code);
   }
 
   function unmatchedBackticks(code: Code): State | undefined {
@@ -220,7 +196,6 @@ function tokenizeGuardedDollarMathText(
       return nok(code);
     }
 
-    if (currentOffset() >= codeSpanEnd) hasTexCommand ||= isAsciiLetter(code);
     consumeData(code);
     return data;
   }
