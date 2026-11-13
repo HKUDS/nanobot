@@ -105,10 +105,68 @@ it("continues through telemetry-only fragments until another message is visible"
   await waitFor(() => expect(result.current.prompts[0]?.id).toBe("u10"));
   await act(async () => result.current.jump("u10"));
   await act(async () => result.current.newer());
-  await act(async () => result.current.newer());
-  await act(async () => result.current.newer());
   await waitFor(() => expect(result.current.window?.messages.map((row) => row.content)).toContain("Visible answer"));
   expect(api.fetchWebuiThread).toHaveBeenCalledTimes(5);
+});
+
+it.each([false, true])("preserves trace details arriving during a multi-page read (fragment=%s)", async (fragment) => {
+  const ref = "1.history-aaaaaaaaaaaaaaaaaaaa";
+  const initial = page(10);
+  initial.events.splice(1, 0, { event: "message", chat_id: "a", projection_id: "trace", kind: "progress",
+    text: "exec(…)", trace_detail: { ref, bytes: 40_000, traceCount: 1 } });
+  const bookkeeping: WebuiThreadPersistedPayload = { ...page(11), events: [{ event: "model_request", chat_id: "a",
+    request_id: "r1", run_id: "run", sequence: 1, phase: "started" }] };
+  const ready: WebuiThreadPersistedPayload = { ...page(12), events: [
+    { event: "message", chat_id: "a", projection_id: "continuation", text: "continued answer" },
+  ] };
+  if (fragment) {
+    initial.page = { ...initial.page, record_range: { turn: 0, start: 0, end: 3 } };
+    bookkeeping.page = { ...bookkeeping.page, record_range: { turn: 0, start: 3, end: 4 } };
+    ready.page = { ...ready.page, record_range: { turn: 0, start: 4, end: 5 } };
+  }
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(initial);
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  let finishBookkeeping!: (body: WebuiThreadPersistedPayload) => void;
+  let finishContent!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread)
+    .mockImplementationOnce(() => new Promise((resolve) => { finishBookkeeping = resolve; }))
+    .mockImplementationOnce(() => new Promise((resolve) => { finishContent = resolve; }));
+  act(() => result.current.newer());
+  const details = projectThreadEvents([{ event: "message", chat_id: "a", projection_id: "trace", kind: "progress",
+    text: 'exec({"command":"echo historical"})' }]);
+  act(() => result.current.expandTraceDetail(ref, details));
+  await act(async () => finishBookkeeping(bookkeeping));
+  expect(result.current.loading).toBe(true);
+  expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("test", "a", expect.objectContaining({ after: "12" }));
+  await act(async () => finishContent(ready));
+  expect(result.current.loading).toBe(false);
+  const contents = result.current.window!.messages.map((message) => message.content);
+  expect(contents).toContain("continued answer");
+  expect(contents).toContain('exec({"command":"echo historical"})');
+});
+
+it.each(["exhausted", "error"] as const)("preserves readable navigation after several bookkeeping pages end in %s", async (outcome) => {
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  const original = result.current.window!.messages;
+  for (let cursor = 9; cursor >= 6; cursor--) {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(cursor), events: [] });
+  }
+  if (outcome === "error") vi.mocked(api.fetchWebuiThread).mockRejectedValueOnce(new Error("offline"));
+  else vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(0), events: [] });
+  await act(async () => result.current.older());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  expect(result.current.window!.messages).toEqual(original);
+  if (outcome === "error") {
+    expect(result.current.error).toBe("offline");
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(page(5));
+    await act(async () => result.current.retry());
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("test", "a", expect.objectContaining({ before: "6" }));
+    expect(result.current.window!.messages.map((row) => row.content)).toContain("question 5");
+  } else expect(result.current.window?.hasMoreBefore).toBe(false);
 });
 
 it("does not mix navigation pages from a replaced session", async () => {

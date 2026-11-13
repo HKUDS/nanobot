@@ -1,4 +1,5 @@
 import { isModelCommandResponseText, isModelCommandText } from "@/lib/format";
+import { projectActivityTimeline } from "@/lib/activity-timeline";
 import { isSystemCommandTurnId } from "@/lib/nanobot-client";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import type { UIMessage } from "@/lib/types";
@@ -73,4 +74,14 @@ export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
     visible.push(message);
   }
   return visible;
+}
+
+/** Compare history admission, not replay identities, completion times or usage telemetry. */
+export function historyContentSnapshot(messages: UIMessage[]): string {
+  return JSON.stringify(projectActivityTimeline(projectWebuiThreadMessages(messages))
+    .flatMap((unit) => unit.type === "message" ? [unit.message] : unit.messages)
+    .map(({ role, kind, renderAs, activityKind, content, reasoning, images, media, traces,
+      toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage }) =>
+      ({ role, kind, renderAs, activityKind, content, reasoning, images, media, traces,
+        toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage })));
 }

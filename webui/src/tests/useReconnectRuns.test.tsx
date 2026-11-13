@@ -343,11 +343,14 @@ describe("durable run recovery", () => {
     const initial = page(1, 3, [chunk(2, "B"), chunk(3, "C")]);
     const latest = page(6, 9, [chunk(8, "H"), chunk(9, "I"),
       { event: "turn_end", chat_id: chatId, turn_id: turnId, turn_seq: 10, projection_id: "history-end" }], true);
-    const missing = page(3, 6, [chunk(5, "E"), chunk(6, "F"), chunk(7, "G")]);
+    const middle = page(5, 6, [chunk(7, "G")]);
+    const missing = page(3, 5, [chunk(5, "E"), chunk(6, "F")]);
     let finishLatest!: (value: Response) => void;
+    let finishMiddle!: (value: Response) => void;
     let finishMissing!: (value: Response) => void;
     let latestReads = 0;
     vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url.includes("before=before-6")) return new Promise<Response>((resolve) => { finishMiddle = resolve; });
       if (url.includes("before=")) return new Promise<Response>((resolve) => { finishMissing = resolve; });
       const read = latestReads++;
       if (read === 0) return Promise.resolve(response(initial));
@@ -382,7 +385,7 @@ describe("durable run recovery", () => {
     expect(webuiThreadCache.get(`websocket:${chatId}`)).toEqual(latest);
     expect(mounted.result.current.history.error).toBeNull();
     expect(mounted.result.current.history.loadingOlder).toBe(true);
-    expect(finishMissing).toBeTypeOf("function");
+    expect(finishMiddle).toBeTypeOf("function");
     expect(reconcile).not.toHaveBeenCalled();
     expect(fence).not.toHaveBeenCalled();
     expect(client.getRunState(chatId).active).toBe(true);
@@ -391,8 +394,13 @@ describe("durable run recovery", () => {
       turn_seq: 5, stream_id: "wire", text: "E" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(mounted.result.current.messages.at(-1)?.content).toBe("BCDE");
+    await act(async () => { finishMiddle(response(middle)); });
+    expect(mounted.result.current.history.loadingOlder).toBe(true);
+    expect(mounted.result.current.messages.map((row) => row.content)).toEqual(["BCDE"]);
+    expect(finishMissing).toBeTypeOf("function");
     await act(async () => { finishMissing(response(missing)); });
-    expect(mounted.result.current.messages.at(-1)?.content).toBe("BCDEFGHI");
+    expect(mounted.result.current.messages.map((row) => row.content)).toEqual(["BCDEFGHI"]);
+    expect(mounted.result.current.history.loadingOlder).toBe(false);
     expect(client.getRunState(chatId).active).toBe(false);
     expect(mounted.result.current.isStreaming).toBe(false);
     const late = { event: "message", chat_id: chatId, turn_id: turnId, turn_seq: 11,

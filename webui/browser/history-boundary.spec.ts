@@ -304,6 +304,68 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   expect(history.reads).toHaveLength(1);
 });
 
+for (const navigate of [false, true]) {
+  test(`one pull holds its header across non-display pages until content is ready (${navigate ? "navigation" : "latest"})`, async ({ page }) => {
+    const history = await installHistory(page, 40, 12, (start, count, more) => {
+      const payload = historyPage(start, count, more);
+      // Record-level history can return only bookkeeping, with an advancing cursor.
+      return start === (navigate ? 26 : 28) ? { ...payload, events: [] } : payload;
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const { body, header } = await openSettledHistory(page, navigate ? "&navigate=1" : "");
+    if (navigate) {
+      const rail = page.getByTestId("prompt-rail-scroll");
+      await rail.getByRole("button").first().focus();
+      await page.keyboard.press("Home");
+      await page.getByRole("button", { name: "Jump to message: Question 38", exact: true }).click();
+      await expect.poll(() => history.reads.length).toBe(1);
+      history.complete();
+      await expect(body.getByText("Question 38", { exact: true })).toBeInViewport();
+      await stableLayout(body);
+      await body.hover();
+      await page.mouse.wheel(0, 10000);
+      await expect.poll(() => history.reads.length).toBe(2);
+      history.complete();
+      await expect(body.getByText("Question 51", { exact: true })).toBeAttached();
+      await stableLayout(body);
+    }
+    const anchor = navigate ? "Question 38" : "Question 40";
+    await positionAtTop(body);
+    await requestOlderWithWheel(body, history, navigate ? 3 : 1);
+    const held = await expectHeld(body, anchor);
+    history.complete();
+    await expect.poll(() => history.reads.length).toBe(navigate ? 4 : 2);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    await stableLayout(body);
+    await expectCoordinates(body, anchor, held);
+    history.complete();
+    await expect(body.getByText(navigate ? "Question 14" : "Question 16", { exact: true })).toBeAttached();
+    await expect(body.locator(".thread-history-slot")).toHaveCount(0);
+    await stableLayout(body);
+    await expectAnchorCoordinate(body, anchor, held.anchorTop);
+  });
+}
+
+test("content settling at the top during preparation does not restore an obsolete reading offset", async ({ page }) => {
+  const history = await installHistory(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { body } = await openSettledHistory(page);
+  const first = body.locator("[data-thread-display-unit]").first();
+  // A plain Markdown fallback can be taller than its final layout above the reading anchor.
+  await first.evaluate((node) => { (node as HTMLElement).style.paddingBottom = "160px"; });
+  await positionAtTop(body);
+  await requestOlderWithWheel(body, history, 1);
+  await expectHeld(body, "Question 40");
+  await first.evaluate((node) => { (node as HTMLElement).style.paddingBottom = ""; });
+  await stableLayout(body);
+  const top = await anchorTop(body, "Question 40");
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(0);
+  history.complete();
+  await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
+  await stableLayout(body);
+  await expectAnchorCoordinate(body, "Question 40", top);
+});
+
 test("task results stay with their prompts and retain the reading boundary when earlier messages load", async ({ page }) => {
   const history = await installHistory(page, 40, 12, (start, count, more) => {
     const payload = historyPage(start, count, more);
