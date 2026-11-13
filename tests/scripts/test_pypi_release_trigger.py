@@ -43,7 +43,7 @@ def shell_env(tmp_path):
     python.chmod(0o755)
     return {
         "PATH": f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}", "HOME": str(tmp_path), "GH_TOKEN": "test",
-        "GITHUB_RUN_ID": "987", "RUNNER_TEMP": str(tmp_path),
+        "GITHUB_RUN_ID": "987", "GITHUB_RUN_ATTEMPT": "1", "RUNNER_TEMP": str(tmp_path),
         "GITHUB_OUTPUT": str(tmp_path / "outputs"), "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
         "MOCK_APPROVALS": str(tmp_path / "approvals.json"),
         "GITHUB_EVENT_NAME": "workflow_run", "UPSTREAM_TAG": "v1.2.3", "UPSTREAM_SHA": COMMIT,
@@ -59,6 +59,10 @@ def run(step, env):
 def release_step():
     return next(step for step in workflow("publish-pypi.yml")["jobs"]["verify"]["steps"]
                 if step.get("id") == "release")
+
+
+def publish_gate():
+    return workflow("publish-pypi.yml")["jobs"]["publish"]["steps"][0]
 
 
 def test_only_stable_release_completion_can_start_the_main_publisher(shell_env):
@@ -102,8 +106,8 @@ def test_simulated_release_reaches_independently_approved_publisher(shell_env):
     Path(shell_env["MOCK_APPROVALS"]).write_text(json.dumps([
         {"state": "approved", "user": {"login": "reviewer"}, "environments": [{"name": "pypi"}]}
     ]))
-    approval = workflow("publish-pypi.yml")["jobs"]["publish"]["steps"][0]
-    assert run(approval, {**shell_env, "RELEASE_ACTOR": outputs["release_actor"]}).returncode == 0
+    assert run(publish_gate(), {**shell_env, "DESTINATION": "pypi",
+                                "RELEASE_ACTOR": outputs["release_actor"]}).returncode == 0
 
 
 @pytest.mark.parametrize("change", [{"UPSTREAM_SHA": "b" * 40}, {"UPSTREAM_TAG": "v1.2.3-rc1"},
@@ -131,6 +135,17 @@ def test_manual_testpypi_run_uses_its_real_actor_not_upstream_input(shell_env):
 def test_production_approval_must_be_independent(shell_env, reviewer, environment, state, allowed):
     payload = [{"state": state, "user": {"login": reviewer}, "environments": [{"name": environment}]}]
     Path(shell_env["MOCK_APPROVALS"]).write_text(json.dumps(payload))
-    step = workflow("publish-pypi.yml")["jobs"]["publish"]["steps"][0]
-    result = run(step, {**shell_env, "RELEASE_ACTOR": "publisher"})
+    result = run(publish_gate(), {**shell_env, "DESTINATION": "pypi", "RELEASE_ACTOR": "publisher"})
     assert (result.returncode == 0) == allowed
+
+
+@pytest.mark.parametrize("destination", ["pypi", "testpypi"])
+def test_rerun_cannot_use_prior_approval_or_staged_files(shell_env, destination):
+    if destination == "pypi":
+        Path(shell_env["MOCK_APPROVALS"]).write_text(json.dumps([
+            {"state": "approved", "user": {"login": "reviewer"}, "environments": [{"name": "pypi"}]}
+        ]))
+    env = {**shell_env, "DESTINATION": destination, "RELEASE_ACTOR": "publisher"}
+    assert run(publish_gate(), env).returncode == 0
+    result = run(publish_gate(), {**env, "GITHUB_RUN_ATTEMPT": "2"})
+    assert result.returncode != 0 and "start a new workflow run" in result.stderr

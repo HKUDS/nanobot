@@ -132,19 +132,25 @@ jobs:
       id-token: write
       actions: read
     steps:
-      - name: Verify an independent PyPI approval
-        if: needs.verify.outputs.destination == 'pypi'
+      - name: Require a fresh run and verify PyPI approval
         env:
           GH_TOKEN: ${{ github.token }}
+          DESTINATION: ${{ needs.verify.outputs.destination }}
           RELEASE_ACTOR: ${{ needs.verify.outputs.release_actor }}
         shell: bash
         run: |
           set -euo pipefail
+          # GitHub can reuse job outputs and the approval API is scoped to the run, not the attempt.
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 ]] || { echo 'To retry, start a new workflow run for the same version and destination.' >&2; exit 1; }
+          if [[ "$DESTINATION" == testpypi ]]; then
+            exit 0
+          fi
+          [[ "$DESTINATION" == pypi ]]
           gh api "repos/HKUDS/nanobot/actions/runs/$GITHUB_RUN_ID/approvals" | jq -e \
             --arg actor "$RELEASE_ACTOR" \
             'any(.[]; .state == "approved" and ([.environments[]?.name] | index("pypi")) != null and (.user.login | ascii_downcase) != ($actor | ascii_downcase))' >/dev/null \
             || { echo 'A different maintainer must approve this release in the pypi environment.' >&2; exit 1; }
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ needs.verify.outputs.artifact_id }}
           path: dist
@@ -161,6 +167,6 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          message='To resume, choose "Re-run all jobs" or start a new run with the same version and destination. Do not choose "Re-run failed jobs" or rerun only "publish": those skip the index recheck. Preserve the original approved release files.'
+          message='To resume, use "Run workflow" on main with the same version and destination. Do not rerun the old run. Preserve the original approved release files.'
           echo "::notice title=Retry the complete publication workflow::$message"
           printf '### Resume publication\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
