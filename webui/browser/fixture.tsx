@@ -33,6 +33,7 @@ import { ThreadLoadingFixture } from "./thread-loading-fixture";
 import { AnswerOrderFixture } from "./answer-order-fixture";
 import { SidebarActivityFixture } from "./sidebar-activity-fixture";
 import { ActivityLogosFixture } from "./activity-logos-fixture";
+import { ExecSessionFixture } from "./exec-session-fixture";
 import { HistoryHydrationFixture } from "./history-hydration-fixture";
 import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compaction-fixture";
 import { FileEditPathFixture } from "./file-edit-path-fixture";
@@ -262,6 +263,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <AnswerOrderFixture />
     : parameters.get("case") === "activity-logos"
     ? <ActivityLogosFixture parameters={parameters} />
+    : parameters.get("case") === "exec-session"
+    ? <ExecSessionFixture />
     : parameters.get("case") === "sidebar-activity"
     ? <SidebarActivityFixture />
     : parameters.get("case") === "chat-failure"

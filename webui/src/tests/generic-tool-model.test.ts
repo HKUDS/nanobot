@@ -53,7 +53,6 @@ describe("generic tool activity semantics", () => {
     ['cron({"action":"remove","name":"Daily digest"})', "Removed automation", "Daily digest"],
     ['create_goal({"objective":"private objective","ui_summary":"Benchmark memory"})', "Started long task", "Benchmark memory"],
     ['update_goal({"action":"complete","recap":"private recap"})', "Updated long task", "complete"],
-    ['exec_session({"session_id":"session-1234567890-secret","until_exit":true})', "Continued command", "session…ecret"],
     ['write_stdin({"session_id":"legacy-1234567890-secret","chars":"private input"})', "Completed Write stdin", ""],
     ['list_exec_sessions({})', "Checked running commands", ""],
     ['screenshot({"path":"artifacts/home.png"})', "Captured screenshot", ""],
@@ -94,6 +93,7 @@ describe("generic tool activity semantics", () => {
       'web_search({"query":"nanobot"})',
       'web_fetch({"url":"https://example.com"})',
       'exec({"command":"date"})',
+      'exec_session({"session_id":"012345abcdef"})',
       'write_file({"path":"README.md"})',
       'edit_file({"path":"README.md"})',
       'apply_patch({"patch":"private"})',
@@ -116,19 +116,6 @@ describe("generic tool activity semantics", () => {
       label: "文件搜索完成",
       aside: "2 次",
     });
-  });
-
-  it("localizes command continuation events", async () => {
-    await setAppLanguage("zh-CN");
-    const line = 'exec_session({"session_id":"session-1234567890-secret"})';
-    for (const status of ["running", "done", "error"] as const) {
-      const key = status === "running" ? "continuingCommand"
-        : status === "done" ? "continuedCommand" : "continueCommandFailed";
-      expect(describeRun(line, status)).toMatchObject({
-        label: i18n.t(`message.agentActivity.${key}`),
-        detail: "session…ecret",
-      });
-    }
   });
 
   it("keeps different subtask actions separate while grouping repeated status checks", () => {
