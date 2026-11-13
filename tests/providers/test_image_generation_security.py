@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import socket
 
 import httpx
@@ -61,7 +62,8 @@ async def test_generated_image_download_blocks_unsafe_target(
 
 
 @pytest.mark.asyncio
-async def test_generated_image_download_revalidates_redirects(monkeypatch) -> None:
+@pytest.mark.parametrize("status", [300, 302])
+async def test_generated_image_download_revalidates_redirects(monkeypatch, status: int) -> None:
     original_getaddrinfo = socket.getaddrinfo
 
     def resolve_test_hosts(host: str, port: int | None, *args, **kwargs):
@@ -74,7 +76,7 @@ async def test_generated_image_download_revalidates_redirects(monkeypatch) -> No
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requested.append(str(request.url))
-        return httpx.Response(302, headers={"location": "http://169.254.169.254/latest"})
+        return httpx.Response(status, headers={"location": "http://169.254.169.254/latest"})
 
     with pytest.raises(ImageGenerationError, match="blocked unsafe generated image URL"):
         await _download_image_data_url(
@@ -85,6 +87,21 @@ async def test_generated_image_download_revalidates_redirects(monkeypatch) -> No
     assert requested == ["https://cdn.example/image.png"]
 
 
+class _ImageStream(httpx.AsyncByteStream):
+    def __init__(self, *chunks: bytes) -> None:
+        self.chunks = chunks
+        self.started = False
+        self.closed = False
+
+    async def __aiter__(self):
+        self.started = True
+        for chunk in self.chunks:
+            yield chunk
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
 @pytest.mark.asyncio
 async def test_generated_image_download_returns_valid_data_url(monkeypatch) -> None:
     monkeypatch.setattr(
@@ -92,39 +109,44 @@ async def test_generated_image_download_returns_valid_data_url(monkeypatch) -> N
         _resolve_public,
     )
 
+    stream = _ImageStream(PNG_BYTES[:20], PNG_BYTES[20:])
+
     async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=PNG_BYTES)
+        return httpx.Response(200, stream=stream)
 
     result = await _download_image_data_url(
         "https://cdn.example/image.png",
         transport=httpx.MockTransport(handler),
     )
 
-    assert result.startswith("data:image/png;base64,")
-
-
-class _OversizedStream(httpx.AsyncByteStream):
-    async def __aiter__(self):
-        yield b"12345"
-        yield b"6789"
+    assert result == f"data:image/png;base64,{base64.b64encode(PNG_BYTES).decode('ascii')}"
+    assert stream.closed
 
 
 @pytest.mark.asyncio
-async def test_generated_image_download_enforces_streaming_size_limit(monkeypatch) -> None:
+@pytest.mark.parametrize("declared_length", [None, "9"], ids=["stream-limit", "declared-limit"])
+async def test_generated_image_download_enforces_streaming_size_limit(
+    monkeypatch, declared_length: str | None,
+) -> None:
     monkeypatch.setattr(
         "nanobot.security.network.socket.getaddrinfo",
         _resolve_public,
     )
     monkeypatch.setattr(image_generation, "_IMAGE_DOWNLOAD_MAX_BYTES", 8)
 
+    stream = _ImageStream(b"12345", b"6789")
+    headers = {"content-length": declared_length} if declared_length is not None else {}
+
     async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, stream=_OversizedStream())
+        return httpx.Response(200, headers=headers, stream=stream)
 
     with pytest.raises(ImageGenerationError, match="download limit"):
         await _download_image_data_url(
             "https://cdn.example/image.png",
             transport=httpx.MockTransport(handler),
         )
+    assert stream.started == (declared_length is None)
+    assert stream.closed
 
 
 class _StreamContext:
@@ -158,8 +180,9 @@ async def test_generated_image_download_delegates_unresolved_host_to_provider_pr
         async def __aexit__(self, exc_type, exc, traceback) -> None:
             return None
 
-        def stream(self, method: str, url: str) -> _StreamContext:
+        def stream(self, method: str, url: str, **kwargs) -> _StreamContext:
             captured["request"] = (method, url)
+            captured["follow_redirects"] = kwargs["follow_redirects"]
             request = httpx.Request(method, url)
             return _StreamContext(httpx.Response(200, content=PNG_BYTES, request=request))
 
@@ -173,9 +196,10 @@ async def test_generated_image_download_delegates_unresolved_host_to_provider_pr
 
     assert result.startswith("data:image/png;base64,")
     assert captured["request"] == ("GET", "https://proxy-only.example/image.png")
+    assert captured["follow_redirects"] is False
     assert captured["kwargs"] == {
-        "follow_redirects": False,
         "timeout": image_generation._DEFAULT_TIMEOUT_S,
+        "transport": None,
         "trust_env": False,
         "proxy": proxy,
     }
@@ -205,7 +229,7 @@ async def test_proxied_generated_image_download_revalidates_redirects(
         async def __aexit__(self, exc_type, exc, traceback) -> None:
             return None
 
-        def stream(self, method: str, url: str) -> _StreamContext:
+        def stream(self, method: str, url: str, **kwargs) -> _StreamContext:
             requested.append(url)
             request = httpx.Request(method, url)
             return _StreamContext(

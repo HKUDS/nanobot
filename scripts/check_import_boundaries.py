@@ -88,6 +88,11 @@ IMPORT_RULES = (
         (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.security", "nanobot.session"),
     ),
     ImportRule(
+        "http-execution",
+        ("nanobot.execution.http",),
+        (*_ADAPTERS, "nanobot.agent", "nanobot.config", "nanobot.providers", "nanobot.session"),
+    ),
+    ImportRule(
         "channel-routing-contracts",
         ("nanobot.channels.notification_routes",),
         ("nanobot",),
