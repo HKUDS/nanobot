@@ -1403,7 +1403,10 @@ export function ThreadShell({
   const emptyState = initialHistoryLoading ? (
     <ThreadLoadingSkeleton />
   ) : (
-    <ThreadWelcomeMark />
+    <>
+      <h1 className="sr-only">{session ? title : t(temporary || temporaryChatEnabled ? "temporaryChat.title" : "sidebar.newChat")}</h1>
+      <ThreadWelcomeMark />
+    </>
   );
   const sessionInfoAction = historyKey ? (
     <SessionInfoPopover client={client} sessionKey={historyKey} token={token} />

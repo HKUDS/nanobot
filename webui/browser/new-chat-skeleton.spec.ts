@@ -47,6 +47,9 @@ for (const c of cases) for (const locale of ["en", "zh-CN"]) {
         workspaceRow: await box(page.locator(".thread-composer-meta")),
         workspaceControl: await box(page.locator(".thread-composer-workspace")),
       };
+      await expect(page.getByTestId("thread-empty-region").getByRole("heading", {
+        level: 1, name: locale === "en" ? "New topic" : "新建话题",
+      })).toHaveClass("sr-only");
       await expect(page.getByTestId("thread-welcome-mark").locator(".thread-welcome-mark__focus")).toHaveCSS("mask-image", /nanobot_mark_outline\.svg/);
       await expect(page.getByTestId("thread-welcome-mark").locator(".thread-welcome-mark__fill")).toHaveCSS("background-image", /nanobot_mark\.svg/);
       await expect(page.getByTestId("thread-welcome-mark").locator(".thread-welcome-mark__fill")).toHaveCSS("filter", "grayscale(1)");
@@ -69,6 +72,25 @@ for (const c of cases) for (const locale of ["en", "zh-CN"]) {
     });
   });
 }
+
+test("keeps the welcome marks proportional and inside split panes as the window resizes", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 936 });
+  await page.route("**/api/commands", (route) => route.fulfill({ json: { commands: [] } }));
+  await page.goto("/browser/fixture.html?case=new-chat-skeleton&split");
+  const panes = page.locator(".workbench-pane");
+  await expect(panes).toHaveCount(3);
+
+  for (const width of [1100, 946]) {
+    await page.setViewportSize({ width, height: 936 });
+    for (const pane of await panes.all()) {
+      const region = await box(pane.getByTestId("thread-empty-region"));
+      const mark = await box(pane.getByTestId("thread-welcome-mark"));
+      expect(mark.x).toBeGreaterThanOrEqual(region.x - 0.1);
+      expect(mark.x + mark.width).toBeLessThanOrEqual(region.x + region.width + 0.1);
+      expect(mark.width / mark.height).toBeCloseTo(783 / 742, 2);
+    }
+  }
+});
 
 test("draws the nose bridge and the original cheek lines", async ({ page }) => {
   await page.route("**/api/commands", (route) => route.fulfill({ json: { commands: [] } }));

@@ -2,7 +2,8 @@
   position: absolute;
   bottom: -3rem;
   left: 50%;
-  height: min(19.9rem, calc(100% + 3rem), 66.3vw);
+  /* 94.76cqw is the height of the 783:742 mark at its container's width. */
+  height: min(19.9rem, calc(100% + 3rem), 66.3vw, 94.76cqw);
   aspect-ratio: 783 / 742;
   pointer-events: none;
   transform: translateX(-50%);

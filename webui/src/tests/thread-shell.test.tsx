@@ -1488,10 +1488,11 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    await waitFor(() => expect(screen.getByText("Important conversation")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("Important conversation"));
+    const header = within(screen.getByTestId("thread-header"));
+    await waitFor(() => expect(header.getByText("Important conversation")).toBeInTheDocument());
+    fireEvent.click(header.getByText("Important conversation"));
 
-    expect(screen.getByText("Important conversation")).toBeVisible();
+    expect(header.getByText("Important conversation")).toBeVisible();
   });
 
   it.each([true, false])("waits for parent settings and retries only on failure (success: %s)", async (success) => {
@@ -2648,7 +2649,7 @@ describe("ThreadShell", () => {
     });
   });
 
-  it("keeps the empty thread landing focused on the composer", async () => {
+  it.each([false, true])("keeps the empty thread landing focused on the composer (temporary=%s)", async (temporary) => {
     const client = makeClient();
     render(
       wrap(
@@ -2656,13 +2657,16 @@ describe("ThreadShell", () => {
         <ThreadShell
           session={null}
           title="nanobot"
+          temporaryChatEnabled={temporary}
           onToggleSidebar={() => {}}
         />,
       ),
     );
     await act(async () => {});
 
-    expect(within(screen.getByTestId("thread-empty-region")).queryByRole("heading")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("thread-empty-region")).getByRole("heading", {
+      level: 1, name: temporary ? "Temporary chat" : "New topic",
+    })).toHaveClass("sr-only");
     expect(screen.getByTestId("thread-welcome-mark")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write code" })).not.toBeInTheDocument();
@@ -5740,6 +5744,7 @@ describe("ThreadShell", () => {
 
     await waitFor(() => expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero"));
     expect(screen.queryByRole("status", { name: "Loading conversation…" })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("thread-empty-region")).getByRole("heading", { level: 1, name: "Empty topic" })).toHaveClass("sr-only");
     expect(screen.getByRole("textbox", { name: "Message input" })).toBeEnabled();
   });
 
