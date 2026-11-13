@@ -15,7 +15,6 @@ Match the recipe to the credential or endpoint you already have:
 | What you have | Recipe | Must match |
 |---|---|---|
 | A gateway key and model IDs that include a model family path, such as `provider/model-name` | [OpenRouter Gateway](#recipe-openrouter-gateway) | API key, provider config key, preset provider, and gateway model ID |
-| A ShengSuanYun (胜算云) API key | [ShengSuanYun](#recipe-shengsuanyun) | API key, `shengsuanyun` provider, and the full model ID |
 | An OpenCode Zen or Go key | [OpenCode Zen or Go](#recipe-opencode-zen-or-go) | `OPENCODE_API_KEY`, the Zen/Go provider key, and a model ID from the matching OpenCode endpoint |
 | An OpenAI platform API key and OpenAI model ID | [OpenAI Direct](#recipe-openai-direct) | `OPENAI_API_KEY`, `provider: "openai"`, and an OpenAI model available to that account |
 | An Anthropic API key and Anthropic model ID | [Anthropic Direct](#recipe-anthropic-direct) | `ANTHROPIC_API_KEY`, `provider: "anthropic"`, and a non-gateway model ID |
@@ -104,35 +103,6 @@ nanobot agent -m "Hello!"
 ```
 
 If this fails with `401` or `unauthorized`, check that `OPENROUTER_API_KEY` is visible in the same terminal or service that starts nanobot. If it fails with `model not found`, choose a model ID that OpenRouter lists for your account.
-
-## Recipe: ShengSuanYun
-
-In **Settings → Models → New preset**, add **ShengSuanYun**, enter your API key,
-and select an available model. Its default API endpoint is
-`https://router.shengsuanyun.com/api/v1`. Model IDs include their upstream provider,
-for example `deepseek/deepseek-v4-flash`; use the exact ID from the model list.
-Availability and pricing depend on your ShengSuanYun account.
-See the [official API documentation](https://lean.shengsuanyun.com/openai-api).
-
-<details>
-<summary>Manual configuration</summary>
-
-```json
-{
-  "providers": {
-    "shengsuanyun": { "apiKey": "${SHENGSUANYUN_API_KEY}" }
-  },
-  "modelPresets": {
-    "primary": {
-      "provider": "shengsuanyun",
-      "model": "deepseek/deepseek-v4-flash"
-    }
-  },
-  "agents": { "defaults": { "modelPreset": "primary" } }
-}
-```
-
-</details>
 
 ## Recipe: OpenCode Zen or Go
 
