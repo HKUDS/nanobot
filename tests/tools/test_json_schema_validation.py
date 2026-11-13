@@ -183,3 +183,57 @@ def test_server_schema_cannot_load_external_references(monkeypatch, reference):
     assert is_tool_error_result(error)
     assert "resolve" in error.lower()
     retrieve.assert_not_called()
+
+
+@pytest.mark.parametrize("dialect", [
+    "https://example.invalid/unsupported-dialect", {}, [], None,
+])
+async def test_invalid_declared_dialect_returns_error_without_calling_server(dialect):
+    registry, wrapper, session = make_mcp_registry({
+        "$schema": dialect, "type": "object", "properties": {},
+    })
+
+    result = await registry.execute(wrapper.name, {})
+
+    assert is_tool_error_result(result)
+    assert "Invalid tool schema" in result
+    assert ("Unsupported JSON Schema dialect" if isinstance(dialect, str) else "$schema must be a string") in result
+    session.call_tool.assert_not_awaited()
+
+
+@pytest.mark.parametrize("amount, valid", [
+    (4.02, True), (4.021, False), (-4.02, True), (0.07000000000000002, False),
+])
+async def test_decimal_multiple_of_does_not_use_binary_rounding_or_tolerance(amount, valid):
+    registry, wrapper, session = make_mcp_registry({
+        "type": "object", "properties": {"amount": {"type": "number", "multipleOf": 0.01}},
+    })
+    arguments = {"amount": amount}
+
+    result = await registry.execute(wrapper.name, arguments)
+
+    assert is_tool_error_result(result) is not valid
+    assert arguments == {"amount": amount}
+    assert session.call_tool.await_count == int(valid)
+    if not valid:
+        assert "amount:" in result and "multiple" in result
+
+
+@pytest.mark.parametrize("dialect", [None, "http://json-schema.org/draft-07/schema#"])
+@pytest.mark.parametrize("expression, name, valid", [
+    (r"^\p{L}+$", "北京", True),
+    (r"^\p{L}+$", "123", False),
+    ("[", "北京", False),
+])
+async def test_string_pattern_uses_unicode_engine_and_rejects_invalid_schema(dialect, expression, name, valid):
+    schema = {"type": "object", "properties": {"name": {"type": "string", "pattern": expression}}}
+    if dialect is not None:
+        schema["$schema"] = dialect
+    registry, wrapper, session = make_mcp_registry(schema)
+
+    result = await registry.execute(wrapper.name, {"name": name})
+
+    assert is_tool_error_result(result) is not valid
+    assert session.call_tool.await_count == int(valid)
+    if not valid:
+        assert ("Invalid tool schema" if expression == "[" else "name:") in result

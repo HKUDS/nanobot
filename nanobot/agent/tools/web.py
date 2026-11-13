@@ -495,7 +495,7 @@ class WebSearchTool(Tool):
     ) -> str:
         self._refresh_config()
         provider = self.config.provider.strip().lower() or "brave"
-        n = min(max(count or self.config.max_results, 1), 10)
+        n = int(min(max(count or self.config.max_results, 1), 10))
 
         if provider == "olostep":
             return await self._search_olostep(query, n)
@@ -1314,7 +1314,7 @@ class WebFetchTool(Tool):
     ) -> Any:
         url = url.strip(" \t\r\n`\"'")
         extract_mode = kwargs.pop("extractMode", extract_mode)
-        max_chars = cast(int, kwargs.pop("maxChars", max_chars) or self.max_chars)
+        max_chars = int(kwargs.pop("maxChars", max_chars) or self.max_chars)
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
             return ToolResult.error(json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False))

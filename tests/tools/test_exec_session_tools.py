@@ -406,11 +406,12 @@ def test_exec_session_wait_for_searches_before_response_truncation():
     assert len(result.partition("\n")[0]) == 10_000
 
 
-def test_exec_one_shot_accepts_max_output_tokens_alias(tmp_path):
+@pytest.mark.parametrize("limit", [1000, 1000.0])
+def test_exec_one_shot_accepts_max_output_tokens_alias(tmp_path, limit):
     async def run() -> str:
         tool = ExecTool(working_dir=str(tmp_path), timeout=5)
         command = _python_command("print('A' * 2000)")
-        return await tool.execute(command=command, max_output_tokens=1000, yield_time_ms=10000)
+        return await tool.execute(command=command, max_output_tokens=limit, yield_time_ms=10000)
 
     result = asyncio.run(run())
 
