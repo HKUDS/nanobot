@@ -1512,9 +1512,9 @@ OpenAI Codex, xAI Grok subscriptions, and Azure OpenAI use Responses; Anthropic 
 
 **Advanced options** opens in a separate dialog; closing it returns to the preset editor. Changing a preset's model or provider resets its API selection to Auto unless the same update supplies a new declaration. Each fallback preset keeps its own API settings. Existing `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
 
-Each preset has an **Image input** switch, enabled by default. Turn it off for a text-only model. Requests containing images skip that preset, whether it is the primary or a fallback; text-only requests keep the configured order. If no enabled preset accepts images, the request fails before contacting a model. In manual configuration, set `supportsImages: false` on the preset; the same field is available on the implicit `agents.defaults` preset and inline fallbacks, and defaults to `true` independently for each one.
+Use the **Image input** switch in each preset to match the model's image capability. It is enabled by default; turn it off for text-only models. Requests containing images follow the configured primary and fallback order, using presets with **Image input** enabled. Text-only requests use the full configured order. If every candidate is text-only, nanobot returns an image-input error before sending the request.
 
-This setting declares the model's capability; it does not guarantee support for every image format. If an image-enabled preset's API rejects an image or returns another invalid-request error, nanobot reports that error. Retries retain the original messages and images rather than silently retrying with text alone.
+For manual configuration, set `supportsImages` on a named preset, the implicit `agents.defaults` preset, or an inline fallback. Each defaults independently to `true`; use `false` for a text-only model. Transient retries preserve the original messages and images, and API validation errors are returned directly.
 
 ### Model Fallbacks
 
