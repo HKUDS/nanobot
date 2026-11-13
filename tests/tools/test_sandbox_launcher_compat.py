@@ -106,11 +106,20 @@ async def test_disabled_settings_do_not_launch_a_probe(settings, state, tmp_path
     assert (await check_sandbox(ExecToolConfig(**settings), tmp_path))["state"] == state
 
 
-async def test_unsupported_platform_reports_no_isolation_without_running(tmp_path, monkeypatch):
-    monkeypatch.setattr(sys, "platform", "win32")
-    status = await check_sandbox(ExecToolConfig(sandbox="bwrap"), tmp_path)
+@pytest.mark.parametrize(("platform", "backend", "supported"), [
+    ("win32", "bwrap", None),
+    ("linux", "seatbelt", "bwrap"),
+    ("darwin", "bwrap", "seatbelt"),
+])
+async def test_unsupported_backend_does_not_run(tmp_path, monkeypatch, platform, backend, supported):
+    async def unexpected(*args, **kwargs):
+        pytest.fail("unsupported sandbox must not start a process")
+
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", unexpected)
+    status = await check_sandbox(ExecToolConfig(sandbox=backend), tmp_path)
     assert status["state"] == "unsupported"
-    assert status["supported_backend"] is None
+    assert status["supported_backend"] == supported
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Unix native sandbox")

@@ -14,13 +14,12 @@ from nanobot.security.sandbox_launcher import resolve_sandbox_launcher
 
 
 def _normalize_bind_paths(
-    paths: Iterable[str] | None,
+    paths: Iterable[str],
     *,
-    workspace: Path | None = None,
+    workspace: Path,
 ) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in paths or []:
+    binds: dict[str, None] = {}
+    for raw in paths:
         value = str(raw).strip()
         if not value:
             continue
@@ -28,21 +27,12 @@ def _normalize_bind_paths(
         if not path.is_absolute():
             continue
         resolved_path = path.resolve(strict=False)
-        if workspace is not None:
-            try:
-                workspace.relative_to(resolved_path)
-            except ValueError:
-                pass
-            else:
-                # A later bind of the workspace or one of its parents could
-                # cover the tmpfs that hides the config directory.
-                continue
-        resolved = str(resolved_path)
-        if resolved in seen:
+        # A later bind of the workspace or an ancestor could cover the
+        # tmpfs that hides the config directory.
+        if workspace.is_relative_to(resolved_path):
             continue
-        seen.add(resolved)
-        out.append(resolved)
-    return out
+        binds[str(resolved_path)] = None
+    return list(binds)
 
 
 def _bwrap(
@@ -54,7 +44,6 @@ def _bwrap(
     ro_binds: list[str],
     rw_binds: list[str],
 ) -> list[str]:
-    required = ["/usr"]
     optional = [
         "/bin",
         "/lib",
@@ -68,9 +57,10 @@ def _bwrap(
         "/etc/ld.so.cache",
     ]
 
-    args = ["--new-session", "--die-with-parent", "--setenv", "HOME", str(ws)]
-    for p in required:
-        args += ["--ro-bind", p, p]
+    args = [
+        "--new-session", "--die-with-parent", "--setenv", "HOME", str(ws),
+        "--ro-bind", "/usr", "/usr",
+    ]
     for p in optional:
         args += ["--ro-bind-try", p, p]
     args += [
@@ -131,16 +121,7 @@ def _seatbelt_ancestors(*paths: Path) -> list[str]:
     command.  Only ``file-read-metadata`` is granted for these: the directories
     stay searchable, but listing or reading them is still denied.
     """
-    out: list[str] = []
-    seen: set[str] = set()
-    for path in paths:
-        for ancestor in path.parents:
-            name = str(ancestor)
-            if name in seen:
-                continue
-            seen.add(name)
-            out.append(name)
-    return out
+    return list(dict.fromkeys(str(ancestor) for path in paths for ancestor in path.parents))
 
 
 def _seatbelt_is_within(path: Path, root: Path) -> bool:
@@ -299,15 +280,13 @@ def build_sandbox_argv(
         raise ValueError(f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}")
     ws = Path(workspace).resolve()
     media = get_media_dir().resolve()
-    try:
-        sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
-    except ValueError:
-        sandbox_cwd = str(ws)
+    requested_cwd = Path(cwd).resolve()
+    sandbox_cwd = str(requested_cwd if requested_cwd.is_relative_to(ws) else ws)
 
     rw_binds = tuple(sandbox_rw_binds or ())
     args = backend(
         command, ws, sandbox_cwd, media=media,
-        ro_binds=_normalize_bind_paths(sandbox_ro_binds, workspace=ws),
+        ro_binds=_normalize_bind_paths(sandbox_ro_binds or (), workspace=ws),
         rw_binds=_normalize_bind_paths(rw_binds, workspace=ws),
     )
     executable = resolve_sandbox_launcher(

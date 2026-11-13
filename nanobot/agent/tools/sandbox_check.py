@@ -19,7 +19,7 @@ from nanobot.execution.sandbox import build_sandbox_argv
 from nanobot.security.sandbox_launcher import (
     SandboxLauncherError,
     resolve_sandbox_launcher,
-    sandbox_platform,
+    supported_sandbox_backend,
 )
 
 _PROBE_TIMEOUT_S = 5
@@ -34,13 +34,11 @@ class SandboxCheck(TypedDict):
 
 
 def sandbox_settings_status(config: ExecToolConfig, workspace: Path) -> SandboxCheck:
-    return _prepare_settings(config, workspace)[2]
+    return _prepare_settings(config, workspace)[1]
 
 
-def _prepare_settings(config: ExecToolConfig, workspace: Path) -> tuple[ExecToolConfig, Path, SandboxCheck]:
-    import sys
-
-    backend = "bwrap" if sys.platform.startswith("linux") else "seatbelt" if sys.platform == "darwin" else None
+def _prepare_settings(config: ExecToolConfig, workspace: Path) -> tuple[ExecToolConfig, SandboxCheck]:
+    backend = supported_sandbox_backend()
     missing_env = False
     try:
         config = resolve_config_env_vars(config)
@@ -58,7 +56,7 @@ def _prepare_settings(config: ExecToolConfig, workspace: Path) -> tuple[ExecTool
         result["state"] = "disabled"
     elif not config.sandbox:
         result["state"] = "off"
-    elif sandbox_platform(config.sandbox) == "unsupported":
+    elif config.sandbox != backend:
         result.update(state="unsupported", reason="platform_unsupported")
     elif missing_env:
         result.update(state="unavailable", reason="path_unavailable")
@@ -70,11 +68,11 @@ def _prepare_settings(config: ExecToolConfig, workspace: Path) -> tuple[ExecTool
             )
         except SandboxLauncherError as exc:
             result.update(state="unavailable", reason=exc.reason)
-    return config, workspace, result
+    return config, result
 
 
 async def check_sandbox(config: ExecToolConfig, workspace: Path) -> SandboxCheck:
-    config, workspace, result = await asyncio.to_thread(_prepare_settings, config, workspace)
+    config, result = await asyncio.to_thread(_prepare_settings, config, workspace)
     if result["state"] != "unchecked":
         return result
     # Use synthetic files only. Never run startup/login profiles or an arbitrary

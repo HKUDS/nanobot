@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -16,12 +17,12 @@ class SandboxLauncherError(ValueError):
         super().__init__(reason)
 
 
-def sandbox_platform(backend: str) -> Literal["supported", "unsupported"]:
-    import sys
-
-    return "supported" if (backend == "bwrap" and sys.platform.startswith("linux")) or (
-        backend == "seatbelt" and sys.platform == "darwin"
-    ) else "unsupported"
+def supported_sandbox_backend() -> Literal["bwrap", "seatbelt"] | None:
+    if sys.platform.startswith("linux"):
+        return "bwrap"
+    if sys.platform == "darwin":
+        return "seatbelt"
+    return None
 
 
 def resolve_sandbox_launcher(
