@@ -87,9 +87,12 @@ async def test_history_reports_unknown_job(tmp_path: Path) -> None:
     assert "job missing not found" in result
 
 
-@pytest.mark.parametrize("limit", [0, 21])
-async def test_history_validates_limit(tmp_path: Path, limit: int) -> None:
+@pytest.mark.parametrize("limit, reason", [
+    (0, "is less than the minimum of 1"),
+    (21, "is greater than the maximum of 20"),
+])
+async def test_history_validates_limit(tmp_path: Path, limit: int, reason: str) -> None:
     result = await _registry(CronService(tmp_path / "jobs.json")).execute(
         "cron", {"action": "history", "job_id": "test", "limit": limit},
     )
-    assert "limit must be" in result
+    assert f"limit: {limit} {reason}" in result
