@@ -65,7 +65,7 @@ const SidebarPanelContent = forwardRef<HTMLElement, SidebarPanelProps>(function 
       "--file-preview-mobile-width": isClosing ? "0px" : !entered ? "var(--sidebar-enter-mobile-width, 0px)" : "100%",
       ...style,
     } as CSSProperties}
-    className={cn("file-preview-pane z-30 min-h-0 w-[var(--file-preview-mobile-width)] overflow-hidden duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+    className={cn("file-preview-pane z-30 min-h-0 w-[var(--file-preview-mobile-width)] overflow-hidden duration-300 [transition-timing-function:cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
       entered ? "transition-[width]" : "transition-none",
       floating ? "fixed inset-y-2 right-2 max-w-[420px]" : "absolute inset-y-0 right-0", isClosing && "pointer-events-none", className)}>
     <div className={cn("file-preview-content absolute inset-y-2 right-2 flex min-h-0 w-[calc(100cqw-1rem)] flex-col pb-[env(safe-area-inset-bottom)] transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
