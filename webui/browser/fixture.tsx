@@ -44,6 +44,7 @@ import { ComposerActionFixture } from "./composer-action-fixture";
 import { MobileChatLayoutFixture } from "./mobile-chat-layout-fixture";
 import { ThemeToggleFixture } from "./theme-toggle-fixture";
 import { DisplayMathFixture } from "./display-math-fixture";
+import { MarkdownDollarRefsFixture } from "./markdown-dollar-refs-fixture";
 import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
 import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
 import { AppearanceFixture } from "./appearance-fixture";
@@ -267,6 +268,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <ChatFailureFixture parameters={parameters} />
     : parameters.get("case") === "display-math"
     ? <DisplayMathFixture />
+    : parameters.get("case") === "markdown-dollar-refs"
+    ? <MarkdownDollarRefsFixture />
     : parameters.get("case") === "code-wrapping"
     ? <CodeWrappingFixture />
     : parameters.get("case") === "typography"
