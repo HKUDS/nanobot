@@ -31,6 +31,7 @@ async function ready(result: { current: Session }, index: number) {
 }
 
 beforeEach(() => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
   vi.useFakeTimers();
   window.sessionStorage.clear();
   mocks.read.mockReset().mockResolvedValue(directory);
@@ -43,6 +44,136 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("host session lifecycle", () => {
+  it("does not probe retained remote views while local or hidden, and rechecks on return", async () => {
+    let visibility: DocumentVisibilityState = "visible";
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    act(() => result.current.local());
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.read).not.toHaveBeenCalled();
+    await act(async () => { await result.current.connect(ids[0]); });
+    expect(mocks.read.mock.calls.some(([, targets]) => targets?.includes(ids[0]))).toBe(true);
+    act(() => { visibility = "hidden"; document.dispatchEvent(new Event("visibilitychange")); });
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.read).not.toHaveBeenCalled();
+    await act(async () => { visibility = "visible"; document.dispatchEvent(new Event("visibilitychange")); });
+    expect(mocks.read.mock.calls.some(([, targets]) => targets?.includes(ids[0]))).toBe(true);
+    expect(mocks.request.mock.calls.filter(([action]) => action === "remote.connect")).toHaveLength(1);
+    expect(result.current.frames).toHaveLength(1);
+  });
+
+  it("only probes the selected host, not every retained view", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    await ready(result, 1);
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(mocks.read).toHaveBeenCalledWith("token", [ids[1]]);
+    expect(mocks.read.mock.calls.every(([, targets]) => !targets?.includes(ids[0]))).toBe(true);
+  });
+  it("checks existing connections only while the local directory is observed", async () => {
+    mocks.read.mockResolvedValue({ ...directory, profiles: [
+      directory.profiles[0], { ...directory.profiles[1], connected: false, connection_error: "remote_unreachable" },
+      { ...directory.profiles[2], connected: false, connection_error: "pair_authorization_rejected" },
+      { ...directory.profiles[3], connected: false, gateway_id: undefined },
+    ] });
+    const { result } = renderHook(useHostSessions);
+    await act(async () => {});
+    let stop!: () => void;
+    await act(async () => { stop = result.current.watchDirectory(); });
+    expect(mocks.read).toHaveBeenCalledWith("token", [ids[0], ids[1]]);
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(mocks.read).toHaveBeenCalledWith("token", [ids[0], ids[1]]);
+    act(stop);
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.read).not.toHaveBeenCalled();
+    expect(mocks.request).not.toHaveBeenCalled();
+  });
+
+  it("counts distinct failed probes rather than repeated reads of a cached failure", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    let revision = 41;
+    let connected = false;
+    mocks.read.mockImplementation(async () => ({ ...directory, profiles: directory.profiles.map((p) =>
+      p.id === ids[0] ? { ...p, connected, health_check: revision, connection_error: connected ? "" : "remote_unreachable" } : p) }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(result.current.frames[0].failures).toBe(1);
+    await act(async () => { await result.current.refresh(); await result.current.refresh(); });
+    expect(result.current.frames[0].failures).toBe(1);
+    expect(result.current.frames[0].offline).toBe(false);
+    revision += 1;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(result.current.frames[0].offline).toBe(true);
+    connected = true; revision += 1;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(result.current.frames[0].offline).toBe(false);
+    expect(result.current.selected?.id).toBe(ids[0]);
+    expect(mocks.request.mock.calls.filter(([action]) => action === "remote.connect")).toHaveLength(1);
+  });
+
+  it("does not start a queued probe after its observer leaves", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    const slow = deferred<typeof directory>();
+    mocks.read.mockReturnValueOnce(slow.promise);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    let stop!: () => void;
+    await act(async () => { stop = result.current.watchDirectory(); });
+    act(() => { stop(); result.current.local(); });
+    mocks.read.mockClear();
+    await act(async () => { slow.resolve(directory); await vi.advanceTimersByTimeAsync(30_000); });
+    expect(mocks.read).not.toHaveBeenCalled();
+    expect(result.current.frames).toHaveLength(1);
+  });
+
+  it("rechecks a queued wake immediately even when the old request fails", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    const slow = deferred<typeof directory>();
+    mocks.read.mockReturnValueOnce(slow.promise);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    act(() => { window.dispatchEvent(new Event("online")); window.dispatchEvent(new Event("pageshow")); });
+    mocks.read.mockClear();
+    await act(async () => { slow.reject(new Error("directory_unavailable")); });
+    expect(mocks.read.mock.calls.filter(([, targets]) => targets?.length)).toEqual([["token", [ids[0]]]]);
+    expect(result.current.selected?.id).toBe(ids[0]);
+    expect(result.current.frames[0].offline).toBe(false);
+  });
+
+  it("can cancel a warm view's revalidation without activating it", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    act(() => result.current.local());
+    const slow = deferred<typeof directory>();
+    mocks.read.mockReturnValueOnce(slow.promise);
+    const { completion } = await start(result, 0);
+    expect(result.current.pending?.id).toBe(ids[0]);
+    act(() => result.current.cancel());
+    await act(async () => { slow.resolve(directory); await completion; });
+    expect(result.current.selected).toBeNull();
+    expect(result.current.frames).toHaveLength(1);
+    expect(mocks.request.mock.calls.filter(([action]) => action === "remote.connect")).toHaveLength(1);
+  });
+
+  it("does not reuse a retained view when revalidation finds a different gateway", async () => {
+    const { result } = renderHook(useHostSessions);
+    await ready(result, 0);
+    act(() => result.current.local());
+    mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) =>
+      p.id === ids[0] ? { ...p, gateway_id: "another-gateway" } : p) });
+    mocks.request.mockRejectedValueOnce(new Error("instance_changed"));
+    await act(async () => { await expect(result.current.connect(ids[0])).rejects.toThrow("instance_changed"); });
+    expect(result.current.selected).toBeNull();
+    expect(result.current.frames[0].offline).toBe(true);
+    expect(result.current.frames[0].connection.gateway_id).toBe("gateway-0");
+  });
+
   it("reveals only a loaded live view for notifications, without connecting", async () => {
     const { result } = renderHook(useHostSessions);
     await ready(result, 0);
@@ -51,9 +182,10 @@ describe("host session lifecycle", () => {
     act(() => { expect(result.current.reveal(ids[0])).toBe(true); });
     expect(result.current.selected?.id).toBe(ids[0]);
     act(() => { expect(result.current.reveal(ids[3])).toBe(false); });
-    mocks.read.mockResolvedValue({ ...directory, profiles: directory.profiles.map((p) => ({ ...p, connected: false })) });
+    let check = 0;
+    mocks.read.mockImplementation(async () => ({ ...directory, profiles: directory.profiles.map((p) => ({ ...p, connected: false, health_check: ++check })) }));
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-    act(() => { expect(result.current.reveal(ids[1])).toBe(false); });
+    act(() => { expect(result.current.reveal(ids[0])).toBe(false); });
     expect(mocks.request).not.toHaveBeenCalled();
   });
   it("clears a failed reconnect only after that host's loaded view recovers", async () => {
@@ -83,8 +215,11 @@ describe("host session lifecycle", () => {
   it("ignores a stale health failure that arrives after reconnect succeeds", async () => {
     const { result } = renderHook(useHostSessions);
     await ready(result, 0);
-    mocks.read.mockResolvedValue({ ...directory, profiles: [] });
+    let revision = 0;
+    mocks.read.mockImplementation(async () => ({ ...directory, profiles: directory.profiles.map((p) =>
+      ({ ...p, connected: false, connection_error: "remote_unreachable", health_check: ++revision })) }));
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(result.current.frames[0].offline).toBe(true);
     const stale = deferred<typeof directory>();
     mocks.read.mockReturnValueOnce(stale.promise);
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
@@ -195,7 +330,9 @@ describe("host session lifecycle", () => {
     act(() => result.current.loaded(ids[0]));
     expect(result.current.selected).toBeNull();
     expect(result.current.frames).toHaveLength(0);
-    expect(vi.getTimerCount()).toBe(1);
+    mocks.read.mockClear();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mocks.read).not.toHaveBeenCalled();
   });
 
   it("a timed-out cold page leaves the old host intact and can be retried", async () => {

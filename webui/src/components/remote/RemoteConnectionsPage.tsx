@@ -71,6 +71,9 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
   const nameId = useId();
   const nameInput = useRef<HTMLInputElement>(null);
   const refresh = connections?.refresh;
+  const watchDirectory = connections?.watchDirectory;
+  const visible = connections?.localActive || connections?.managing;
+  useEffect(() => { if (visible) return watchDirectory?.(); }, [visible, watchDirectory]);
   const page = useRef<HTMLDivElement>(null);
   useEffect(() => { if (connections?.managing) page.current?.focus({ preventScroll: true }); }, [connections?.managing]);
 
