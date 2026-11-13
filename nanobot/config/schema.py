@@ -321,6 +321,7 @@ class ProvidersConfig(Base):
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     orcarouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    shengsuanyun: ProviderConfig = Field(default_factory=ProviderConfig)
     assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)
     huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     skywork: ProviderConfig = Field(default_factory=ProviderConfig)

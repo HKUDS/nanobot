@@ -21,6 +21,18 @@ async function chooseProviderToConfigure(label: string) {
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
 
+  it("finds ShengSuanYun by its Chinese name and opens its credential form", async () => {
+    const user = userEvent.setup();
+    const payload = settingsPayload();
+    payload.providers = [{ name: "shengsuanyun", label: "ShengSuanYun", configured: false }];
+    renderProviderManager({ initialSection: "models", initialSettings: payload });
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.type(screen.getByRole("combobox", { name: "Search providers" }), "胜算云");
+    await user.click(screen.getByRole("option", { name: "ShengSuanYun" }));
+    expect(screen.getByRole("dialog", { name: "ShengSuanYun" })).toBeVisible();
+    expect(screen.getByPlaceholderText("Enter API key")).toBeInTheDocument();
+  });
+
   it("manages providers unused by presets and returns focus through the manager", async () => {
     const user = userEvent.setup();
     const payload = settingsPayload();

@@ -20,6 +20,7 @@ export const PROVIDER_ICONS: Record<string, LucideIcon> = {
   gemini: Gem,
   mistral: Orbit,
   siliconflow: Layers,
+  shengsuanyun: Cloud,
   volcengine: Cloud,
   volcengine_coding_plan: Cloud,
   byteplus: Cloud,

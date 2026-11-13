@@ -281,6 +281,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="orcarouter",
         default_api_base="https://api.orcarouter.ai/v1",
     ),
+    # ShengSuanYun model IDs include the upstream provider (e.g. deepseek/model).
+    ProviderSpec(
+        name="shengsuanyun",
+        keywords=("shengsuanyun",),
+        env_key="SHENGSUANYUN_API_KEY",
+        request_apis=("chat_completions", "responses"),
+        display_name="ShengSuanYun",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="shengsuanyun.com",
+        default_api_base="https://router.shengsuanyun.com/api/v1",
+        strip_model_prefixes=("shengsuanyun",),
+    ),
     # Eden AI: OpenAI-compatible gateway. Models use the "provider/model"
     # naming scheme (e.g. "anthropic/claude-sonnet-4-5"); the full id is sent upstream.
     ProviderSpec(
