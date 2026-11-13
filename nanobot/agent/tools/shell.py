@@ -26,8 +26,6 @@ from nanobot.agent.tools.exec_session import (
     clamp_session_int,
     format_session_poll,
 )
-from nanobot.agent.tools.sandbox import wrap_command
-from nanobot.agent.tools.sandbox_launcher import SandboxLauncherError, resolve_sandbox_launcher
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
@@ -36,6 +34,8 @@ from nanobot.agent.tools.schema import (
 )
 from nanobot.agent.tools.shell_config import ExecToolConfig
 from nanobot.config.paths import get_media_dir
+from nanobot.execution.sandbox import build_sandbox_argv
+from nanobot.security.sandbox_launcher import SandboxLauncherError
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
@@ -436,24 +436,17 @@ class ExecTool(Tool):
                         args.append("-l")
                     payload = shlex.join([*args, "-c", command])
                 workspace = workspace_root or cwd
-                command = shlex.split(wrap_command(
-                    self.sandbox,
-                    payload,
-                    workspace,
-                    cwd,
-                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
-                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
-                ))
-                # Project/tool and inherited PATH can contain writable programs.
                 try:
-                    command[0] = resolve_sandbox_launcher(
-                        self.sandbox, self.sandbox_launcher,
-                        writable_roots=(Path(workspace), *self.sandbox_rw_binds),
+                    command = build_sandbox_argv(
+                        self.sandbox, payload, workspace, cwd,
+                        launcher=self.sandbox_launcher,
+                        sandbox_ro_binds=map(str, self.sandbox_ro_binds),
+                        sandbox_rw_binds=map(str, self.sandbox_rw_binds),
                     )
                 except SandboxLauncherError as exc:
                     if exc.reason == "launcher_missing":
                         return ToolResult.error(
-                            f"Error: sandbox launcher not found: {command[0]}", error_code="sandbox_launcher_missing",
+                            f"Error: sandbox launcher not found: {exc.launcher}", error_code="sandbox_launcher_missing",
                         )
                     return ToolResult.error(
                         f"Error: sandbox launcher rejected: {exc.reason}", error_code=f"sandbox_{exc.reason}",

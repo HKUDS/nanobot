@@ -116,6 +116,8 @@ class CronTool(Tool):
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         errors = super().validate_params(params)
+        if errors:
+            return errors
         action = params.get("action")
         if action == "add" and not str(params.get("message") or "").strip():
             errors.append("message is required when action='add'")
@@ -347,7 +349,7 @@ class CronTool(Tool):
             return f"No recorded runs for job {job_id}."
         lines = [f"Recent runs for '{job.name}' (id: {job.id}), newest first:"]
         display_tz = self._display_timezone(job.schedule)
-        for run in reversed(job.state.run_history[-limit:]):
+        for run in reversed(job.state.run_history[-int(limit):]):
             timestamp = self._format_timestamp(run.run_at_ms, display_tz)
             lines.append(f"- {timestamp} — {run.status} ({run.duration_ms}ms)")
             if run.error:

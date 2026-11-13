@@ -1,8 +1,7 @@
 """Sandbox backends for shell command execution.
 
-To add a backend, match the callable signature of _bwrap and _seatbelt,
-including keyword-only sandbox_ro_binds and sandbox_rw_binds, and register
-it in _BACKENDS below.
+To add a backend, match the callable signature of _bwrap and _seatbelt and
+register it in _BACKENDS below.
 """
 
 import os
@@ -11,16 +10,16 @@ from pathlib import Path
 from typing import Iterable
 
 from nanobot.config.paths import get_media_dir
+from nanobot.security.sandbox_launcher import resolve_sandbox_launcher
 
 
 def _normalize_bind_paths(
-    paths: Iterable[str] | None,
+    paths: Iterable[str],
     *,
-    workspace: Path | None = None,
+    workspace: Path,
 ) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for raw in paths or []:
+    binds: dict[str, None] = {}
+    for raw in paths:
         value = str(raw).strip()
         if not value:
             continue
@@ -28,40 +27,23 @@ def _normalize_bind_paths(
         if not path.is_absolute():
             continue
         resolved_path = path.resolve(strict=False)
-        if workspace is not None:
-            try:
-                workspace.relative_to(resolved_path)
-            except ValueError:
-                pass
-            else:
-                # A later bind of the workspace or one of its parents could
-                # cover the tmpfs that hides the config directory.
-                continue
-        resolved = str(resolved_path)
-        if resolved in seen:
+        # A later bind of the workspace or an ancestor could cover the
+        # tmpfs that hides the config directory.
+        if workspace.is_relative_to(resolved_path):
             continue
-        seen.add(resolved)
-        out.append(resolved)
-    return out
+        binds[str(resolved_path)] = None
+    return list(binds)
 
 
 def _bwrap(
     command: str,
-    workspace: str,
-    cwd: str,
+    ws: Path,
+    sandbox_cwd: str,
     *,
-    sandbox_ro_binds: Iterable[str] | None = None,
-    sandbox_rw_binds: Iterable[str] | None = None,
-) -> str:
-    ws = Path(workspace).resolve()
-    media = get_media_dir().resolve()
-
-    try:
-        sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
-    except ValueError:
-        sandbox_cwd = str(ws)
-
-    required = ["/usr"]
+    media: Path,
+    ro_binds: list[str],
+    rw_binds: list[str],
+) -> list[str]:
     optional = [
         "/bin",
         "/lib",
@@ -75,9 +57,10 @@ def _bwrap(
         "/etc/ld.so.cache",
     ]
 
-    args = ["bwrap", "--new-session", "--die-with-parent", "--setenv", "HOME", str(ws)]
-    for p in required:
-        args += ["--ro-bind", p, p]
+    args = [
+        "--new-session", "--die-with-parent", "--setenv", "HOME", str(ws),
+        "--ro-bind", "/usr", "/usr",
+    ]
     for p in optional:
         args += ["--ro-bind-try", p, p]
     args += [
@@ -87,12 +70,12 @@ def _bwrap(
         "--bind", str(ws), str(ws),
         "--ro-bind-try", str(media), str(media),
     ]
-    for p in _normalize_bind_paths(sandbox_ro_binds, workspace=ws):
+    for p in ro_binds:
         args += ["--ro-bind-try", p, p]
-    for p in _normalize_bind_paths(sandbox_rw_binds, workspace=ws):
+    for p in rw_binds:
         args += ["--bind-try", p, p]
     args += ["--chdir", sandbox_cwd, "--", "sh", "-c", command]
-    return shlex.join(args)
+    return args
 
 
 # System code and certificates needed by command-line tools. Do not grant
@@ -138,16 +121,7 @@ def _seatbelt_ancestors(*paths: Path) -> list[str]:
     command.  Only ``file-read-metadata`` is granted for these: the directories
     stay searchable, but listing or reading them is still denied.
     """
-    out: list[str] = []
-    seen: set[str] = set()
-    for path in paths:
-        for ancestor in path.parents:
-            name = str(ancestor)
-            if name in seen:
-                continue
-            seen.add(name)
-            out.append(name)
-    return out
+    return list(dict.fromkeys(str(ancestor) for path in paths for ancestor in path.parents))
 
 
 def _seatbelt_is_within(path: Path, root: Path) -> bool:
@@ -177,12 +151,13 @@ def _sbpl_quote(path: str) -> str:
 
 def _seatbelt(
     command: str,
-    workspace: str,
-    cwd: str,
+    ws: Path,
+    sandbox_cwd: str,
     *,
-    sandbox_ro_binds: Iterable[str] | None = None,
-    sandbox_rw_binds: Iterable[str] | None = None,
-) -> str:
+    media: Path,
+    ro_binds: list[str],
+    rw_binds: list[str],
+) -> list[str]:
     """Wrap command in a macOS Seatbelt sandbox (requires sandbox-exec(1)).
 
     The workspace is read-write and media is read-only. The workspace's parent
@@ -199,19 +174,8 @@ def _seatbelt(
     Network access is left unrestricted, matching ``bwrap`` (which does not pass
     ``--unshare-net``).
     """
-    ws = Path(workspace).resolve()
-    media = get_media_dir().resolve()
-
-    try:
-        sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
-    except ValueError:
-        sandbox_cwd = str(ws)
-
     def subpaths(paths: Iterable[str]) -> str:
         return " ".join(f"(subpath {_sbpl_quote(p)})" for p in paths)
-
-    ro_binds = _normalize_bind_paths(sandbox_ro_binds, workspace=ws)
-    rw_binds = _normalize_bind_paths(sandbox_rw_binds, workspace=ws)
 
     rules = [
         "(version 1)",
@@ -285,9 +249,7 @@ def _seatbelt(
 
     # sandbox-exec(1) has no --chdir. Exit on failure before evaluating any of
     # the submitted shell list; `cd ... && a; b` would still execute b on failure.
-    args = [
-        # Resolve the security boundary before consulting operator tool PATHs.
-        "/usr/bin/sandbox-exec",
+    return [
         "-p",
         "\n".join(rules),
         "/usr/bin/env",
@@ -297,28 +259,37 @@ def _seatbelt(
         "-c",
         f"cd {shlex.quote(sandbox_cwd)} || exit\n{command}",
     ]
-    return shlex.join(args)
 
 
 _BACKENDS = {"bwrap": _bwrap, "seatbelt": _seatbelt}
 
 
-def wrap_command(
+def build_sandbox_argv(
     sandbox: str,
     command: str,
     workspace: str,
     cwd: str,
     *,
+    launcher: str = "",
     sandbox_ro_binds: Iterable[str] | None = None,
     sandbox_rw_binds: Iterable[str] | None = None,
-) -> str:
-    """Wrap *command* using the named sandbox backend."""
-    if backend := _BACKENDS.get(sandbox):
-        return backend(
-            command,
-            workspace,
-            cwd,
-            sandbox_ro_binds=sandbox_ro_binds,
-            sandbox_rw_binds=sandbox_rw_binds,
-        )
-    raise ValueError(f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}")
+) -> list[str]:
+    """Build the sandbox argv with an independently resolved host launcher."""
+    backend = _BACKENDS.get(sandbox)
+    if backend is None:
+        raise ValueError(f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}")
+    ws = Path(workspace).resolve()
+    media = get_media_dir().resolve()
+    requested_cwd = Path(cwd).resolve()
+    sandbox_cwd = str(requested_cwd if requested_cwd.is_relative_to(ws) else ws)
+
+    rw_binds = tuple(sandbox_rw_binds or ())
+    args = backend(
+        command, ws, sandbox_cwd, media=media,
+        ro_binds=_normalize_bind_paths(sandbox_ro_binds or (), workspace=ws),
+        rw_binds=_normalize_bind_paths(rw_binds, workspace=ws),
+    )
+    executable = resolve_sandbox_launcher(
+        sandbox, launcher, writable_roots=(Path(workspace), *map(Path, rw_binds)),
+    )
+    return [executable, *args]

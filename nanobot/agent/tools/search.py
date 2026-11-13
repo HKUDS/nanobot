@@ -416,8 +416,8 @@ class FindFilesTool(_SearchTool):
                 file_type=type,
                 include_dirs=include_dirs,
                 sort=sort,
-                head_limit=head_limit,
-                offset=offset,
+                head_limit=int(head_limit) if head_limit is not None else None,
+                offset=int(offset),
                 cancelled=cancelled,
             )
         except asyncio.CancelledError:
@@ -667,9 +667,11 @@ class GrepTool(_SearchTool):
                 self._execute_sync,
                 pattern=pattern, path=path, glob=glob, type=type, pages=pages,
                 case_insensitive=case_insensitive, fixed_strings=fixed_strings,
-                output_mode=output_mode, context_before=context_before, context_after=context_after,
-                max_matches=max_matches, max_results=max_results, head_limit=head_limit,
-                offset=offset, cancelled=cancelled,
+                output_mode=output_mode, context_before=int(context_before), context_after=int(context_after),
+                max_matches=int(max_matches) if max_matches is not None else None,
+                max_results=int(max_results) if max_results is not None else None,
+                head_limit=int(head_limit) if head_limit is not None else None,
+                offset=int(offset), cancelled=cancelled,
             )
         except asyncio.CancelledError:
             cancelled.set()
