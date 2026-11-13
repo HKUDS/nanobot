@@ -1841,12 +1841,6 @@
     },
     "loadingConversation": "会話を読み込み中…",
     "empty": {
-      "greetings": {
-        "workOn": "一緒に何に取り組みましょうか？",
-        "start": "今日はどこから始めましょう？",
-        "build": "今日は何を作りましょうか？",
-        "tackle": "一緒に何を解決しましょう？"
-      },
       "quickActions": {
         "plan": {
           "title": "計画を立てる",

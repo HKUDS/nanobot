@@ -20,7 +20,7 @@ for (const theme of ["light", "dark"]) {
       await expect(surface).toBeVisible();
       const input = page.getByRole("textbox", { name: "Message input" });
       await input.blur();
-      await page.getByTestId("hero-greeting").click();
+      await page.getByTestId("thread-empty-region").click();
       const rest = await surface.evaluate(element => getComputedStyle(element).boxShadow);
       const bounds = await surface.boundingBox();
       const footer = await page.locator(".thread-composer-footer").boundingBox();

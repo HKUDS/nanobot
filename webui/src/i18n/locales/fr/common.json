@@ -1841,12 +1841,6 @@
     },
     "loadingConversation": "Chargement de la conversation…",
     "empty": {
-      "greetings": {
-        "workOn": "Sur quoi travaillons-nous ensemble ?",
-        "start": "Par où commence-t-on ?",
-        "build": "Que construisons-nous aujourd'hui ?",
-        "tackle": "Que résout-on ensemble ?"
-      },
       "quickActions": {
         "plan": {
           "title": "Créer un plan",

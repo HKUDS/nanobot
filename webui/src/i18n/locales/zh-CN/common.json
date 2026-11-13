@@ -2023,12 +2023,6 @@
     },
     "loadingConversation": "正在加载话题…",
     "empty": {
-      "greetings": {
-        "workOn": "我们要一起做点什么？",
-        "start": "今天从哪里开始？",
-        "build": "今天一起构建什么？",
-        "tackle": "我们要一起解决什么？"
-      },
       "quickActions": {
         "plan": {
           "title": "制定计划",

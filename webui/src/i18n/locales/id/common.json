@@ -1841,12 +1841,6 @@
     },
     "loadingConversation": "Memuat percakapan…",
     "empty": {
-      "greetings": {
-        "workOn": "Apa yang kita kerjakan bersama?",
-        "start": "Kita mulai dari mana?",
-        "build": "Apa yang kita bangun hari ini?",
-        "tackle": "Apa yang kita selesaikan bersama?"
-      },
       "quickActions": {
         "plan": {
           "title": "Buat rencana",

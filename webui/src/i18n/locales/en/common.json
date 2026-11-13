@@ -2023,12 +2023,6 @@
     },
     "loadingConversation": "Loading conversation…",
     "empty": {
-      "greetings": {
-        "workOn": "What should we work on?",
-        "start": "Where should we start?",
-        "build": "What are we building today?",
-        "tackle": "What should we tackle together?"
-      },
       "quickActions": {
         "plan": {
           "title": "Make a plan",

@@ -1841,12 +1841,6 @@
     },
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {
-      "greetings": {
-        "workOn": "Mình cùng làm gì tiếp?",
-        "start": "Hôm nay bắt đầu từ đâu?",
-        "build": "Hôm nay mình xây dựng gì?",
-        "tackle": "Mình cùng xử lý việc gì?"
-      },
       "quickActions": {
         "plan": {
           "title": "Lập kế hoạch",

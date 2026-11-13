@@ -27,9 +27,6 @@ import type {
 import { canonicalThreadPayload } from "./thread-test-payload";
 import { createStreamClient } from "./stream-client";
 
-const HERO_GREETING_PATTERN =
-  /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
-
 async function openMessageActions(text: string): Promise<HTMLElement> {
   const message = await screen.findByText(text);
   const block = message.closest<HTMLElement>("[data-thread-display-unit]")!;
@@ -1491,10 +1488,11 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    await waitFor(() => expect(screen.getByText("Important conversation")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("Important conversation"));
+    const header = within(screen.getByTestId("thread-header"));
+    await waitFor(() => expect(header.getByText("Important conversation")).toBeInTheDocument());
+    fireEvent.click(header.getByText("Important conversation"));
 
-    expect(screen.getByText("Important conversation")).toBeVisible();
+    expect(header.getByText("Important conversation")).toBeVisible();
   });
 
   it.each([true, false])("waits for parent settings and retries only on failure (success: %s)", async (success) => {
@@ -1932,7 +1930,11 @@ describe("ThreadShell", () => {
       "anthropic/claude-opus-4-5",
     ));
 
-    await screen.findByText(hasHistory ? "Previous message" : HERO_GREETING_PATTERN);
+    if (hasHistory) {
+      await screen.findByText("Previous message");
+    } else {
+      await waitFor(() => expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero"));
+    }
     const badge = screen.getByRole("button", { name: "Choose model" });
     fireEvent.focus(badge);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
@@ -2555,7 +2557,7 @@ describe("ThreadShell", () => {
     await waitFor(() =>
       expect(screen.getByText("first message should stay")).toBeInTheDocument(),
     );
-    expect(screen.queryByText(HERO_GREETING_PATTERN)).not.toBeInTheDocument();
+    expect(screen.getByTestId("thread-composer-motion").closest("[data-layout]")).toHaveAttribute("data-layout", "thread");
   });
 
   it("hides a live first /model turn when the initial history snapshot is stale", async () => {
@@ -2647,7 +2649,7 @@ describe("ThreadShell", () => {
     });
   });
 
-  it("keeps the empty thread landing focused on the composer", async () => {
+  it.each([false, true])("keeps the empty thread landing focused on the composer (temporary=%s)", async (temporary) => {
     const client = makeClient();
     render(
       wrap(
@@ -2655,15 +2657,17 @@ describe("ThreadShell", () => {
         <ThreadShell
           session={null}
           title="nanobot"
+          temporaryChatEnabled={temporary}
           onToggleSidebar={() => {}}
         />,
       ),
     );
     await act(async () => {});
 
-    const greeting = screen.getByRole("heading", { level: 1, name: HERO_GREETING_PATTERN });
-    expect(greeting).toHaveAttribute("data-testid", "hero-greeting");
-    expect(greeting).toHaveClass("select-none", "whitespace-nowrap");
+    expect(within(screen.getByTestId("thread-empty-region")).getByRole("heading", {
+      level: 1, name: temporary ? "Temporary chat" : "New topic",
+    })).toHaveClass("sr-only");
+    expect(screen.getByTestId("thread-welcome-mark")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write code" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Make a plan" })).not.toBeInTheDocument();
@@ -2903,7 +2907,7 @@ describe("ThreadShell", () => {
     });
 
     expect(screen.queryByText("live assistant reply")).not.toBeInTheDocument();
-    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero");
 
     await act(async () => {
       rerender(
@@ -5357,7 +5361,7 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero");
     const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
     Object.defineProperties(scroller, {
       scrollHeight: { configurable: true, value: 2400 },
@@ -5723,7 +5727,7 @@ describe("ThreadShell", () => {
     expect(screen.getByTestId("thread-composer-motion")).toBe(composer);
   });
 
-  it.each([false, true])("replaces the initial history skeleton with welcome when no visible history remains (systemOnly=%s)", async (systemOnly) => {
+  it.each([false, true])("replaces the initial history skeleton with the empty composer when no visible history remains (systemOnly=%s)", async (systemOnly) => {
     let resolveHistory!: (response: Response) => void;
     vi.mocked(fetch).mockImplementation((input) => String(input).includes("/webui-thread")
       ? new Promise<Response>((resolve) => { resolveHistory = resolve; })
@@ -5738,9 +5742,10 @@ describe("ThreadShell", () => {
         : [])));
     });
 
-    expect(await screen.findByText(HERO_GREETING_PATTERN)).toBeVisible();
+    await waitFor(() => expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero"));
     expect(screen.queryByRole("status", { name: "Loading conversation…" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero");
+    expect(within(screen.getByTestId("thread-empty-region")).getByRole("heading", { level: 1, name: "Empty topic" })).toHaveClass("sr-only");
+    expect(screen.getByRole("textbox", { name: "Message input" })).toBeEnabled();
   });
 
   it("keeps cached messages visible while the first history revalidation is pending", async () => {
