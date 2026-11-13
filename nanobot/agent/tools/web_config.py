@@ -4,12 +4,21 @@ from nanobot.config_base import Base
 
 
 class WebSearchConfig(Base):
-    """Web search configuration."""
+    """Web search configuration.
+
+    For the ``mst`` provider, configure available engines via
+    ``mst_engines`` (e.g. ``["ddg", "google", "brave"]``) or the
+    ``MST_ENGINES`` environment variable (comma-separated). Override engine
+    ranking weights via ``mst_weights`` or ``MST_WEIGHTS`` (JSON object).
+    """
     provider: str = "duckduckgo"
     api_key: str = ""
     base_url: str = ""
     max_results: int = 5
     timeout: int = 30
+    # mst-specific options (only used when provider == "mst")
+    mst_engines: list[str] = Field(default_factory=list)
+    mst_weights: dict[str, float] = Field(default_factory=dict)
 
 
 class WebFetchConfig(Base):

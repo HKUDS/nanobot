@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import html
+import inspect
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, cast
 from urllib.parse import parse_qsl, quote, urljoin, urlparse
 
@@ -69,6 +70,7 @@ SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
     {"name": "bocha", "label": "Bocha", "credential": "api_key"},
     {"name": "volcengine", "label": "Volcengine Search", "credential": "api_key"},
     {"name": "keenable", "label": "Keenable", "credential": "optional_api_key"},
+    {"name": "mst", "label": "Meta-Search (mst) [requires mst-python]", "credential": "none"},
     {"name": "anysearch", "label": "AnySearch", "credential": "optional_api_key"},
     {"name": "deepseek", "label": "DeepSeek", "credential": "api_key"},
 )
@@ -300,6 +302,65 @@ def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
     return "\n".join(lines)
 
 
+_MST_STATUS_LABELS = {
+    "missing-key": "missing API key",
+    "disabled": "disabled",
+}
+
+
+def _mst_accepts_proxy(search: Callable[..., object]) -> bool:
+    """Whether the installed mst callable accepts the v0.6 ``proxy`` argument."""
+    try:
+        parameters = inspect.signature(search).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == "proxy" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+
+
+def _mst_no_results_diagnostic(mst_lib: object, engines: list[str] | None) -> str | None:
+    """Explain a no-results response when a requested engine cannot run."""
+    list_engines = getattr(mst_lib, "list_engines", None)
+    if not callable(list_engines):
+        return None
+    try:
+        entries: object = list_engines()
+    except Exception:
+        return None
+    if not isinstance(entries, list):
+        return None
+    statuses: dict[str, str] = {}
+    for entry in cast(list[object], entries):
+        if not isinstance(entry, dict):
+            continue
+        fields = cast(dict[str, object], entry)
+        name: object = fields.get("name")
+        status: object = fields.get("status")
+        if isinstance(name, str) and isinstance(status, str):
+            statuses[name] = status
+    if not statuses:
+        return None
+    if engines:
+        unavailable = [
+            f"{name} ({_MST_STATUS_LABELS.get(statuses[name], statuses[name])})"
+            for name in engines
+            if name in statuses and statuses[name] != "ready"
+        ]
+        if unavailable:
+            return (
+                f"mst engines are not ready: {', '.join(unavailable)}. "
+                "Configure engine credentials or choose different mst_engines."
+            )
+    if not any(status == "ready" for status in statuses.values()):
+        return (
+            "mst has no ready search engines. "
+            "Configure engine credentials or choose a different search provider."
+        )
+    return None
+
+
 def _deepseek_is_retryable(status_code: int) -> bool:
     return status_code in {408, 429} or status_code >= 500
 
@@ -468,6 +529,8 @@ class WebSearchTool(Tool):
             return "volcengine" if api_key else "duckduckgo"
         if provider == "keenable":
             return "keenable"
+        if provider == "mst":
+            return "mst"
         if provider == "anysearch":
             return "anysearch"
         if provider == "serper":
@@ -529,6 +592,8 @@ class WebSearchTool(Tool):
             )
         elif provider == "keenable":
             return await self._search_keenable(query, n)
+        elif provider == "mst":
+            return await self._search_mst(query, n)
         elif provider == "anysearch":
             return await self._search_anysearch(query, n)
         elif provider == "deepseek":
@@ -697,6 +762,124 @@ class WebSearchTool(Tool):
             return ToolResult.error(f"Error: Keenable search failed ({e.response.status_code}): {e}")
         except Exception as e:
             return ToolResult.error(f"Error: Keenable search failed: {e}")
+
+    async def _search_mst(self, query: str, n: int) -> str:
+        """Search via the Meta-Search Tool (mst) Python package.
+
+        mst aggregates results from multiple search engines using RRF ranking,
+        providing richer coverage than any single provider.
+        Inspired by [SearXNG](https://github.com/searxng/searxng); package at
+        https://github.com/openmtx/meta-search-tool. Engines like ddg and
+        google work out-of-the-box; others require API keys.
+
+        Configure engines via ``mst_engines`` (list of engine names) or the
+        ``MST_ENGINES`` env var (comma-separated). Override weights via
+        ``mst_weights`` or ``MST_WEIGHTS`` env var (JSON object).
+        """
+        try:
+            import mst as mst_lib  # pyright: ignore[reportMissingImports, reportMissingTypeStubs]
+            from mst import (
+                MSTError,  # pyright: ignore[reportMissingImports, reportMissingTypeStubs, reportUnknownVariableType]
+            )
+        except ImportError:
+            return ToolResult.error(
+                "mst support is not installed. Run `nanobot plugins enable mst`."
+            )
+        except OSError as e:
+            return ToolResult.error(f"Error: mst support failed to load: {e}")
+
+        mst_error_cls: type[Exception] = cast(type[Exception], MSTError)
+        engines: list[str] | None = None
+
+        try:
+            # Resolve engines: config > env var > None (uses all ready engines)
+            engines = self.config.mst_engines if self.config.mst_engines else None
+            if not engines:
+                env_engines = os.environ.get("MST_ENGINES", "").strip()
+                if env_engines:
+                    engines = [e.strip() for e in env_engines.split(",") if e.strip()]
+            if engines:
+                logger.info("mst search using engines: {}", engines)
+
+            # Resolve weights: config > env var > None
+            weights: dict[str, float] | None = (
+                self.config.mst_weights if self.config.mst_weights else None
+            )
+            if weights is None:
+                env_weights = os.environ.get("MST_WEIGHTS", "").strip()
+                if env_weights:
+                    try:
+                        parsed_weights = cast(object, json.loads(env_weights))
+                    except (json.JSONDecodeError, ValueError):
+                        parsed_weights = None
+                    candidate: dict[str, float] = {}
+                    if isinstance(parsed_weights, dict):
+                        for key, value in cast(dict[object, object], parsed_weights).items():
+                            if (
+                                isinstance(key, str)
+                                and isinstance(value, (int, float))
+                                and not isinstance(value, bool)
+                            ):
+                                candidate[key] = float(value)
+                    if candidate:
+                        weights = candidate
+                    else:
+                        logger.warning("Invalid MST_WEIGHTS JSON, ignoring")
+
+            timeout = f"{max(1, int(self.config.timeout))}s"
+
+            search_kwargs: dict[str, Any] = {
+                "query": query,
+                "engines": list(engines) if isinstance(engines, list) else engines,
+                "limit": n,
+                "rrf_k": 60,
+                "timeout": timeout,
+                "weights": weights,
+            }
+            search_async = getattr(mst_lib, "search_async", None)
+            search_callable = cast(
+                Callable[..., object],
+                search_async if callable(search_async) else mst_lib.search,
+            )
+            if self.proxy:
+                if not _mst_accepts_proxy(search_callable):
+                    return ToolResult.error(
+                        "Error: mst-python 0.6.0 or newer is required for proxy support. "
+                        "Run `nanobot plugins enable mst` to upgrade."
+                    )
+                search_kwargs["proxy"] = self.proxy
+            if callable(search_async):
+                result: dict[str, Any] = await cast(
+                    Callable[..., Awaitable[dict[str, Any]]], search_async,
+                )(**search_kwargs)
+            else:
+                # mst-python < 0.5 exposes only the blocking native call.
+                result = await asyncio.to_thread(
+                    cast(Callable[..., dict[str, Any]], mst_lib.search), **search_kwargs,
+                )
+
+            # Format mst results into shared output
+            items: list[dict[str, Any]] = [
+                {
+                    "title": r.get("title") or "",
+                    "url": r.get("url") or "",
+                    "content": r.get("snippet") or r.get("description") or "",
+                }
+                for r in result.get("results", [])
+            ]
+            return _format_results(query, items, n)
+        except mst_error_cls as e:
+            # "No results" is a valid outcome, not a failed search.
+            if getattr(e, "code", None) == "no_results":
+                diagnostic = _mst_no_results_diagnostic(mst_lib, engines)
+                if diagnostic is not None:
+                    return ToolResult.error(f"Error: {diagnostic}")
+                return _format_results(query, [], n)
+            logger.warning("mst search failed: {}", e)
+            return ToolResult.error(f"Error: mst search failed ({e})")
+        except Exception as e:
+            logger.warning("mst search failed: {}", e)
+            return ToolResult.error(f"Error: mst search failed ({e})")
 
     async def _search_searxng(self, query: str, n: int) -> str:
         base_url = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
