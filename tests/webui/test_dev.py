@@ -50,18 +50,21 @@ def _write_webui_source(source: Path, *, with_vite: bool = True) -> Path:
     return vite_cli
 
 
-def test_dev_urls_preserve_secret_and_target_only_the_backend_origin() -> None:
+@pytest.mark.parametrize("port", [5173, 5174])
+def test_dev_urls_preserve_secret_and_target_only_the_backend_origin(port: int) -> None:
     webui_url = "http://127.0.0.1:8899/#/?bootstrapSecret=secret"
 
-    assert webui_dev_browser_url(webui_url) == (
-        "http://127.0.0.1:5173/#/?bootstrapSecret=secret"
+    assert webui_dev_browser_url(webui_url, port=port) == (
+        f"http://127.0.0.1:{port}/#/?bootstrapSecret=secret"
     )
     assert webui_dev_proxy_target(webui_url) == "http://127.0.0.1:8899"
 
 
+@pytest.mark.parametrize("port", [5173, 5174])
 def test_start_webui_dev_server_uses_vite_directly_and_sets_proxy_target(
     monkeypatch,
     tmp_path: Path,
+    port: int,
 ) -> None:
     source = tmp_path / "webui"
     vite_cli = _write_webui_source(source)
@@ -81,6 +84,7 @@ def test_start_webui_dev_server_uses_vite_directly_and_sets_proxy_target(
 
     server = start_webui_dev_server(
         target_url="http://127.0.0.1:8899",
+        port=port,
         source_dir=source,
         runner="bun",
         environ={"EXISTING": "value"},
@@ -92,7 +96,8 @@ def test_start_webui_dev_server_uses_vite_directly_and_sets_proxy_target(
 
     assert server.process is process
     command, kwargs = popen_calls[0]
-    assert command == ["node", str(vite_cli), "--logLevel", "warn", "--clearScreen", "false"]
+    assert command == ["node", str(vite_cli), "--port", str(port), "--strictPort",
+                       "--logLevel", "warn", "--clearScreen", "false"]
     assert kwargs["cwd"] == source
     assert kwargs["env"] == {
         "EXISTING": "value",
