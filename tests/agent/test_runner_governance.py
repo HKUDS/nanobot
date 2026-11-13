@@ -1005,6 +1005,7 @@ async def test_reported_usage_floor_triggers_pressure_despite_low_estimate(monke
 
 async def test_runner_does_not_compact_primary_request_from_fallback_usage(monkeypatch):
     primary = MagicMock(spec=LLMProvider)
+    primary._image_input_error.return_value = None
     primary.provider_name = "primary"
     primary.generation = GenerationSettings(max_tokens=100)
     primary.supports_native_compaction.return_value = False
