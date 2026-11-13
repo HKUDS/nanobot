@@ -221,9 +221,8 @@ async def test_bedrock_prepares_images_before_native_conversion(image_blocks, st
 
 
 @pytest.mark.parametrize("streaming", [False, True])
-@pytest.mark.parametrize("reject_text", [False, True])
-async def test_responses_image_rejection_discards_replay_and_retries_once(
-    image_peer, image_blocks, monkeypatch, streaming, reject_text,
+async def test_responses_image_rejection_preserves_input_and_original_error(
+    image_peer, image_blocks, monkeypatch, streaming,
 ):
     url, requests, reject = image_peer
     provider = _provider("azure", url, monkeypatch)
@@ -233,16 +232,17 @@ async def test_responses_image_rejection_discards_replay_and_retries_once(
         assert first.provider_state is not None
         pending = {"role": "user", "content": "Continue."}
         messages.extend([{"role": "assistant", "content": first.content}, pending])
-        reject.update(images=True, text=reject_text)
+        original = json.dumps(messages)
+        reject["images"] = True
         call = provider.chat_stream_with_retry if streaming else provider.chat_with_retry
         result = await call(messages, provider_context=ProviderCallContext(
             session_id="image-rejection", conversation_state=first.provider_state.with_pending_messages([pending]),
         ))
-        assert result.finish_reason == ("error" if reject_text else "stop")
-        assert len(requests) == 3
+        assert result.finish_reason == "error"
+        assert result.error_status_code == 400
+        assert len(requests) == 2
         assert "input_image" in json.dumps(requests[1][1]["input"])
-        assert "input_image" not in json.dumps(requests[2][1]["input"])
-        assert "not delivered to model" in json.dumps(requests[2][1]["input"])
+        assert json.dumps(messages) == original
     finally:
         await provider.aclose()
 
@@ -263,7 +263,7 @@ async def test_auto_responses_fallback_keeps_prepared_images(image_peer, image_b
 
 
 @pytest.mark.parametrize("streaming", [False, True])
-async def test_text_only_model_keeps_its_image_policy(image_peer, image_blocks, streaming):
+async def test_model_metadata_does_not_override_preset_image_policy(image_peer, image_blocks, streaming):
     url, requests, _ = image_peer
     provider = OpenAICompatProvider(
         api_key="fixture", api_base=f"{url}/v1", spec=find_by_name("deepseek"),
@@ -272,8 +272,7 @@ async def test_text_only_model_keeps_its_image_policy(image_peer, image_blocks, 
     try:
         result = await (provider.chat_stream if streaming else provider.chat)(_messages(image_blocks))
         assert result.content == "answer"
-        assert "input_image" not in json.dumps(requests[0][1])
-        assert "data:image/" not in json.dumps(requests[0][1])
+        _assert_prepared(_received_images(requests[0][1]), image_blocks)
         assert "Read these images." in json.dumps(requests[0][1])
     finally:
         await provider.aclose()

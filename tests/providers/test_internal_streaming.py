@@ -784,7 +784,7 @@ async def test_chat_callback_error_wins_over_close_error(chat_sdk, cleanup_warni
 
 @pytest.mark.parametrize("close_fails", [False, True])
 @pytest.mark.parametrize("error_type", [RuntimeError, ConnectionError])
-async def test_chat_callback_error_does_not_retry_without_images(chat_sdk, close_fails, error_type):
+async def test_chat_callback_error_preserves_input_without_retry(chat_sdk, close_fails, error_type):
     stream = _ControlledChatStream(
         [_chat_event({"reasoning_content": "thinking"})],
         close_error=httpx.CloseError("connection reset") if close_fails else None,
@@ -803,6 +803,7 @@ async def test_chat_callback_error_does_not_retry_without_images(chat_sdk, close
     result = await provider.chat_stream_with_retry(messages, on_thinking_delta=on_thinking)
 
     assert result.finish_reason == "error" and "callback failed" in result.content
+    assert result.error_kind == "callback" and result.error_should_retry is False
     assert len(requests) == 1
     assert messages == original
     assert stream.closed

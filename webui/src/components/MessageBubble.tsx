@@ -572,7 +572,7 @@ function UserQuotedContext({ text, label }: { text: string; label: string }) {
       data-theme-surface
       data-theme-ink
       className={cn(
-        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-control",
+        "ml-auto flex w-fit max-w-full min-w-0 items-start gap-2 rounded-floating",
         "border border-border/60 bg-muted/35 px-3 py-2 text-left text-muted-foreground",
       )}
       aria-label={label}

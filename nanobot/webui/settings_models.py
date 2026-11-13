@@ -1104,6 +1104,7 @@ def model_settings_payload(
             "max_tokens": defaults.max_tokens,
             "context_window_tokens": defaults.context_window_tokens,
             "temperature": defaults.temperature,
+            "supports_images": defaults.supports_images,
             "reasoning_effort": defaults.reasoning_effort,
             "api": defaults.api.model_dump(mode="json") if defaults.api is not None else None,
             "reasoning_effort_values": reasoning_effort_values_for(
@@ -1132,6 +1133,7 @@ def model_settings_payload(
                 "max_tokens": preset.max_tokens,
                 "context_window_tokens": preset.context_window_tokens,
                 "temperature": preset.temperature,
+                "supports_images": preset.supports_images,
                 "reasoning_effort": preset.reasoning_effort,
                 "api": preset.api.model_dump(mode="json") if preset.api is not None else None,
                 **{
@@ -1158,6 +1160,7 @@ def model_settings_payload(
             "max_tokens": effective_preset.max_tokens,
             "context_window_tokens": effective_preset.context_window_tokens,
             "temperature": effective_preset.temperature,
+            "supports_images": effective_preset.supports_images,
             "reasoning_effort": effective_preset.reasoning_effort,
             "api": (
                 effective_preset.api.model_dump(mode="json")
@@ -1349,6 +1352,9 @@ def create_model_configuration(
         ),
         temperature=temperature if temperature is not None else base.temperature,
         reasoning_effort=reasoning_effort,
+        supports_images=parse_bool(
+            query_first_alias(query, "supports_images", "supportsImages") or "true", "supports_images",
+        ),
         api=_parse_preset_api(config, model, provider, query_first(query, "api")),
     )
     config.model_presets[name] = _preset_with_request_updates(config, candidate, query)
@@ -1437,6 +1443,13 @@ def update_model_configuration(
         ).strip() or None
         if preset.reasoning_effort != reasoning_effort:
             preset.reasoning_effort = reasoning_effort
+            changed = True
+    if "supports_images" in query or "supportsImages" in query:
+        supports_images = parse_bool(
+            query_first_alias(query, "supports_images", "supportsImages") or "", "supports_images",
+        )
+        if preset.supports_images != supports_images:
+            preset.supports_images = supports_images
             changed = True
     if "api" in query:
         api = _parse_preset_api(config, preset.model, preset.provider, query_first(query, "api"))
@@ -1541,6 +1554,7 @@ def migrate_model_configurations(
         config.model_presets[name] = ModelPresetConfig(
             model=primary.model,
             provider=primary.provider,
+            supports_images=primary.supports_images,
             max_tokens=primary.max_tokens,
             context_window_tokens=primary.context_window_tokens,
             temperature=primary.temperature,
@@ -1560,6 +1574,7 @@ def migrate_model_configurations(
         config.model_presets[name] = ModelPresetConfig(
             model=fallback.model,
             provider=fallback.provider,
+            supports_images=fallback.supports_images,
             max_tokens=(
                 fallback.max_tokens if fallback.max_tokens is not None else primary.max_tokens
             ),

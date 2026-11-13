@@ -134,6 +134,7 @@ class InlineFallbackConfig(RequestOverrides):
 
     model: str
     provider: str
+    supports_images: bool = True
     max_tokens: int | None = None
     context_window_tokens: int | None = None
     temperature: float | None = None
@@ -149,6 +150,7 @@ class ModelPresetConfig(RequestOverrides):
 
     model: str
     provider: str = "auto"
+    supports_images: bool = True
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
     temperature: float = 0.1
@@ -172,6 +174,7 @@ class AgentDefaults(Base):
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
+    supports_images: bool = True
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
     temperature: float = 0.1
@@ -552,7 +555,8 @@ class Config(BaseSettings):
         """Return the implicit `default` preset from agents.defaults fields."""
         d = self.agents.defaults
         return ModelPresetConfig(
-            model=d.model, provider=d.provider, max_tokens=d.max_tokens,
+            model=d.model, provider=d.provider, supports_images=d.supports_images,
+            max_tokens=d.max_tokens,
             context_window_tokens=d.context_window_tokens,
             temperature=d.temperature, reasoning_effort=d.reasoning_effort, api=d.api,
         )

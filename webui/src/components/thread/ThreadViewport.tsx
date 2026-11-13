@@ -1334,6 +1334,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
                 initialLoading
                   ? "overflow-hidden"
                   : cn("flex items-center justify-center", hasComposer && "sm:items-end sm:pb-8"),
+                "thread-empty-region",
               )}
             >
               {emptyState}

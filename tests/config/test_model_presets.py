@@ -425,3 +425,20 @@ def test_transcription_only_provider_is_not_chat_fallback() -> None:
     })
 
     assert config.get_provider_name() is None
+
+
+@pytest.mark.parametrize("supports_images", [False, True])
+def test_image_capability_round_trip_for_defaults_named_and_inline_presets(supports_images):
+    config = Config.model_validate({
+        "agents": {"defaults": {"supportsImages": supports_images, "fallbackModels": [
+            "vision", {"model": "inline", "provider": "custom", "supportsImages": supports_images},
+        ]}},
+        "modelPresets": {"vision": {"model": "vision", "supportsImages": supports_images}},
+    })
+    restored = Config.model_validate(config.model_dump(mode="json", by_alias=True))
+    assert restored.resolve_default_preset().supports_images is supports_images
+    assert restored.resolve_preset("vision").supports_images is supports_images
+    inline = restored.agents.defaults.fallback_models[1]
+    assert not isinstance(inline, str)
+    assert inline.supports_images is supports_images
+    assert Config().resolve_preset().supports_images is True

@@ -34,9 +34,12 @@ import {
   toModelBadgeInfo,
 } from "@/components/thread/model-preset";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
+import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadLoadingSkeleton } from "@/components/thread/ThreadLoadingSkeleton";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
+import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
+import { execSessionCommands } from "@/components/thread/activity/exec-session-model";
 import { useNanobotStream, type SendAttachment, type SendOptions } from "@/hooks/useNanobotStream";
 import { useFilePreviewState, type FilePreviewState, type FilePreviewStore } from "@/hooks/useFilePreviewState";
 import {
@@ -558,6 +561,7 @@ export function ThreadShell({
   }, [chatId, onTurnEnd]);
   const {
     messages,
+    execSourceMessages,
     modelRequests,
     messagesKey,
     messagesReady,
@@ -598,7 +602,11 @@ export function ThreadShell({
   const showTemporaryChatControl =
     !hideHeader && !session && !loading && !!onTemporaryChatEnabledChange;
   const promptNavigation = usePromptHistory(historyKey, historyVersion, displayMessages);
-  const updateNavigationMessages = promptNavigation.updateMessages;
+  const sessionCommands = useMemo(
+    () => messagesReady ? execSessionCommands(execSourceMessages ?? [], promptNavigation.window?.messages ?? []) : new Map<string, string>(),
+    [execSourceMessages, messagesReady, promptNavigation.window?.messages],
+  );
+  const expandNavigationTraceDetail = promptNavigation.expandTraceDetail;
   useEffect(() => {
     if (!chatId || !messagesReady) return;
     messageCacheRef.current.setLoadedMessages(chatId, promptNavigation.window
@@ -613,13 +621,9 @@ export function ThreadShell({
     const details = await loadBodyTraceDetails(refs);
     for (const detail of details) {
       const projected = projectThreadEvents(detail.events);
-      updateNavigationMessages((current) => current.flatMap((message) => (
-        message.traceDetail?.ref === detail.ref
-          ? projected.map((row) => ({ ...row, activitySegmentId: message.activitySegmentId }))
-          : [message]
-      )));
+      expandNavigationTraceDetail(detail.ref, projected);
     }
-  }, [loadBodyTraceDetails, updateNavigationMessages]);
+  }, [expandNavigationTraceDetail, loadBodyTraceDetails]);
 
   useEffect(() => {
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
@@ -1424,6 +1428,8 @@ export function ThreadShell({
     <ThreadHeader
       className={previewOpen ? "h-10" : undefined}
       title={title}
+      goal={currentGoalState && (currentGoalState.active || currentGoalState.status === "blocked")
+        ? <GoalIsland key={historyKey} goal={currentGoalState} /> : undefined}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}
@@ -1476,6 +1482,7 @@ export function ThreadShell({
           resolve={previewSessionKey ? resolveFilePreviewAvailability : undefined}
         >
           <FileActionsProvider value={previewSessionKey ? fileActions : undefined}>
+          <ExecSessionCommandsContext.Provider value={sessionCommands}>
           <ThreadViewport
             ref={viewportRef}
             messages={displayMessages}
@@ -1513,6 +1520,7 @@ export function ThreadShell({
             onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
+          </ExecSessionCommandsContext.Provider>
           </FileActionsProvider>
         </FilePreviewAvailabilityProvider>
       </div>

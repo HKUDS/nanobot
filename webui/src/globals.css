@@ -759,39 +759,6 @@
   .composer-status-strip[data-state="enter"] {
     animation: composer-status-strip-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
-  .composer-status-drawer {
-    --composer-status-drawer-duration: 220ms;
-    --composer-status-drawer-easing: ease-out;
-
-    display: grid;
-    grid-template-rows: 0fr;
-    pointer-events: none;
-    transition:
-      grid-template-rows var(--composer-status-drawer-duration)
-        var(--composer-status-drawer-easing);
-  }
-  .composer-status-drawer[data-state="open"] {
-    grid-template-rows: 1fr;
-    pointer-events: auto;
-  }
-  .composer-status-drawer-clip {
-    min-height: 0;
-    overflow: hidden;
-  }
-  .composer-status-drawer-content {
-    opacity: 0;
-    transform: translateY(8px);
-    transform-origin: bottom center;
-    transition:
-      opacity var(--composer-status-drawer-duration)
-        var(--composer-status-drawer-easing),
-      transform var(--composer-status-drawer-duration)
-        var(--composer-status-drawer-easing);
-  }
-  .composer-status-drawer[data-state="open"] .composer-status-drawer-content {
-    opacity: 1;
-    transform: translateY(0);
-  }
   .inline-disclosure {
     --inline-disclosure-duration: 220ms;
 
@@ -836,13 +803,6 @@
     }
     .composer-status-strip[data-state] {
       animation: none;
-    }
-    .composer-status-drawer {
-      transition-duration: 0.01ms;
-    }
-    .composer-status-drawer-content {
-      transform: none;
-      transition-duration: 120ms, 0.01ms;
     }
     .thread-layout {
       transition-duration: 0.01ms;

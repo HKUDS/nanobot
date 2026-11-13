@@ -48,8 +48,10 @@ def ssh(monkeypatch):
     monkeypatch.setattr(remote_ssh, "probe", probe)
     monkeypatch.setattr(remote_ssh, "open_tunnel", AsyncMock(return_value=tunnel))
     state = {"status": 200, "identity": {"protocolVersion": 1, "gatewayId": "remote-one", "webui": webui_contract()}}
+    requests = []
 
     def respond(request):
+        requests.append(request.url.port)
         if request.url.path == "/webui/terminal":
             assert request.headers["X-Nanobot-Auth"] == "private-webui-secret"
             return httpx.Response(state["status"], json=state["identity"])
@@ -57,7 +59,24 @@ def ssh(monkeypatch):
 
     real_client = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(respond), **kwargs))
-    return SimpleNamespace(tunnel=tunnel, proxy=proxy, probe=probe, state=state, client=real_client)
+    return SimpleNamespace(tunnel=tunnel, proxy=proxy, probe=probe, state=state, client=real_client, requests=requests)
+
+
+@pytest.fixture
+async def connected_hosts(manager, ssh, monkeypatch):
+    first = await save(manager)
+    await manager.action("connect", {"id": first})
+    second = await save(manager, host="another-host")
+    tunnel = SimpleNamespace(active=True, error="", port=23457, pause=AsyncMock(), close=AsyncMock())
+    proxy = SimpleNamespace(tunnel=tunnel, port=23458, origin="http://127.0.0.1:23458",
+                            secret="local-two", pause=tunnel.pause, close=tunnel.close)
+    monkeypatch.setattr(remote_ssh, "open_tunnel", AsyncMock(return_value=tunnel))
+    RemoteProxy.open.return_value = proxy
+    ssh.state["identity"]["gatewayId"] = "remote-two"
+    await manager.action("connect", {"id": second})
+    ssh.state["identity"]["gatewayId"] = "remote-one"
+    ssh.requests.clear()
+    return first, second
 
 
 async def test_save_survives_restart_without_credentials(manager):
@@ -446,8 +465,11 @@ async def test_health_deadline_returns_editable_offline_directory(manager, ssh, 
     key = await save(manager)
     await manager.action("connect", {"id": key})
     cancelled = asyncio.Event()
+    checks = 0
 
     async def respond(request):
+        nonlocal checks
+        checks += 1
         try:
             await asyncio.Event().wait()
         finally:
@@ -459,7 +481,10 @@ async def test_health_deadline_returns_editable_offline_directory(manager, ssh, 
     ))
     directory = await asyncio.wait_for(manager.health(), 1)
     assert not directory["profiles"][0]["connected"]
+    assert directory["profiles"][0]["health_check"] > 0
     assert cancelled.is_set()
+    assert (await manager.health({key}))["profiles"] == directory["profiles"]
+    assert checks == 1
     await manager.action("save", {"id": key, "profile": {
         "name": "Repaired", "host": "ubuntu@example.test",
     }})
@@ -473,6 +498,8 @@ async def test_health_budget_includes_waiting_for_connection_lock(manager, ssh, 
     async with manager._lock:
         directory = await asyncio.wait_for(manager.health(), 1)
     assert directory["profiles"][0]["id"] == key
+    assert "health_check" not in directory["profiles"][0]
+    assert ssh.requests == [23455]  # Only the initial connection verification.
 
 
 async def test_reconnect_keeps_origin_and_changing_target_does_not(manager, ssh):
@@ -678,6 +705,235 @@ def gateway(tmp_path):
     )
 
 
+@pytest.fixture
+def read_directory(gateway, manager, monkeypatch):
+    monkeypatch.setattr(gateway.http, "remote_instances", manager)
+    token = gateway.tokens.issue_api_token(60)
+    connection = SimpleNamespace(remote_address=("127.0.0.1", 10000))
+
+    async def read(query=""):
+        request = Request("/api/remote-instances" + (f"?{query}" if query else ""), Headers({
+            "Host": "127.0.0.1:8765", "Authorization": f"Bearer {token}",
+        }))
+        return await gateway.http.dispatch(connection, request)
+
+    return read
+
+
+async def test_directory_snapshot_does_not_probe_or_wait_for_health_lock(manager, ssh, read_directory):
+    key = await save(manager)
+    await manager.action("connect", {"id": key})
+    await save(manager, host="saved-only")
+    ssh.requests.clear()
+    ssh.state["status"] = 503
+    async with manager._lock:
+        response = await asyncio.wait_for(read_directory(), 1)
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert json.loads(response.body) == manager.snapshot()
+    assert ssh.requests == []
+    ssh.probe.assert_awaited_once()
+
+
+async def test_directory_checks_only_requested_existing_connections(
+    manager, ssh, connected_hosts, read_directory,
+):
+    first, second = connected_hosts
+    disconnected = await save(manager, host="saved-only")
+    response = await read_directory(
+        f"check={first}&check={first.upper()}&check={disconnected}&check=00000000-0000-0000-0000-000000000000",
+    )
+    assert response.status_code == 200
+    profiles = {item["id"]: item for item in json.loads(response.body)["profiles"]}
+    assert set(profiles) == {first, second, disconnected}
+    assert profiles[first]["connected"]
+    assert profiles[first]["health_check"] > 0
+    assert "health_check" not in profiles[second]
+    assert "health_check" not in profiles[disconnected]
+    assert profiles[disconnected]["connection_error"] == "disconnected"
+    assert ssh.requests == [23455]
+    assert ssh.probe.await_count == 2
+
+
+@pytest.mark.parametrize("status", [200, 503])
+async def test_overlapping_and_recent_directory_checks_share_results(
+    manager, ssh, connected_hosts, read_directory, monkeypatch, status,
+):
+    first, second = connected_hosts
+    entered, release = asyncio.Event(), asyncio.Event()
+    checked = []
+    now = 100.0
+    monkeypatch.setattr(remote_instances, "time", SimpleNamespace(monotonic=lambda: now))
+
+    async def respond(request):
+        checked.append(request.url.port)
+        entered.set()
+        await release.wait()
+        identity = {**ssh.state["identity"],
+                    "gatewayId": "remote-one" if request.url.port == 23455 else "remote-two"}
+        return httpx.Response(status, json=identity)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: ssh.client(
+        transport=httpx.MockTransport(respond), **kwargs,
+    ))
+    one = asyncio.create_task(read_directory(f"check={first}"))
+    await asyncio.wait_for(entered.wait(), 2)
+    both = asyncio.create_task(read_directory(f"check={first}&check={second}"))
+    try:
+        cancelled = asyncio.create_task(read_directory(f"check={first}"))
+        await asyncio.sleep(0)
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        assert not one.done()
+        assert not both.done()
+        assert checked == [23455]
+    finally:
+        release.set()
+        one_response, both_response = await asyncio.gather(one, both)
+    first_profile = json.loads(one_response.body)["profiles"][0]
+    profiles = json.loads(both_response.body)["profiles"]
+    assert first_profile["health_check"] == profiles[0]["health_check"]
+    assert all(item["connected"] == (status == 200) for item in profiles)
+    assert checked == [23455, 23457]
+    now += 4.9
+    recent = await read_directory(f"check={first}&check={second}")
+    assert json.loads(recent.body)["profiles"] == profiles
+    assert checked == [23455, 23457]
+    now += 0.2
+    refreshed = json.loads((await read_directory(f"check={first}&check={second}")).body)["profiles"]
+    assert all(new["health_check"] != old["health_check"] for new, old in zip(refreshed, profiles))
+    assert checked == [23455, 23457, 23455, 23457]
+
+
+async def test_overlapping_check_is_reused_even_if_another_host_holds_the_lock(
+    manager, ssh, connected_hosts, read_directory, monkeypatch,
+):
+    first, second = connected_hosts
+    entered, first_replied = asyncio.Event(), asyncio.Event()
+    release_first, release_second = asyncio.Event(), asyncio.Event()
+    checked = []
+    now = 100.0
+    monkeypatch.setattr(remote_instances, "time", SimpleNamespace(monotonic=lambda: now))
+
+    async def respond(request):
+        checked.append(request.url.port)
+        if request.url.port == 23455:
+            entered.set()
+            await release_first.wait()
+            first_replied.set()
+        else:
+            await release_second.wait()
+        return httpx.Response(503)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: ssh.client(
+        transport=httpx.MockTransport(respond), **kwargs,
+    ))
+    both = asyncio.create_task(read_directory(f"check={first}&check={second}"))
+    await asyncio.wait_for(entered.wait(), 2)
+    one = asyncio.create_task(read_directory(f"check={first}"))
+    try:
+        await asyncio.sleep(0)
+        release_first.set()
+        await asyncio.wait_for(first_replied.wait(), 2)
+        assert manager.connections[first].health_check is not None
+        now += 6
+    finally:
+        release_first.set()
+        release_second.set()
+        both_response, one_response = await asyncio.gather(both, one)
+    assert checked == [23455, 23457]
+    assert json.loads(one_response.body)["profiles"] == json.loads(both_response.body)["profiles"]
+
+
+async def test_queued_health_does_not_check_replaced_connection(manager, ssh, read_directory):
+    key = await save(manager)
+    await manager.action("connect", {"id": key})
+    first = json.loads((await read_directory(f"check={key}")).body)["profiles"][0]
+    previous = manager.connections[key]
+    ssh.requests.clear()
+    async with manager._lock:
+        disconnect = asyncio.create_task(manager.action("disconnect", {"id": key}))
+        reconnect = asyncio.create_task(manager.action("connect", {"id": key}))
+        health = asyncio.create_task(read_directory(f"check={key}"))
+        await asyncio.sleep(0)
+    disconnected, _, response = await asyncio.gather(disconnect, reconnect, health)
+    assert "health_check" not in disconnected["profiles"][0]
+    assert manager.connections[key] is not previous
+    assert "health_check" not in json.loads(response.body)["profiles"][0]
+    assert ssh.requests == [23455]  # Reconnect verification, not the obsolete demand.
+    refreshed = json.loads((await read_directory(f"check={key}")).body)["profiles"][0]
+    assert refreshed["health_check"] != first["health_check"]
+    assert ssh.requests == [23455, 23455]
+
+
+async def test_cancelled_health_retains_lifetime_lock_until_request_cleanup(
+    manager, ssh, read_directory, monkeypatch,
+):
+    key = await save(manager)
+    await manager.action("connect", {"id": key})
+    entered, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def respond(request):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            await release.wait()
+            ssh.tunnel.close.assert_not_awaited()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: ssh.client(
+        transport=httpx.MockTransport(respond), **kwargs,
+    ))
+    health = asyncio.create_task(read_directory(f"check={key}"))
+    await asyncio.wait_for(entered.wait(), 2)
+    health.cancel()
+    await asyncio.wait_for(cleaning.wait(), 2)
+    shutdown = asyncio.create_task(manager.close())
+    try:
+        await asyncio.sleep(0)
+        assert not shutdown.done()
+        assert manager._lock.locked()
+        assert "health_check" not in manager.snapshot()["profiles"][0]
+        ssh.tunnel.close.assert_not_awaited()
+    finally:
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await health
+        await shutdown
+    ssh.tunnel.close.assert_awaited_once()
+    assert "health_check" not in manager.snapshot()["profiles"][0]
+
+
+@pytest.mark.parametrize("query", [
+    "check", "check=", "check=not-an-id", "other=value", "check=%GG",
+    "check=00000000-0000-0000-0000-000000000000&other=value",
+    "check=00000000-0000-0000-0000-000000000000&",
+    "check=00000000-0000-0000-0000-000000000000%00",
+    "check=00000000-0000-0000-0000-000000000000#fragment",
+    "check=" + "a" * 4097,
+    "&".join(["check=00000000-0000-0000-0000-000000000000"] * 21),
+])
+async def test_invalid_health_query_is_rejected_before_probing(manager, ssh, read_directory, query):
+    key = await save(manager)
+    await manager.action("connect", {"id": key})
+    ssh.requests.clear()
+    response = await read_directory(query)
+    assert response.status_code == 400
+    assert response.body == b"invalid_health_check"
+    assert ssh.requests == []
+
+
+async def test_maximum_duplicate_checks_probe_once(manager, ssh, read_directory):
+    key = await save(manager)
+    await manager.action("connect", {"id": key})
+    ssh.requests.clear()
+    response = await read_directory("&".join([f"check={key}"] * 20))
+    assert response.status_code == 200
+    assert ssh.requests == [23455]
+
+
 @pytest.mark.parametrize("action", ["save", "discover", "inspect", "pick_file", "connect", "remove", "trust"])
 async def test_http_mutations_are_not_gettable_even_with_token(gateway, action):
     request = Request(f"/api/remote-instances/{action}", Headers())
@@ -742,13 +998,14 @@ async def test_remote_clients_cannot_open_local_file_picker(gateway, monkeypatch
     ("127.0.0.1", "bot.example.com", "https://bot.example.com", 403),
     ("127.0.0.1", "127.0.0.1:8765", "https://evil.example", 403),
 ])
-async def test_ssh_access_is_local_and_authenticated(gateway, peer, host, origin, status):
+@pytest.mark.parametrize("query", ["", "?check=00000000-0000-0000-0000-000000000000"])
+async def test_ssh_access_is_local_and_authenticated(gateway, peer, host, origin, status, query):
     token = gateway.tokens.issue_api_token(60)
     connection = SimpleNamespace(remote_address=(peer, 10000))
-    request = Request("/api/remote-instances", Headers({"Host": host, "Origin": origin, "Authorization": f"Bearer {token}"}))
+    request = Request("/api/remote-instances" + query, Headers({"Host": host, "Origin": origin, "Authorization": f"Bearer {token}"}))
     result = await gateway.http.dispatch(connection, request)
     assert result.status_code == status
-    request = Request("/api/remote-instances", Headers({"Host": host}))
+    request = Request("/api/remote-instances" + query, Headers({"Host": host}))
     assert (await gateway.http.dispatch(connection, request)).status_code == 401
 
 

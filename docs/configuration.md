@@ -1512,6 +1512,10 @@ OpenAI Codex, xAI Grok subscriptions, and Azure OpenAI use Responses; Anthropic 
 
 **Advanced options** opens in a separate dialog; closing it returns to the preset editor. Changing a preset's model or provider resets its API selection to Auto unless the same update supplies a new declaration. Each fallback preset keeps its own API settings. Existing `agents.defaults.api` and inline fallback `api` values are preserved when converting to named presets.
 
+Use the **Image input** switch in each preset to match the model's image capability. It is enabled by default; turn it off for text-only models. Requests containing images follow the configured primary and fallback order, using presets with **Image input** enabled. Text-only requests use the full configured order. If every candidate is text-only, nanobot returns an image-input error before sending the request.
+
+For manual configuration, set `supportsImages` on a named preset, the implicit `agents.defaults` preset, or an inline fallback. Each defaults independently to `true`; use `false` for a text-only model. Transient retries preserve the original messages and images, and API validation errors are returned directly.
+
 ### Model Fallbacks
 
 In **Settings → Models**, create the primary and backup presets, then use **Enable preset** and arrange their order. The first enabled preset is primary; later entries are tried as fallbacks. Save and test each preset before relying on the chain.

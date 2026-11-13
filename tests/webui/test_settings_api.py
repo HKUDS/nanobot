@@ -686,6 +686,7 @@ def test_migrate_model_configurations_preserves_legacy_chain(
     config.agents.defaults.provider = "openai"
     config.agents.defaults.max_tokens = 4096
     config.agents.defaults.temperature = 0.25
+    config.agents.defaults.supports_images = False
     config.agents.defaults.fallback_models = [
         InlineFallbackConfig(
             model="anthropic/claude-sonnet-4",
@@ -708,6 +709,8 @@ def test_migrate_model_configurations_preserves_legacy_chain(
     assert saved.agents.defaults.model_preset == "gpt-4o"
     assert saved.agents.defaults.fallback_models == ["claude-sonnet-4"]
     assert saved.model_presets["gpt-4o"].temperature == 0.25
+    assert saved.model_presets["gpt-4o"].supports_images is False
+    assert saved.model_presets["claude-sonnet-4"].supports_images is True
     assert saved.model_presets["claude-sonnet-4"].max_tokens == 4096
     assert saved.model_presets["claude-sonnet-4"].temperature == 0.25
 
@@ -2931,3 +2934,25 @@ def test_openai_settings_can_return_to_auto(monkeypatch, tmp_path):
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
     update_provider_settings({"provider": ["openai"], "api": ["null"]})
     assert load_config(config_path).providers.openai.api is None
+
+
+@pytest.mark.parametrize("field", ["supports_images", "supportsImages"])
+def test_preset_image_capability_persists_and_preserves_unrelated_edits(tmp_path, monkeypatch, field):
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.openai.api_key = "sk-test"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    created = create_model_configuration({
+        "name": ["Text"], "provider": ["openai"], "model": ["gpt-4.1"], field: ["false"],
+    })
+    assert next(row for row in created["model_presets"] if row["name"] == "Text")["supports_images"] is False
+    update_model_call_order({"order": [json.dumps(["Text"])]})
+    assert settings_payload()["agent"]["supports_images"] is False
+    update_model_configuration({"name": ["Text"], "temperature": ["0.3"]})
+    assert load_config(config_path).model_presets["Text"].supports_images is False
+    updated = update_model_configuration({"name": ["Text"], field: ["true"]})
+    assert next(row for row in updated["model_presets"] if row["name"] == "Text")["supports_images"] is True
+    assert json.loads(config_path.read_text(encoding="utf-8"))["modelPresets"]["Text"]["supportsImages"] is True
+    defaulted = create_model_configuration({"name": ["Default vision"], "provider": ["openai"], "model": ["gpt-4.1"]})
+    assert next(row for row in defaulted["model_presets"] if row["name"] == "Default vision")["supports_images"] is True
