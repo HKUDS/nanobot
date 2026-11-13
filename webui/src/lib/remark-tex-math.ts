@@ -5,6 +5,7 @@ import type { Plugin } from "unified";
 import type {} from "micromark-extension-math";
 
 const BACKSLASH = 92;
+const BACKTICK = 96;
 const DOLLAR = 36;
 const LEFT_PAREN = 40;
 const RIGHT_PAREN = 41;
@@ -79,6 +80,10 @@ function isDigit(code: Code): boolean {
   return code !== null && code >= 48 && code <= 57;
 }
 
+function isAsciiLetter(code: Code): boolean {
+  return code !== null && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122));
+}
+
 function isOpeningDollarBlocked(code: Code): boolean {
   return code === null || code === DOLLAR || code === SPACE || isLineEnding(code);
 }
@@ -149,6 +154,14 @@ function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State):
       return nok(code);
     }
 
+    // A backtick opens a code span, so a dollar pair like `$ref` ... `$defs` is
+    // prose, not a formula: without this guard the span swallows the code spans,
+    // emphasis, and text that follow it.
+    if (code === BACKTICK) {
+      effects.exit("mathTextData");
+      return nok(code);
+    }
+
     if (code === DOLLAR) {
       effects.exit("mathTextData");
       effects.enter("mathTextSequence");
@@ -175,6 +188,9 @@ function tokenizeGuardedDollarMathText(effects: Effects, ok: State, nok: State):
   function close(code: Code): State | undefined {
     if (!hasContent || previousDataCode === SPACE) return nok(code);
     if (isDigit(firstDataCode) && !hasMathSignal) return nok(code);
+    // Prose pairs such as `变量$x，常量$y` continue with an identifier after the
+    // closing dollar; a formula ends at whitespace, punctuation, or CJK text.
+    if (isAsciiLetter(code) || isDigit(code)) return nok(code);
     return ok(code);
   }
 

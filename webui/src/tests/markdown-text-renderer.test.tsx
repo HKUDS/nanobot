@@ -1099,6 +1099,31 @@ describe("MarkdownTextRenderer", () => {
     expect(container.querySelectorAll("strong")).toHaveLength(3);
   });
 
+  it("keeps prose with dollar identifiers out of inline math", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>
+        {
+          "另外有个作者和我之前都没提的事：`mcp.py` 里**已经有一份完整的 $ref 解析器** `_resolve_local_schema_ref`，支持 JSON Pointer 全路径、`~0`/`~1` 转义、嵌套。它在构造 wrapper 时就把 server 给的本地 ref 全部提升到根 `$defs`。"
+        }
+      </MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelector(".katex")).toBeNull();
+    expect(container.querySelector("strong")).toHaveTextContent("已经有一份完整的 $ref 解析器");
+    expect(screen.getByText("_resolve_local_schema_ref").tagName).toBe("CODE");
+    expect(screen.getByText("$defs").tagName).toBe("CODE");
+    expect(container).toHaveTextContent("提升到根 $defs。");
+  });
+
+  it("keeps adjacent identifier dollars literal instead of pairing them as math", () => {
+    const { container } = render(
+      <MarkdownTextRenderer>{"变量$x，常量$y 混在一起，公式 $x$ 仍然渲染。"}</MarkdownTextRenderer>,
+    );
+
+    expect(container.querySelectorAll(".katex")).toHaveLength(1);
+    expect(container).toHaveTextContent("变量$x，常量$y 混在一起");
+  });
+
   it("renders guarded single-dollar inline math", () => {
     const { container } = render(
       <MarkdownTextRenderer>
