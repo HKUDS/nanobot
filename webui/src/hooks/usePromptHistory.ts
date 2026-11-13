@@ -6,13 +6,28 @@ import { historyContentSnapshot, projectWebuiThreadMessages } from "@/lib/thread
 import { joinThreadFragments } from "@/lib/thread-page-fragments";
 import { isModelCommandText } from "@/lib/format";
 import { isSystemCommandTurnId } from "@/lib/nanobot-client";
-import type { PromptIndex, UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
+import type { PromptIndex, ThreadProjectionEvent, UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
 import { type PromptAnchor, userPromptAnchors } from "@/components/thread/promptNavigation";
 
 interface HistoryPage {
   messages: UIMessage[];
   body: WebuiThreadPersistedPayload;
   details: Map<string, UIMessage[]>;
+  /** One terminal record per raw turn, retained when its page leaves the bounded cache. */
+  completion?: Extract<ThreadProjectionEvent, { event: "turn_end" }>;
+  /** A crossed marker can precede all visible rows until an older page arrives. */
+  forkBoundaryBefore?: boolean;
+}
+
+function projectionBody(page: HistoryPage): WebuiThreadPersistedPayload {
+  return page.forkBoundaryBefore ? { ...page.body, fork_boundary_event_index: 0 } : page.body;
+}
+
+function retainFragmentCompletion(pages: HistoryPage[], page: HistoryPage): HistoryPage[] {
+  const turn = page.body.page?.record_range?.turn;
+  if (turn === undefined || !page.completion) return pages;
+  return pages.map((saved) => saved.body.page?.record_range?.turn === turn && saved.completion !== page.completion
+    ? { ...saved, completion: page.completion } : saved);
 }
 
 function expandDetails(messages: UIMessage[], details: ReadonlyMap<string, UIMessage[]>): UIMessage[] {
@@ -52,19 +67,25 @@ function projectHistoryWindow(pages: HistoryPage[]): NonNullable<PromptHistoryNa
   let boundary: number | null = null;
   for (let index = 0; index < pages.length; index++) {
     const page = pages[index];
-    let body = page.body;
+    let body = projectionBody(page);
     let rows = page.messages;
     const range = body.page?.record_range;
     if (range) {
       let joined = joinThreadFragments([], body);
       const details = new Map(page.details);
+      let completion = page.completion;
       while (pages[index + 1]?.body.page?.record_range?.turn === range.turn) {
         const next = pages[++index];
-        joined = joinThreadFragments(joined.pages, next.body);
+        joined = joinThreadFragments(joined.pages, projectionBody(next));
+        completion = next.completion ?? completion;
         for (const [ref, detail] of next.details) details.set(ref, detail);
       }
       body = joined.body;
-      rows = expandDetails(projectWebuiThreadMessages(projectThreadEvents(body.events)), details);
+      // Completion is data, not a content-ready signal. Replay it through the same
+      // reducer even when intervening telemetry or the terminal page was evicted.
+      const events = completion && !body.events.some((event) => event.event === "turn_end")
+        ? [...body.events, completion] : body.events;
+      rows = expandDetails(projectWebuiThreadMessages(projectThreadEvents(events)), details);
     }
     const eventIndex = body.fork_boundary_event_index;
     if (eventIndex !== undefined) boundary = messages.length + projectWebuiThreadMessages(projectThreadEvents(body.events.slice(0, eventIndex))).length;
@@ -84,7 +105,11 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   const indexSnapshot = useRef<PromptIndex>();
   const [pages, setPages] = useState<HistoryPage[]>([]);
   const pagesRef = useRef(pages);
-  pagesRef.current = pages;
+  const publishPages = useCallback((next: HistoryPage[]) => {
+    // Reads and detail expansion share the latest window even within one React batch.
+    pagesRef.current = next;
+    setPages(next);
+  }, []);
   const [target, setTarget] = useState<PromptHistoryNavigation["target"]>(null);
   const [operation, setOperation] = useState<PromptHistoryNavigation["operation"]>(null);
   const [loading, setLoading] = useState(false);
@@ -107,8 +132,8 @@ export function usePromptHistory(key: string | null, version: number, messages: 
 
   const latest = useCallback(() => {
     cancel();
-    setPages([]);
-  }, [cancel]);
+    publishPages([]);
+  }, [cancel, publishPages]);
 
   useEffect(() => {
     scope.current = { key, client };
@@ -177,12 +202,12 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   }, [currentScope, enabled, index, indexed, key, messages]);
 
   const expandTraceDetail = useCallback((ref: string, rows: UIMessage[]) => {
-    setPages((current) => current.map((page) => {
+    publishPages(pagesRef.current.map((page) => {
       if (!page.messages.some((message) => message.traceDetail?.ref === ref)) return page;
       const details = new Map(page.details).set(ref, rows);
       return { ...page, messages: expandDetails(page.messages, details), details };
     }));
-  }, []);
+  }, [publishPages]);
 
   const read = useCallback(async (cursor: string, direction: "before" | "after", id?: string, resume?: HistoryPage[]) => {
     // Boundary inputs can arrive before loading renders; only a new jump supersedes a read.
@@ -209,20 +234,40 @@ export function usePromptHistory(key: string | null, version: number, messages: 
         if (!id && generation && previousGeneration && generation !== previousGeneration) {
           throw new Error("History changed; select the message again");
         }
-        const page = { body, messages: projectWebuiThreadMessages(projectThreadEvents(body.events)), details: new Map<string, UIMessage[]>() };
+        const turn = body.page?.record_range?.turn;
+        const page: HistoryPage = { body, messages: projectWebuiThreadMessages(projectThreadEvents(body.events)), details: new Map(),
+          completion: body.events.find((event) => event.event === "turn_end")
+            ?? (!id && turn !== undefined ? staged.find((saved) => saved.body.page?.record_range?.turn === turn)?.completion : undefined) };
         if (id && !page.messages.some((message) => message.id === id)) {
           setRefresh((value) => value + 1);
           throw new Error("History changed; select the message again");
         }
         // Trace details can finish while this read is pending; preserve those visible updates.
         staged = staged.map((saved) => pagesRef.current.find((current) => current.body === saved.body) ?? saved);
-        const expanded = id ? [page] : direction === "before" ? [page, ...staged] : [...staged, page];
+        if (!id && page.completion) {
+          staged = retainFragmentCompletion(staged, page);
+          const retained = retainFragmentCompletion(pagesRef.current, page);
+          if (retained.some((saved, index) => saved !== pagesRef.current[index])) {
+            publishPages(retained);
+          }
+        }
+        // Only fragments need the staged raw context. Self-contained pages extend
+        // the readable window, not the bookkeeping pages traversed on the way here.
+        const source = body.page?.record_range ? staged : pagesRef.current;
+        const expanded = id ? [page] : direction === "before" ? [page, ...source] : [...source, page];
         // Compare before eviction: a full window can gain content without growing.
-        const ready = id || historyContentSnapshot(projectHistoryWindow(expanded).messages)
-          !== historyContentSnapshot(projectHistoryWindow(staged).messages);
+        const previous = projectHistoryWindow(source);
+        const prepared = projectHistoryWindow(expanded);
+        const ready = id || historyContentSnapshot(prepared.messages, prepared.forkBoundaryMessageCount)
+          !== historyContentSnapshot(previous.messages, previous.forkBoundaryMessageCount);
         const nextCursor = direction === "before" ? body.page?.before_cursor : body.page?.after_cursor;
         const more = direction === "before" ? body.page?.has_more_before : body.page?.has_more_after;
         if (!id && more && (!nextCursor || nextCursor === cursor)) throw new Error("History cursor did not advance");
+        if (!ready && direction === "before" && body.fork_boundary_event_index !== undefined) {
+          // Admit the crossed boundary without ending a pull that still has no
+          // visible content before it. It must survive discarded staging pages.
+          publishPages(pagesRef.current.map((saved, index) => index === 0 ? { ...saved, forkBoundaryBefore: true } : saved));
+        }
         // At most three bounded server pages; intermediate pages do not complete the operation.
         staged = direction === "before" ? expanded.slice(0, HISTORY_PAGE_LIMIT) : expanded.slice(-HISTORY_PAGE_LIMIT);
         if (ready || !more) {
@@ -234,8 +279,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
               : { after_cursor: nextCursor ?? null, has_more_after: false };
             return { ...saved, body: { ...saved.body, page: { ...saved.body.page, ...boundary } } };
           });
-          pagesRef.current = staged;
-          setPages(staged);
+          publishPages(staged);
           if (id) setTarget({ id, sequence: ++sequence.current });
           break;
         }
@@ -249,12 +293,20 @@ export function usePromptHistory(key: string | null, version: number, messages: 
         setLoading(false);
       }
     }
-  }, [getToken, key]);
+  }, [getToken, key, publishPages]);
 
   const first = pages[0]?.body.page;
   const last = pages[pages.length - 1]?.body.page;
   const window = useMemo(() => currentScope && pages.length ? projectHistoryWindow(pages) : null,
     [currentScope, pages]);
+  const readBoundary = (direction: "before" | "after") => {
+    if (error && operation === (direction === "before" ? "older" : "newer")) {
+      retry.current();
+      return;
+    }
+    const cursor = direction === "before" ? first?.before_cursor : last?.after_cursor;
+    if (cursor) void read(cursor, direction);
+  };
 
   return { prompts, window, target: currentScope ? target : null, loading: currentScope && loading,
     operation: currentScope && (loading || error) ? operation : null,
@@ -264,7 +316,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       const prompt = prompts.find((item) => item.id === id);
       if (enabled && prompt?.cursor) void read(prompt.cursor, "after", id);
     },
-    older: () => { if (first?.before_cursor) void read(first.before_cursor, "before"); },
-    newer: () => { if (last?.after_cursor) void read(last.after_cursor, "after"); },
+    older: () => readBoundary("before"),
+    newer: () => readBoundary("after"),
   };
 }

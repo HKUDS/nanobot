@@ -7,6 +7,7 @@ import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { UIMessage, WebuiThreadPersistedPayload } from "@/lib/types";
 import { ThreadViewport, type ThreadViewportHandle } from "@/components/thread/ThreadViewport";
+import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
 import { projectWebuiThreadMessages } from "@/lib/thread-display-projection";
 
@@ -109,6 +110,161 @@ it("continues through telemetry-only fragments until another message is visible"
   expect(api.fetchWebuiThread).toHaveBeenCalledTimes(5);
 });
 
+it("keeps loading through task-create fragments hidden by the message list", async () => {
+  const initial = page(10);
+  initial.events = [{ event: "user_message", chat_id: "a", projection_id: "u10", turn_id: "long",
+    turn_seq: 1, text: "question", starts_turn: true }];
+  initial.page = { ...initial.page, record_range: { turn: 0, start: 0, end: 1 } };
+  const hidden: WebuiThreadPersistedPayload = { ...page(11), events: [
+    { event: "message", chat_id: "a", projection_id: "create", turn_id: "long", turn_seq: 2,
+      kind: "progress", text: 'subagent({"action":"create"})',
+      tool_events: [{ call_id: "create", name: "subagent", phase: "end", arguments: { action: "create" } }] },
+  ], page: { ...page(11).page, record_range: { turn: 0, start: 1, end: 2 } } };
+  let finish!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(initial).mockResolvedValueOnce(hidden)
+    .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  const list = render(<ThreadMessages messages={result.current.window!.messages} />);
+  const text = list.container.textContent;
+  await act(async () => result.current.newer());
+  list.rerender(<ThreadMessages messages={result.current.window!.messages} />);
+  expect(list.container.textContent).toBe(text);
+  expect(result.current.loading).toBe(true);
+  expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("test", "a", expect.objectContaining({ after: "12" }));
+  await act(async () => finish({ ...page(12), events: [
+    { event: "message", chat_id: "a", projection_id: "answer", turn_id: "long", turn_seq: 3, text: "Visible answer" },
+  ], page: { has_more_after: false, record_range: { turn: 0, start: 2, end: 3 } } }));
+  list.rerender(<ThreadMessages messages={result.current.window!.messages} />);
+  expect(list.getByText("Visible answer")).toBeVisible();
+  expect(result.current.loading).toBe(false);
+});
+
+it.each([[0, "exhausted"], [4, "exhausted"], [4, "error"]] as const)("retains completion metadata after %s bookkeeping fragments end in %s", async (count, outcome) => {
+  const initial = page(10);
+  initial.events = [
+    { event: "user_message", chat_id: "a", projection_id: "u10", turn_id: "long", turn_seq: 1, text: "question", starts_turn: true },
+    { event: "message", chat_id: "a", projection_id: "a10", turn_id: "long", turn_seq: 2, text: "answer" },
+  ];
+  initial.page = { ...initial.page, record_range: { turn: 0, start: 0, end: 2 } };
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(initial);
+  for (let part = 0; part < count; part++) {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(11 + part), events: [
+      { event: "model_request", chat_id: "a", request_id: `r${part}`, run_id: "run", sequence: part,
+        phase: "completed", turn_id: "long", turn_seq: part + 3 },
+    ], page: { ...page(11 + part).page, record_range: { turn: 0, start: part + 2, end: part + 3 } } });
+  }
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(11 + count), events: [
+    { event: "turn_end", chat_id: "a", projection_id: "end", turn_id: "long", turn_seq: count + 3,
+      latency_ms: 1234, usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
+  ], page: { has_more_after: outcome === "error", after_cursor: outcome === "error" ? "continue" : null,
+    record_range: { turn: 0, start: count + 2, end: count + 3 } } });
+  if (outcome === "error") vi.mocked(api.fetchWebuiThread).mockRejectedValueOnce(new Error("offline"));
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  await act(async () => result.current.newer());
+  expect(result.current.loading).toBe(false);
+  expect(result.current.window?.hasMoreAfter).toBe(outcome === "error");
+  expect(result.current.window?.messages.map((message) => message.content)).toEqual(["question", "answer"]);
+  expect(result.current.window?.messages.find((message) => message.id === "a10")).toMatchObject({
+    latencyMs: 1234, completedAt: 1234, usage: { total_tokens: 15 },
+  });
+  if (outcome === "error") {
+    expect(result.current.error).toBe("offline");
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(page(20));
+    await act(async () => result.current.newer());
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("test", "a", expect.objectContaining({ after: "continue" }));
+    expect(result.current.window?.messages.map((message) => message.content)).toContain("question 20");
+  }
+});
+
+it.each([0, 4])("admits a fork-marker-only page after %s bookkeeping fragments without losing the readable window", async (count) => {
+  const initial = page(10);
+  initial.events = [
+    { event: "user_message", chat_id: "a", projection_id: "u10", turn_id: "forked", text: "Forked prompt", starts_turn: true },
+    ...Array.from({ length: 24 }, (_, i) => ({ event: "message" as const, chat_id: "a", projection_id: `a${i}`,
+      turn_id: "forked", text: `answer ${i}` })),
+  ];
+  const completion = { event: "turn_end" as const, chat_id: "a", turn_id: "forked", latency_ms: 1234 };
+  if (count) initial.page = { ...initial.page, record_range: { turn: 0, start: 0, end: 25 } };
+  else {
+    initial.events.push(completion);
+    initial.page = { ...initial.page, after_cursor: "fork" };
+  }
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(initial);
+  for (let part = 0; part < count; part++) {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(11 + part), events: [
+      { event: "model_request", chat_id: "a", turn_id: "forked", request_id: `r${part}`, run_id: "run",
+        sequence: part, phase: "completed" },
+    ], page: { ...page(11 + part).page, record_range: { turn: 0, start: 25 + part, end: 26 + part } } });
+  }
+  if (count) vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(15), events: [completion],
+    page: { ...page(15).page, after_cursor: "fork", record_range: { turn: 0, start: 29, end: 30 } } });
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(16), events: [], fork_boundary_event_index: 0,
+    page: { before_cursor: "fork", has_more_before: true, after_cursor: null, has_more_after: false } });
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  await act(async () => result.current.newer());
+  expect(result.current.loading).toBe(false);
+  expect(result.current.window?.hasMoreAfter).toBe(false);
+  expect(result.current.window?.messages).toHaveLength(25);
+  expect(result.current.window?.forkBoundaryMessageCount).toBe(25);
+  const list = render(<ThreadMessages messages={result.current.window!.messages}
+    forkBoundaryMessageCount={result.current.window!.forkBoundaryMessageCount} />);
+  expect(list.getByText("Forked from history")).toBeVisible();
+});
+
+it("keeps a crossed fork boundary while reading from the first child prompt into its parent history", async () => {
+  const child = page(10);
+  child.page = { ...child.page, record_range: { turn: 1, start: 1, end: 4 } };
+  child.events.push({ event: "turn_end", chat_id: "a" });
+  const marker: WebuiThreadPersistedPayload = { ...page(9), events: [], fork_boundary_event_index: 0,
+    page: { ...page(9).page, record_range: { turn: 1, start: 0, end: 1 } } };
+  let finish!: (body: WebuiThreadPersistedPayload) => void;
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(child).mockResolvedValueOnce(marker)
+    .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u10"));
+  await act(async () => result.current.older());
+  expect(result.current.loading).toBe(true);
+  expect(result.current.window?.messages.map((message) => message.content)).toEqual(["question 10", "answer"]);
+  await act(async () => finish(page(8)));
+  expect(result.current.loading).toBe(false);
+  expect(result.current.window?.messages.map((message) => message.content)).toEqual(["question 8", "answer", "question 10", "answer"]);
+  expect(result.current.window?.forkBoundaryMessageCount).toBe(2);
+  const list = render(<ThreadMessages messages={result.current.window!.messages}
+    forkBoundaryMessageCount={result.current.window!.forkBoundaryMessageCount} />);
+  expect(list.getByText("Forked from history")).toBeVisible();
+});
+
+it("retains a terminal record until its answer arrives while scanning backward", async () => {
+  const { result } = renderHook(() => usePromptHistory("a", 1, latest), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.prompts).toHaveLength(2000));
+  await act(async () => result.current.jump("u20"));
+  for (let part = 6; part >= 2; part--) {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(10 + part), events: part === 6
+      ? [{ event: "turn_end", chat_id: "a", turn_id: "long", latency_ms: 1234, usage: { total_tokens: 15 } }]
+      : [{ event: "model_request", chat_id: "a", turn_id: "long", request_id: `r${part}`, run_id: "run",
+        sequence: part, phase: "completed" }],
+    page: { ...page(10 + part).page, record_range: { turn: 0, start: part, end: part + 1 } } });
+  }
+  vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...page(10), events: [
+    { event: "user_message", chat_id: "a", projection_id: "u10", turn_id: "long", text: "question", starts_turn: true },
+    { event: "message", chat_id: "a", projection_id: "a10", turn_id: "long", text: "answer" },
+  ], page: { ...page(10).page, record_range: { turn: 0, start: 0, end: 2 } } });
+  await act(async () => result.current.older());
+  expect(api.fetchWebuiThread).toHaveBeenCalledTimes(7);
+  expect(result.current.loading).toBe(false);
+  expect(result.current.window?.messages.map((message) => message.content)).toEqual(["question", "answer"]);
+  expect(result.current.window?.messages.find((message) => message.id === "a10")).toMatchObject({
+    latencyMs: 1234, completedAt: 1234, usage: { total_tokens: 15 },
+  });
+});
+
 it.each([false, true])("preserves trace details arriving during a multi-page read (fragment=%s)", async (fragment) => {
   const ref = "1.history-aaaaaaaaaaaaaaaaaaaa";
   const initial = page(10);
@@ -136,11 +292,14 @@ it.each([false, true])("preserves trace details arriving during a multi-page rea
   act(() => result.current.newer());
   const details = projectThreadEvents([{ event: "message", chat_id: "a", projection_id: "trace", kind: "progress",
     text: 'exec({"command":"echo historical"})' }]);
-  act(() => result.current.expandTraceDetail(ref, details));
   await act(async () => finishBookkeeping(bookkeeping));
   expect(result.current.loading).toBe(true);
   expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("test", "a", expect.objectContaining({ after: "12" }));
-  await act(async () => finishContent(ready));
+  // Both HTTP completions can land in one React batch.
+  await act(async () => {
+    result.current.expandTraceDetail(ref, details);
+    finishContent(ready);
+  });
   expect(result.current.loading).toBe(false);
   const contents = result.current.window!.messages.map((message) => message.content);
   expect(contents).toContain("continued answer");

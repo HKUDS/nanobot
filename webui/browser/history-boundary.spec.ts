@@ -346,6 +346,54 @@ for (const navigate of [false, true]) {
   });
 }
 
+for (const retryWith of ["Blocks button", "boundary wheel"] as const) {
+  test(`navigation older retries the failed cursor after a non-display page (${retryWith})`, async ({ page }) => {
+    const history = await installHistory(page, 40, 12, (start, count, more) => {
+      const payload = historyPage(start, count, more);
+      return start === 26 ? { ...payload, events: [] } : payload;
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const { body, header, slot } = await openSettledHistory(page, "&navigate=1");
+    // Keep the jump away from latest's bottom so setup cannot prefetch newer.
+    await positionAtTop(body);
+    await jumpViaRail(page, 38);
+    await expect.poll(() => history.reads.length).toBe(1);
+    history.complete();
+    await expect(body.getByText("Question 38", { exact: true })).toBeInViewport();
+    await stableLayout(body);
+    await positionAtTop(body);
+    await requestOlderWithWheel(body, history, 2);
+    await expectHeld(body, "Question 38");
+
+    history.complete();
+    await expect.poll(() => history.reads.length).toBe(3);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    await expect(slot).toHaveCSS("height", "48px");
+    history.complete("error");
+    await expect(header).toHaveAttribute("data-state", "error");
+    const retry = page.getByRole("button", { name: "Loading failed. Retry", exact: true });
+    const blocks = retry.locator(".thread-history-blocks");
+    await expect(blocks).toBeInViewport();
+    await expect(blocks).toHaveCSS("color", "rgb(185, 28, 28)");
+    if (retryWith === "Blocks button") await blocks.click();
+    else await requestOlderWithWheel(body, history, 4);
+    await expect.poll(() => history.reads.length).toBe(4);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    expect(history.reads).toEqual([
+      "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+    ]);
+    history.complete();
+    await expect(body.getByText("Question 14", { exact: true })).toBeAttached();
+    await expect(header).toHaveCount(0);
+    await expect(slot).toHaveCount(0);
+    await stableLayout(body);
+    expect(history.reads).toHaveLength(4);
+  });
+}
+
 test("content settling at the top during preparation does not restore an obsolete reading offset", async ({ page }) => {
   const history = await installHistory(page);
   await page.setViewportSize({ width: 1440, height: 900 });

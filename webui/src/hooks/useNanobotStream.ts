@@ -619,10 +619,11 @@ export function useNanobotStream(
         });
         if (olderReadRef.current !== operation || transcriptRef.current !== owner) return;
         flushPendingStreamEvents();
-        const previousContent = historyContentSnapshot(owner.messages);
+        const previousContent = historyContentSnapshot(owner.messages, owner.paging.forkBoundaryMessageCount);
         const accepted = owner.accept(body, operation.read);
         const needsContent = accepted && owner.paging.hasMoreBefore
-          && (owner.hasPendingFragmentGap || historyContentSnapshot(owner.messages) === previousContent);
+          && (owner.hasPendingFragmentGap
+            || historyContentSnapshot(owner.messages, owner.paging.forkBoundaryMessageCount) === previousContent);
         // Keep one pull pending across bookkeeping pages and staged fragments.
         // Begin the continuation before publishing accept()'s intermediate state.
         if (needsContent) operation.read = owner.begin("older");

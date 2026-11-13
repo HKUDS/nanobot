@@ -1,5 +1,6 @@
 import { isModelCommandResponseText, isModelCommandText } from "@/lib/format";
-import { projectActivityTimeline } from "@/lib/activity-timeline";
+import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
 import { isSystemCommandTurnId } from "@/lib/nanobot-client";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import type { UIMessage } from "@/lib/types";
@@ -76,12 +77,22 @@ export function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
   return visible;
 }
 
+/** Keep empty activity units as source anchors, but remove their redundant task content. */
+export function filterThreadDisplayUnits(units: TurnUnit[]): TurnUnit[] {
+  return units.map((unit) => unit.type === "activity"
+    ? { ...unit, messages: unit.messages.flatMap((message) => {
+      const visible = withoutSubagentCreateActivity(message);
+      return visible ? [visible] : [];
+    }) } : unit);
+}
+
 /** Compare history admission, not replay identities, completion times or usage telemetry. */
-export function historyContentSnapshot(messages: UIMessage[]): string {
-  return JSON.stringify(projectActivityTimeline(projectWebuiThreadMessages(messages))
+export function historyContentSnapshot(messages: UIMessage[], forkBoundaryMessageCount: number | null): string {
+  return JSON.stringify({ forkBoundary: forkBoundaryMessageCount !== null && forkBoundaryMessageCount > 0,
+    messages: filterThreadDisplayUnits(projectActivityTimeline(projectWebuiThreadMessages(messages)))
     .flatMap((unit) => unit.type === "message" ? [unit.message] : unit.messages)
     .map(({ role, kind, renderAs, activityKind, content, reasoning, images, media, traces,
       toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage }) =>
       ({ role, kind, renderAs, activityKind, content, reasoning, images, media, traces,
-        toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage })));
+        toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage })) });
 }
