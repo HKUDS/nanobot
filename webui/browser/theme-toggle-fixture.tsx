@@ -23,7 +23,7 @@ export function ThemeToggleFixture() {
           </div>
           <div className="workbench-body">
             <section data-theme-surface className="workbench-pane flex flex-col gap-8 bg-background">
-              <h1 data-testid="theme-preview-title" data-theme-ink className="text-center text-4xl text-foreground">Theme preview</h1>
+              <h1 data-theme-ink className="text-center text-4xl text-foreground">Theme preview</h1>
               <ThreadComposer variant="hero" onSend={() => {}} />
             </section>
           </div>
