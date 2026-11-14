@@ -707,3 +707,7 @@ class SessionManager:
 
     def list_sessions(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._store.list_sessions())
+
+    def list_session_versions(self) -> dict[str, tuple[str, int]]:
+        """Return committed session identities for cache invalidation."""
+        return self._store.list_session_versions()

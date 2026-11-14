@@ -9,6 +9,7 @@ from typing import Any, TypedDict, TypeVar, cast
 from nanobot.runtime_context import public_history_message
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import SessionHistoryPayload, SessionManager, metadata_title
+from nanobot.session.search_index import SessionSearchIndex
 from nanobot.session.session_handles import (
     SESSION_HANDLE_METADATA_KEY,
     SessionHandleResolver,
@@ -159,12 +160,13 @@ class SessionHistoryReader:
 
     def __init__(self, sessions: SessionManager) -> None:
         self._sessions = sessions
+        self._search_index = SessionSearchIndex(sessions)
 
     async def asearch(
         self, query: str, limit: int, *, handles: SessionHandleResolver,
         exclude_session_key: str | None = None,
     ) -> list[tuple[SessionMatch, str | None]]:
-        candidates, matches = await _run_cancellable(lambda cancelled: self._start_search(
+        candidates, matches, public_keys = await _run_cancellable(lambda cancelled: self._start_search(
             query, limit, exclude_session_key, cancelled,
         ))
         if not matches:
@@ -172,21 +174,22 @@ class SessionHistoryReader:
         resolved = await handles.alist_all_by_key()
         names = {key: handle.name for key, handle in resolved.items()}
         return await _run_cancellable(lambda cancelled: self._sessions.read_batch(
-            lambda: self._complete_search(query, candidates, matches, names, limit, cancelled),
+            lambda: self._complete_search(query, candidates, matches, names, limit, cancelled, public_keys),
         ))
 
     def search(
         self, query: str, limit: int, *, exclude_session_key: str | None = None,
         cancelled: threading.Event | None = None,
     ) -> list[SessionMatch]:
-        _, matches = self._start_search(query, limit, exclude_session_key, cancelled)
+        _, matches, _ = self._start_search(query, limit, exclude_session_key, cancelled)
         return [match for _, _, match in matches]
 
     def _start_search(
         self, query: str, limit: int, exclude_session_key: str | None,
         cancelled: threading.Event | None,
-    ) -> tuple[list[_SearchCandidate], list[_SearchMatch]]:
+    ) -> tuple[list[_SearchCandidate], list[_SearchMatch], list[str]]:
         candidates: list[_SearchCandidate] = []
+        public_keys: list[str] = []
         needle = query.casefold()
 
         def headers() -> None:
@@ -195,10 +198,13 @@ class SessionHistoryReader:
             for position, row in enumerate(self._sessions.list_sessions()):
                 _check_cancelled(cancelled)
                 key = row.get("key")
-                if not isinstance(key, str) or key == exclude_session_key:
+                if not isinstance(key, str):
                     continue
                 payload = self._sessions.read_history_header(key)
                 if payload is None or not self._sessions.types.public_history(payload["metadata"]):
+                    continue
+                public_keys.append(key)
+                if key == exclude_session_key:
                     continue
                 title = _text(row.get("title"))
                 rank = _title_rank(title, needle)
@@ -217,23 +223,55 @@ class SessionHistoryReader:
         def start() -> list[_SearchMatch]:
             self._sessions.read_consistently(headers, cancelled=cancelled)
             candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-            return self._take_matches(query, candidates, limit, cancelled)
+            return self._take_matches(query, candidates, limit, cancelled, public_keys)
 
         matches = self._sessions.read_batch(start)
-        return candidates, matches
+        return candidates, matches, public_keys
+
+    def _index_content(
+        self, key: str, add_content: Callable[[str], None], cancelled: threading.Event | None,
+    ) -> None:
+        def project(
+            payload: SessionHistoryPayload, messages: Iterator[tuple[int, dict[str, Any]]],
+        ) -> None:
+            if not self._sessions.types.public_history(payload["metadata"]):
+                return
+            for _, message in messages:
+                _check_cancelled(cancelled)
+                if message.get("role") not in {"user", "assistant"} or message.get("_command") or is_hidden_history_message(message):
+                    continue
+                text = _message_text(public_history_message(message), cancelled)
+                if text:
+                    add_content(text)
+
+        self._sessions.read_consistently(
+            lambda: self._sessions.project_session_messages(key, project), cancelled=cancelled,
+        )
 
     def _take_matches(
         self, query: str, candidates: list[_SearchCandidate], limit: int,
-        cancelled: threading.Event | None,
+        cancelled: threading.Event | None, public_keys: list[str],
     ) -> list[_SearchMatch]:
         matches: list[_SearchMatch] = []
         needle = query.casefold()
+        body_candidates: set[str] | None = None
+        indexed = False
         while candidates and len(matches) < limit:
             _check_cancelled(cancelled)
             rank, position, candidate = candidates.pop()
             if isinstance(candidate, str):
+                if not indexed:
+                    body_candidates = self._search_index.matching_session_keys(
+                        query, public_keys,
+                        lambda key, add: self._index_content(key, add, cancelled),
+                        cancelled=cancelled,
+                    )
+                    indexed = True
                 # A body match needs a fresh header and history from one snapshot.
-                match = self.read(candidate, query=query, limit=2, cancelled=cancelled, _for_search=True)
+                match = self.read(
+                    candidate, query=query, limit=2, cancelled=cancelled,
+                    _for_search=True, _body_candidates=body_candidates,
+                )
                 if match is None:
                     continue
                 title_rank = _title_rank(match["title"], needle)
@@ -251,7 +289,7 @@ class SessionHistoryReader:
 
     def _complete_search(
         self, query: str, candidates: list[_SearchCandidate], matches: list[_SearchMatch],
-        handles: Mapping[str, str], limit: int, cancelled: threading.Event,
+        handles: Mapping[str, str], limit: int, cancelled: threading.Event, public_keys: list[str],
     ) -> list[tuple[SessionMatch, str | None]]:
         while True:
             _check_cancelled(cancelled)
@@ -263,7 +301,7 @@ class SessionHistoryReader:
                 return valid
             keys = {match["session_key"] for match, _ in valid}
             matches = [item for item in matches if item[2]["session_key"] in keys]
-            matches.extend(self._take_matches(query, candidates, limit - len(matches), cancelled))
+            matches.extend(self._take_matches(query, candidates, limit - len(matches), cancelled, public_keys))
             matches.sort(key=lambda item: (item[0], item[1]))
 
     async def aread(
@@ -283,6 +321,7 @@ class SessionHistoryReader:
         exclude_session_key: str | None = None,
         cancelled: threading.Event | None = None,
         _for_search: bool = False,
+        _body_candidates: set[str] | None = None,
     ) -> SessionMatch | None:
         if session_key == exclude_session_key:
             return None
@@ -305,9 +344,14 @@ class SessionHistoryReader:
                 ),
             }
 
-        return self._sessions.read_consistently(
-            lambda: self._sessions.project_session_messages(session_key, project), cancelled=cancelled,
-        )
+        def snapshot() -> SessionMatch | None:
+            if _body_candidates is not None and session_key not in _body_candidates:
+                # Keep fresh titles, visibility and generations even for cache misses.
+                header = self._sessions.read_history_header(session_key)
+                return project(header, iter(())) if header is not None else None
+            return self._sessions.project_session_messages(session_key, project)
+
+        return self._sessions.read_consistently(snapshot, cancelled=cancelled)
 
     async def avalidate(
         self, matches: list[SessionMatch], handles: Mapping[str, str],
