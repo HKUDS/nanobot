@@ -1306,6 +1306,18 @@ class TestMainMenuInteraction:
         assert config.model_presets["primary"].provider == "ollama"
         assert config.model_presets["primary"].model == "llama3.2"
 
+    def test_quick_start_does_not_write_over_legacy_custom_connection(self, monkeypatch, capsys):
+        config = Config.model_validate({"providers": {
+            "shengsuanyun": {"apiBase": "https://private-proxy.test/v1"},
+        }})
+        original = config.model_dump()
+        monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", lambda *a, **kw: "ShengSuanYun Router")
+
+        assert onboard_wizard._configure_quick_start_provider(config) is False
+        assert config.model_dump() == original
+        assert "already names a custom connection" in capsys.readouterr().out
+
     def test_quick_start_openai_stores_key_and_model_without_base(self, monkeypatch):
         config = Config()
 
