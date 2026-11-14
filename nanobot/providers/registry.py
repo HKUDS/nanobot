@@ -405,6 +405,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.novita.ai/openai",
     ),
 
+    # Runcrate: OpenAI-compatible API for open models; model names keep the org prefix.
+    ProviderSpec(
+        name="runcrate",
+        keywords=("runcrate",),
+        env_key="RUNCRATE_API_KEY",
+        request_apis=("chat_completions", "responses"),
+        display_name="Runcrate",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="runcrate",
+        default_api_base="https://api.runcrate.ai/v1",
+    ),
+
     ProviderSpec(
         name="volcengine",
         keywords=("volcengine", "volces", "ark"),
