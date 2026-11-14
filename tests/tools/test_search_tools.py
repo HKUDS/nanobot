@@ -21,6 +21,7 @@ from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
+from nanobot.execution import files as file_execution
 from nanobot.execution.files import FileSearch, WorkspaceFiles
 from nanobot.providers.base import GenerationSettings
 from nanobot.security.workspace_access import (
@@ -292,7 +293,10 @@ async def test_find_files_scan_keeps_event_loop_responsive(
     assert await asyncio.wait_for(task, timeout=0.5) == "match.txt"
 
 
-async def test_grep_authorizes_the_targets_of_links_found_during_traversal(tmp_path: Path):
+@pytest.mark.parametrize("native", [True, False])
+async def test_grep_authorizes_the_targets_of_links_found_during_traversal(tmp_path: Path, monkeypatch, native):
+    if not native:
+        monkeypatch.setattr(file_execution, "_supports_directory_handles", lambda: False)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     inside = workspace / "a.txt"
@@ -310,6 +314,37 @@ async def test_grep_authorizes_the_targets_of_links_found_during_traversal(tmp_p
     assert "inside-link.txt" in result
     assert "needle allowed" in result
     assert "needle outside contents" not in result
+
+
+async def test_grep_discards_results_when_unpinned_directory_is_replaced(tmp_path, monkeypatch):
+    workspace = (tmp_path / "workspace").resolve()
+    directory = workspace / "src"
+    directory.mkdir(parents=True)
+    for name in ("a.txt", "b.txt"):
+        (directory / name).write_text("needle inside\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.txt").write_text("needle outside\n", encoding="utf-8")
+    try:
+        link = workspace / "replacement"
+        link.symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError):
+        pytest.skip("symlinks unavailable")
+    monkeypatch.setattr(file_execution, "_supports_directory_handles", lambda: False)
+    original = FileSearch._check_search_directory
+
+    @contextmanager
+    def replace_after_check(tree, path):
+        with original(tree, path):
+            if path == directory:
+                directory.rename(tmp_path / "moved")
+                link.rename(directory)
+            yield
+
+    monkeypatch.setattr(FileSearch, "_check_search_directory", replace_after_check)
+    tool = GrepTool(workspace=workspace, allowed_dir=workspace)
+    result = await tool.execute(pattern="needle", path="src")
+    assert result == "Error: Search directory changed during the scan; retry the search."
 
 
 @pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="requires native directory handles")
