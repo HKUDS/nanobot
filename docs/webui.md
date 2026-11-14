@@ -105,7 +105,9 @@ To use work from another topic, mention it with `@` and tell nanobot what you ne
 
 ### Activity and context usage
 
-The message timeline shows replies and agent activity. Expand the **Worked for** section to inspect the reasoning and tool activity for a completed turn.
+While nanobot works, **Working for** shows the latest activity beside the timer, or below it on narrow screens. Select the timer to see the full reasoning and tool activity. Set **Settings → Appearance → Activity details** to **Expanded** if you prefer to see the details by default.
+
+Expand the **Worked for** section to inspect the reasoning and tool activity for a completed turn.
 
 Scroll past the oldest loaded message, or pull down and release on touch devices, to load earlier history. A red indicator offers error details and retry; **No earlier messages** marks the history boundary.
 

@@ -138,16 +138,18 @@ test.describe("answer order", () => {
       { event: "stream_end", ...base, stream_id: "live-empty", turn_seq: 4, resuming: true },
       { event: "message", ...base, turn_seq: 5, kind: "tool_hint", text: "read_file({\"path\":\"beta\"})" },
     );
-    await expect(page.getByTestId("agent-activity-content")).toContainText("网页");
+    const wheel = page.getByTestId("latest-activity-wheel");
+    await expect(wheel).toContainText("beta");
+    await expect(page.getByTestId("agent-activity-content")).toHaveCount(0);
     await expect(page.getByText("思考过程", { exact: true })).toHaveCount(0);
     await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
     await page.getByRole("button", { name: "Switch topic" }).click();
     await expect(page.getByText("检查工具", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Switch topic" }).click();
-    await expect(page.getByTestId("agent-activity-content")).toContainText("网页");
+    await expect(wheel).toContainText("beta");
     await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
     await dropAndReconnect();
-    await expect(page.getByTestId("agent-activity-content")).toContainText("网页");
+    await expect(wheel).toContainText("beta");
     await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
 
     emit(
@@ -157,6 +159,8 @@ test.describe("answer order", () => {
       { event: "delta", ...base, stream_id: "answer", turn_seq: 9, text: "最终答案" },
     );
     await expect(page.getByText("最终答案", { exact: true })).toHaveCount(1);
+    await expect(wheel).toContainText("真正的推理");
+    await page.getByRole("button", { name: /^处理中/ }).click();
     await expect(page.getByText("真正的推理", { exact: true })).toHaveCount(1);
     const activity = await page.getByTestId("agent-activity-content").textContent();
     expect(activity).toContain("网页");
@@ -181,6 +185,8 @@ test.describe("answer order", () => {
     await expect(page.getByRole("status", { name: /^Working for / })).toBeVisible();
     await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
     emit({ event: "message", ...base, turn_seq: 2, kind: "tool_hint", text: "web_search({\"query\":\"alpha\"})" });
+    await expect(page.getByTestId("latest-activity-wheel")).toContainText("alpha");
+    await page.getByRole("button", { name: /^Working for / }).click();
     await expect(page.getByTestId("agent-activity-content")).toContainText("web");
     await expect(page.getByTestId("activity-reasoning-marker")).toHaveCount(0);
     expect(errors).toEqual([]);

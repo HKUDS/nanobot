@@ -98,7 +98,7 @@ test("appearance explanations open on demand and follow the selected display mod
   const explanations = [
     ["Reading text size", "Adjust messages, code and the composer—not navigation."],
     ["Activity display", "Choose how much detail appears as nanobot works."],
-    ["Activity details", "Show progress while working; keep finished work compact."],
+    ["Activity details", "Keep details collapsed by default. Show the latest activity while working."],
     ["Edit preview", "Show changed files and line counts."],
   ];
   for (const [label, description] of explanations) {
@@ -109,12 +109,20 @@ test("appearance explanations open on demand and follow the selected display mod
     await expect(page.getByRole("tooltip")).toBeHidden();
   }
 
-  await page.getByRole("button", { name: "Expanded", exact: true }).click();
+  const collapsed = page.getByRole("button", { name: "Collapsed", exact: true });
+  const expanded = page.getByRole("button", { name: "Expanded", exact: true });
+  await expect(collapsed).toHaveAttribute("aria-pressed", "true");
+  await expanded.click();
+  await page.reload();
+  await expect(expanded).toHaveAttribute("aria-pressed", "true");
   const activity = page.getByRole("button", { name: "Activity details", exact: true });
   await activity.focus();
   await expect(page.getByRole("tooltip")).toHaveText("Keep activity details expanded by default.");
   await activity.press("Escape");
   await expect(page.getByRole("tooltip")).toBeHidden();
+  await collapsed.click();
+  await page.reload();
+  await expect(collapsed).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Diff", exact: true }).click();
   const edits = page.getByRole("button", { name: "Edit preview", exact: true });
   await edits.focus();
