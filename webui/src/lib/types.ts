@@ -734,6 +734,15 @@ export interface SandboxCheck {
   supported_backend: "bwrap" | "seatbelt" | null;
 }
 
+export interface ProviderSetupTemplate {
+  id: string;
+  label: string;
+  suggested_name: string;
+  search_aliases: string;
+  api_base: string;
+  api: ModelAPIConfig;
+}
+
 export interface SettingsPayload {
   runtime_config?: Record<string, RuntimeConfigValue>;
   surface?: RuntimeSurface;
@@ -789,6 +798,7 @@ export interface SettingsPayload {
   model_request_overrides_supported?: boolean;
   created_model_preset?: string;
   created_provider?: string;
+  provider_setup_templates?: ProviderSetupTemplate[];
   providers: Array<{
     name: string;
     label: string;

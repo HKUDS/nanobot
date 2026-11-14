@@ -2901,13 +2901,17 @@ def test_setup_template_keeps_existing_provider_with_matching_name(tmp_path, mon
     before = load_config(config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
+    settings = settings_payload()
+    template = next(item for item in settings["provider_setup_templates"] if item["id"] == "shengsuanyun")
+    assert template["label"] == "ShengSuanYun Router"
+    assert "胜算云" in template["search_aliases"].split()
+    assert template["suggested_name"] == "ShengSuanYun Router 2"
+    assert any(provider["name"] == legacy_key for provider in settings["providers"])
     payload = create_provider_settings({
-        "name": ["ShengSuanYun Router 2"],
-        "apiBase": ["https://router.shengsuanyun.com/api/v1"],
+        "name": [template["suggested_name"]],
+        "apiBase": [template["api_base"]],
         "apiKey": ["new-key"],
-        "api": [json.dumps({
-            "supportedApis": ["chat_completions", "responses"], "preferredApi": "chat_completions",
-        })],
+        "api": [json.dumps(template["api"])],
     })
     key = payload["created_provider"]
     saved = load_config(config_path)

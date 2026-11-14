@@ -902,7 +902,7 @@ class TestMainMenuInteraction:
         from nanobot.providers.registry import PROVIDERS
 
         choices = onboard_wizard._get_quick_start_provider_choices()
-        selected_provider_names = set(choices.values())
+        selected_provider_names = {choice for choice in choices.values() if isinstance(choice, str)}
         expected_provider_names = set()
         seen_display_names: set[str] = set()
         for spec in PROVIDERS:

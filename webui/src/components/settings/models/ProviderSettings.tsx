@@ -63,21 +63,11 @@ import type {
   NanobotFeaturesPayload,
   ModelAPIConfig,
   ProviderOAuthAuthorizationRequired,
+  ProviderSetupTemplate,
   SettingsPayload,
 } from "@/lib/types";
 
 const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
-const SHENGSUANYUN_TEMPLATE = {
-  icon: "template:shengsuanyun",
-  label: "ShengSuanYun Router",
-  searchAliases: "胜算云 勝算雲",
-  apiBase: "https://router.shengsuanyun.com/api/v1",
-  api: {
-    supported_apis: ["chat_completions", "responses"],
-    preferred_api: "chat_completions",
-  } satisfies ModelAPIConfig,
-};
-
 type ProviderRequestOption = {
   kind: "priority" | "hosted_tool";
   titleKey: string;
@@ -603,14 +593,22 @@ export function ProvidersSettings({
     emptyCustomProviderDraft,
   );
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
-  const { providerOptions, templateId } = useMemo(() => {
+  const { providerOptions, templatesByOption } = useMemo(() => {
     const providerOptions = settings.providers.filter((provider) => !provider.configured && provider.name !== "custom");
-    // This ID is only used by the picker, and must not shadow a saved provider.
-    let templateId = SHENGSUANYUN_TEMPLATE.icon;
-    while (providerOptions.some((provider) => provider.name === templateId)) templateId += ":";
-    const { label, icon, searchAliases } = SHENGSUANYUN_TEMPLATE;
-    return { templateId, providerOptions: [...providerOptions, { name: templateId, label, icon, searchAliases }] };
-  }, [settings.providers]);
+    const occupied = new Set(providerOptions.map((provider) => provider.name));
+    const entries = (settings.provider_setup_templates ?? []).map((template) => {
+      const icon = `template:${template.id}`;
+      // Picker IDs must not shadow saved connection IDs.
+      let name = icon;
+      while (occupied.has(name)) name += ":";
+      occupied.add(name);
+      return { template, option: { name, label: template.label, icon, searchAliases: template.search_aliases } };
+    });
+    return {
+      providerOptions: [...providerOptions, ...entries.map(({ option }) => option)],
+      templatesByOption: new Map(entries.map(({ option, template }) => [option.name, template])),
+    };
+  }, [settings.providers, settings.provider_setup_templates]);
   const customProviderSaving = providerSaving === CUSTOM_PROVIDER_CREATION_KEY;
   const selectedProvider = view.kind === "provider"
     ? settings.providers.find((provider) => provider.name === view.name)
@@ -652,21 +650,16 @@ export function ProvidersSettings({
       returnToOrigin();
     }
   };
-  const beginCustomProviderCreation = (fromTemplate = false) => {
+  const beginCustomProviderCreation = (template?: ProviderSetupTemplate) => {
     const draft = emptyCustomProviderDraft();
-    if (fromTemplate) {
-      const { label, apiBase, api } = SHENGSUANYUN_TEMPLATE;
-      draft.name = label;
-      const names = new Set(settings.providers.map((provider) => provider.label.trim().toLowerCase()));
-      for (let suffix = 2; names.has(draft.name.toLowerCase()); suffix += 1) {
-        draft.name = `${label} ${suffix}`;
-      }
-      draft.apiBase = apiBase;
-      draft.api = api;
+    if (template) {
+      draft.name = template.suggested_name;
+      draft.apiBase = template.api_base;
+      draft.api = template.api;
     }
     setCustomProviderDraft(draft);
     setCustomProviderKeyVisible(false);
-    setView({ kind: "custom", requiresApiKey: fromTemplate });
+    setView({ kind: "custom", requiresApiKey: Boolean(template) });
   };
   const saveCustomProvider = async () => {
     if (customProviderSaving) return;
@@ -1155,7 +1148,11 @@ export function ProvidersSettings({
       ) : view.kind === "picker" ? (
         <ProviderSearchList providers={providerOptions} showBrandLogos={showBrandLogos}
           query={providerSearch} onQueryChange={setProviderSearch}
-          onSelect={(name) => name === templateId ? beginCustomProviderCreation(true) : editProvider(name, true)}
+          onSelect={(name) => {
+            const template = templatesByOption.get(name);
+            if (template) beginCustomProviderCreation(template);
+            else editProvider(name, true);
+          }}
           onCustom={() => beginCustomProviderCreation()}
           onClose={entry.kind === "manage" ? goBack : closePanel} />
       ) : (
