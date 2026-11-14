@@ -13,6 +13,7 @@ Browser sign-in uses the service's MCP OAuth flow. API-key presets ask for the c
 | Browserbase | API key | [Official guide](https://docs.browserbase.com/integrations/mcp/setup) |
 | Firecrawl | None (keyless preset) | [Official guide](https://docs.firecrawl.dev/use-cases/developers-mcp) |
 | Parallel Search | None (anonymous access) | [Official guide](https://docs.parallel.ai/integrations/mcp/search-mcp) |
+| FXMacroData | None for USD data; API key for other currencies | [Official guide](https://fxmacrodata.com/documentation/mcp-server) |
 | Exa | None | [Official guide](https://exa.ai/mcp) |
 | Microsoft Learn | None (public documentation) | [Official guide](https://learn.microsoft.com/en-us/training/support/mcp) |
 | Xmind | Browser OAuth | [Official guide](https://xmind.com/user-guide/xmind-mcp) |
