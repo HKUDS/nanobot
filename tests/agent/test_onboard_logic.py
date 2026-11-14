@@ -1267,8 +1267,10 @@ class TestMainMenuInteraction:
         assert config.model_dump(by_alias=True) == original
         assert getattr(config.channels, "websocket", None) is None
 
-    def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch):
+    @pytest.mark.parametrize("existing_base", [None, "https://my-router.example/v1"])
+    def test_quick_start_provider_choice_asks_for_model_id(self, monkeypatch, existing_base):
         config = Config()
+        config.providers.openrouter.api_base = existing_base
         model_prompts: list[tuple[str, str, str]] = []
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
@@ -1285,7 +1287,7 @@ class TestMainMenuInteraction:
 
         assert model_prompts == [("Model ID", "", "openrouter")]
         assert config.providers.openrouter.api_key == "sk-or-test"
-        assert config.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
+        assert config.providers.openrouter.api_base == (existing_base or "https://openrouter.ai/api/v1")
         assert config.model_presets["primary"].provider == "openrouter"
         assert config.model_presets["primary"].model == "openai/gpt-4o-mini"
 
@@ -1360,6 +1362,7 @@ class TestMainMenuInteraction:
 
     def test_quick_start_zhipu_coding_plan_uses_coding_base_url(self, monkeypatch):
         config = Config()
+        config.providers.zhipu.api_base = "https://open.bigmodel.cn/api/paas/v4"
         choices = iter(["Zhipu AI", "Coding Plan"])
 
         monkeypatch.setattr(onboard_wizard, "_show_quick_start_progress", lambda *_args: None)
