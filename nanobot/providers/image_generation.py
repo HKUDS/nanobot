@@ -1093,7 +1093,7 @@ class OpenAIImageGenerationClient(ImageGenerationProvider):
     """OpenAI Images API using an API key (``providers.openai.apiKey``)."""
 
     provider_name = "openai"
-    model_options = ("gpt-image-2", "gpt-image-1", "dall-e-3", "dall-e-2")
+    model_options = ("gpt-image-2",)
     missing_key_message = (
         "OpenAI API key is not configured. Set providers.openai.apiKey."
     )
