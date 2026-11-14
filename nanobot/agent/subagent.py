@@ -919,6 +919,33 @@ class SubagentManager:
         final_result = result.final_content or "Task completed but no final response was generated."
         return _SubagentOutcome("done", final_result, result.stop_reason, result.error)
 
+    def _take_pending_announcement_count(self, task_id: str) -> int:
+        record = self._tasks.get(task_id)
+        if record is None:
+            return 0
+        # Retire before counting; publish_inbound enqueues without yielding.
+        record.announce = False
+
+        def group(status: SubagentStatus) -> tuple[str, str] | None:
+            if status.origin_turn_id:
+                return "turn", status.origin_turn_id
+            if status.origin_message_id:
+                return "message", status.origin_message_id
+            return None
+
+        origin_group = group(record.status)
+        if origin_group is None:
+            return 0
+        # Terminal status is saved before publication; those results still count.
+        return sum(
+            sibling.announce and not sibling.suppress_notice
+            and sibling.status.owner == record.status.owner
+            and group(sibling.status) == origin_group
+            and (execution := self._running_tasks.get(sibling.status.task_id)) is not None
+            and not execution.done()
+            for sibling in self._tasks.values()
+        )
+
     async def _announce_result(
         self,
         task_id: str,
@@ -939,6 +966,7 @@ class SubagentManager:
             "incomplete": "stopped before completing the task",
         }.get(status, "failed")
 
+        remaining_count = self._take_pending_announcement_count(task_id)
         announce_content = render_template(
             "agent/subagent_announce.md",
             label=label,
@@ -948,6 +976,7 @@ class SubagentManager:
             stop_reason=stop_reason,
             error=error,
             partial_result=partial_result,
+            remaining_count=remaining_count,
         )
 
         # Inject as system message to trigger main agent.
@@ -966,6 +995,7 @@ class SubagentManager:
             "subagent_state": "done" if status == "ok" else status,
             "subagent_stop_reason": stop_reason,
             "subagent_partial": partial_result,
+            "subagent_remaining_count": remaining_count,
         }
         metadata["subagent_message_receipts"] = receipts or {}
         if receipts:
