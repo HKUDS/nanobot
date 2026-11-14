@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClient } from "@/providers/ClientProvider";
 import { fetchPromptIndex, fetchWebuiThread } from "@/lib/api";
 import { projectThreadEvents } from "@/lib/thread-event-projection";
-import { historyContentSnapshot, projectWebuiThreadMessages } from "@/lib/thread-display-projection";
+import { historyContentSnapshot, projectWebuiThreadMessages, sameHistoryContent } from "@/lib/thread-display-projection";
 import { joinThreadFragments } from "@/lib/thread-page-fragments";
 import { isModelCommandText } from "@/lib/format";
 import { isSystemCommandTurnId } from "@/lib/nanobot-client";
@@ -25,7 +25,8 @@ function projectionBody(page: HistoryPage): WebuiThreadPersistedPayload {
 
 function retainFragmentCompletion(pages: HistoryPage[], page: HistoryPage): HistoryPage[] {
   const turn = page.body.page?.record_range?.turn;
-  if (turn === undefined || !page.completion) return pages;
+  if (turn === undefined || !page.completion
+    || !pages.some((saved) => saved.body.page?.record_range?.turn === turn && saved.completion !== page.completion)) return pages;
   return pages.map((saved) => saved.body.page?.record_range?.turn === turn && saved.completion !== page.completion
     ? { ...saved, completion: page.completion } : saved);
 }
@@ -62,7 +63,13 @@ export interface PromptHistoryNavigation {
   expandTraceDetail: (ref: string, rows: UIMessage[]) => void;
 }
 
+// Pages and detail maps are replaced, never mutated. Cache by the immutable raw window,
+// so admission and the rendered window share one projection without retaining evicted pages.
+const projectedWindows = new WeakMap<HistoryPage[], NonNullable<PromptHistoryNavigation["window"]>>();
+
 function projectHistoryWindow(pages: HistoryPage[]): NonNullable<PromptHistoryNavigation["window"]> {
+  const cached = projectedWindows.get(pages);
+  if (cached) return cached;
   const messages: UIMessage[] = [];
   let boundary: number | null = null;
   for (let index = 0; index < pages.length; index++) {
@@ -91,10 +98,12 @@ function projectHistoryWindow(pages: HistoryPage[]): NonNullable<PromptHistoryNa
     if (eventIndex !== undefined) boundary = messages.length + projectWebuiThreadMessages(projectThreadEvents(body.events.slice(0, eventIndex))).length;
     messages.push(...rows);
   }
-  return { messages, userMessageOffset: pages[0]?.body.page?.user_message_offset ?? 0,
+  const window = { messages, userMessageOffset: pages[0]?.body.page?.user_message_offset ?? 0,
     hasMoreBefore: pages[0]?.body.page?.has_more_before === true,
     hasMoreAfter: pages.at(-1)?.body.page?.has_more_after === true,
     forkBoundaryMessageCount: boundary };
+  projectedWindows.set(pages, window);
+  return window;
 }
 
 /** Browsing pages never replace the canonical latest page or live turn state. */
@@ -118,13 +127,14 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   const [refresh, setRefresh] = useState(0);
   const request = useRef<AbortController | null>(null);
   const sequence = useRef(0);
-  const retry = useRef<() => void>(() => setRefresh((value) => value + 1));
+  const retry = useRef<(() => void) | null>(null);
   const scope = useRef({ key, client });
   const currentScope = scope.current.key === key && scope.current.client === client;
 
   const cancel = useCallback(() => {
     request.current?.abort();
     request.current = null;
+    retry.current = null;
     setTarget(null);
     setLoading(false);
     setError(null);
@@ -218,12 +228,14 @@ export function usePromptHistory(key: string | null, version: number, messages: 
     setOperation(id ? "jump" : direction === "before" ? "older" : "newer");
     setLoading(true);
     setError(null);
+    retry.current = null;
     let staged = resume ?? pagesRef.current;
+    let retryRead: (() => void) | null = null;
     try {
       while (true) {
         const requestedCursor = cursor;
         const retryPages = staged;
-        retry.current = () => { void read(requestedCursor, direction, id, retryPages); };
+        retryRead = () => { void read(requestedCursor, direction, id, retryPages); };
         const body = await fetchWebuiThread(getToken(), key, {
           [direction]: cursor, limit: 24, signal: controller.signal,
         });
@@ -243,7 +255,8 @@ export function usePromptHistory(key: string | null, version: number, messages: 
           throw new Error("History changed; select the message again");
         }
         // Trace details can finish while this read is pending; preserve those visible updates.
-        staged = staged.map((saved) => pagesRef.current.find((current) => current.body === saved.body) ?? saved);
+        const updated = staged.map((saved) => pagesRef.current.find((current) => current.body === saved.body) ?? saved);
+        if (updated.some((saved, index) => saved !== staged[index])) staged = updated;
         if (!id && page.completion) {
           staged = retainFragmentCompletion(staged, page);
           const retained = retainFragmentCompletion(pagesRef.current, page);
@@ -258,8 +271,10 @@ export function usePromptHistory(key: string | null, version: number, messages: 
         // Compare before eviction: a full window can gain content without growing.
         const previous = projectHistoryWindow(source);
         const prepared = projectHistoryWindow(expanded);
-        const ready = id || historyContentSnapshot(prepared.messages, prepared.forkBoundaryMessageCount)
-          !== historyContentSnapshot(previous.messages, previous.forkBoundaryMessageCount);
+        const ready = id || !sameHistoryContent(
+          historyContentSnapshot(previous.messages, previous.forkBoundaryMessageCount),
+          historyContentSnapshot(prepared.messages, prepared.forkBoundaryMessageCount),
+        );
         const nextCursor = direction === "before" ? body.page?.before_cursor : body.page?.after_cursor;
         const more = direction === "before" ? body.page?.has_more_before : body.page?.has_more_after;
         if (!id && more && (!nextCursor || nextCursor === cursor)) throw new Error("History cursor did not advance");
@@ -269,7 +284,8 @@ export function usePromptHistory(key: string | null, version: number, messages: 
           publishPages(pagesRef.current.map((saved, index) => index === 0 ? { ...saved, forkBoundaryBefore: true } : saved));
         }
         // At most three bounded server pages; intermediate pages do not complete the operation.
-        staged = direction === "before" ? expanded.slice(0, HISTORY_PAGE_LIMIT) : expanded.slice(-HISTORY_PAGE_LIMIT);
+        staged = expanded.length <= HISTORY_PAGE_LIMIT ? expanded
+          : direction === "before" ? expanded.slice(0, HISTORY_PAGE_LIMIT) : expanded.slice(-HISTORY_PAGE_LIMIT);
         if (ready || !more) {
           // Reaching the end through bookkeeping must not evict the readable window.
           if (!ready) staged = pagesRef.current.map((saved, index, current) => {
@@ -286,7 +302,10 @@ export function usePromptHistory(key: string | null, version: number, messages: 
         cursor = nextCursor!;
       }
     } catch (cause) {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+      if (!controller.signal.aborted) {
+        retry.current = retryRead;
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
       if (request.current === controller) {
         request.current = null;
@@ -301,7 +320,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
     [currentScope, pages]);
   const readBoundary = (direction: "before" | "after") => {
     if (error && operation === (direction === "before" ? "older" : "newer")) {
-      retry.current();
+      retry.current?.();
       return;
     }
     const cursor = direction === "before" ? first?.before_cursor : last?.after_cursor;
@@ -311,7 +330,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
   return { prompts, window, target: currentScope ? target : null, loading: currentScope && loading,
     operation: currentScope && (loading || error) ? operation : null,
     error: currentScope ? error ?? indexError : null, cancel, latest, expandTraceDetail,
-    retry: () => error ? retry.current() : setRefresh((value) => value + 1),
+    retry: () => error ? retry.current?.() : setRefresh((value) => value + 1),
     jump: (id) => {
       const prompt = prompts.find((item) => item.id === id);
       if (enabled && prompt?.cursor) void read(prompt.cursor, "after", id);

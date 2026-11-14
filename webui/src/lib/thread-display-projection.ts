@@ -87,12 +87,37 @@ export function filterThreadDisplayUnits(units: TurnUnit[]): TurnUnit[] {
 }
 
 /** Compare history admission, not replay identities, completion times or usage telemetry. */
-export function historyContentSnapshot(messages: UIMessage[], forkBoundaryMessageCount: number | null): string {
-  return JSON.stringify({ forkBoundary: forkBoundaryMessageCount !== null && forkBoundaryMessageCount > 0,
+export function historyContentSnapshot(messages: UIMessage[], forkBoundaryMessageCount: number | null) {
+  return { forkBoundary: forkBoundaryMessageCount !== null && forkBoundaryMessageCount > 0,
     messages: filterThreadDisplayUnits(projectActivityTimeline(projectWebuiThreadMessages(messages)))
     .flatMap((unit) => unit.type === "message" ? [unit.message] : unit.messages)
     .map(({ role, kind, renderAs, activityKind, content, reasoning, images, media, traces,
       toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage }) =>
       ({ role, kind, renderAs, activityKind, content, reasoning, images, media, traces,
-        toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage })) });
+        toolEvents, fileEdits, traceDetail, compaction, compactReply, cliApps, mcpPresets, sessionMentions, sessionMessage })) };
+}
+
+// Display payloads are JSON values. Shared tool results and media need no byte-by-byte serialization.
+function sameContentValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") return false;
+  if (Array.isArray(left)) {
+    return Array.isArray(right) && left.length === right.length
+      && left.every((value, index) => sameContentValue(value, right[index]));
+  }
+  if (Array.isArray(right)) return false;
+  const previous = left as Record<string, unknown>;
+  const next = right as Record<string, unknown>;
+  const keys = Object.keys(previous).filter((key) => previous[key] !== undefined);
+  return keys.length === Object.keys(next).filter((key) => next[key] !== undefined).length
+    && keys.every((key) => Object.hasOwn(next, key) && sameContentValue(previous[key], next[key]));
+}
+
+export function sameHistoryContent(
+  previous: ReturnType<typeof historyContentSnapshot>,
+  next: ReturnType<typeof historyContentSnapshot>,
+): boolean {
+  return previous.forkBoundary === next.forkBoundary
+    && previous.messages.length === next.messages.length
+    && previous.messages.every((message, index) => sameContentValue(message, next.messages[index]));
 }

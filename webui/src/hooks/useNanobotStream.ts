@@ -7,7 +7,7 @@ import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { ApiError, fetchWebuiThread, fetchWebuiThreadTraceDetail } from "@/lib/api";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
-import { historyContentSnapshot } from "@/lib/thread-display-projection";
+import { historyContentSnapshot, sameHistoryContent } from "@/lib/thread-display-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadTranscript, type ThreadPaging, type ThreadRead, type ThreadTranscriptSnapshot } from "@/lib/thread-transcript";
 import type { ThreadMessageCache } from "@/lib/thread-message-cache";
@@ -623,7 +623,7 @@ export function useNanobotStream(
         const accepted = owner.accept(body, operation.read);
         const needsContent = accepted && owner.paging.hasMoreBefore
           && (owner.hasPendingFragmentGap
-            || historyContentSnapshot(owner.messages, owner.paging.forkBoundaryMessageCount) === previousContent);
+            || sameHistoryContent(previousContent, historyContentSnapshot(owner.messages, owner.paging.forkBoundaryMessageCount)));
         // Keep one pull pending across bookkeeping pages and staged fragments.
         // Begin the continuation before publishing accept()'s intermediate state.
         if (needsContent) operation.read = owner.begin("older");
