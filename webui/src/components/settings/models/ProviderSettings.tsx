@@ -47,6 +47,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ProviderParameterFields } from "@/components/settings/models/ProviderParameterFields";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
+  SHENGSUANYUN_TEMPLATE,
   emptyCustomProviderDraft,
   parseProviderObject,
   providerFormFromRow,
@@ -525,7 +526,8 @@ export type ProviderSettingsEntry =
   | { kind: "edit"; provider: string };
 
 type ProviderSettingsView =
-  | { kind: "list" | "picker" | "custom" }
+  | { kind: "list" | "picker" }
+  | { kind: "custom"; requiresApiKey: boolean }
   | { kind: "provider"; name: string; adding: boolean };
 
 export function ProvidersSettings({
@@ -639,10 +641,20 @@ export function ProvidersSettings({
       returnToOrigin();
     }
   };
-  const beginCustomProviderCreation = () => {
-    setCustomProviderDraft(emptyCustomProviderDraft());
+  const beginCustomProviderCreation = (template?: typeof SHENGSUANYUN_TEMPLATE) => {
+    const draft = emptyCustomProviderDraft();
+    if (template) {
+      draft.name = template.name;
+      const names = new Set(settings.providers.map((provider) => provider.label.trim().toLowerCase()));
+      for (let suffix = 2; names.has(draft.name.toLowerCase()); suffix += 1) {
+        draft.name = `${template.name} ${suffix}`;
+      }
+      draft.apiBase = template.apiBase;
+      draft.api = template.api;
+    }
+    setCustomProviderDraft(draft);
     setCustomProviderKeyVisible(false);
-    setView({ kind: "custom" });
+    setView({ kind: "custom", requiresApiKey: Boolean(template) });
   };
   const saveCustomProvider = async () => {
     if (customProviderSaving) return;
@@ -1068,7 +1080,8 @@ export function ProvidersSettings({
             disabled={
               customProviderSaving ||
               !customProviderDraft.name.trim() ||
-              !customProviderDraft.apiBase.trim()
+              !customProviderDraft.apiBase.trim() ||
+              (view.requiresApiKey && !customProviderDraft.apiKey.trim())
             }
             className="rounded-full"
           >
@@ -1131,7 +1144,14 @@ export function ProvidersSettings({
         <ProviderSearchList providers={unconfiguredProviders} showBrandLogos={showBrandLogos}
           query={providerSearch} onQueryChange={setProviderSearch}
           onSelect={(name) => editProvider(name, true)}
-          onCustom={beginCustomProviderCreation} onClose={entry.kind === "manage" ? goBack : closePanel} />
+          onCustom={() => beginCustomProviderCreation()}
+          setupOption={{
+            id: SHENGSUANYUN_TEMPLATE.id,
+            label: SHENGSUANYUN_TEMPLATE.name,
+            searchAliases: SHENGSUANYUN_TEMPLATE.searchAliases,
+            onSelect: () => beginCustomProviderCreation(SHENGSUANYUN_TEMPLATE),
+          }}
+          onClose={entry.kind === "manage" ? goBack : closePanel} />
       ) : (
         <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 pb-5">
           {view.kind === "custom" ? customProviderForm : selectedProvider ? renderProviderForm(selectedProvider) : null}
