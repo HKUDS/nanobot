@@ -203,6 +203,7 @@ export function useModelSettingsActions({
       try {
         const result = await createModelConfiguration(client, {
           name,
+          ...(settings.model_preset_descriptions_supported === true ? { description: form.description } : {}),
           provider,
           model,
           maxTokens: form.maxTokens,
@@ -260,6 +261,8 @@ export function useModelSettingsActions({
       const result = await updateModelConfiguration(client, {
         name: selectedPreset.name,
         newName: nameChanged ? nextName : undefined,
+        ...(settings.model_preset_descriptions_supported === true && form.description !== (selectedPreset.description ?? "")
+          ? { description: form.description } : {}),
         model: form.model !== selectedPreset.model ? form.model : undefined,
         provider: form.provider !== selectedPreset.provider ? form.provider : undefined,
         maxTokens:
@@ -337,6 +340,7 @@ export function useModelSettingsActions({
     setForm((prev) => ({
       ...prev,
       modelPreset: "",
+      description: "",
       provider,
       model: "",
       supportsImages: true,

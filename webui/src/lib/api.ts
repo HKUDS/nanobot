@@ -1457,6 +1457,7 @@ export async function createModelConfiguration(
     "settings.model_configuration.create",
     {
       name: configuration.name,
+      ...(configuration.description !== undefined ? { description: configuration.description } : {}),
       provider: configuration.provider,
       model: configuration.model,
       ...(optimized ? { append_to_order: true, include_usage: false } : {}),
@@ -1477,6 +1478,7 @@ export async function updateModelConfiguration(
       name: configuration.name,
       ...(optimized ? { include_usage: false } : {}),
       ...(configuration.newName !== undefined ? { new_name: configuration.newName } : {}),
+      ...(configuration.description !== undefined ? { description: configuration.description } : {}),
       ...(configuration.provider !== undefined ? { provider: configuration.provider } : {}),
       ...(configuration.model !== undefined ? { model: configuration.model } : {}),
       ...modelGenerationSettingsPayload(configuration),
