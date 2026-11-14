@@ -2,11 +2,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx
 import pytest
 from prompt_toolkit.application import create_app_session
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from pydantic import BaseModel, Field
+from typer.testing import CliRunner
 
 from nanobot.cli import onboard as onboard_wizard
 from nanobot.cli.onboard import (
@@ -19,8 +21,11 @@ from nanobot.cli.onboard import (
     _input_text,
     run_onboard,
 )
-from nanobot.config.loader import merge_missing_defaults
+from nanobot.config import home as instance_home
+from nanobot.config import loader
+from nanobot.config.loader import load_config, merge_missing_defaults, save_config
 from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.providers.routing import resolve_provider_route
 from nanobot.utils.helpers import sync_workspace_templates
 
 
@@ -953,7 +958,7 @@ class TestMainMenuInteraction:
             or True,
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert oauth_calls == [(config, "openai_codex")]
         assert model_prompts == [
@@ -1113,6 +1118,7 @@ class TestMainMenuInteraction:
 
     def test_quick_start_summary_reports_missing_codex_oauth(self, monkeypatch):
         config = Config()
+        config.channels.websocket = {"enabled": True}
         config.model_presets["primary"] = ModelPresetConfig(
             model="openai-codex/gpt-5.6-sol",
             provider="openai_codex",
@@ -1131,7 +1137,7 @@ class TestMainMenuInteraction:
             lambda rows, _title: captured.setdefault("rows", rows),
         )
 
-        onboard_wizard._show_quick_start_summary(config)
+        onboard_wizard._show_quick_start_summary(config, "primary")
 
         rows = dict(captured["rows"])
         assert rows["Status"] == "OpenAI Codex OAuth login missing"
@@ -1171,7 +1177,11 @@ class TestMainMenuInteraction:
         )
         monkeypatch.setattr(onboard_wizard, "_configure_pydantic_model", fail_websocket_config)
         monkeypatch.setattr(onboard_wizard, "_print_summary_panel", lambda *a, **kw: None)
-        monkeypatch.setattr(onboard_wizard, "_pause", lambda message="": pause_messages.append(message))
+        def pause(message=""):
+            pause_messages.append(message)
+            return True
+
+        monkeypatch.setattr(onboard_wizard, "_pause", pause)
 
         assert onboard_wizard._configure_quick_start(config) is True
 
@@ -1271,7 +1281,7 @@ class TestMainMenuInteraction:
 
         monkeypatch.setattr(onboard_wizard, "_input_model_with_autocomplete", fake_model_input)
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert model_prompts == [("Model ID", "", "openrouter")]
         assert config.providers.openrouter.api_key == "sk-or-test"
@@ -1295,7 +1305,7 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "llama3.2",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert config.providers.ollama.api_key is None
         assert config.providers.ollama.api_base == "http://localhost:11434/v1"
@@ -1314,7 +1324,7 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "gpt-4o-mini",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert config.providers.openai.api_key == "sk-openai-test"
         assert config.providers.openai.api_base is None
@@ -1341,7 +1351,7 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "gpt-4o-mini",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert selected_providers == ["DeepSeek", "OpenAI"]
         assert config.providers.deepseek.api_key is None
@@ -1361,7 +1371,7 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "glm-4.6",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert config.providers.zhipu.api_key == "zhipu-key"
         assert config.providers.zhipu.api_base == "https://open.bigmodel.cn/api/coding/paas/v4"
@@ -1381,7 +1391,7 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "MiniMax-M2",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert config.providers.minimax.api_key == "minimax-key"
         assert config.providers.minimax.api_base == "https://api.minimaxi.com/v1"
@@ -1401,7 +1411,7 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "step-3.5-flash",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert config.providers.stepfun.api_key == "stepfun-key"
         assert config.providers.stepfun.api_base == "https://api.stepfun.ai/step_plan/v1"
@@ -1421,7 +1431,7 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "mimo-v2.5-pro",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert config.providers.xiaomi_mimo.api_key == "mimo-key"
         assert config.providers.xiaomi_mimo.api_base == "https://token-plan-sgp.xiaomimimo.com/v1"
@@ -1445,12 +1455,106 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "custom-model",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert config.providers.custom.api_key == "sk-custom-test"
         assert config.providers.custom.api_base == "https://api.example.test/v1"
         assert config.model_presets["primary"].provider == "custom"
         assert config.model_presets["primary"].model == "custom-model"
+
+    @pytest.mark.parametrize(
+        "existing, cancel_at",
+        [(False, None), (True, None), (True, "model"), (True, "review")],
+        ids=["first-run", "existing-setup", "cancel-model", "cancel-review"],
+    )
+    def test_shengsuanyun_quick_start_saves_separate_connection(
+        self, tmp_path, monkeypatch, prompt_input, existing, cancel_at,
+    ):
+        from nanobot.cli.commands import app
+
+        path = tmp_path / "config.json"
+        monkeypatch.setattr(loader, "_current_config_path", None)
+        monkeypatch.setattr(instance_home, "_home_path", None)
+        if existing:
+            old = Config.model_validate({
+                "agents": {"defaults": {"workspace": str(tmp_path / "workspace"), "modelPreset": "primary"}},
+                "providers": {
+                    "custom": {"apiBase": "https://old.example/v1", "apiKey": "old-key"},
+                    "Custom_ShengSuanYun_Router": {"apiBase": "https://other.example/v1"},
+                },
+                "modelPresets": {
+                    "primary": {"model": "old-model", "provider": "custom"},
+                    "shengsuanyun": {"model": "other-model", "provider": "Custom_ShengSuanYun_Router"},
+                },
+                "channels": {"websocket": {"enabled": True, "tokenIssueSecret": "old-password"}},
+            })
+            save_config(old, path)
+            before = path.read_bytes()
+
+        model_id = "deepseek/example-model"
+        model_url = "https://router.shengsuanyun.com/api/v1/models"
+        calls = []
+
+        def get(url, **kwargs):
+            calls.append((url, kwargs["headers"]["Authorization"]))
+            return httpx.Response(200, request=httpx.Request("GET", url), json={"data": [{"id": model_id}]})
+
+        keys = ["\r", "\x1b[A" * 3 + "\r", "router-test-key\r"]
+        if cancel_at == "model":
+            keys.extend(["\x1b", "\x1b[D"])
+        else:
+            keys.append(f"{model_id}\r")
+            if not existing:
+                keys.append("webui-test-password\r")
+        if cancel_at:
+            keys.append("\x1b[A\r")
+        inputs = iter(keys)
+        ask_prompt = onboard_wizard._ask_prompt
+        pause = onboard_wizard._pause
+
+        def ask_with_input(prompt):
+            prompt_input.send_text(next(inputs))
+            return ask_prompt(prompt)
+
+        def review_with_input(message):
+            prompt_input.send_text("\x03" if cancel_at == "review" else "\r")
+            return pause(message)
+
+        monkeypatch.setattr(httpx, "get", get)
+        monkeypatch.setattr(onboard_wizard, "_ask_prompt", ask_with_input)
+        monkeypatch.setattr(onboard_wizard, "_pause", review_with_input)
+        monkeypatch.setattr(
+            onboard_wizard._get_questionary(), "confirm",
+            lambda *args, **kwargs: SimpleNamespace(ask=lambda: True),
+        )
+
+        result = CliRunner().invoke(app, ["--home", str(tmp_path), "onboard", "--wizard"])
+        assert result.exit_code == 0, result.output
+        assert "router-test-key" not in result.output
+        assert calls == [(model_url, "Bearer router-test-key")]
+        if cancel_at:
+            assert "Configuration discarded" in result.output
+            assert path.read_bytes() == before
+            return
+        saved = load_config(path)
+        preset_name = "shengsuanyun-2" if existing else "shengsuanyun"
+        route = resolve_provider_route(saved, preset=saved.resolve_preset(preset_name))
+        assert route.model == model_id
+        assert route.provider_name == ("custom-shengsuanyun-router-2" if existing else "custom-shengsuanyun-router")
+        assert route.provider_config is not None
+        assert route.provider_config.api_base == model_url.removesuffix("/models")
+        assert route.model_api is not None and route.model_api.preferred_api == "chat_completions"
+        if existing:
+            assert saved.resolve_preset() == old.resolve_preset()
+            assert saved.agents.defaults.model_preset == "primary"
+            assert saved.channels.websocket == old.channels.websocket
+            for key, provider in (old.providers.model_extra or {}).items():
+                assert getattr(saved.providers, key) == provider
+            assert saved.providers.custom == old.providers.custom
+            assert saved.model_presets["shengsuanyun"] == old.model_presets["shengsuanyun"]
+        else:
+            assert saved.agents.defaults.model_preset == preset_name
+            assert saved.channels.websocket["enabled"] is True
 
     def test_quick_start_provider_without_default_base_url_prompts_for_base(self, monkeypatch):
         config = Config()
@@ -1465,7 +1569,7 @@ class TestMainMenuInteraction:
             lambda *a, **kw: "deployment-name",
         )
 
-        assert onboard_wizard._configure_quick_start_provider(config) is True
+        assert onboard_wizard._configure_quick_start_provider(config) == "primary"
 
         assert config.providers.azure_openai.api_key == "azure-key"
         assert config.providers.azure_openai.api_base == "https://azure.example.test/openai"
@@ -1579,6 +1683,7 @@ class TestMainMenuInteraction:
 
     def test_quick_start_summary_calls_out_missing_api_key(self, monkeypatch):
         config = Config()
+        config.channels.websocket = {"enabled": True}
         config.model_presets["primary"] = ModelPresetConfig(
             model="deepseek-v4-flash",
             provider="deepseek",
@@ -1593,7 +1698,7 @@ class TestMainMenuInteraction:
             lambda rows, _title: captured.setdefault("rows", rows),
         )
 
-        onboard_wizard._show_quick_start_summary(config)
+        onboard_wizard._show_quick_start_summary(config, "primary")
 
         rows = dict(captured["rows"])
         assert rows["Status"] == "DeepSeek API key missing"
