@@ -131,8 +131,6 @@ class ApplyPatchTool(_WritableFsTool):
                             content = source.read_bytes().decode("utf-8")
                         except UnicodeDecodeError:
                             raise _PatchError(f"file is not UTF-8 text: {path}")
-                        if action == "replace" and not source.is_file():
-                            raise _PatchError(f"path to update is not a file: {path}")
                     elif action == "replace":
                         raise _PatchError(f"file to update does not exist: {path}")
                     originals[source] = content
