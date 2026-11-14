@@ -334,6 +334,20 @@ async def test_grep_defaults_to_match_context(tmp_path: Path) -> None:
     assert "line 12" not in result
 
 
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+async def test_grep_searches_bom_encoded_text(tmp_path: Path, encoding: str) -> None:
+    source = tmp_path / "report.txt"
+    source.write_bytes("needle 世界\nsecond line\n".encode(encoding))
+    tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    result = await tool.execute(pattern="^needle", path=source.name)
+
+    assert "report.txt:1" in result
+    assert "> 1| needle 世界" in result
+    assert "  2| second line" in result
+    assert "skipped" not in result
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("declared_dimension", ["A1:B2", "A1:A1", "A1:A2", "A1:B1"])
 async def test_grep_searches_xlsx_with_sheet_cell_locator(
