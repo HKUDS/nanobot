@@ -258,6 +258,27 @@ async def test_message_tool_passes_through_absolute_media_paths() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_tool_expands_home_relative_media_paths(tmp_path, monkeypatch) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    tool = MessageTool(send_callback=_send, workspace=tmp_path / "workspace")
+
+    await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=["~/report.pdf"],
+    )
+
+    assert sent[0].media == [str(tmp_path / "report.pdf")]
+
+
+@pytest.mark.asyncio
 async def test_message_tool_passes_through_url_media_paths() -> None:
     sent: list[OutboundMessage] = []
 
