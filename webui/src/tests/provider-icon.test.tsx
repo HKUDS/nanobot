@@ -48,7 +48,7 @@ describe("settings provider icons", () => {
 
   it.each([
     "aihubmix", "bedrock", "exa", "groq", "lm_studio", "minimax", "minimax_anthropic",
-    "modelscope", "moonshot", "olostep", "template:shengsuanyun", "tavily", "xiaomi_mimo", "zhipu",
+    "modelscope", "moonshot", "olostep", "shengsuanyun", "tavily", "xiaomi_mimo", "zhipu",
   ])(
     "does not double-frame %s's primary tile, but preserves unknown fallback assets",
     (provider) => {

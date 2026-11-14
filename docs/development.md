@@ -48,10 +48,6 @@ Useful `ProviderSpec` options:
 | `responses` | `ResponsesCapabilities` with automatic model rules, reasoning replay, and fallback policy. |
 | `is_transcription_only` | Provider has credentials but cannot serve chat completions. |
 
-### Setup templates for compatible endpoints
-
-If a provider only needs a prefilled URL and request API options, add an entry to `PROVIDER_SETUP_TEMPLATES` in [`nanobot/providers/setup.py`](../nanobot/providers/setup.py). Quick Start and WebUI read the same declaration. A template creates an ordinary custom connection; it does not reserve a runtime provider ID or add a new adapter.
-
 ### Request API routing
 
 `resolve_provider_route` in `nanobot/providers/routing.py` validates connection and preset declarations and selects the adapter. Built-in OpenAI connection declarations set an overridable default; custom connection declarations also limit the preset's allowed APIs.

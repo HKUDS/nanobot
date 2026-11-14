@@ -29,14 +29,8 @@ from nanobot.cli.models import (
     get_model_context_limit,
 )
 from nanobot.config.loader import get_config_path, load_config
-from nanobot.config.schema import Config, ModelPresetConfig, ProviderConfig
+from nanobot.config.schema import Config, ModelPresetConfig
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
-from nanobot.providers.setup import (
-    PROVIDER_SETUP_TEMPLATES,
-    ProviderSetupTemplate,
-    custom_provider_key,
-    setup_template_names,
-)
 
 console = Console()
 
@@ -1391,13 +1385,17 @@ def _show_summary(config: Config) -> None:
     _pause()
 
 
-def _pause(message: str = "Press Enter to continue...") -> bool:
-    return _get_questionary().text(message, default="").ask() is not None
+def _pause(message: str = "Press Enter to continue...") -> None:
+    _get_questionary().text(message, default="").ask()
 
 
 def _set_primary_quick_start_preset(config: Config, provider_name: str, model: str) -> None:
-    config.model_presets["primary"] = ModelPresetConfig(model=model, provider=provider_name)
+    config.model_presets["primary"] = ModelPresetConfig(
+        model=model,
+        provider=provider_name,
+    )
     config.agents.defaults.model_preset = "primary"
+    _sync_preset_cache(config)
 
 
 def _show_quick_start_progress(active_step: int) -> None:
@@ -1438,16 +1436,16 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
     return result
 
 
-def _get_quick_start_provider_choices() -> dict[str, str | ProviderSetupTemplate]:
-    choices: dict[str, str | ProviderSetupTemplate] = {}
+def _get_quick_start_provider_choices() -> dict[str, str]:
+    choices: dict[str, str] = {}
     for provider_name, info in _get_quick_start_provider_info().items():
         choices.setdefault(info.display_name, provider_name)
-    for template in PROVIDER_SETUP_TEMPLATES:
-        alias, _, _ = template.search_aliases.partition(" ")
-        label = f"{template.label} ({alias})" if alias else template.label
-        choices.setdefault(label, template)
     choices[_QUICK_START_CUSTOM_PROVIDER_CHOICE] = "custom"
     return choices
+
+
+def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
+    return provider_name == "custom" or not (info and (info.is_local or info.is_oauth))
 
 
 def _quick_start_codex_proxy(config: Config) -> str | None:
@@ -1517,6 +1515,8 @@ def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> b
 def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
     if provider_name == "custom":
         return True
+    if provider_name in _QUICK_START_ENDPOINT_CHOICES:
+        return False
     if info is None or info.default_api_base:
         return False
     return info.backend == "azure_openai" or (
@@ -1524,22 +1524,47 @@ def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProvider
     )
 
 
-def _select_quick_start_endpoint(
+def _select_quick_start_api_base(
+    provider_name: str,
     provider_display: str,
-    endpoint_choices: tuple[_QuickStartEndpointChoice, ...],
-) -> str | object:
-    choices = {choice.label: choice.api_base for choice in endpoint_choices}
-    answer = _select_with_back(
-        f"Which {provider_display} endpoint should Quick Start use?",
-        list(choices) + ["<- Back"],
-        default=endpoint_choices[0].label,
+    info: _QuickStartProviderInfo | None,
+) -> tuple[str, bool] | None | object:
+    endpoint_choices = _QUICK_START_ENDPOINT_CHOICES.get(provider_name)
+    if endpoint_choices:
+        choices = {choice.label: choice.api_base for choice in endpoint_choices}
+        answer = _select_with_back(
+            f"Which {provider_display} endpoint should Quick Start use?",
+            list(choices) + ["<- Back"],
+            default=endpoint_choices[0].label,
+        )
+        if answer is _BACK_PRESSED or answer == "<- Back":
+            return _BACK_PRESSED
+        if answer is None:
+            return None
+        assert isinstance(answer, str)
+        return choices[answer], True
+
+    api_base = info.default_api_base if info else ""
+    if not _quick_start_requires_base_url(provider_name, info):
+        return api_base, False
+
+    base_answer = _input_text(
+        "Provider base URL",
+        api_base,
+        "str",
     )
-    if answer is _BACK_PRESSED or answer == "<- Back":
+    if base_answer is _BACK_PRESSED:
         return _BACK_PRESSED
-    return choices[answer] if isinstance(answer, str) else None
+    if base_answer is None:
+        return None
+    api_base = base_answer.strip().rstrip("/")
+    if not api_base:
+        console.print("[yellow]! Provider base URL is required for this provider[/yellow]")
+        return None
+    return api_base, True
 
 
-def _configure_quick_start_provider(config: Config) -> str | object:
+def _configure_quick_start_provider(config: Config) -> bool | object:
     while True:
         _show_quick_start_progress(1)
 
@@ -1551,67 +1576,59 @@ def _configure_quick_start_provider(config: Config) -> str | object:
         if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
             return _BACK_PRESSED
         assert isinstance(answer, str)
-        choice = provider_choices[answer]
-        template = choice if isinstance(choice, ProviderSetupTemplate) else None
-        provider_name = choice if isinstance(choice, str) else "custom"
+        provider_name = provider_choices[answer]
         provider_info = _get_quick_start_provider_info().get(provider_name)
 
-        api_base = ""
-        if endpoints := _QUICK_START_ENDPOINT_CHOICES.get(provider_name):
-            api_base_result = _select_quick_start_endpoint(answer, endpoints)
+        api_base = provider_info.default_api_base if provider_info else ""
+        base_was_prompted = False
+        if provider_name in _QUICK_START_ENDPOINT_CHOICES:
+            api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
             if api_base_result is _BACK_PRESSED:
                 continue
-            if not isinstance(api_base_result, str):
+            if api_base_result is None:
                 return False
-            api_base = api_base_result
+            api_base, base_was_prompted = cast(
+                tuple[str, bool],
+                api_base_result,
+            )
 
         api_key: str | None = None
-        if not (provider_info and (provider_info.is_local or provider_info.is_oauth)):
-            prompt = f"{answer} API key"
-            key_answer = _input_secret(prompt) if template else _input_text(prompt, "", "str")
-            if key_answer is _BACK_PRESSED:
+        if _quick_start_requires_api_key(provider_name, provider_info):
+            api_key = _input_text(f"{answer} API key", "", "str")
+            if api_key is _BACK_PRESSED:
                 continue
-            if key_answer is None:
+            if api_key is None:
                 return False
-            api_key = cast(str, key_answer).strip()
+            api_key = api_key.strip()
             if not api_key:
                 console.print("[yellow]! API key is required for Quick Start[/yellow]")
                 return False
 
-        if not (endpoints or template) and _quick_start_requires_base_url(provider_name, provider_info):
-            base_answer = _input_text("Provider base URL", "", "str")
-            if base_answer is _BACK_PRESSED:
+        if (
+            provider_name not in _QUICK_START_ENDPOINT_CHOICES
+            and _quick_start_requires_base_url(provider_name, provider_info)
+        ):
+            api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
+            if api_base_result is _BACK_PRESSED:
                 continue
-            if base_answer is None:
+            if api_base_result is None:
                 return False
-            api_base = base_answer.strip().rstrip("/")
-            if not api_base:
-                console.print("[yellow]! Provider base URL is required for this provider[/yellow]")
-                return False
-
-        catalog_config = config.model_copy(deep=True)
-        preset_name = "primary"
-        if template:
-            label, preset_name = setup_template_names(config, template)
-            provider_name = custom_provider_key(config, label)
-            catalog_provider = ProviderConfig(
-                display_name=label,
-                api_base=template.api_base,
-                api=template.api.model_copy(),
+            api_base, base_was_prompted = cast(
+                tuple[str, bool],
+                api_base_result,
             )
-            setattr(catalog_config.providers, provider_name, catalog_provider)
-        else:
-            catalog_provider = getattr(catalog_config.providers, provider_name, None)
-        if catalog_provider is None:
+
+        provider_config = getattr(config.providers, provider_name, None)
+        if provider_config is None:
             console.print(f"[red]Unknown provider: {provider_name}[/red]")
             return False
 
+        catalog_config = config.model_copy(deep=True)
+        catalog_provider = getattr(catalog_config.providers, provider_name)
         if api_key is not None:
             catalog_provider.api_key = api_key
-        if api_base:
+        if api_base and (base_was_prompted or not catalog_provider.api_base):
             catalog_provider.api_base = api_base
-        elif not catalog_provider.api_base and provider_info and provider_info.default_api_base:
-            catalog_provider.api_base = provider_info.default_api_base
 
         model = _input_model_with_autocomplete(
             "Model ID",
@@ -1630,19 +1647,20 @@ def _configure_quick_start_provider(config: Config) -> str | object:
             if not _quick_start_oauth_login(config, provider_name):
                 return False
 
-        use_template_as_default = (
-            template is not None
-            and config.agents.defaults.model_preset is None
-            and config.get_provider() is None
+        if api_key is not None:
+            provider_config.api_key = api_key
+        if api_base:
+            if base_was_prompted:
+                provider_config.api_base = api_base
+            elif not provider_config.api_base:
+                provider_config.api_base = api_base
+
+        _set_primary_quick_start_preset(
+            config,
+            provider_name,
+            model,
         )
-        setattr(config.providers, provider_name, catalog_provider)
-        if template is None:
-            _set_primary_quick_start_preset(config, provider_name, model)
-            return "primary"
-        config.model_presets[preset_name] = ModelPresetConfig(model=model, provider=provider_name)
-        if use_template_as_default:
-            config.agents.defaults.model_preset = preset_name
-        return preset_name
+        return True
 
 
 def _enable_quick_start_websocket_defaults(config: Config) -> bool:
@@ -1689,14 +1707,9 @@ def _enable_quick_start_websocket_defaults(config: Config) -> bool:
     return True
 
 
-def _quick_start_websocket_enabled(config: Config) -> bool:
-    websocket: Any = getattr(config.channels, "websocket", None)
-    return bool(websocket and websocket.get("enabled"))
-
-
-def _show_quick_start_summary(config: Config, preset_name: str) -> None:
+def _show_quick_start_summary(config: Config) -> None:
     _show_quick_start_progress(3)
-    preset = config.model_presets.get(preset_name)
+    preset = config.model_presets.get("primary")
     provider_label = "AI provider"
     credentials_ready = True
     credential_name = "API key"
@@ -1722,11 +1735,8 @@ def _show_quick_start_summary(config: Config, preset_name: str) -> None:
 
     rows = [
         ("Status", status),
-        ("Model preset", preset_name),
-        ("WebSocket channel", "enabled" if _quick_start_websocket_enabled(config) else "disabled"),
+        ("WebSocket channel", "enabled"),
     ]
-    if config.agents.defaults.model_preset != preset_name:
-        rows.insert(2, ("Default model", f"unchanged (switch with /model {preset_name})"))
     _print_summary_panel(rows, "Quick Start")
 
 
@@ -1740,22 +1750,16 @@ def _configure_quick_start(config: Config) -> bool:
     provider_result = _configure_quick_start_provider(draft)
     if provider_result is _BACK_PRESSED:
         return False
-    if not isinstance(provider_result, str):
+    if not provider_result:
         _pause()
         return False
-    needs_websocket_setup = provider_result == "primary" or (
-        draft.agents.defaults.model_preset == provider_result
-        and getattr(draft.channels, "websocket", None) is None
-    )
-    if needs_websocket_setup and not _enable_quick_start_websocket_defaults(draft):
+    if not _enable_quick_start_websocket_defaults(draft):
         _pause()
         return False
-    _show_quick_start_summary(draft, provider_result)
-    if not _pause("Press Enter to save and exit..."):
-        return False
+    _show_quick_start_summary(draft)
+    _pause("Press Enter to save and exit...")
     for field_name in type(config).model_fields:
         setattr(config, field_name, getattr(draft, field_name))
-    _sync_preset_cache(config)
     return True
 
 

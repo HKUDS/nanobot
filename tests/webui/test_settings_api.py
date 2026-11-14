@@ -17,7 +17,6 @@ from nanobot.llm_usage.models import LLMCallRecord
 from nanobot.providers.base import LLMUsage
 from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
-from nanobot.providers.routing import resolve_provider_route
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.webui.settings_api import (
@@ -2686,40 +2685,39 @@ def test_provider_models_payload_requires_gateway_key(
     assert payload["models"] == []
 
 
-def test_provider_models_payload_fetches_orcarouter_catalog(
+@pytest.mark.parametrize(("provider", "api_base", "models"), [
+    ("orcarouter", "https://api.orcarouter.ai/v1", ["orcarouter/auto", "anthropic/claude-sonnet-4.6"]),
+    ("shengsuanyun", "https://router.shengsuanyun.com/api/v1", ["deepseek/deepseek-v4-flash"]),
+])
+def test_provider_models_payload_fetches_router_catalog(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    api_base: str,
+    models: list[str],
 ) -> None:
     config_path = tmp_path / "config.json"
     config = Config()
-    config.providers.orcarouter.api_key = "sk-orca-test"
+    getattr(config.providers, provider).api_key = "router-test-key"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
     def fake_get(url: str, **kwargs):
-        assert url == "https://api.orcarouter.ai/v1/models"
-        assert kwargs["headers"]["Authorization"] == "Bearer sk-orca-test"
+        assert url == f"{api_base}/models"
+        assert kwargs["headers"]["Authorization"] == "Bearer router-test-key"
         return httpx.Response(
             200,
-            json={
-                "data": [
-                    {"id": "orcarouter/auto", "owned_by": "orcarouter"},
-                    {"id": "anthropic/claude-sonnet-4.6", "owned_by": "anthropic"},
-                ]
-            },
+            json={"data": [{"id": model} for model in models]},
             request=httpx.Request("GET", url),
         )
 
     monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
 
-    payload = provider_models_payload({"provider": ["orcarouter"]})
+    payload = provider_models_payload({"provider": [provider]})
 
     assert payload["status"] == "available"
     assert payload["catalog_kind"] == "catalog"
-    assert [model["id"] for model in payload["models"]] == [
-        "orcarouter/auto",
-        "anthropic/claude-sonnet-4.6",
-    ]
+    assert [model["id"] for model in payload["models"]] == models
 
 
 def test_model_catalog_kind_uses_provider_spec_metadata() -> None:
@@ -2884,50 +2882,6 @@ def test_custom_connection_api_create_edit_and_preset_ceiling(tmp_path, monkeypa
     assert load_config(config_path).providers.model_extra[key].api.model_dump(mode="json") == expanded
     update_provider_settings({"provider": [key], "api": ["null"]})
     assert load_config(config_path).providers.model_extra[key].api is None
-
-
-@pytest.mark.parametrize("legacy_key", ["shengsuanyun_router", "shengsuanyun-router"])
-def test_setup_template_keeps_existing_provider_with_matching_name(tmp_path, monkeypatch, legacy_key):
-    config_path = tmp_path / "config.json"
-    legacy_config = {
-        "providers": {legacy_key: {
-            "apiBase": "https://legacy.example/api",
-            "apiKey": "legacy-key",
-            "api": {"supportedApis": ["anthropic_messages"]},
-        }},
-        "agents": {"defaults": {"model": "anthropic/old-model", "provider": legacy_key}},
-    }
-    config_path.write_text(json.dumps(legacy_config), encoding="utf-8")
-    before = load_config(config_path)
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
-
-    settings = settings_payload()
-    template = next(item for item in settings["provider_setup_templates"] if item["id"] == "shengsuanyun")
-    assert template["label"] == "ShengSuanYun Router"
-    assert "胜算云" in template["search_aliases"].split()
-    assert template["suggested_name"] == "ShengSuanYun Router 2"
-    assert any(provider["name"] == legacy_key for provider in settings["providers"])
-    payload = create_provider_settings({
-        "name": [template["suggested_name"]],
-        "apiBase": [template["api_base"]],
-        "apiKey": ["new-key"],
-        "api": [json.dumps(template["api"])],
-    })
-    key = payload["created_provider"]
-    saved = load_config(config_path)
-    assert saved.get_provider_name() == legacy_key
-    assert saved.get_provider() == before.get_provider()
-    assert resolve_provider_route(saved, preset=saved.resolve_preset()).backend == "anthropic"
-
-    def fake_get(url: str, **kwargs):
-        assert url == "https://router.shengsuanyun.com/api/v1/models"
-        assert kwargs["headers"]["Authorization"] == "Bearer new-key"
-        return httpx.Response(200, json={"data": [{"id": "deepseek/deepseek-v4-flash"}]},
-                              request=httpx.Request("GET", url))
-
-    monkeypatch.setattr("nanobot.webui.settings_api.httpx.get", fake_get)
-    catalog = provider_models_payload({"provider": [key]})
-    assert catalog["models"][0]["id"] == "deepseek/deepseek-v4-flash"
 
 
 @pytest.mark.parametrize("api", [
