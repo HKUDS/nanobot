@@ -10,7 +10,6 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import dataclass
 from functools import lru_cache
 from itertools import count, islice
@@ -61,7 +60,6 @@ class _FindFilesEntry:
     path: Path
     rel_path: str
     display_path: str
-    name: str
     is_dir: bool
 
 
@@ -218,13 +216,6 @@ class _SearchTool(_FsTool):
     def _ignore_directory(cls, name: str) -> bool:
         return name in cls._IGNORE_DIRS or name.startswith(".verify-")
 
-    def _display_path(self, target: Path, root: Path) -> str:
-        workspace = self._files.display_workspace
-        if workspace:
-            with suppress(ValueError):
-                return target.relative_to(workspace).as_posix()
-        return target.relative_to(root).as_posix()
-
     def _iter_files(self, tree: FileSearch, budget: _SearchBudget) -> Iterable[Path]:
         if not tree.is_directory:
             budget.visit_path()
@@ -318,21 +309,11 @@ class FindFilesTool(_SearchTool):
             },
         }
 
-    def _entry(self, path: Path, root: Path, *, is_dir: bool) -> _FindFilesEntry:
-        display_path = self._display_path(path, root)
-        return _FindFilesEntry(
-            path=path,
-            rel_path=path.relative_to(root).as_posix(),
-            display_path=display_path,
-            name=path.name,
-            is_dir=is_dir,
-        )
-
     def _directory_entries(
         self,
         tree: FileSearch,
         directory: Path,
-        root: Path,
+        entry_for: Callable[[Path, bool], _FindFilesEntry],
         budget: _SearchBudget,
     ) -> Iterator[_FindFilesEntry]:
         budget.checkpoint()
@@ -342,7 +323,7 @@ class FindFilesTool(_SearchTool):
                 is_dir = raw_entry.is_directory
                 if raw_entry.is_directory_link or (is_dir and self._ignore_directory(raw_entry.name)):
                     continue
-                yield self._entry(directory / raw_entry.name, root, is_dir=is_dir)
+                yield entry_for(directory / raw_entry.name, is_dir)
         except OSError:
             # os.walk silently skips directories that cannot be listed. Preserve
             # that behavior while still allowing cancellation and budget errors
@@ -354,22 +335,23 @@ class FindFilesTool(_SearchTool):
         tree: FileSearch,
         *,
         include_dirs: bool,
+        entry_for: Callable[[Path, bool], _FindFilesEntry],
         budget: _SearchBudget,
     ) -> Iterable[_FindFilesEntry]:
         budget.checkpoint()
         root = tree.root
         if not tree.is_directory:
             budget.visit_path()
-            yield self._entry(root, root.parent, is_dir=False)
+            yield entry_for(root, False)
             return
 
         if include_dirs:
-            yield self._entry(root, root, is_dir=True)
+            yield entry_for(root, True)
 
         sequence = count()
 
         def queue(directory: Path) -> Iterator[tuple[str, int, _FindFilesEntry]]:
-            for entry in self._directory_entries(tree, directory, root, budget):
+            for entry in self._directory_entries(tree, directory, entry_for, budget):
                 sort_path = entry.display_path + ("/" if entry.is_dir else "")
                 yield sort_path, next(sequence), entry
 
@@ -391,6 +373,7 @@ class FindFilesTool(_SearchTool):
         tree: FileSearch,
         *,
         include_dirs: bool,
+        entry_for: Callable[[Path, bool], _FindFilesEntry],
         matches: Callable[[_FindFilesEntry], bool],
         budget: _SearchBudget,
     ) -> Iterator[tuple[str, float]]:
@@ -399,7 +382,7 @@ class FindFilesTool(_SearchTool):
         if not tree.is_directory or include_dirs:
             if not tree.is_directory:
                 budget.visit_path()
-            entry = self._entry(root, root if tree.is_directory else root.parent, is_dir=tree.is_directory)
+            entry = entry_for(root, tree.is_directory)
             if matches(entry):
                 yield entry.display_path + ("/" if entry.is_dir else ""), tree.modified(root)
         if not tree.is_directory:
@@ -410,7 +393,7 @@ class FindFilesTool(_SearchTool):
         while pending:
             directory = pending.pop()
             selected: list[_FindFilesEntry] = []
-            for entry in self._directory_entries(tree, directory, root, budget):
+            for entry in self._directory_entries(tree, directory, entry_for, budget):
                 if entry.is_dir:
                     pending.append(entry.path)
                     if not include_dirs:
@@ -419,7 +402,7 @@ class FindFilesTool(_SearchTool):
                     selected.append(entry)
             if selected:
                 times = tree.modified_children(
-                    directory, [entry.name for entry in selected], checkpoint=budget.checkpoint,
+                    directory, [entry.path.name for entry in selected], checkpoint=budget.checkpoint,
                 )
                 for entry, mtime in zip(selected, times, strict=True):
                     yield entry.display_path + ("/" if entry.is_dir else ""), mtime
@@ -499,11 +482,19 @@ class FindFilesTool(_SearchTool):
         )
 
         terms = query.lower().split() if query else []
+        root = tree.root if tree.is_directory else tree.root.parent
+        workspace = self._files.display_workspace
+        display_root = workspace if workspace and root.is_relative_to(workspace) else root
+
+        def entry_for(path: Path, is_dir: bool) -> _FindFilesEntry:
+            rel_path = path.relative_to(root).as_posix()
+            displayed = rel_path if display_root == root else path.relative_to(display_root).as_posix()
+            return _FindFilesEntry(path, rel_path, displayed, is_dir)
 
         def matches_entry(entry: _FindFilesEntry) -> bool:
-            if glob and not _match_glob(entry.rel_path, entry.name, glob):
+            if glob and not _match_glob(entry.rel_path, entry.path.name, glob):
                 return False
-            if file_type and (entry.is_dir or not _matches_type(entry.name, file_type)):
+            if file_type and (entry.is_dir or not _matches_type(entry.path.name, file_type)):
                 return False
             if not terms:
                 return True
@@ -514,14 +505,14 @@ class FindFilesTool(_SearchTool):
         try:
             if sort == "modified":
                 by_modified = self._iter_modified(
-                    tree, include_dirs=include_dirs, matches=matches_entry, budget=budget,
+                    tree, include_dirs=include_dirs, entry_for=entry_for, matches=matches_entry, budget=budget,
                 )
                 matches = _ordered_prefix(by_modified, selection_size, key=lambda item: (-item[1], item[0]))
                 paths = [item[0] for item in matches]
             else:
                 matching_paths = (
                     entry.display_path + ("/" if entry.is_dir else "")
-                    for entry in self._iter_paths(tree, include_dirs=include_dirs, budget=budget)
+                    for entry in self._iter_paths(tree, include_dirs=include_dirs, entry_for=entry_for, budget=budget)
                     if matches_entry(entry)
                 )
                 paths = list(islice(matching_paths, selection_size))
@@ -643,8 +634,8 @@ class GrepTool(_SearchTool):
         }
 
     @staticmethod
-    def _text_source(raw: bytes, max_bytes: int) -> DocumentLineSource | None:
-        if len(raw) > max_bytes or _is_binary(raw):
+    def _text_source(raw: bytes) -> DocumentLineSource | None:
+        if _is_binary(raw):
             return None
         try:
             content = raw.decode("utf-8")
@@ -758,6 +749,7 @@ class GrepTool(_SearchTool):
             )
 
             workspace = self._files.display_workspace
+            display_root = workspace if workspace and root.is_relative_to(workspace) else root
             with tree.search_bytes_reader() as read_bytes:
                 for file_path in self._iter_files(tree, budget):
                     rel_path = file_path.relative_to(root).as_posix()
@@ -765,10 +757,7 @@ class GrepTool(_SearchTool):
                         continue
                     if not _matches_type(file_path.name, type):
                         continue
-                    display_path = rel_path
-                    if workspace is not None and workspace != root:
-                        with suppress(ValueError):
-                            display_path = file_path.relative_to(workspace).as_posix()
+                    display_path = rel_path if display_root == root else file_path.relative_to(display_root).as_posix()
 
                     source: DocumentLineSource | None = None
                     is_document = file_path.suffix.lower() in _DOCUMENT_EXTENSIONS
@@ -794,7 +783,7 @@ class GrepTool(_SearchTool):
                                 skipped_large += 1
                                 continue
                             mtime = contents.modified
-                            source = self._text_source(contents.data, max_file_bytes)
+                            source = self._text_source(contents.data)
                         if source is None:
                             skipped_binary += 1
                             continue

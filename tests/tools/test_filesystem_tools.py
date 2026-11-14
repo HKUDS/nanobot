@@ -11,6 +11,7 @@ from nanobot.agent.tools.filesystem import (
     ReadFileTool,
     WriteFileTool,
 )
+from nanobot.execution.files import WorkspaceFiles
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires a POSIX named pipe")
@@ -37,6 +38,39 @@ async def test_file_mutation_rejects_named_pipe_without_opening_it(tmp_path, mon
 
     assert result.is_error
     assert "Not a regular file: pipe" in result
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="requires no-follow file opens")
+@pytest.mark.parametrize("operation", ["write", "patch"])
+async def test_file_mutation_does_not_follow_a_symlink_swapped_in_after_authorization(
+    tmp_path, monkeypatch, operation,
+):
+    workspace = (tmp_path / "workspace").resolve()
+    workspace.mkdir()
+    inside = workspace / "inside.txt"
+    outside = tmp_path / "private.txt"
+    inside.write_text("before", encoding="utf-8")
+    outside.write_text("private", encoding="utf-8")
+    authorize = WorkspaceFiles.edit_target
+
+    def swap_after_authorize(files, path):
+        target = authorize(files, path)
+        inside.unlink()
+        inside.symlink_to(outside)
+        return target
+
+    monkeypatch.setattr(WorkspaceFiles, "edit_target", swap_after_authorize)
+    if operation == "write":
+        result = await WriteFileTool(workspace=workspace, allowed_dir=workspace).execute(
+            path="inside.txt", content="changed",
+        )
+    else:
+        result = await ApplyPatchTool(workspace=workspace, allowed_dir=workspace).execute(
+            edits=[{"path": "inside.txt", "action": "add", "new_text": "changed"}],
+        )
+
+    assert result.is_error
+    assert outside.read_text(encoding="utf-8") == "private"
 
 
 async def test_exact_edit_grant_does_not_list_sibling_files(tmp_path):

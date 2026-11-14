@@ -21,7 +21,7 @@ from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
-from nanobot.execution.files import FileSearch
+from nanobot.execution.files import FileSearch, WorkspaceFiles
 from nanobot.providers.base import GenerationSettings
 from nanobot.security.workspace_access import (
     bind_workspace_scope,
@@ -359,6 +359,31 @@ async def test_exact_read_grant_does_not_authorize_a_directory_tree(tmp_path: Pa
     grant.mkdir()
     (grant / "private.txt").write_text("needle private", encoding="utf-8")
     result = await grep.execute(pattern="needle", path=str(grant))
+    assert "outside allowed directory" in result
+    assert "needle private" not in result
+
+
+async def test_search_cannot_expand_exact_file_grant_after_file_becomes_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    grant = tmp_path / "history.jsonl"
+    grant.write_text("needle history", encoding="utf-8")
+    resolve_read = WorkspaceFiles._read_path
+
+    def replace_after_grant(files, path, **kwargs):
+        target = resolve_read(files, path, **kwargs)
+        if target == grant.resolve() and target.is_file():
+            target.unlink()
+            target.mkdir()
+            (target / "private.txt").write_text("needle private", encoding="utf-8")
+        return target
+
+    monkeypatch.setattr(WorkspaceFiles, "_read_path", replace_after_grant)
+    tool = GrepTool(workspace=workspace, allowed_dir=workspace, extra_read_allowed_files=[grant])
+    result = await tool.execute(pattern="needle", path=str(grant))
+    assert is_tool_error_result(result)
     assert "outside allowed directory" in result
     assert "needle private" not in result
 
@@ -962,7 +987,7 @@ async def test_grep_keeps_read_limit_when_an_open_file_grows(tmp_path, monkeypat
 
     if exceeds_limit:
         assert result.startswith("No matches found")
-        assert "skipped 1 binary/unreadable files" in result
+        assert "skipped 1 large files" in result
     else:
         assert result == "growing.log"
 

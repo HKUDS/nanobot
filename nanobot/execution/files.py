@@ -6,7 +6,7 @@ import os
 import re
 import stat
 from collections.abc import Callable, Generator, Iterable
-from contextlib import AbstractContextManager, ExitStack, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager, suppress
 from dataclasses import dataclass
 from heapq import nsmallest
 from operator import itemgetter
@@ -27,17 +27,17 @@ class NotRegularFileError(OSError):
 
 @contextmanager
 def _open_regular_file(
-    resolved_path: Path | str, *, dir_fd: int | None = None,
+    resolved_path: Path | str, *, dir_fd: int | None = None, write: bool = False,
 ) -> Generator[tuple[BinaryIO, int]]:
-    """Own one descriptor for the entire read and report its initial size.
+    """Own one descriptor and check its type before reading or truncating it.
 
     Callers must supply an authorized path or a child of an authorized directory handle.
     Where supported, refuse a swapped-in final symlink and avoid waiting on
     a swapped-in FIFO. This does not protect ancestor path components.
     """
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
-    with os.fdopen(os.open(resolved_path, flags, dir_fd=dir_fd), "rb") as stream:
+    flags = (os.O_WRONLY | os.O_CREAT) if write else os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(resolved_path, flags, 0o666, dir_fd=dir_fd), "wb" if write else "rb") as stream:
         opened = os.fstat(stream.fileno())
         if not stat.S_ISREG(opened.st_mode):
             raise NotRegularFileError
@@ -114,24 +114,22 @@ class WritableFile:
     def exists(self) -> bool:
         return self.path.exists()
 
-    def is_file(self) -> bool:
-        return self.path.is_file()
-
     def size(self) -> int:
         return self.path.stat().st_size
 
     def read_bytes(self) -> bytes:
-        return self.path.read_bytes()
+        with _open_regular_file(self.path) as (stream, _):
+            return stream.read()
 
     def write(self, content: str, *, create_parents: bool = False) -> None:
         if create_parents:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(content, encoding="utf-8", newline="")
+        _write_regular_file(self.path, content.encode("utf-8"))
 
     def snapshot(self, max_bytes: int) -> FileSnapshot:
         """Read a bounded edit preview, not an independent path grant."""
         try:
-            if not self.is_file():
+            if not self.path.is_file():
                 return FileSnapshot(exists=False, text="")
             with _open_regular_file(self.path) as (stream, size):
                 if size > max_bytes:
@@ -148,6 +146,12 @@ class WritableFile:
         return FileSnapshot(exists=True, text=text.replace("\r\n", "\n"))
 
 
+def _write_regular_file(path: Path, data: bytes) -> None:
+    with _open_regular_file(path, write=True) as (stream, _):
+        stream.truncate(0)
+        stream.write(data)
+
+
 def commit_file_edits(writes: dict[WritableFile, str]) -> None:
     """Write validated patch targets; restore their previous bytes on failure."""
     backups = {target: target.read_bytes() if target.exists() else None for target in writes}
@@ -159,11 +163,13 @@ def commit_file_edits(writes: dict[WritableFile, str]) -> None:
     except Exception:
         for target in attempted:
             data = backups[target]
-            if data is None:
-                target.path.unlink(missing_ok=True)
-            else:
-                target.path.parent.mkdir(parents=True, exist_ok=True)
-                target.path.write_bytes(data)
+            # A replaced target can reject rollback. Continue restoring the
+            # other targets without replacing the original write error.
+            with suppress(OSError):
+                if data is None:
+                    target.path.unlink(missing_ok=True)
+                else:
+                    _write_regular_file(target.path, data)
         raise
 
 
@@ -326,15 +332,20 @@ class FileSearch:
             opened_path = path.name
         if size > limit:
             return SearchBytes(None, modified)
-        with _open_regular_file(opened_path, dir_fd=fd) as (stream, opened_size):
-            if opened_size > limit:
-                return None
-            # Avoid allocating the full scan limit for each small file. The
-            # extra byte detects growth (including streams with a reported size of zero).
-            data = stream.read(opened_size + 1)
-            if len(data) > opened_size:
-                data += stream.read(limit + 1 - len(data))
-            return SearchBytes(data, modified)
+        try:
+            with _open_regular_file(opened_path, dir_fd=fd) as (stream, opened_size):
+                if opened_size > limit:
+                    return SearchBytes(None, modified)
+                # The extra byte detects growth without allocating the full
+                # scan limit for every small file.
+                data = stream.read(opened_size + 1)
+                if len(data) > opened_size:
+                    data += stream.read(limit + 1 - len(data))
+                return SearchBytes(data if len(data) <= limit else None, modified)
+        except OSError:
+            if not self.is_directory:
+                raise
+            return None  # The file disappeared, changed type, or became unreadable.
 
     @contextmanager
     def search_bytes_reader(self) -> Generator[Callable[[Path, int], SearchBytes | None]]:
@@ -430,7 +441,7 @@ class WorkspaceFiles:
         )
         return access.project_path, self._allowed_root(access.allowed_root)
 
-    def _read_path(self, path: str | Path) -> Path:
+    def _read_path(self, path: str | Path, *, include_file_grants: bool = True) -> Path:
         workspace, root = self._roots()
         extra_roots: list[Path] = []
         if root is not None:
@@ -445,7 +456,7 @@ class WorkspaceFiles:
             workspace=workspace,
             allowed_root=root,
             extra_allowed_roots=extra_roots,
-            extra_allowed_files=self._read_files if root is not None else (),
+            extra_allowed_files=self._read_files if root is not None and include_file_grants else (),
         )
 
     def edit_target(self, path: str) -> WritableFile:
@@ -490,6 +501,7 @@ class WorkspaceFiles:
             raise FileNotFoundError(path)
         if not directory.is_dir():
             raise NotADirectoryError(path)
+        directory = self._read_path(directory, include_file_grants=False)
         tree = FileSearch(directory, True, self._read_path)
         total = 0
 
@@ -526,6 +538,8 @@ class WorkspaceFiles:
     def search_tree(self, path: str) -> FileSearch:
         target = self._read_path(path)
         mode = target.stat().st_mode
-        if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+        if stat.S_ISDIR(mode):
+            target = self._read_path(target, include_file_grants=False)
+        elif not stat.S_ISREG(mode):
             raise NotRegularFileError
         return FileSearch(target, stat.S_ISDIR(mode), self._read_path)
