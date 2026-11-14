@@ -273,11 +273,11 @@ async def test_find_files_scan_keeps_event_loop_responsive(
     started = threading.Event()
     release = threading.Event()
 
-    def blocking_iter_paths(root: Path, *, include_dirs: bool, budget):
+    def blocking_iter_paths(tree, **kwargs):
         started.set()
         if not release.wait(timeout=1):
             raise TimeoutError("test did not release find_files traversal")
-        yield from original_iter_paths(root, include_dirs=include_dirs, budget=budget)
+        yield from original_iter_paths(tree, **kwargs)
 
     monkeypatch.setattr(tool, "_iter_paths", blocking_iter_paths)
     task = asyncio.create_task(tool.execute(path="."))
@@ -397,8 +397,7 @@ async def test_find_files_cancellation_stops_worker_scan(
     started = threading.Event()
     stopped = threading.Event()
 
-    def cancellable_iter_paths(root: Path, *, include_dirs: bool, budget):
-        del root, include_dirs
+    def cancellable_iter_paths(_tree, *, budget, **_kwargs):
         started.set()
         if not budget.cancelled.wait(timeout=1):
             raise TimeoutError("find_files worker did not receive cancellation")
@@ -428,12 +427,11 @@ async def test_find_files_path_limit_stops_after_pagination_lookahead(
     tool = FindFilesTool(workspace=tmp_path, allowed_dir=tmp_path)
     visited: list[str] = []
 
-    def ordered_iter_paths(tree, *, include_dirs: bool, budget):
-        del include_dirs
+    def ordered_iter_paths(_tree, *, entry_for, budget, **_kwargs):
         for path in paths:
             budget.checkpoint()
             visited.append(path.name)
-            yield tool._entry(path, tree.root, is_dir=False)
+            yield entry_for(path, False)
 
     monkeypatch.setattr(tool, "_iter_paths", ordered_iter_paths)
     result = await tool.execute(path=".", head_limit=1)
