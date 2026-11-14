@@ -24,12 +24,12 @@ describe("Settings providers", () => {
   it("finds ShengSuanYun by its Chinese name and opens its credential form", async () => {
     const user = userEvent.setup();
     const payload = settingsPayload();
-    payload.providers = [{ name: "shengsuanyun", label: "ShengSuanYun", configured: false }];
+    payload.providers = [{ name: "shengsuanyun_router", label: "ShengSuanYun Router", configured: false }];
     renderProviderManager({ initialSection: "models", initialSettings: payload });
     await user.click(screen.getByRole("button", { name: "Add provider" }));
     await user.type(screen.getByRole("combobox", { name: "Search providers" }), "胜算云");
-    await user.click(screen.getByRole("option", { name: "ShengSuanYun" }));
-    expect(screen.getByRole("dialog", { name: "ShengSuanYun" })).toBeVisible();
+    await user.click(screen.getByRole("option", { name: "ShengSuanYun Router" }));
+    expect(screen.getByRole("dialog", { name: "ShengSuanYun Router" })).toBeVisible();
     expect(screen.getByPlaceholderText("Enter API key")).toBeInTheDocument();
   });
 
