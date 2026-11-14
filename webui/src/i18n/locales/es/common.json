@@ -1938,6 +1938,9 @@
       "goalStateExpandAria": "Ver objetivo completo",
       "goalBlocked": "Bloqueado",
       "goalStateSheetTitle": "Objetivo",
+      "cancelGoal": "Cancelar objetivo",
+      "cancelGoalFailed": "No se pudo cancelar. Inténtalo de nuevo.",
+      "cancelGoalOffline": "Vuelve a conectarte para cancelar el objetivo.",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
       "quotedContext": "Contexto citado",
@@ -2070,6 +2073,10 @@
           "goal": {
             "title": "Objetivo a largo plazo",
             "description": "Haz que el asistente siga trabajando en este objetivo."
+          },
+          "cancel_goal": {
+            "title": "Cancelar objetivo",
+            "description": "Cancela el objetivo activo o bloqueado de este chat."
           },
           "trigger": {
             "title": "Activador CLI",

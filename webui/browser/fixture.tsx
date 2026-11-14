@@ -52,7 +52,7 @@ import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
 import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
 import { AppearanceFixture } from "./appearance-fixture";
 import { ContinuityFixture } from "./continuity-fixture";
-import { SessionTransitionFixture } from "./session-transition-fixture";
+import { installSessionTransitionPreviewApi, SessionTransitionFixture } from "./session-transition-fixture";
 import { installSubagentDockApi, SubagentDockFixture } from "./subagent-dock-fixture";
 
 const history: UIMessage[] = [
@@ -236,13 +236,18 @@ if (parameters.get("case") === "skeleton-additions") installSkeletonPreviewApi()
 if (parameters.get("case") === "tools-catalog") installToolsCatalogPreviewApi();
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 if (parameters.get("case") === "subagent-dock") installSubagentDockApi();
+if (parameters.get("case") === "session-transition" && parameters.has("preview")) installSessionTransitionPreviewApi();
 await initializeI18n();
 if (parameters.get("case") === "activity-wheel") await setAppLanguage("zh-CN");
-if ((parameters.get("case") === "appearance" || historyPreview) && parameters.has("lang")) {
+if ((["appearance", "session-transition"].includes(parameters.get("case") ?? "") || historyPreview) && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
+const widePreview = new URL(location.href);
+widePreview.searchParams.delete("narrow");
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "session-transition"
+  {parameters.get("case") === "session-transition" && parameters.has("narrow")
+    ? <iframe title="Narrow goal preview" src={widePreview.href} style={{ display: "block", margin: "0 auto", height: "100dvh", width: "100%", maxWidth: 390, border: 0 }} />
+    : parameters.get("case") === "session-transition"
     ? <SessionTransitionFixture />
     : parameters.get("case") === "continuity"
     ? <ContinuityFixture />

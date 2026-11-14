@@ -426,6 +426,18 @@ export function ThreadShell({
     [historyKey, sessions, titleOverrides],
   );
   const { client, getToken, ingressLimits, modelName, token, webuiCapabilities } = useClient();
+  const [online, setOnline] = useState(client.status === "open");
+  useEffect(() => client.onStatus((status) => setOnline(status === "open")), [client]);
+  const cancelGoal = useCallback(async () => {
+    if (!chatId || client.status !== "open") throw new Error(t("thread.composer.cancelGoalOffline"));
+    await client.sendSystemCommand(chatId, "/cancel_goal").catch(() => {
+      throw new Error(t("thread.composer.cancelGoalFailed"));
+    });
+    const remainingGoal = client.getGoalState(chatId);
+    if (remainingGoal?.active || remainingGoal?.status === "blocked") {
+      throw new Error(t("thread.composer.cancelGoalFailed"));
+    }
+  }, [chatId, client, t]);
   const favoriteWorkspaceProject = useCallback(
     async (path: string, pinned: boolean) => {
       const response = await client.requestMutation<{ favorite_projects: ProjectDirectory[] }>("workspace.favorite", { path, pinned });
@@ -1060,6 +1072,9 @@ export function ThreadShell({
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
+      if (content.trim() === "/cancel_goal" && options?.sideChannel) {
+        return cancelGoal().then(() => true);
+      }
       setRestoredFirstDraft((current) => current?.chatId === chatId ? { ...current, error: "" } : current);
       const submitted = send(content, images, withWorkspaceScope(options));
       if (
@@ -1073,7 +1088,7 @@ export function ThreadShell({
       }
       return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
-    [chatId, send, withWorkspaceScope],
+    [cancelGoal, chatId, send, withWorkspaceScope],
   );
 
   const loadTemporaryFilePreview = useCallback((path: string) =>
@@ -1429,7 +1444,7 @@ export function ThreadShell({
       className={previewOpen ? "h-10" : undefined}
       title={title}
       goal={currentGoalState && (currentGoalState.active || currentGoalState.status === "blocked")
-        ? <GoalIsland key={historyKey} goal={currentGoalState} /> : undefined}
+        ? <GoalIsland key={historyKey} goal={currentGoalState} cancelDisabled={!online} onCancel={cancelGoal} /> : undefined}
       onToggleSidebar={onToggleSidebar}
       theme={theme}
       onToggleTheme={onToggleTheme}

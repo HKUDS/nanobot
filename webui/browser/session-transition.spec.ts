@@ -67,6 +67,32 @@ test("blocked goal remains visible until cleared and survives session switching"
   await expect(page.locator(".goal-island")).toHaveCount(0);
 });
 
+for (const { width, topic } of [{ width: 1440, topic: "goal" }, { width: 390, topic: "blocked" }]) {
+  test(`goal cancellation is reachable at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await installPreview(page);
+    await page.goto("/browser/fixture.html?case=session-transition&cancel-goal");
+    await select(page, topic);
+    await page.getByRole("textbox").fill("Keep this draft");
+    await page.getByRole("button", { name: "Show full goal" }).click();
+    const dialog = page.getByRole("dialog", { name: "Goal", exact: true });
+    await dialog.evaluate(async el => { await Promise.all(el.getAnimations({ subtree: true }).map(animation => animation.finished)); });
+    const cancel = dialog.getByRole("button", { name: "Cancel goal", exact: true });
+    const panelBounds = await dialog.boundingBox();
+    const buttonBounds = await cancel.boundingBox();
+    expect(buttonBounds!.y).toBeGreaterThanOrEqual(panelBounds!.y);
+    expect(buttonBounds!.y + buttonBounds!.height).toBeLessThanOrEqual(panelBounds!.y + panelBounds!.height);
+    await cancel.focus();
+    await page.keyboard.press("Enter");
+    const confirm = page.getByRole("button", { name: "Confirm cancellation", exact: true });
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+    await expect(page.locator(".goal-island")).toHaveCount(0);
+    await expect(page.getByRole("textbox")).toHaveValue("Keep this draft");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+  });
+}
+
 for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
   test(`long goal summaries leave the objective readable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);

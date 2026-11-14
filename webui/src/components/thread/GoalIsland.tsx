@@ -3,15 +3,22 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
+import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
 import type { GoalStateWsPayload } from "@/lib/types";
 
 import "./goal-island.css";
 
-export function GoalIsland({ goal }: { goal: GoalStateWsPayload }) {
+export function GoalIsland({ goal, cancelDisabled, onCancel }: {
+  goal: GoalStateWsPayload;
+  cancelDisabled: boolean;
+  onCancel: () => Promise<void>;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelFailed, setCancelFailed] = useState(false);
   const [scrollBody, setScrollBody] = useState<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const escapeFocus = useOverlayEscapeFocus();
@@ -36,10 +43,30 @@ export function GoalIsland({ goal }: { goal: GoalStateWsPayload }) {
   const status = goal.status === "blocked" ? "blocked" : "active";
   const recap = goal.recap?.trim() ?? "";
   const collapsedLabel = status === "blocked" ? recap : label;
+  const cancelButton = <Button
+    type="button"
+    variant="ghost"
+    size="sm"
+    className="ml-auto h-7 shrink-0 px-2 text-caption text-muted-foreground"
+    disabled={cancelDisabled || cancelling}
+    aria-busy={cancelling}
+    title={cancelDisabled ? t("thread.composer.cancelGoalOffline") : undefined}
+    onClick={async () => {
+      setCancelling(true);
+      setCancelFailed(false);
+      try {
+        await onCancel();
+      } catch {
+        setCancelFailed(true);
+      } finally {
+        setCancelling(false);
+      }
+    }}
+  >{t("thread.composer.cancelGoal")}</Button>;
 
   useLayoutEffect(() => {
     if (!scrollBody) return;
-    if (status === "blocked") scrollBody.scrollTop = 0;
+    if (status === "blocked" || cancelFailed) scrollBody.scrollTop = 0;
     const measure = () => {
       scrollBody.toggleAttribute("data-overflow-top", scrollBody.scrollTop > 1);
       scrollBody.toggleAttribute("data-overflow-bottom", scrollBody.scrollHeight - scrollBody.clientHeight - scrollBody.scrollTop > 1);
@@ -53,7 +80,7 @@ export function GoalIsland({ goal }: { goal: GoalStateWsPayload }) {
       observer.disconnect();
       scrollBody.removeEventListener("scroll", measure);
     };
-  }, [scrollBody, status]);
+  }, [scrollBody, status, cancelFailed]);
 
   return (
     <div className="goal-island-position">
@@ -87,13 +114,18 @@ export function GoalIsland({ goal }: { goal: GoalStateWsPayload }) {
         >
           <div className="goal-island-surface" aria-hidden />
           <div className="goal-island-panel-content">
-            {status !== "blocked" && summary ? <div className="goal-island-summary markdown-content"><h2>{summary}</h2></div> : null}
+            {status !== "blocked" ? <div className="goal-island-summary flex items-start gap-3">
+              {summary ? <div className="markdown-content min-w-0 flex-1"><h2>{summary}</h2></div> : null}
+              {cancelButton}
+            </div> : null}
             <div ref={setScrollBody} className="goal-island-body">
               <div className="goal-island-document">
+                {cancelFailed ? <p role="alert" className="mb-2 text-caption text-destructive">{t("thread.composer.cancelGoalFailed")}</p> : null}
                 {status === "blocked" ? <div className="goal-island-blocked">
                   <CircleAlert className="goal-island-status-icon" strokeWidth={2.5} aria-hidden="true" />
                   <span className="sr-only">{t("thread.composer.goalBlocked")}</span>
-                  {recap ? <MarkdownText className="goal-island-reason">{recap}</MarkdownText> : null}
+                  {recap ? <MarkdownText className="goal-island-reason flex-1">{recap}</MarkdownText> : null}
+                  {cancelButton}
                 </div> : null}
                 {objective ? <MarkdownText className={status === "blocked" ? "mt-4" : undefined}>{objective}</MarkdownText> : null}
                 {status !== "blocked" && recap ? <MarkdownText className="mt-4 text-muted-foreground">{recap}</MarkdownText> : null}

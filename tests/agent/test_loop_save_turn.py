@@ -1368,7 +1368,7 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
         if calls == 4:
             assert "list-1" in str(kwargs["messages"]) and "list-3" in str(kwargs["messages"])
             return LLMResponse(content=None, tool_calls=[ToolCallRequest(
-                id="cancel", name="update_goal", arguments={"action": "cancel", "recap": "Stopped work."},
+                id="block", name="update_goal", arguments={"action": "block", "recap": "Waiting for user input."},
             )])
         assert calls == 5
         return LLMResponse(content="handled later")
@@ -1475,6 +1475,10 @@ async def test_stop_during_committed_goal_checkpoint_settles_queued_command(
                 await asyncio.sleep(0)
         assert calls == 5 and loop.runner.run.await_count == 2
         assert msg.session_key not in loop._pending_queues
+        saved = await loop.sessions.state.read(msg.session_key)
+        assert saved.metadata[GOAL_STATE_KEY]["status"] == "blocked"
+        assert [event.outcome for event in completed
+                if event.context.metadata.get("message_id") == "independent-input"] == ["completed"]
         followup_outbound = []
         while loop.bus.outbound_size:
             followup_outbound.append(await loop.bus.consume_outbound())

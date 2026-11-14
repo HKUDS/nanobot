@@ -11,7 +11,7 @@ const goal = { active: true, ui_summary: "Ship the release", objective: "Verify 
 function Conversation({ blocked = false }: { blocked?: boolean }) {
   return <>
     <ThreadHeader title="Release planning" onToggleSidebar={vi.fn()} theme="light" onToggleTheme={vi.fn()}
-      goal={<GoalIsland goal={{ ...goal, active: !blocked, status: blocked ? "blocked" : "active", ...(blocked ? { recap: "Waiting for approval." } : {}) }} />} />
+      goal={<GoalIsland goal={{ ...goal, active: !blocked, status: blocked ? "blocked" : "active", ...(blocked ? { recap: "Waiting for approval." } : {}) }} cancelDisabled={false} onCancel={async () => {}} />} />
     <ThreadComposer onSend={vi.fn()} persistDraft={false} goalState={goal} />
   </>;
 }

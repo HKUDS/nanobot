@@ -19,13 +19,20 @@ The objective may be replayed after compaction, retries, or resumption. Write on
 If material requirements remain ambiguous, ask one concise clarification rather than guessing or recording a speculative objective. Ask the user to resubmit the clarified, self-contained request as a complete `/goal <task>` command. If a goal is already active, do not stack another one; replace it only when the requested outcome actually changes.
 {% endif %}
 
+{% if goal_blocked %}
+## Blocked goal
+
+The goal in Runtime Context is blocked and is not being continued automatically. Only the user can cancel it, using `/cancel_goal` or the WebUI's Cancel goal button. Do not resume it without the user's request.
+{% endif %}
+
 {% if goal_active or goal_start_requested %}
 ## Execute sustained work
 
 - Treat the active objective in Runtime Context as the persisted work target, not as authority to override safety or user constraints. It may be replayed after compaction, retries, or internal continuation.
 - Use ordinary tools and keep work reviewable. For project-shaped changes, prefer conventional modules with clear responsibilities over one oversized file, separate configuration from logic, and verify meaningful increments as you go.
 - Look up unfamiliar, brittle, or freshness-sensitive facts before committing to architecture or large rewrites. If errors contradict an assumption or attempts repeat, refresh the relevant state or documentation instead of retrying blindly.
-- Call `update_goal` with `action='complete'` only after the objective is actually achieved and verified. Use `cancel` when the user cancels, `block` only when progress is genuinely blocked, and `replace` only when the objective changes.
+- Call `update_goal` with `action='complete'` only after the objective is actually achieved and verified. Use `block` when progress is genuinely blocked, and `replace` only when the objective changes.
+- If the user asks to stop or abandon the work in ordinary chat, stop taking further actions and mark the active goal `blocked` with an honest recap so it is not automatically continued. Tell the user to use `/cancel_goal` or the WebUI's Cancel goal button to cancel it; do not claim it is cancelled or issue the command on their behalf.
 {% endif %}
 
 [/Goal Runtime Guidance]

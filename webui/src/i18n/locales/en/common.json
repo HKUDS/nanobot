@@ -2120,6 +2120,9 @@
       "goalStateExpandAria": "Show full goal",
       "goalBlocked": "Blocked",
       "goalStateSheetTitle": "Goal",
+      "cancelGoal": "Cancel goal",
+      "cancelGoalFailed": "Could not cancel goal. Try again.",
+      "cancelGoalOffline": "Reconnect to cancel the goal.",
       "send": "Send message",
       "stop": "Stop response",
       "quotedContext": "Quoted context",
@@ -2261,6 +2264,10 @@
           "goal": {
             "title": "Long-running goal",
             "description": "Have the assistant keep working toward this goal."
+          },
+          "cancel_goal": {
+            "title": "Cancel goal",
+            "description": "Cancel the active or blocked goal in this chat."
           },
           "trigger": {
             "title": "CLI trigger",

@@ -93,11 +93,12 @@ function ComposerPreview() {
 function GoalPreview() {
   const { t } = useGalleryTranslation();
   const [status, setStatus] = useState<"active" | "blocked">("active");
+  const [cancelled, setCancelled] = useState(false);
   return <div>
-    <StatePicker label={t("previews.goal.state")} value={status} options={["active", "blocked"]} onChange={setStatus} />
+    <StatePicker label={t("previews.goal.state")} value={status} options={["active", "blocked"]} onChange={(next) => { setStatus(next); setCancelled(false); }} />
     <div className="thread-header-container relative h-56 overflow-hidden rounded-control border bg-background">
-      <GoalIsland goal={{ active: status === "active", status, ui_summary: t("previews.goal.summary"), objective: t("previews.goal.objective"),
-        ...(status === "blocked" ? { recap: t("previews.goal.recap") } : {}) }} />
+      {!cancelled && <GoalIsland goal={{ active: status === "active", status, ui_summary: t("previews.goal.summary"), objective: t("previews.goal.objective"),
+        ...(status === "blocked" ? { recap: t("previews.goal.recap") } : {}) }} cancelDisabled={false} onCancel={async () => setCancelled(true)} />}
     </div>
   </div>;
 }

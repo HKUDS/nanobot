@@ -1938,6 +1938,9 @@
       "goalStateExpandAria": "目標の全文を表示",
       "goalBlocked": "進行不可",
       "goalStateSheetTitle": "目標",
+      "cancelGoal": "目標を取り消す",
+      "cancelGoalFailed": "取り消せませんでした。再試行してください。",
+      "cancelGoalOffline": "再接続してから目標を取り消してください。",
       "send": "メッセージを送信",
       "stop": "応答を停止",
       "quotedContext": "引用したコンテキスト",
@@ -2070,6 +2073,10 @@
           "goal": {
             "title": "長期目標",
             "description": "アシスタントがこの目標に向けて作業を続けます。"
+          },
+          "cancel_goal": {
+            "title": "目標を取り消す",
+            "description": "このチャットの実行中またはブロック中の目標を取り消します。"
           },
           "trigger": {
             "title": "CLI トリガー",

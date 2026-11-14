@@ -1938,6 +1938,9 @@
       "goalStateExpandAria": "전체 목표 보기",
       "goalBlocked": "진행 막힘",
       "goalStateSheetTitle": "목표",
+      "cancelGoal": "목표 취소",
+      "cancelGoalFailed": "목표를 취소하지 못했습니다. 다시 시도하세요.",
+      "cancelGoalOffline": "다시 연결한 후 목표를 취소하세요.",
       "send": "메시지 보내기",
       "stop": "응답 중지",
       "quotedContext": "인용한 문맥",
@@ -2070,6 +2073,10 @@
           "goal": {
             "title": "장기 목표",
             "description": "어시스턴트가 이 목표를 향해 계속 작업하게 합니다."
+          },
+          "cancel_goal": {
+            "title": "목표 취소",
+            "description": "이 채팅에서 진행 중이거나 차단된 목표를 취소합니다."
           },
           "trigger": {
             "title": "CLI 트리거",

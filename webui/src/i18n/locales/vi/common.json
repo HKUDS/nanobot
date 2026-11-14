@@ -1938,6 +1938,9 @@
       "goalStateExpandAria": "Xem đầy đủ mục tiêu",
       "goalBlocked": "Bị chặn",
       "goalStateSheetTitle": "Mục tiêu",
+      "cancelGoal": "Hủy mục tiêu",
+      "cancelGoalFailed": "Không thể hủy mục tiêu. Hãy thử lại.",
+      "cancelGoalOffline": "Kết nối lại để hủy mục tiêu.",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
       "quotedContext": "Ngữ cảnh được trích dẫn",
@@ -2070,6 +2073,10 @@
           "goal": {
             "title": "Mục tiêu dài hạn",
             "description": "Để trợ lý tiếp tục làm việc hướng đến mục tiêu này."
+          },
+          "cancel_goal": {
+            "title": "Hủy mục tiêu",
+            "description": "Hủy mục tiêu đang chạy hoặc bị chặn trong cuộc trò chuyện này."
           },
           "trigger": {
             "title": "Kích hoạt CLI",
