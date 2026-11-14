@@ -47,7 +47,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { ProviderParameterFields } from "@/components/settings/models/ProviderParameterFields";
 import {
   CUSTOM_PROVIDER_CREATION_KEY,
-  SHENGSUANYUN_TEMPLATE,
   emptyCustomProviderDraft,
   parseProviderObject,
   providerFormFromRow,
@@ -68,6 +67,17 @@ import type {
 } from "@/lib/types";
 
 const OAUTH_PROXY_PROVIDERS = new Set(["openai_codex", "xai_grok"]);
+const SHENGSUANYUN_TEMPLATE = {
+  icon: "template:shengsuanyun",
+  label: "ShengSuanYun Router",
+  searchAliases: "胜算云 勝算雲",
+  apiBase: "https://router.shengsuanyun.com/api/v1",
+  api: {
+    supported_apis: ["chat_completions", "responses"],
+    preferred_api: "chat_completions",
+  } satisfies ModelAPIConfig,
+};
+
 type ProviderRequestOption = {
   kind: "priority" | "hosted_tool";
   titleKey: string;
@@ -593,13 +603,14 @@ export function ProvidersSettings({
     emptyCustomProviderDraft,
   );
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
-  const unconfiguredProviders = useMemo(
-    () =>
-      settings.providers.filter(
-        (provider) => !provider.configured && provider.name !== "custom",
-      ),
-    [settings.providers],
-  );
+  const { providerOptions, templateId } = useMemo(() => {
+    const providerOptions = settings.providers.filter((provider) => !provider.configured && provider.name !== "custom");
+    // This ID is only used by the picker, and must not shadow a saved provider.
+    let templateId = SHENGSUANYUN_TEMPLATE.icon;
+    while (providerOptions.some((provider) => provider.name === templateId)) templateId += ":";
+    const { label, icon, searchAliases } = SHENGSUANYUN_TEMPLATE;
+    return { templateId, providerOptions: [...providerOptions, { name: templateId, label, icon, searchAliases }] };
+  }, [settings.providers]);
   const customProviderSaving = providerSaving === CUSTOM_PROVIDER_CREATION_KEY;
   const selectedProvider = view.kind === "provider"
     ? settings.providers.find((provider) => provider.name === view.name)
@@ -641,20 +652,21 @@ export function ProvidersSettings({
       returnToOrigin();
     }
   };
-  const beginCustomProviderCreation = (template?: typeof SHENGSUANYUN_TEMPLATE) => {
+  const beginCustomProviderCreation = (fromTemplate = false) => {
     const draft = emptyCustomProviderDraft();
-    if (template) {
-      draft.name = template.name;
+    if (fromTemplate) {
+      const { label, apiBase, api } = SHENGSUANYUN_TEMPLATE;
+      draft.name = label;
       const names = new Set(settings.providers.map((provider) => provider.label.trim().toLowerCase()));
       for (let suffix = 2; names.has(draft.name.toLowerCase()); suffix += 1) {
-        draft.name = `${template.name} ${suffix}`;
+        draft.name = `${label} ${suffix}`;
       }
-      draft.apiBase = template.apiBase;
-      draft.api = template.api;
+      draft.apiBase = apiBase;
+      draft.api = api;
     }
     setCustomProviderDraft(draft);
     setCustomProviderKeyVisible(false);
-    setView({ kind: "custom", requiresApiKey: Boolean(template) });
+    setView({ kind: "custom", requiresApiKey: fromTemplate });
   };
   const saveCustomProvider = async () => {
     if (customProviderSaving) return;
@@ -1141,16 +1153,10 @@ export function ProvidersSettings({
           </div>
         </div>
       ) : view.kind === "picker" ? (
-        <ProviderSearchList providers={unconfiguredProviders} showBrandLogos={showBrandLogos}
+        <ProviderSearchList providers={providerOptions} showBrandLogos={showBrandLogos}
           query={providerSearch} onQueryChange={setProviderSearch}
-          onSelect={(name) => editProvider(name, true)}
+          onSelect={(name) => name === templateId ? beginCustomProviderCreation(true) : editProvider(name, true)}
           onCustom={() => beginCustomProviderCreation()}
-          setupOption={{
-            id: SHENGSUANYUN_TEMPLATE.id,
-            label: SHENGSUANYUN_TEMPLATE.name,
-            searchAliases: SHENGSUANYUN_TEMPLATE.searchAliases,
-            onSelect: () => beginCustomProviderCreation(SHENGSUANYUN_TEMPLATE),
-          }}
           onClose={entry.kind === "manage" ? goBack : closePanel} />
       ) : (
         <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 pb-5">

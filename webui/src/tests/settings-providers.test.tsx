@@ -25,15 +25,19 @@ describe("Settings providers", () => {
     const user = userEvent.setup();
     const payload = settingsPayload();
     const existing = { name: "shengsuanyun_router", label: "ShengSuanYun Router", configured: true };
-    payload.providers = [existing];
+    const unconfigured = { name: "template:shengsuanyun", label: "Existing custom connection", configured: false };
+    payload.providers = [existing, unconfigured];
     payload.provider_api_configuration_supported = true;
     requestMutationMock.mockResolvedValueOnce({
       ...payload,
       created_provider: "custom-shengsuanyun-router-2",
-      providers: [existing, { name: "custom-shengsuanyun-router-2", label: "ShengSuanYun Router 2", configured: true, is_custom: true }],
+      providers: [existing, unconfigured, { name: "custom-shengsuanyun-router-2", label: "ShengSuanYun Router 2", configured: true, is_custom: true }],
     });
     renderProviderManager({ initialSection: "models", initialSettings: payload });
     await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.click(screen.getByRole("option", { name: unconfigured.label }));
+    const existingForm = screen.getByRole("dialog", { name: unconfigured.label });
+    await user.click(within(existingForm).getByRole("button", { name: "Back to providers" }));
     await user.type(screen.getByRole("combobox", { name: "Search providers" }), "胜算云");
     await user.keyboard("{ArrowDown}{Enter}");
     const form = screen.getByRole("dialog", { name: "Custom" });

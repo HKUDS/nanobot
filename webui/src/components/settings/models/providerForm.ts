@@ -19,17 +19,6 @@ export type ProviderForm = {
 export type CustomProviderDraft = ProviderForm & { name: string };
 export const CUSTOM_PROVIDER_CREATION_KEY = "__custom_provider__";
 
-export const SHENGSUANYUN_TEMPLATE = {
-  id: "template:shengsuanyun",
-  name: "ShengSuanYun Router",
-  searchAliases: "胜算云 勝算雲",
-  apiBase: "https://router.shengsuanyun.com/api/v1",
-  api: {
-    supported_apis: ["chat_completions", "responses"],
-    preferred_api: "chat_completions",
-  } satisfies ModelAPIConfig,
-};
-
 export function providerJsonValue(value: Record<string, unknown> | null | undefined): string {
   return value && Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "";
 }
