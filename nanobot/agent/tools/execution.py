@@ -15,6 +15,7 @@ from nanobot.agent.tools.context import tool_log_content_allowed
 from nanobot.agent.tools.file_state import file_read_context
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result, with_tool_error_hint
 from nanobot.providers.base import ToolCallRequest
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
@@ -114,14 +115,22 @@ async def execute_tool_calls(
                     asyncio.create_task(execute(offset + index, tool_call))
                     for index, tool_call in enumerate(batch)
                 ]
+                batch_task = asyncio.create_task(_collect_tool_batch(tasks))
                 try:
-                    await asyncio.gather(*tasks)
+                    failure = await asyncio.shield(batch_task)
+                    if failure is not None:
+                        raise failure
                 except BaseException:
-                    # gather propagates ordinary errors before siblings finish.
-                    # The run must not release ownership while they can act.
                     for task in tasks:
-                        task.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                        if not task.done():
+                            task.cancel()
+                    try:
+                        await shield_and_drain(
+                            asyncio.gather(batch_task, *tasks, return_exceptions=True)
+                        )
+                    except asyncio.CancelledError:
+                        # Re-raise the original failure after cleanup has settled.
+                        pass
                     raise
             else:
                 for index, tool_call in enumerate(batch):
@@ -131,6 +140,16 @@ async def execute_tool_calls(
         settled = [result for result in tool_results if result is not None]
         if settled and on_settled is not None:
             await on_settled(settled)
+
+
+async def _collect_tool_batch(tasks: list[asyncio.Task[None]]) -> BaseException | None:
+    # Returning failures keeps Python 3.14 shield from reporting an abandoned
+    # inner future's handled cancellation or late hook error.
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException as exc:
+        return exc
+    return None
 
 
 async def _execute_tool_call_inner(
