@@ -38,7 +38,6 @@ const DEFERRED_MODEL_LIST_PROVIDERS = new Set([
   "openrouter",
   "orcarouter",
   "ovms",
-  "shengsuanyun_router",
   "siliconflow",
   "vllm",
   "volcengine",

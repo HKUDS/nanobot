@@ -27,7 +27,6 @@ const PROVIDER_SEARCH_ALIASES: Record<string, string> = {
   minimax: "海螺 稀宇",
   minimax_anthropic: "海螺 稀宇",
   siliconflow: "硅基流动 矽基流動 硅基流動",
-  shengsuanyun_router: "胜算云 勝算雲",
   stepfun: "阶跃星辰 階躍星辰",
   xiaomi_mimo: "小米 mimo",
   longcat: "美团 美團",
@@ -35,8 +34,9 @@ const PROVIDER_SEARCH_ALIASES: Record<string, string> = {
   ant_ling: "蚂蚁 螞蟻 百灵 百靈",
 };
 
-export function ProviderSearchList({ providers, showBrandLogos, query, onQueryChange, onSelect, onCustom, onClose }: {
+export function ProviderSearchList({ providers, setupOption, showBrandLogos, query, onQueryChange, onSelect, onCustom, onClose }: {
   providers: SettingsPayload["providers"];
+  setupOption?: { id: string; label: string; searchAliases: string; onSelect: () => void };
   showBrandLogos: boolean;
   query: string;
   onQueryChange: (query: string) => void;
@@ -51,23 +51,34 @@ export function ProviderSearchList({ providers, showBrandLogos, query, onQueryCh
   useEffect(() => {
     if (!mobile) inputRef.current?.focus({ preventScroll: true });
   }, [mobile]);
-  const filtered = useMemo(() => {
+  const groups = useMemo(() => {
     const normalize = (value: string) => value.toLocaleLowerCase().replace(/[\s_.-]+/g, "");
     const normalizedQuery = normalize(query);
-    return providers.filter((provider) => normalize(
-      `${provider.name} ${provider.label} ${PROVIDER_SEARCH_ALIASES[provider.name] ?? ""}`,
-    ).includes(normalizedQuery));
-  }, [providers, query]);
-  const groups = useMemo(() => PROVIDER_GROUPS.map((group) => ({
-    ...group,
-    providers: filtered.filter((provider) => providerGroup(provider) === group.id),
-  })).filter((group) => group.providers.length > 0), [filtered]);
-  const values = useMemo(
-    () => groups.flatMap((group) => group.providers.map((provider) => provider.name)),
-    [groups],
-  );
+    const options = providers.map((provider) => ({
+      id: `provider:${provider.name}`,
+      icon: provider.name,
+      label: provider.label,
+      searchText: `${provider.name} ${provider.label} ${PROVIDER_SEARCH_ALIASES[provider.name] ?? ""}`,
+      group: providerGroup(provider),
+      select: () => onSelect(provider.name),
+    }));
+    if (setupOption) options.push({
+      id: setupOption.id, icon: setupOption.id, label: setupOption.label, group: "api_key",
+      searchText: `${setupOption.label} ${setupOption.searchAliases}`,
+      select: setupOption.onSelect,
+    });
+    const filtered = options.filter(({ searchText }) =>
+      normalize(searchText).includes(normalizedQuery),
+    );
+    return PROVIDER_GROUPS.map((group) => ({
+      ...group, options: filtered.filter((option) => option.group === group.id),
+    })).filter((group) => group.options.length > 0);
+  }, [providers, query, setupOption, onSelect]);
+  const options = groups.flatMap((group) => group.options);
+  const values = options.map((option) => option.id);
   const { inputProps, listProps, getOptionProps } = useComboboxNavigation({
-    open: true, values, onSelect, onClose,
+    open: true, values, onClose,
+    onSelect: (id) => options.find((option) => option.id === id)?.select(),
   });
   const searchLabel = t("settings.providers.searchPlaceholder", { defaultValue: "Search providers" });
   return <>
@@ -88,17 +99,17 @@ export function ProviderSearchList({ providers, showBrandLogos, query, onQueryCh
               {t(group.labelKey, { defaultValue: group.label })}
             </div>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))] gap-x-2 gap-y-0.5">
-              {group.providers.map((provider) => <ComboboxOption key={provider.name} {...getOptionProps(provider.name)}
-                aria-label={provider.label}
+              {group.options.map((option) => <ComboboxOption key={option.id} {...getOptionProps(option.id)}
+                aria-label={option.label}
                 className="min-h-11 min-w-0 gap-2 rounded-xl px-2 py-2 text-[13px] font-normal sm:gap-3 sm:px-3 sm:text-sm">
-                <ProviderIcon provider={provider.name} showBrandLogos={showBrandLogos} compact />
-                <TruncatedTextTooltip text={provider.label} className="flex-1" />
+                <ProviderIcon provider={option.icon} showBrandLogos={showBrandLogos} compact />
+                <TruncatedTextTooltip text={option.label} className="flex-1" />
               </ComboboxOption>)}
             </div>
           </div>
         ))}
       </div>
-      {filtered.length === 0 ? <p role="status" className="px-3 py-12 text-center text-sm text-muted-foreground">
+      {groups.length === 0 ? <p role="status" className="px-3 py-12 text-center text-sm text-muted-foreground">
         {t("settings.providers.noMatches", { defaultValue: "No matching providers." })}
       </p> : null}
     </div>

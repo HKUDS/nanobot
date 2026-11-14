@@ -281,19 +281,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="orcarouter",
         default_api_base="https://api.orcarouter.ai/v1",
     ),
-    # Keep the Router ID separate from existing custom connections named "shengsuanyun".
-    # Upstream model IDs retain their provider namespace (e.g. deepseek/model).
-    ProviderSpec(
-        name="shengsuanyun_router",
-        keywords=("shengsuanyun_router",),
-        env_key="SHENGSUANYUN_API_KEY",
-        request_apis=("chat_completions", "responses"),
-        display_name="ShengSuanYun Router",
-        backend="openai_compat",
-        is_gateway=True,
-        default_api_base="https://router.shengsuanyun.com/api/v1",
-        strip_model_prefixes=("shengsuanyun_router",),
-    ),
     # Eden AI: OpenAI-compatible gateway. Models use the "provider/model"
     # naming scheme (e.g. "anthropic/claude-sonnet-4-5"); the full id is sent upstream.
     ProviderSpec(
