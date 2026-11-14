@@ -45,6 +45,13 @@
           "false": "Off"
         }
       },
+      "silentProgress": {
+        "label": "Silent progress",
+        "choices": {
+          "true": "On",
+          "false": "Off"
+        }
+      },
       "replyToMessage": {
         "label": "Reply to message",
         "choices": {
