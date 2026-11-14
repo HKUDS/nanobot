@@ -9,7 +9,6 @@ import {
   type CustomMcpForm,
 } from "@/components/settings/system/AppsSettings";
 import type {
-  ApiServicePayload,
   AutomationsPayload,
   McpOAuthFlowPayload,
   NanobotFeatureInfo,
@@ -45,10 +44,6 @@ export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
   const [mcpOAuthCallbackUrl, setMcpOAuthCallbackUrl] = useState("");
   const [mcpOAuthCompleting, setMcpOAuthCompleting] = useState(false);
   const [mcpOAuthCallbackError, setMcpOAuthCallbackError] = useState<string | null>(null);
-  const [apiService, setApiService] = useState<ApiServicePayload | null>(null);
-  const [apiServiceLoading, setApiServiceLoading] = useState(false);
-  const [apiServiceAction, setApiServiceAction] = useState<"start" | "stop" | null>(null);
-  const [apiServiceError, setApiServiceError] = useState<string | null>(null);
   const [appsQuery, setAppsQuery] = useState("");
   const [automationsFilter, setAutomationsFilter] = useState<AutomationFilter>("all");
   const [cliAppsMessage, setCliAppsMessage] = useState<string | null>(null);
@@ -71,10 +66,6 @@ export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
   return {
     toolsCatalog,
     toolsCatalogInvalidation,
-    apiService,
-    apiServiceAction,
-    apiServiceError,
-    apiServiceLoading,
     appsKindFilter,
     appsQuery,
     automationAction,
@@ -112,10 +103,6 @@ export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
     nanobotFeatures,
     nanobotFeaturesError,
     nanobotFeaturesLoading,
-    setApiService,
-    setApiServiceAction,
-    setApiServiceError,
-    setApiServiceLoading,
     setAppsKindFilter,
     setAppsQuery,
     setAutomationAction,

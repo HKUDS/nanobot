@@ -153,6 +153,7 @@ def _make_provider_core(
         )
 
     provider.generation = preset.to_generation_settings()
+    provider.supports_images = preset.supports_images
     return provider
 
 
@@ -163,6 +164,7 @@ def _inline_fallback_preset(
     return ModelPresetConfig(
         model=fallback.model,
         provider=fallback.provider,
+        supports_images=fallback.supports_images,
         max_tokens=fallback.max_tokens if fallback.max_tokens is not None else primary.max_tokens,
         context_window_tokens=(
             fallback.context_window_tokens
@@ -247,6 +249,7 @@ def _preset_provider_signature(
     return (
         preset.model,
         preset.provider,
+        preset.supports_images,
         provider_name,
         config.get_api_key(preset.model, preset=preset),
         config.get_api_base(preset.model, preset=preset),

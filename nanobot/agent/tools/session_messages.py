@@ -40,6 +40,22 @@ MIN_REPLY_TIMEOUT_SECONDS = 5
 MAX_REPLY_TIMEOUT_SECONDS = 60
 
 
+async def session_message_runtime_context(
+    request: RequestContext,
+) -> RuntimeContextBlock | None:
+    envelope = session_message_envelope(request.metadata)
+    if envelope is None:
+        return None
+    source = session_handle_for_name(
+        envelope["source_session_key"],
+        envelope["source_handle"],
+    )
+    content = f"Message from @{source.name}."
+    if envelope["expect_reply"]:
+        content += " Reply with send_session_message."
+    return RuntimeContextBlock(source="session_message", content=content)
+
+
 class SessionMessageError(ValueError):
     pass
 
@@ -113,25 +129,6 @@ class SendSessionMessageTool(Tool):
     def description(self) -> str:
         return "Send a message to a persisted session by @handle."
 
-    def runtime_context_provider(self):
-        return self._provide_runtime_context
-
-    async def _provide_runtime_context(
-        self,
-        request: RequestContext,
-    ) -> RuntimeContextBlock | None:
-        envelope = session_message_envelope(request.metadata)
-        if envelope is None:
-            return None
-        source = session_handle_for_name(
-            envelope["source_session_key"],
-            envelope["source_handle"],
-        )
-        content = f"Message from @{source.name}."
-        if envelope["expect_reply"]:
-            content += " Reply with send_session_message."
-        return RuntimeContextBlock(source="session_message", content=content)
-
     async def execute(
         self,
         to: str,
@@ -171,6 +168,8 @@ class SendSessionMessageTool(Tool):
         expect_reply: bool,
         reply_timeout_seconds: int | None = None,
     ) -> str:
+        if content.lstrip().startswith("/"):
+            raise SessionMessageError("slash commands cannot be sent between sessions")
         timeout_seconds = self._validate_reply_timeout(expect_reply, reply_timeout_seconds)
         try:
             target_name = normalize_session_handle(target_handle)
@@ -215,6 +214,7 @@ class SendSessionMessageTool(Tool):
                 content=content,
                 metadata={SESSION_MESSAGE_METADATA_KEY: envelope},
                 session_key_override=target.session_key,
+                require_existing_session=True,
                 input_role="user",
             ))
             sent_at.append(now)

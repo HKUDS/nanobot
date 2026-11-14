@@ -54,8 +54,8 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
       }
     });
 
-    test("settings sections preserve their loaded row layout", async ({ page }, testInfo) => {
-      for (const surface of ["notifications", "capabilities", "runtime", "advanced", "sandbox", "overview", "models", "about"]) {
+    for (const surface of ["notifications", "capabilities", "runtime", "advanced", "sandbox", "overview", "models", "about"]) {
+      test(`settings ${surface} preserves its loaded row layout`, async ({ page }, testInfo) => {
         const section = surface === "sandbox" ? "advanced" : surface;
         const extra = `&section=${section}${section === "notifications" ? "&notificationPermission=granted" : ""}${surface === "sandbox" ? "&sandboxSettings" : ""}`;
         await page.goto(fixture("settings", "loaded", extra));
@@ -71,7 +71,7 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
           await expect(target.getByRole("switch")).toHaveCount(2);
           await expect(target.getByRole("switch").first()).toBeEnabled();
         }
-        if (section === "runtime") await expect(page.locator('[data-settings-section] button').filter({ hasText: locale === "en" ? "Start API server" : "启动 API 服务" })).toBeVisible();
+        if (section === "runtime") await expect(target.getByText("Langfuse", { exact: true })).toBeVisible();
         await settle(page);
         // Collapsed options remain mounted for drafts but do not occupy the visible layout.
         const selector = section === "overview" ? "section button.group" : section === "models" ? '[data-testid^="model-call-order-row"], .settings-footer' : section === "about" ? ".settings-list-row" : ".settings-row:not([inert] *)";
@@ -93,8 +93,8 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
           await testInfo.attach("notifications-layout", { body: JSON.stringify({ loaded, skeleton, loadedControls, skeletonControls }, null, 2), contentType: "application/json" });
         }
         await accessibleSkeleton(page);
-      }
-    });
+      });
+    }
 
     test("appearance stays usable and keeps its layout while gateway settings load or fail", async ({ page }) => {
       await page.addInitScript(() => localStorage.setItem("nanobot-webui.settings-preferences", JSON.stringify({
@@ -103,7 +103,7 @@ for (const width of [390, 1440]) for (const locale of ["en", "zh-CN"]) {
       await page.goto(fixture("settings", "loaded", "&section=appearance"));
       const target = page.locator('[data-settings-section="appearance"]');
       const ready = async () => {
-        await expect(target.locator("[data-reading-preview-content] strong")).toBeVisible();
+        await expect(target.locator("[data-reading-preview-content] .markdown-content p").first()).toBeVisible();
         await expect(target.locator("[data-reading-preview-content] .markdown-content p").first()).toHaveCSS("font-size", "24px");
         await settle(page);
       };

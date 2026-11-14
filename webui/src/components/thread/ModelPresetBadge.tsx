@@ -20,6 +20,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
+import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
 import { inferProviderFromModelName, providerBrand } from "@/lib/provider-brand";
 import { cn } from "@/lib/utils";
 
@@ -124,6 +125,8 @@ export function ModelPresetBadge({
   const [motionWidth, setMotionWidth] = useState<number | null>(null);
   const gestureRef = useRef<PresetGesture | null>(null);
   const suppressClickRef = useRef(false);
+  const escapeFocus = useOverlayEscapeFocus();
+  const focusAfterClose = useRef<"composer" | "management" | null>(null);
   const activeName = modelPreset?.trim() || "";
   const listedIndex = modelPresets.findIndex((preset) => preset.name === activeName);
   const activePreset: ModelPresetOption = {
@@ -158,12 +161,14 @@ export function ModelPresetBadge({
   });
 
   const selectPreset = (name: string) => {
+    if (open) focusAfterClose.current = "composer";
+    else requestAnimationFrame(() => onRequestComposerFocus?.());
     setOpen(false);
     if (name !== activeName) onPresetChange?.(name);
-    requestAnimationFrame(() => onRequestComposerFocus?.());
   };
 
   const openModelSettings = () => {
+    focusAfterClose.current = "management";
     setOpen(false);
     onManageModels?.();
   };
@@ -306,13 +311,7 @@ export function ModelPresetBadge({
       </Container>
     </TooltipTrigger>
   ) : (
-    <Popover
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (!nextOpen) requestAnimationFrame(() => onRequestComposerFocus?.());
-      }}
-    >
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <TooltipTrigger asChild>
           <button
@@ -320,6 +319,7 @@ export function ModelPresetBadge({
             data-switching={motion ? "true" : undefined}
             aria-label={label}
             aria-expanded={open}
+            {...escapeFocus.triggerProps}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerLeave={(event) => {
@@ -404,6 +404,16 @@ export function ModelPresetBadge({
         collisionPadding={12}
         role="dialog"
         aria-label={switchModelLabel}
+        onEscapeKeyDown={escapeFocus.contentProps.onEscapeKeyDown}
+        onCloseAutoFocus={(event) => {
+          if (focusAfterClose.current === "management") event.preventDefault();
+          else if (focusAfterClose.current === "composer" && onRequestComposerFocus) {
+            event.preventDefault();
+            onRequestComposerFocus();
+          }
+          escapeFocus.contentProps.onCloseAutoFocus(event);
+          focusAfterClose.current = null;
+        }}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           const content = event.currentTarget;

@@ -2,10 +2,15 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
 import type { CliAppInfo, McpPresetInfo, UIMessage } from "@/lib/types";
+
+function openLiveActivity() {
+  fireEvent.click(screen.getByRole("button", { name: /^Working for / }));
+}
 
 // These DOM tests exercise disclosure/source contracts; the real shadow renderer runs in browser tests.
 vi.mock("@/components/thread/activity/DiffSyntaxHighlight", async (importOriginal) => {
@@ -106,9 +111,136 @@ function installReducedMotion() {
 describe("AgentActivityCluster", () => {
   afterEach(() => { localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
 
-  it("honors the activity preference for standalone completed activity with manual overrides", () => {
-    render(<AgentActivityCluster messages={activityMessages()} isTurnStreaming={false} hasBodyBelow={false} />);
-    const disclosure = screen.getByRole("button", { name: /Worked/ });
+  it("keeps repeated session observations in call order and shows their original command", () => {
+    const id = "012345abcdef";
+    const sessionLine = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const readLine = 'read_file({"path":"README.md"})';
+    const messages: UIMessage[] = [{
+      id: "session-activity", role: "tool", kind: "trace", content: sessionLine,
+      traces: [sessionLine, readLine], createdAt: 1,
+      toolEvents: [
+        { name: "exec_session", call_id: "poll-1", arguments: { session_id: id }, phase: "end", result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s` },
+        { name: "read_file", call_id: "read-1", arguments: { path: "README.md" }, phase: "end" },
+        { name: "exec_session", call_id: "poll-2", arguments: { session_id: id }, phase: "end", result: "Exit code: 7\nElapsed: 2.0s" },
+      ],
+    }];
+    const commands = new Map([[id, "npm test --token secret-value"]]);
+    const { container } = render(
+      <ExecSessionCommandsContext.Provider value={commands}>
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>,
+    );
+    openLiveActivity();
+    const rows = screen.getAllByTestId("activity-step").map((row) => row.textContent);
+    expect(rows).toEqual([
+      "Command was still running at the last check npm test --token ••••",
+      "Read file README.md",
+      "Command failed (exit code 7) npm test --token ••••",
+    ]);
+    expect(container.innerHTML).not.toContain(id);
+    expect(container.innerHTML).not.toContain("secret-value");
+  });
+
+  it("preserves the order of a structured session check followed by text-only activity", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const legacy = 'read_file({"path":"later.txt"})';
+    const message: UIMessage = { id: "mixed-activity", role: "tool", kind: "trace", content: legacy,
+      traces: [line, legacy], createdAt: 1, toolEvents: [{ name: "exec_session", call_id: "check",
+        arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" }] };
+    render(<AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />);
+    openLiveActivity();
+    expect(screen.getAllByTestId("activity-step").map((row) => row.textContent)).toEqual([
+      "Command completed", "Reading file later.txt",
+    ]);
+  });
+
+  it("keeps text-only activity after every repeated structured check preceding it", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const legacy = 'read_file({"path":"later.txt"})';
+    const message: UIMessage = { id: "mixed-repeats", role: "tool", kind: "trace", content: legacy,
+      traces: [line, line, legacy], createdAt: 1, toolEvents: [
+        { name: "exec_session", call_id: "check-1", arguments: { session_id: id }, phase: "end",
+          result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s` },
+        { name: "exec_session", call_id: "check-2", arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" },
+      ] };
+    render(<AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />);
+    openLiveActivity();
+    expect(screen.getAllByTestId("activity-step").map((row) => row.textContent)).toEqual([
+      "Command was still running at the last check", "Command completed", "Reading file later.txt",
+    ]);
+  });
+
+  it("does not claim text-only session input succeeded without an observation", () => {
+    const line = 'exec_session({"session_id":"012345abcdef","input":"private-stdin"})';
+    const message: UIMessage = { id: "legacy-session", role: "tool", kind: "trace", content: line, traces: [line], createdAt: 1 };
+    const { container } = render(<AgentActivityCluster messages={[message]} isTurnStreaming={false} hasBodyBelow={false} expanded />);
+    expect(container).toHaveTextContent("Command status unknown");
+    expect(container).not.toHaveTextContent("Sent input");
+    expect(container).not.toHaveTextContent("private-stdin");
+  });
+
+  it("folds only long consecutive passive checks and lets users inspect every observation", () => {
+    const a = "012345abcdef";
+    const b = "fedcba543210";
+    const running = (id: string) => `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s`;
+    const view = (checks: number) => {
+      const events: NonNullable<UIMessage["toolEvents"]> = [
+        ...Array.from({ length: checks }, (_, index) => ({ name: "exec_session", call_id: `a-${index}`,
+          arguments: { session_id: a }, phase: "end" as const, result: running(a) })),
+        { name: "exec_session", call_id: "input", arguments: { session_id: a, input: "private" }, phase: "end", result: running(a) },
+        ...Array.from({ length: 7 }, (_, index) => ({ name: "exec_session", call_id: `b-${index}`,
+          arguments: { session_id: b }, phase: "end" as const, result: running(b) })),
+        { name: "exec_session", call_id: "failed", arguments: { session_id: b }, phase: "error", error: "query failed" },
+        { name: "exec_session", call_id: "finished", arguments: { session_id: a }, phase: "end", result: "Exit code: 0\nElapsed: 1.0s" },
+      ];
+      const message: UIMessage = { id: "many-checks", role: "tool", kind: "trace", content: "exec_session()",
+        traces: events.map((event) => `exec_session(${JSON.stringify(event.arguments)})`), toolEvents: events, createdAt: 1 };
+      return <ExecSessionCommandsContext.Provider value={new Map([[a, "test-a"], [b, "test-b"]])}>
+        <AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>;
+    };
+    const { rerender, container } = render(view(10));
+    openLiveActivity();
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(5);
+    expect(container).toHaveTextContent("Sent input test-a");
+    expect(container).toHaveTextContent("Could not check command test-b");
+    expect(container).toHaveTextContent("Command completed test-a");
+    expect(container).not.toHaveTextContent("private");
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier command checks (9)" }));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(14);
+    expect(screen.getByRole("button", { name: "Hide earlier command checks (9)" })).toHaveAttribute("aria-expanded", "true");
+    rerender(view(11));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(15);
+    fireEvent.click(screen.getByRole("button", { name: "Hide earlier command checks (10)" }));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "Show earlier command checks (6)" })).toBeInTheDocument();
+  });
+
+  it("shows a generic session label until its source command becomes available", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const messages: UIMessage[] = [{
+      id: "session-activity", role: "tool", kind: "trace", content: line, traces: [line], createdAt: 1,
+      toolEvents: [{ name: "exec_session", call_id: "poll", arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" }],
+    }];
+    const view = (commands: ReadonlyMap<string, string>) => (
+      <ExecSessionCommandsContext.Provider value={commands}>
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>
+    );
+    const { rerender, container } = render(view(new Map()));
+    expect(screen.getByText("Command completed")).toBeInTheDocument();
+    expect(container.innerHTML).not.toContain(id);
+    rerender(view(new Map([[id, "bun test"]])));
+    expect(screen.getByText("Command completed bun test")).toBeInTheDocument();
+    expect(container.innerHTML).not.toContain(id);
+  });
+
+  it.each([false, true])("honors the activity preference and manual overrides (streaming: %s)", (isTurnStreaming) => {
+    render(<AgentActivityCluster messages={activityMessages()} isTurnStreaming={isTurnStreaming} hasBodyBelow={false} />);
+    const disclosure = screen.getByRole("button", { name: /^(Working|Worked)/ });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     act(() => { writeLocalPreferences({ ...DEFAULT_LOCAL_PREFS, activityMode: "expanded" }); });
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
@@ -164,6 +296,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    openLiveActivity();
     expect(screen.getByText(`Searched files “${query}”`)).toBeInTheDocument();
     expect(screen.getByText(`Reading file ${path}`)).toBeInTheDocument();
     expect(screen.getByLabelText("Using Blender, --json --background scene.blend")).toBeInTheDocument();
@@ -292,6 +425,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    openLiveActivity();
     const block = screen.getByTestId("activity-model-message");
     await waitFor(() => expect(block.querySelector("strong")).not.toBeNull());
     expect(block.querySelector("strong")).toHaveTextContent("partial answer");
@@ -309,6 +443,7 @@ describe("AgentActivityCluster", () => {
     };
     const view = render(<AgentActivityCluster {...props} />);
     const header = screen.getByRole("button", { name: /^(Working|Worked)/ });
+    if (isTurnStreaming) fireEvent.click(header);
     const content = screen.getByTestId("agent-activity-content");
 
     expect(header).toHaveClass("h-7", "gap-1.5", "px-1.5");
@@ -350,6 +485,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    openLiveActivity();
     expect(screen.getByTestId("activity-reasoning-marker")).toHaveAttribute("data-state", "thinking");
 
     rerender(
@@ -370,8 +506,7 @@ describe("AgentActivityCluster", () => {
     await waitFor(() => expect(marker).toHaveClass("animate-in"));
   });
 
-  it("briefly shows completed activity, then auto-collapses before the answer", () => {
-    vi.useFakeTimers();
+  it("keeps untouched live details folded when work completes", () => {
     const liveReasoning: UIMessage = {
       id: "r-collapse",
       role: "assistant",
@@ -381,40 +516,25 @@ describe("AgentActivityCluster", () => {
       isStreaming: true,
       createdAt: 1,
     };
-    try {
-      const { rerender } = render(
-        <AgentActivityCluster
-          messages={[liveReasoning]}
-          isTurnStreaming
-          hasBodyBelow
-        />,
-      );
-      expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
+    const { rerender } = render(
+      <AgentActivityCluster messages={[liveReasoning]} isTurnStreaming hasBodyBelow />,
+    );
+    expect(screen.getByRole("button", { name: /^Working for / })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("latest-activity-wheel")).toHaveTextContent("checking files");
 
-      rerender(
-        <AgentActivityCluster
-          messages={[{
-            ...liveReasoning,
-            reasoningStreaming: false,
-            isStreaming: false,
-          }]}
-          isTurnStreaming={false}
-          hasBodyBelow
-        />,
-      );
-
-      expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
-      act(() => {
-        vi.advanceTimersByTime(301);
-      });
-      expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Worked" })).toHaveAttribute(
-        "aria-expanded",
-        "false",
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+    rerender(
+      <AgentActivityCluster
+        messages={[{ ...liveReasoning, reasoningStreaming: false, isStreaming: false }]}
+        isTurnStreaming={false}
+        hasBodyBelow
+      />,
+    );
+    expect(screen.queryByTestId("latest-activity-wheel")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("agent-activity-content")).not.toBeInTheDocument();
+    const disclosure = screen.getByRole("button", { name: "Worked" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(disclosure);
+    expect(screen.getByTestId("agent-activity-content")).toHaveTextContent("checking files");
   });
 
 
@@ -567,6 +687,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    openLiveActivity();
     assertBetween(screen.getByRole("img", { name: "Editing" }));
 
     rerender(
@@ -1199,6 +1320,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    openLiveActivity();
     const searchRow = screen.getByLabelText("Searched the web, nanobot architecture").closest('[data-testid="activity-step"]');
     const cliRow = screen.getByLabelText("Used Blender, --json project new").closest('[data-testid="activity-step"]');
     const fetchRow = screen.getByText("example.com/diagram").closest('[data-testid="activity-step"]');
@@ -1245,6 +1367,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    openLiveActivity();
     expect(screen.getByLabelText("Searched the web, agent frameworks")).toBeInTheDocument();
     expect(screen.queryByText("2 sources")).not.toBeInTheDocument();
 
@@ -1608,6 +1731,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    openLiveActivity();
     expect(screen.getByText("File search complete *.tsx")).toBeInTheDocument();
     expect(screen.getByText("Listed files memory")).toBeInTheDocument();
     expect(screen.getByText("Searching files “dream_cursor”")).toBeInTheDocument();
@@ -1636,6 +1760,7 @@ describe("AgentActivityCluster", () => {
     const view = render(
       <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
     );
+    openLiveActivity();
     const header = screen.getByText(/^Working for /);
     expect(header).toHaveAttribute("data-sheen-text", header.textContent);
     const tool = screen.getByText("Read file skills/weather/SKILL.md");
@@ -2180,6 +2305,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
     expect(screen.getByText("Generated image")).toBeInTheDocument();
     expect(screen.queryByRole("img", { name: "generated.png" })).not.toBeInTheDocument();
   });
@@ -2336,6 +2462,9 @@ describe("AgentActivityCluster", () => {
     expect(container.innerHTML).not.toContain("mcp-private-value");
     expect(container.innerHTML).not.toContain("sk-proj-1234567890-secret");
     expect(container.innerHTML).not.toContain("private-payload");
+    expect(container.textContent).not.toMatch(/run_cli_app\(|browser_fill\(|third_party_sync\(/);
+    openLiveActivity();
+    expect(container.innerHTML).not.toMatch(/xoxb-1234567890-secret|mcp-private-value|sk-proj-1234567890-secret|private-payload/);
     expect(container.textContent).not.toMatch(/run_cli_app\(|browser_fill\(|third_party_sync\(/);
     expect(container.textContent).toMatch(/<redacted>|••••/);
   });

@@ -23,6 +23,7 @@ function HostMenuContent({ picker, portalContainer }: { picker: HostPicker; port
 /** Mounted with the menu so every opening starts with a fresh, stable list. */
 function HostMenuItems({ picker }: { picker: HostPicker }) {
   const { t } = useTranslation();
+  useEffect(() => picker.watchDirectory?.(), [picker.watchDirectory]);
   const [searchable] = useState(() => picker.profiles.length > 5);
   const [query, setQuery] = useState("");
   const [order] = useState(() => [picker.currentId, ...picker.recentIds]);

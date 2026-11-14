@@ -25,6 +25,7 @@ import {
 } from "@/components/settings/models/ProviderSettings";
 import { providerFormFromRow } from "@/components/settings/models/providerForm";
 import { AboutSettings, AppearanceSettings, OverviewSettings } from "@/components/settings/overview/OverviewSettings";
+import { TokenUsageOverview } from "@/components/settings/TokenUsageOverview";
 import { NotificationSettings } from "@/components/settings/notifications/NotificationSettings";
 import { SettingsSidebar, standaloneSectionTitle } from "@/components/settings/SettingsSidebar";
 import {
@@ -270,6 +271,7 @@ export function SettingsPage({
             settings={settings}
             showBrandLogos={localPrefs.brandLogos}
             onSelectSection={selectSection}
+            usageCard={<TokenUsageOverview initialUsage={settings.usage} timeZone={settings.agent.timezone} />}
           />
         );
       case "about":
@@ -467,15 +469,10 @@ export function SettingsPage({
               onRestart={showSidebar ? undefined : restartViaSettingsSurface}
               isRestarting={restartInProgress}
               requiresRestartPending={pendingRestartSections.runtime}
-              apiService={systemState.apiService}
-              apiServiceLoading={systemState.apiServiceLoading}
-              apiServiceAction={systemState.apiServiceAction}
-              apiServiceError={systemState.apiServiceError}
               langfuseFeature={featureCatalog.find((feature) => feature.name === "langfuse")}
               capabilitiesLoading={systemState.nanobotFeaturesLoading}
               capabilityAction={systemState.nanobotFeatureAction}
               capabilityError={systemState.nanobotFeaturesError}
-              onApiServiceAction={systemActions.handleApiServiceAction}
               onInstallCapability={(name) => void systemActions.installCapabilities([name])}
             />
           </div>

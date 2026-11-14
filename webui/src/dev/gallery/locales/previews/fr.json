@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · Objectif",
+    "description": "Prévisualisez l’objectif et ses détails.",
+    "options": "Fournissez l’état, le résumé, l’objectif et un bilan facultatif.",
+    "state": "État",
+    "summary": "Préparer la publication",
+    "objective": "Examinez les modifications et vérifiez la publication.\n\n- Vérifier les tests\n- Relire la documentation\n- Confirmer que tout est prêt",
+    "recap": "En attente d’approbation."
+  },
   "rename": {
     "title": "RenameDialog · Renommer groupes et projets",
     "description": "Essayez le renommage des groupes et projets. Les sujets se renomment dans la liste des discussions.",

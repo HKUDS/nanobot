@@ -8,7 +8,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
 from nanobot.cli.gateway_runtime import _deliver_to_channel
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
-from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services
 
@@ -125,16 +124,12 @@ async def webui_delivery(delivery, tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("caption", ["caption", ""])
-async def test_unified_webui_media_keeps_its_display_generation(webui_delivery, caption):
+async def test_webui_media_keeps_its_display_generation(webui_delivery, caption):
     sessions, bus, tool, channel = webui_delivery
     alias = await sessions.state.get_header("websocket:chat")
-    canonical = await sessions.state.get_header(UNIFIED_SESSION_KEY)
-    tool.set_send_callback(partial(
-        _deliver_to_channel, bus=bus, session_manager=sessions, unified_session=True,
-    ))
     with request_context(RequestContext(
-        "websocket", "chat", session_key=canonical.key,
-        session_generation=canonical.generation,
+        "websocket", "chat", session_key=alias.key,
+        session_generation=alias.generation,
         metadata={HISTORY_GENERATION_METADATA_KEY: alias.generation},
     )):
         result = await tool.execute(content=caption, media=["attachment.txt"])

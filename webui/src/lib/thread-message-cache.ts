@@ -13,7 +13,7 @@ export class ThreadMessageCache extends MemoryLruCache<ThreadTranscriptSnapshot>
 
   constructor(
     isPinned: (key: string) => boolean,
-    maxBytes = 16 * 1024 * 1024,
+    maxBytes = 32 * 1024 * 1024,
     maxEntries = 12,
   ) {
     super(maxBytes, maxEntries, (key) => !isPinned(key));

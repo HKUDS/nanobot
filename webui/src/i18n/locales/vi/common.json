@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Đã lưu. Khởi động lại dịch vụ API để áp dụng thay đổi.",
       "commandRuntime": {
         "custom": "Tùy chỉnh (giây)",
         "customLabel": "Thời gian chạy tùy chỉnh (giây)",
@@ -557,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "Tiếp tục thử lại", "help": "Thử lại khi lỗi có thể khắc phục; tắt để dùng cách thử lại tiêu chuẩn.\n\nTự động thử lại khi yêu cầu gửi đến mô hình gặp lỗi tạm thời. Tắt tùy chọn này để giới hạn số lần thử lại."},
         "agents_defaults_tool_hint_max_length": {"label": "Độ dài tóm tắt", "help": "Giới hạn ký tự tóm tắt hoạt động công cụ.\n\nĐộ dài tối đa của gợi ý ngắn về hoạt động công cụ."},
         "tools_max_session_messages_per_minute": {"label": "Tần suất tin nhắn", "help": "Số tin nhắn công cụ gửi đến một phiên mỗi phút tối đa.\n\nGiới hạn tần suất công cụ gửi tin nhắn vào cuộc trò chuyện."},
-        "agents_defaults_unified_session": {"label": "Phiên dùng chung", "help": "Chia sẻ lịch sử trò chuyện của một người dùng giữa các nền tảng.\n\nDùng chung một cuộc trò chuyện cho một người dùng trên nhiều nền tảng."},
         "tools_exec_enable": {"label": "Công cụ shell", "help": "Cho phép agent chạy lệnh Shell.\n\nCho phép tác nhân chạy lệnh shell."},
         "tools_file_enable": {"label": "Công cụ tệp", "help": "Cho phép công cụ đọc và chỉnh sửa tệp tích hợp.\n\nCho phép dùng công cụ đọc và chỉnh sửa tệp tích hợp."},
         "tools_web_enable": {"label": "Truy cập web", "help": "Cho phép tìm kiếm web và đọc trang.\n\nCho phép tìm kiếm và tải nội dung trang web."},
@@ -585,8 +583,6 @@
         "gateway_host": {"label": "Địa chỉ gateway", "help": "Địa chỉ gateway; đặt địa chỉ lắng nghe WebUI riêng.\n\nĐịa chỉ gateway dùng để nhận kết nối. Địa chỉ WebSocket và WebUI được cấu hình trong Kênh → WebSocket."},
         "gateway_port": {"label": "Cổng gateway", "help": "Cổng gateway; tham số khởi chạy được ưu tiên.\n\nCổng được lưu. Tham số dòng lệnh được ưu tiên."},
         "gateway_restart_mode": {"label": "Chế độ khởi động lại", "help": "Chọn cách khởi động lại; Tự động dựa theo môi trường.\n\nCách khởi động lại tiến trình. Chế độ tự động chọn theo môi trường máy chủ."},
-        "api_host": {"label": "Địa chỉ API", "help": "Đặt khóa trước khi cho phép truy cập mạng; khởi động lại API sau thay đổi.\n\nCần khóa API khi nhận kết nối trên địa chỉ khác localhost. Đặt khóa trong Hệ thống rồi khởi động lại dịch vụ API để áp dụng thay đổi."},
-        "api_timeout": {"label": "Thời hạn API", "help": "Số giây mỗi yêu cầu API tối đa; khởi động lại để áp dụng.\n\nThời gian tối đa của yêu cầu. Khởi động lại dịch vụ API để áp dụng."},
         "tools_image_generation_save_dir": {"label": "Thư mục lưu", "help": "Đường dẫn tương đối trong thư mục media; không chuyển ảnh có sẵn.\n\nĐường dẫn tương đối trong thư mục phương tiện của nanobot. Ảnh hiện có không bị di chuyển."}
       },
       "groups": {
@@ -603,7 +599,6 @@
         "safety": {"title": "Quyền chung", "help": "Đặt giới hạn vùng làm việc, ngoại lệ mạng và cài đặt từ xa.\n\nGiới hạn không gian làm việc, mạng riêng và cài đặt từ xa."},
         "cli": {"title": "Giới hạn CLI", "help": "Đặt thời hạn cài đặt, chạy và thời gian cache danh sách.\n\nGiới hạn thời gian cài đặt, thực thi và lưu đệm danh mục."},
         "gateway": {"title": "Gateway", "help": "Đặt cách triển khai và khởi động lại."},
-        "api": {"title": "Thiết lập API", "help": "Đặt địa chỉ lắng nghe và thời hạn yêu cầu."},
         "storage": {"title": "Lưu trữ ảnh", "help": "Chọn nơi lưu ảnh được tạo."},
         "maintenance": {"title": "Sắp xếp bộ nhớ", "help": ""},
         "web": {"title": "Truy cập web", "help": ""},
@@ -714,11 +709,11 @@
       "small": "Nhỏ",
       "standard": "Tiêu chuẩn",
       "large": "Lớn",
-      "previewText": "**Một chút không gian để suy nghĩ.**\n\nCâu chữ rõ ràng, đọc thật thoải mái. Biến không gian này thành của riêng bạn.",
+      "previewText": "Câu chữ rõ ràng, đọc thật thoải mái. Biến không gian này thành của riêng bạn.",
       "previewPlaceholder": "Chúng ta nên bắt đầu từ đâu?",
       "process": "Hiển thị hoạt động",
       "processHelp": "Chọn mức độ chi tiết hiển thị khi nanobot làm việc.",
-      "autoHelp": "Hiển thị tiến độ khi đang làm việc và thu gọn khi hoàn tất.",
+      "autoHelp": "Mặc định thu gọn chi tiết và chỉ hiện hoạt động mới nhất khi đang làm việc.",
       "expandedHelp": "Mặc định mở rộng chi tiết hoạt động.",
       "summaryHelp": "Hiển thị các tệp đã thay đổi và số dòng.",
       "diffHelp": "Hiển thị thay đổi mã ngay trong cuộc trò chuyện.",
@@ -835,6 +830,7 @@
       "unixSocket": "Socket Unix",
       "defaultWorkspace": "Không gian làm việc mặc định",
       "auto": "Tự động",
+      "collapsed": "Thu gọn",
       "expanded": "Mở rộng",
       "default": "Mặc định",
       "summary": "Tóm tắt",
@@ -940,18 +936,19 @@
       "shortTitle": "Mức dùng token",
       "viewDetails": "Xem chi tiết",
       "cacheHitRate": "Tỷ lệ trúng bộ nhớ đệm",
-      "cacheRateHelp": "Tỷ lệ không tính đầu vào có trạng thái bộ nhớ đệm không rõ.",
       "dailyTrend": "Token mỗi ngày",
       "systemHelp": "Gồm tác vụ nội bộ và lệnh gọi chưa ghi nguồn.",
       "bySource": "Mức dùng theo nguồn",
       "modelTrend": "Xu hướng mô hình",
       "modelsUnavailable": "Chưa có chi tiết theo mô hình.",
-      "otherModels": "Khác / chưa phân loại",
+      "otherModels": "Mô hình khác",
       "unclassified": "Chưa phân loại",
       "unavailable": "Không có dữ liệu sử dụng.",
       "noActivity": "Không có token nào được sử dụng trong 30 ngày qua.",
+      "last30Days": "30 ngày qua",
       "cachedInput": "Đầu vào có trong bộ nhớ đệm",
       "cacheMiss": "Không khớp cache",
+      "cacheWrite": "Ghi bộ nhớ đệm",
       "cacheUnknown": "Trạng thái chưa rõ",
       "outputTokens": "Đầu ra",
       "otherTokens": "Token khác",
@@ -964,7 +961,9 @@
         "cron": "Tự động hóa",
         "dream": "Sắp xếp bộ nhớ",
         "system": "Lượt gọi phụ trợ"
-      }
+      },
+      "failedRequests": "{{count}} lần lỗi",
+      "estimatedShare": "{{percent}} token là ước tính"
     },
     "providers": {
       "manageProviders": "Quản lý nhà cung cấp",
@@ -1062,6 +1061,8 @@
       "contextWindowError": "Nhập số lượng token dương, chẳng hạn 200k, 1m hoặc 131072.",
       "maxTokens": "Token đầu ra tối đa",
       "temperature": "Nhiệt độ",
+      "imageInput": "Đầu vào hình ảnh",
+      "imageInputHelp": "Khi tắt, yêu cầu chứa hình ảnh sẽ bỏ qua cấu hình này.",
       "reasoningEffort": "Mức suy luận",
       "convertTitle": "Chuyển thiết lập",
       "convertHelp": "Chuyển mô hình chính và dự phòng thành bộ thiết lập.",
@@ -1237,15 +1238,6 @@
         "github": "Quản lý kho mã, issue và PR.",
         "supabase": "Xem và quản lý dự án."
       }
-    },
-    "api": {
-      "title": "Máy chủ API", "openaiCompatible": "API tương thích OpenAI", "description": "Kết nối qua API tương thích OpenAI.",
-      "start": "Khởi động API", "starting": "Đang khởi động...", "stop": "Dừng", "stopping": "Đang dừng...",
-      "access": "Truy cập", "thisDevice": "Thiết bị này", "localNetwork": "Mạng nội bộ",
-      "localHelp": "Chỉ thiết bị này có thể kết nối.", "networkHelp": "Truy cập LAN cần khóa API.\n\nThiết bị khác có thể kết nối; cần khóa API.",
-      "port": "Cổng", "portHelp": "Cổng cục bộ dịch vụ API sử dụng.", "apiKey": "Khóa API", "apiKeyHelp": "Gửi khóa dưới dạng Bearer Token.",
-      "apiKeyRequired": "Bắt buộc trước khi mở API ra mạng.", "apiKeyPlaceholder": "Nhập khóa API",
-      "autoInstall": "Các gói cần thiết cho máy chủ API sẽ được cài tự động khi khởi động."
     },
     "observability": {
       "title": "Theo dõi chạy", "configured": "nanobot đã có thông tin xác thực để ghi lại quá trình xử lý.",
@@ -1811,8 +1803,6 @@
       },
       "interruptedHelp": "Máy chủ khởi động lại trước khi tác vụ hoàn thành. Tác vụ không tự động chạy lại.",
       "workTitle": "Tác vụ con",
-      "otherWorkTitle": "Tác vụ khác",
-      "unlinkedHelp": "Không tìm thấy yêu cầu tương ứng với các tác vụ này trong tin nhắn đang hiển thị.",
       "progress": "Hoàn thành {{completed}} / {{total}}",
       "running": "Đang chạy: {{count}}",
       "finished": "Đã kết thúc: {{count}}",
@@ -1854,12 +1844,6 @@
     },
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {
-      "greetings": {
-        "workOn": "Mình cùng làm gì tiếp?",
-        "start": "Hôm nay bắt đầu từ đâu?",
-        "build": "Hôm nay mình xây dựng gì?",
-        "tackle": "Mình cùng xử lý việc gì?"
-      },
       "quickActions": {
         "plan": {
           "title": "Lập kế hoạch",
@@ -1952,8 +1936,11 @@
       "goalStateStrip": "Mục tiêu: {{label}}",
       "goalStateFallback": "Mục tiêu",
       "goalStateExpandAria": "Xem đầy đủ mục tiêu",
+      "goalBlocked": "Bị chặn",
       "goalStateSheetTitle": "Mục tiêu",
-      "goalStateCloseAria": "Đóng mục tiêu",
+      "cancelGoal": "Hủy mục tiêu",
+      "cancelGoalFailed": "Không thể hủy mục tiêu. Hãy thử lại.",
+      "cancelGoalOffline": "Kết nối lại để hủy mục tiêu.",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
       "quotedContext": "Ngữ cảnh được trích dẫn",
@@ -2067,10 +2054,6 @@
             "title": "Mô hình",
             "description": "Xem hoặc đổi bộ thiết lập mô hình hiện tại."
           },
-          "history": {
-            "title": "Lịch sử trò chuyện",
-            "description": "Hiện N tin nhắn đã lưu gần nhất."
-          },
           "dream": {
             "title": "Chạy Dream",
             "description": "Sắp xếp bộ nhớ ngay."
@@ -2090,6 +2073,10 @@
           "goal": {
             "title": "Mục tiêu dài hạn",
             "description": "Để trợ lý tiếp tục làm việc hướng đến mục tiêu này."
+          },
+          "cancel_goal": {
+            "title": "Hủy mục tiêu",
+            "description": "Hủy mục tiêu đang chạy hoặc bị chặn trong cuộc trò chuyện này."
           },
           "trigger": {
             "title": "Kích hoạt CLI",
@@ -2111,7 +2098,6 @@
         "details": {
           "goalActive": "Mục tiêu đang chạy",
           "goalReady": "Bắt đầu mục tiêu duy trì",
-          "history": "Hiển thị tin nhắn gần đây",
           "stopRunning": "Đang chạy"
         }
       },
@@ -2288,11 +2274,37 @@
       "updatedLongTask": "Đã cập nhật tác vụ dài",
       "updateLongTaskFailed": "Không thể cập nhật tác vụ dài",
       "continuingCommand": "Đang tiếp tục lệnh",
+      "waitingCommandResult": "Đang chờ kết quả lệnh",
+      "waitingCommandOutput": "Đang chờ đầu ra của lệnh",
+      "sendingCommandInput": "Đang gửi dữ liệu đầu vào",
+      "closingCommandInput": "Đang đóng đầu vào của lệnh",
+      "sendingClosingInput": "Đang gửi và đóng đầu vào của lệnh",
+      "stoppingCommand": "Đang dừng lệnh",
+      "commandStatusUnknown": "Không rõ trạng thái lệnh",
+      "commandWasRunning": "Lệnh vẫn đang chạy tại lần kiểm tra gần nhất",
+      "commandWaitTimedOut": "Hết thời gian chờ; lệnh vẫn đang chạy tại lần kiểm tra gần nhất",
+      "commandWasStopping": "Tại lần kiểm tra gần nhất, lệnh đang trong quá trình dừng",
+      "commandCompleted": "Lệnh đã hoàn tất",
+      "commandExitFailed": "Lệnh thất bại (mã thoát {{code}})",
+      "commandExited": "Lệnh đã kết thúc (mã thoát {{code}})",
+      "commandTimedOut": "Lệnh đã bị dừng do hết thời gian",
+      "commandIdleTimedOut": "Lệnh bị dừng sau một khoảng thời gian không có đầu ra",
+      "commandCheckedUnknown": "Đã kiểm tra lệnh; không rõ trạng thái",
+      "stopCommandError": "Không thể dừng lệnh",
+      "sendCloseInputError": "Không thể gửi hoặc đóng đầu vào của lệnh",
+      "sendInputError": "Không thể gửi dữ liệu đầu vào",
+      "closeInputError": "Không thể đóng đầu vào của lệnh",
+      "checkCommandError": "Không thể kiểm tra lệnh",
+      "sentClosedInput": "Đã gửi và đóng đầu vào của lệnh",
+      "sentCommandInput": "Đã gửi dữ liệu đầu vào",
+      "closedCommandInput": "Đã đóng đầu vào của lệnh",
       "continuedCommand": "Đã tiếp tục lệnh",
       "continueCommandFailed": "Không thể tiếp tục lệnh",
       "checkingRunningCommands": "Đang kiểm tra lệnh đang chạy",
       "checkedRunningCommands": "Đã kiểm tra lệnh đang chạy",
       "checkRunningCommandsFailed": "Không thể kiểm tra lệnh đang chạy",
+      "showEarlierCommandChecks": "Hiển thị các lần kiểm tra lệnh trước đó ({{count}})",
+      "hideEarlierCommandChecks": "Ẩn các lần kiểm tra lệnh trước đó ({{count}})",
       "capturingScreenshot": "Đang chụp màn hình",
       "capturedScreenshot": "Đã chụp màn hình",
       "captureScreenshotFailed": "Không thể chụp màn hình",

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import pytest
 
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
+from nanobot.execution.files import WritableFile
 
 
 def test_apply_patch_edits_replace(tmp_path):
@@ -139,6 +139,24 @@ def test_apply_patch_edits_add_to_existing_crlf_file_without_final_newline(tmp_p
 
     assert "update notes.txt" in result
     assert target.read_bytes() == b"alpha\r\nbravo\r\ncharlie\r\n"
+
+
+@pytest.mark.parametrize("original", [None, b"", b"alpha\r\nbravo"], ids=["new", "empty", "crlf"])
+def test_apply_patch_replaces_text_from_an_earlier_edit_in_the_batch(tmp_path, original):
+    target = tmp_path / "notes.txt"
+    if original is not None:
+        target.write_bytes(original)
+    tool = ApplyPatchTool(workspace=tmp_path)
+
+    result = asyncio.run(tool.execute(edits=[
+        {"path": "notes.txt", "action": "add", "new_text": "charlie"},
+        {"path": "./notes.txt", "action": "replace", "old_text": "charlie", "new_text": "delta"},
+    ]))
+
+    assert result.startswith("Patch applied:\n")
+    assert result.count("notes.txt") == 1
+    assert f"{'add' if original is None else 'update'} notes.txt" in result
+    assert target.read_bytes() == (b"alpha\r\nbravo\r\ndelta\r\n" if original else b"delta\n")
 
 
 def test_apply_patch_rejects_delete_action(tmp_path):
@@ -356,7 +374,7 @@ def test_apply_patch_media_dir_is_read_only_by_default(tmp_path, monkeypatch):
     media.mkdir()
     target = media / "demo.md"
     target.write_text("before\n", encoding="utf-8")
-    monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
     tool = ApplyPatchTool(workspace=workspace, allowed_dir=workspace)
 
     result = asyncio.run(
@@ -454,18 +472,17 @@ def test_apply_patch_edits_rolls_back_when_later_write_fails(tmp_path, monkeypat
     second_original = b"before\r\nsecond tail"
     second.write_bytes(second_original)
     tool = ApplyPatchTool(workspace=tmp_path)
-    write_text = Path.write_text
+    write = WritableFile.write
     failed = False
 
-    def _fail_second_write(path, *args, **kwargs):
+    def _fail_second_write(target, *args, **kwargs):
         nonlocal failed
-        written = write_text(path, *args, **kwargs)
-        if path == second and not failed:
+        write(target, *args, **kwargs)
+        if target.path == second.resolve() and not failed:
             failed = True
             raise OSError("injected second write failure")
-        return written
 
-    monkeypatch.setattr(Path, "write_text", _fail_second_write)
+    monkeypatch.setattr(WritableFile, "write", _fail_second_write)
 
     result = asyncio.run(
         tool.execute(

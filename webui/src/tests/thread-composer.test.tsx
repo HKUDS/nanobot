@@ -50,9 +50,9 @@ const COMMANDS: SlashCommand[] = [
     acceptsArgs: false,
   },
   {
-    command: "/history",
-    title: "Show conversation history",
-    description: "Print the last N persisted messages.",
+    command: "/inspect",
+    title: "Inspect session",
+    description: "Inspect a session.",
     icon: "history",
     argHint: "[n]",
     lifecycle: "side_channel",
@@ -490,13 +490,13 @@ describe("ThreadComposer", () => {
 
     const input = screen.getByLabelText("Message input");
     fireEvent.change(input, { target: { value: "/" } });
-    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /\/inspect/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(input).toHaveValue("/history ");
+    expect(input).toHaveValue("/inspect ");
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -1697,87 +1697,6 @@ describe("ThreadComposer", () => {
   });
 
 
-  it("closes the sustained goal through its existing drawer", () => {
-    const { container, rerender } = render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        goalState={{
-          active: true,
-          objective: "Ship the release",
-          ui_summary: "Preparing release",
-        }}
-      />,
-    );
-
-    const drawer = container.querySelector("[data-composer-status-drawer]");
-    expect(drawer).not.toBeNull();
-    expect(drawer).toHaveAttribute("data-state", "open");
-    expect(drawer).not.toHaveAttribute("aria-hidden");
-    const status = screen.getByRole("status");
-    expect(status).toHaveClass("composer-status-drawer-content");
-
-    rerender(
-      <ThreadComposer
-        onSend={vi.fn()}
-        placeholder="Type your message..."
-        goalState={{ active: false }}
-      />,
-    );
-
-    expect(container.querySelector("[data-composer-status-drawer]")).toBe(drawer);
-    expect(drawer).toHaveAttribute("data-state", "closed");
-    expect(drawer).toHaveAttribute("aria-hidden", "true");
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(drawer?.querySelector('[role="status"]')).toBe(status);
-
-    fireEvent.transitionEnd(drawer as Element, { propertyName: "grid-template-rows" });
-    expect(container.querySelector("[data-composer-status-drawer]")).toBeNull();
-  });
-
-  it("shows full goal content and dismisses it without losing the composer draft", async () => {
-    const user = userEvent.setup();
-    const longObjective =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz0123456789GoalTail";
-    render(
-      <ThreadComposer
-        onSend={vi.fn()}
-        persistDraft={false}
-        placeholder="Type your message..."
-        goalState={{
-          active: true,
-          objective: longObjective,
-          ui_summary: "Short summary for strip",
-        }}
-      />,
-    );
-
-    const input = screen.getByRole("textbox", { name: "Message input" });
-    const trigger = screen.getByRole("button", { name: "Show full goal" });
-    await user.type(input, "Keep my draft");
-    await user.click(trigger);
-
-    const dialog = await screen.findByRole("dialog", { name: "Goal" });
-    expect(dialog).toHaveTextContent("Short summary for strip");
-    expect(dialog).toHaveTextContent(longObjective);
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-
-    await user.click(trigger);
-    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
-
-    await user.click(trigger);
-    expect(await screen.findByRole("dialog", { name: "Goal" })).toBeVisible();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
-
-    await user.click(trigger);
-    expect(await screen.findByRole("dialog", { name: "Goal" })).toBeVisible();
-    await user.click(input);
-    expect(screen.queryByRole("dialog", { name: "Goal" })).not.toBeInTheDocument();
-    expect(input).toHaveValue("Keep my draft");
-  });
-
   it("opens a slash command palette and inserts the selected command", () => {
     const onSend = vi.fn();
     render(
@@ -1795,15 +1714,15 @@ describe("ThreadComposer", () => {
     expect(palette).toBeInTheDocument();
     expect(palette).toHaveStyle({ maxHeight: "288px" });
     expect(screen.queryByRole("option", { name: /\/stop/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /\/inspect/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     fireEvent.keyDown(input, { key: "Enter" });
 
-    expect(input).toHaveValue("/history ");
-    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
-    expect(input.previousElementSibling?.textContent).toBe("/history ");
+    expect(input).toHaveValue("/inspect ");
+    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/inspect");
+    expect(input.previousElementSibling?.textContent).toBe("/inspect ");
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
   });
@@ -1888,7 +1807,7 @@ describe("ThreadComposer", () => {
   });
 
   it("orders recent slash commands first for the blank slash menu", () => {
-    window.localStorage.setItem("nanobot.webui.slashCommandRecents", JSON.stringify(["/history"]));
+    window.localStorage.setItem("nanobot.webui.slashCommandRecents", JSON.stringify(["/inspect"]));
     render(
       <ThreadComposer
         onSend={vi.fn()}
@@ -1901,7 +1820,7 @@ describe("ThreadComposer", () => {
       target: { value: "/" },
     });
 
-    expect(screen.getByRole("option", { name: /\/history/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /\/inspect/i })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -2500,12 +2419,12 @@ describe("ThreadComposer", () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} slashCommands={COMMANDS} />);
     const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
-    const text = "/history $workflow 中文 English";
+    const text = "/inspect $workflow 中文 English";
     fireEvent.change(input, { target: { value: text, selectionStart: text.length } });
 
     const command = screen.getByTestId("composer-slash-command");
     const skill = screen.getByTestId("composer-skill-reference-workflow");
-    expect(command).toHaveTextContent("/history");
+    expect(command).toHaveTextContent("/inspect");
     expect(command.className).toBe(skill.className);
     expect(command.getAttribute("style")).toBe(skill.getAttribute("style"));
     expect(input.previousElementSibling).toHaveAttribute("aria-hidden", "true");
@@ -2514,15 +2433,15 @@ describe("ThreadComposer", () => {
     input.setSelectionRange(1, 4);
     const setData = vi.fn();
     fireEvent.copy(input, { clipboardData: { setData } });
-    expect(setData).toHaveBeenCalledWith("text/plain", "his");
+    expect(setData).toHaveBeenCalledWith("text/plain", "ins");
     fireEvent.cut(input, { clipboardData: { setData } });
-    expect(input).toHaveValue("/tory $workflow 中文 English");
+    expect(input).toHaveValue("/pect $workflow 中文 English");
     expect(screen.queryByTestId("composer-slash-command")).not.toBeInTheDocument();
     fireEvent.keyDown(input, { key: "z", ctrlKey: true });
     expect(input).toHaveValue(text);
     expect(input.selectionStart).toBe(1);
     expect(input.selectionEnd).toBe(4);
-    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
+    expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/inspect");
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(onSend).toHaveBeenCalledWith(text, undefined, { sideChannel: true });
@@ -2576,14 +2495,14 @@ describe("ThreadComposer", () => {
     expect(onSend).toHaveBeenCalledWith(command.trim(), undefined, { sideChannel: true, userShell: true });
   });
 
-  it.each(["", "/history "])("mirrors inline references during composition without submitting the IME confirmation: %s", (prefix) => {
+  it.each(["", "/inspect "])("mirrors inline references during composition without submitting the IME confirmation: %s", (prefix) => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} slashCommands={COMMANDS} />);
     const input = screen.getByLabelText("Message input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: `${prefix}$workflow ` } });
     fireEvent.compositionStart(input);
     fireEvent.change(input, { target: { value: `${prefix}$workflow zhong` } });
-    if (prefix) expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/history");
+    if (prefix) expect(screen.getByTestId("composer-slash-command")).toHaveTextContent("/inspect");
     expect(screen.getByTestId("composer-skill-reference-workflow")).toHaveTextContent(/^\$workflow$/);
     expect(input.previousElementSibling?.textContent).toBe(input.value);
     expect(input.previousElementSibling).toHaveClass("z-20");
@@ -3318,10 +3237,10 @@ describe("ThreadComposer", () => {
     );
 
     const input = screen.getByLabelText("Message input");
-    fireEvent.change(input, { target: { value: "/history" } });
+    fireEvent.change(input, { target: { value: "/inspect" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith("/history", undefined, { sideChannel: true });
+    expect(onSend).toHaveBeenCalledWith("/inspect", undefined, { sideChannel: true });
   });
 
   it("does not infer side-channel behavior before command metadata loads", () => {
@@ -3578,10 +3497,10 @@ describe("ThreadComposer", () => {
   it("does not mark side-channel commands as guidance during an active turn", () => {
     const onSend = vi.fn();
     render(<ThreadComposer onSend={onSend} onStop={vi.fn()} isStreaming slashCommands={COMMANDS} />);
-    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/history 5" } });
+    fireEvent.change(screen.getByLabelText("Message input"), { target: { value: "/inspect 5" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
-    expect(onSend).toHaveBeenCalledWith("/history 5", undefined, { sideChannel: true });
+    expect(onSend).toHaveBeenCalledWith("/inspect 5", undefined, { sideChannel: true });
   });
 
   it("keeps Stop available while a draft attachment is encoding", () => {
@@ -3655,7 +3574,7 @@ describe("ThreadComposer", () => {
     },
   );
 
-  it.each(["/history 5", "/stop now", "/STOP@nanobot now"])(
+  it.each(["/inspect 5", "/stop now", "/STOP@nanobot now"])(
     "sends registered command %s to the gateway without queuing it",
     (content) => {
       const onSend = vi.fn();

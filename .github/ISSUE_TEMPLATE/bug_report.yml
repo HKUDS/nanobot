@@ -76,7 +76,7 @@ body:
     attributes:
       label: Channel / Platform
       description: Which messaging platform are you using?
-      placeholder: e.g., WebSocket, Telegram, Feishu (Lark), API Server
+      placeholder: e.g., WebSocket, Telegram, Feishu (Lark)
     validations:
       required: true
 

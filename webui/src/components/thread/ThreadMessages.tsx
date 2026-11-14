@@ -15,7 +15,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { fmtDateTime, formatMessageHoverTime } from "@/lib/format-time";
-import { projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { leadingDisplayNoopCount, projectActivityTimeline, type TurnUnit } from "@/lib/activity-timeline";
+import { filterThreadDisplayUnits } from "@/lib/thread-display-projection";
+import { withoutSubagentCreateActivity } from "@/lib/subagent-create-activity";
 import { cn } from "@/lib/utils";
 import type { CliAppInfo, McpPresetInfo, RetryStatus, SlashCommand, UIMessage } from "@/lib/types";
 
@@ -107,14 +109,13 @@ export function ThreadMessages({
   const { activityMode } = useLocalPreferences();
   const messageListRef = useRef<HTMLDivElement>(null);
   const mobileActions = useMediaQuery("(max-width: 767px)");
-  const units = useMemo(
-    () => buildDisplayUnits(messages),
-    [messages],
-  );
-  const forkBoundaryAfterUnitIndex = useMemo(
-    () => unitIndexAfterMessageCount(units, forkBoundaryMessageCount),
-    [forkBoundaryMessageCount, units],
-  );
+  const rawUnits = useMemo(() => buildDisplayUnits(messages), [messages]);
+  const units = useMemo(() => filterThreadDisplayUnits(rawUnits), [rawUnits]);
+  const forkBoundaryAfterUnitIndex = useMemo(() => {
+    if (forkBoundaryMessageCount != null && forkBoundaryMessageCount > 0
+      && forkBoundaryMessageCount <= leadingDisplayNoopCount(messages)) return -1;
+    return unitIndexAfterMessageCount(units, forkBoundaryMessageCount);
+  }, [forkBoundaryMessageCount, messages, units]);
   const forkFlags = useMemo(() => assistantForkFlags(units), [units]);
   const liveActivityClusterIndices = useMemo(
     () => isStreaming
@@ -135,7 +136,8 @@ export function ThreadMessages({
   const currentTurnStartIndex = isStreaming
     ? activeTurnStartIndex(units, activeTurnId)
     : units.length;
-  const unitKeys = useMemo(() => unitKeysForDisplay(units), [units]);
+  const unitKeys = useMemo(() => unitKeysForDisplay(rawUnits), [rawUnits]);
+  const scrollAnchors = useMemo(() => scrollAnchorsForUnits(rawUnits), [rawUnits]);
   const messageBlocks = useMemo(
     () => completedMessageBlocks(
       units,
@@ -247,10 +249,14 @@ export function ThreadMessages({
         const prelude = index === preludeIndex ? renderPrelude(prefix, marginTop) : null;
         return [
           prelude,
+          index === 0 && forkBoundaryAfterUnitIndex === -1
+            ? <ForkBoundaryDivider key="leading-fork-boundary" label={t("thread.forkedFromHistory")} />
+            : null,
           <Fragment key={`unit:${unitKeys[index]}`}>
           <ThreadDisplayUnit
             key={unitKeys[index]}
             unitKey={unitKeys[index]}
+            scrollAnchor={scrollAnchors[index]}
             unit={unit}
             mobileActions={mobileActions}
             marginTop={prelude ? "" : marginTop}
@@ -268,6 +274,7 @@ export function ThreadMessages({
             contextBlockMenuOpen={contextBlockKey === openContextBlockKey}
             deferOffscreenRender={deferOffscreenRender}
             isTurnStreaming={unitTurnStreaming}
+            runStartedAtMs={unit.type === "activity" && unitTurnStreaming && runStartedAt != null ? runStartedAt * 1000 : undefined}
             retryStatus={
               unit.type === "activity" && liveActivityClusterIndices.has(index)
                 ? retryStatus
@@ -335,23 +342,25 @@ function pendingTurnProjection(
       break;
     }
   }
-  if (promptIndex < 0) return null;
+  if (promptIndex < 0 && activeTurnId === null) return null;
 
   const prompt = messages[promptIndex];
   const hasVisibleOutput = messages.slice(promptIndex + 1).some((message) => {
     if (message.role === "user") return false;
-    if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false;
-    return (
-      message.content.trim().length > 0
-      || !!message.reasoning?.trim()
-      || !!message.reasoningStreaming
-      || message.kind === "trace"
-      || !!message.media?.length
+    // Assistant-only runs have no prompt boundary; only their own turn's rows count.
+    if (activeTurnId && (message.turnId ? message.turnId !== activeTurnId : promptIndex < 0)) return false;
+    const visible = withoutSubagentCreateActivity(message);
+    return visible !== null && (
+      visible.content.trim().length > 0
+      || !!visible.reasoning?.trim()
+      || !!visible.reasoningStreaming
+      || visible.kind === "trace"
+      || !!visible.media?.length
     );
   });
 
   return {
-    ...(typeof prompt.createdAt === "number" && Number.isFinite(prompt.createdAt)
+    ...(typeof prompt?.createdAt === "number" && Number.isFinite(prompt.createdAt)
       ? { startedAtMs: prompt.createdAt }
       : {}),
     hasVisibleOutput,
@@ -361,6 +370,7 @@ function pendingTurnProjection(
 interface ThreadDisplayUnitProps {
   mobileActions: boolean;
   unitKey: string;
+  scrollAnchor: ScrollAnchorIdentity;
   unit: DisplayUnit;
   marginTop: string;
   userPromptId?: string;
@@ -374,6 +384,7 @@ interface ThreadDisplayUnitProps {
   contextBlockMenuOpen: boolean;
   deferOffscreenRender: boolean;
   isTurnStreaming: boolean;
+  runStartedAtMs?: number;
   retryStatus: RetryStatus | null;
   forkIndex?: number;
   showForkBoundary: boolean;
@@ -562,6 +573,7 @@ function MessageBlockMenu({
 const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   mobileActions,
   unitKey,
+  scrollAnchor,
   unit,
   marginTop,
   userPromptId,
@@ -575,6 +587,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
   contextBlockMenuOpen,
   deferOffscreenRender,
   isTurnStreaming,
+  runStartedAtMs,
   retryStatus,
   forkIndex,
   showForkBoundary,
@@ -686,6 +699,8 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
           onContextBlockActiveChange(contextBlockKey ?? null);
         }}
         data-thread-display-unit={unitKey}
+        data-thread-scroll-sources={scrollAnchor.sources}
+        data-thread-scroll-fallback={scrollAnchor.fallback}
         data-user-prompt-id={userPromptId}
         data-message-context-block={contextBlockKey}
         data-context-block-active={contextBlockActive || undefined}
@@ -714,7 +729,7 @@ const ThreadDisplayUnit = memo(function ThreadDisplayUnit({
               retryStatus={retryStatus}
               hasBodyBelow={hasBodyBelow}
               turnLatencyMs={unit.turnLatencyMs}
-              startedAtMs={unit.startedAtMs}
+              startedAtMs={unit.startedAtMs ?? (isTurnStreaming ? runStartedAtMs : undefined)}
               cliApps={cliApps}
               mcpPresets={mcpPresets}
               traceDetailScope={traceDetailScope}
@@ -778,6 +793,8 @@ function threadDisplayUnitPropsEqual(
 ): boolean {
   return (
     displayUnitsEqual(previous.unit, next.unit)
+    && previous.scrollAnchor.sources === next.scrollAnchor.sources
+    && previous.scrollAnchor.fallback === next.scrollAnchor.fallback
     && previous.mobileActions === next.mobileActions
     && previous.marginTop === next.marginTop
     && previous.userPromptId === next.userPromptId
@@ -791,6 +808,7 @@ function threadDisplayUnitPropsEqual(
     && previous.contextBlockMenuOpen === next.contextBlockMenuOpen
     && previous.deferOffscreenRender === next.deferOffscreenRender
     && previous.isTurnStreaming === next.isTurnStreaming
+    && previous.runStartedAtMs === next.runStartedAtMs
     && previous.retryStatus === next.retryStatus
     && previous.forkIndex === next.forkIndex
     && previous.showForkBoundary === next.showForkBoundary
@@ -911,7 +929,10 @@ function currentActivityClusterIndices(
   let markedCurrentActivity = false;
   for (let i = units.length - 1; i >= 0; i -= 1) {
     const unit = units[i];
+    const turnId = displayUnitTurnId(unit);
+    if (activeTurnId && turnId && turnId !== activeTurnId) break;
     if (unit.type === "activity") {
+      if (!unit.messages.length) continue;
       if (!markedCurrentActivity) {
         indices.add(i);
         markedCurrentActivity = true;
@@ -933,6 +954,46 @@ export function unitKeysForDisplay(units: DisplayUnit[]): string[] {
     occurrences.set(base, next);
     return base.endsWith("-user") && next === 1 ? base : `${base}-${next}`;
   });
+}
+
+interface ScrollAnchorIdentity {
+  sources: string;
+  fallback?: string;
+}
+
+function scrollAnchorsForUnits(units: DisplayUnit[]): ScrollAnchorIdentity[] {
+  const sourceKeys = units.map((unit) => {
+    const messages = unit.type === "message" ? [unit.message] : unit.messages;
+    // Either edge of an activity cluster can survive when the other grows.
+    const edges = messages.length > 1 ? [messages[0], messages[messages.length - 1]] : messages;
+    const streams: string[] = [];
+    const sequences: string[] = [];
+    const ids: string[] = [];
+    for (const message of edges) {
+      const stream = unit.type === "message" ? message.streamId : message.reasoningStreamId;
+      if (message.turnId && stream) streams.push(JSON.stringify([unit.type, "stream", message.turnId, stream]));
+      const sequence = message.projectionStartSeq ?? message.turnSeq;
+      if (message.turnId && Number.isFinite(sequence)) {
+        sequences.push(JSON.stringify([unit.type, "sequence", message.turnId, sequence]));
+      }
+      ids.push(JSON.stringify([unit.type, "id", message.id]));
+    }
+    return [...new Set([...streams, ...sequences, ...ids])];
+  });
+  const sourceCounts = new Map<string, number>();
+  const bases = units.map(unitKeyBase);
+  const baseCounts = new Map<string, number>();
+  for (const sources of sourceKeys) for (const source of sources) {
+    sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + 1);
+  }
+  for (const base of bases) baseCounts.set(base, (baseCounts.get(base) ?? 0) + 1);
+  return sourceKeys.map((sources, index) => ({
+    sources: JSON.stringify(sources.filter((source) => sourceCounts.get(source) === 1)),
+    // A sole turn/phase row can keep its live identity when replay replaces
+    // both its source id and sequence. Occurrence keys are unsafe otherwise.
+    ...(bases[index].startsWith("turn-") && baseCounts.get(bases[index]) === 1
+      ? { fallback: bases[index] } : {}),
+  }));
 }
 
 function unitKeyBase(unit: DisplayUnit, index: number): string {
@@ -998,7 +1059,8 @@ function completedMessageBlocks(
   const result: CompletedMessageBlocks = {
     blockKeys: new Array<string | undefined>(units.length),
     blockIndices: new Set<number>(),
-    suppressedActivityIndices: new Set<number>(),
+    suppressedActivityIndices: new Set(units.flatMap((unit, index) =>
+      unit.type === "activity" && !unit.messages.length ? [index] : [])),
     activityByBlock: new Map(),
   };
   let groupStart = 0;
@@ -1029,7 +1091,7 @@ function completedMessageBlocks(
     const activityByBlock = new Map<number, Array<Extract<DisplayUnit, { type: "activity" }>>>();
     for (const index of indices) {
       const unit = units[index];
-      if (unit.type !== "activity") continue;
+      if (unit.type !== "activity" || !unit.messages.length) continue;
       const blockIndex = blockIndices.find((candidate) => candidate > index) ?? blockIndices.at(-1);
       if (blockIndex === undefined) continue;
       result.suppressedActivityIndices.add(index);

@@ -1,0 +1,41 @@
+.thread-welcome-mark {
+  position: absolute;
+  bottom: -3rem;
+  left: 50%;
+  /* 94.76cqw is the height of the 783:742 mark at its container's width. */
+  height: min(19.9rem, calc(100% + 3rem), 66.3vw, 94.76cqw);
+  aspect-ratio: 783 / 742;
+  pointer-events: none;
+  transform: translateX(-50%);
+  mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 0.8) 32%, rgb(0 0 0 / 0.28) 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 0.8) 32%, rgb(0 0 0 / 0.28) 70%, transparent 100%);
+}
+
+.thread-welcome-mark__fill,
+.thread-welcome-mark__focus {
+  position: absolute;
+  inset: 0;
+}
+
+.thread-welcome-mark__fill {
+  background: url('/brand/nanobot_mark.svg') center / calc(100% * 759 / 783) auto no-repeat;
+  filter: grayscale(1);
+  opacity: 0.06;
+}
+
+.thread-welcome-mark__focus {
+  mask: url('/brand/nanobot_mark_outline.svg') center / contain no-repeat;
+  -webkit-mask: url('/brand/nanobot_mark_outline.svg') center / contain no-repeat;
+  background: radial-gradient(circle 12rem at var(--mark-x, -200px) var(--mark-y, -200px), hsl(0 0% 25% / 0.06), hsl(0 0% 25% / 0.02) 50%, transparent 100%);
+  opacity: var(--mark-active, 0);
+  transition: opacity 600ms ease;
+}
+
+.dark .thread-welcome-mark__fill { opacity: 0.05; }
+.dark .thread-welcome-mark__focus {
+  background: radial-gradient(circle 12rem at var(--mark-x, -200px) var(--mark-y, -200px), hsl(0 0% 100% / 0.05), hsl(0 0% 100% / 0.016) 50%, transparent 100%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-welcome-mark__focus { transition: none; }
+}

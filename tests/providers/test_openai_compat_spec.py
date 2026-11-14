@@ -1784,7 +1784,7 @@ def test_deepseek_vision_preserves_multimodal_content(
 
 
 @pytest.mark.parametrize("responses", [False, True])
-def test_deepseek_pro_remains_text_only(responses: bool) -> None:
+def test_deepseek_text_coercion_preserves_image_content(responses: bool) -> None:
     provider = OpenAICompatProvider(
         api_key="k", default_model="deepseek-v4-pro", spec=find_by_name("deepseek"),
     )
@@ -1799,10 +1799,16 @@ def test_deepseek_pro_remains_text_only(responses: bool) -> None:
     )
     if responses:
         assert body["input"] == [{
-            "role": "user", "content": [{"type": "input_text", "text": "describe the image"}],
+            "role": "user", "content": [
+                {"type": "input_text", "text": "describe the image"},
+                {"type": "input_image", "image_url": "data:image/png;base64,AA==", "detail": "auto"},
+            ],
         }]
     else:
-        assert body["messages"] == [{"role": "user", "content": "describe the image"}]
+        assert body["messages"][0]["content"] == [
+            {"type": "text", "text": "describe the image"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+        ]
 
 
 def test_non_deepseek_keeps_list_content() -> None:

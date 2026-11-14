@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · Tujuan",
+    "description": "Pratinjau tujuan dan detailnya.",
+    "options": "Berikan status, ringkasan, tujuan, dan laporan opsional.",
+    "state": "Status",
+    "summary": "Siapkan rilis",
+    "objective": "Tinjau perubahan dan verifikasi rilis.\n\n- Periksa pengujian\n- Tinjau dokumentasi\n- Pastikan rilis siap",
+    "recap": "Menunggu persetujuan."
+  },
   "rename": {
     "title": "RenameDialog · Ubah nama grup dan proyek",
     "description": "Coba dialog pengubahan nama grup dan proyek. Nama topik diubah langsung di daftar percakapan.",

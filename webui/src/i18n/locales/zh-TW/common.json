@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "已儲存，重新啟動 API 服務後生效。",
       "commandRuntime": {
         "custom": "自訂（秒）",
         "customLabel": "自訂執行時間（秒）",
@@ -557,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "持續重試", "help": "可恢復錯誤持續重試；關閉用標準策略\n\n遇到可恢復的請求錯誤時持續重試。關閉後使用標準重試策略。"},
         "agents_defaults_tool_hint_max_length": {"label": "提示長度", "help": "工具執行提示的字元數上限\n\n工具執行時顯示的簡短提示最多包含多少個字元。"},
         "tools_max_session_messages_per_minute": {"label": "訊息頻率", "help": "工具每分鐘向同一會話發訊息的上限"},
-        "agents_defaults_unified_session": {"label": "共享會話", "help": "同一使用者的跨平臺對話共用記錄\n\n讓同一使用者在不同聊天平臺的對話共用會話記錄。"},
         "tools_exec_enable": {"label": "Shell 工具", "help": "允許智慧體執行 Shell 命令"},
         "tools_file_enable": {"label": "檔案工具", "help": "允許使用內建檔案讀取和編輯工具"},
         "tools_web_enable": {"label": "網頁訪問", "help": "允許搜尋網頁和讀取網頁內容"},
@@ -585,8 +583,6 @@
         "gateway_host": {"label": "閘道器地址", "help": "閘道器地址，WebUI 監聽地址另設\n\n閘道器使用的地址。WebUI 的監聽地址需在聊天平臺的 WebSocket 設定中單獨配置。"},
         "gateway_port": {"label": "閘道連接埠", "help": "閘道器埠，啟動引數優先\n\n閘道器使用的埠。啟動時指定的命令列引數優先於此設定。"},
         "gateway_restart_mode": {"label": "重新啟動方式", "help": "選擇重啟方式，自動按環境決定\n\n選擇閘道器的重啟方式。“自動”會根據執行環境選擇。"},
-        "api_host": {"label": "API 地址", "help": "對外開放須設金鑰；修改後重啟 API\n\n允許其他裝置連線前，請先在“系統”中設定 API 金鑰。修改後需重啟 API 服務。"},
-        "api_timeout": {"label": "API 超時", "help": "API 最長等待秒數，重啟服務生效\n\n每次 API 請求最長等待多久。修改後需重啟 API 服務。"},
         "tools_image_generation_save_dir": {"label": "儲存目錄", "help": "媒體目錄內相對路徑，不遷移已有圖片\n\nnanobot 媒體目錄內的子目錄。請使用相對路徑，已有圖片不會遷移。"}
       },
       "groups": {
@@ -603,7 +599,6 @@
         "safety": {"title": "全域性許可權", "help": "設定目錄限制、網路例外和遠端安裝\n\n設定工作區訪問限制、網路訪問例外和遠端安裝許可權。"},
         "cli": {"title": "CLI 限制", "help": "設定安裝、執行超時和列表快取\n\n設定安裝和執行超時，以及應用列表的快取時長。"},
         "gateway": {"title": "閘道器", "help": "設定部署和重啟方式"},
-        "api": {"title": "API 設定", "help": "設定監聽地址和請求超時"},
         "storage": {"title": "圖片儲存", "help": "選擇生成圖片的儲存位置"},
         "maintenance": {"title": "記憶整理", "help": ""},
         "web": {"title": "網路存取", "help": ""},
@@ -714,11 +709,11 @@
       "small": "小",
       "standard": "標準",
       "large": "大",
-      "previewText": "**給思考留一點空間。**\n\n清晰的文字，舒服的節奏。讓每一個想法，都有自在展開的空間。",
+      "previewText": "清晰的文字，舒服的節奏。讓每一個想法，都有自在展開的空間。",
       "previewPlaceholder": "接下來，想聊點什麼？",
       "process": "過程展示",
       "processHelp": "選擇 nanobot 工作時展示多少細節。",
-      "autoHelp": "工作時顯示進度，結束後保持簡潔。",
+      "autoHelp": "預設收合明細，處理中顯示最新一筆。",
       "expandedHelp": "預設展開工具活動與子任務詳情。",
       "summaryHelp": "顯示修改檔案和增刪行數。",
       "diffHelp": "在對話中直接展示程式碼差異。",
@@ -835,6 +830,7 @@
       "unixSocket": "Unix 通訊端",
       "defaultWorkspace": "預設工作區",
       "auto": "自動",
+      "collapsed": "收合",
       "expanded": "展開",
       "default": "預設",
       "summary": "概要",
@@ -940,18 +936,19 @@
       "shortTitle": "Token 用量",
       "viewDetails": "查看詳情",
       "cacheHitRate": "快取命中率",
-      "cacheRateHelp": "快取命中率僅統計快取狀態已知的輸入。",
       "dailyTrend": "每日 Token",
       "systemHelp": "包括內部任務和未標註來源的呼叫",
       "bySource": "用量來源",
       "modelTrend": "模型趨勢",
       "modelsUnavailable": "暫無模型用量明細。",
-      "otherModels": "其他模型 / 未歸類",
+      "otherModels": "其他模型",
       "unclassified": "未分類",
       "unavailable": "暫時無法取得用量資料。",
       "noActivity": "近 30 天暫無 Token 用量。",
+      "last30Days": "近 30 天",
       "cachedInput": "快取命中",
       "cacheMiss": "未命中",
+      "cacheWrite": "快取寫入",
       "cacheUnknown": "狀態未知",
       "outputTokens": "輸出",
       "otherTokens": "其他 Token",
@@ -964,7 +961,9 @@
         "cron": "自動任務",
         "dream": "記憶整理",
         "system": "輔助呼叫"
-      }
+      },
+      "failedRequests": "{{count}} 次失敗",
+      "estimatedShare": "{{percent}} 的 Token 為本地估算"
     },
     "providers": {
       "manageProviders": "管理提供商",
@@ -1062,6 +1061,8 @@
       "contextWindowError": "請輸入正數 Token 數量，例如 200k、1m 或 131072。",
       "maxTokens": "輸出 Token 上限",
       "temperature": "溫度",
+      "imageInput": "圖像輸入",
+      "imageInputHelp": "關閉後，含圖片的請求會略過此預設。",
       "reasoningEffort": "推理強度",
       "convertTitle": "轉換設定",
       "convertHelp": "將主模型和備用模型轉為預設",
@@ -1237,15 +1238,6 @@
         "github": "管理倉庫、Issue 和 PR",
         "supabase": "檢視和管理專案"
       }
-    },
-    "api": {
-      "title": "API 伺服器", "openaiCompatible": "OpenAI 相容 API", "description": "透過相容 OpenAI 的 API 連線",
-      "start": "啟動 API 伺服器", "starting": "正在啟動…", "stop": "停止", "stopping": "正在停止…",
-      "access": "存取範圍", "thisDevice": "僅此裝置", "localNetwork": "區域網路",
-      "localHelp": "僅當前裝置可連線", "networkHelp": "區域網可連線，須設定 API 金鑰\n\n區域網內其他裝置可以連線，因此必須設定 API 金鑰。",
-      "port": "連接埠", "portHelp": "API 服務使用的本地埠", "apiKey": "API 金鑰", "apiKeyHelp": "透過 Bearer Token 傳送金鑰",
-      "apiKeyRequired": "向區域網路開放 API 前必須設定金鑰。", "apiKeyPlaceholder": "輸入 API 金鑰",
-      "autoInstall": "啟動時會自動安裝 API 服務所需的套件。"
     },
     "observability": {
       "title": "執行追蹤", "configured": "nanobot 已偵測到追蹤憑證。",
@@ -1811,8 +1803,6 @@
       },
       "interruptedHelp": "後端重新啟動時此任務尚未結束，任務沒有自動恢復或重新執行。",
       "workTitle": "子任務",
-      "otherWorkTitle": "其他任務",
-      "unlinkedHelp": "未找到這些任務在目前顯示訊息中的原始請求。",
       "progress": "已完成 {{completed}} / {{total}} 項",
       "running": "{{count}} 項進行中",
       "finished": "{{count}} 項已結束",
@@ -1854,12 +1844,6 @@
     },
     "loadingConversation": "正在載入話題…",
     "empty": {
-      "greetings": {
-        "workOn": "我們要一起做點什麼？",
-        "start": "今天從哪裡開始？",
-        "build": "今天要一起打造什麼？",
-        "tackle": "我們要一起解決什麼？"
-      },
       "quickActions": {
         "plan": {
           "title": "制定計劃",
@@ -1952,8 +1936,11 @@
       "goalStateStrip": "目標：{{label}}",
       "goalStateFallback": "目標",
       "goalStateExpandAria": "檢視完整目標",
+      "goalBlocked": "已受阻",
       "goalStateSheetTitle": "目標",
-      "goalStateCloseAria": "關閉目標",
+      "cancelGoal": "取消目標",
+      "cancelGoalFailed": "取消失敗，請重試。",
+      "cancelGoalOffline": "請重新連線後取消目標。",
       "send": "送出訊息",
       "stop": "停止回覆",
       "quotedContext": "引用內容",
@@ -2067,10 +2054,6 @@
             "title": "模型",
             "description": "檢視或切換當前模型預設"
           },
-          "history": {
-            "title": "對話記錄",
-            "description": "檢視最近 N 條已儲存的訊息"
-          },
           "dream": {
             "title": "執行 Dream",
             "description": "手動整理記憶"
@@ -2090,6 +2073,10 @@
           "goal": {
             "title": "長期目標",
             "description": "讓助手持續推進當前目標"
+          },
+          "cancel_goal": {
+            "title": "取消目標",
+            "description": "取消目前對話中執行或受阻的目標"
           },
           "trigger": {
             "title": "CLI 觸發器",
@@ -2111,7 +2098,6 @@
         "details": {
           "goalActive": "目標正在執行",
           "goalReady": "開始一個持續目標",
-          "history": "檢視最近訊息",
           "stopRunning": "正在執行"
         }
       },
@@ -2287,11 +2273,37 @@
       "updatedLongTask": "已更新長期任務",
       "updateLongTaskFailed": "無法更新長期任務",
       "continuingCommand": "正在繼續命令",
+      "waitingCommandResult": "正在等待命令結果",
+      "waitingCommandOutput": "正在等待命令輸出",
+      "sendingCommandInput": "正在傳送輸入",
+      "closingCommandInput": "正在關閉命令輸入",
+      "sendingClosingInput": "正在傳送並關閉命令輸入",
+      "stoppingCommand": "正在停止命令",
+      "commandStatusUnknown": "命令狀態未知",
+      "commandWasRunning": "上次檢查時命令仍在執行",
+      "commandWaitTimedOut": "等待逾時，上次檢查時命令仍在執行",
+      "commandWasStopping": "上次檢查時命令正在停止",
+      "commandCompleted": "命令已完成",
+      "commandExitFailed": "命令執行失敗（結束代碼 {{code}}）",
+      "commandExited": "命令已結束（結束代碼 {{code}}）",
+      "commandTimedOut": "命令逾時，已終止",
+      "commandIdleTimedOut": "命令因長時間沒有輸出而終止",
+      "commandCheckedUnknown": "已檢查命令，狀態未知",
+      "stopCommandError": "無法停止命令",
+      "sendCloseInputError": "無法傳送或關閉命令輸入",
+      "sendInputError": "無法傳送輸入",
+      "closeInputError": "無法關閉命令輸入",
+      "checkCommandError": "無法檢查命令",
+      "sentClosedInput": "已傳送並關閉命令輸入",
+      "sentCommandInput": "已傳送輸入",
+      "closedCommandInput": "已關閉命令輸入",
       "continuedCommand": "已繼續命令",
       "continueCommandFailed": "無法繼續命令",
       "checkingRunningCommands": "正在檢查執行中的命令",
       "checkedRunningCommands": "已檢查執行中的命令",
       "checkRunningCommandsFailed": "無法檢查執行中的命令",
+      "showEarlierCommandChecks": "展開先前的命令檢查（{{count}}）",
+      "hideEarlierCommandChecks": "收合先前的命令檢查（{{count}}）",
       "capturingScreenshot": "正在擷取螢幕截圖",
       "capturedScreenshot": "已擷取螢幕截圖",
       "captureScreenshotFailed": "無法擷取螢幕截圖",

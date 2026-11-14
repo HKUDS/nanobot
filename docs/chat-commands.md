@@ -6,7 +6,9 @@ These commands work inside chat channels and interactive agent sessions:
 |---------|-------------|
 | `/new` | Stop current task and start a new conversation |
 | `/compact` | Summarize the current conversation context while keeping saved chat history |
-| `/stop` | Stop the current task |
+| `/stop` | Stop the current task without cancelling its saved goal |
+| `/goal <task>` | Start a sustained goal for this conversation |
+| `/cancel_goal` | Cancel the active or blocked goal; also stop work on an active goal |
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |
 | `/model` | Show the current model and available model presets |
@@ -69,6 +71,10 @@ To switch presets for future turns:
 ```
 
 Switching changes the model used for future replies in this conversation and keeps that choice for later turns, including after a restart. It does not change other conversations or interrupt a reply already in progress. To add or configure model choices, see [Configuration: Model presets](./configuration.md#model-presets).
+
+## Goals
+
+Only you can cancel a goal: use `/cancel_goal`, or expand the goal in WebUI and select **Cancel goal**. Cancelling an active goal also stops its work; cancelling a blocked goal leaves unrelated replies running. Chat history is kept. Asking the agent to stop can block the goal, but does not cancel it.
 
 ## Local triggers
 

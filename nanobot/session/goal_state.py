@@ -64,18 +64,19 @@ def parse_goal_state(blob: Any) -> dict[str, Any] | None:
 
 
 def goal_state_runtime_lines(metadata: Mapping[str, Any] | None) -> list[str]:
-    """Lines appended inside the Runtime Context block when a goal is active."""
+    """Lines appended inside the Runtime Context block for active or blocked goals."""
     if not metadata:
         return []
     goal = parse_goal_state(_session_goal_raw(metadata))
-    if not isinstance(goal, dict) or goal.get("status") != "active":
+    if not isinstance(goal, dict) or goal.get("status") not in {"active", "blocked"}:
         return []
+    status = goal["status"]
     objective = str(goal.get("objective") or "").strip()
     if not objective:
-        return ["Goal: active (no objective text stored)."]
+        return [f"Goal: {status} (no objective text stored)."]
     if len(objective) > MAX_GOAL_OBJECTIVE_CHARS:
         objective = objective[:MAX_GOAL_OBJECTIVE_CHARS].rstrip() + "\n… (truncated)"
-    out = ["Goal (active):", objective]
+    out = [f"Goal ({status}):", objective]
     hint = str(goal.get("ui_summary") or "").strip()
     if hint:
         out.append(f"Summary: {hint}")

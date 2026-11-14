@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
-import { Eye, EyeOff, Loader2, PauseCircle, PlayCircle, RotateCcw } from "lucide-react";
+import { useState } from "react";
+import { Loader2, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentSettingsDraft } from "@/components/settings/models/ModelsSettings";
 import {
-  NumberInput,
   ReadOnlyRow,
   SettingsGroup,
   SettingsRow,
@@ -12,11 +11,8 @@ import {
   StatusPill,
 } from "@/components/settings/shared/SettingsControls";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { isLoopbackHost } from "@/lib/network";
 import { getRuntimeHost, isNativeRuntime } from "@/lib/runtime";
-import type { ApiServicePayload, NanobotFeatureInfo, SettingsPayload } from "@/lib/types";
+import type { NanobotFeatureInfo, SettingsPayload } from "@/lib/types";
 
 export function RuntimeSettings({
   form,
@@ -24,15 +20,10 @@ export function RuntimeSettings({
   onRestart,
   isRestarting,
   requiresRestartPending,
-  apiService,
-  apiServiceLoading,
-  apiServiceAction,
-  apiServiceError,
   langfuseFeature,
   capabilitiesLoading,
   capabilityAction,
   capabilityError,
-  onApiServiceAction,
   onInstallCapability,
 }: {
   form: AgentSettingsDraft;
@@ -40,18 +31,10 @@ export function RuntimeSettings({
   onRestart?: () => void;
   isRestarting?: boolean;
   requiresRestartPending: boolean;
-  apiService: ApiServicePayload | null;
-  apiServiceLoading: boolean;
-  apiServiceAction: "start" | "stop" | null;
-  apiServiceError: string | null;
   langfuseFeature?: NanobotFeatureInfo;
   capabilitiesLoading: boolean;
   capabilityAction: string | null;
   capabilityError: string | null;
-  onApiServiceAction: (
-    action: "start" | "stop",
-    values?: { host: string; port: number; timeout: number; apiKey?: string },
-  ) => void;
   onInstallCapability: (name: string) => void;
 }) {
   const { t } = useTranslation();
@@ -74,30 +57,6 @@ export function RuntimeSettings({
   } | null>(null);
   const [hostActionBusy, setHostActionBusy] =
     useState<"logs" | "diagnostics" | null>(null);
-  const apiDefaults = apiService ?? {
-    installed: false,
-    running: false,
-    managed: false,
-    host: settings.api?.host ?? "127.0.0.1",
-    port: settings.api?.port ?? 8900,
-    timeout: settings.api?.timeout ?? 120,
-    api_key_hint: settings.api?.api_key_hint,
-    endpoint: `http://127.0.0.1:${settings.api?.port ?? 8900}/v1`,
-    command: "nanobot serve",
-  };
-  const [apiHost, setApiHost] = useState(apiDefaults.host);
-  const [apiPort, setApiPort] = useState(apiDefaults.port);
-  const [apiKey, setApiKey] = useState("");
-  const [apiKeyVisible, setApiKeyVisible] = useState(false);
-  useEffect(() => {
-    if (!apiService) return;
-    setApiHost(settings.api?.host ?? apiService.host);
-    setApiPort(settings.api?.port ?? apiService.port);
-    setApiKey("");
-    setApiKeyVisible(false);
-  }, [apiService, settings.api?.host, settings.api?.port]);
-  const apiNetworkAccess = !isLoopbackHost(apiHost);
-  const apiMissingNetworkKey = apiNetworkAccess && !apiKey.trim() && !apiDefaults.api_key_hint;
   const engineState = isRestarting
     ? tx("settings.values.restartingEngine", "Restarting")
     : settings.apply_state?.status === "pending"
@@ -204,118 +163,6 @@ export function RuntimeSettings({
           </SettingsGroup>
         </section>
       ) : null}
-
-      <section>
-        <SettingsSectionTitle>{tx("settings.api.title", "API server")}</SettingsSectionTitle>
-        <SettingsGroup>
-          <SettingsRow
-            title={tx("settings.api.openaiCompatible", "OpenAI-compatible API")}
-            description={
-              apiServiceError
-                ? apiServiceError
-                : apiDefaults.running
-                  ? apiDefaults.endpoint
-                  : undefined
-            }
-          >
-            <div className="flex items-center justify-end gap-2">
-              <StatusPill tone={apiDefaults.running ? "success" : "neutral"}>
-                {apiServiceLoading
-                  ? tx("settings.values.checking", "Checking")
-                  : apiDefaults.running
-                    ? tx("settings.values.running", "Running")
-                    : tx("settings.values.off", "Off")}
-              </StatusPill>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={apiServiceLoading || apiServiceAction !== null || apiMissingNetworkKey}
-                onClick={() =>
-                  onApiServiceAction(
-                    apiDefaults.running ? "stop" : "start",
-                    apiDefaults.running
-                      ? undefined
-                      : {
-                          host: apiHost,
-                          port: apiPort,
-                          timeout: settings.api?.timeout ?? apiDefaults.timeout,
-                          apiKey: apiKey.trim() || undefined,
-                        },
-                  )
-                }
-                className="rounded-full"
-              >
-                {apiServiceAction ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                ) : apiDefaults.running ? (
-                  <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                ) : (
-                  <PlayCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                )}
-                {apiServiceAction === "start"
-                  ? tx("settings.api.starting", "Starting...")
-                  : apiServiceAction === "stop"
-                    ? tx("settings.api.stopping", "Stopping...")
-                    : apiDefaults.running
-                      ? tx("settings.api.stop", "Stop")
-                      : tx("settings.api.start", "Start API server")}
-              </Button>
-            </div>
-          </SettingsRow>
-          {!apiDefaults.running ? (
-            <>
-              <SettingsRow
-                title={tx("settings.api.access", "Access")}
-                description={
-                  apiNetworkAccess
-                    ? tx("settings.api.networkHelp", "Other devices can connect; an API key is required.")
-                    : tx("settings.api.localHelp", "Only this device can connect.")
-                }
-              >
-                <SegmentedControl
-                  value={apiNetworkAccess ? "network" : "local"}
-                  options={[
-                    { value: "local", label: tx("settings.api.thisDevice", "This device") },
-                    { value: "network", label: tx("settings.api.localNetwork", "Local network") },
-                  ]}
-                  onChange={(value) => setApiHost(value === "network" ? "0.0.0.0" : "127.0.0.1")}
-                />
-              </SettingsRow>
-              <SettingsRow title={tx("settings.api.port", "Port")}>
-                <NumberInput value={apiPort} min={1} max={65535} onChange={setApiPort} />
-              </SettingsRow>
-              <SettingsRow
-                  title={tx("settings.api.apiKey", "API key")}
-                  description={
-                    apiMissingNetworkKey
-                      ? tx("settings.api.apiKeyRequired", "Required before exposing the API to your network.")
-                      : tx("settings.api.apiKeyHelp", "Clients send this as a Bearer token.")
-                  }
-                >
-                  <div className="relative w-full">
-                    <Input
-                      type={apiKeyVisible ? "text" : "password"}
-                      value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
-                      placeholder={apiDefaults.api_key_hint ?? tx("settings.api.apiKeyPlaceholder", "Enter an API key")}
-                      className="h-9 rounded-full pr-10 text-[13px]"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setApiKeyVisible((visible) => !visible)}
-                      aria-label={apiKeyVisible ? tx("settings.byok.hideApiKey", "Hide API key") : tx("settings.byok.showApiKey", "Show API key")}
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full"
-                    >
-                      {apiKeyVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </Button>
-                  </div>
-              </SettingsRow>
-            </>
-          ) : null}
-        </SettingsGroup>
-      </section>
 
       <section>
         <SettingsSectionTitle>{tx("settings.observability.title", "Observability")}</SettingsSectionTitle>

@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · 목표",
+    "description": "목표와 세부 내용을 미리 봅니다.",
+    "options": "목표 상태, 요약, 내용 및 선택적 진행 내용을 전달합니다.",
+    "state": "상태",
+    "summary": "릴리스 준비",
+    "objective": "변경 사항을 검토하고 릴리스를 검증합니다.\n\n- 테스트 확인\n- 문서 검토\n- 릴리스 준비 확인",
+    "recap": "승인 대기 중."
+  },
   "rename": {
     "title": "RenameDialog · 그룹 및 프로젝트 이름 변경",
     "description": "그룹과 프로젝트의 이름 변경을 시험합니다. 주제 이름은 채팅 목록에서 바로 바꿉니다.",

@@ -185,6 +185,7 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
+          -o faulthandler_timeout=60
           --junitxml=test-results/main.xml --timing-report=test-results/main.json
           --durations=25 --durations-min=1.0
 
@@ -371,7 +372,18 @@ jobs:
 
       - name: Test browser layout and history motion
         working-directory: webui
-        run: bun run test:browser
+        run: bun run test:browser --trace=retain-on-failure
+
+      - name: Retain browser failure details
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-failures
+          path: |
+            webui/test-results/browser/**/trace.zip
+            webui/test-results/browser/**/test-failed-*.png
+            webui/test-results/browser/**/error-context.md
+          retention-days: 7
 
   webui:
     needs: [changes, webui_checks, webui_browser]
@@ -495,7 +507,7 @@ jobs:
       - name: Build image with default channel dependencies
         run: docker build -t nanobot:test .
 
-      - name: Verify first-boot WebUI and API
+      - name: Verify first-boot gateway and WebUI
         run: python scripts/docker_compose_smoke.py --image nanobot:test
 
       - name: Check out the real previous release for retained-volume acceptance
@@ -553,7 +565,7 @@ jobs:
           from pathlib import Path
 
           config = json.loads(Path(os.environ["RUNNER_TEMP"], "bwrap-compose.json").read_text())
-          for service_name in ("nanobot-gateway", "nanobot-api", "nanobot-cli"):
+          for service_name in ("nanobot-gateway", "nanobot-cli"):
               service = config["services"][service_name]
               assert {"CHOWN", "SETGID", "SETUID", "SYS_ADMIN"} <= set(service["cap_add"])
               assert "no-new-privileges:true" in service["security_opt"]

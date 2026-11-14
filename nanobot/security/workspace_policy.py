@@ -70,7 +70,9 @@ def _is_path_exactly_allowed(
         except (OSError, RuntimeError, TypeError, ValueError):
             continue
         if _path_key(allowed_file) == logical_key:
-            return True
+            # A missing file can be created, but an exact file grant cannot
+            # become a directory grant if the path now refers to a directory.
+            return not resolved_path.is_dir()
     return False
 
 

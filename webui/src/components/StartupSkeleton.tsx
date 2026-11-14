@@ -72,7 +72,7 @@ export function StartupSkeleton({
           <div className="startup-chat-viewport">
             <div className="startup-chat-layout">
               <div className="startup-messages"><Block /><Block /><Block /></div>
-              <div className="startup-welcome"><div className="startup-welcome-line"><Block /></div></div>
+              <div className="startup-chat-empty" />
               <div className="startup-composer">
                 <div className="startup-composer-surface">
                   <div className="startup-composer-input"><Block /></div>

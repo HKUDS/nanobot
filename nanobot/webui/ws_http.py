@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
 from websockets.datastructures import Headers
@@ -212,8 +212,6 @@ _WEBUI_MUTATION_PATHS = {
     "settings.provider.oauth_complete": "/api/settings/provider/oauth-login/complete",
     "settings.provider.oauth_logout": "/api/settings/provider/oauth-logout",
     "settings.web_search.update": "/api/settings/web-search/update",
-    "settings.api_service.start": "/api/settings/api-service/start",
-    "settings.api_service.stop": "/api/settings/api-service/stop",
     "settings.image_generation.update": "/api/settings/image-generation/update",
     "settings.transcription.update": "/api/settings/transcription/update",
     "settings.runtime_config.update": "/api/settings/runtime-config/update",
@@ -695,7 +693,21 @@ class GatewayHTTPHandler:
             return _http_error(403, "remote_connections_local_only")
         try:
             if path == "/api/remote-instances":
-                return _http_json_response(await self.remote_instances.health(), extra_headers=_NO_STORE_HEADERS)
+                parsed = urlsplit(request.path)
+                try:
+                    if parsed.fragment or len(parsed.query) > 4096:
+                        raise ValueError
+                    query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True, max_num_fields=20)
+                    if query.keys() - {"check"} or any(
+                        re.fullmatch(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", key) is None
+                        for key in query.get("check", [])
+                    ):
+                        raise ValueError
+                except ValueError:
+                    return _http_error(400, "invalid_health_check")
+                check = {key.lower() for key in query.get("check", [])}
+                result = await self.remote_instances.health(check) if check else self.remote_instances.snapshot()
+                return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
             if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
                 return _http_error(405, "WebSocket required")
             payload = getattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, {})
@@ -922,8 +934,22 @@ class GatewayHTTPHandler:
             return _http_error(404, "session not found")
         if self.subagent_manager is None:
             return _http_error(503, "subagent manager unavailable")
+        query = _parse_query(request.path)
+        scope = query.get("scope")
+        if scope is not None and scope != ["window"]:
+            return _http_error(400, "invalid task scope")
+        turns = query.get("turn_id", [])
+        tracked = query.get("track", [])
+        if scope == ["window"] and (len(turns) + len(tracked) > 512
+                or any(not value or len(value) > 512 for value in (*turns, *tracked))):
+            return _http_error(400, "invalid task window")
         try:
-            statuses = await self.subagent_manager.read_statuses_for_session(session_key)
+            if scope == ["window"]:
+                statuses = await self.subagent_manager.read_statuses_for_session(
+                    session_key, turns=turns, tracked=tracked,
+                )
+            else:
+                statuses = await self.subagent_manager.read_statuses_for_session(session_key)
         except (OSError, SubagentSessionError):
             return _http_error(503, "task history unavailable")
         return _http_json_response({

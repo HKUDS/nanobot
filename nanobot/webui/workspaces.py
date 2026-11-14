@@ -491,12 +491,11 @@ class WebUIWorkspaceController:
         chat_id: str,
         scope: WorkspaceScope,
         *,
-        session_key: str | None = None,
         expected_generation: str | None = None,
     ) -> tuple[str | None, bool]:
         async with self._scope_lock(chat_id):
             return await self._persist_scope(
-                session_key or webui_session_key(chat_id), scope, expected_generation,
+                webui_session_key(chat_id), scope, expected_generation,
             )
 
     async def _persist_scope(
@@ -517,7 +516,7 @@ class WebUIWorkspaceController:
 
     async def rollback_scope_admission(
         self,
-        session_key: str,
+        chat_id: str,
         generation: str | None,
         *,
         created: bool,
@@ -526,7 +525,7 @@ class WebUIWorkspaceController:
         if not created or generation is None or self._sessions is None:
             return
         await self._sessions.state.delete(
-            session_key,
+            webui_session_key(chat_id),
             expected_generation=generation,
         )
 

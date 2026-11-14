@@ -53,7 +53,7 @@ class TestSocket {
     this.sent.push(frame);
     if (frame.type === "new_temporary_chat") {
       const chatId = `00000000-0000-4000-8000-${String(++this.nextChat).padStart(12, "0")}`;
-      queueMicrotask(() => this.receive({ event: "attached", chat_id: chatId, temporary: true }));
+      queueMicrotask(() => this.receive({ event: "attached", chat_id: chatId, temporary: true, request_id: frame.request_id }));
     } else if (frame.type === "set_sidebar_state") {
       queueMicrotask(() => this.receive({ event: "sidebar_state_updated", state: frame.state }));
     } else if (frame.type === "webui_request" && frame.action === "temporary_chat.file_preview") {
@@ -386,7 +386,7 @@ describe("temporary chat navigation", () => {
     expect(within(screen.getByTestId("thread-message-region")).getByText(
       "Count from one to three",
     )).toBeInTheDocument();
-    expect(screen.queryByTestId("hero-greeting")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thread-welcome-mark")).not.toBeInTheDocument();
   });
 
   it.each(["before leaving", "while away", "after returning"])(
@@ -520,7 +520,7 @@ describe("temporary chat navigation", () => {
     expect(window.location.hash).toBe(`#/temporary/${secondChatId}`);
     await selectTopic("Close temporary chat: List three colors");
     expect(deleteCache).toHaveBeenCalledWith(secondChatId);
-    expect(await screen.findByTestId("hero-greeting")).toBeInTheDocument();
+    expect(await screen.findByTestId("thread-welcome-mark")).toBeInTheDocument();
     for (const cache of deleteCache.mock.contexts) {
       if (!(cache instanceof ThreadMessageCache)) throw new Error("Expected thread message cache");
       expect(cache.get(firstChatId)).toBeUndefined();

@@ -117,9 +117,6 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
         def concurrency_safe(self) -> bool:
             return False
 
-        def cast_params(self, params: dict) -> dict:
-            return {"value": str(params["value"])}
-
         def validate_params(self, params: dict) -> list[str]:
             return [] if params == {"value": "1"} else ["bad value"]
 
@@ -143,7 +140,6 @@ async def test_loader_entry_point_error_wrapper_preserves_tool_api(tmp_path):
     assert tool.config_key == "api_plugin"
     assert tool.read_only is True
     assert tool.concurrency_safe is False
-    assert tool.cast_params({"value": 1}) == {"value": "1"}
     assert tool.validate_params({"value": "1"}) == []
     assert tool.to_schema() == {"name": "api_plugin", "custom": True}
 

@@ -91,7 +91,7 @@ async def test_scope_snapshots_route_and_queues_events_in_order():
     factory = TurnDeliveryFactory(bus)
     delivery = factory.create(InboundMessage(
         channel="slack", sender_id="u", chat_id="chat", content="", metadata=metadata,
-    ), "unified:default")
+    ), "slack:chat")
     metadata["slack"]["thread_ts"] = "moved"
     for phase in ("started", "succeeded"):
         await delivery.events.emit(ContextCompactionEvent("c1", phase))

@@ -386,6 +386,7 @@ describe("Settings overview and appearance", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url === "/api/settings") return jsonResponse(payload);
+        if (url === "/api/settings/usage") return jsonResponse(payload.usage);
         if (url === "/api/settings/cli-apps") {
           return jsonResponse({ apps: [], installed_count: 0 });
         }
@@ -398,7 +399,7 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView({ initialSection: "overview" });
 
-    expect(await screen.findByLabelText("1,500 tokens")).toBeInTheDocument();
+    expect(await screen.findByLabelText("1,500 tokens in the last 30 days")).toBeInTheDocument();
     expect(screen.getByText("Token usage")).toBeInTheDocument();
   });
 

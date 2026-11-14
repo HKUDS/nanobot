@@ -45,7 +45,6 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
         )
 
 
-@pytest.mark.parametrize("unified", [False, True])
 @pytest.mark.parametrize(("key", "channel", "chat_id", "metadata"), [
     ("slack:C123:1700000000.000100", "slack", "C123",
      {"slack": {"thread_ts": "1700000000.000100"}}),
@@ -59,14 +58,13 @@ async def test_internal_compaction_never_reaches_its_result_destination(channel,
     ("dingtalk:group:conversation:user", "dingtalk", "group:conversation", {}),
 ])
 async def test_session_route_delivers_automatic_and_manual_compaction(
-    key, channel, chat_id, metadata, unified,
+    key, channel, chat_id, metadata,
 ) -> None:
     factory = TurnDeliveryFactory(MessageBus())
     automatic = ContextCompactionEvent(compaction_id="auto-1", phase="started")
     notified = ContextCompactionEvent(
         compaction_id="notified-1", phase="started", notify=True,
     )
-    key = "unified:default" if unified else key
     msg = InboundMessage(
         channel=channel, sender_id="user", chat_id=chat_id, content="hello",
         metadata={
@@ -90,9 +88,9 @@ async def test_session_route_delivers_automatic_and_manual_compaction(
     assert [outbound.event for outbound in outbounds] == [automatic, notified]
 
 
-async def test_idle_compaction_keeps_its_route_when_a_unified_session_moves() -> None:
+async def test_idle_compaction_keeps_its_route_when_the_saved_route_changes() -> None:
     factory = TurnDeliveryFactory(MessageBus())
-    key = "unified:default"
+    key = "sdk:workflow"
     session_metadata = {}
     original = InboundMessage(
         channel="slack", sender_id="user", chat_id="C123", content="hello",
@@ -476,29 +474,23 @@ async def test_late_subagent_route_requires_webui_owned_session(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_unified_display_route_admits_alias_generation_and_rejects_stale_lifetime(tmp_path):
+async def test_cross_session_display_route_rejects_stale_lifetime(tmp_path):
     from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
     from nanobot.session.sqlite_store import SessionConflictError
 
     sessions = SessionManager(tmp_path)
-    alias = await sessions.state.get_header("websocket:chat")
-    source = await sessions.state.get_header("unified:default")
+    target = await sessions.state.get_header("websocket:chat")
+    source = await sessions.state.get_header("heartbeat")
     policy = WebuiTurnRoutePolicy(sessions)
     factory = TurnDeliveryFactory(MessageBus(), route_policy=policy, route_admission=policy.admit)
     message = InboundMessage(channel="system", sender_id="cron", chat_id="websocket:chat", content="notice")
     delivery = factory.create(message, source.key)
     await delivery.bind_session_generation(source.generation)
-    assert delivery.route.metadata[HISTORY_GENERATION_METADATA_KEY] == alias.generation
+    assert delivery.route.metadata[HISTORY_GENERATION_METADATA_KEY] == target.generation
     assert delivery.delivery_message.session_generation == source.generation
     response = delivery.background_response("done", stop_reason="end_turn", streamed=False, latency_ms=1)
-    assert response.metadata[HISTORY_GENERATION_METADATA_KEY] == alias.generation
-    await sessions.state.delete(alias.key)
-    replacement = await sessions.state.get_header(alias.key)
-    stale = factory.create(InboundMessage(
-        channel="websocket", sender_id="user", chat_id="chat", content="old queued input",
-        metadata={HISTORY_GENERATION_METADATA_KEY: alias.generation},
-    ), source.key)
+    assert response.metadata[HISTORY_GENERATION_METADATA_KEY] == target.generation
+    await sessions.state.reset(target.key)
     with pytest.raises(SessionConflictError):
-        await stale.bind_session_generation(source.generation)
-    assert replacement.generation != alias.generation
+        await policy.admit(delivery.route, source.key, source.generation)
     await sessions.state.aclose()

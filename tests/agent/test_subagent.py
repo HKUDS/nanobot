@@ -20,7 +20,11 @@ from nanobot.context_sources import (
 )
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.security.workspace_access import build_workspace_scope
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
@@ -217,8 +221,22 @@ async def test_subagent_keeps_project_runtime_scope_with_agent_owned_tools(tmp_p
 
     spec = manager.runner.run.call_args.args[0]
     assert spec.workspace == project
-    assert spec.tools.get("read_file")._workspace == agent_workspace.resolve()
-    assert spec.tools.get("read_file")._restrict_to_workspace is True
+    (project / "project.txt").write_text("project document", encoding="utf-8")
+    (agent_workspace / "skills").mkdir()
+    (agent_workspace / "skills" / "reference.txt").write_text("agent skill", encoding="utf-8")
+    private = agent_workspace / "private.txt"
+    private.write_text("agent private data", encoding="utf-8")
+    token = bind_workspace_scope(build_workspace_scope(project, "restricted"))
+    try:
+        assert "project document" in await spec.tools.execute("read_file", {"path": "project.txt"})
+        assert "agent skill" in await spec.tools.execute(
+            "read_file", {"path": str(agent_workspace / "skills" / "reference.txt")},
+        )
+        denied = await spec.tools.execute("read_file", {"path": str(private)})
+        assert denied.is_error
+        assert "agent private data" not in denied
+    finally:
+        reset_workspace_scope(token)
     assert manager.tools_config.restrict_to_workspace is False
 
 

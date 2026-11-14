@@ -163,8 +163,7 @@ async def test_new_during_active_turn_stops_it_and_resets_session(loop):
 
 
 @pytest.mark.parametrize("followup_scope", ["same", "restricted", "other-project"])
-async def test_unified_followup_keeps_its_workspace_authority(loop, tmp_path, followup_scope):
-    loop._unified_session = True
+async def test_followup_keeps_its_workspace_authority(loop, tmp_path, followup_scope):
     project = tmp_path / "other-project"
     project.mkdir()
     initial_scope = {"project_path": str(tmp_path), "access_mode": "full"}
@@ -179,11 +178,11 @@ async def test_unified_followup_keeps_its_workspace_authority(loop, tmp_path, fo
         observed.append(scope.metadata())
         if len(observed) == 1:
             await loop.bus.publish_inbound(InboundMessage(
-                channel="websocket", sender_id="client", chat_id="followup", content="second",
+                channel="websocket", sender_id="client", chat_id="initial", content="second",
                 metadata={"workspace_scope": next_scope},
             ))
             async with asyncio.timeout(3):
-                while loop._pending_queues["unified:default"].empty():
+                while loop._pending_queues["websocket:initial"].empty():
                     await asyncio.sleep(0)
         return LLMResponse(content="done")
 
@@ -196,7 +195,7 @@ async def test_unified_followup_keeps_its_workspace_authority(loop, tmp_path, fo
             metadata={"workspace_scope": initial_scope},
         ))
         async with asyncio.timeout(5):
-            while not observed or "unified:default" in loop._pending_queues:
+            while not observed or "websocket:initial" in loop._pending_queues:
                 await asyncio.sleep(0.01)
         assert observed == [initial_scope, next_scope]
         assert loop.runner.run.await_count == (1 if followup_scope == "same" else 2)
@@ -525,7 +524,7 @@ async def test_stopped_followups_are_not_recovered_but_shutdown_preserves_them(
         stop = InboundMessage(
             channel="websocket", sender_id="u", chat_id="test", content="/stop",
         )
-        await loop._dispatch_command_inline(stop, key, "/stop", loop.commands.dispatch_priority)
+        await loop._dispatch_command_inline(stop, stop.content, loop.commands.dispatch_priority)
 
     # Use fresh managers and the real startup scan: a cache-only assertion can
     # miss the canceled journal being replayed from disk on the next restart.
@@ -684,7 +683,7 @@ async def test_ingress_sources_share_one_session_worker(loop, bus_running):
         else:
             (await loop._enqueue_session_message(second))
         compact = InboundMessage(channel="websocket", sender_id="u", chat_id="test", content="/compact")
-        await loop._dispatch_command_inline(compact, key, compact.content, loop.commands.dispatch)
+        await loop._dispatch_command_inline(compact, compact.content, loop.commands.dispatch)
         assert len(loop._active_tasks[key]) == 1
         release.set()
         results = await asyncio.wait_for(asyncio.gather(cron, trigger), timeout=3)
@@ -809,11 +808,10 @@ async def test_active_goal_prioritizes_real_followup_before_internal_prompt(loop
 
 
 async def test_active_goal_keeps_origin_until_queued_independent_command_runs(loop):
-    loop._unified_session = True
     loop.max_iterations = 1
     loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
     loop.tools.execute = AsyncMock(return_value="ok")
-    key = "unified:default"
+    key = "feishu:chat-a"
     session = loop.sessions.get_or_create(key)
     session.metadata[GOAL_STATE_KEY] = {"status": "active", "objective": "Finish the goal"}
     loop.sessions.save(session)
@@ -832,7 +830,7 @@ async def test_active_goal_keeps_origin_until_queued_independent_command_runs(lo
         usage = LLMUsage(input_tokens=tokens, output_tokens=0, total_tokens=tokens, reported_tokens=tokens)
         if len(requests) == 1:
             await loop.bus.publish_inbound(InboundMessage(
-                channel="feishu", sender_id="user", chat_id="chat-b", content="/compact",
+                channel="feishu", sender_id="user", chat_id="chat-a", content="/compact",
                 metadata={"message_id": "message-b"},
             ))
             async with asyncio.timeout(3):
@@ -866,16 +864,16 @@ async def test_active_goal_keeps_origin_until_queued_independent_command_runs(lo
         loop.runner.run.assert_awaited_once()
         loop.consolidator.compact_idle_session.assert_awaited_once()
         assert persisted_origin == {"message_id": "message-a", "turn_id": requests[0][2]}
-        by_chat = {event.context.chat_id: event for event in completed}
-        assert set(by_chat) == {"chat-a", "chat-b"}
-        assert by_chat["chat-a"].outcome == "completed"
+        by_message = {event.context.metadata.get("message_id"): event for event in completed}
+        assert set(by_message) == {"message-a", "message-b"}
+        assert by_message["message-a"].outcome == "completed"
         assert len(completed) == 2
-        assert by_chat["chat-a"].usage.total_tokens == 60
-        assert [usage.total_tokens for usage in by_chat["chat-a"].round_usages] == [10, 20, 30]
-        assert by_chat["chat-b"].outcome == "completed"
-        assert by_chat["chat-b"].context.metadata["message_id"] == "message-b"
-        assert by_chat["chat-b"].usage is None
-        assert by_chat["chat-b"].round_usages == ()
+        assert by_message["message-a"].usage.total_tokens == 60
+        assert [usage.total_tokens for usage in by_message["message-a"].round_usages] == [10, 20, 30]
+        assert by_message["message-b"].outcome == "completed"
+        assert by_message["message-b"].context.metadata["message_id"] == "message-b"
+        assert by_message["message-b"].usage is None
+        assert by_message["message-b"].round_usages == ()
         replies = []
         while not loop.bus.outbound.empty():
             reply = loop.bus.outbound.get_nowait()

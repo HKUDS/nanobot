@@ -25,7 +25,6 @@ export const RUNTIME_CONFIG_GROUPS: { id: string; page: RuntimeConfigPage; enabl
   { id: "safety", page: "advanced" },
   { id: "cli", page: "advanced", enabledBy: "tools.cli_apps.enable" },
   { id: "gateway", page: "advanced" },
-  { id: "api", page: "advanced" },
   { id: "storage", page: "image" },
 ];
 
@@ -39,7 +38,6 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "execution", path: "agents.defaults.max_tool_result_chars", kind: "number", min: 1 },
   { group: "execution", path: "agents.defaults.tool_hint_max_length", kind: "number", min: 20, max: 500 },
   { group: "execution", path: "tools.max_session_messages_per_minute", kind: "number", min: 1 },
-  { group: "sessions", path: "agents.defaults.unified_session", kind: "boolean" },
   { group: "sessions", path: "agents.defaults.session_ttl_minutes", kind: "idle-compaction", manual: true },
   { group: "tools", path: "tools.exec.enable", kind: "boolean" },
   { group: "tools", path: "tools.file.enable", kind: "boolean" },
@@ -68,7 +66,5 @@ export const RUNTIME_CONFIG_FIELDS: RuntimeConfigField[] = [
   { group: "gateway", path: "gateway.host", kind: "text", manual: true },
   { group: "gateway", path: "gateway.port", kind: "number", min: 1, max: 65535, manual: true },
   { group: "gateway", path: "gateway.restart_mode", kind: "select", options: ["auto", "exec", "spawn", "exit"] },
-  { group: "api", path: "api.host", kind: "text", manual: true },
-  { group: "api", path: "api.timeout", kind: "number", min: 1, max: 3600 },
   { group: "storage", path: "tools.image_generation.save_dir", kind: "text" },
 ];

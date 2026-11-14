@@ -391,5 +391,9 @@ def test_goal_command_in_help_and_palette() -> None:
     }
     commands = [item["command"] for item in palette]
     goal_index = commands.index("/goal")
-    assert commands[goal_index - 1:goal_index + 2] == ["/history", "/goal", "/trigger"]
+    assert commands[goal_index - 1:goal_index + 3] == ["/model", "/goal", "/cancel_goal", "/trigger"]
+    cancel = next(item for item in palette if item["command"] == "/cancel_goal")
+    assert cancel["lifecycle"] == "side_channel"
+    assert cancel["accepts_args"] is False
     assert "/goal <goal>" in build_help_text()
+    assert "/cancel_goal" in build_help_text()

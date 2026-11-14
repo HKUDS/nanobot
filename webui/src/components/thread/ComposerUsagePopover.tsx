@@ -176,7 +176,7 @@ export function ComposerUsagePopover({
   };
 
   const inspector = <ContextInspector key={sessionKey} sidebar expandable={!narrow} context={context} rounds={rounds} snapshots={snapshots}
-    onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
+    onClose={narrow ? undefined : close} onOpenFile={onOpenFile ? (path) => { setOpen(false); onOpenFile(path); } : undefined} />;
   const onPanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape" && !event.defaultPrevented) { event.preventDefault(); close(); }
   };

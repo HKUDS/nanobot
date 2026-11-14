@@ -17,7 +17,7 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.session import turn_continuation
-from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
+from nanobot.session.display_history import HistoryFact, HistoryKind, HistoryReader
 from nanobot.session.manager import Session, SessionManager
 from nanobot.session.recovery import (
     KNOWN_CHECKPOINT_PHASES,
@@ -55,7 +55,6 @@ class RecoveryCoordinator:
 
     sessions: SessionManager
     bus: MessageBus
-    unified_session: bool = False
     _active_recovery_tasks: dict[str, asyncio.Task[Any]] = dataclasses.field(
         default_factory=dict,
         init=False,
@@ -86,19 +85,21 @@ class RecoveryCoordinator:
         from nanobot.webui.history import initialize_history
 
         await initialize_history(self.sessions)
-        for key in await self._recovery_candidates():
+        for item in await self.sessions.state.list_sessions():
+            key = item["key"]
+            chat_id = webui_chat_id(key)
+            if chat_id is None:
+                continue
             metadata_payload = await self.sessions.state.read_metadata(key)
             raw_metadata = metadata_payload.get("metadata") if metadata_payload else None
             metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
-            route = self._websocket_route_for(key, metadata)
-            if route is None:
-                continue
             unfinished = await self._has_unfinished_webui_transcript(key)
             if not self._needs_recovery(metadata) and not unfinished:
                 continue
             session = await self.sessions.state.get(key)
             try:
-                await self._recover_session(session, route[1])
+                await self._recover_session(session, chat_id)
+                await self._close_interrupted_turns(session)
                 await self._requeue_pending_followups(session)
             except Exception:
                 logger.exception("failed to recover interrupted WebUI session {}", session.key)
@@ -112,10 +113,7 @@ class RecoveryCoordinator:
                     can_continue=False,
                 )
                 await self.sessions.state.restore_interruption(session)
-                await self._publish(route[1], failed)
-
-    async def _recovery_candidates(self) -> list[str]:
-        return [item["key"] for item in await self.sessions.state.list_sessions()]
+                await self._publish(chat_id, failed)
 
     @staticmethod
     def _needs_recovery(metadata: Mapping[str, Any]) -> bool:
@@ -140,7 +138,12 @@ class RecoveryCoordinator:
                 and state["status"] == "resuming"
                 and state["recovery_id"] == recovery_id
             )
-        if message.channel != "websocket":
+        from nanobot.session.session_messages import session_message_input
+
+        chat_id = message.chat_id if message.channel == "websocket" else None
+        if session_message_input(message) is not None:
+            chat_id = webui_chat_id(message.session_key)
+        if chat_id is None:
             return True
         session = await self.sessions.state.get(message.session_key)
         state = recovery_state_from_metadata(session.metadata)
@@ -164,7 +167,7 @@ class RecoveryCoordinator:
                 reason="superseded",
             )
             await self.sessions.state.restore_interruption(session)
-            await self._publish(message.chat_id, recovered)
+            await self._publish(chat_id, recovered)
         return True
 
     async def turn_completed(
@@ -172,11 +175,11 @@ class RecoveryCoordinator:
         failure_error_kind: str | None = None,
     ) -> None:
         """Offer explicit continuation of committed model failures or resolve recovery."""
+        chat_id = webui_chat_id(session_key)
+        if chat_id is None:
+            return
         session = await self.sessions.state.get(session_key)
         state = recovery_state_from_metadata(session.metadata)
-        route = self._websocket_route(session)
-        if route is None:
-            return
         if failure_kind == "model":
             # The turn has already saved its transcript and tool results. Use
             # that context, never resend the user's message or replay tools.
@@ -192,7 +195,7 @@ class RecoveryCoordinator:
             if session.messages and session.messages[-1].get("_interrupted") is True:
                 waiting["reply_preserved"] = True
             await self.sessions.state.restore_interruption(session)
-            await self._publish(route[1], waiting)
+            await self._publish(chat_id, waiting)
             return
         if not state or state["status"] != "resuming":
             return
@@ -204,7 +207,7 @@ class RecoveryCoordinator:
             reason="continued",
         )
         await self.sessions.state.restore_interruption(session)
-        await self._publish(route[1], recovered)
+        await self._publish(chat_id, recovered)
 
     async def handle_action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Apply an authenticated continue/dismiss operation."""
@@ -214,7 +217,7 @@ class RecoveryCoordinator:
             raise RecoveryActionError("missing chat_id")
         if not isinstance(recovery_id, str) or not recovery_id:
             raise RecoveryActionError("missing recovery_id")
-        session = await self.sessions.state.get(self._session_key(chat_id))
+        session = await self.sessions.state.get(webui_session_key(chat_id))
         state = recovery_state_from_metadata(session.metadata)
         if not state or state["recovery_id"] != recovery_id:
             raise RecoveryActionError("recovery state is stale", status=409)
@@ -422,6 +425,31 @@ class RecoveryCoordinator:
             )
         )
 
+    async def _close_interrupted_turns(self, session: Session) -> None:
+        # Startup has no live execution owners. Persist their terminal identities
+        # before admitting new work so reconnecting clients can settle old runs.
+        queued_turns = {message.metadata.get(WEBUI_TURN_METADATA_KEY) for message in pending_followups(session)}
+
+        def completions(history: HistoryReader) -> list[HistoryFact]:
+            if not history.turn_count:
+                return []
+            tail = history.read_entries(history.turn_count - 1)
+            if not tail or tail[-1][1].kind is HistoryKind.COMPLETION:
+                # In particular, don't bypass a transcript_incomplete marker.
+                return []
+            sequences: dict[str, int] = {}
+            for _, fact in tail:
+                if fact.turn_id and fact.turn_id not in queued_turns:
+                    sequences[fact.turn_id] = max(sequences.get(fact.turn_id, 0), fact.sequence or 0)
+            return [HistoryFact(
+                HistoryKind.COMPLETION, {"outcome": "interrupted"}, turn_id=turn_id,
+                phase="complete", sequence=sequence + 1, created_at_ms=int(datetime.now().timestamp() * 1000),
+            ) for turn_id, sequence in sequences.items()]
+
+        facts = await self.sessions.state.project_history(session.key, completions)
+        if facts:
+            await self.sessions.state.append_history(session.key, facts, expected_generation=session.generation)
+
     async def _requeue_pending_followups(self, session: Session) -> None:
         for message in pending_followups(session):
             await self.bus.publish_inbound(message)
@@ -489,9 +517,6 @@ class RecoveryCoordinator:
         session.updated_at = datetime.now()
         return state
 
-    def _session_key(self, chat_id: str) -> str:
-        return UNIFIED_SESSION_KEY if self.unified_session else webui_session_key(chat_id)
-
     async def _has_unfinished_webui_transcript(self, session_key: str) -> bool:
         from nanobot.webui.transcript import has_unfinished_transcript_tail
 
@@ -521,21 +546,3 @@ class RecoveryCoordinator:
                 for message in tail
             )
         )
-
-    @staticmethod
-    def _websocket_route(session: Session) -> tuple[str, str] | None:
-        return RecoveryCoordinator._websocket_route_for(session.key, session.metadata)
-
-    @staticmethod
-    def _websocket_route_for(
-        session_key: str,
-        metadata: Mapping[str, Any],
-    ) -> tuple[str, str] | None:
-        chat_id = webui_chat_id(session_key)
-        if chat_id is not None:
-            return ("websocket", chat_id)
-        if session_key == UNIFIED_SESSION_KEY:
-            route = last_channel_from_metadata(metadata)
-            if route and route[0] == "websocket":
-                return route
-        return None

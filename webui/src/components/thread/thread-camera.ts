@@ -4,6 +4,8 @@ const SETTLE_DISTANCE_PX = 0.5;
 
 export interface ThreadCameraViewport {
   scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
   scrollTo?: (options?: ScrollToOptions) => void;
 }
 
@@ -45,6 +47,8 @@ export class ThreadCameraController {
   private target = 0;
   private lastTimestamp: number | null = null;
   private deadline = 0;
+  private lastScrollTop: number | null = null;
+  private lastViewport: ThreadCameraViewport | null = null;
 
   constructor(
     getViewport: () => ThreadCameraViewport | null,
@@ -54,6 +58,28 @@ export class ThreadCameraController {
     this.scheduler = options.scheduler ?? defaultScheduler();
     this.onSettled = options.onSettled;
     this.prefersReducedMotion = options.prefersReducedMotion ?? defaultPrefersReducedMotion;
+  }
+
+  private scrollDelta(viewport: ThreadCameraViewport): number {
+    if (viewport !== this.lastViewport || this.lastScrollTop === null) return 0;
+    // Layout can clamp the old position to a shorter page. Only movement
+    // beyond that clamp, or beyond our own last write, comes from outside.
+    const max = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+    return viewport.scrollTop - Math.min(this.lastScrollTop, max);
+  }
+
+  observeScroll(): number {
+    const viewport = this.getViewport();
+    if (!viewport) return 0;
+    const delta = this.scrollDelta(viewport);
+    this.lastScrollTop = viewport.scrollTop;
+    this.lastViewport = viewport;
+    return delta;
+  }
+
+  reset(): void {
+    this.cancel();
+    this.lastScrollTop = null;
   }
 
   isFollowing(): boolean {
@@ -100,6 +126,8 @@ export class ThreadCameraController {
       return "settled";
     }
 
+    this.lastScrollTop = current;
+    this.lastViewport = viewport;
     this.phase = "following";
     this.lastTimestamp = this.scheduler.now();
     this.deadline = this.lastTimestamp + (this.prefersReducedMotion()
@@ -126,6 +154,12 @@ export class ThreadCameraController {
     this.frameId = null;
     const viewport = this.getViewport();
     if (!viewport || this.phase !== "following") {
+      this.cancel();
+      return;
+    }
+
+    if (Math.abs(this.scrollDelta(viewport)) > SETTLE_DISTANCE_PX) {
+      // Do not overwrite browser movement while its scroll event is queued.
       this.cancel();
       return;
     }
@@ -157,5 +191,7 @@ export class ThreadCameraController {
         // Test DOMs can expose read-only scrollTop; browsers keep this writable.
       }
     }
+    this.lastScrollTop = viewport.scrollTop;
+    this.lastViewport = viewport;
   }
 }

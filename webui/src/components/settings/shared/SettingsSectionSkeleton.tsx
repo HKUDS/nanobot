@@ -119,7 +119,7 @@ export function SettingsSectionSkeleton({ section, showRestart = false, sandboxS
       </SettingsGroup><div className="settings-footer flex items-center justify-between gap-2"><div className="flex h-11 items-center sm:h-9"><div className={cn(block, "h-3 w-20")} /></div><div className="flex h-11 items-center sm:h-9"><div className={cn(block, "h-3 w-28")} /></div></div></section>;
       break;
     case "runtime":
-      content = <><RuntimeGroups page="runtime" /><Group controls={["input", "segments", "input", "input"]} /><Group controls={["input"]} /><Group controls={showRestart ? ["text", "text", "input"] : ["text", "text"]} /></>;
+      content = <><RuntimeGroups page="runtime" /><Group controls={["input"]} /><Group controls={showRestart ? ["text", "text", "input"] : ["text", "text"]} /></>;
       break;
     case "advanced":
       content = <RuntimeGroups page="advanced" sandboxSupported={sandboxSupported} />;

@@ -121,7 +121,6 @@ def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
     assert saved.channels.telegram == {"token": "keep-me", "streaming": False}
     assert payload["requires_restart"]
     assert payload["runtime_config"]["tools.image_generation.save_dir"] == "images"
-    assert "api.api_key" not in runtime_config_payload(saved)
     assert "PRIVATE_API_KEY" not in json.dumps(runtime_config_payload(saved))
 
 
@@ -153,8 +152,6 @@ def test_runtime_patch_persists_and_preserves_other_domains(tmp_path):
     {"agents.defaults.timezone_mode": "manual", "agents.defaults.timezone": "Mars/Olympus"},
     {"gateway.port": 65536},
     {"gateway.heartbeat.interval_s": 0},
-    {"api.host": "192.168.1.2"},
-    {"api.timeout": float("nan")},
     {"tools.image_generation.save_dir": ""},
     {"tools.image_generation.save_dir": "../outside"},
     {"tools.image_generation.save_dir": "C:/outside"},
@@ -228,13 +225,6 @@ def test_timezone_auto_and_nullable_fields():
     assert config.agents.defaults.timezone_mode == "auto"
     assert config.agents.defaults.dream.cron == "0 2 * * *"
     assert not update_runtime_config(config, {}, local_browser=True)
-
-
-def test_api_changes_require_explicit_restart(tmp_path):
-    path = tmp_path / "config.json"
-    payload = update_runtime_config_settings({"api.timeout": 222.5}, config_path=path)
-    assert payload["api"]["timeout"] == 222.5
-    assert payload["requires_restart"]
 
 
 def test_runtime_payload_matches_shared_catalogue_contract():

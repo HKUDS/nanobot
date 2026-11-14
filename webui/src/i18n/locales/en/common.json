@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Saved. Restart the API service to apply changes.",
       "commandRuntime": {
         "custom": "Custom (seconds)",
         "customLabel": "Custom runtime (seconds)",
@@ -589,10 +588,6 @@
         "tools_max_session_messages_per_minute": {
           "label": "Message rate",
           "help": "Maximum tool messages to one session per minute.\n\nMaximum number of messages tools can send to the same session each minute."
-        },
-        "agents_defaults_unified_session": {
-          "label": "Shared sessions",
-          "help": "Share one user's chat history across platforms.\n\nShare conversation history across chat channels for a single user."
         },
         "tools_exec_enable": {
           "label": "Shell tool",
@@ -702,14 +697,6 @@
           "label": "Restart mode",
           "help": "Choose a restart method; Automatic follows your environment.\n\nChoose how the gateway restarts. Automatic selects a method for your environment."
         },
-        "api_host": {
-          "label": "API address",
-          "help": "Set a key before allowing network access; restart the API after changes.\n\nSet an API key in System before binding to a network address. Restart the API service to apply changes."
-        },
-        "api_timeout": {
-          "label": "API timeout",
-          "help": "Maximum seconds per API request; restart to apply.\n\nHow long each API request can take. Restart the API service to apply changes."
-        },
         "tools_image_generation_save_dir": {
           "label": "Save directory",
           "help": "Relative path inside the media directory; existing images stay put.\n\nSubdirectory of nanobot’s media directory. Use a relative path; existing images are not moved."
@@ -767,10 +754,6 @@
         "gateway": {
           "title": "Gateway",
           "help": "Set deployment and restart options."
-        },
-        "api": {
-          "title": "API settings",
-          "help": "Set the listening address and request timeout."
         },
         "storage": {
           "title": "Image storage",
@@ -897,6 +880,8 @@
       "contextWindowError": "Enter a positive token count, such as 200k, 1m, or 131072.",
       "maxTokens": "Max output tokens",
       "temperature": "Temperature",
+      "imageInput": "Image input",
+      "imageInputHelp": "When off, requests containing images skip this preset.",
       "reasoningEffort": "Reasoning effort",
       "convertTitle": "Convert setup",
       "convertHelp": "Convert primary and fallback models to presets.",
@@ -961,11 +946,11 @@
       "small": "Small",
       "standard": "Standard",
       "large": "Large",
-      "previewText": "**A little room to think.**\n\nClear words, comfortable reading. Make this space your own.",
+      "previewText": "Clear words, comfortable reading. Make this space your own.",
       "previewPlaceholder": "Where should we begin?",
       "process": "Activity display",
       "processHelp": "Choose how much detail appears as nanobot works.",
-      "autoHelp": "Show progress while working; keep finished work compact.",
+      "autoHelp": "Keep details collapsed by default. Show the latest activity while working.",
       "expandedHelp": "Keep activity details expanded by default.",
       "summaryHelp": "Show changed files and line counts.",
       "diffHelp": "Show code changes directly in the conversation.",
@@ -1236,6 +1221,7 @@
       "defaultWorkspace": "Default workspace",
       "auto": "Auto",
       "default": "Default",
+      "collapsed": "Collapsed",
       "expanded": "Expanded",
       "summary": "Summary",
       "diff": "Diff",
@@ -1340,17 +1326,18 @@
       "shortTitle": "Token usage",
       "viewDetails": "View details",
       "cacheHitRate": "Cache hit rate",
-      "cacheRateHelp": "Cache hit rate excludes input with unknown cache status.",
       "dailyTrend": "Daily tokens",
       "bySource": "Usage by source",
       "modelTrend": "Model trends",
       "modelsUnavailable": "No model breakdown available.",
-      "otherModels": "Other / unattributed",
+      "otherModels": "Other models",
       "unclassified": "Unclassified",
       "unavailable": "Usage data is unavailable.",
       "noActivity": "No token usage in the last 30 days.",
+      "last30Days": "Last 30 days",
       "cachedInput": "Cached input",
       "cacheMiss": "Cache miss",
+      "cacheWrite": "Cache write",
       "cacheUnknown": "Unknown status",
       "outputTokens": "Output",
       "otherTokens": "Other tokens",
@@ -1364,7 +1351,9 @@
         "dream": "Memory",
         "system": "Auxiliary calls"
       },
-      "systemHelp": "Includes internal tasks and calls without a recorded source."
+      "systemHelp": "Includes internal tasks and calls without a recorded source.",
+      "failedRequests": "{{count}} failed",
+      "estimatedShare": "{{percent}} of tokens are estimated"
     },
     "providers": {
       "manageProviders": "Manage providers",
@@ -1432,27 +1421,6 @@
       "searchSupport": "Search dependencies",
       "searchInstallOnSave": "Required Olostep packages will be installed automatically when you save.",
       "installing": "Installing required packages…"
-    },
-    "api": {
-      "title": "API server",
-      "openaiCompatible": "OpenAI-compatible API",
-      "description": "Connect through an OpenAI-compatible API.",
-      "start": "Start API server",
-      "starting": "Starting...",
-      "stop": "Stop",
-      "stopping": "Stopping...",
-      "access": "Access",
-      "thisDevice": "This device",
-      "localNetwork": "Local network",
-      "localHelp": "Only this device can connect.",
-      "networkHelp": "LAN access requires an API key.\n\nOther devices can connect; an API key is required.",
-      "port": "Port",
-      "portHelp": "Local port used by the API service.",
-      "apiKey": "API key",
-      "apiKeyHelp": "Send the key as a Bearer token.",
-      "apiKeyRequired": "Required before exposing the API to your network.",
-      "apiKeyPlaceholder": "Enter an API key",
-      "autoInstall": "Required API server packages will be installed automatically when you start it."
     },
     "observability": {
       "title": "Run tracing",
@@ -2017,8 +1985,6 @@
       },
       "interruptedHelp": "The host restarted before this task finished. It has not been restarted automatically.",
       "workTitle": "Subtasks",
-      "otherWorkTitle": "Other tasks",
-      "unlinkedHelp": "These tasks have no matching request in the displayed messages.",
       "progress": "{{completed}} of {{total}} completed",
       "running": "Running: {{count}}",
       "finished": "Finished: {{count}}",
@@ -2060,12 +2026,6 @@
     },
     "loadingConversation": "Loading conversation…",
     "empty": {
-      "greetings": {
-        "workOn": "What should we work on?",
-        "start": "Where should we start?",
-        "build": "What are we building today?",
-        "tackle": "What should we tackle together?"
-      },
       "quickActions": {
         "plan": {
           "title": "Make a plan",
@@ -2158,8 +2118,11 @@
       "goalStateStrip": "Goal: {{label}}",
       "goalStateFallback": "Goal",
       "goalStateExpandAria": "Show full goal",
+      "goalBlocked": "Blocked",
       "goalStateSheetTitle": "Goal",
-      "goalStateCloseAria": "Close goal",
+      "cancelGoal": "Cancel goal",
+      "cancelGoalFailed": "Could not cancel goal. Try again.",
+      "cancelGoalOffline": "Reconnect to cancel the goal.",
       "send": "Send message",
       "stop": "Stop response",
       "quotedContext": "Quoted context",
@@ -2255,7 +2218,6 @@
         "details": {
           "goalActive": "Goal is running",
           "goalReady": "Start a sustained objective",
-          "history": "Show recent messages",
           "stopRunning": "Running now"
         },
         "commands": {
@@ -2283,10 +2245,6 @@
             "title": "Model",
             "description": "View or switch the current model preset."
           },
-          "history": {
-            "title": "Chat history",
-            "description": "Show the last N saved messages."
-          },
           "dream": {
             "title": "Run Dream",
             "description": "Organize memory now."
@@ -2306,6 +2264,10 @@
           "goal": {
             "title": "Long-running goal",
             "description": "Have the assistant keep working toward this goal."
+          },
+          "cancel_goal": {
+            "title": "Cancel goal",
+            "description": "Cancel the active or blocked goal in this chat."
           },
           "trigger": {
             "title": "CLI trigger",
@@ -2467,11 +2429,37 @@
       "updatedLongTask": "Updated long task",
       "updateLongTaskFailed": "Could not update long task",
       "continuingCommand": "Continuing command",
+      "waitingCommandResult": "Waiting for command result",
+      "waitingCommandOutput": "Waiting for command output",
+      "sendingCommandInput": "Sending input",
+      "closingCommandInput": "Closing command input",
+      "sendingClosingInput": "Sending and closing command input",
+      "stoppingCommand": "Stopping command",
+      "commandStatusUnknown": "Command status unknown",
+      "commandWasRunning": "Command was still running at the last check",
+      "commandWaitTimedOut": "Wait timed out; command was still running at the last check",
+      "commandWasStopping": "Command was stopping at the last check",
+      "commandCompleted": "Command completed",
+      "commandExitFailed": "Command failed (exit code {{code}})",
+      "commandExited": "Command exited (exit code {{code}})",
+      "commandTimedOut": "Command timed out and was stopped",
+      "commandIdleTimedOut": "Command stopped after output silence",
+      "commandCheckedUnknown": "Command checked; status unknown",
+      "stopCommandError": "Could not stop command",
+      "sendCloseInputError": "Could not send or close command input",
+      "sendInputError": "Could not send input",
+      "closeInputError": "Could not close command input",
+      "checkCommandError": "Could not check command",
+      "sentClosedInput": "Sent and closed command input",
+      "sentCommandInput": "Sent input",
+      "closedCommandInput": "Closed command input",
       "continuedCommand": "Continued command",
       "continueCommandFailed": "Could not continue command",
       "checkingRunningCommands": "Checking running commands",
       "checkedRunningCommands": "Checked running commands",
       "checkRunningCommandsFailed": "Could not check running commands",
+      "showEarlierCommandChecks": "Show earlier command checks ({{count}})",
+      "hideEarlierCommandChecks": "Hide earlier command checks ({{count}})",
       "capturingScreenshot": "Capturing screenshot",
       "capturedScreenshot": "Captured screenshot",
       "captureScreenshotFailed": "Could not capture screenshot",

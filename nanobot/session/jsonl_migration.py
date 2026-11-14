@@ -26,8 +26,6 @@ from nanobot.session.manager import Session
 if TYPE_CHECKING:
     from nanobot.session.sqlite_store import SqliteSessionStore
 
-INTRODUCED_VERSION = "0.3.6"
-LAST_SUPPORTED_RELEASE_LINE = "0.4.x"
 SUNSET_VERSION = "0.5.0"
 WORKSPACE_BACKUP_DIR = "jsonl-backup"
 _WORKSPACE_SOURCES_KEY = "jsonl_workspace_sources"

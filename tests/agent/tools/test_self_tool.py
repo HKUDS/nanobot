@@ -32,7 +32,6 @@ def _make_mock_loop(**overrides):
     loop.model_preset = None
     loop.model_presets = {}
     loop._concurrency_gate = None
-    loop._unified_session = False
     loop._extra_hooks = []
     loop.set_runtime_model.side_effect = lambda value: setattr(loop, "model", value)
     loop.set_runtime_max_iterations.side_effect = lambda value: setattr(loop, "max_iterations", value)

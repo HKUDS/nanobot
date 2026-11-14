@@ -27,9 +27,11 @@ async def test_fork_handler_rejects_invalid_protocol_input(
         gateway=SimpleNamespace(session_manager=MagicMock()),
     )
 
-    await forking.handle_webui_fork_chat(channel, connection, envelope)
+    await forking.handle_webui_fork_chat(channel, connection, envelope, request_id="fork-request")
 
-    channel.send_webui_protocol_error.assert_awaited_once_with(connection, detail)
+    channel.send_webui_protocol_error.assert_awaited_once_with(
+        connection, detail, request_id="fork-request",
+    )
 
 
 @pytest.mark.asyncio
@@ -44,11 +46,13 @@ async def test_fork_handler_reports_unavailable_session_manager() -> None:
         channel,
         connection,
         {"source_chat_id": "source", "before_user_index": 0},
+        request_id="fork-request",
     )
 
     channel.send_webui_protocol_error.assert_awaited_once_with(
         connection,
         "session_manager_unavailable",
+        request_id="fork-request",
     )
 
 
@@ -66,10 +70,11 @@ async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_e
     envelope = {"source_chat_id": "source", "before_user_index": 0}
     monkeypatch.setattr(forking, "create_webui_chat_fork", AsyncMock(return_value=None))
 
-    await forking.handle_webui_fork_chat(channel, connection, envelope)
+    await forking.handle_webui_fork_chat(channel, connection, envelope, request_id="fork-request")
     channel.send_webui_protocol_error.assert_awaited_once_with(
         connection,
         "invalid fork source or index",
+        request_id="fork-request",
     )
 
     channel.send_webui_protocol_error.reset_mock()
@@ -78,10 +83,12 @@ async def test_fork_handler_maps_invalid_source_and_internal_failure_to_stable_e
         "create_webui_chat_fork",
         AsyncMock(side_effect=RuntimeError("broken transcript")),
     )
-    await forking.handle_webui_fork_chat(channel, connection, envelope)
+    await forking.handle_webui_fork_chat(channel, connection, envelope, request_id="fork-request")
 
     warning.assert_called_once_with("fork_chat failed: {}", ANY)
-    channel.send_webui_protocol_error.assert_awaited_once_with(connection, "fork_chat_failed")
+    channel.send_webui_protocol_error.assert_awaited_once_with(
+        connection, "fork_chat_failed", request_id="fork-request",
+    )
 
 
 @pytest.mark.parametrize("with_display", [False, True])

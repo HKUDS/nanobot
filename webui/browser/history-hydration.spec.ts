@@ -22,7 +22,7 @@ function delta(sequence: number, text: string, streamId = "live-wire"): ThreadPr
   return { ...at(TURN, sequence, "answer"), event: "delta", stream_id: streamId, text };
 }
 
-function end(sequence: number, text: string, streamId: string, merge = false): ThreadProjectionEvent {
+function end(sequence: number, text: string, streamId: string, merge = false): Extract<ThreadProjectionEvent, { event: "stream_end" }> {
   return { ...at(TURN, sequence, "answer"), event: "stream_end", stream_id: streamId, text,
     ...(merge ? { resuming: true, merge_next: true } : { resuming: true }) };
 }
@@ -156,6 +156,99 @@ async function expectBefore(body: Locator, first: string, second: string) {
   expect(text.indexOf(first), `${first} must be in the rendered body`).toBeGreaterThanOrEqual(0);
   expect(text.indexOf(second), `${second} must follow ${first}`).toBeGreaterThan(text.indexOf(first));
 }
+
+test("loading an earlier fragment restores a long turn without duplicating its answer", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const events: ThreadProjectionEvent[] = [
+    input(TURN, "Long-turn question"),
+    end(1, "First answer segment.", "long-wire", true),
+    { ...at(TURN, 2, "activity"), event: "message", kind: "tool_hint", text: "Inspecting long history" },
+    end(3, "First answer segment. Final answer segment.", "long-wire"),
+    { ...at(TURN, 4, "complete"), event: "turn_end" },
+  ];
+  const tail = history(events.slice(3), { before: "inside-turn", more: true });
+  tail.page = { ...tail.page, record_range: { turn: 0, start: 3, end: 5 }, truncated_oversized_turn: true };
+  await backend.release(await backend.read(), tail);
+  await expect(body.getByText("First answer segment. Final answer segment.", { exact: true })).toBeVisible();
+
+  const older = await requestOlder(page, backend, body, "inside-turn");
+  const prefix = history(events.slice(0, 3));
+  prefix.page = { ...prefix.page, record_range: { turn: 0, start: 0, end: 3 }, truncated_oversized_turn: true };
+  await backend.release(older, prefix);
+  await expect(body.getByText("Long-turn question", { exact: true })).toHaveCount(1);
+  await expect(body.getByText("First answer segment.", { exact: true })).toHaveCount(1);
+  await expect(body.getByText("Final answer segment.", { exact: true })).toHaveCount(1);
+  await expectBefore(body, "Long-turn question", "Final answer segment.");
+  const answer = body.locator("[data-thread-display-unit]").filter({ has: page.getByText("Final answer segment.", { exact: true }) });
+  await answer.hover();
+  await answer.getByRole("button", { name: "Message actions", exact: true }).click();
+  await page.locator("[data-message-block-activity-action]").click();
+  await expect(answer.getByText("Completed step Inspecting long history", { exact: true })).toBeVisible();
+  backend.healthy();
+});
+
+test("canonical recovery replaces the partial answer in an open oversized turn", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const active = history([end(3, "Partial answer", "partial-wire")], { before: "before-1", more: true, active: TURN });
+  active.page = { ...active.page, history_generation: "generation", record_range: { turn: 0, start: 1, end: 4001 }, truncated_oversized_turn: true };
+  await backend.release(await backend.read(), active);
+  await expect(body.getByText("Partial answer", { exact: true })).toBeVisible();
+  const recovered = history([
+    { chat_id: A, turn_id: TURN, event: "message", text: "Correct final answer" },
+    { ...at(TURN, 4002, "complete"), event: "turn_end" },
+  ], { before: "before-2", more: true });
+  recovered.page = { ...recovered.page, history_generation: "generation", record_range: { turn: 0, start: 2, end: 4002 },
+    truncated_oversized_turn: true, recovered_answers: true };
+  backend.refreshThread();
+  await backend.release(await backend.read(A, null, 1), recovered);
+  await expect(body.getByText("Correct final answer", { exact: true })).toBeVisible();
+  await expect(body.getByText("Partial answer", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await backend.ready();
+  await backend.release(await backend.read(A, null, 2), recovered);
+  await expect(body.getByText("Correct final answer", { exact: true })).toHaveCount(1);
+  await expect(body.getByText("Partial answer", { exact: true })).toHaveCount(0);
+  backend.healthy();
+});
+
+test("prepending a fragment keeps the same answer at the reading position", async ({ page }) => {
+  const { backend, body } = await openFixture(page);
+  const prefix: ThreadProjectionEvent[] = [
+    input(TURN, "Earlier question"),
+    end(1, "Earlier answer", "earlier-wire"),
+    { ...at(TURN, 2, "activity"), event: "message", kind: "tool_hint", text: "Earlier tool" },
+  ];
+  const tail: ThreadProjectionEvent[] = [];
+  for (let index = 0; index < 24; index++) {
+    tail.push(end(3 + index * 2, `Tail answer ${index}`, `tail-${index}`));
+    tail.push({ ...at(TURN, 4 + index * 2, "activity"), event: "message", kind: "tool_hint", text: `Tail tool ${index}` });
+  }
+  tail.push({ ...at(TURN, 51, "complete"), event: "turn_end" });
+  const latest = history(tail, { before: "inside-turn", more: true });
+  latest.page = { ...latest.page, record_range: { turn: 0, start: 3, end: 3 + tail.length }, truncated_oversized_turn: true };
+  await backend.release(await backend.read(), latest);
+  await expect(body.getByText("Tail answer 23", { exact: true })).toBeAttached();
+  const older = await requestOlder(page, backend, body, "inside-turn");
+  const anchor = body.getByText("Tail answer 5", { exact: true });
+  await expect(anchor).toBeAttached();
+  await body.evaluate(async (node) => {
+    const unit = Array.from(node.querySelectorAll<HTMLElement>("[data-thread-display-unit]"))
+      .find((item) => item.textContent?.includes("Tail answer 5"))!;
+    // Establish the reading anchor through the native scroll event before HTTP commits.
+    const scrolled = new Promise<void>((resolve) => node.addEventListener("scroll", () => resolve(), { once: true }));
+    node.scrollTop += unit.getBoundingClientRect().top - node.getBoundingClientRect().top - 280;
+    await scrolled;
+  });
+  const position = () => anchor.evaluate((node) => node.getBoundingClientRect().top);
+  const before = await position();
+  const first = history(prefix);
+  first.page = { ...first.page, record_range: { turn: 0, start: 0, end: 3 }, truncated_oversized_turn: true };
+  await backend.release(older, first);
+  await expect(body.getByText("Earlier question", { exact: true })).toBeAttached();
+  await expect(page.locator('.thread-history-status[data-state="loading"]')).toHaveCount(0);
+  await expect.poll(async () => Math.abs((await position()) - before)).toBeLessThan(2);
+  backend.healthy();
+});
 
 test("idle compaction stays singular across live updates, thread refresh and cold replay", async ({ page }) => {
   const { backend, body } = await openFixture(page);
@@ -322,7 +415,8 @@ test("synthetic HTTP-first cumulative text suppresses delayed covered chunks but
   const { backend, body } = await openFixture(page);
   const latest = await backend.read();
   const canonical = "Canonical answer";
-  await backend.release(latest, history([input(TURN, "HTTP-first question"), end(3, canonical, "resume-wire", true)], { active: TURN }));
+  await backend.release(latest, history([input(TURN, "HTTP-first question"),
+    { ...end(3, canonical, "resume-wire", true), text_from_seq: 1 }], { active: TURN }));
   await expect(body.getByText(canonical, { exact: true })).toBeVisible();
 
   await backend.send(delta(1, "Canonical ", "resume-wire"));

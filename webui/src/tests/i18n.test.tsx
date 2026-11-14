@@ -21,7 +21,6 @@ import {
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
-const HERO_GREETING_KEYS = ["workOn", "start", "build", "tackle"];
 const SLASH_COMMAND_KEYS = [
   "new",
   "compact",
@@ -29,7 +28,6 @@ const SLASH_COMMAND_KEYS = [
   "restart",
   "status",
   "model",
-  "history",
   "dream",
   "dream_log",
   "dream_restore",
@@ -213,6 +211,7 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.help.webuiDefaultAccess",
   "settings.values.light",
   "settings.values.dark",
+  "settings.values.collapsed",
   "settings.values.expanded",
   "settings.values.enabled",
   "settings.values.disabled",
@@ -586,9 +585,6 @@ describe("webui i18n", () => {
   it("keeps empty landing resources localized for every registered locale", () => {
     for (const resource of Object.values(resources)) {
       const empty = resource.common.thread.empty;
-      for (const key of HERO_GREETING_KEYS) {
-        expect(empty.greetings[key as keyof typeof empty.greetings]).toBeTruthy();
-      }
       for (const key of QUICK_ACTION_KEYS) {
         const action = empty.quickActions[key as keyof typeof empty.quickActions];
         expect(action.title).toBeTruthy();
@@ -632,7 +628,6 @@ describe("webui i18n", () => {
       expect(slash.badges.recent).toBeTruthy();
       expect(slash.details.goalActive).toBeTruthy();
       expect(slash.details.goalReady).toBeTruthy();
-      expect(slash.details.history).toBeTruthy();
       expect(slash.details.stopRunning).toBeTruthy();
       for (const key of SLASH_COMMAND_KEYS) {
         const command = slash.commands[key as keyof typeof slash.commands];

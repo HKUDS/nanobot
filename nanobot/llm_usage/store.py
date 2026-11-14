@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import sqlite3
 import threading
@@ -8,7 +10,7 @@ from collections.abc import Iterable
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from nanobot.llm_usage.models import LLMCallRecord
@@ -52,6 +54,8 @@ _USAGE_COLUMNS = (
     "cache_write_tokens",
     "cache_read_observed_input_tokens",
     "cache_write_observed_input_tokens",
+    "cache_miss_tokens",
+    "cache_unknown_tokens",
     "total_tokens",
     "reported_tokens",
     "estimated_tokens",
@@ -78,6 +82,16 @@ _AGGREGATE_SQL = """
     COALESCE(SUM(
         CASE WHEN cache_write_tokens IS NOT NULL THEN input_tokens ELSE 0 END
     ), 0) AS cache_write_observed_input_tokens,
+    COALESCE(SUM(
+        CASE WHEN cache_read_tokens IS NOT NULL
+            THEN input_tokens - cache_read_tokens - COALESCE(cache_write_tokens, 0)
+            ELSE 0 END
+    ), 0) AS cache_miss_tokens,
+    COALESCE(SUM(
+        CASE WHEN cache_read_tokens IS NULL
+            THEN input_tokens - COALESCE(cache_write_tokens, 0)
+            ELSE 0 END
+    ), 0) AS cache_unknown_tokens,
     COALESCE(SUM(total_tokens), 0) AS total_tokens,
     COALESCE(SUM(reported_tokens), 0) AS reported_tokens,
     COALESCE(SUM(estimated_tokens), 0) AS estimated_tokens,
@@ -165,8 +179,9 @@ class LLMUsageStore:
         self._last_prune_utc_day: int | None = None
         self._writes_since_size_prune = 0
         self._write_version = 0
-        self._cached_payload_key: tuple[int, str, str, int, int] | None = None
-        self._cached_payload: dict[str, Any] | None = None
+        self._cached_payloads: dict[
+            str, tuple[tuple[int, str, str, int, int], dict[str, Any]]
+        ] = {}
 
     def _connect(self) -> sqlite3.Connection:
         pid = os.getpid()
@@ -174,8 +189,7 @@ class LLMUsageStore:
             return self._connection
         if self._connection is not None:
             self._connection.close()
-            self._cached_payload_key = None
-            self._cached_payload = None
+            self._cached_payloads.clear()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(
             self.path,
@@ -251,8 +265,7 @@ class LLMUsageStore:
                 self._connection.close()
             self._connection = None
             self._connection_pid = None
-            self._cached_payload_key = None
-            self._cached_payload = None
+            self._cached_payloads.clear()
 
     def record(self, call: LLMCallRecord) -> None:
         usage = call.usage
@@ -301,8 +314,7 @@ class LLMUsageStore:
                 values,
             )
             self._write_version += 1
-            self._cached_payload_key = None
-            self._cached_payload = None
+            self._cached_payloads.clear()
             self._prune_if_due(connection)
 
     def _prune_if_due(self, connection: sqlite3.Connection) -> None:
@@ -392,6 +404,7 @@ class LLMUsageStore:
         self,
         *,
         days: int = 371,
+        view: Literal["history", "overview", "models"] = "history",
         timezone_name: str | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
@@ -400,7 +413,7 @@ class LLMUsageStore:
         if current.tzinfo is None:
             current = current.replace(tzinfo=timezone.utc)
         today = current.astimezone(zone).date()
-        safe_days = max(1, days)
+        safe_days = max(1, days) if view == "history" else 30
         zone_name = getattr(zone, "key", "UTC")
 
         with self._lock:
@@ -414,14 +427,16 @@ class LLMUsageStore:
                 write_version,
                 data_version,
             )
-            if self._cached_payload_key == cache_key and self._cached_payload is not None:
-                return deepcopy(self._cached_payload)
+            cached = self._cached_payloads.get(view)
+            if cached is not None and cached[0] == cache_key:
+                return deepcopy(cached[1])
 
         connection = self._read_connection()
         try:
             connection.execute("BEGIN")
             end_ms = self._midnight_ms(today + timedelta(days=1), zone)
-            retained_start = today - timedelta(days=MAX_DAYS_RETAINED - 1)
+            retained_days = MAX_DAYS_RETAINED if view == "history" else 30
+            retained_start = today - timedelta(days=retained_days - 1)
             retained_start_ms = self._midnight_ms(retained_start, zone)
             daily = self._daily_rows(
                 connection=connection,
@@ -435,16 +450,11 @@ class LLMUsageStore:
             last_30_start_ms = self._midnight_ms(today - timedelta(days=29), zone)
 
             last_30_date = (today - timedelta(days=29)).isoformat()
-            last_365_date = (today - timedelta(days=364)).isoformat()
-            all_totals = _sum_rows(daily)
-            totals_30 = _sum_rows(row for row in daily if row["date"] >= last_30_date)
-            totals_365 = _sum_rows(row for row in daily if row["date"] >= last_365_date)
-
             provider_rows = self._aggregate(
                 connection=connection,
                 start_ms=last_30_start_ms,
                 end_ms=end_ms,
-            )
+            ) if view != "overview" else []
             providers_30d = [
                 {
                     "provider": str(row["provider"]),
@@ -459,11 +469,19 @@ class LLMUsageStore:
                     "provider": str(row["provider"]),
                     "model": str(row["model"]),
                     "total_tokens": int(row["total_tokens"]),
+                    "measured_output_tokens": int(row["measured_output_tokens"]),
+                    "generation_ms": int(row["generation_ms"]),
+                    "ttft_ms": int(row["ttft_ms"]),
+                    "timed_requests": int(row["timed_requests"]),
+                    "cache_read_tokens": int(row["cache_read_tokens"]),
+                    "cache_read_observed_input_tokens": int(
+                        row["cache_read_observed_input_tokens"]
+                    ),
                 }
                 for row in connection.execute(
-                    """
+                    f"""
                     SELECT llm_usage_local_day(started_at_ms, ?) AS date, provider, model,
-                           COALESCE(SUM(total_tokens), 0) AS total_tokens
+                           {_AGGREGATE_SQL}
                     FROM llm_calls
                     WHERE started_at_ms >= ? AND started_at_ms < ?
                     GROUP BY date, provider, model
@@ -472,66 +490,70 @@ class LLMUsageStore:
                     """,
                     (zone_name, last_30_start_ms, end_ms),
                 )
-            ]
+            ] if view != "overview" else []
 
-            active_dates = {
-                date.fromisoformat(row["date"]) for row in daily if row["total_tokens"] > 0
-            }
-            current_streak = 0
-            cursor = today
-            while cursor in active_dates:
-                current_streak += 1
-                cursor -= timedelta(days=1)
-            longest_streak = 0
-            running_streak = 0
-            previous: date | None = None
-            for cursor in sorted(active_dates):
-                running_streak = running_streak + 1 if previous == cursor - timedelta(days=1) else 1
-                longest_streak = max(longest_streak, running_streak)
-                previous = cursor
-
-            latest = (
-                connection
-                .execute("SELECT MAX(started_at_ms) AS updated_at_ms FROM llm_calls")
-                .fetchone()
-            )
-            updated_at_ms = int(latest["updated_at_ms"] or 0) if latest is not None else 0
-            denominator = totals_30["cache_read_observed_input_tokens"]
-            payload = {
-                "days": visible_days,
-                "total_tokens": all_totals["total_tokens"],
-                "total_tokens_30d": totals_30["total_tokens"],
-                "total_tokens_365d": totals_365["total_tokens"],
-                "reported_tokens_30d": totals_30["reported_tokens"],
-                "estimated_tokens_30d": totals_30["estimated_tokens"],
-                "cache_read_tokens_30d": totals_30["cache_read_tokens"],
-                "cache_read_observed_input_tokens_30d": denominator,
-                "cache_read_rate_30d": (
-                    totals_30["cache_read_tokens"] / denominator if denominator else None
-                ),
-                "peak_day_tokens": max(
-                    (int(row["total_tokens"]) for row in daily),
-                    default=0,
-                ),
-                "current_streak_days": current_streak,
-                "longest_streak_days": longest_streak,
-                "active_days_30d": sum(
-                    1
-                    for row in daily
-                    if row["date"] >= last_30_date and row["total_tokens"] > 0
-                ),
-                "requests_30d": totals_30["requests"],
-                "failed_requests_30d": totals_30["failed_requests"],
-                "providers_30d": providers_30d,
-                "model_days_30d": model_days_30d,
-                "updated_at": (
-                    datetime.fromtimestamp(updated_at_ms / 1000, timezone.utc)
-                    .isoformat()
-                    .replace("+00:00", "Z")
-                    if updated_at_ms
-                    else None
-                ),
-            }
+            if view == "history":
+                totals_30 = _sum_rows(row for row in daily if row["date"] >= last_30_date)
+                last_365_date = (today - timedelta(days=364)).isoformat()
+                totals_365 = _sum_rows(row for row in daily if row["date"] >= last_365_date)
+                active_dates = {
+                    date.fromisoformat(row["date"]) for row in daily if row["total_tokens"] > 0
+                }
+                current_streak = 0
+                cursor = today
+                while cursor in active_dates:
+                    current_streak += 1
+                    cursor -= timedelta(days=1)
+                longest_streak = 0
+                running_streak = 0
+                previous: date | None = None
+                for cursor in sorted(active_dates):
+                    running_streak = running_streak + 1 if previous == cursor - timedelta(days=1) else 1
+                    longest_streak = max(longest_streak, running_streak)
+                    previous = cursor
+                latest = connection.execute(
+                    "SELECT MAX(started_at_ms) AS updated_at_ms FROM llm_calls"
+                ).fetchone()
+                updated_at_ms = int(latest["updated_at_ms"] or 0) if latest is not None else 0
+                denominator = totals_30["cache_read_observed_input_tokens"]
+                payload = {
+                    "days": visible_days,
+                    "total_tokens": _sum_rows(daily)["total_tokens"],
+                    "total_tokens_30d": totals_30["total_tokens"],
+                    "total_tokens_365d": totals_365["total_tokens"],
+                    "reported_tokens_30d": totals_30["reported_tokens"],
+                    "estimated_tokens_30d": totals_30["estimated_tokens"],
+                    "cache_read_tokens_30d": totals_30["cache_read_tokens"],
+                    "cache_read_observed_input_tokens_30d": denominator,
+                    "cache_read_rate_30d": (
+                        totals_30["cache_read_tokens"] / denominator if denominator else None
+                    ),
+                    "peak_day_tokens": max((int(row["total_tokens"]) for row in daily), default=0),
+                    "current_streak_days": current_streak,
+                    "longest_streak_days": longest_streak,
+                    "active_days_30d": sum(
+                        1 for row in daily if row["date"] >= last_30_date and row["total_tokens"] > 0
+                    ),
+                    "requests_30d": totals_30["requests"],
+                    "failed_requests_30d": totals_30["failed_requests"],
+                    "providers_30d": providers_30d,
+                    "model_days_30d": model_days_30d,
+                    "updated_at": (
+                        datetime.fromtimestamp(updated_at_ms / 1000, timezone.utc)
+                        .isoformat().replace("+00:00", "Z") if updated_at_ms else None
+                    ),
+                }
+            else:
+                payload = {
+                    "days": visible_days,
+                    "range_start": last_30_date,
+                    "range_end": today.isoformat(),
+                    **({"providers_30d": providers_30d, "model_days_30d": model_days_30d}
+                       if view == "models" else {}),
+                }
+                payload["revision"] = hashlib.sha256(
+                    json.dumps(payload, sort_keys=True).encode("utf-8")
+                ).hexdigest()
         finally:
             connection.close()
 
@@ -543,8 +565,7 @@ class LLMUsageStore:
                 else 0
             )
             if self._write_version == write_version and latest_data_version == data_version:
-                self._cached_payload_key = cache_key
-                self._cached_payload = payload
+                self._cached_payloads[view] = (cache_key, payload)
         return deepcopy(payload)
 
     def recent_calls(self, *, limit: int = 100) -> list[dict[str, Any]]:

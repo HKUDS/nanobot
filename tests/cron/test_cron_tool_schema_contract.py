@@ -100,3 +100,15 @@ class TestSchemaSelfDescribesRequirements:
         # accidentally introduced).
         tool = CronTool(_SvcStub())
         assert tool.parameters["required"] == ["action"]
+
+
+async def test_invalid_action_returns_tool_error_and_allows_correction(registry):
+    from nanobot.agent.tools.registry import is_tool_error_result
+
+    arguments = {"action": ["list"]}
+    result = await registry.execute("cron", arguments)
+
+    assert is_tool_error_result(result)
+    assert "action:" in result and "string" in result
+    assert arguments == {"action": ["list"]}
+    assert await registry.execute("cron", {"action": "list"}) == "No scheduled jobs."

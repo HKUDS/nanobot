@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "Guardado. Reinicia el servicio API para aplicar los cambios.",
       "commandRuntime": {
         "custom": "Personalizada (segundos)",
         "customLabel": "Duración personalizada (segundos)",
@@ -557,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "Seguir reintentando", "help": "Reintenta errores recuperables; desactívalo para usar reintentos estándar.\n\nVuelve a intentar las solicitudes al modelo tras un error temporal. Desactiva esta opción para limitar el número de reintentos."},
         "agents_defaults_tool_hint_max_length": {"label": "Longitud del resumen", "help": "Límite de caracteres de los resúmenes de herramientas.\n\nLongitud máxima de las indicaciones breves de actividad."},
         "tools_max_session_messages_per_minute": {"label": "Frecuencia de mensajes", "help": "Máximo de mensajes de herramientas a una sesión por minuto.\n\nLimita la frecuencia de los mensajes que envían las herramientas a una conversación."},
-        "agents_defaults_unified_session": {"label": "Sesiones compartidas", "help": "Comparte el historial de un usuario entre plataformas.\n\nUsa la misma conversación para un usuario en varias plataformas de chat."},
         "tools_exec_enable": {"label": "Herramienta de shell", "help": "Permite al agente ejecutar comandos Shell.\n\nPermite al agente ejecutar comandos de shell."},
         "tools_file_enable": {"label": "Herramientas de archivos", "help": "Permite las herramientas integradas de lectura y edición de archivos."},
         "tools_web_enable": {"label": "Acceso web", "help": "Permite buscar y leer páginas web.\n\nPermite buscar en la web y obtener páginas."},
@@ -585,8 +583,6 @@
         "gateway_host": {"label": "Dirección de la puerta de enlace", "help": "Dirección de la puerta de enlace; configura el listener WebUI aparte.\n\nDirección de escucha de la pasarela. Las direcciones de WebSocket y WebUI se configuran en Canales → WebSocket."},
         "gateway_port": {"label": "Puerto de la pasarela", "help": "Puerto de la puerta de enlace; los argumentos de inicio tienen prioridad.\n\nPuerto guardado. Los argumentos de línea de comandos tienen prioridad."},
         "gateway_restart_mode": {"label": "Modo de reinicio", "help": "Elige cómo reiniciar; Automático se adapta al entorno.\n\nMétodo de reinicio del proceso. El modo automático depende del entorno del host."},
-        "api_host": {"label": "Dirección API", "help": "Configura una clave antes del acceso por red; reinicia la API tras los cambios.\n\nSe requiere una clave API para escuchar en una dirección distinta de localhost. Configúrala en Sistema y reinicia el servicio API para aplicar los cambios."},
-        "api_timeout": {"label": "Tiempo límite de API", "help": "Segundos máximos por solicitud API; reinicia para aplicar.\n\nDuración máxima de las solicitudes. Reinicia el servicio API para aplicar los cambios."},
         "tools_image_generation_save_dir": {"label": "Directorio de guardado", "help": "Ruta relativa dentro del directorio multimedia; las imágenes existentes no se mueven.\n\nRuta relativa dentro de la carpeta multimedia de nanobot. Las imágenes existentes no se mueven."}
       },
       "groups": {
@@ -603,7 +599,6 @@
         "safety": {"title": "Permisos globales", "help": "Configura límites del espacio, excepciones de red e instalaciones remotas.\n\nRestricciones del espacio de trabajo, redes privadas e instalaciones remotas."},
         "cli": {"title": "Límites CLI", "help": "Configura tiempos límite de instalación y ejecución y la duración de caché.\n\nTiempos de instalación, ejecución y caché del catálogo."},
         "gateway": {"title": "Puerta de enlace", "help": "Configura el despliegue y el reinicio."},
-        "api": {"title": "Ajustes API", "help": "Configura la dirección de escucha y el tiempo límite de solicitudes."},
         "storage": {"title": "Almacenamiento de imágenes", "help": "Elige dónde guardar las imágenes generadas."},
         "maintenance": {"title": "Organización de memoria", "help": ""},
         "web": {"title": "Acceso web", "help": ""},
@@ -714,11 +709,11 @@
       "small": "Pequeño",
       "standard": "Estándar",
       "large": "Grande",
-      "previewText": "**Un poco de espacio para pensar.**\n\nPalabras claras, lectura cómoda. Haz tuyo este espacio.",
+      "previewText": "Palabras claras, lectura cómoda. Haz tuyo este espacio.",
       "previewPlaceholder": "¿Por dónde empezamos?",
       "process": "Visualización de actividad",
       "processHelp": "Elige cuánto detalle se muestra mientras nanobot trabaja.",
-      "autoHelp": "Muestra el progreso durante el trabajo y una vista compacta al terminar.",
+      "autoHelp": "Mantén los detalles contraídos por defecto y muestra la actividad más reciente durante el trabajo.",
       "expandedHelp": "Mantén los detalles de actividad expandidos por defecto.",
       "summaryHelp": "Muestra los archivos modificados y el número de líneas.",
       "diffHelp": "Muestra los cambios de código directamente en la conversación.",
@@ -835,6 +830,7 @@
       "unixSocket": "Socket Unix",
       "defaultWorkspace": "Espacio predeterminado",
       "auto": "Automático",
+      "collapsed": "Contraído",
       "expanded": "Expandido",
       "default": "Predeterminado",
       "summary": "Resumen",
@@ -940,18 +936,19 @@
       "shortTitle": "Uso de tokens",
       "viewDetails": "Ver detalles",
       "cacheHitRate": "Tasa de aciertos de caché",
-      "cacheRateHelp": "La tasa excluye las entradas cuyo estado de caché se desconoce.",
       "dailyTrend": "Tokens diarios",
       "systemHelp": "Incluye tareas internas y llamadas sin origen registrado.",
       "bySource": "Uso por origen",
       "modelTrend": "Tendencias por modelo",
       "modelsUnavailable": "Sin desglose por modelo.",
-      "otherModels": "Otros / sin atribuir",
+      "otherModels": "Otros modelos",
       "unclassified": "Sin clasificar",
       "unavailable": "Los datos de uso no están disponibles.",
       "noActivity": "Sin uso de tokens en los últimos 30 días.",
+      "last30Days": "Últimos 30 días",
       "cachedInput": "Entrada en caché",
       "cacheMiss": "Fallo de caché",
+      "cacheWrite": "Escritura de caché",
       "cacheUnknown": "Estado desconocido",
       "outputTokens": "Salida",
       "otherTokens": "Otros tokens",
@@ -964,7 +961,9 @@
         "cron": "Automatizaciones",
         "dream": "Consolidación de memoria",
         "system": "Llamadas auxiliares"
-      }
+      },
+      "failedRequests": "{{count}} fallidas",
+      "estimatedShare": "El {{percent}} de los tokens es estimado"
     },
     "providers": {
       "manageProviders": "Gestionar proveedores",
@@ -1062,6 +1061,8 @@
       "contextWindowError": "Introduce una cantidad positiva de tokens, como 200k, 1m o 131072.",
       "maxTokens": "Máx. tokens de salida",
       "temperature": "Temperatura",
+      "imageInput": "Entrada de imágenes",
+      "imageInputHelp": "Al desactivarla, las solicitudes con imágenes omiten este preajuste.",
       "reasoningEffort": "Esfuerzo de razonamiento",
       "convertTitle": "Convertir ajustes",
       "convertHelp": "Convierte los modelos principal y de respaldo en preajustes.",
@@ -1237,16 +1238,6 @@
         "github": "Gestiona repositorios, issues y PR.",
         "supabase": "Consulta y gestiona proyectos."
       }
-    },
-    "api": {
-      "title": "Servidor API", "openaiCompatible": "API compatible con OpenAI",
-      "description": "Conecta mediante una API compatible con OpenAI.",
-      "start": "Iniciar servidor API", "starting": "Iniciando...", "stop": "Detener", "stopping": "Deteniendo...",
-      "access": "Acceso", "thisDevice": "Este dispositivo", "localNetwork": "Red local",
-      "localHelp": "Solo este dispositivo puede conectarse.", "networkHelp": "El acceso desde la red local requiere una clave API.\n\nOtros dispositivos pueden conectarse; se requiere una clave API.",
-      "port": "Puerto", "portHelp": "Puerto local del servicio API.", "apiKey": "Clave API",
-      "apiKeyHelp": "Envía la clave como Bearer token.", "apiKeyRequired": "Obligatoria antes de exponer la API en la red.",
-      "apiKeyPlaceholder": "Introduce una clave API", "autoInstall": "Las dependencias del servidor API se instalarán automáticamente al iniciarlo."
     },
     "observability": {
       "title": "Trazas de ejecución", "configured": "Las credenciales de trazas están disponibles para nanobot.",
@@ -1812,8 +1803,6 @@
       },
       "interruptedHelp": "El servidor se reinició antes de terminar esta tarea. No se ha vuelto a ejecutar automáticamente.",
       "workTitle": "Subtareas",
-      "otherWorkTitle": "Otras tareas",
-      "unlinkedHelp": "No se encontró la solicitud correspondiente a estas tareas en los mensajes mostrados.",
       "progress": "{{completed}} de {{total}} completadas",
       "running": "En curso: {{count}}",
       "finished": "Finalizadas: {{count}}",
@@ -1855,12 +1844,6 @@
     },
     "loadingConversation": "Cargando conversación…",
     "empty": {
-      "greetings": {
-        "workOn": "¿En qué trabajamos juntos?",
-        "start": "¿Por dónde empezamos?",
-        "build": "¿Qué construimos hoy?",
-        "tackle": "¿Qué resolvemos juntos?"
-      },
       "quickActions": {
         "plan": {
           "title": "Crear un plan",
@@ -1953,8 +1936,11 @@
       "goalStateStrip": "Objetivo: {{label}}",
       "goalStateFallback": "Objetivo",
       "goalStateExpandAria": "Ver objetivo completo",
+      "goalBlocked": "Bloqueado",
       "goalStateSheetTitle": "Objetivo",
-      "goalStateCloseAria": "Cerrar objetivo",
+      "cancelGoal": "Cancelar objetivo",
+      "cancelGoalFailed": "No se pudo cancelar. Inténtalo de nuevo.",
+      "cancelGoalOffline": "Vuelve a conectarte para cancelar el objetivo.",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
       "quotedContext": "Contexto citado",
@@ -2068,10 +2054,6 @@
             "title": "Modelo",
             "description": "Consulta o cambia el preajuste de modelo actual."
           },
-          "history": {
-            "title": "Historial del chat",
-            "description": "Muestra los últimos N mensajes guardados."
-          },
           "dream": {
             "title": "Ejecutar Dream",
             "description": "Organiza la memoria ahora."
@@ -2091,6 +2073,10 @@
           "goal": {
             "title": "Objetivo a largo plazo",
             "description": "Haz que el asistente siga trabajando en este objetivo."
+          },
+          "cancel_goal": {
+            "title": "Cancelar objetivo",
+            "description": "Cancela el objetivo activo o bloqueado de este chat."
           },
           "trigger": {
             "title": "Activador CLI",
@@ -2112,7 +2098,6 @@
         "details": {
           "goalActive": "El objetivo está en curso",
           "goalReady": "Iniciar un objetivo sostenido",
-          "history": "Mostrar mensajes recientes",
           "stopRunning": "En ejecución"
         }
       },
@@ -2289,11 +2274,37 @@
       "updatedLongTask": "Tarea larga actualizada",
       "updateLongTaskFailed": "No se pudo actualizar la tarea larga",
       "continuingCommand": "Continuando comando",
+      "waitingCommandResult": "Esperando el resultado del comando",
+      "waitingCommandOutput": "Esperando la salida del comando",
+      "sendingCommandInput": "Enviando entrada",
+      "closingCommandInput": "Cerrando la entrada del comando",
+      "sendingClosingInput": "Enviando y cerrando la entrada del comando",
+      "stoppingCommand": "Deteniendo el comando",
+      "commandStatusUnknown": "Estado del comando desconocido",
+      "commandWasRunning": "El comando seguía en ejecución en la última comprobación",
+      "commandWaitTimedOut": "Se agotó el tiempo de espera; el comando seguía en ejecución en la última comprobación",
+      "commandWasStopping": "El comando se estaba deteniendo en la última comprobación",
+      "commandCompleted": "Comando completado",
+      "commandExitFailed": "El comando falló (código de salida {{code}})",
+      "commandExited": "El comando ha finalizado (código de salida {{code}})",
+      "commandTimedOut": "El comando superó el tiempo límite y se detuvo",
+      "commandIdleTimedOut": "El comando se detuvo tras un período sin salida",
+      "commandCheckedUnknown": "Comando comprobado; estado desconocido",
+      "stopCommandError": "No se pudo detener el comando",
+      "sendCloseInputError": "No se pudo enviar o cerrar la entrada del comando",
+      "sendInputError": "No se pudo enviar la entrada",
+      "closeInputError": "No se pudo cerrar la entrada del comando",
+      "checkCommandError": "No se pudo comprobar el comando",
+      "sentClosedInput": "Se envió y se cerró la entrada del comando",
+      "sentCommandInput": "Entrada enviada",
+      "closedCommandInput": "Entrada del comando cerrada",
       "continuedCommand": "Comando continuado",
       "continueCommandFailed": "No se pudo continuar el comando",
       "checkingRunningCommands": "Comprobando comandos en ejecución",
       "checkedRunningCommands": "Comandos en ejecución comprobados",
       "checkRunningCommandsFailed": "No se pudieron comprobar los comandos en ejecución",
+      "showEarlierCommandChecks": "Mostrar las comprobaciones anteriores de comandos ({{count}})",
+      "hideEarlierCommandChecks": "Ocultar las comprobaciones anteriores de comandos ({{count}})",
       "capturingScreenshot": "Capturando pantalla",
       "capturedScreenshot": "Captura de pantalla realizada",
       "captureScreenshotFailed": "No se pudo capturar la pantalla",

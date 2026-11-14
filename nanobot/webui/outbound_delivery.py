@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 
@@ -94,6 +94,21 @@ class WebUIOutboundTransport(Protocol):
     ) -> None: ...
 
 
+@dataclass
+class _StreamBuffer:
+    """Text and its first wire sequence share the same continuation/reset lifetime."""
+
+    chunks: list[str] = field(default_factory=list)
+    from_seq: int | None = None
+
+    def observe(self, event: Mapping[str, Any]) -> None:
+        if self.from_seq is None:
+            self.from_seq = event.get("turn_seq")
+
+    def snapshot(self) -> dict[str, Any]:
+        return {"text_from_seq": self.from_seq} if self.from_seq is not None else {}
+
+
 class WebUIOutboundDelivery:
     """Keep presentation, history and delivery-turn policy out of socket writers."""
 
@@ -112,8 +127,8 @@ class WebUIOutboundDelivery:
         self._temporary_chats = temporary_chats
         self._session_projection = session_projection
         self._context_graph = ContextGraphObserver(transcripts.sessions)
-        self._stream_text_buffers: dict[tuple[str, str], list[str]] = {}
-        self._reasoning_text_buffers: dict[tuple[str, str], list[str]] = {}
+        self._stream_text_buffers: dict[tuple[str, str], _StreamBuffer] = {}
+        self._reasoning_text_buffers: dict[tuple[str, str], _StreamBuffer] = {}
 
     async def _project_notification(self, msg: OutboundMessage) -> NotificationProjection | None:
         event = msg.event
@@ -295,6 +310,7 @@ class WebUIOutboundDelivery:
                 body: UserInputWirePayload = {
                     "event": "user_message", "chat_id": msg.chat_id, "text": event.content,
                     "created_at_ms": event.created_at_ms, "starts_turn": False,
+                    "input_id": event.input_id,
                 }
                 if event.provenance:
                     body["provenance"] = event.provenance
@@ -485,11 +501,13 @@ class WebUIOutboundDelivery:
         payload: StreamWirePayload = {"event": "reasoning_delta", "chat_id": chat_id, "text": delta}
         if stream_id is not None:
             payload["stream_id"] = stream_id
-        self._reasoning_text_buffers.setdefault((chat_id, str(stream_id or "")), []).append(delta)
+        buffered = self._reasoning_text_buffers.setdefault((chat_id, str(stream_id or "")), _StreamBuffer())
+        buffered.chunks.append(delta)
         body: dict[str, Any] = dict(payload)
         await self._persist_turn_stream_event(
             chat_id, body, completed_text=None, metadata=metadata or {}, phase="reasoning",
         )
+        buffered.observe(body)
         await self._fanout(recipients, body, label=" reasoning ")
 
     async def send_reasoning_end(
@@ -500,8 +518,9 @@ class WebUIOutboundDelivery:
         payload: StreamWirePayload = {"event": "reasoning_end", "chat_id": chat_id}
         if stream_id is not None:
             payload["stream_id"] = stream_id
-        text = "".join(self._reasoning_text_buffers.pop((chat_id, str(stream_id or "")), []))
-        body: dict[str, Any] = dict(payload)
+        buffered = self._reasoning_text_buffers.pop((chat_id, str(stream_id or "")), _StreamBuffer())
+        text = "".join(buffered.chunks)
+        body: dict[str, Any] = {**payload, **buffered.snapshot()}
         await self._persist_turn_stream_event(
             chat_id, body, completed_text=text or None, metadata=metadata or {}, phase="reasoning",
         )
@@ -534,30 +553,32 @@ class WebUIOutboundDelivery:
         if stream_end:
             payload = {"event": "stream_end", "chat_id": chat_id}
             buffered = (
-                self._stream_text_buffers.setdefault(stream_key, [])
-                if merge_next else self._stream_text_buffers.pop(stream_key, [])
+                self._stream_text_buffers.setdefault(stream_key, _StreamBuffer())
+                if merge_next else self._stream_text_buffers.pop(stream_key, _StreamBuffer())
             )
             if delta:
-                buffered.append(delta)
-            full_text = "".join(buffered)
+                buffered.chunks.append(delta)
+            full_text = "".join(buffered.chunks)
             rewritten = self._media.rewrite_local_markdown_images(full_text)
             completed_text = rewritten
             if delta or rewritten != full_text:
                 payload["text"] = rewritten
         else:
             payload = {"event": "delta", "chat_id": chat_id, "text": delta}
-            self._stream_text_buffers.setdefault(stream_key, []).append(delta)
+            buffered = self._stream_text_buffers.setdefault(stream_key, _StreamBuffer())
+            buffered.chunks.append(delta)
         if stream_id is not None:
             payload["stream_id"] = stream_id
         if stream_end and resuming:
             payload["resuming"] = True
         if stream_end and merge_next:
             payload["merge_next"] = True
-        body: dict[str, Any] = dict(payload)
+        body: dict[str, Any] = {**payload, **(buffered.snapshot() if stream_end else {})}
         await self._persist_turn_stream_event(
             chat_id, body, completed_text=completed_text, metadata=metadata or {},
             phase="answer", include_source=True,
         )
+        buffered.observe(body)
         await self._fanout(recipients, body, label=" stream ")
 
     async def _send_payload(

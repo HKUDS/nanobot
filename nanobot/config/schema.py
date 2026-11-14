@@ -5,6 +5,7 @@ from typing import Any, ClassVar, Literal, cast
 
 from pydantic import AliasChoices, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticCustomError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from nanobot.agent.tools.cli_apps_config import CliAppsToolConfig
@@ -21,7 +22,6 @@ from nanobot.agent.tools.web_config import (
 from nanobot.agent.tools.web_config import WebToolsConfig
 from nanobot.config.home import get_default_workspace
 from nanobot.config.network import NetworkConfig, migrate_legacy_proxy_config
-from nanobot.config.provider_api_migration import migrate_legacy_provider_api
 from nanobot.config.timezone import detect_system_timezone
 from nanobot.config_base import Base
 from nanobot.cron.types import CronSchedule
@@ -134,6 +134,7 @@ class InlineFallbackConfig(RequestOverrides):
 
     model: str
     provider: str
+    supports_images: bool = True
     max_tokens: int | None = None
     context_window_tokens: int | None = None
     temperature: float | None = None
@@ -149,6 +150,7 @@ class ModelPresetConfig(RequestOverrides):
 
     model: str
     provider: str = "auto"
+    supports_images: bool = True
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
     temperature: float = 0.1
@@ -172,6 +174,7 @@ class AgentDefaults(Base):
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
+    supports_images: bool = True
     max_tokens: int = 8192
     context_window_tokens: int = 200_000
     temperature: float = 0.1
@@ -193,7 +196,6 @@ class AgentDefaults(Base):
     timezone_mode: Literal["auto", "manual"] = "auto"
     bot_name: str = "nanobot"
     bot_icon: str = "🐈"  # Short icon (emoji or text) shown next to the bot name in CLI; "" to omit
-    unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
     session_ttl_minutes: int = Field(
         default=15,
@@ -266,6 +268,25 @@ class ProviderConfig(Base):
         "reasoning_split",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_retired_api_selector(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        provider = cast(dict[object, object], value)
+        # Older releases wrote the default Auto to every provider. Auto is
+        # already the default, and a current declaration always takes priority.
+        if "api" not in provider and any(
+            key in provider and provider[key] != "auto"
+            for key in ("apiType", "api_type", "apitype")
+        ):
+            raise PydanticCustomError(
+                "retired_provider_api_selector",
+                "The apiType setting was removed. Replace it with an api object that declares supportedApis, "
+                "or remove it for Auto.",
+            )
+        return provider
+
     @field_validator("thinking_style")
     @classmethod
     def _validate_thinking_style(cls, v: str | None) -> str | None:
@@ -303,6 +324,7 @@ class ProvidersConfig(Base):
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
     orcarouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    shengsuanyun: ProviderConfig = Field(default_factory=ProviderConfig)
     assemblyai: ProviderConfig = Field(default_factory=ProviderConfig)
     huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     skywork: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -359,45 +381,12 @@ class ProvidersConfig(Base):
                     self.model_extra[key] = ProviderConfig.model_validate(value)
         return self
 
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_api_type(cls, value: Any) -> Any:
-        # Temporary for two releases; remove with provider_api_migration.py.
-        if not isinstance(value, dict):
-            return value
-        providers = cast(dict[str, Any], value)
-        return {
-            name: migrate_legacy_provider_api(cast(dict[str, Any], provider), provider_name=name)
-            if isinstance(provider, dict) else provider
-            for name, provider in providers.items()
-        }
-
 
 class HeartbeatConfig(Base):
     """Heartbeat service configuration (now backed by cron)."""
 
     enabled: bool = True
     interval_s: int = 30 * 60
-
-
-class ApiConfig(Base):
-    """OpenAI-compatible API server configuration."""
-
-    host: str = "127.0.0.1"  # Safer default: local-only bind.
-    port: int = 8900
-    timeout: float = 120.0  # Per-request timeout in seconds.
-    api_key: str = Field(default="", repr=False)
-
-    @model_validator(mode="after")
-    def wildcard_host_requires_auth(self) -> "ApiConfig":
-        if self.host not in ("0.0.0.0", "::"):
-            return self
-        if self.api_key.strip():
-            return self
-        raise ValueError(
-            "host is 0.0.0.0 (all interfaces) but api_key is not set "
-            "- set api.api_key to prevent unauthenticated access"
-        )
 
 
 class GatewayConfig(Base):
@@ -506,7 +495,6 @@ class Config(BaseSettings):
     transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     network: NetworkConfig = Field(default_factory=NetworkConfig)
-    api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     model_presets: dict[str, ModelPresetConfig] = Field(
@@ -517,7 +505,11 @@ class Config(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def _migrate_proxy_config(cls, value: Any) -> Any:
+    def _migrate_legacy_config(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "api" in value:
+            # Old installations saved this block even if they never ran serve.
+            legacy = cast(dict[object, object], value)
+            value = {key: item for key, item in legacy.items() if key != "api"}
         return migrate_legacy_proxy_config(value)
 
     @classmethod
@@ -564,7 +556,8 @@ class Config(BaseSettings):
         """Return the implicit `default` preset from agents.defaults fields."""
         d = self.agents.defaults
         return ModelPresetConfig(
-            model=d.model, provider=d.provider, max_tokens=d.max_tokens,
+            model=d.model, provider=d.provider, supports_images=d.supports_images,
+            max_tokens=d.max_tokens,
             context_window_tokens=d.context_window_tokens,
             temperature=d.temperature, reasoning_effort=d.reasoning_effort, api=d.api,
         )
@@ -620,6 +613,13 @@ class Config(BaseSettings):
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")
         prefixed_provider = find_by_name(model_prefix) if model_prefix else None
+        legacy_connections = {
+            spec.name: provider
+            for spec in PROVIDERS
+            if spec.accepts_legacy_custom_config
+            and isinstance(provider := getattr(self.providers, spec.name, None), ProviderConfig)
+            and spec.uses_legacy_custom_config(provider)
+        }
 
         def _kw_matches(kw: str) -> bool:
             kw = kw.lower()
@@ -631,7 +631,7 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
+                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key or spec.name in legacy_connections:
                     return p, spec.name
 
         # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
@@ -644,7 +644,7 @@ class Config(BaseSettings):
                 return custom
 
         for spec in PROVIDERS:
-            if spec.is_transcription_only:
+            if spec.is_transcription_only or spec.name in legacy_connections:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
@@ -688,7 +688,7 @@ class Config(BaseSettings):
 
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
         for spec in PROVIDERS:
-            if spec.is_oauth or spec.is_transcription_only:
+            if spec.is_oauth or spec.is_transcription_only or spec.name in legacy_connections:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
@@ -696,6 +696,10 @@ class Config(BaseSettings):
 
         for attr_name, p in (self.providers.model_extra or {}).items():
             if isinstance(p, ProviderConfig) and p.api_base:
+                return p, attr_name
+
+        for attr_name, p in legacy_connections.items():
+            if p.api_base:
                 return p, attr_name
 
         return None, None
@@ -744,7 +748,7 @@ class Config(BaseSettings):
             return p.api_base
         if name:
             spec = find_by_name(name)
-            if spec and spec.default_api_base:
+            if spec and spec.default_api_base and (p is None or not spec.uses_legacy_custom_config(p)):
                 return spec.default_api_base
         return None
 

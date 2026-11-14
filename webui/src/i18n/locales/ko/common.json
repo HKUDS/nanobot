@@ -537,7 +537,6 @@
       }
     },
     "runtimeConfig": {
-      "apiSaved": "저장했습니다. API 서비스를 다시 시작하면 적용됩니다.",
       "commandRuntime": {
         "custom": "사용자 지정(초)",
         "customLabel": "사용자 지정 실행 시간(초)",
@@ -557,7 +556,6 @@
         "agents_defaults_provider_retry_mode": {"label": "계속 재시도", "help": "복구 가능한 오류는 계속 재시도합니다. 끄면 기본 재시도를 사용합니다.\n\n일시적인 오류로 모델 요청이 실패하면 계속 재시도합니다. 끄면 재시도 횟수를 제한합니다."},
         "agents_defaults_tool_hint_max_length": {"label": "요약 길이", "help": "도구 실행 요약의 글자 수 상한입니다.\n\n도구 활동을 나타내는 짧은 안내의 최대 길이입니다."},
         "tools_max_session_messages_per_minute": {"label": "메시지 빈도", "help": "도구가 한 세션에 보내는 분당 메시지 수 상한입니다.\n\n도구가 대화에 메시지를 보내는 빈도를 제한합니다."},
-        "agents_defaults_unified_session": {"label": "세션 공유", "help": "동일 사용자의 채팅 기록을 여러 플랫폼에서 공유합니다.\n\n한 사용자가 여러 채팅 플랫폼에서 같은 대화를 사용합니다."},
         "tools_exec_enable": {"label": "셸 도구", "help": "에이전트의 Shell 명령 실행을 허용합니다.\n\n에이전트의 셸 명령 실행을 허용합니다."},
         "tools_file_enable": {"label": "파일 도구", "help": "내장 파일 읽기와 편집 도구를 허용합니다.\n\n기본 파일 읽기 및 편집 도구를 허용합니다."},
         "tools_web_enable": {"label": "웹 접근", "help": "웹 검색과 페이지 읽기를 허용합니다.\n\n웹 검색과 페이지 가져오기를 허용합니다."},
@@ -585,8 +583,6 @@
         "gateway_host": {"label": "게이트웨이 주소", "help": "게이트웨이 주소입니다. WebUI 수신 주소는 별도로 설정합니다.\n\n게이트웨이가 연결을 수신하는 주소입니다. WebSocket과 WebUI 주소는 채널 → WebSocket에서 설정합니다."},
         "gateway_port": {"label": "게이트웨이 포트", "help": "게이트웨이 포트입니다. 시작 인수가 우선합니다.\n\n저장할 포트입니다. 명령줄 인수가 우선 적용됩니다."},
         "gateway_restart_mode": {"label": "다시 시작 방식", "help": "재시작 방법을 선택하세요. 자동은 실행 환경에 맞춥니다.\n\n프로세스를 다시 시작하는 방식입니다. 자동 모드는 호스트 환경에 따라 선택합니다."},
-        "api_host": {"label": "API 주소", "help": "네트워크 접근 허용 전 키를 설정하고, 변경 후 API를 재시작하세요.\n\nlocalhost 이외의 주소에서 연결을 받으려면 API 키가 필요합니다. 시스템에서 키를 설정하고 API 서비스를 다시 시작해 변경 사항을 적용하세요."},
-        "api_timeout": {"label": "API 제한 시간", "help": "API 요청당 최대 초입니다. 적용하려면 재시작하세요.\n\n요청에 허용되는 최대 시간입니다. API 서비스를 다시 시작하면 적용됩니다."},
         "tools_image_generation_save_dir": {"label": "저장 디렉터리", "help": "미디어 디렉터리 내부의 상대 경로입니다. 기존 이미지는 이동하지 않습니다.\n\nnanobot 미디어 폴더 아래의 상대 경로입니다. 기존 이미지는 이동하지 않습니다."}
       },
       "groups": {
@@ -603,7 +599,6 @@
         "safety": {"title": "전체 권한", "help": "작업 공간 제한, 네트워크 예외 및 원격 설치를 설정하세요.\n\n작업 공간 제한, 사설 네트워크 및 원격 설치입니다."},
         "cli": {"title": "CLI 제한", "help": "설치와 실행 제한 시간, 목록 캐시 시간을 설정하세요.\n\n설치, 실행 및 카탈로그 캐시의 시간 제한입니다."},
         "gateway": {"title": "게이트웨이", "help": "배포와 재시작 옵션을 설정하세요."},
-        "api": {"title": "API 설정", "help": "수신 주소와 요청 제한 시간을 설정하세요."},
         "storage": {"title": "이미지 저장", "help": "생성한 이미지의 저장 위치를 선택하세요."},
         "maintenance": {"title": "메모리 정리", "help": ""},
         "web": {"title": "웹 접근", "help": ""},
@@ -714,11 +709,11 @@
       "small": "작게",
       "standard": "표준",
       "large": "크게",
-      "previewText": "**생각을 위한 작은 여유.**\n\n명확한 글과 편안한 읽기. 이 공간을 나에게 맞게 꾸며 보세요.",
+      "previewText": "명확한 글과 편안한 읽기. 이 공간을 나에게 맞게 꾸며 보세요.",
       "previewPlaceholder": "어디서부터 시작할까요?",
       "process": "활동 표시",
       "processHelp": "nanobot이 작업하는 동안 표시할 세부 정보의 양을 선택하세요.",
-      "autoHelp": "작업 중에는 진행 상황을 표시하고, 완료 후에는 간결하게 표시합니다.",
+      "autoHelp": "세부 정보는 기본으로 접고, 작업 중에는 최신 활동을 표시합니다.",
       "expandedHelp": "활동 세부 정보를 기본으로 펼쳐 둡니다.",
       "summaryHelp": "변경된 파일과 줄 수를 표시합니다.",
       "diffHelp": "코드 변경 내용을 대화에 바로 표시합니다.",
@@ -835,6 +830,7 @@
       "unixSocket": "Unix 소켓",
       "defaultWorkspace": "기본 작업 공간",
       "auto": "자동",
+      "collapsed": "접힘",
       "expanded": "펼침",
       "default": "기본값",
       "summary": "요약",
@@ -940,18 +936,19 @@
       "shortTitle": "토큰 사용량",
       "viewDetails": "자세히 보기",
       "cacheHitRate": "캐시 적중률",
-      "cacheRateHelp": "캐시 상태가 알려진 입력만 적중률 계산에 포함됩니다.",
       "dailyTrend": "일일 Token",
       "systemHelp": "내부 작업과 출처가 기록되지 않은 호출을 포함합니다.",
       "bySource": "출처별 사용량",
       "modelTrend": "모델 추이",
       "modelsUnavailable": "모델별 내역이 없습니다.",
-      "otherModels": "기타 / 미분류",
+      "otherModels": "기타 모델",
       "unclassified": "미분류",
       "unavailable": "사용량 데이터를 사용할 수 없습니다.",
       "noActivity": "최근 30일 동안 토큰 사용량이 없습니다.",
+      "last30Days": "최근 30일",
       "cachedInput": "캐시 적중",
       "cacheMiss": "캐시 미스",
+      "cacheWrite": "캐시 쓰기",
       "cacheUnknown": "상태 알 수 없음",
       "outputTokens": "출력",
       "otherTokens": "기타 토큰",
@@ -964,7 +961,9 @@
         "cron": "자동화",
         "dream": "기억 정리",
         "system": "보조 호출"
-      }
+      },
+      "failedRequests": "실패 {{count}}회",
+      "estimatedShare": "토큰의 {{percent}}가 추정치"
     },
     "providers": {
       "manageProviders": "제공업체 관리",
@@ -1062,6 +1061,8 @@
       "contextWindowError": "200k, 1m, 131072처럼 양수 토큰 수를 입력하세요.",
       "maxTokens": "최대 출력 토큰",
       "temperature": "온도",
+      "imageInput": "이미지 입력",
+      "imageInputHelp": "끄면 이미지가 포함된 요청에서 이 프리셋을 건너뜁니다.",
       "reasoningEffort": "추론 강도",
       "convertTitle": "설정 변환",
       "convertHelp": "주 모델과 대체 모델을 프리셋으로 변환하세요.",
@@ -1237,15 +1238,6 @@
         "github": "저장소, 이슈 및 PR을 관리합니다.",
         "supabase": "프로젝트를 확인하고 관리합니다."
       }
-    },
-    "api": {
-      "title": "API 서버", "openaiCompatible": "OpenAI 호환 API", "description": "OpenAI 호환 API로 연결합니다.",
-      "start": "API 서버 시작", "starting": "시작 중...", "stop": "중지", "stopping": "중지 중...",
-      "access": "접근", "thisDevice": "이 기기", "localNetwork": "로컬 네트워크",
-      "localHelp": "이 기기만 연결할 수 있습니다.", "networkHelp": "LAN 접근에는 API 키가 필요합니다.\n\n다른 기기도 연결할 수 있으므로 API 키가 필요합니다.",
-      "port": "포트", "portHelp": "API 서비스가 사용하는 로컬 포트입니다.", "apiKey": "API 키", "apiKeyHelp": "키를 Bearer Token으로 전송합니다.",
-      "apiKeyRequired": "네트워크에 공개하기 전에 필요합니다.", "apiKeyPlaceholder": "API 키 입력",
-      "autoInstall": "서버를 시작할 때 필요한 패키지를 자동으로 설치합니다."
     },
     "observability": {
       "title": "실행 추적", "configured": "nanobot이 추적 인증 정보을 사용할 수 있습니다.",
@@ -1811,8 +1803,6 @@
       },
       "interruptedHelp": "작업이 완료되기 전에 서버가 다시 시작되었습니다. 작업은 자동으로 다시 실행되지 않았습니다.",
       "workTitle": "하위 작업",
-      "otherWorkTitle": "다른 작업",
-      "unlinkedHelp": "표시된 메시지에서 이 작업에 해당하는 요청을 찾을 수 없습니다.",
       "progress": "{{total}}개 중 {{completed}}개 완료",
       "running": "진행 중: {{count}}",
       "finished": "종료: {{count}}",
@@ -1854,12 +1844,6 @@
     },
     "loadingConversation": "대화 불러오는 중…",
     "empty": {
-      "greetings": {
-        "workOn": "우리 무엇을 함께 해볼까요?",
-        "start": "오늘은 어디서 시작할까요?",
-        "build": "오늘은 무엇을 만들어볼까요?",
-        "tackle": "함께 무엇을 해결할까요?"
-      },
       "quickActions": {
         "plan": {
           "title": "계획 세우기",
@@ -1952,8 +1936,11 @@
       "goalStateStrip": "목표: {{label}}",
       "goalStateFallback": "목표",
       "goalStateExpandAria": "전체 목표 보기",
+      "goalBlocked": "진행 막힘",
       "goalStateSheetTitle": "목표",
-      "goalStateCloseAria": "목표 닫기",
+      "cancelGoal": "목표 취소",
+      "cancelGoalFailed": "목표를 취소하지 못했습니다. 다시 시도하세요.",
+      "cancelGoalOffline": "다시 연결한 후 목표를 취소하세요.",
       "send": "메시지 보내기",
       "stop": "응답 중지",
       "quotedContext": "인용한 문맥",
@@ -2067,10 +2054,6 @@
             "title": "모델",
             "description": "현재 모델 프리셋을 확인하거나 전환합니다."
           },
-          "history": {
-            "title": "대화 기록",
-            "description": "저장된 최근 N개 메시지를 표시합니다."
-          },
           "dream": {
             "title": "Dream 실행",
             "description": "메모리를 지금 정리합니다."
@@ -2090,6 +2073,10 @@
           "goal": {
             "title": "장기 목표",
             "description": "어시스턴트가 이 목표를 향해 계속 작업하게 합니다."
+          },
+          "cancel_goal": {
+            "title": "목표 취소",
+            "description": "이 채팅에서 진행 중이거나 차단된 목표를 취소합니다."
           },
           "trigger": {
             "title": "CLI 트리거",
@@ -2111,7 +2098,6 @@
         "details": {
           "goalActive": "목표 실행 중",
           "goalReady": "지속 목표 시작",
-          "history": "최근 메시지 보기",
           "stopRunning": "실행 중"
         }
       },
@@ -2288,11 +2274,37 @@
       "updatedLongTask": "장기 작업 업데이트 완료",
       "updateLongTaskFailed": "장기 작업을 업데이트하지 못함",
       "continuingCommand": "명령 계속 진행 중",
+      "waitingCommandResult": "명령 결과를 기다리는 중",
+      "waitingCommandOutput": "명령 출력을 기다리는 중",
+      "sendingCommandInput": "입력 전송 중",
+      "closingCommandInput": "명령 입력을 닫는 중",
+      "sendingClosingInput": "명령 입력을 전송하고 닫는 중",
+      "stoppingCommand": "명령을 중지하는 중",
+      "commandStatusUnknown": "명령 상태를 알 수 없음",
+      "commandWasRunning": "마지막 확인 시 명령이 계속 실행 중이었음",
+      "commandWaitTimedOut": "대기 시간이 초과되었으며 마지막 확인 시 명령이 계속 실행 중이었음",
+      "commandWasStopping": "마지막 확인 시 명령이 중지되고 있었음",
+      "commandCompleted": "명령 완료",
+      "commandExitFailed": "명령 실패 (종료 코드 {{code}})",
+      "commandExited": "명령이 종료됨 (종료 코드 {{code}})",
+      "commandTimedOut": "명령이 제한 시간을 초과하여 중지됨",
+      "commandIdleTimedOut": "일정 시간 동안 출력이 없어 명령이 중지됨",
+      "commandCheckedUnknown": "명령을 확인했으나 상태를 알 수 없음",
+      "stopCommandError": "명령을 중지하지 못함",
+      "sendCloseInputError": "명령 입력을 전송하거나 닫지 못함",
+      "sendInputError": "입력을 전송하지 못함",
+      "closeInputError": "명령 입력을 닫지 못함",
+      "checkCommandError": "명령을 확인하지 못함",
+      "sentClosedInput": "명령 입력을 전송하고 닫음",
+      "sentCommandInput": "입력 전송 완료",
+      "closedCommandInput": "명령 입력 닫힘",
       "continuedCommand": "명령 계속 진행 완료",
       "continueCommandFailed": "명령을 계속 진행하지 못함",
       "checkingRunningCommands": "실행 중인 명령 확인 중",
       "checkedRunningCommands": "실행 중인 명령 확인 완료",
       "checkRunningCommandsFailed": "실행 중인 명령을 확인하지 못함",
+      "showEarlierCommandChecks": "이전 명령 확인 내역 표시 ({{count}})",
+      "hideEarlierCommandChecks": "이전 명령 확인 내역 숨기기 ({{count}})",
       "capturingScreenshot": "스크린샷 캡처 중",
       "capturedScreenshot": "스크린샷 캡처 완료",
       "captureScreenshotFailed": "스크린샷을 캡처하지 못함",

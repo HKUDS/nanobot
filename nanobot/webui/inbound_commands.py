@@ -29,7 +29,6 @@ from nanobot.security.workspace_access import (
     WorkspaceScopeError,
 )
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
-from nanobot.session.keys import session_key_for_channel
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
     clear_websocket_turns,
@@ -69,6 +68,7 @@ if TYPE_CHECKING:
 
 _WEBUI_REQUEST_CACHE_TTL_S = 5 * 60.0
 _WEBUI_REQUEST_CACHE_MAX = 256
+_WEBUI_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 
 
 @dataclass(frozen=True)
@@ -125,7 +125,6 @@ class WebUICommandTransport(Protocol):
         media: list[str] | None,
         metadata: dict[str, Any],
         is_dm: bool,
-        session_key: str | None,
         require_existing_session: bool,
         session_generation: str | None,
     ) -> None: ...
@@ -170,8 +169,13 @@ class WebUICommandRouter:
         self,
         connection: ServerConnection,
         detail: str,
+        *,
+        request_id: str | None = None,
     ) -> None:
-        await self._transport.webui_send_event(connection, "error", detail=detail)
+        await self._transport.webui_send_event(
+            connection, "error", detail=detail,
+            **({"request_id": request_id} if request_id is not None else {}),
+        )
 
     async def attach_webui_fork(
         self,
@@ -179,6 +183,7 @@ class WebUICommandRouter:
         *,
         fork_id: str,
         fork_key: str,
+        request_id: str | None = None,
     ) -> None:
         scope = await self._workspaces.async_scope_for_session_key(fork_key)
         self._transport.webui_attach(connection, fork_id)
@@ -186,6 +191,7 @@ class WebUICommandRouter:
             connection,
             "attached",
             chat_id=fork_id,
+            **({"request_id": request_id} if request_id is not None else {}),
             **(await self._session_projection.attach_fields(fork_key)),
         )
         await self._transport.webui_send_event(
@@ -246,6 +252,7 @@ class WebUICommandRouter:
         }
         if turn_id is not None:
             body["turn_id"] = turn_id
+            body["input_id"] = f"user:{turn_id}"
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -272,6 +279,7 @@ class WebUICommandRouter:
         *,
         chat_id: str | None = None,
         turn_id: str | None = None,
+        request_id: str | None = None,
     ) -> Any | None:
         try:
             return await resolver()
@@ -281,6 +289,7 @@ class WebUICommandRouter:
                 "error",
                 detail="workspace_scope_rejected",
                 reason=exc.message,
+                **({"request_id": request_id} if request_id is not None else {}),
                 **({"chat_id": chat_id} if chat_id else {}),
                 **({"turn_id": turn_id} if turn_id else {}),
             )
@@ -312,7 +321,6 @@ class WebUICommandRouter:
                 WORKSPACE_SCOPE_METADATA_KEY: scope.metadata(),
             },
             is_dm=False,
-            session_key=None,
             require_existing_session=False,
             session_generation=None,
         )
@@ -328,6 +336,14 @@ class WebUICommandRouter:
         if command_type == "webui_request":
             await self.start_webui_request(connection, envelope)
             return
+        request_id: str | None = None
+        if command_type in ("new_chat", "new_temporary_chat", "fork_chat") and "request_id" in envelope:
+            raw_request_id = envelope["request_id"]
+            if not isinstance(raw_request_id, str) or _WEBUI_REQUEST_ID_RE.fullmatch(raw_request_id) is None:
+                await self.send_webui_protocol_error(connection, "invalid chat request_id")
+                return
+            request_id = raw_request_id
+        request_fields = {"request_id": request_id} if request_id is not None else {}
         if command_type == "new_chat":
             new_id = str(uuid.uuid4())
             scope = await self.workspace_scope_or_error(
@@ -336,6 +352,7 @@ class WebUICommandRouter:
                     envelope,
                     can_change_project=self.workspace_project_selection_available(connection),
                 ),
+                request_id=request_id,
             )
             if scope is None:
                 return
@@ -345,6 +362,7 @@ class WebUICommandRouter:
                 connection,
                 "attached",
                 chat_id=new_id,
+                **request_fields,
                 **(await self._session_projection.attach_fields(webui_session_key(new_id))),
             )
             await self._transport.webui_send_event(
@@ -363,7 +381,9 @@ class WebUICommandRouter:
                     trusted_webui=connection in self._webui_connections,
                 )
             except TemporaryChatError as exc:
-                await self._transport.webui_send_event(connection, "error", detail=exc.detail)
+                await self._transport.webui_send_event(
+                    connection, "error", detail=exc.detail, **request_fields,
+                )
                 return
             self._transport.webui_attach(connection, new_id)
             await self._transport.webui_send_event(
@@ -371,10 +391,11 @@ class WebUICommandRouter:
                 "attached",
                 chat_id=new_id,
                 temporary=True,
+                **request_fields,
             )
             return
         if command_type == "fork_chat":
-            await handle_webui_fork_chat(self, connection, envelope)
+            await handle_webui_fork_chat(self, connection, envelope, **request_fields)
             return
         if command_type == "discard_temporary_chat":
             chat_id = envelope.get("chat_id")
@@ -650,7 +671,7 @@ class WebUICommandRouter:
             )
             return
         self._transport.webui_attach(connection, chat_id)
-        if temporary_policy is None or temporary_policy.hydrate_transcript:
+        if temporary_policy is None:
             await self._outbound.hydrate(chat_id)
 
         scope = temporary_policy.workspace_scope if temporary_policy is not None else (
@@ -765,22 +786,8 @@ class WebUICommandRouter:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
         accepted = False
-        admission_session_key = (
-            temporary_policy.session_key
-            if temporary_policy is not None
-            else webui_session_key(chat_id)
-        )
-        execution_session_key = (
-            temporary_policy.session_key
-            if temporary_policy is not None
-            else session_key_for_channel(
-                "websocket", chat_id, unified_session=self.gateway.unified_session,
-            )
-        )
         session_generation: str | None = None
         session_created = False
-        execution_generation: str | None = None
-        execution_created = False
         try:
             if not restart_control:
                 admission = await self.workspace_scope_or_error(
@@ -788,7 +795,6 @@ class WebUICommandRouter:
                     lambda: self._workspaces.persist_scope(
                         chat_id,
                         scope,
-                        session_key=admission_session_key,
                         expected_generation=(
                             temporary_policy.session_generation
                             if temporary_policy is not None
@@ -801,21 +807,9 @@ class WebUICommandRouter:
                 if admission is None:
                     return
                 session_generation, session_created = admission
-                execution_generation = session_generation
-                if (
-                    execution_session_key != admission_session_key
-                    and self.gateway.session_manager is not None
-                ):
-                    execution_generation, execution_created = (
-                        await self.gateway.session_manager.state.open_with_metadata(
-                            execution_session_key, {},
-                        )
-                    )
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
-            if is_webui and not restart_control and (
-                temporary_policy is None or temporary_policy.persist_transcript
-            ):
+            if is_webui and not restart_control and temporary_policy is None:
                 await self._transcripts.append_user_message(
                     chat_id,
                     content,
@@ -849,18 +843,8 @@ class WebUICommandRouter:
                 media=media_paths or None,
                 metadata=metadata,
                 is_dm=False,
-                session_key=(
-                    execution_session_key
-                    if temporary_policy is not None
-                    or execution_session_key != admission_session_key
-                    else None
-                ),
-                require_existing_session=(
-                    temporary_policy.require_existing_session
-                    if temporary_policy is not None
-                    else False
-                ),
-                session_generation=execution_generation,
+                require_existing_session=temporary_policy is not None,
+                session_generation=session_generation,
             )
             accepted = True
             if turn_id:
@@ -869,12 +853,7 @@ class WebUICommandRouter:
                     del self._accepted_messages[next(iter(self._accepted_messages))]
         except BaseException:
             await self._workspaces.rollback_scope_admission(
-                execution_session_key,
-                execution_generation,
-                created=execution_created,
-            )
-            await self._workspaces.rollback_scope_admission(
-                admission_session_key,
+                chat_id,
                 session_generation,
                 created=session_created,
             )
@@ -932,10 +911,7 @@ class WebUICommandRouter:
         envelope: dict[str, Any],
     ) -> None:
         request_id = envelope.get("request_id")
-        if not isinstance(request_id, str) or re.fullmatch(
-            r"[A-Za-z0-9._:-]{1,128}",
-            request_id,
-        ) is None:
+        if not isinstance(request_id, str) or _WEBUI_REQUEST_ID_RE.fullmatch(request_id) is None:
             await self._transport.webui_send_event(
                 connection,
                 "error",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import json
 import threading
 from collections.abc import Awaitable, Callable, Mapping
@@ -765,6 +766,25 @@ async def test_model_update_route_forwards_session_rename_dependency(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_older_client_does_not_partially_update_provider_settings(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    before = '{"providers":{"openai":{"apiKey":"fixture","api":{"supportedApis":["responses"]}}}}'
+    config_path.write_text(before, encoding="utf-8")
+    refresh = MagicMock()
+    router = _router(config_path=config_path, refresh_runtime_config=refresh)
+    path = "/api/settings/provider/update"
+    request = _mutation_request(path, {"provider": "openai", "apiType": "auto", "apiBase": "https://example.test/v1"})
+
+    response = await router.dispatch(None, request, path)
+
+    assert response is not None
+    assert response.status_code == 400
+    assert "Update the client" in json.loads(response.body)["error"]
+    assert config_path.read_text(encoding="utf-8") == before
+    refresh.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_settings_get_mutation_route_is_method_not_allowed() -> None:
     path = "/api/settings/provider/update"
     request = SimpleNamespace(
@@ -974,19 +994,16 @@ async def test_runtime_config_route_authentication_validation_and_restart(tmp_pa
     assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
 
 
-async def test_runtime_settings_only_save_without_refreshing_or_rebinding(tmp_path, monkeypatch):
+async def test_runtime_settings_only_save_without_refreshing_or_rebinding(tmp_path):
     refresh = MagicMock()
-    runtime = MagicMock()
-    monkeypatch.setattr(WebUISettingsRouter, "_api_runtime", lambda _self: runtime)
     router = _router(config_path=tmp_path / "config.json", refresh_runtime_config=refresh)
     path = "/api/settings/runtime-config/update"
     response = await router.dispatch(None, _mutation_request(path, {
-        "values": {"agents.defaults.dream.enabled": False, "api.timeout": 45},
+        "values": {"agents.defaults.dream.enabled": False, "gateway.port": 19001},
     }), path)
     assert response.status_code == 200
     assert json.loads(response.body)["requires_restart"]
     refresh.assert_not_called()
-    runtime.restart.assert_not_called()
 
 
 async def test_reverting_runtime_switch_clears_restart_but_preserves_other_changes(tmp_path):
@@ -1015,7 +1032,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
     router = _router(config_path=tmp_path / "config.json")
     config = router.settings.config.load()
     original_reader = config.tools.web.fetch.use_jina_reader
-    original_timeout = config.api.timeout
+    original_port = config.gateway.port
     path = "/api/settings/web-search/update"
     first = await router.dispatch(None, _mutation_request(path, {
         "provider": "duckduckgo", "use_jina_reader": not original_reader,
@@ -1025,7 +1042,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
 
     runtime_path = "/api/settings/runtime-config/update"
     changed = await router.dispatch(None, _mutation_request(runtime_path, {
-        "values": {"api.timeout": original_timeout + 1},
+        "values": {"gateway.port": original_port + 1},
     }), runtime_path)
     assert changed.status_code == 200
     assert set(json.loads(changed.body)["restart_required_sections"]) == {"browser", "runtime"}
@@ -1038,7 +1055,7 @@ async def test_reverting_web_reader_preserves_unrelated_restart_reason(tmp_path)
     refreshed = await router.dispatch(None, SimpleNamespace(path="/api/settings", headers=Headers()), "/api/settings")
     assert json.loads(refreshed.body)["restart_required_sections"] == ["runtime"]
     reverted = await router.dispatch(None, _mutation_request(runtime_path, {
-        "values": {"api.timeout": original_timeout},
+        "values": {"gateway.port": original_port},
     }), runtime_path)
     assert reverted.status_code == 200
     assert json.loads(reverted.body)["restart_required_sections"] == []
@@ -1165,3 +1182,36 @@ async def test_mcp_proxy_mutation_persists_reloads_and_keeps_oauth_credentials(
         reload.assert_awaited_once()
     finally:
         await gateway.http.settings_routes.close()
+
+
+@pytest.mark.asyncio
+async def test_usage_query_supports_lazy_details_and_conditional_compressed_responses(monkeypatch):
+    calls = []
+    payload = {"days": [{"date": "2026-06-03", "total_tokens": 12}] * 100, "revision": "overview"}
+
+    def usage_payload(**kwargs):
+        calls.append(kwargs["details"])
+        return {**payload, "revision": "models" if kwargs["details"] else "overview"}
+
+    monkeypatch.setattr("nanobot.webui.settings_routes.settings_usage_payload", usage_payload)
+    router = _router()
+    path = "/api/settings/usage"
+    request = SimpleNamespace(path=path, headers=Headers({"Accept-Encoding": "gzip"}))
+    first = await router.dispatch(None, request, path)
+    assert first.status_code == 200
+    assert first.headers["Content-Encoding"] == "gzip"
+    assert json.loads(gzip.decompress(first.body)) == payload
+    assert first.headers["ETag"] == 'W/"overview"'
+    request.headers["If-None-Match"] = first.headers["ETag"]
+    unchanged = await router.dispatch(None, request, path)
+    assert unchanged.status_code == 304
+    assert unchanged.body == b""
+    request.path = f"{path}?details=true"
+    detailed = await router.dispatch(None, request, path)
+    assert detailed.status_code == 200
+    assert detailed.headers["ETag"] == 'W/"models"'
+    assert calls == [False, False, True]
+    request.path = f"{path}?details=invalid"
+    assert (await router.dispatch(None, request, path)).status_code == 400
+    unauthorized = _router(authorized=False)
+    assert (await unauthorized.dispatch(None, request, path)).status_code == 401

@@ -15,7 +15,6 @@ from nanobot.utils.file_edit_events import (
     build_file_edit_start_event,
     build_unified_diff_payload,
     prepare_file_edit_trackers,
-    read_file_snapshot,
 )
 
 
@@ -211,6 +210,18 @@ def test_unified_diff_payload_truncates_large_diffs() -> None:
     assert len(body_lines) == 5
 
 
+def test_unified_diff_clips_long_content_without_changing_header_counts() -> None:
+    payload = build_unified_diff_payload(
+        "old line\nkeep this\n", "new line\nkeep this\n", max_line_chars=3,
+    )
+    assert payload == {
+        "format": "unified",
+        "context": 3,
+        "truncated": True,
+        "text": "--- before\n+++ after\n@@ -1,2 +1,2 @@\n+new\n-old\n kee",
+    }
+
+
 @pytest.mark.parametrize(("max_lines", "expected_tail", "truncated"), [
     (2, "", True),
     (3, "\n@@ -3,0 +3 @@\n+new last", True),
@@ -245,7 +256,6 @@ def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:
         params={"path": "data.bin", "old_text": "before", "new_text": "after"},
     )
     [tracker] = trackers
-    assert not read_file_snapshot(target).countable
     target.write_bytes(b"\x00\x01after")
     event = build_file_edit_end_event(tracker)
     assert event["binary"] is True
@@ -253,9 +263,15 @@ def test_binary_file_is_reported_but_not_counted(tmp_path: Path) -> None:
     assert "diff" not in event
 
 
-def test_binary_before_file_is_reported_but_not_counted(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "before", [b"\x00\x01before", b"text\n" * 20], ids=["binary", "oversized"],
+)
+def test_unavailable_before_is_reported_but_not_counted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, before: bytes,
+) -> None:
+    monkeypatch.setattr("nanobot.utils.file_edit_events._MAX_SNAPSHOT_BYTES", 64)
     target = tmp_path / "data.bin"
-    target.write_bytes(b"\x00\x01before")
+    target.write_bytes(before)
     trackers = prepare_file_edit_trackers(
         call_id="call-bin",
         tool_name="write_file",
@@ -370,4 +386,18 @@ def test_untracked_tools_do_not_prepare_file_edit_trackers(tmp_path: Path) -> No
         tool=None,
         workspace=tmp_path,
         params={"path": "created-by-shell.txt"},
+    ) == []
+
+
+def test_edit_progress_does_not_snapshot_a_denied_target(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (tmp_path / "outside.txt").write_text("private", encoding="utf-8")
+    tool = WriteFileTool(workspace=workspace, allowed_dir=workspace)
+    assert prepare_file_edit_trackers(
+        call_id="denied",
+        tool_name="write_file",
+        tool=tool,
+        workspace=workspace,
+        params={"path": "../outside.txt", "content": "new"},
     ) == []

@@ -141,7 +141,7 @@ This requires a model that supports tools and an enabled `nanobot-document` skil
 | Add an App or MCP integration | Open **Apps** or follow [Configure MCP Tools](./guides/configure-mcp-tools.md) |
 | Schedule agent work | Read [Automations](./automations.md) |
 | Run continuously or remotely | Read [Deployment](./deployment.md) |
-| Integrate from code | Use the [Python SDK](./python-sdk.md) or [OpenAI-Compatible API](./openai-api.md) |
+| Integrate from code | Use the [Python SDK](./python-sdk.md) |
 
 ## Other Install Methods
 
@@ -170,17 +170,17 @@ Clone the repository and install it in editable mode. nanobot downloads the pinn
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
-python -m venv .venv
+python3 -m venv .venv
 ```
 
-Activate it with `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
+On Windows, use `py -3 -m venv .venv` instead of `python3`. Activate it with `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
 
 ```bash
 python -m pip install -e .
 nanobot webui
 ```
 
-The source path follows current `main` and can be newer than the published package. The editable install keeps Python pointed at the checkout; `nanobot` runs `tui/` with Bun, and `nanobot webui` automatically rebuilds `webui/` when its bundled assets are stale. All normal commands remain the same as a stable install. For development details, follow [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
+The source path follows current `main` and can be newer than the published package. The editable install keeps Python pointed at the checkout; `nanobot` runs `tui/` with Bun, and `nanobot webui` prompts to rebuild stale frontend assets, or warns in non-interactive sessions; `--yes` builds automatically. All normal commands remain the same as a stable install. For development details, follow [`../CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 If the shell cannot find `nanobot`, reuse the installer's printed command or run Python from the existing installation. For uv or pipx, locate that environment with the original manager; do not start a temporary tool environment to manage it. The official installer's default paths are:
 

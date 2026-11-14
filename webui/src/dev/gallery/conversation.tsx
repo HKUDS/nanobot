@@ -6,6 +6,7 @@ import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
 import { ComposerUsagePopover, type ComposerRoundUsage } from "@/components/thread/ComposerUsagePopover";
 import type { ContextSnapshot } from "@/lib/types";
 import { ContextCompactionNotice } from "@/components/thread/ContextCompactionNotice";
+import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { SandboxNotice, type SandboxIssue } from "@/components/thread/SandboxNotice";
 import { ModelPresetBadge, type ModelPresetOption } from "@/components/thread/ModelPresetBadge";
@@ -86,6 +87,19 @@ function ComposerPreview() {
     <p role="status" className="text-sm text-muted-foreground">{sent?.kind === "stopped" ? t("previews.composer.stopped")
       : sent ? t("previews.composer.sent", { content: sent.content, attachments: sent.attachments ? t("previews.composer.attachments", { amount: sent.attachments }) : "" })
         : t("previews.composer.hint")}</p>
+  </div>;
+}
+
+function GoalPreview() {
+  const { t } = useGalleryTranslation();
+  const [status, setStatus] = useState<"active" | "blocked">("active");
+  const [cancelled, setCancelled] = useState(false);
+  return <div>
+    <StatePicker label={t("previews.goal.state")} value={status} options={["active", "blocked"]} onChange={(next) => { setStatus(next); setCancelled(false); }} />
+    <div className="thread-header-container relative h-56 overflow-hidden rounded-control border bg-background">
+      {!cancelled && <GoalIsland goal={{ active: status === "active", status, ui_summary: t("previews.goal.summary"), objective: t("previews.goal.objective"),
+        ...(status === "blocked" ? { recap: t("previews.goal.recap") } : {}) }} cancelDisabled={false} onCancel={async () => setCancelled(true)} />}
+    </div>
   </div>;
 }
 
@@ -343,6 +357,9 @@ function ResponseSourcesPreview() {
 
 const components = "webui/src/components/";
 export const conversationExamples: ComponentExample[] = [
+  { title: "previews.goal.title", files: ["thread/GoalIsland"], Preview: GoalPreview,
+    description: "previews.goal.description", options: "previews.goal.options",
+    code: '<GoalIsland goal={{ active: true, status: "active", ui_summary: summary, objective }} />' },
   { title: "previews.composer.title", files: ["thread/ThreadComposer"], Preview: ComposerPreview,
     description: "previews.composer.description", options: "previews.composer.options",
     code: '<ThreadComposer onSend={send} modelPresets={presets} onModelPresetChange={setPreset} slashCommands={commands} />' },

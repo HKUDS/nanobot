@@ -92,6 +92,7 @@ class UserInputEvent(AgentEvent):
 
     content: str
     created_at_ms: int
+    input_id: str
     provenance: dict[str, Any]
 
 

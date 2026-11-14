@@ -68,6 +68,19 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
     </section>
 
     <section>
+      <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
+      <SettingsGroup>
+        <SettingsRow title={t("settings.rows.language")}><LanguageSwitcher /></SettingsRow>
+        <SettingsRow title={t("settings.rows.brandLogos")} description={t("settings.legal.thirdPartyBrands")}>
+          <ToggleButton checked={localPrefs.brandLogos}
+            onChange={(brandLogos) => onChangeLocalPrefs((previous) => ({ ...previous, brandLogos }))}
+            ariaLabel={t("settings.rows.brandLogos")}
+            label={t(localPrefs.brandLogos ? "settings.values.on" : "settings.values.off")} />
+        </SettingsRow>
+      </SettingsGroup>
+    </section>
+
+    <section>
       <SettingsSectionTitle>
         <SettingsHint description={t("settings.appearance.processHelp")}>{t("settings.appearance.process")}</SettingsHint>
       </SettingsSectionTitle>
@@ -76,7 +89,7 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
           description={t(`settings.appearance.${localPrefs.activityMode === "auto" ? "autoHelp" : "expandedHelp"}`)}>
           <SegmentedControl<LocalActivityMode> value={localPrefs.activityMode}
             ariaLabel={t("settings.rows.activityMode")}
-            options={[{ value: "auto", label: t("settings.values.auto") }, { value: "expanded", label: t("settings.values.expanded") }]}
+            options={[{ value: "auto", label: t("settings.values.collapsed") }, { value: "expanded", label: t("settings.values.expanded") }]}
             onChange={(activityMode) => onChangeLocalPrefs((previous) => ({ ...previous, activityMode }))} />
         </SettingsRow>
         <div className="settings-group-divider">
@@ -92,19 +105,6 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
               onChange={(fileEditDisplayMode) => onChangeLocalPrefs((previous) => ({ ...previous, fileEditDisplayMode }))} />
           </SettingsRow>
         </div>
-      </SettingsGroup>
-    </section>
-
-    <section>
-      <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
-      <SettingsGroup>
-        <SettingsRow title={t("settings.rows.language")}><LanguageSwitcher /></SettingsRow>
-        <SettingsRow title={t("settings.rows.brandLogos")} description={t("settings.legal.thirdPartyBrands")}>
-          <ToggleButton checked={localPrefs.brandLogos}
-            onChange={(brandLogos) => onChangeLocalPrefs((previous) => ({ ...previous, brandLogos }))}
-            ariaLabel={t("settings.rows.brandLogos")}
-            label={t(localPrefs.brandLogos ? "settings.values.on" : "settings.values.off")} />
-        </SettingsRow>
       </SettingsGroup>
     </section>
   </div>;

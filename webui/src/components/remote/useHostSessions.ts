@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useClient } from "@/providers/ClientProvider";
+import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { readPairReturn } from "@/lib/remote-pair-return";
-import { readRemoteInstances, readSelectedRemote, readRecentRemotes, rememberSelectedRemote, rememberRecentRemote, remoteAction, validateRemoteConnection, type RemoteConnection, type RemoteDirectory, type SelectedRemote } from "@/lib/remote-instances";
+import { needsRemoteSetup, readRemoteInstances, readSelectedRemote, readRecentRemotes, rememberSelectedRemote, rememberRecentRemote, remoteAction, validateRemoteConnection, type RemoteConnection, type RemoteDirectory, type SelectedRemote } from "@/lib/remote-instances";
 
 // Never silently evict a view containing drafts or unfinished attachments.
 // Tunnels are shared across browser tabs, so only explicit disconnect closes one.
@@ -11,6 +12,7 @@ export interface HostFrame {
   loaded: boolean;
   offline: boolean;
   failures: number;
+  healthCheck?: number;
   error?: string;
 }
 interface PendingSwitch { id: string; name: string }
@@ -18,7 +20,17 @@ interface SwitchFailure { id: string; code: string }
 
 export function useHostSessions() {
   const { client, getToken } = useClient();
+  const pageVisible = usePageVisibility();
   const [directory, setDirectory] = useState<RemoteDirectory | null>(null);
+  const directoryRef = useRef(directory);
+  const directoryRead = useRef<{ generation: number; ids: string[]; promise: Promise<RemoteDirectory> } | null>(null);
+  const observers = useRef(0);
+  const [observing, setObserving] = useState(false);
+  const watchDirectory = useCallback(() => {
+    observers.current += 1;
+    setObserving(true);
+    return () => { observers.current -= 1; setObserving(observers.current > 0); };
+  }, []);
   const [directoryError, setDirectoryError] = useState(false);
   const [selected, setSelected] = useState<SelectedRemote | null>(() => readPairReturn() ? null : readSelectedRemote());
   const [recentIds, setRecentIds] = useState(readRecentRemotes);
@@ -66,6 +78,7 @@ export function useHostSessions() {
     return true;
   }, [cancel, select]);
   const applyDirectory = useCallback((next: RemoteDirectory) => {
+    directoryRef.current = next;
     setDirectory(next); setDirectoryError(false);
     // Names are metadata, not a new host session. Keep iframe URLs, drafts,
     // selection and connection state intact when this or another tab renames.
@@ -92,39 +105,106 @@ export function useHostSessions() {
     directoryGeneration.current += 1;
     if (mounted.current) applyDirectory(next);
   }, [applyDirectory, client]);
-  const refresh = useCallback(async () => {
-    const generation = ++directoryGeneration.current;
-    try {
-      const next = window.top === window ? await readRemoteInstances(getToken()) : { available: false, profiles: [] };
-      if (mounted.current && generation === directoryGeneration.current) applyDirectory(next);
-      return next;
-    } catch (reason) {
-      if (mounted.current && generation === directoryGeneration.current) setDirectoryError(true);
-      throw reason;
+  const readDirectory = useCallback(function read(ids: string[] = [], wanted: () => boolean = () => true): Promise<RemoteDirectory> {
+    if (!mounted.current || !wanted()) return Promise.resolve(directoryRef.current || { available: false, profiles: [] });
+    if (window.top !== window) {
+      const next = { available: false, profiles: [] };
+      if (mounted.current) applyDirectory(next);
+      return Promise.resolve(next);
     }
-  }, [applyDirectory, getToken]);
+    // Visibility affects observation, never the shared transport's lifetime.
+    if (document.visibilityState === "hidden") ids = [];
+    const generation = directoryGeneration.current;
+    const pendingRead = directoryRead.current;
+    if (pendingRead?.generation === generation) {
+      if (ids.every((id) => pendingRead.ids.includes(id))) return pendingRead.promise;
+      return pendingRead.promise.catch(() => {}).then(() => read(ids, wanted));
+    }
+    const promise = readRemoteInstances(getToken(), ids).then((next) => {
+      if (!mounted.current || generation !== directoryGeneration.current) return next;
+      applyDirectory(next);
+      for (const [id, frame] of cache.current) {
+        if (id === pendingRef.current?.id) continue;
+        const profile = next.profiles.find((item) => item.id === id);
+        const changed = (!!profile?.gateway_id && profile.gateway_id !== frame.connection.gateway_id)
+          || (!!profile?.view_id && profile.view_id !== frame.connection.view_id);
+        const connected = !!profile?.connected && !changed;
+        // Missing connections and changed identities are authoritative, not a
+        // transient probe failure. A cached probe must not count twice.
+        if (connected) frame.failures = 0;
+        else if (!profile?.gateway_id || changed || needsRemoteSetup(profile.connection_error || "")) frame.failures = 2;
+        else if (profile.health_check !== frame.healthCheck) frame.failures += 1;
+        frame.healthCheck = profile?.health_check;
+        if (connected || frame.failures >= 2) {
+          frame.offline = !connected;
+          frame.error = connected ? "" : changed ? "instance_changed" : profile?.connection_error || (!profile ? "profile_not_found" : "");
+        }
+        if (connected && frame.loaded) setFailure((current) => current?.id === id ? null : current);
+      }
+      if (cache.current.size) publish();
+      return next;
+    }).catch((reason: unknown) => {
+      if (mounted.current && generation === directoryGeneration.current) {
+        setDirectoryError(true);
+        for (const id of ids) {
+          const frame = cache.current.get(id);
+          if (frame && id !== pendingRef.current?.id && ++frame.failures >= 2) {
+            frame.offline = true; frame.error = "directory_unavailable";
+          }
+        }
+        if (ids.length) publish();
+      }
+      throw reason;
+    });
+    directoryRead.current = { generation, ids, promise };
+    const finish = () => { if (directoryRead.current?.promise === promise) directoryRead.current = null; };
+    void promise.then(finish, finish);
+    return promise;
+  }, [applyDirectory, getToken, publish]);
+  const healthTargets = useCallback(() => {
+    const profiles = directoryRef.current?.profiles ?? [];
+    const ids = observers.current ? profiles.filter((profile) => profile.gateway_id).map((profile) => profile.id) : [];
+    if (selectedRef.current && cache.current.has(selectedRef.current.id)) ids.push(selectedRef.current.id);
+    return [...new Set(ids)].filter((id) => id !== pendingRef.current?.id);
+  }, []);
+  const refresh = useCallback(async () => {
+    const next = await readDirectory();
+    const ids = healthTargets();
+    return mounted.current && document.visibilityState !== "hidden" && ids.length ? readDirectory(ids) : next;
+  }, [healthTargets, readDirectory]);
 
   const connect = useCallback(async (id: string, stillWanted: () => boolean = () => true) => {
     cancel();
     const attempt = epoch.current;
     const wanted = () => mounted.current && attempt === epoch.current && stillWanted();
     const warm = cache.current.get(id);
-    if (warm?.loaded && !warm.offline) {
-      if (wanted()) select(warm.connection);
-      return;
-    }
     if (!warm && cache.current.size >= MAX_HOST_VIEWS) {
       setFailure({ id, code: "view_limit" });
       throw new Error("view_limit");
     }
-    // A health response started before this mutation describes the old tunnel.
     directoryGeneration.current += 1;
     const name = directory?.profiles.find((item) => item.id === id)?.name || initial.current?.name || id;
     setPendingSwitch({ id, name });
     setFailure(null);
     let openingFrame = warm?.loaded ? undefined : warm;
     try {
+      if (warm?.loaded && !warm.offline) {
+        // A retained view may have spent hours unobserved. Check its identity
+        // before reusing it, without reloading the iframe or reconnecting SSH.
+        const next = await readDirectory([id], wanted);
+        if (!wanted()) return;
+        const profile = next.profiles.find((item) => item.id === id);
+        if (profile?.connected && profile.gateway_id === warm.connection.gateway_id
+          && profile.view_id === warm.connection.view_id) {
+          select(warm.connection);
+          return;
+        }
+        warm.offline = true;
+        publish();
+      }
       const connection = validateRemoteConnection(await remoteAction<RemoteConnection>(client, "connect", { id }));
+      // Reads started before or during this mutation describe the old tunnel.
+      directoryGeneration.current += 1;
       if (!wanted()) {
         // A cancelled SSH request can finish later. Never switch away from the
         // latest choice or close its tunnel, which another tab may already use.
@@ -141,7 +221,7 @@ export function useHostSessions() {
       }
       if (!frame.loaded) openingFrame = frame;
       publish();
-      void refresh().catch(() => {});
+      void readDirectory().catch(() => {});
       if (!frame.loaded) {
         const ready = await new Promise<boolean>((resolve, reject) => {
           const timer = window.setTimeout(() => {
@@ -171,7 +251,7 @@ export function useHostSessions() {
       }
       if (attempt === epoch.current) setPendingSwitch(null);
     }
-  }, [cancel, client, directory, publish, refresh, select, setPendingSwitch]);
+  }, [cancel, client, directory, publish, readDirectory, refresh, select, setPendingSwitch]);
   const connectRef = useRef(connect);
   connectRef.current = connect;
   const loaded = useCallback((id: string) => {
@@ -197,9 +277,9 @@ export function useHostSessions() {
 
   useEffect(() => {
     mounted.current = true;
-    void refresh().catch(() => {});
-    return () => { mounted.current = false; cancel(); };
-  }, [cancel, refresh]);
+    void readDirectory().catch(() => {});
+    return () => { mounted.current = false; directoryGeneration.current += 1; cancel(); };
+  }, [cancel, readDirectory]);
   useEffect(() => {
     const saved = initial.current;
     if (!saved || window.top !== window) return;
@@ -222,53 +302,43 @@ export function useHostSessions() {
     return () => { window.clearTimeout(timer); unsubscribe(); };
   }, [client, setPendingSwitch]);
   useEffect(() => {
-    let checking = false;
-    let cancelled = false;
-    const tick = async () => {
-      if (checking || !cache.current.size) return;
-      checking = true;
-      const generation = ++directoryGeneration.current;
+    if (window.top !== window || !pageVisible || (!selected?.id && !observing)) return;
+    let disposed = false;
+    let running = false;
+    let refreshPending = false;
+    let timer: number | undefined;
+    const hidden = () => document.visibilityState === "hidden";
+    const poll = async (readList = false) => {
+      if (disposed || hidden()) return;
+      if (running) { refreshPending = true; return; }
+      running = true;
+      window.clearTimeout(timer);
       try {
-        const next = await readRemoteInstances(getToken());
-        if (cancelled || generation !== directoryGeneration.current) return;
-        applyDirectory(next);
-        for (const [id, frame] of cache.current) {
-          if (id === pendingRef.current?.id) continue;
-          const profile = next.profiles.find((profile) => profile.id === id);
-          const changed = (!!profile?.gateway_id && profile.gateway_id !== frame.connection.gateway_id)
-            || (!!profile?.view_id && profile.view_id !== frame.connection.view_id);
-          const connected = !!profile?.connected && !changed;
-          frame.failures = connected ? 0 : frame.failures + 1;
-          if (connected || frame.failures >= 2) {
-            frame.offline = !connected;
-            frame.error = connected ? "" : changed ? "instance_changed" : profile?.connection_error || (!profile ? "profile_not_found" : "");
-          }
-          if (connected && frame.loaded) setFailure((current) => current?.id === id ? null : current);
-        }
+        do {
+          refreshPending = false;
+          if (readList || (observing && !healthTargets().length)) await readDirectory([], () => !disposed && !hidden());
+          if (disposed || hidden()) break;
+          const ids = healthTargets();
+          if (ids.length) await readDirectory(ids, () => !disposed && !hidden());
+        } while (refreshPending && !disposed);
       } catch {
-        if (!cancelled && generation === directoryGeneration.current) for (const [id, frame] of cache.current) {
-          if (id === pendingRef.current?.id) continue;
-          if (++frame.failures >= 2) { frame.offline = true; frame.error = "directory_unavailable"; }
-        }
+        // Keep the retained page; readDirectory owns health/error projection.
       } finally {
-        checking = false;
-        if (!cancelled) publish();
+        running = false;
+        if (refreshPending && !disposed && !hidden()) void poll(true);
+        else if (!disposed && (healthTargets().length || observing)) timer = window.setTimeout(() => void poll(), 5_000);
       }
     };
-    const timer = window.setInterval(() => { void tick(); }, 5_000);
-    // Background tabs throttle timers. Recheck promptly after waking or a
-    // network change, without reloading a frame or changing the selected host.
-    const wake = () => { if (document.visibilityState === "visible") void tick(); };
+    const wake = () => { void poll(true); };
     window.addEventListener("online", wake);
     window.addEventListener("pageshow", wake);
-    document.addEventListener("visibilitychange", wake);
+    void poll(true);
     return () => {
-      cancelled = true; window.clearInterval(timer);
+      disposed = true; window.clearTimeout(timer);
       window.removeEventListener("online", wake);
       window.removeEventListener("pageshow", wake);
-      document.removeEventListener("visibilitychange", wake);
     };
-  }, [applyDirectory, client, getToken, publish]);
-  return { directory, directoryError, refresh, rename, selected, recentIds, frames, pending,
+  }, [healthTargets, observing, pageVisible, pending?.id, readDirectory, selected?.id]);
+  return { directory, directoryError, refresh, watchDirectory, rename, selected, recentIds, frames, pending,
     error: failure?.code || "", errorId: failure?.id, clearError, connect, cancel, local, reveal, disconnect, remove, loaded };
 }
