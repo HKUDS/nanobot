@@ -1459,10 +1459,6 @@ def _get_quick_start_provider_choices() -> dict[str, str]:
     return choices
 
 
-def _quick_start_requires_api_key(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
-    return provider_name == "custom" or not (info and (info.is_local or info.is_oauth))
-
-
 def _quick_start_codex_proxy(config: Config) -> str | None:
     return config.network.resolve_proxy(config.providers.openai_codex.use_proxy)
 
@@ -1530,8 +1526,6 @@ def _quick_start_oauth_is_authenticated(config: Config, provider_name: str) -> b
 def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProviderInfo | None) -> bool:
     if provider_name == "custom":
         return True
-    if provider_name in _QUICK_START_ENDPOINT_CHOICES:
-        return False
     if info is None or info.default_api_base:
         return False
     return info.backend == "azure_openai" or (
@@ -1539,44 +1533,19 @@ def _quick_start_requires_base_url(provider_name: str, info: _QuickStartProvider
     )
 
 
-def _select_quick_start_api_base(
-    provider_name: str,
+def _select_quick_start_endpoint(
     provider_display: str,
-    info: _QuickStartProviderInfo | None,
-) -> tuple[str, bool] | None | object:
-    endpoint_choices = _QUICK_START_ENDPOINT_CHOICES.get(provider_name)
-    if endpoint_choices:
-        choices = {choice.label: choice.api_base for choice in endpoint_choices}
-        answer = _select_with_back(
-            f"Which {provider_display} endpoint should Quick Start use?",
-            list(choices) + ["<- Back"],
-            default=endpoint_choices[0].label,
-        )
-        if answer is _BACK_PRESSED or answer == "<- Back":
-            return _BACK_PRESSED
-        if answer is None:
-            return None
-        assert isinstance(answer, str)
-        return choices[answer], True
-
-    api_base = info.default_api_base if info else ""
-    if not _quick_start_requires_base_url(provider_name, info):
-        return api_base, False
-
-    base_answer = _input_text(
-        "Provider base URL",
-        api_base,
-        "str",
+    endpoint_choices: tuple[_QuickStartEndpointChoice, ...],
+) -> str | object:
+    choices = {choice.label: choice.api_base for choice in endpoint_choices}
+    answer = _select_with_back(
+        f"Which {provider_display} endpoint should Quick Start use?",
+        list(choices) + ["<- Back"],
+        default=endpoint_choices[0].label,
     )
-    if base_answer is _BACK_PRESSED:
+    if answer is _BACK_PRESSED or answer == "<- Back":
         return _BACK_PRESSED
-    if base_answer is None:
-        return None
-    api_base = base_answer.strip().rstrip("/")
-    if not api_base:
-        console.print("[yellow]! Provider base URL is required for this provider[/yellow]")
-        return None
-    return api_base, True
+    return choices[answer] if isinstance(answer, str) else None
 
 
 def _configure_quick_start_provider(config: Config) -> str | object:
@@ -1595,21 +1564,17 @@ def _configure_quick_start_provider(config: Config) -> str | object:
         provider_info = _get_quick_start_provider_info().get(provider_name)
         shengsuanyun = answer == _QUICK_START_SHENGSUANYUN.label
 
-        api_base = provider_info.default_api_base if provider_info else ""
-        base_was_prompted = False
-        if provider_name in _QUICK_START_ENDPOINT_CHOICES:
-            api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
+        api_base = ""
+        if endpoints := _QUICK_START_ENDPOINT_CHOICES.get(provider_name):
+            api_base_result = _select_quick_start_endpoint(answer, endpoints)
             if api_base_result is _BACK_PRESSED:
                 continue
-            if api_base_result is None:
+            if not isinstance(api_base_result, str):
                 return False
-            api_base, base_was_prompted = cast(
-                tuple[str, bool],
-                api_base_result,
-            )
+            api_base = api_base_result
 
         api_key: str | None = None
-        if _quick_start_requires_api_key(provider_name, provider_info):
+        if not (provider_info and (provider_info.is_local or provider_info.is_oauth)):
             prompt = f"{answer} API key"
             key_answer = _input_secret(prompt) if shengsuanyun else _input_text(prompt, "", "str")
             if key_answer is _BACK_PRESSED:
@@ -1621,20 +1586,16 @@ def _configure_quick_start_provider(config: Config) -> str | object:
                 console.print("[yellow]! API key is required for Quick Start[/yellow]")
                 return False
 
-        if (
-            not shengsuanyun
-            and provider_name not in _QUICK_START_ENDPOINT_CHOICES
-            and _quick_start_requires_base_url(provider_name, provider_info)
-        ):
-            api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
-            if api_base_result is _BACK_PRESSED:
+        if not (endpoints or shengsuanyun) and _quick_start_requires_base_url(provider_name, provider_info):
+            base_answer = _input_text("Provider base URL", "", "str")
+            if base_answer is _BACK_PRESSED:
                 continue
-            if api_base_result is None:
+            if base_answer is None:
                 return False
-            api_base, base_was_prompted = cast(
-                tuple[str, bool],
-                api_base_result,
-            )
+            api_base = base_answer.strip().rstrip("/")
+            if not api_base:
+                console.print("[yellow]! Provider base URL is required for this provider[/yellow]")
+                return False
 
         catalog_config = config.model_copy(deep=True)
         preset_name = "primary"
@@ -1654,8 +1615,10 @@ def _configure_quick_start_provider(config: Config) -> str | object:
 
         if api_key is not None:
             catalog_provider.api_key = api_key
-        if api_base and (base_was_prompted or not catalog_provider.api_base):
+        if api_base:
             catalog_provider.api_base = api_base
+        elif not catalog_provider.api_base and provider_info and provider_info.default_api_base:
+            catalog_provider.api_base = provider_info.default_api_base
 
         model = _input_model_with_autocomplete(
             "Model ID",
