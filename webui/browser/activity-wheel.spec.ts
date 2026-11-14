@@ -116,7 +116,7 @@ test("narrow reduced-motion preview replaces the row without scrolling the page"
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(360);
 });
 
-test("the elapsed label does not shift the collapsed activity horizontally", async ({ page }) => {
+test("the elapsed label keeps a compact gap before the collapsed activity", async ({ page }) => {
   await page.setViewportSize({ width: 960, height: 740 });
   const start = new Date("2026-01-01T00:00:00Z");
   await page.clock.install({ time: start });
@@ -126,14 +126,43 @@ test("the elapsed label does not shift the collapsed activity horizontally", asy
   const wheel = page.getByTestId("latest-activity-wheel");
   await expect(wheel).toBeVisible();
 
-  let initialX: number | undefined;
+  let initialGap: number | undefined;
   let elapsed = 0;
   for (const [seconds, label] of [[1, "1s"], [9, "9s"], [10, "10s"], [20, "20s"], [59, "59s"], [60, "1m"], [61, "1m 1s"]] as const) {
     await page.clock.fastForward((seconds - elapsed) * 1000);
     elapsed = seconds;
     await expect(toggle).toHaveAccessibleName(`处理中 ${label}`);
-    const { x } = (await wheel.boundingBox())!;
-    initialX ??= x;
-    expect(Math.abs(x - initialX), `wheel displacement at ${label}`).toBeLessThan(0.2);
+    const wheelBox = (await wheel.boundingBox())!;
+    const headerBox = (await toggle.boundingBox())!;
+    const gap = wheelBox.x - (headerBox.x + headerBox.width);
+    initialGap ??= gap;
+    expect(Math.abs(gap - initialGap), `activity gap at ${label}`).toBeLessThan(0.2);
+    expect(gap).toBeLessThanOrEqual(8);
+  }
+});
+
+test("the working label stays in place when activity is expanded and collapsed", async ({ page }) => {
+  for (const width of [960, 360]) {
+    await page.setViewportSize({ width, height: 740 });
+    const toggle = page.getByRole("button", { name: /处理中/ });
+    const labelPosition = () => toggle.evaluate((button) => {
+      const label = button.querySelector("[data-sheen-text]")!;
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const { x, y } = range.getBoundingClientRect();
+      return { x, y, width: button.getBoundingClientRect().width };
+    });
+    const collapsed = await labelPosition();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const expanded = await labelPosition();
+    expect(Math.abs(expanded.x - collapsed.x)).toBeLessThan(0.2);
+    expect(Math.abs(expanded.y - collapsed.y)).toBeLessThan(0.2);
+    expect(Math.abs(expanded.width - collapsed.width)).toBeLessThan(0.2);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const collapsedAgain = await labelPosition();
+    expect(Math.abs(collapsedAgain.x - collapsed.x)).toBeLessThan(0.2);
+    expect(Math.abs(collapsedAgain.y - collapsed.y)).toBeLessThan(0.2);
   }
 });

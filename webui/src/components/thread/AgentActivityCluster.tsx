@@ -409,7 +409,6 @@ function FoldedAgentActivity({
         collapseLabel={t("message.collapseActivity")}
         contentId={detailsId}
         label={activityLabel}
-        reservedLabel={showActivityPreview ? workingLabel("00m 00s") : undefined}
         preview={showActivityPreview ? (
           <CollapsedActivityPreview
             messages={activityMessages}
