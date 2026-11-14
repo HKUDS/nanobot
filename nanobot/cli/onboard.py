@@ -29,8 +29,14 @@ from nanobot.cli.models import (
     get_model_context_limit,
 )
 from nanobot.config.loader import get_config_path, load_config
-from nanobot.config.schema import Config, ModelPresetConfig, ProviderAPIConfig, ProviderConfig
+from nanobot.config.schema import Config, ModelPresetConfig, ProviderConfig
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
+from nanobot.providers.setup import (
+    PROVIDER_SETUP_TEMPLATES,
+    ProviderSetupTemplate,
+    custom_provider_key,
+    setup_template_names,
+)
 
 console = Console()
 
@@ -77,9 +83,6 @@ _BACK_PRESSED = object()
 _MODEL_PRESET_CACHE: set[str] = set()
 
 _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
-_QUICK_START_SHENGSUANYUN = _QuickStartEndpointChoice(
-    "ShengSuanYun Router (胜算云)", "https://router.shengsuanyun.com/api/v1",
-)
 _QUICK_START_OAUTH_PROVIDERS = {"openai_codex"}
 
 _CLEAR_CHOICE = "Clear value"
@@ -1392,24 +1395,9 @@ def _pause(message: str = "Press Enter to continue...") -> bool:
     return _get_questionary().text(message, default="").ask() is not None
 
 
-def _shengsuanyun_quick_start_names(config: Config) -> tuple[str, str, str]:
-    connections = config.providers.model_extra or {}
-    keys = {key.replace("_", "-").lower() for key in connections}
-    labels = {
-        (provider.display_name or key.replace("_", " ").replace("-", " ")).strip().casefold()
-        for key, provider in connections.items()
-        if isinstance(provider, ProviderConfig)
-    }
-    presets = {name.casefold() for name in config.model_presets}
-    index = 1
-    while True:
-        suffix = f"-{index}" if index > 1 else ""
-        key = f"custom-shengsuanyun-router{suffix}"
-        preset = f"shengsuanyun{suffix}"
-        label = "ShengSuanYun Router" + (f" {index}" if suffix else "")
-        if key not in keys and label.casefold() not in labels and preset not in presets:
-            return key, preset, label
-        index += 1
+def _set_primary_quick_start_preset(config: Config, provider_name: str, model: str) -> None:
+    config.model_presets["primary"] = ModelPresetConfig(model=model, provider=provider_name)
+    config.agents.defaults.model_preset = "primary"
 
 
 def _show_quick_start_progress(active_step: int) -> None:
@@ -1450,11 +1438,14 @@ def _get_quick_start_provider_info() -> dict[str, _QuickStartProviderInfo]:
     return result
 
 
-def _get_quick_start_provider_choices() -> dict[str, str]:
-    choices: dict[str, str] = {}
+def _get_quick_start_provider_choices() -> dict[str, str | ProviderSetupTemplate]:
+    choices: dict[str, str | ProviderSetupTemplate] = {}
     for provider_name, info in _get_quick_start_provider_info().items():
         choices.setdefault(info.display_name, provider_name)
-    choices[_QUICK_START_SHENGSUANYUN.label] = "custom"
+    for template in PROVIDER_SETUP_TEMPLATES:
+        alias, _, _ = template.search_aliases.partition(" ")
+        label = f"{template.label} ({alias})" if alias else template.label
+        choices.setdefault(label, template)
     choices[_QUICK_START_CUSTOM_PROVIDER_CHOICE] = "custom"
     return choices
 
@@ -1560,9 +1551,10 @@ def _configure_quick_start_provider(config: Config) -> str | object:
         if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
             return _BACK_PRESSED
         assert isinstance(answer, str)
-        provider_name = provider_choices[answer]
+        choice = provider_choices[answer]
+        template = choice if isinstance(choice, ProviderSetupTemplate) else None
+        provider_name = choice if isinstance(choice, str) else "custom"
         provider_info = _get_quick_start_provider_info().get(provider_name)
-        shengsuanyun = answer == _QUICK_START_SHENGSUANYUN.label
 
         api_base = ""
         if endpoints := _QUICK_START_ENDPOINT_CHOICES.get(provider_name):
@@ -1576,7 +1568,7 @@ def _configure_quick_start_provider(config: Config) -> str | object:
         api_key: str | None = None
         if not (provider_info and (provider_info.is_local or provider_info.is_oauth)):
             prompt = f"{answer} API key"
-            key_answer = _input_secret(prompt) if shengsuanyun else _input_text(prompt, "", "str")
+            key_answer = _input_secret(prompt) if template else _input_text(prompt, "", "str")
             if key_answer is _BACK_PRESSED:
                 continue
             if key_answer is None:
@@ -1586,7 +1578,7 @@ def _configure_quick_start_provider(config: Config) -> str | object:
                 console.print("[yellow]! API key is required for Quick Start[/yellow]")
                 return False
 
-        if not (endpoints or shengsuanyun) and _quick_start_requires_base_url(provider_name, provider_info):
+        if not (endpoints or template) and _quick_start_requires_base_url(provider_name, provider_info):
             base_answer = _input_text("Provider base URL", "", "str")
             if base_answer is _BACK_PRESSED:
                 continue
@@ -1599,12 +1591,13 @@ def _configure_quick_start_provider(config: Config) -> str | object:
 
         catalog_config = config.model_copy(deep=True)
         preset_name = "primary"
-        if shengsuanyun:
-            provider_name, preset_name, label = _shengsuanyun_quick_start_names(config)
+        if template:
+            label, preset_name = setup_template_names(config, template)
+            provider_name = custom_provider_key(config, label)
             catalog_provider = ProviderConfig(
                 display_name=label,
-                api_base=_QUICK_START_SHENGSUANYUN.api_base,
-                api=ProviderAPIConfig(supported_apis=("chat_completions", "responses")),
+                api_base=template.api_base,
+                api=template.api.model_copy(),
             )
             setattr(catalog_config.providers, provider_name, catalog_provider)
         else:
@@ -1637,11 +1630,18 @@ def _configure_quick_start_provider(config: Config) -> str | object:
             if not _quick_start_oauth_login(config, provider_name):
                 return False
 
-        defaults = config.agents.defaults
-        if not shengsuanyun or (defaults.model_preset is None and config.get_provider() is None):
-            defaults.model_preset = preset_name
+        use_template_as_default = (
+            template is not None
+            and config.agents.defaults.model_preset is None
+            and config.get_provider() is None
+        )
         setattr(config.providers, provider_name, catalog_provider)
+        if template is None:
+            _set_primary_quick_start_preset(config, provider_name, model)
+            return "primary"
         config.model_presets[preset_name] = ModelPresetConfig(model=model, provider=provider_name)
+        if use_template_as_default:
+            config.agents.defaults.model_preset = preset_name
         return preset_name
 
 

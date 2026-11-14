@@ -49,6 +49,13 @@ from nanobot.providers.registry import (
 )
 from nanobot.providers.request_overrides import isolate_request_overrides
 from nanobot.providers.routing import resolve_automatic_model_api, resolve_model_api
+from nanobot.providers.setup import (
+    PROVIDER_SETUP_TEMPLATES,
+    custom_provider_key,
+    dynamic_provider_items,
+    provider_display_name_exists,
+    setup_template_names,
+)
 from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.webui import request_settings
 from nanobot.webui.settings_contracts import (
@@ -105,6 +112,7 @@ class ModelSettingsPayload(TypedDict):
     provider_api_configuration_supported: bool
     model_request_overrides_supported: bool
     providers: list[dict[str, Any]]
+    provider_setup_templates: list[dict[str, Any]]
 
 
 class ProviderModelMetadataPayload(TypedDict, total=False):
@@ -304,15 +312,6 @@ def provider_configured_for_settings(
     )
 
 
-def _dynamic_provider_items(config: Config) -> list[tuple[str, ProviderConfig]]:
-    model_extra = config.providers.model_extra or {}
-    return [
-        (name, provider_config)
-        for name, provider_config in model_extra.items()
-        if isinstance(provider_config, ProviderConfig)
-    ]
-
-
 def resolve_settings_provider(
     config: Config,
     provider_name: str,
@@ -325,7 +324,7 @@ def resolve_settings_provider(
         return None
 
     normalized = provider_name.replace("-", "_")
-    for extra_name, provider_config in _dynamic_provider_items(config):
+    for extra_name, provider_config in dynamic_provider_items(config):
         if provider_name == extra_name or normalized == extra_name.replace("-", "_"):
             return (
                 create_dynamic_spec(
@@ -876,44 +875,6 @@ def _rename_model_configuration(config: Config, old_name: str, new_name: str) ->
     return True
 
 
-def _custom_provider_key(config: Config, display_name: str) -> str:
-    slug = _MODEL_CONFIGURATION_SLUG_RE.sub("-", display_name.strip().lower()).strip("-_")
-    base = f"custom-{slug or 'provider'}"
-    if len(base) > 56:
-        base = base[:56].rstrip("-_")
-    existing = {
-        name.replace("_", "-").lower()
-        for name, _provider_config in _dynamic_provider_items(config)
-    }
-    candidate = base
-    suffix = 2
-    while candidate.replace("_", "-").lower() in existing or find_by_name(candidate):
-        candidate = f"{base}-{suffix}"
-        suffix += 1
-    return candidate
-
-
-def _provider_display_name_exists(
-    config: Config,
-    display_name: str,
-    *,
-    exclude_key: str | None = None,
-) -> bool:
-    normalized = display_name.strip().casefold()
-    if any(spec.label.strip().casefold() == normalized for spec in PROVIDERS):
-        return True
-    for provider_key, provider_config in _dynamic_provider_items(config):
-        if provider_key == exclude_key:
-            continue
-        label = (
-            provider_config.display_name
-            or provider_key.replace("-", " ").replace("_", " ").title()
-        )
-        if label.strip().casefold() == normalized:
-            return True
-    return False
-
-
 def _unique_model_configuration_name(config: Config, label: str) -> str:
     try:
         base = _model_configuration_slug(label)
@@ -1073,7 +1034,7 @@ def model_settings_payload(
         selected_provider = spec.name if spec else provider_name
 
     providers = _provider_settings_rows(config, selected_provider, oauth_status)
-    for provider_key, provider_config in _dynamic_provider_items(config):
+    for provider_key, provider_config in dynamic_provider_items(config):
         providers.append(
             _provider_settings_row(
                 provider_key,
@@ -1178,6 +1139,17 @@ def model_settings_payload(
             oauth_status,
         ),
         "providers": providers,
+        "provider_setup_templates": [
+            {
+                "id": template.id,
+                "label": template.label,
+                "suggested_name": setup_template_names(config, template)[0],
+                "search_aliases": template.search_aliases,
+                "api_base": template.api_base,
+                "api": template.api.model_dump(mode="json", exclude_none=True),
+            }
+            for template in PROVIDER_SETUP_TEMPLATES
+        ],
     }
 
 
@@ -1648,10 +1620,10 @@ def create_provider_settings(config: Config, query: QueryParams) -> str:
     api_base = str(updates.get("api_base") or "")
     if not api_base:
         raise WebUISettingsError("API base is required")
-    if _provider_display_name_exists(config, display_name):
+    if provider_display_name_exists(config, display_name):
         raise WebUISettingsError("provider already exists", status=409)
 
-    provider_key = _custom_provider_key(config, display_name)
+    provider_key = custom_provider_key(config, display_name)
     updates["display_name"] = display_name
     provider_config = request_settings.validate_request_config(None, updates)
     setattr(config.providers, provider_key, provider_config)
@@ -1709,7 +1681,7 @@ def update_provider_settings(
             raise WebUISettingsError("provider name is required")
         if len(display_name) > 80:
             raise WebUISettingsError("provider name must be 80 characters or fewer")
-        if _provider_display_name_exists(config, display_name, exclude_key=provider_key):
+        if provider_display_name_exists(config, display_name, exclude_key=provider_key):
             raise WebUISettingsError("provider already exists", status=409)
 
     updated_provider_config = request_settings.validate_request_config(provider_config, updates)

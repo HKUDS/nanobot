@@ -28,6 +28,14 @@ describe("Settings providers", () => {
     const unconfigured = { name: "template:shengsuanyun", label: "Existing custom connection", configured: false };
     payload.providers = [existing, unconfigured];
     payload.provider_api_configuration_supported = true;
+    payload.provider_setup_templates = [{
+      id: "shengsuanyun",
+      label: "ShengSuanYun Router",
+      suggested_name: "ShengSuanYun Router 2",
+      search_aliases: "胜算云 勝算雲",
+      api_base: "https://router.shengsuanyun.com/api/v1",
+      api: { supported_apis: ["chat_completions", "responses"], preferred_api: "chat_completions" },
+    }];
     requestMutationMock.mockResolvedValueOnce({
       ...payload,
       created_provider: "custom-shengsuanyun-router-2",
