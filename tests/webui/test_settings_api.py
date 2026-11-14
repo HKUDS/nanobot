@@ -143,6 +143,26 @@ def test_settings_payload_exposes_edenai_provider(
     assert edenai["model_selectable"] is True
 
 
+def test_settings_payload_exposes_standardcompute_provider(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.providers.standardcompute.api_key = "sc-test-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    payload = settings_payload()
+    row = next(row for row in payload["providers"] if row["name"] == "standardcompute")
+
+    assert row["label"] == "Standard Compute"
+    assert row["configured"] is True
+    assert row["default_api_base"] == "https://api.stdcmpt.com/v1"
+    assert row["model_catalog"] == "catalog"
+    assert row["model_selectable"] is True
+
+
 def test_settings_payload_exposes_orcarouter_provider(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
