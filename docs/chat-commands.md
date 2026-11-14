@@ -74,9 +74,7 @@ Switching changes the model used for future replies in this conversation and kee
 
 ## Goals
 
-Use `/cancel_goal` to cancel the current conversation's active or blocked goal without waiting for a model response. WebUI users can also expand the goal and select **Cancel goal**. Cancelling an active goal stops the current work, including its running subtasks and commands; cancelling a blocked goal does not interrupt an unrelated reply. Saved chat history is kept, and repeating the command when no goal remains has no effect.
-
-Only you can cancel a goal. If you ask the agent to stop in ordinary chat, it can mark the goal as blocked and direct you to the cancellation control. `/stop` interrupts execution but keeps the goal saved.
+Only you can cancel a goal: use `/cancel_goal`, or expand the goal in WebUI and select **Cancel goal**. Cancelling an active goal also stops its work; cancelling a blocked goal leaves unrelated replies running. Chat history is kept. Asking the agent to stop can block the goal, but does not cancel it.
 
 ## Local triggers
 

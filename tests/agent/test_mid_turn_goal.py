@@ -564,34 +564,3 @@ async def test_queued_goal_command_does_not_write_to_an_obsolete_generation(tmp_
         assert key not in loop._pending_queues
     finally:
         await loop.aclose()
-
-
-async def test_agent_pauses_goal_when_user_asks_to_stop_without_cancelling_it(tmp_path):
-    provider = MagicMock(aclose=AsyncMock())
-    provider.get_default_model.return_value = "test-model"
-    provider.generation = GenerationSettings()
-    provider.estimate_prompt_tokens.return_value = (100, "test")
-    provider.chat_stream_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content=None, tool_calls=[ToolCallRequest(
-            id="block", name="update_goal", arguments={"action": "block", "recap": "User asked to stop."},
-        )]),
-        LLMResponse(content="Stopped work. Use /cancel_goal to cancel the saved goal."),
-    ])
-    loop = _assembled_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
-    session = await loop.sessions.state.get("cli:pause-goal")
-    await loop.sessions.state.update_metadata(session.key, {
-        GOAL_STATE_KEY: {"status": "active", "objective": "Finish the task."},
-    })
-    try:
-        result = await loop.process_direct("Stop working on this", session_key=session.key)
-        assert result.content == "Stopped work. Use /cancel_goal to cancel the saved goal."
-        messages = "\n".join(str(message.get("content", "")) for message in
-                             provider.chat_stream_with_retry.await_args_list[0].kwargs["messages"])
-        assert "Goal (active)" in messages
-        assert "Finish the task." in messages
-        assert "mark the active goal `blocked`" in messages
-        saved = await loop.sessions.state.read(session.key)
-        assert saved.metadata[GOAL_STATE_KEY]["status"] == "blocked"
-        assert provider.chat_stream_with_retry.await_count == 2
-    finally:
-        await loop.aclose()

@@ -5485,10 +5485,12 @@ describe("ThreadShell", () => {
     const input = screen.getByRole("textbox", { name: "Message input" });
     fireEvent.change(input, { target: { value: "Keep my draft" } });
     fireEvent.click(await screen.findByRole("button", { name: "Show full goal" }));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel goal" }));
+    const button = screen.getByRole("button", { name: "Cancel goal" });
+    fireEvent.click(button);
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
     expect(client.sendSystemCommand).toHaveBeenCalledTimes(1);
     expect(client.sendSystemCommand).toHaveBeenCalledWith(chatId, "/cancel_goal");
-    expect(screen.getByRole("button", { name: "Cancel goal" })).toBeDisabled();
     expect(screen.getByRole("dialog", { name: "Goal" })).toBeVisible();
     expect(input).toHaveValue("Keep my draft");
     expect(client.sendMessage).not.toHaveBeenCalled();
