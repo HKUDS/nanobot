@@ -28,6 +28,7 @@ import { TypographyFixture } from "./typography-fixture";
 import { CodeWrappingFixture } from "./code-wrapping-fixture";
 import { InlineReferencesFixture } from "./inline-references-fixture";
 import { HistoryBoundaryFixture } from "./history-boundary-fixture";
+import { installHistoryBoundaryPreviewApi } from "./history-boundary-preview";
 import { ChatFailureFixture } from "./chat-failure-fixture";
 import { ThreadLoadingFixture } from "./thread-loading-fixture";
 import { AnswerOrderFixture } from "./answer-order-fixture";
@@ -111,6 +112,11 @@ function SessionMessagesFixture() {
 }
 
 const parameters = new URLSearchParams(location.search);
+const historyPreview = parameters.get("preview");
+if (parameters.get("case") === "history-boundary"
+  && (historyPreview === "slow" || historyPreview === "fast" || historyPreview === "pages" || historyPreview === "error")) {
+  installHistoryBoundaryPreviewApi(historyPreview);
+}
 const railClient = new NanobotClient({ url: "ws://127.0.0.1:8765", reconnect: false });
 const railHistory: UIMessage[] = Array.from({ length: 5 }, (_, index) => [
   { id: `u${1995 + index}`, role: "user" as const, content: `Question ${1995 + index}`, createdAt: index + 1 },
@@ -232,7 +238,7 @@ if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 if (parameters.get("case") === "subagent-dock") installSubagentDockApi();
 await initializeI18n();
 if (parameters.get("case") === "activity-wheel") await setAppLanguage("zh-CN");
-if (parameters.get("case") === "appearance" && parameters.has("lang")) {
+if ((parameters.get("case") === "appearance" || historyPreview) && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
 createRoot(document.getElementById("root")!).render(<TooltipProvider>

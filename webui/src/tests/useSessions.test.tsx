@@ -8,6 +8,7 @@ import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { activateReloadCache, clearReloadCache, writeReloadCache } from "@/lib/reload-cache";
 import { ClientProvider } from "@/providers/ClientProvider";
 import { canonicalThreadPayload } from "./thread-test-payload";
+import type { WebuiThreadPersistedPayload } from "@/lib/types";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -1166,6 +1167,49 @@ describe("useSessions", () => {
     expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:empty-tail",
       expect.objectContaining({ before: "inside", limit: 120 }));
     expect(result.current.hasMoreBefore).toBe(false);
+  });
+
+  it("keeps one pull pending through telemetry pages and retries from its failed continuation", async () => {
+    const initial: WebuiThreadPersistedPayload = {
+      schemaVersion: 3, projection: "events",
+      events: [{ event: "message", chat_id: "ready", projection_id: "answer", turn_id: "turn", turn_seq: 1, text: "Visible answer" }],
+      page: { before_cursor: "telemetry", has_more_before: true },
+    };
+    let fail!: (error: Error) => void;
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce(initial).mockResolvedValueOnce({
+      ...initial, events: [
+        { event: "model_request", chat_id: "ready", projection_id: "request", turn_id: "turn", turn_seq: 2,
+          request_id: "request", run_id: "run", sequence: 1, phase: "completed" },
+        { event: "turn_end", chat_id: "ready", projection_id: "end", turn_id: "turn", turn_seq: 3, latency_ms: 1000 },
+      ], page: { before_cursor: "content", has_more_before: true },
+    }).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const loading: boolean[] = [];
+    const { result } = renderHook(() => {
+      const history = useSessionHistory("websocket:ready");
+      loading.push(history.loadingOlder);
+      return history;
+    }, { wrapper: wrap(fakeClient()) });
+    await waitFor(() => expect(result.current.messages[0]?.content).toBe("Visible answer"));
+    loading.length = 0;
+    let finished = false;
+    act(() => { void result.current.loadOlder().then(() => { finished = true; }); });
+    await waitFor(() => expect(api.fetchWebuiThread).toHaveBeenCalledTimes(3));
+    expect(finished).toBe(false);
+    expect(result.current.loadingOlder).toBe(true);
+    expect(loading).not.toContain(false);
+    expect(result.current.messages.map((row) => row.content)).toEqual(["Visible answer"]);
+    await act(async () => { fail(new Error("offline")); });
+    expect(finished).toBe(true);
+    expect(result.current.olderError).toBe("offline");
+    vi.mocked(api.fetchWebuiThread).mockResolvedValueOnce({ ...initial,
+      events: [{ event: "user_message", chat_id: "ready", projection_id: "old", text: "Earlier question", starts_turn: true }],
+      page: { before_cursor: null, has_more_before: false },
+    });
+    await act(async () => { await result.current.loadOlder(); });
+    expect(api.fetchWebuiThread).toHaveBeenLastCalledWith("tok", "websocket:ready", expect.objectContaining({ before: "content" }));
+    expect(result.current.messages.map((row) => row.content)).toEqual(["Earlier question", "Visible answer"]);
+    expect(result.current.loadingOlder).toBe(false);
+    expect(result.current.olderError).toBeNull();
   });
 
   it("keeps older-history failures separate and retries them explicitly", async () => {

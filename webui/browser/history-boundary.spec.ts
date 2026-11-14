@@ -304,6 +304,116 @@ test("wheel loading hands off to a retained 48px slot; prepend and delayed layou
   expect(history.reads).toHaveLength(1);
 });
 
+for (const navigate of [false, true]) {
+  test(`one pull holds its header across non-display pages until content is ready (${navigate ? "navigation" : "latest"})`, async ({ page }) => {
+    const history = await installHistory(page, 40, 12, (start, count, more) => {
+      const payload = historyPage(start, count, more);
+      // Record-level history can return only bookkeeping, with an advancing cursor.
+      return start === (navigate ? 26 : 28) ? { ...payload, events: [] } : payload;
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const { body, header } = await openSettledHistory(page, navigate ? "&navigate=1" : "");
+    if (navigate) {
+      const rail = page.getByTestId("prompt-rail-scroll");
+      await rail.getByRole("button").first().focus();
+      await page.keyboard.press("Home");
+      await page.getByRole("button", { name: "Jump to message: Question 38", exact: true }).click();
+      await expect.poll(() => history.reads.length).toBe(1);
+      history.complete();
+      await expect(body.getByText("Question 38", { exact: true })).toBeInViewport();
+      await stableLayout(body);
+      await body.hover();
+      await page.mouse.wheel(0, 10000);
+      await expect.poll(() => history.reads.length).toBe(2);
+      history.complete();
+      await expect(body.getByText("Question 51", { exact: true })).toBeAttached();
+      await stableLayout(body);
+    }
+    const anchor = navigate ? "Question 38" : "Question 40";
+    await positionAtTop(body);
+    await requestOlderWithWheel(body, history, navigate ? 3 : 1);
+    const held = await expectHeld(body, anchor);
+    history.complete();
+    await expect.poll(() => history.reads.length).toBe(navigate ? 4 : 2);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    await stableLayout(body);
+    await expectCoordinates(body, anchor, held);
+    history.complete();
+    await expect(body.getByText(navigate ? "Question 14" : "Question 16", { exact: true })).toBeAttached();
+    await expect(body.locator(".thread-history-slot")).toHaveCount(0);
+    await stableLayout(body);
+    await expectAnchorCoordinate(body, anchor, held.anchorTop);
+  });
+}
+
+for (const retryWith of ["Blocks button", "boundary wheel"] as const) {
+  test(`navigation older retries the failed cursor after a non-display page (${retryWith})`, async ({ page }) => {
+    const history = await installHistory(page, 40, 12, (start, count, more) => {
+      const payload = historyPage(start, count, more);
+      return start === 26 ? { ...payload, events: [] } : payload;
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const { body, header, slot } = await openSettledHistory(page, "&navigate=1");
+    // Keep the jump away from latest's bottom so setup cannot prefetch newer.
+    await positionAtTop(body);
+    await jumpViaRail(page, 38);
+    await expect.poll(() => history.reads.length).toBe(1);
+    history.complete();
+    await expect(body.getByText("Question 38", { exact: true })).toBeInViewport();
+    await stableLayout(body);
+    await positionAtTop(body);
+    await requestOlderWithWheel(body, history, 2);
+    await expectHeld(body, "Question 38");
+
+    history.complete();
+    await expect.poll(() => history.reads.length).toBe(3);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    await expect(slot).toHaveCSS("height", "48px");
+    history.complete("error");
+    await expect(header).toHaveAttribute("data-state", "error");
+    const retry = page.getByRole("button", { name: "Loading failed. Retry", exact: true });
+    const blocks = retry.locator(".thread-history-blocks");
+    await expect(blocks).toBeInViewport();
+    await expect(blocks).toHaveCSS("color", "rgb(185, 28, 28)");
+    if (retryWith === "Blocks button") await blocks.click();
+    else await requestOlderWithWheel(body, history, 4);
+    await expect.poll(() => history.reads.length).toBe(4);
+    await expect(header).toHaveAttribute("data-state", "loading");
+    expect(history.reads).toEqual([
+      "?limit=24&after=38&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=38&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+      "?limit=24&before=26&include_model_requests=1&context_graph_encoding=references-v1",
+    ]);
+    history.complete();
+    await expect(body.getByText("Question 14", { exact: true })).toBeAttached();
+    await expect(header).toHaveCount(0);
+    await expect(slot).toHaveCount(0);
+    await stableLayout(body);
+    expect(history.reads).toHaveLength(4);
+  });
+}
+
+test("content settling at the top during preparation does not restore an obsolete reading offset", async ({ page }) => {
+  const history = await installHistory(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { body } = await openSettledHistory(page);
+  const first = body.locator("[data-thread-display-unit]").first();
+  // A plain Markdown fallback can be taller than its final layout above the reading anchor.
+  await first.evaluate((node) => { (node as HTMLElement).style.paddingBottom = "160px"; });
+  await positionAtTop(body);
+  await requestOlderWithWheel(body, history, 1);
+  await expectHeld(body, "Question 40");
+  await first.evaluate((node) => { (node as HTMLElement).style.paddingBottom = ""; });
+  await stableLayout(body);
+  const top = await anchorTop(body, "Question 40");
+  await expect.poll(() => body.evaluate((node) => node.scrollTop)).toBe(0);
+  history.complete();
+  await expect(body.getByText("Question 28", { exact: true })).toBeAttached();
+  await stableLayout(body);
+  await expectAnchorCoordinate(body, "Question 40", top);
+});
+
 test("task results stay with their prompts and retain the reading boundary when earlier messages load", async ({ page }) => {
   const history = await installHistory(page, 40, 12, (start, count, more) => {
     const payload = historyPage(start, count, more);

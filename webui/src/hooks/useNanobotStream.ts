@@ -7,6 +7,7 @@ import { hasPendingAgentActivity } from "@/lib/activity-timeline";
 import { ApiError, fetchWebuiThread, fetchWebuiThreadTraceDetail } from "@/lib/api";
 import { fetchLatestWebuiThread } from "@/lib/latest-thread-request";
 import { persistedCanonicalRunState } from "@/lib/canonical-run-snapshot";
+import { historyContentSnapshot, sameHistoryContent } from "@/lib/thread-display-projection";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadTranscript, type ThreadPaging, type ThreadRead, type ThreadTranscriptSnapshot } from "@/lib/thread-transcript";
 import type { ThreadMessageCache } from "@/lib/thread-message-cache";
@@ -612,19 +613,31 @@ export function useNanobotStream(
     olderReadRef.current = operation;
     publishHistory();
     try {
-      const body = await fetchWebuiThread(getToken(), historyKey, { before, limit: 120, signal: controller.signal });
-      if (olderReadRef.current !== operation || transcriptRef.current !== owner) return;
-      flushPendingStreamEvents();
-      const accepted = owner.accept(body, read);
-      setMessages(owner.messages);
-      setExecSourceMessages(owner.messages);
-      if (accepted) {
-        if (chatId) messageCache?.set(chatId, owner.save());
-        settleFragment(owner);
+      while (true) {
+        const body = await fetchWebuiThread(getToken(), historyKey, {
+          before: operation.read.before!, limit: 120, signal: controller.signal,
+        });
+        if (olderReadRef.current !== operation || transcriptRef.current !== owner) return;
+        flushPendingStreamEvents();
+        const previousContent = historyContentSnapshot(owner.messages, owner.paging.forkBoundaryMessageCount);
+        const accepted = owner.accept(body, operation.read);
+        const needsContent = accepted && owner.paging.hasMoreBefore
+          && (owner.hasPendingFragmentGap
+            || sameHistoryContent(previousContent, historyContentSnapshot(owner.messages, owner.paging.forkBoundaryMessageCount)));
+        // Keep one pull pending across bookkeeping pages and staged fragments.
+        // Begin the continuation before publishing accept()'s intermediate state.
+        if (needsContent) operation.read = owner.begin("older");
+        setMessages(owner.messages);
+        setExecSourceMessages(owner.messages);
+        if (accepted) {
+          if (chatId) messageCache?.set(chatId, owner.save());
+          settleFragment(owner);
+        }
+        if (!needsContent) break;
       }
     } catch (error) {
       if (olderReadRef.current === operation && transcriptRef.current === owner) {
-        owner.finishRead(read, (error as Error).message);
+        owner.finishRead(operation.read, (error as Error).message);
         publishHistory();
       }
     } finally {

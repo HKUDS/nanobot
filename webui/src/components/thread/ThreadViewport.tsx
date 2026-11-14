@@ -577,9 +577,12 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       - (historySlotRef.current ? HISTORY_HOLD_PX : 0);
     const delta = nextOffset - anchor.offsetTop;
     if (Math.abs(delta) < 0.5) return true;
-    const nextTop = Math.min(maxScrollTop, Math.max(0, scroller.scrollTop + delta));
+    const requestedTop = scroller.scrollTop + delta;
+    const nextTop = Math.min(maxScrollTop, Math.max(0, requestedTop));
     threadMotionRef.current?.jumpTo(nextTop);
     anchor.scrollTop = scroller.scrollTop;
+    // A clamped layout is the new reading position, not space owed by a later prepend.
+    anchor.offsetTop += requestedTop - nextTop;
     return true;
   }, [captureHistoryScrollAnchor]);
 
