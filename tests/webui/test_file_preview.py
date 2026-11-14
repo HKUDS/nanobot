@@ -16,6 +16,27 @@ PNG = base64.b64decode(
 )
 
 
+def test_preview_keeps_hash_and_question_mark_in_the_path(tmp_path: Path) -> None:
+    """A # or ? inside a path is part of the name, not a URL suffix."""
+    folder = tmp_path / "C#"
+    folder.mkdir()
+    source = folder / "Program.cs"
+    source.write_text("class Program {}\n", encoding="utf-8")
+    marked = tmp_path / "notes#1.md"
+    marked.write_text("marked\n", encoding="utf-8")
+    question = tmp_path / "report?.txt"
+    question.write_text("question\n", encoding="utf-8")
+    scope = default_workspace_scope(tmp_path, restrict_to_workspace=True)
+
+    preview = file_preview_payload("C#/Program.cs", scope=scope)
+    assert preview["content"] == "class Program {}\n"
+    assert file_preview_payload("notes#1.md", scope=scope)["content"] == "marked\n"
+    assert file_preview_payload("report?.txt", scope=scope)["content"] == "question\n"
+    referenced = file_reference_payload(source.as_uri(), scope=scope)
+    assert Path(referenced["path"]) == source.resolve()
+    assert referenced["relative_path"] == "C#/Program.cs"
+
+
 def test_file_reference_metadata_does_not_read_contents(tmp_path, monkeypatch) -> None:
     source = tmp_path / "notes with space.bin"
     source.write_bytes(b"\0binary")
