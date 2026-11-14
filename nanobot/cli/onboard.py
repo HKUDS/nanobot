@@ -29,7 +29,7 @@ from nanobot.cli.models import (
     get_model_context_limit,
 )
 from nanobot.config.loader import get_config_path, load_config
-from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.config.schema import Config, ModelPresetConfig, ProviderAPIConfig, ProviderConfig
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 
 console = Console()
@@ -77,6 +77,9 @@ _BACK_PRESSED = object()
 _MODEL_PRESET_CACHE: set[str] = set()
 
 _QUICK_START_CUSTOM_PROVIDER_CHOICE = "Other OpenAI-compatible"
+_QUICK_START_SHENGSUANYUN = _QuickStartEndpointChoice(
+    "ShengSuanYun Router (胜算云)", "https://router.shengsuanyun.com/api/v1",
+)
 _QUICK_START_OAUTH_PROVIDERS = {"openai_codex"}
 
 _CLEAR_CHOICE = "Clear value"
@@ -1385,17 +1388,28 @@ def _show_summary(config: Config) -> None:
     _pause()
 
 
-def _pause(message: str = "Press Enter to continue...") -> None:
-    _get_questionary().text(message, default="").ask()
+def _pause(message: str = "Press Enter to continue...") -> bool:
+    return _get_questionary().text(message, default="").ask() is not None
 
 
-def _set_primary_quick_start_preset(config: Config, provider_name: str, model: str) -> None:
-    config.model_presets["primary"] = ModelPresetConfig(
-        model=model,
-        provider=provider_name,
-    )
-    config.agents.defaults.model_preset = "primary"
-    _sync_preset_cache(config)
+def _shengsuanyun_quick_start_names(config: Config) -> tuple[str, str, str]:
+    connections = config.providers.model_extra or {}
+    keys = {key.replace("_", "-").lower() for key in connections}
+    labels = {
+        (provider.display_name or key.replace("_", " ").replace("-", " ")).strip().casefold()
+        for key, provider in connections.items()
+        if isinstance(provider, ProviderConfig)
+    }
+    presets = {name.casefold() for name in config.model_presets}
+    index = 1
+    while True:
+        suffix = f"-{index}" if index > 1 else ""
+        key = f"custom-shengsuanyun-router{suffix}"
+        preset = f"shengsuanyun{suffix}"
+        label = "ShengSuanYun Router" + (f" {index}" if suffix else "")
+        if key not in keys and label.casefold() not in labels and preset not in presets:
+            return key, preset, label
+        index += 1
 
 
 def _show_quick_start_progress(active_step: int) -> None:
@@ -1440,6 +1454,7 @@ def _get_quick_start_provider_choices() -> dict[str, str]:
     choices: dict[str, str] = {}
     for provider_name, info in _get_quick_start_provider_info().items():
         choices.setdefault(info.display_name, provider_name)
+    choices[_QUICK_START_SHENGSUANYUN.label] = "custom"
     choices[_QUICK_START_CUSTOM_PROVIDER_CHOICE] = "custom"
     return choices
 
@@ -1564,7 +1579,7 @@ def _select_quick_start_api_base(
     return api_base, True
 
 
-def _configure_quick_start_provider(config: Config) -> bool | object:
+def _configure_quick_start_provider(config: Config) -> str | object:
     while True:
         _show_quick_start_progress(1)
 
@@ -1578,6 +1593,7 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
         assert isinstance(answer, str)
         provider_name = provider_choices[answer]
         provider_info = _get_quick_start_provider_info().get(provider_name)
+        shengsuanyun = answer == _QUICK_START_SHENGSUANYUN.label
 
         api_base = provider_info.default_api_base if provider_info else ""
         base_was_prompted = False
@@ -1594,18 +1610,20 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
 
         api_key: str | None = None
         if _quick_start_requires_api_key(provider_name, provider_info):
-            api_key = _input_text(f"{answer} API key", "", "str")
-            if api_key is _BACK_PRESSED:
+            prompt = f"{answer} API key"
+            key_answer = _input_secret(prompt) if shengsuanyun else _input_text(prompt, "", "str")
+            if key_answer is _BACK_PRESSED:
                 continue
-            if api_key is None:
+            if key_answer is None:
                 return False
-            api_key = api_key.strip()
+            api_key = cast(str, key_answer).strip()
             if not api_key:
                 console.print("[yellow]! API key is required for Quick Start[/yellow]")
                 return False
 
         if (
-            provider_name not in _QUICK_START_ENDPOINT_CHOICES
+            not shengsuanyun
+            and provider_name not in _QUICK_START_ENDPOINT_CHOICES
             and _quick_start_requires_base_url(provider_name, provider_info)
         ):
             api_base_result = _select_quick_start_api_base(provider_name, answer, provider_info)
@@ -1618,13 +1636,22 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
                 api_base_result,
             )
 
-        provider_config = getattr(config.providers, provider_name, None)
-        if provider_config is None:
+        catalog_config = config.model_copy(deep=True)
+        preset_name = "primary"
+        if shengsuanyun:
+            provider_name, preset_name, label = _shengsuanyun_quick_start_names(config)
+            catalog_provider = ProviderConfig(
+                display_name=label,
+                api_base=_QUICK_START_SHENGSUANYUN.api_base,
+                api=ProviderAPIConfig(supported_apis=("chat_completions", "responses")),
+            )
+            setattr(catalog_config.providers, provider_name, catalog_provider)
+        else:
+            catalog_provider = getattr(catalog_config.providers, provider_name, None)
+        if catalog_provider is None:
             console.print(f"[red]Unknown provider: {provider_name}[/red]")
             return False
 
-        catalog_config = config.model_copy(deep=True)
-        catalog_provider = getattr(catalog_config.providers, provider_name)
         if api_key is not None:
             catalog_provider.api_key = api_key
         if api_base and (base_was_prompted or not catalog_provider.api_base):
@@ -1647,20 +1674,13 @@ def _configure_quick_start_provider(config: Config) -> bool | object:
             if not _quick_start_oauth_login(config, provider_name):
                 return False
 
-        if api_key is not None:
-            provider_config.api_key = api_key
-        if api_base:
-            if base_was_prompted:
-                provider_config.api_base = api_base
-            elif not provider_config.api_base:
-                provider_config.api_base = api_base
-
-        _set_primary_quick_start_preset(
-            config,
-            provider_name,
-            model,
-        )
-        return True
+        defaults = config.agents.defaults
+        if not shengsuanyun or (defaults.model_preset is None and config.get_provider() is None):
+            defaults.model_preset = preset_name
+        setattr(config.providers, provider_name, catalog_provider)
+        config.model_presets[preset_name] = ModelPresetConfig(model=model, provider=provider_name)
+        _sync_preset_cache(config)
+        return preset_name
 
 
 def _enable_quick_start_websocket_defaults(config: Config) -> bool:
@@ -1707,9 +1727,14 @@ def _enable_quick_start_websocket_defaults(config: Config) -> bool:
     return True
 
 
-def _show_quick_start_summary(config: Config) -> None:
+def _quick_start_websocket_enabled(config: Config) -> bool:
+    websocket: Any = getattr(config.channels, "websocket", None)
+    return bool(websocket and websocket.get("enabled"))
+
+
+def _show_quick_start_summary(config: Config, preset_name: str) -> None:
     _show_quick_start_progress(3)
-    preset = config.model_presets.get("primary")
+    preset = config.model_presets.get(preset_name)
     provider_label = "AI provider"
     credentials_ready = True
     credential_name = "API key"
@@ -1735,8 +1760,11 @@ def _show_quick_start_summary(config: Config) -> None:
 
     rows = [
         ("Status", status),
-        ("WebSocket channel", "enabled"),
+        ("Model preset", preset_name),
+        ("WebSocket channel", "enabled" if _quick_start_websocket_enabled(config) else "disabled"),
     ]
+    if config.agents.defaults.model_preset != preset_name:
+        rows.insert(2, ("Default model", f"unchanged (switch with /model {preset_name})"))
     _print_summary_panel(rows, "Quick Start")
 
 
@@ -1750,14 +1778,19 @@ def _configure_quick_start(config: Config) -> bool:
     provider_result = _configure_quick_start_provider(draft)
     if provider_result is _BACK_PRESSED:
         return False
-    if not provider_result:
+    if not isinstance(provider_result, str):
         _pause()
         return False
-    if not _enable_quick_start_websocket_defaults(draft):
+    needs_websocket_setup = provider_result == "primary" or (
+        draft.agents.defaults.model_preset == provider_result
+        and not _quick_start_websocket_enabled(draft)
+    )
+    if needs_websocket_setup and not _enable_quick_start_websocket_defaults(draft):
         _pause()
         return False
-    _show_quick_start_summary(draft)
-    _pause("Press Enter to save and exit...")
+    _show_quick_start_summary(draft, provider_result)
+    if not _pause("Press Enter to save and exit..."):
+        return False
     for field_name in type(config).model_fields:
         setattr(config, field_name, getattr(draft, field_name))
     return True
