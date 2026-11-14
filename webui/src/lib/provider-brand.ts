@@ -228,7 +228,7 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
     initials: "SX",
   },
   siliconflow: brand("siliconflow.cn", "#111827", "SF"),
-  shengsuanyun: { ...brand("shengsuanyun.com", "#5742EE", "SSY", [
+  shengsuanyun_router: { ...brand("shengsuanyun.com", "#5742EE", "SSY", [
     "https://www.shengsuanyun.com/svg/logo-C_e87Vaj.svg",
   ]), logoLayout: "tile" },
   skywork: brand("skywork.ai", "#5B5BF6", "SW"),

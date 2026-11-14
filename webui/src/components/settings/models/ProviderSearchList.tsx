@@ -27,7 +27,7 @@ const PROVIDER_SEARCH_ALIASES: Record<string, string> = {
   minimax: "海螺 稀宇",
   minimax_anthropic: "海螺 稀宇",
   siliconflow: "硅基流动 矽基流動 硅基流動",
-  shengsuanyun: "胜算云 勝算雲",
+  shengsuanyun_router: "胜算云 勝算雲",
   stepfun: "阶跃星辰 階躍星辰",
   xiaomi_mimo: "小米 mimo",
   longcat: "美团 美團",
