@@ -1761,8 +1761,8 @@ describe("AgentActivityCluster", () => {
       <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />,
     );
     openLiveActivity();
-    const header = screen.getByRole("button", { name: /^Working for / }).querySelector("[data-sheen-text]");
-    expect(header).toHaveAttribute("data-sheen-text", header?.textContent);
+    const header = screen.getByText(/^Working for /);
+    expect(header).toHaveAttribute("data-sheen-text", header.textContent);
     const tool = screen.getByText("Read file skills/weather/SKILL.md");
     expect(tool).toHaveClass("text-muted-foreground");
     expect(tool).not.toHaveAttribute("data-sheen-text");
@@ -1770,9 +1770,9 @@ describe("AgentActivityCluster", () => {
     view.rerender(
       <AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow={false} />,
     );
-    const completedHeader = screen.getByText(/^Worked/);
-    expect(completedHeader).toHaveClass("text-muted-foreground");
-    expect(completedHeader).not.toHaveAttribute("data-sheen-text");
+    expect(screen.getByText(/^Worked/)).toBe(header);
+    expect(header).toHaveClass("text-muted-foreground");
+    expect(header).not.toHaveAttribute("data-sheen-text");
   });
 
   it("groups repeated searches over internal tool results without exposing raw paths", () => {

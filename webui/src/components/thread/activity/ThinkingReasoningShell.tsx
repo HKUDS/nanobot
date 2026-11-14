@@ -11,7 +11,6 @@ interface ThinkingReasoningShellProps {
   collapseLabel?: string;
   contentId?: string;
   label: string;
-  reservedLabel?: string;
   preview?: ReactNode;
   children: ReactNode;
   hasDetails?: boolean;
@@ -26,7 +25,6 @@ export function ThinkingReasoningShell({
   collapseLabel,
   contentId: providedContentId,
   label,
-  reservedLabel,
   preview,
   children,
   hasDetails = true,
@@ -40,7 +38,7 @@ export function ThinkingReasoningShell({
     "touch-target inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md px-1.5",
     preview && "max-sm:self-start",
   );
-  const labelClassName = "min-w-0 truncate text-[12px] font-normal leading-4";
+  const labelClassName = "min-w-0 truncate text-[12px] font-normal leading-4 tabular-nums";
   const headerLabel = (
     <span
       data-sheen-text={active ? label : undefined}
@@ -54,12 +52,7 @@ export function ThinkingReasoningShell({
       <Activity className={cn("h-3.5 w-3.5 shrink-0", active ? "activity-current" : "text-muted-foreground")} strokeWidth={1.5} aria-hidden>
         {active ? <path className="activity-current-trace" pathLength={100} d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /> : null}
       </Activity>
-      {reservedLabel ? (
-        <span className="grid min-w-0 text-start tabular-nums [&>span]:col-start-1 [&>span]:row-start-1">
-          {headerLabel}
-          <span className={cn(labelClassName, "invisible")} aria-hidden>{reservedLabel}</span>
-        </span>
-      ) : headerLabel}
+      {headerLabel}
     </>
   );
   return (
