@@ -2051,10 +2051,6 @@
             "title": "Mô hình",
             "description": "Xem hoặc đổi bộ thiết lập mô hình hiện tại."
           },
-          "history": {
-            "title": "Lịch sử trò chuyện",
-            "description": "Hiện N tin nhắn đã lưu gần nhất."
-          },
           "dream": {
             "title": "Chạy Dream",
             "description": "Sắp xếp bộ nhớ ngay."
@@ -2095,7 +2091,6 @@
         "details": {
           "goalActive": "Mục tiêu đang chạy",
           "goalReady": "Bắt đầu mục tiêu duy trì",
-          "history": "Hiển thị tin nhắn gần đây",
           "stopRunning": "Đang chạy"
         }
       },

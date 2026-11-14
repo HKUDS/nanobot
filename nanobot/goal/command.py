@@ -58,4 +58,4 @@ async def cmd_goal(ctx: CommandInput) -> CommandExpansion | OutboundMessage:
 def register_goal_command(router: CommandRouter) -> None:
     """Register the exact usage and task-bearing forms of /goal."""
     router.input_command(GOAL_COMMAND, cmd_goal)
-    router.add_spec(GOAL_COMMAND_SPEC, after="/history")
+    router.add_spec(GOAL_COMMAND_SPEC, after="/model")

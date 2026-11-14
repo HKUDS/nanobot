@@ -296,7 +296,7 @@ const COMMAND_ICONS: Record<string, LucideIcon> = {
 const BUILTIN_COMMAND_ICONS: Record<string, LucideIcon> = {
   "/new": NewChatIcon, "/compact": CompactIcon, "/stop": StopIcon,
   "/restart": RestartIcon, "/status": StatusIcon, "/model": ModelsIcon,
-  "/history": HistoryIcon, "/goal": GoalIcon, "/trigger": TriggerIcon,
+  "/goal": GoalIcon, "/trigger": TriggerIcon,
   "/dream": DreamIcon, "/dream-log": DreamLogIcon, "/dream-restore": RestoreMemoryIcon,
   "/dream-prompt": PromptTemplateIcon, "/evaluator-prompt": PromptTemplateIcon,
   "/skill": SkillsIcon, "/help": HelpIcon, "/pairing": PairingIcon,
@@ -1007,8 +1007,6 @@ export function ThreadComposer({
             : t("thread.composer.slash.details.goalReady");
         } else if (command.command === "/stop" && isStreaming) {
           detail = t("thread.composer.slash.details.stopRunning");
-        } else if (command.command === "/history") {
-          detail = t("thread.composer.slash.details.history");
         }
         return {
           ...command,

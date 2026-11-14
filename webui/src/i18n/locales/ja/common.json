@@ -2051,10 +2051,6 @@
             "title": "モデル",
             "description": "現在のモデルプリセットを確認・切り替えます。"
           },
-          "history": {
-            "title": "会話の履歴",
-            "description": "保存済みメッセージの直近 N 件を表示します。"
-          },
           "dream": {
             "title": "Dream を実行",
             "description": "メモリーを今すぐ整理します。"
@@ -2095,7 +2091,6 @@
         "details": {
           "goalActive": "目標が実行中",
           "goalReady": "継続的な目標を開始",
-          "history": "最近のメッセージを表示",
           "stopRunning": "実行中"
         }
       },

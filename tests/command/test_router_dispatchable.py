@@ -80,7 +80,7 @@ class TestIsDispatchableCommand:
     ("content", "expected"),
     [
         ("/status", False),
-        ("/history 5", False),
+        ("/dream-log abc123", False),
         ("/goal", False),
         ("/goal migrate the database", True),
         ("regular prompt", True),

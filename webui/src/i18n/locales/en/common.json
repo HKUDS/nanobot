@@ -2215,7 +2215,6 @@
         "details": {
           "goalActive": "Goal is running",
           "goalReady": "Start a sustained objective",
-          "history": "Show recent messages",
           "stopRunning": "Running now"
         },
         "commands": {
@@ -2242,10 +2241,6 @@
           "model": {
             "title": "Model",
             "description": "View or switch the current model preset."
-          },
-          "history": {
-            "title": "Chat history",
-            "description": "Show the last N saved messages."
           },
           "dream": {
             "title": "Run Dream",

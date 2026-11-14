@@ -391,5 +391,5 @@ def test_goal_command_in_help_and_palette() -> None:
     }
     commands = [item["command"] for item in palette]
     goal_index = commands.index("/goal")
-    assert commands[goal_index - 1:goal_index + 2] == ["/history", "/goal", "/trigger"]
+    assert commands[goal_index - 1:goal_index + 2] == ["/model", "/goal", "/trigger"]
     assert "/goal <goal>" in build_help_text()

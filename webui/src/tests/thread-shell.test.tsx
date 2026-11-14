@@ -5478,9 +5478,9 @@ describe("ThreadShell", () => {
           return httpJson({
             commands: [
               {
-                command: "/history",
-                title: "Show conversation history",
-                description: "Print the last N persisted messages.",
+                command: "/inspect",
+                title: "Inspect session",
+                description: "Inspect a session.",
                 icon: "history",
                 arg_hint: "[n]",
                 lifecycle: "side_channel",
@@ -5520,7 +5520,7 @@ describe("ThreadShell", () => {
     });
 
     expect(screen.getByRole("listbox", { name: "Slash commands" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /\/history/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /\/inspect/i })).toBeInTheDocument();
   });
 
   it("surfaces a dismissible banner for an uncorrelated message_too_big error", async () => {
