@@ -2035,7 +2035,6 @@
         "details": {
           "goalActive": "Objetivo em execução",
           "goalReady": "Iniciar um objetivo sustentado",
-          "history": "Mostrar mensagens recentes",
           "stopRunning": "Executando agora"
         },
         "commands": {
@@ -2062,10 +2061,6 @@
           "model": {
             "title": "Modelo",
             "description": "Veja ou troque o preset de modelo atual."
-          },
-          "history": {
-            "title": "Histórico da conversa",
-            "description": "Mostre as últimas N mensagens salvas."
           },
           "dream": {
             "title": "Executar Dream",

@@ -28,7 +28,6 @@ const SLASH_COMMAND_KEYS = [
   "restart",
   "status",
   "model",
-  "history",
   "dream",
   "dream_log",
   "dream_restore",
@@ -629,7 +628,6 @@ describe("webui i18n", () => {
       expect(slash.badges.recent).toBeTruthy();
       expect(slash.details.goalActive).toBeTruthy();
       expect(slash.details.goalReady).toBeTruthy();
-      expect(slash.details.history).toBeTruthy();
       expect(slash.details.stopRunning).toBeTruthy();
       for (const key of SLASH_COMMAND_KEYS) {
         const command = slash.commands[key as keyof typeof slash.commands];

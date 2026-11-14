@@ -576,7 +576,6 @@ class TelegramChannel(BaseChannel):
         BotCommand("stop", "Stop the current task"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
-        BotCommand("history", "Show recent conversation messages"),
         BotCommand("goal", "Start a sustained objective (long-running task)"),
         BotCommand("trigger", "Create a named local trigger"),
         BotCommand("pairing", "Manage DM pairing (approve/deny/list)"),
@@ -594,7 +593,7 @@ class TelegramChannel(BaseChannel):
     # Telegram-safe aliases are normalized before reaching the core router.
     # Canonical hyphenated commands stay on a separate handler (below).
     TELEGRAM_BUS_SLASH_COMMAND_RE = re.compile(
-        rf"^/(?:new|compact|stop|restart|status|dream|history|goal|trigger|pairing|model|skill"
+        rf"^/(?:new|compact|stop|restart|status|dream|goal|trigger|pairing|model|skill"
         rf"|{_command_alternation(_TELEGRAM_COMMAND_ALIASES)}"
         rf"|{_command_alternation(_TELEGRAM_BUS_CANONICAL_COMMANDS)})(?:@\w+)?(?:\s+[\s\S]*)?$"
     )

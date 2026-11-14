@@ -2051,10 +2051,6 @@
             "title": "Model",
             "description": "Lihat atau ganti preset model saat ini."
           },
-          "history": {
-            "title": "Riwayat chat",
-            "description": "Tampilkan N pesan terakhir yang tersimpan."
-          },
           "dream": {
             "title": "Jalankan Dream",
             "description": "Atur memori sekarang."
@@ -2095,7 +2091,6 @@
         "details": {
           "goalActive": "Tujuan sedang berjalan",
           "goalReady": "Mulai tujuan berkelanjutan",
-          "history": "Tampilkan pesan terbaru",
           "stopRunning": "Sedang berjalan"
         }
       },

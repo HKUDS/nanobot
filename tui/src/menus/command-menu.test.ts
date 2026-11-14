@@ -15,9 +15,9 @@ const commands: SlashCommand[] = [
     acceptsArgs: false,
   },
   {
-    command: "/history",
+    command: "/inspect",
     title: "History",
-    description: "Show recent messages",
+    description: "Inspect a session",
     argHint: "[n]",
     lifecycle: "side_channel",
     acceptsArgs: true,
@@ -54,11 +54,11 @@ describe("CommandMenu", () => {
 
     const frame = setup.captureCharFrame()
     expect(frame).toContain("› /help")
-    expect(frame).toContain("/history [n]")
+    expect(frame).toContain("/inspect [n]")
     expect(menu.completion("/h")).toBe("/help")
 
     expect(menu.move(1)).toBe(true)
-    expect(menu.complete()).toBe("/history ")
+    expect(menu.complete()).toBe("/inspect ")
     expect(menu.visible).toBe(false)
   })
 
@@ -100,7 +100,7 @@ describe("CommandMenu", () => {
     menu.setCommands(commands)
     menu.update("explain /help")
     expect(menu.visible).toBe(false)
-    menu.update("/history 5")
+    menu.update("/inspect 5")
     expect(menu.visible).toBe(false)
   })
 
