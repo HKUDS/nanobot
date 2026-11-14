@@ -57,9 +57,9 @@ nanobot can:
 
 - run in a browser WebUI or terminal
 - connect to Telegram, Discord, Slack, WeChat, Email, Mattermost, Linear, and other channels
-- read PDF, Word (`.docx`), Excel (`.xlsx`), and PowerPoint (`.pptx`) files with built-in file tools, for tasks such as summarizing reports
+- read images, PDF, Word (`.docx`), Excel (`.xlsx`), and PowerPoint (`.pptx`) files with built-in file tools
 - use shell, web search/fetch, MCP integrations, cron, image generation, and multi-agent delegation
-- keep session history and long-term memory through [Dream](./docs/memory.md#save-and-check-a-preference)
+- keep session history and use [Dream](./docs/memory.md#save-and-check-a-preference) to consolidate long-term memory
 - run [long-horizon goals](./docs/guides/long-running-ai-agent.md) and [scheduled automations](./docs/automations.md)
 - embed the agent with the Python SDK
 - deploy as a long-running local or server-side agent gateway
@@ -82,7 +82,7 @@ New to terminals or model credentials? Follow [Start Without Technical Backgroun
 
 | Track | Install with | Update with | What runs |
 |---|---|---|---|
-| Stable | installer, `uv`, or pip | managed installer: WebUI update; other installs: original package tool | one released Python/WebUI/TUI version |
+| Stable | installer, `uv`, or pip | [WebUI when supported](./docs/updating.md#update-from-the-webui), otherwise the original package tool | one released Python/WebUI/TUI version |
 | Current source | editable Git checkout | `git pull --ff-only` + editable dependency sync | Python, WebUI, and TUI from that checkout |
 
 **Stable release: automatic setup (recommended)**
@@ -110,9 +110,9 @@ irm https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.ps1 | i
 <details>
 <summary>Installer details, preview, and script review</summary>
 
-The default command installs or upgrades the stable PyPI release. Fresh installations use a dedicated environment under `~/.nanobot/venv`. On a fresh local desktop it opens the WebUI for model setup. That gateway keeps running after the browser or terminal closes; use the printed `gateway stop` command to stop it. SSH, headless, existing-config and older-release installs use terminal setup.
+The default command installs or upgrades the stable PyPI release. Fresh installations use a dedicated environment under `~/.nanobot/venv`. On a fresh local desktop it opens the WebUI for model setup. That gateway keeps running after the browser or terminal closes; use the printed `gateway stop` command to stop it. SSH, headless, existing-config and older-release installs use terminal setup when an interactive terminal is available; otherwise the installer prints the command to run later.
 
-Existing installations keep their package manager, extras and constraints. An active ordinary venv remains an explicit target, not an installer-managed environment. The installer avoids system-wide pip and prints the command to reuse if `nanobot` is not on `PATH`.
+The installer uses the detected installation method when safe, or stops for manual review. Check existing extras and constraints with the original package manager. An active venv remains an explicit target, not an installer-managed environment. The installer avoids system-wide pip and prints the command to reuse if `nanobot` is not on `PATH`.
 
 To preview the plan without changing your environment, pass `--dry-run`.
 
@@ -161,16 +161,16 @@ Clone the repository and install it in editable mode. A source install requires 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
 cd nanobot
-python -m venv .venv
+python3 -m venv .venv
 ```
 
-Activate it with `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
+On Windows, use `py -3 -m venv .venv` instead of `python3`. Activate it with `source .venv/bin/activate` on macOS/Linux or `.venv\Scripts\Activate.ps1` in Windows PowerShell, then run:
 
 ```bash
 python -m pip install -e .
 ```
 
-After that, the normal commands are identical to a stable install. `nanobot` runs the TUI from this checkout, and `nanobot webui` rebuilds stale frontend assets automatically. After stopping the old instance, `git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun `python -m pip install -e .` when Python dependencies change, then restart the instance. Contributors should also read [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+After that, the normal commands are identical to a stable install. `nanobot` runs the TUI from this checkout, and `nanobot webui` prompts to rebuild stale frontend assets, or warns in non-interactive sessions; `--yes` builds automatically. After stopping the old instance, `git pull --ff-only` updates the Python, TUI, and WebUI source together; rerun `python -m pip install -e .` when Python dependencies change, then restart the instance. Contributors should also read [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 </details>
 
@@ -180,19 +180,6 @@ After that, the normal commands are identical to a stable install. `nanobot` run
 Published packages include the WebUI, and supported platform wheels also include the native TUI. A source-distribution install can fetch a checksummed, version-matched TUI archive—with its licenses, notices, corresponding application source, source offer, and relinking instructions—on first use.
 
 Platform wheels include both the WebUI and the native terminal UI: macOS 13+ (Apple Silicon and Intel), glibc 2.17+ Linux (ARM64 and x64), and Windows x64. The x64 runtime requires SSE4.2. Pip selects the matching wheel; opening the TUI does not need a separate GitHub download or Bun installation. A source-distribution install on a supported target can use the matching checksummed GitHub release archive. On other platforms, use `nanobot --classic` or the WebUI.
-
-> [!IMPORTANT]
->
-> If you want the newest features and experiments, install from source.
->
-> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
-
-Pick **one** install method:
-
-| Track | Install with | Update with | What runs |
-|---|---|---|---|
-| Stable | installer, `uv`, or pip | [same installation method](./docs/quick-start.md#updating) | one released Python/WebUI/TUI version |
-| Current source | editable Git checkout | `git pull --ff-only` + editable dependency sync | Python, WebUI, and TUI from that checkout |
 
 </details>
 
@@ -227,7 +214,7 @@ Keep the launcher terminal open while using the browser. It starts or joins the 
 
 1. Open **Settings → Models** and save a provider/model preset with your credential or supported sign-in. See [model setup](./docs/quick-start.md#2-configure-your-model) if you need the full steps.
 2. Start a new topic and send `Hello!` to verify the model connection.
-3. To try file work, put a copy of `notes.txt` in a practice folder, select that folder and **Default Permission** (workspace-only access), and ask: "Read notes.txt and write a short summary to summary.md." Open `summary.md` in that folder to check the result. See [Your first file task](./docs/start-without-technical-background.md#your-first-file-task).
+3. To try file work, put a copy of `notes.txt` in a practice folder, select that folder and **Default Permission** (workspace-restricted access, not an OS sandbox), and ask: "Read notes.txt and write a short summary to summary.md." Open `summary.md` in that folder to check the result. See [Your first file task](./docs/start-without-technical-background.md#your-first-file-task).
 
 A normal reply verifies the provider/model and browser connection. The file task separately checks the selected project and its file permissions. Attaching a file sends it to the conversation; it does not change the selected project folder.
 
@@ -370,7 +357,7 @@ Deploy nanobot's gateway and bundled WebUI from the repository's ready-to-use Bl
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/HKUDS/nanobot)
 
-Render will ask for `ANTHROPIC_API_KEY` and a private `NANOBOT_WEB_TOKEN`, then provision persistent storage for sessions, memory, and WebUI history. Persistent disks require a paid Render service.
+Render will ask for `ANTHROPIC_API_KEY` and a private `NANOBOT_WEB_TOKEN`, then provision persistent storage for sessions, memory, and WebUI history. Persistent disks require a paid Render service. Existing disk configuration is preserved on redeploy; check it when changing credentials.
 
 **Self-host**
 
@@ -380,19 +367,17 @@ Prefer your own infrastructure? Follow the [deployment guide](./docs/deployment.
 
 The WebUI ships **inside the published wheel** with no separate frontend build. It is the browser workbench for persistent topics, temporary chats, visible agent activity, workspace controls, Apps, Skills, Automations, and settings. Start it with `nanobot webui`. WebUI access grants administration of the same agent instance; share it only with trusted operators. See [Sharing access](./docs/webui.md#sharing-access).
 
-The screenshots below show the current source WebUI with example conversations, illustrative token counts, and paused schedules.
+The screenshots show example conversations, illustrative token counts, and paused schedules; the interface may change.
 
 <p align="center">
-  <a href="./images/nanobot_webui-source.png">
-    <img src="./images/nanobot_webui.png" alt="nanobot WebUI new-topic screen with project-grouped topics, the composer, workspace access, and model controls" width="900">
-  </a>
+  <img src="./images/nanobot-workbench.png" alt="Three conversations in one WebUI workbench" width="900">
 </p>
 
 <details>
 <summary>Mobile WebUI · dark theme</summary>
 
 <p align="center">
-  <img src="./images/nanobot-mobile.png" alt="Mobile WebUI in dark theme with a saved conversation, model controls, context usage, and workspace-only permissions" width="390">
+  <img src="./images/nanobot-mobile.png" alt="Mobile WebUI in dark theme with a saved conversation, model controls, context usage, and Default Permission" width="390">
 </p>
 
 </details>
@@ -400,18 +385,17 @@ The screenshots below show the current source WebUI with example conversations, 
 Use it to:
 
 - keep separate topics for different tasks and projects;
-- use temporary chats when a conversation should not be saved to history or memory;
+- fork a topic from an earlier reply, or use temporary chats outside saved history and memory;
 - inspect reasoning, tool calls, file edits, diffs, command output, and generated artifacts;
 - switch model presets and choose a project before starting a topic;
+- attach images, documents, or video, and use voice input with a configured transcription provider;
 - configure models in **Settings**, connect chat platforms in **Channels**, and manage Apps, Skills, and Automations.
+
+Videos can be played in WebUI, but the agent cannot directly analyze their contents.
 
 ### Keep related work side by side
 
 Group up to four conversations and arrange them in columns, rows, a grid, or a main pane with supporting panes. Each topic keeps its own history. Select another topic from the `@` menu, or drag it into the composer, to let the agent read its context and coordinate work across sessions.
-
-<p align="center">
-  <img src="./images/nanobot-workbench.png" alt="Three conversations in one workbench: a release plan beside quick-start work and documentation review" width="900">
-</p>
 
 Choose a project, access mode, and model for each task. Topics separate conversation history; project folders select where file work happens. Neither creates separate long-term memory: one instance shares its agent profile, memory, and skills across projects. Use [separate instances](./docs/multiple-instances.md) when client data or preferences must stay isolated. [Explore topics and panes →](./docs/webui.md#conversation-groups-and-panes)
 
@@ -478,31 +462,13 @@ Browse the [repo docs](./docs/README.md) for current source documentation, or vi
 
 ## Releases
 
-**Latest release: [v0.4.0](https://github.com/HKUDS/nanobot/releases/tag/v0.4.0)**
+**Latest release: [v0.4.1](https://github.com/HKUDS/nanobot/releases/tag/v0.4.1)**
 
-v0.4.0 makes everyday work easier to continue, with durable conversation history, a more capable browser workbench, and diagrams in the terminal.
+v0.4.1 improves workspace permissions, sandboxed commands, connection recovery, file-context previews, and navigation. It retains legacy history and proxy migration through 0.4.x.
 
-- Keep model and browser conversation history in SQLite, with imports of existing conversations and retained source backups.
-- Navigate prompt history, search loaded messages and session handles, and keep delegated tasks within reach.
-- Work with local-file and video attachments, image thumbnails, file cards, and improved mobile and reading controls.
-- Connect remote instances, inspect Mermaid diagrams in the terminal, and edit or pause scheduled tasks in place.
+Back up the stopped instance and upgrade through its original installation method. v0.3.5 can upgrade directly to v0.4.1; in-app automatic installation is not enabled for this release. See [upgrade notes](https://github.com/HKUDS/nanobot/releases/tag/v0.4.1) and [Updating nanobot](./docs/updating.md).
 
-Upgrade through your original installation method and back up the complete stopped instance first. In-app automatic installation is not enabled for this release yet. See [Updating nanobot](./docs/updating.md) and the [v0.4.0 release notes and upgrade notes](https://github.com/HKUDS/nanobot/releases/tag/v0.4.0).
-
-## Recent Updates
-
-- **2026-10-28** 🚀 Released [v0.4.0](https://github.com/HKUDS/nanobot/releases/tag/v0.4.0) with durable conversation history, remote WebUI connections, richer attachments, and terminal diagrams.
-- **2026-10-27** 🗂️ Batch topic archiving, clearer mentions, and preserved partial replies after model failures.
-- **2026-10-26** 🧰 WebUI `!` shell commands show literal output; delegated tasks and their details stay within reach.
-- **2026-10-25** ⏰ Edit or pause scheduled tasks and inspect recent runs; Ctrl+K searches loaded messages and session handles.
-- **2026-10-24** ⚡ Smaller native terminal builds, Kimi K3.1 Pro support, and corrected API session routing.
-- **2026-10-23** 🧭 Compact workspace controls, MiniMax-M3.1-Flash support, and corrected DeepSeek reasoning replay.
-- **2026-10-22** 📎 Local-file and video attachments, shared proxy settings for remote MCP, and idle-compaction controls.
-- **2026-10-21** 🔄 Shared SQLite history storage and update review in About, with in-app installation gated on verified release approval.
-- **2026-10-20** 🖼️ Mermaid diagrams in the terminal, QQ QR-code setup, and reading-size preferences.
-- **2026-10-19** 🔍 DeepSeek Search, WebUI Mermaid diagrams, and first-run Docker Compose onboarding.
-
-For earlier updates, see the [release archive](./docs/release-archive.md) or [GitHub releases](https://github.com/HKUDS/nanobot/releases).
+For other changes, see [GitHub releases](https://github.com/HKUDS/nanobot/releases) and the [release archive](./docs/release-archive.md).
 
 ## Open Source Partners
 
@@ -513,11 +479,7 @@ For earlier updates, see the [release archive](./docs/release-archive.md) or [Gi
 
 ## 🤝 Contribute
 
-Use nanobot for a real task, report what broke, and then pick a focused improvement.
-
-- Read [CONTRIBUTING.md](./CONTRIBUTING.md) for the development workflow.
-- Browse [open issues](https://github.com/HKUDS/nanobot/issues) for problems to investigate.
-- Open a [pull request](https://github.com/HKUDS/nanobot/pulls) for a focused fix or integration.
+Everyone is welcome to [open an issue](https://github.com/HKUDS/nanobot/issues) with a bug, reproduction, use case, or suggestion. Discuss the problem first; pull requests are currently limited to repository collaborators. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution process and recognition.
 
 ## Maintainers
 
