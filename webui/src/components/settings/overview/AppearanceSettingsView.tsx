@@ -89,7 +89,7 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
           description={t(`settings.appearance.${localPrefs.activityMode === "auto" ? "autoHelp" : "expandedHelp"}`)}>
           <SegmentedControl<LocalActivityMode> value={localPrefs.activityMode}
             ariaLabel={t("settings.rows.activityMode")}
-            options={[{ value: "auto", label: t("settings.values.auto") }, { value: "expanded", label: t("settings.values.expanded") }]}
+            options={[{ value: "auto", label: t("settings.values.collapsed") }, { value: "expanded", label: t("settings.values.expanded") }]}
             onChange={(activityMode) => onChangeLocalPrefs((previous) => ({ ...previous, activityMode }))} />
         </SettingsRow>
         <div className="settings-group-divider">
