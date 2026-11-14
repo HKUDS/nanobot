@@ -13,7 +13,7 @@ Every entry writes out all fields so you can copy-paste as a template.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic.alias_generators import to_snake
 
@@ -25,6 +25,9 @@ from nanobot.providers.model_api import hosted_web_search_enabled as hosted_web_
 from nanobot.providers.model_api import is_direct_openai_base as is_direct_openai_base
 from nanobot.providers.model_api import is_hosted_web_search_tool as is_hosted_web_search_tool
 from nanobot.providers.model_api import is_hosted_web_search_type as is_hosted_web_search_type
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import ProviderConfig
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,8 @@ class ProviderSpec:
     detect_by_key_prefix: str = ""  # match api_key prefix, e.g. "sk-or-"
     detect_by_base_keyword: str = ""  # match substring in api_base URL
     default_api_base: str = ""
+    accepts_legacy_custom_config: bool = False  # This key previously allowed a named custom connection.
+    is_named_custom: bool = False  # Created by create_dynamic_spec.
 
     strip_model_prefix: bool = False  # strip "provider/" before sending to gateway
     strip_model_prefixes: tuple[str, ...] = ()  # strip only when the first model segment matches
@@ -145,6 +150,26 @@ class ProviderSpec:
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
+
+    def uses_legacy_custom_config(self, config: ProviderConfig) -> bool:
+        """Keep the previous interpretation when this connection has custom settings."""
+        if not self.accepts_legacy_custom_config:
+            return False
+        return bool(
+            config.api is not None or config.display_name or config.thinking_style
+            or (config.api_base and (
+                not config.api_key or config.api_base.rstrip("/") != self.default_api_base.rstrip("/")
+            ))
+        )
+
+    def for_connection(self, config: ProviderConfig) -> ProviderSpec:
+        if not self.uses_legacy_custom_config(config):
+            return self
+        return create_dynamic_spec(
+            self.name,
+            display_name=config.display_name or "",
+            thinking_style=config.thinking_style or "",
+        )
 
     def request_model_name(self, model: str) -> str:
         """Remove only the provider prefixes owned by this adapter."""
@@ -289,6 +314,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="ShengSuanYun Router",
         is_gateway=True,
         default_api_base="https://router.shengsuanyun.com/api/v1",
+        accepts_legacy_custom_config=True,
         strip_model_prefixes=("shengsuanyun",),
     ),
     # Eden AI: OpenAI-compatible gateway. Models use the "provider/model"
@@ -956,6 +982,7 @@ def create_dynamic_spec(
         display_name=display_name or name.replace("-", " ").replace("_", " ").title(),
         backend="openai_compat",
         is_direct=True,
+        is_named_custom=True,
         strip_model_prefixes=strip_prefixes,
         thinking_style=thinking_style,
     )

@@ -17,6 +17,7 @@ from nanobot.llm_usage.models import LLMCallRecord
 from nanobot.providers.base import LLMUsage
 from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
+from nanobot.providers.routing import resolve_provider_route
 from nanobot.session.manager import SessionManager
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.webui.settings_api import (
@@ -1289,6 +1290,42 @@ def test_settings_payload_includes_dynamic_custom_provider(
     assert providers[DYNAMIC_PROVIDER_NAME]["configured"] is True
     assert providers[DYNAMIC_PROVIDER_NAME]["api_key_required"] is False
     assert providers[DYNAMIC_PROVIDER_NAME]["api_base"] == DYNAMIC_PROVIDER_API_BASE
+
+
+@pytest.mark.parametrize(("api_base", "api_key"), [
+    ("https://legacy-private.test/v1", None),
+    ("https://router.shengsuanyun.com/api/v1", "legacy-test-key"),
+])
+def test_legacy_shengsuanyun_keeps_custom_route_and_settings(tmp_path, api_base, api_key):
+    config_path = tmp_path / "legacy.json"
+    config_path.write_text(json.dumps({
+        "agents": {"defaults": {"model": "shengsuanyun/example-model"}},
+        "providers": {
+            "openrouter": {"apiKey": "must-not-route-here"},
+            "shengsuanyun": {
+                "apiBase": api_base, "apiKey": api_key,
+                "api": {"supportedApis": ["chat_completions"]},
+            },
+        },
+    }), encoding="utf-8")
+
+    initial = settings_payload(config_path=config_path)
+    assert initial["agent"]["resolved_provider"] == "shengsuanyun"
+    initial_row = next(row for row in initial["providers"] if row["name"] == "shengsuanyun")
+    assert initial_row["is_custom"] and initial_row["provider_api_configurable"]
+
+    update_provider_settings(
+        {"provider": ["shengsuanyun"], "display_name": ["My private router"]},
+        config_path=config_path,
+    )
+    saved = load_config(config_path)
+    route = resolve_provider_route(saved, preset=saved.resolve_preset())
+    assert route.provider_name == "shengsuanyun"
+    assert saved.get_api_base() == api_base
+    assert route.model_api is not None and route.model_api.preferred_api == "chat_completions"
+    assert route.spec is not None and route.spec.request_model_name(route.model) == "example-model"
+    row = next(row for row in settings_payload(config_path=config_path)["providers"] if row["name"] == "shengsuanyun")
+    assert row["label"] == "My private router"
 
 
 def test_settings_payload_resolves_provider_for_each_auto_preset(

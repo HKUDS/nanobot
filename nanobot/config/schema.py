@@ -613,6 +613,13 @@ class Config(BaseSettings):
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")
         prefixed_provider = find_by_name(model_prefix) if model_prefix else None
+        legacy_connections = {
+            spec.name: provider
+            for spec in PROVIDERS
+            if spec.accepts_legacy_custom_config
+            and isinstance(provider := getattr(self.providers, spec.name, None), ProviderConfig)
+            and spec.uses_legacy_custom_config(provider)
+        }
 
         def _kw_matches(kw: str) -> bool:
             kw = kw.lower()
@@ -624,7 +631,7 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
+                if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key or spec.name in legacy_connections:
                     return p, spec.name
 
         # Check for custom provider by prefix (e.g., "companyProxy/gpt-4").
@@ -637,7 +644,7 @@ class Config(BaseSettings):
                 return custom
 
         for spec in PROVIDERS:
-            if spec.is_transcription_only:
+            if spec.is_transcription_only or spec.name in legacy_connections:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
@@ -681,7 +688,7 @@ class Config(BaseSettings):
 
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
         for spec in PROVIDERS:
-            if spec.is_oauth or spec.is_transcription_only:
+            if spec.is_oauth or spec.is_transcription_only or spec.name in legacy_connections:
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
@@ -689,6 +696,10 @@ class Config(BaseSettings):
 
         for attr_name, p in (self.providers.model_extra or {}).items():
             if isinstance(p, ProviderConfig) and p.api_base:
+                return p, attr_name
+
+        for attr_name, p in legacy_connections.items():
+            if p.api_base:
                 return p, attr_name
 
         return None, None
@@ -737,7 +748,7 @@ class Config(BaseSettings):
             return p.api_base
         if name:
             spec = find_by_name(name)
-            if spec and spec.default_api_base:
+            if spec and spec.default_api_base and (p is None or not spec.uses_legacy_custom_config(p)):
                 return spec.default_api_base
         return None
 
