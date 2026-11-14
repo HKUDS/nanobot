@@ -6,6 +6,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,35 @@ async def _wait_finished(manager: ExecSessionManager, owner: str | None, session
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"session {session_id} did not finish")
+
+
+async def test_finished_listing_keeps_execution_duration_until_result_is_read(tmp_path, monkeypatch):
+    manager = ExecSessionManager()
+    tool = ExecTool(working_dir=str(tmp_path), session_manager=manager)
+    try:
+        gate = tmp_path / "finish"
+        sid = await _start_gated(tool, gate)
+        gate.touch()
+        await _wait_finished(manager, None, sid)
+        completed = (await manager.list())[0]
+
+        now = time.monotonic()
+        with monkeypatch.context() as shifted:
+            # Keep the event loop's clock unchanged.
+            shifted.setattr(
+                "nanobot.agent.tools.exec_session.time",
+                SimpleNamespace(monotonic=lambda: now + 60),
+            )
+            retained = (await manager.list())[0]
+            assert retained.elapsed_s == completed.elapsed_s
+            final = await ExecSessionTool(manager=manager).execute(session_id=sid, timeout_ms=0)
+
+        assert f"Elapsed: {completed.elapsed_s:.1f}s" in final
+        assert "retained result" in final
+        assert "Exit code: 0" in final
+        assert await manager.list() == []
+    finally:
+        await manager.close_all()
 
 
 @pytest.mark.parametrize("tool_name", [
