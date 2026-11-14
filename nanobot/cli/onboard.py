@@ -1679,7 +1679,6 @@ def _configure_quick_start_provider(config: Config) -> str | object:
             defaults.model_preset = preset_name
         setattr(config.providers, provider_name, catalog_provider)
         config.model_presets[preset_name] = ModelPresetConfig(model=model, provider=provider_name)
-        _sync_preset_cache(config)
         return preset_name
 
 
@@ -1783,7 +1782,7 @@ def _configure_quick_start(config: Config) -> bool:
         return False
     needs_websocket_setup = provider_result == "primary" or (
         draft.agents.defaults.model_preset == provider_result
-        and not _quick_start_websocket_enabled(draft)
+        and getattr(draft.channels, "websocket", None) is None
     )
     if needs_websocket_setup and not _enable_quick_start_websocket_defaults(draft):
         _pause()
@@ -1793,6 +1792,7 @@ def _configure_quick_start(config: Config) -> bool:
         return False
     for field_name in type(config).model_fields:
         setattr(config, field_name, getattr(draft, field_name))
+    _sync_preset_cache(config)
     return True
 
 
