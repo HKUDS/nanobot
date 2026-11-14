@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session, SessionManager
 
 
-_GOAL_ACTIONS = ("complete", "cancel", "block", "replace")
+_GOAL_ACTIONS = ("complete", "block", "replace")
 _CREATE_UNAVAILABLE_ERROR = (
     "Error: create_goal is unavailable for this turn. Ask the user to submit the complete "
     "objective as `/goal <task>`."
@@ -241,11 +241,11 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
 @tool_parameters(
     tool_parameters_schema(
         action=StringSchema(
-            "How to update the active goal, or cancel a blocked goal.",
+            "How to update the active goal.",
             enum=_GOAL_ACTIONS,
         ),
         recap=StringSchema(
-            "Brief honest recap for the user. Required in practice for complete, cancel, and block.",
+            "Brief honest recap for the user. Required in practice for complete and block.",
             max_length=8000,
             nullable=True,
         ),
@@ -264,7 +264,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     )
 )
 class UpdateGoalTool(Tool, _GoalToolsMixin):
-    """Complete, cancel, block, or replace an active goal; cancel a blocked goal."""
+    """Complete, block, or replace an active goal."""
 
     def __init__(
         self,
@@ -284,10 +284,10 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
     @property
     def description(self) -> str:
         return (
-            "Update the active sustained goal, or cancel a blocked goal. Use action='complete' only after the objective "
-            "is actually achieved and verified. Use action='cancel' when the user cancels, "
-            "action='block' when progress is genuinely blocked, and action='replace' only when "
-            "the requested objective changes."
+            "Update the active sustained goal. Use action='complete' only after the objective "
+            "is actually achieved and verified, action='block' when progress is genuinely blocked "
+            "or the user asks to stop, and action='replace' only when the requested objective changes. "
+            "Only the user can cancel a goal, using /cancel_goal or the WebUI button."
         )
 
     async def execute(
@@ -303,16 +303,10 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
             return ToolResult.error("Error: update_goal requires an active chat session.")
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         normalized = (action or "").strip().lower()
-        if not isinstance(prior, dict) or not (
-            prior.get("status") == "active"
-            or (prior.get("status") == "blocked" and normalized == "cancel")
-        ):
-            return "No active goal to update."
-
         if normalized not in _GOAL_ACTIONS:
-            return ToolResult.error(
-                "Error: action must be one of complete, cancel, block, or replace."
-            )
+            return ToolResult.error("Error: action must be one of complete, block, or replace.")
+        if not isinstance(prior, dict) or prior.get("status") != "active":
+            return "No active goal to update."
 
         if normalized == "replace":
             if not self._goal_mutation_allowed():
@@ -341,11 +335,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
             return "Goal replaced. Continue toward the new objective using ordinary tools." + extra
 
         ended = _iso_now()
-        status = {
-            "complete": "completed",
-            "cancel": "cancelled",
-            "block": "blocked",
-        }[normalized]
+        status = {"complete": "completed", "block": "blocked"}[normalized]
         blob = {
             **prior,
             "status": status,
@@ -357,11 +347,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         await self._save_goal_state(sess, blob, revoke_permission=True)
 
         tail = (recap or "").strip()
-        label = {
-            "complete": "complete",
-            "cancel": "cancelled",
-            "block": "blocked",
-        }[normalized]
+        label = {"complete": "complete", "block": "blocked"}[normalized]
         if tail:
             return f"Goal marked {label} ({ended}). Recap:\n{tail}"
         return f"Goal marked {label} ({ended})."

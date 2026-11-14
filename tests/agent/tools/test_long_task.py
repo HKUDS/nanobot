@@ -531,30 +531,20 @@ async def test_goal_assembly_preserves_builtin_plugin_precedence(tmp_path, monke
 
 
 @pytest.mark.asyncio
-async def test_blocked_goal_can_be_cancelled_in_a_later_turn(tmp_path):
-    bus = MessageBus()
-    bus.publish_outbound = AsyncMock()
+@pytest.mark.parametrize("status", ["active", "blocked"])
+async def test_agent_cannot_cancel_a_goal(tmp_path, status):
     sm = SessionManager(tmp_path)
-    WebuiTurnCoordinator(bus=bus, sessions=sm, schedule_background=lambda _coro: None).subscribe()
-    create = CreateGoalTool(sessions=sm, bus=bus)
-    update = UpdateGoalTool(sessions=sm, bus=bus)
-    ctx = _request_context()
-    await _execute(create, ctx, objective="Finish the task")
-    await _execute(update, ctx, action="block", recap="Waiting for access")
-    ordinary = _request_context(metadata={}, original_user_text="Cancel the goal")
-    guidance = await create.runtime_context_provider()(ordinary)
-    assert guidance is not None
-    assert "blocked" in guidance.content
-    assert "Finish the task" in guidance.content
-    assert "cancel" in guidance.content
-    for action in ("complete", "block", "replace"):
-        assert "No active" in await _execute(update, ordinary, action=action)
-    bus.publish_outbound.reset_mock()
-    result = await _execute(update, ordinary, action="cancel", recap="Cancelled by user")
-    assert "marked cancelled" in result
-    blob = SessionManager(tmp_path).get_or_create("websocket:c1").metadata[GOAL_STATE_KEY]
-    assert blob["status"] == "cancelled"
-    assert blob["objective"] == "Finish the task"
-    assert blob["recap"] == "Cancelled by user"
-    assert bus.publish_outbound.await_args.args[0].event.goal_state == {"active": False}
-    assert await create.runtime_context_provider()(ordinary) is None
+    create, update, ctx = _tools(sm)
+    try:
+        await _execute(create, ctx, objective="Finish the task")
+        if status == "blocked":
+            await _execute(update, ctx, action="block", recap="Waiting for access")
+        before = (await sm.state.read_header("websocket:c1")).metadata[GOAL_STATE_KEY]
+        result = await _execute(update, ctx, action="cancel", recap="Cancelled by agent")
+        assert result.is_error
+        assert "complete, block, or replace" in result
+        assert (await sm.state.read_header("websocket:c1")).metadata[GOAL_STATE_KEY] == before
+        guidance = await create.runtime_context_provider()(_request_context(metadata={}))
+        assert guidance is not None and "/cancel_goal" in guidance.content
+    finally:
+        await sm.state.aclose()

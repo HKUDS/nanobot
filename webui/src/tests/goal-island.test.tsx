@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,7 +11,7 @@ const goal = { active: true, ui_summary: "Ship the release", objective: "Verify 
 function Conversation({ blocked = false }: { blocked?: boolean }) {
   return <>
     <ThreadHeader title="Release planning" onToggleSidebar={vi.fn()} theme="light" onToggleTheme={vi.fn()}
-      goal={<GoalIsland goal={{ ...goal, active: !blocked, status: blocked ? "blocked" : "active", ...(blocked ? { recap: "Waiting for approval." } : {}) }} />} />
+      goal={<GoalIsland goal={{ ...goal, active: !blocked, status: blocked ? "blocked" : "active", ...(blocked ? { recap: "Waiting for approval." } : {}) }} cancelDisabled={false} onCancel={async () => {}} />} />
     <ThreadComposer onSend={vi.fn()} persistDraft={false} goalState={goal} />
   </>;
 }
@@ -36,6 +36,33 @@ describe("GoalIsland", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(input).toHaveValue("Keep my draft");
     expect(input).toHaveFocus();
+  });
+
+  it.each(["active", "blocked"] as const)("keeps the %s goal visible while cancelling and lets a failed request be retried", async (status) => {
+    const user = userEvent.setup();
+    let reject!: (error: Error) => void;
+    const onCancel = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+    const props = { goal: { ...goal, status, active: status === "active" }, onCancel };
+    const { rerender } = render(<GoalIsland {...props} cancelDisabled />);
+    await user.click(screen.getByRole("button", { name: "Show full goal" }));
+    const button = screen.getByRole("button", { name: "Cancel goal" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "Reconnect to cancel the goal.");
+    rerender(<GoalIsland {...props} cancelDisabled={false} />);
+    await user.click(button);
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    await user.click(button);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog")).toHaveTextContent(goal.objective);
+    await act(async () => reject(new Error("Save failed")));
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not cancel goal. Try again.");
+    expect(button).toBeEnabled();
+    onCancel.mockResolvedValueOnce(undefined);
+    await user.click(button);
+    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeVisible();
   });
 
   it("returns keyboard-opened details to their trigger on Escape", async () => {

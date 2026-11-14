@@ -1938,6 +1938,9 @@
       "goalStateExpandAria": "檢視完整目標",
       "goalBlocked": "已受阻",
       "goalStateSheetTitle": "目標",
+      "cancelGoal": "取消目標",
+      "cancelGoalFailed": "取消失敗，請重試。",
+      "cancelGoalOffline": "請重新連線後取消目標。",
       "send": "送出訊息",
       "stop": "停止回覆",
       "quotedContext": "引用內容",
@@ -2070,6 +2073,10 @@
           "goal": {
             "title": "長期目標",
             "description": "讓助手持續推進當前目標"
+          },
+          "cancel_goal": {
+            "title": "取消目標",
+            "description": "取消目前對話中執行或受阻的目標"
           },
           "trigger": {
             "title": "CLI 觸發器",

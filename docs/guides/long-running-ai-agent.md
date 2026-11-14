@@ -40,7 +40,7 @@ Use the same `--config` and explicit `--workspace` selectors as your instance. I
 
 - Keep the gateway running for chat apps, WebUI sessions, automations, and local triggers.
 - Use stable session keys or chat sessions for work that should preserve context.
-- Keep goals bounded and explicit about done-ness. Active goals can exceed the ordinary iteration limit and consume more model tokens. Use `/stop` to interrupt work; stopping does not cancel the saved goal.
+- Keep goals bounded and explicit about done-ness. Active goals can exceed the ordinary iteration limit and consume more model tokens. Use `/stop` to interrupt work while keeping the saved goal, or `/cancel_goal` to cancel it. In WebUI, you can also expand the goal and select **Cancel goal**. Only the user can cancel a goal; the agent can report completion or mark it as blocked.
 - Review Automations in the WebUI before relying on a schedule.
 
 ## Security notes

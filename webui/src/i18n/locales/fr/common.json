@@ -1938,6 +1938,9 @@
       "goalStateExpandAria": "Afficher l’objectif complet",
       "goalBlocked": "Bloqué",
       "goalStateSheetTitle": "Objectif",
+      "cancelGoal": "Annuler l’objectif",
+      "cancelGoalFailed": "Échec de l’annulation. Réessayez.",
+      "cancelGoalOffline": "Reconnectez-vous pour annuler l’objectif.",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
       "quotedContext": "Contexte cité",
@@ -2070,6 +2073,10 @@
           "goal": {
             "title": "Objectif long terme",
             "description": "Demandez à l’assistant de poursuivre cet objectif."
+          },
+          "cancel_goal": {
+            "title": "Annuler l’objectif",
+            "description": "Annuler l’objectif actif ou bloqué de cette conversation."
           },
           "trigger": {
             "title": "Déclencheur CLI",

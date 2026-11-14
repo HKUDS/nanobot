@@ -2120,6 +2120,9 @@
       "goalStateExpandAria": "查看完整目标",
       "goalBlocked": "已阻塞",
       "goalStateSheetTitle": "目标",
+      "cancelGoal": "取消目标",
+      "cancelGoalFailed": "取消失败，请重试。",
+      "cancelGoalOffline": "请重新连接后取消目标。",
       "send": "发送消息",
       "stop": "停止响应",
       "quotedContext": "引用内容",
@@ -2261,6 +2264,10 @@
           "goal": {
             "title": "长期目标",
             "description": "让助手持续推进当前目标"
+          },
+          "cancel_goal": {
+            "title": "取消目标",
+            "description": "取消当前对话中执行或阻塞的目标"
           },
           "trigger": {
             "title": "CLI 触发器",

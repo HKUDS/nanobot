@@ -5468,6 +5468,114 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(scroller.scrollTop).toBe(1800));
   });
 
+  it.each(["active", "blocked"] as const)("cancels the %s goal through a system command and waits for goal_state", async (status) => {
+    const client = makeClient();
+    const chatId = `cancel-${status}`;
+    let complete!: () => void;
+    client.sendSystemCommand.mockImplementation(() => new Promise<void>((resolve) => { complete = resolve; }));
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />));
+    await act(async () => {});
+    act(() => {
+      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: status === "active", status, objective: "Ship the release" } });
+      client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "running-turn", status: "running", started_at: 100 });
+      client._emitChat(chatId, { event: "delta", chat_id: chatId, turn_id: "running-turn", stream_id: "live", text: "Still responding" });
+    });
+    await screen.findByText("Still responding");
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "Keep my draft" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Show full goal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel goal" }));
+    expect(client.sendSystemCommand).toHaveBeenCalledTimes(1);
+    expect(client.sendSystemCommand).toHaveBeenCalledWith(chatId, "/cancel_goal");
+    expect(screen.getByRole("button", { name: "Cancel goal" })).toBeDisabled();
+    expect(screen.getByRole("dialog", { name: "Goal" })).toBeVisible();
+    expect(input).toHaveValue("Keep my draft");
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    expect(client.finishRunLocally).not.toHaveBeenCalled();
+    expect(client.getRunState(chatId).active).toBe(true);
+    act(() => {
+      if (status === "active") client._emitChat(chatId, { event: "turn_end", chat_id: chatId, turn_id: "running-turn" });
+      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false } });
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Show full goal" })).not.toBeInTheDocument());
+    await act(async () => complete());
+    expect(input).toHaveValue("Keep my draft");
+    expect(within(screen.getByTestId("thread-message-region")).queryByText("/cancel_goal")).not.toBeInTheDocument();
+    fireEvent.change(input, { target: { value: "" } });
+    if (status === "blocked") {
+      act(() => client._emitChat(chatId, { event: "delta", chat_id: chatId, turn_id: "running-turn", stream_id: "live", text: " after goal cancellation" }));
+      expect(await screen.findByText("Still responding after goal cancellation")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
+    } else {
+      expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    }
+  });
+
+  it("disables offline goal cancellation and treats an unchanged goal after a control reply as a retryable failure", async () => {
+    const client = makeClient();
+    const chatId = "cancel-failure";
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />));
+    await act(async () => {});
+    act(() => {
+      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false, status: "blocked", objective: "Ship the release" } });
+      client._emitStatus("closed");
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Show full goal" }));
+    const button = screen.getByRole("button", { name: "Cancel goal" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    act(() => client._emitStatus("open"));
+    fireEvent.click(button);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not cancel goal. Try again.");
+    expect(button).toBeEnabled();
+    expect(screen.getByRole("dialog", { name: "Goal" })).toBeVisible();
+    client.sendSystemCommand.mockImplementationOnce(async () => {
+      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false } });
+    });
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Show full goal" })).not.toBeInTheDocument());
+    expect(client.sendSystemCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends /cancel_goal directly while streaming without a transcript entry, /stop, or offline replay", async () => {
+    const client = makeClient();
+    const chatId = "cancel-slash";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/api/commands")
+      ? httpJson({ commands: [{ command: "/cancel_goal", title: "Cancel goal", description: "Cancel the goal", icon: "square", lifecycle: "side_channel", accepts_args: false }] })
+      : new Response(null, { status: 404 })));
+    render(wrap(client, <ThreadShell session={session(chatId)} title="Goal" onToggleSidebar={() => {}} />));
+    await act(async () => {});
+    act(() => {
+      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false, status: "blocked", objective: "Ship the release" } });
+      client._emitChat(chatId, { event: "goal_status", chat_id: chatId, turn_id: "unrelated", status: "running", started_at: 100 });
+      client._emitChat(chatId, { event: "delta", chat_id: chatId, turn_id: "unrelated", stream_id: "live", text: "Unrelated reply" });
+      client._emitStatus("closed");
+    });
+    const input = screen.getByRole("textbox", { name: "Message input" });
+    fireEvent.change(input, { target: { value: "/cancel_goal" } });
+    expect(await screen.findByRole("option", { name: /Cancel goal/ })).toBeVisible();
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByText("Reconnect to cancel the goal.")).toBeVisible();
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    expect(input).toHaveValue("/cancel_goal");
+    act(() => client._emitStatus("open"));
+    expect(client.sendSystemCommand).not.toHaveBeenCalled();
+    client.sendSystemCommand.mockImplementationOnce(async () => {
+      client._emitChat(chatId, { event: "goal_state", chat_id: chatId, goal_state: { active: false } });
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(client.sendSystemCommand).toHaveBeenCalledTimes(1);
+    expect(client.sendSystemCommand).toHaveBeenCalledWith(chatId, "/cancel_goal");
+    expect(client.sendMessage).not.toHaveBeenCalled();
+    expect(client.finishRunLocally).not.toHaveBeenCalled();
+    expect(within(screen.getByTestId("thread-message-region")).queryByText("/cancel_goal")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop response" })).toBeVisible();
+  });
+
   it("opens slash commands on the blank welcome page", async () => {
     const client = makeClient();
     vi.stubGlobal(

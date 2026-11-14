@@ -1938,6 +1938,9 @@
       "goalStateExpandAria": "Lihat tujuan lengkap",
       "goalBlocked": "Terhambat",
       "goalStateSheetTitle": "Tujuan",
+      "cancelGoal": "Batalkan tujuan",
+      "cancelGoalFailed": "Tujuan gagal dibatalkan. Coba lagi.",
+      "cancelGoalOffline": "Hubungkan kembali untuk membatalkan tujuan.",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
       "quotedContext": "Konteks kutipan",
@@ -2070,6 +2073,10 @@
           "goal": {
             "title": "Tujuan jangka panjang",
             "description": "Minta asisten terus mengerjakan tujuan ini."
+          },
+          "cancel_goal": {
+            "title": "Batalkan tujuan",
+            "description": "Batalkan tujuan aktif atau terblokir di chat ini."
           },
           "trigger": {
             "title": "Pemicu CLI",

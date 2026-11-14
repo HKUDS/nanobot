@@ -1940,6 +1940,9 @@
       "goalStateExpandAria": "Mostrar objetivo completo",
       "goalBlocked": "Bloqueado",
       "goalStateSheetTitle": "Objetivo",
+      "cancelGoal": "Cancelar objetivo",
+      "cancelGoalFailed": "Não foi possível cancelar. Tente novamente.",
+      "cancelGoalOffline": "Reconecte-se para cancelar o objetivo.",
       "send": "Enviar mensagem",
       "stop": "Parar resposta",
       "quotedContext": "Contexto citado",
@@ -2081,6 +2084,10 @@
           "goal": {
             "title": "Objetivo de longa duração",
             "description": "Peça ao assistente para continuar trabalhando neste objetivo."
+          },
+          "cancel_goal": {
+            "title": "Cancelar objetivo",
+            "description": "Cancela o objetivo ativo ou bloqueado desta conversa."
           },
           "trigger": {
             "title": "Gatilho CLI",
