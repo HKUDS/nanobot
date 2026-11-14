@@ -137,3 +137,29 @@ test("the elapsed label does not shift the collapsed activity horizontally", asy
     expect(Math.abs(x - initialX), `wheel displacement at ${label}`).toBeLessThan(0.2);
   }
 });
+
+test("the working label stays in place when activity is expanded and collapsed", async ({ page }) => {
+  for (const width of [960, 360]) {
+    await page.setViewportSize({ width, height: 740 });
+    const toggle = page.getByRole("button", { name: /处理中/ });
+    const labelPosition = () => toggle.evaluate((button) => {
+      const label = button.querySelector("[data-sheen-text]")!;
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const { x, y } = range.getBoundingClientRect();
+      return { x, y, width: button.getBoundingClientRect().width };
+    });
+    const collapsed = await labelPosition();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const expanded = await labelPosition();
+    expect(Math.abs(expanded.x - collapsed.x)).toBeLessThan(0.2);
+    expect(Math.abs(expanded.y - collapsed.y)).toBeLessThan(0.2);
+    expect(Math.abs(expanded.width - collapsed.width)).toBeLessThan(0.2);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const collapsedAgain = await labelPosition();
+    expect(Math.abs(collapsedAgain.x - collapsed.x)).toBeLessThan(0.2);
+    expect(Math.abs(collapsedAgain.y - collapsed.y)).toBeLessThan(0.2);
+  }
+});
