@@ -222,6 +222,11 @@ class SkillsLoader:
                 invoked.append(name)
         return invoked
 
+    def is_model_invocable(self, name: str) -> bool:
+        """Return whether the model may discover or automatically load a skill."""
+        metadata = self.get_skill_metadata(name) or {}
+        return metadata.get("disable-model-invocation") is not True
+
     def build_explicit_skill_runtime_context(
         self,
         text: str,
@@ -289,6 +294,7 @@ class SkillsLoader:
                 entry
                 for entry in all_skills
                 if entry["source"] == source and (not exclude or entry["name"] not in exclude)
+                and self.is_model_invocable(entry["name"])
             ]
             if not entries:
                 continue
@@ -406,6 +412,7 @@ class SkillsLoader:
             entry["name"]
             for entry in self.list_skills(filter_unavailable=True)
             if (meta := self.get_skill_metadata(entry["name"]) or {})
+            and meta.get("disable-model-invocation") is not True
             and (
                 self._parse_nanobot_metadata(meta.get("metadata")).get("always")
                 or meta.get("always")
