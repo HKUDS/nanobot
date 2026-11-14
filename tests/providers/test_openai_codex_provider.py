@@ -48,7 +48,7 @@ def _mock_codex_token(monkeypatch: pytest.MonkeyPatch) -> None:
     [(None, False, False), (1000, False, False), (1000, True, False), (1000, False, True)],
     ids=["optional", "compaction-error", "generation-error", "persistent-fallback"],
 )
-async def test_image_retry_cannot_bypass_required_compaction(
+async def test_image_failure_preserves_input_and_required_compaction(
     monkeypatch, stream, input_budget, fail_after_compaction, with_fallback,
 ) -> None:
     _mock_codex_token(monkeypatch)
@@ -82,7 +82,7 @@ async def test_image_retry_cannot_bypass_required_compaction(
             ))
         if len(submitted) == (2 if fail_after_compaction else 1):
             raise _CodexHTTPError("fixture rejection", status_code=400, error_code="unsupported_value")
-        return provider_base.LLMResponse(content="accepted without images")
+        return provider_base.LLMResponse(content="unexpected repeated generation")
 
     monkeypatch.setattr("nanobot.providers.openai_codex_provider._request_codex", request)
     caller = FallbackProvider(
@@ -116,10 +116,12 @@ async def test_image_retry_cannot_bypass_required_compaction(
             else:
                 assert response.preserve_provider_state_on_error is True
         else:
-            assert submitted == ["generation", "generation"]
-            assert response.content == "accepted without images"
-            assert "data:image/png;base64,abc" not in str(bodies[-1])
-            assert question["content"][1]["type"] == "text"
+            assert submitted == ["generation"]
+            assert response.finish_reason == "error"
+            assert response.error_status_code == 400
+            assert response.error_code == "unsupported_value"
+            assert "data:image/png;base64,abc" in str(bodies[-1])
+            assert question["content"][1]["type"] == "image_url"
     finally:
         await provider.aclose()
 

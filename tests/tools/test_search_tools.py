@@ -1081,3 +1081,31 @@ async def test_grep_closes_document_stream_and_preserves_locators(tmp_path, monk
     else:
         assert result.startswith("source.pdf\n")
         assert visited == [2]
+
+
+@pytest.mark.parametrize("operation", ["find_files", "grep_content", "grep_files"])
+async def test_search_tools_accept_json_integer_pagination_and_context(tmp_path, operation):
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (tmp_path / name).write_text("before\nneedle\nafter\n", encoding="utf-8")
+    if operation == "find_files":
+        tool = FindFilesTool(workspace=tmp_path)
+        arguments = {"head_limit": 1.0, "offset": 1.0}
+    else:
+        tool = GrepTool(workspace=tmp_path)
+        arguments = {"pattern": "needle", "head_limit": 1.0, "offset": 1.0,
+                     "context_before": 1.0, "context_after": 1.0}
+        if operation == "grep_files":
+            arguments["output_mode"] = "files_with_matches"
+    registry = ToolRegistry()
+    registry.register(tool)
+    integers = {key: int(value) if isinstance(value, float) else value for key, value in arguments.items()}
+
+    expected = await registry.execute(tool.name, integers)
+    result = await registry.execute(tool.name, arguments)
+
+    assert not is_tool_error_result(expected)
+    assert result == expected
+    assert type(arguments["head_limit"]) is float
+    assert type(arguments["offset"]) is float

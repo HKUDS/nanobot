@@ -58,6 +58,7 @@ function LocalShell({ collapsed = false, initialRemote = false }) {
 const view = (collapsed = false, initialRemote = false) => render(<RemoteInstances><LocalShell collapsed={collapsed} initialRemote={initialRemote} /></RemoteInstances>);
 
 beforeEach(async () => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
   await i18n.changeLanguage("en");
   window.sessionStorage.clear(); window.localStorage.clear();
   window.history.replaceState(null, "", "#/new");
@@ -66,7 +67,12 @@ beforeEach(async () => {
   mocks.discover.mockReset().mockResolvedValue({ hosts: [], files: [], incomplete: false });
   mocks.inspect.mockReset().mockResolvedValue({ hostname: "team-host", candidates: [{ config_path: "~/.nanobot/config.json", runtime_user: "", service: "" }], incomplete: false });
   mocks.request.mockReset().mockImplementation(async (action: string) => {
-    if (action === "remote.connect") return connection;
+    if (action === "remote.connect") {
+      const current = await mocks.read.getMockImplementation()?.("local-token", []);
+      mocks.read.mockResolvedValue({ ...current, profiles: current.profiles.map((item: typeof profile) => item.id === profile.id
+        ? { ...item, connected: true, gateway_id: connection.gateway_id, health_check: 1 } : item) });
+      return connection;
+    }
     if (action === "remote.save") return { id: profile.id };
     if (action === "remote.disconnect") return { available: true, profiles: [profile] };
     return {};
@@ -1312,17 +1318,18 @@ describe("remote instance UX", () => {
 
   it("tolerates transient health failures and covers, rather than reloads, the remote frame", async () => {
     let tick: (() => void) | undefined;
-    const setInterval = globalThis.setInterval;
-    vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => {
-      if (delay === 5_000) tick = callback;
-      const timer = setInterval(callback, delay);
-      globalThis.clearInterval(timer);
+    const setTimeout = globalThis.setTimeout;
+    vi.spyOn(window, "setTimeout").mockImplementation((callback, delay) => {
+      const timer = setTimeout(callback, delay);
+      if (delay === 5_000) { tick = callback; globalThis.clearTimeout(timer); }
       return timer;
     });
     view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
     fireEvent.load(frame);
+    let check = 1;
+    mocks.read.mockImplementation(async () => ({ available: true, profiles: [{ ...profile, gateway_id: connection.gateway_id, health_check: ++check }] }));
     await act(async () => { tick?.(); });
     expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
     await act(async () => { tick?.(); });
@@ -1338,19 +1345,26 @@ describe("remote instance UX", () => {
   });
 
   it("rechecks on wake and network recovery without reloading or switching hosts", async () => {
-    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    let visibility: DocumentVisibilityState = "visible";
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
     const rendered = view(); await openDirectory();
     fireEvent.click(screen.getByRole("button", { name: "Team server ubuntu@example.test" }));
     const frame = await readyRemote();
-    mocks.read.mockClear();
+    let check = 1;
+    mocks.read.mockClear().mockImplementation(async (_token, ids: string[]) => {
+      if (ids.length) check++;
+      return { available: true, profiles: [{ ...profile, gateway_id: connection.gateway_id, health_check: check }] };
+    });
+    const probes = () => mocks.read.mock.calls.filter(([, ids]) => ids?.length);
     await act(async () => { window.dispatchEvent(new Event("online")); });
-    expect(mocks.read).toHaveBeenCalledTimes(1);
-    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
-    expect(mocks.read).toHaveBeenCalledTimes(2);
+    expect(probes()).toHaveLength(1);
+    act(() => { visibility = "hidden"; document.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => { visibility = "visible"; document.dispatchEvent(new Event("visibilitychange")); });
+    expect(probes()).toHaveLength(2);
     await screen.findByRole("region", { name: "Server connection lost" });
-    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true }] });
+    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, connected: true, gateway_id: connection.gateway_id, health_check: ++check }] });
     await act(async () => { window.dispatchEvent(new Event("pageshow")); });
-    expect(mocks.read).toHaveBeenCalledTimes(3);
+    expect(probes()).toHaveLength(3);
     expect(screen.queryByRole("region", { name: "Server connection lost" })).not.toBeInTheDocument();
     expect(screen.getByTitle("nanobot on Team server")).toBe(frame);
     expect(readSelectedRemote()?.id).toBe(profile.id);

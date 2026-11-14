@@ -268,6 +268,7 @@ export function useSettingsController({
       form.contextWindowTokens !== normalizeContextWindowTokens(selectedPreset.context_window_tokens) ||
       form.temperature !== selectedPreset.temperature ||
       form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "") ||
+      form.supportsImages !== (selectedPreset.supports_images ?? true) ||
       modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api) ||
       form.extraHeaders !== providerJsonValue(selectedPreset.extra_headers) ||
       form.extraQuery !== providerJsonValue(selectedPreset.extra_query) ||

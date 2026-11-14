@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentActivityCluster } from "@/components/thread/AgentActivityCluster";
+import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
 import { preloadMarkdownText } from "@/components/MarkdownText";
 import { setAppLanguage } from "@/i18n";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, writeLocalPreferences } from "@/lib/local-preferences";
@@ -105,6 +106,129 @@ function installReducedMotion() {
 
 describe("AgentActivityCluster", () => {
   afterEach(() => { localStorage.removeItem(LOCAL_PREFS_STORAGE_KEY); });
+
+  it("keeps repeated session observations in call order and shows their original command", () => {
+    const id = "012345abcdef";
+    const sessionLine = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const readLine = 'read_file({"path":"README.md"})';
+    const messages: UIMessage[] = [{
+      id: "session-activity", role: "tool", kind: "trace", content: sessionLine,
+      traces: [sessionLine, readLine], createdAt: 1,
+      toolEvents: [
+        { name: "exec_session", call_id: "poll-1", arguments: { session_id: id }, phase: "end", result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s` },
+        { name: "read_file", call_id: "read-1", arguments: { path: "README.md" }, phase: "end" },
+        { name: "exec_session", call_id: "poll-2", arguments: { session_id: id }, phase: "end", result: "Exit code: 7\nElapsed: 2.0s" },
+      ],
+    }];
+    const commands = new Map([[id, "npm test --token secret-value"]]);
+    const { container } = render(
+      <ExecSessionCommandsContext.Provider value={commands}>
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>,
+    );
+    const rows = screen.getAllByTestId("activity-step").map((row) => row.textContent);
+    expect(rows).toEqual([
+      "Command was still running at the last check npm test --token ••••",
+      "Read file README.md",
+      "Command failed (exit code 7) npm test --token ••••",
+    ]);
+    expect(container.innerHTML).not.toContain(id);
+    expect(container.innerHTML).not.toContain("secret-value");
+  });
+
+  it("preserves the order of a structured session check followed by text-only activity", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const legacy = 'read_file({"path":"later.txt"})';
+    const message: UIMessage = { id: "mixed-activity", role: "tool", kind: "trace", content: legacy,
+      traces: [line, legacy], createdAt: 1, toolEvents: [{ name: "exec_session", call_id: "check",
+        arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" }] };
+    render(<AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />);
+    expect(screen.getAllByTestId("activity-step").map((row) => row.textContent)).toEqual([
+      "Command completed", "Reading file later.txt",
+    ]);
+  });
+
+  it("keeps text-only activity after every repeated structured check preceding it", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const legacy = 'read_file({"path":"later.txt"})';
+    const message: UIMessage = { id: "mixed-repeats", role: "tool", kind: "trace", content: legacy,
+      traces: [line, line, legacy], createdAt: 1, toolEvents: [
+        { name: "exec_session", call_id: "check-1", arguments: { session_id: id }, phase: "end",
+          result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s` },
+        { name: "exec_session", call_id: "check-2", arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" },
+      ] };
+    render(<AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />);
+    expect(screen.getAllByTestId("activity-step").map((row) => row.textContent)).toEqual([
+      "Command was still running at the last check", "Command completed", "Reading file later.txt",
+    ]);
+  });
+
+  it("does not claim text-only session input succeeded without an observation", () => {
+    const line = 'exec_session({"session_id":"012345abcdef","input":"private-stdin"})';
+    const message: UIMessage = { id: "legacy-session", role: "tool", kind: "trace", content: line, traces: [line], createdAt: 1 };
+    const { container } = render(<AgentActivityCluster messages={[message]} isTurnStreaming={false} hasBodyBelow={false} expanded />);
+    expect(container).toHaveTextContent("Command status unknown");
+    expect(container).not.toHaveTextContent("Sent input");
+    expect(container).not.toHaveTextContent("private-stdin");
+  });
+
+  it("folds only long consecutive passive checks and lets users inspect every observation", () => {
+    const a = "012345abcdef";
+    const b = "fedcba543210";
+    const running = (id: string) => `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s`;
+    const view = (checks: number) => {
+      const events: NonNullable<UIMessage["toolEvents"]> = [
+        ...Array.from({ length: checks }, (_, index) => ({ name: "exec_session", call_id: `a-${index}`,
+          arguments: { session_id: a }, phase: "end" as const, result: running(a) })),
+        { name: "exec_session", call_id: "input", arguments: { session_id: a, input: "private" }, phase: "end", result: running(a) },
+        ...Array.from({ length: 7 }, (_, index) => ({ name: "exec_session", call_id: `b-${index}`,
+          arguments: { session_id: b }, phase: "end" as const, result: running(b) })),
+        { name: "exec_session", call_id: "failed", arguments: { session_id: b }, phase: "error", error: "query failed" },
+        { name: "exec_session", call_id: "finished", arguments: { session_id: a }, phase: "end", result: "Exit code: 0\nElapsed: 1.0s" },
+      ];
+      const message: UIMessage = { id: "many-checks", role: "tool", kind: "trace", content: "exec_session()",
+        traces: events.map((event) => `exec_session(${JSON.stringify(event.arguments)})`), toolEvents: events, createdAt: 1 };
+      return <ExecSessionCommandsContext.Provider value={new Map([[a, "test-a"], [b, "test-b"]])}>
+        <AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>;
+    };
+    const { rerender, container } = render(view(10));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(5);
+    expect(container).toHaveTextContent("Sent input test-a");
+    expect(container).toHaveTextContent("Could not check command test-b");
+    expect(container).toHaveTextContent("Command completed test-a");
+    expect(container).not.toHaveTextContent("private");
+    fireEvent.click(screen.getByRole("button", { name: "Show earlier command checks (9)" }));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(14);
+    expect(screen.getByRole("button", { name: "Hide earlier command checks (9)" })).toHaveAttribute("aria-expanded", "true");
+    rerender(view(11));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(15);
+    fireEvent.click(screen.getByRole("button", { name: "Hide earlier command checks (10)" }));
+    expect(screen.getAllByTestId("activity-step")).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "Show earlier command checks (6)" })).toBeInTheDocument();
+  });
+
+  it("shows a generic session label until its source command becomes available", () => {
+    const id = "012345abcdef";
+    const line = `exec_session(${JSON.stringify({ session_id: id })})`;
+    const messages: UIMessage[] = [{
+      id: "session-activity", role: "tool", kind: "trace", content: line, traces: [line], createdAt: 1,
+      toolEvents: [{ name: "exec_session", call_id: "poll", arguments: { session_id: id }, phase: "end", result: "Exit code: 0\nElapsed: 2.0s" }],
+    }];
+    const view = (commands: ReadonlyMap<string, string>) => (
+      <ExecSessionCommandsContext.Provider value={commands}>
+        <AgentActivityCluster messages={messages} isTurnStreaming hasBodyBelow={false} />
+      </ExecSessionCommandsContext.Provider>
+    );
+    const { rerender, container } = render(view(new Map()));
+    expect(screen.getByText("Command completed")).toBeInTheDocument();
+    expect(container.innerHTML).not.toContain(id);
+    rerender(view(new Map([[id, "bun test"]])));
+    expect(screen.getByText("Command completed bun test")).toBeInTheDocument();
+    expect(container.innerHTML).not.toContain(id);
+  });
 
   it("honors the activity preference for standalone completed activity with manual overrides", () => {
     render(<AgentActivityCluster messages={activityMessages()} isTurnStreaming={false} hasBodyBelow={false} />);

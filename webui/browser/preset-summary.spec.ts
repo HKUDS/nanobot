@@ -18,5 +18,19 @@ for (const width of [390, 1280]) {
       await model.hover();
       await expect(page.getByRole("tooltip")).toHaveText("openai-codex/gpt-6.1-sol");
     }
+
+    await page.getByRole("button", { name: "New preset", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "New preset", exact: true });
+    const imageInput = dialog.getByRole("switch", { name: "Image input", exact: true });
+    await expect(imageInput).toBeVisible();
+    await expect(imageInput).toBeChecked();
+    await imageInput.focus();
+    await imageInput.press("Space");
+    await expect(imageInput).not.toBeChecked();
+    expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    await page.getByRole("button", { name: "New preset", exact: true }).click();
+    await expect(imageInput).toBeChecked();
   });
 }

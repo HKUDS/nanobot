@@ -118,7 +118,7 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
       else if (managing) void connect(id).catch(() => {});
       else switchHost(id);
     },
-    manage,
+    manage, watchDirectory: hosts.watchDirectory,
     cancel: hosts.cancel, clearError: hosts.clearError, restoreFocus: () => { if (!managing) restoreFocus(); },
   };
   useEffect(() => { if (selected) document.title = selected.name; }, [selected]);
@@ -149,7 +149,7 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
     embeddedManagement: !!bridge.embedded, reportManagementSurface: bridge.embedded ? bridge.reportSurface : undefined,
     closeManagement: bridge.embedded ? bridge.leaveManagement : () => changeManagement(false), selectLocal,
     openHostIds: frames.map((frame) => frame.connection.id),
-    directoryError: hosts.directoryError, refresh: hosts.refresh, rename: hosts.rename, connect, disconnect: hosts.disconnect, remove: hosts.remove, cancel: hosts.cancel }}>
+    directoryError: hosts.directoryError, refresh: hosts.refresh, watchDirectory: hosts.watchDirectory, rename: hosts.rename, connect, disconnect: hosts.disconnect, remove: hosts.remove, cancel: hosts.cancel }}>
     <HostNavigationContext.Provider value={bridge.embedded || (available || selected ? picker : null)}>
       <div className="flex h-full min-h-0 flex-col bg-background">
         <div className="relative min-h-0 flex-1 overflow-hidden">

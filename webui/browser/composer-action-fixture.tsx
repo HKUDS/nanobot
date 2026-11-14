@@ -9,7 +9,6 @@ export function ComposerActionFixture({ parameters }: { parameters: URLSearchPar
       variant={parameters.get("composerVariant") === "thread" ? "thread" : "hero"}
       placeholder={parameters.has("opening") ? "Opening a new topic…" : undefined}
       modelLabel="Preview"
-      goalState={parameters.has("goal") ? { active: true, objective: "Keep the work in focus." } : undefined}
       isStreaming={running}
       onTranscribeAudio={async () => "Voice draft"}
       onSend={() => { setStopRequested(false); setRunning(true); }}

@@ -27,9 +27,6 @@ import type {
 import { canonicalThreadPayload } from "./thread-test-payload";
 import { createStreamClient } from "./stream-client";
 
-const HERO_GREETING_PATTERN =
-  /What should we work on\?|Where should we start\?|What are we building today\?|What should we tackle together\?/;
-
 async function openMessageActions(text: string): Promise<HTMLElement> {
   const message = await screen.findByText(text);
   const block = message.closest<HTMLElement>("[data-thread-display-unit]")!;
@@ -821,6 +818,34 @@ describe("ThreadShell", () => {
     await act(async () => {});
   });
 
+  it("resolves a session command from loaded history outside the visible window", async () => {
+    const client = makeClient();
+    const id = "012345abcdef";
+    const command = { cmd: "bun run test --token secret-value" };
+    const sessionArgs = { session_id: id, until_exit: true };
+    const events = [
+      { event: "message", chat_id: "command-history", projection_id: "initial-exec", kind: "progress",
+        text: `exec(${JSON.stringify(command)})`, tool_events: [{ name: "exec", phase: "end", call_id: "exec-1", arguments: command,
+          result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s\nInitial wait ended; session remains active.` }] },
+      ...Array.from({ length: 150 }, (_, index) => ({ event: "user_message", chat_id: "command-history",
+        projection_id: `old-${index}`, text: `older question ${index}`, starts_turn: true })),
+      { event: "message", chat_id: "command-history", projection_id: "session-call", kind: "progress",
+        text: `exec_session(${JSON.stringify(sessionArgs)})`, tool_events: [{ name: "exec_session", phase: "end",
+          call_id: "poll-1", arguments: sessionArgs, result: "Exit code: 0\nElapsed: 2.0s" }] },
+      { event: "message", chat_id: "command-history", projection_id: "final-answer", text: "Command answer" },
+    ];
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => String(input).includes("/webui-thread")
+      ? Promise.resolve(httpJson({ schemaVersion: 3, projection: "events", events }))
+      : Promise.resolve({ ok: false, status: 404, json: async () => ({}) })));
+    render(wrap(client, <ThreadShell session={session("command-history")} title="Command history" onToggleSidebar={() => {}} />));
+    const menu = await openMessageActions("Command answer");
+    fireEvent.click(within(menu).getByRole("button", { name: /Worked/ }));
+    await waitFor(() => expect(document.body).toHaveTextContent("Command completed bun run test --token ••••"));
+    expect(document.body).not.toHaveTextContent(id);
+    expect(document.body).not.toHaveTextContent("secret-value");
+    expect(screen.queryByText("older question 0")).not.toBeInTheDocument();
+  });
+
   it("surfaces and retries a deferred trace-detail request failure", async () => {
     const client = makeClient();
     let detailCalls = 0;
@@ -896,27 +921,40 @@ describe("ThreadShell", () => {
     expect(detailCalls).toBe(2);
   });
 
-  it("hydrates deferred activity in an independently paged navigation window", async () => {
+  it.each([false, true])("hydrates deferred activity in an independently paged navigation window (fragment=%s)", async (fragment) => {
     const client = makeClient();
+    const id = "012345abcdef";
+    let detailCalls = 0;
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/prompts")) return Promise.resolve(httpJson({ prompts: [{
         id: "old-user", preview: "Old question", answerPreview: "old answer", createdAt: 1,
         cursor: "0", turnId: "old-turn",
       }] }));
-      if (url.includes("/trace-detail?")) return Promise.resolve(httpJson({
-        message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [{
-          event: "message", chat_id: "trace-navigation", projection_id: "old-trace", kind: "progress",
-          text: 'exec({"command":"echo historical"})',
-        }],
-      }));
+      if (url.includes("/trace-detail?")) {
+        detailCalls += 1;
+        return Promise.resolve(httpJson({
+          message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [{
+            event: "message", chat_id: "trace-navigation", projection_id: "old-trace", kind: "progress",
+            text: 'exec({"command":"echo historical"})',
+            tool_events: [{ name: "exec", phase: "end", call_id: "navigation-exec",
+              arguments: { command: "echo historical" },
+              result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s\nInitial wait ended; session remains active.` }],
+          }],
+        }));
+      }
       if (url.includes("after=0")) return Promise.resolve(httpJson({
         schemaVersion: 3, projection: "events", events: [
           { event: "user_message", chat_id: "trace-navigation", projection_id: "old-user", text: "Old question", starts_turn: true },
           { event: "message", chat_id: "trace-navigation", projection_id: "old-trace", kind: "progress", text: "exec(…)",
             trace_detail: { ref: "1.history-aaaaaaaaaaaaaaaaaaaa", bytes: 40_000, traceCount: 1 } },
+          { event: "message", chat_id: "trace-navigation", projection_id: "old-check", kind: "progress",
+            text: `exec_session({"session_id":"${id}"})`,
+            tool_events: [{ name: "exec_session", phase: "end", call_id: "navigation-check",
+              arguments: { session_id: id }, result: "Exit code: 0\nElapsed: 2.0s" }] },
           { event: "message", chat_id: "trace-navigation", projection_id: "old-answer", text: "old answer" },
-        ], page: { user_message_offset: 0, has_more_before: false, has_more_after: true, after_cursor: "1" },
+        ], page: { user_message_offset: 0, has_more_before: false, has_more_after: true, after_cursor: "1",
+          ...(fragment ? { history_generation: "generation-a", record_range: { turn: 0, start: 0, end: 4 } } : {}) },
       }));
       if (url.includes("/webui-thread")) return Promise.resolve(httpJson({
         schemaVersion: 3, messages: [{ id: "latest-answer", role: "assistant", content: "latest answer", createdAt: 100 }],
@@ -931,10 +969,49 @@ describe("ThreadShell", () => {
     await screen.findByText("old answer");
     const menu = await openMessageActions("old answer");
     fireEvent.click(within(menu).getByRole("button", { name: /Worked/ }));
-    await waitFor(() => expect(document.body).toHaveTextContent("echo historical"));
+    await waitFor(() => expect(document.body).toHaveTextContent("Command completed echo historical"));
+    expect(detailCalls).toBe(1);
+    expect(document.body).not.toHaveTextContent(id);
     fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
     await screen.findByText("latest answer");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
+  });
+
+  it("starts a fresh trace-detail read after leaving and returning to the same chat", async () => {
+    const client = makeClient();
+    let resolveOld!: (response: Response) => void;
+    const oldRequest = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    let detailCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/webui-thread/trace-detail?")) {
+        detailCalls += 1;
+        if (detailCalls === 1) return oldRequest;
+        return Promise.resolve(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [{
+          event: "message", chat_id: "detail-return-a", projection_id: "trace-shared", kind: "progress",
+          text: 'exec({"command":"echo fresh"})',
+        }] }));
+      }
+      if (url.includes("websocket%3Adetail-return-a/webui-thread")) return Promise.resolve(httpJson(traceDetailThread(true, "answer-a")));
+      if (url.includes("websocket%3Adetail-return-b/webui-thread")) return Promise.resolve(httpJson(traceDetailThread(false, "answer-b")));
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    const view = (chatId: string) => wrap(client,
+      <ThreadShell session={session(chatId)} title="Detail return" onToggleSidebar={() => {}} />);
+    const { rerender } = render(view("detail-return-a"));
+    fireEvent.click(within(await openMessageActions("answer-a")).getByRole("button", { name: /Worked/ }));
+    await waitFor(() => expect(detailCalls).toBe(1));
+    rerender(view("detail-return-b"));
+    await screen.findByText("answer-b");
+    rerender(view("detail-return-a"));
+    fireEvent.click(within(await openMessageActions("answer-a")).getByRole("button", { name: /Worked/ }));
+    await waitFor(() => expect(detailCalls).toBe(2));
+    await waitFor(() => expect(document.body).toHaveTextContent("echo fresh"));
+    await act(async () => resolveOld(httpJson({ message_id: "history-aaaaaaaaaaaaaaaaaaaa", events: [{
+      event: "message", chat_id: "detail-return-a", projection_id: "trace-shared", kind: "progress",
+      text: 'exec({"command":"echo stale"})',
+    }] })));
+    expect(document.body).not.toHaveTextContent("echo stale");
   });
 
   it("ignores a deferred trace-detail failure after switching sessions", async () => {
@@ -1491,10 +1568,11 @@ describe("ThreadShell", () => {
       />,
     ));
 
-    await waitFor(() => expect(screen.getByText("Important conversation")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("Important conversation"));
+    const header = within(screen.getByTestId("thread-header"));
+    await waitFor(() => expect(header.getByText("Important conversation")).toBeInTheDocument());
+    fireEvent.click(header.getByText("Important conversation"));
 
-    expect(screen.getByText("Important conversation")).toBeVisible();
+    expect(header.getByText("Important conversation")).toBeVisible();
   });
 
   it.each([true, false])("waits for parent settings and retries only on failure (success: %s)", async (success) => {
@@ -1932,7 +2010,11 @@ describe("ThreadShell", () => {
       "anthropic/claude-opus-4-5",
     ));
 
-    await screen.findByText(hasHistory ? "Previous message" : HERO_GREETING_PATTERN);
+    if (hasHistory) {
+      await screen.findByText("Previous message");
+    } else {
+      await waitFor(() => expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero"));
+    }
     const badge = screen.getByRole("button", { name: "Choose model" });
     fireEvent.focus(badge);
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
@@ -2555,7 +2637,7 @@ describe("ThreadShell", () => {
     await waitFor(() =>
       expect(screen.getByText("first message should stay")).toBeInTheDocument(),
     );
-    expect(screen.queryByText(HERO_GREETING_PATTERN)).not.toBeInTheDocument();
+    expect(screen.getByTestId("thread-composer-motion").closest("[data-layout]")).toHaveAttribute("data-layout", "thread");
   });
 
   it("hides a live first /model turn when the initial history snapshot is stale", async () => {
@@ -2647,7 +2729,7 @@ describe("ThreadShell", () => {
     });
   });
 
-  it("keeps the empty thread landing focused on the composer", async () => {
+  it.each([false, true])("keeps the empty thread landing focused on the composer (temporary=%s)", async (temporary) => {
     const client = makeClient();
     render(
       wrap(
@@ -2655,15 +2737,17 @@ describe("ThreadShell", () => {
         <ThreadShell
           session={null}
           title="nanobot"
+          temporaryChatEnabled={temporary}
           onToggleSidebar={() => {}}
         />,
       ),
     );
     await act(async () => {});
 
-    const greeting = screen.getByRole("heading", { level: 1, name: HERO_GREETING_PATTERN });
-    expect(greeting).toHaveAttribute("data-testid", "hero-greeting");
-    expect(greeting).toHaveClass("select-none", "whitespace-nowrap");
+    expect(within(screen.getByTestId("thread-empty-region")).getByRole("heading", {
+      level: 1, name: temporary ? "Temporary chat" : "New topic",
+    })).toHaveClass("sr-only");
+    expect(screen.getByTestId("thread-welcome-mark")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByRole("textbox")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Write code" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Make a plan" })).not.toBeInTheDocument();
@@ -2903,7 +2987,7 @@ describe("ThreadShell", () => {
     });
 
     expect(screen.queryByText("live assistant reply")).not.toBeInTheDocument();
-    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero");
 
     await act(async () => {
       rerender(
@@ -5357,7 +5441,7 @@ describe("ThreadShell", () => {
       ),
     );
 
-    expect(screen.getByText(HERO_GREETING_PATTERN)).toBeInTheDocument();
+    expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero");
     const scroller = container.querySelector(".thread-viewport-scrollbar") as HTMLElement;
     Object.defineProperties(scroller, {
       scrollHeight: { configurable: true, value: 2400 },
@@ -5723,7 +5807,7 @@ describe("ThreadShell", () => {
     expect(screen.getByTestId("thread-composer-motion")).toBe(composer);
   });
 
-  it.each([false, true])("replaces the initial history skeleton with welcome when no visible history remains (systemOnly=%s)", async (systemOnly) => {
+  it.each([false, true])("replaces the initial history skeleton with the empty composer when no visible history remains (systemOnly=%s)", async (systemOnly) => {
     let resolveHistory!: (response: Response) => void;
     vi.mocked(fetch).mockImplementation((input) => String(input).includes("/webui-thread")
       ? new Promise<Response>((resolve) => { resolveHistory = resolve; })
@@ -5738,9 +5822,10 @@ describe("ThreadShell", () => {
         : [])));
     });
 
-    expect(await screen.findByText(HERO_GREETING_PATTERN)).toBeVisible();
+    await waitFor(() => expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero"));
     expect(screen.queryByRole("status", { name: "Loading conversation…" })).not.toBeInTheDocument();
-    expect(screen.getByTestId("thread-welcome-layout")).toHaveAttribute("data-layout", "hero");
+    expect(within(screen.getByTestId("thread-empty-region")).getByRole("heading", { level: 1, name: "Empty topic" })).toHaveClass("sr-only");
+    expect(screen.getByRole("textbox", { name: "Message input" })).toBeEnabled();
   });
 
   it("keeps cached messages visible while the first history revalidation is pending", async () => {

@@ -2257,7 +2257,7 @@ describe("ThreadViewport", () => {
     const navigation = { prompts: [{ id: "u1", label: "hello", preview: "hello", answerPreview: "", createdAt: 1, index: 0 }],
       window: { messages: [{ id: "old", role: "user" as const, content: "old question", createdAt: 0 }],
         userMessageOffset: 0, hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
-      target: null, operation: null, loading: false, error: null, jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest, retry: vi.fn(), updateMessages: vi.fn() };
+      target: null, operation: null, loading: false, error: null, jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest, retry: vi.fn(), expandTraceDetail: vi.fn() };
     const view = render(<ThreadViewport ref={viewportRef} messages={messages} isStreaming={false} composer={<div />} navigation={navigation} />);
     act(() => viewportRef.current?.jumpToUserPrompt("u1"));
     expect(latest).toHaveBeenCalledOnce();
@@ -2272,7 +2272,7 @@ describe("ThreadViewport", () => {
       prompts: [], window: { messages: history, userMessageOffset: 0,
         hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
       target: null, operation: null, loading: false, error: null,
-      jump: vi.fn(), older: vi.fn(), newer, cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), updateMessages: vi.fn(),
+      jump: vi.fn(), older: vi.fn(), newer, cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), expandTraceDetail: vi.fn(),
     };
     const view = render(<ThreadViewport messages={messages} isStreaming={false} composer={<div />} navigation={navigation} />);
     await flushAnimationFrame();
@@ -2324,7 +2324,7 @@ describe("ThreadViewport", () => {
       navigation={{ prompts: [], window: { messages: history, userMessageOffset: 0,
         hasMoreBefore: false, hasMoreAfter: true, forkBoundaryMessageCount: null },
       target: { id: "old-user", sequence: 1 }, operation: null, loading: false, error: null,
-      jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), updateMessages: vi.fn() }} />);
+      jump: vi.fn(), older: vi.fn(), newer: vi.fn(), cancel: vi.fn(), latest: vi.fn(), retry: vi.fn(), expandTraceDetail: vi.fn() }} />);
     await waitFor(() => expect(screen.getByText("Large old turn")).toBeInTheDocument());
   });
 

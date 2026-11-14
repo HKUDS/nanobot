@@ -2433,7 +2433,8 @@ def test_webui_detached_gateway_does_not_retain_launcher_lease(monkeypatch, tmp_
     assert requested[0][1] is not no_dock
 
 
-def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("dev_port", [5173, 5174])
+def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path, dev_port: int) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{}", encoding="utf-8")
     seen: dict[str, object] = {}
@@ -2476,6 +2477,8 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
         [
             "webui",
             "--dev",
+            "--dev-port",
+            str(dev_port),
             "--config",
             str(config_file),
             "--port",
@@ -2490,9 +2493,10 @@ def test_webui_dev_starts_vite_sidecar_and_gateway(monkeypatch, tmp_path: Path) 
     dev_kwargs = seen["dev_kwargs"]
     assert isinstance(dev_kwargs, dict)
     assert dev_kwargs["target_url"] == "http://127.0.0.1:8899"
+    assert dev_kwargs["port"] == dev_port
     saved = json.loads(config_file.read_text(encoding="utf-8"))
     secret = saved["channels"]["websocket"]["tokenIssueSecret"]
-    browser_url = f"http://127.0.0.1:5173/#/?bootstrapSecret={secret}"
+    browser_url = f"http://127.0.0.1:{dev_port}/#/?bootstrapSecret={secret}"
     assert seen["start_options"].port == 18888
     assert seen["attached_while_dev_running"] is True
     assert seen["attach_kwargs"]["poll_hook"] == seen["dev_server"].ensure_running

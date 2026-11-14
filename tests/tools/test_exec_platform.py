@@ -525,55 +525,47 @@ class TestSandboxPlatform:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
-    async def test_sandbox_applied_on_unix(self, tmp_path, backend):
+    async def test_unix_sandbox_launch_uses_trusted_launcher_and_configured_binds(self, tmp_path, backend):
         mock_proc = _CompletedProcess(b"sandboxed")
         trusted_bin = tmp_path / "trusted-bin"
-        launcher = "bwrap" if backend == "bwrap" else "/usr/bin/sandbox-exec"
-
-        with (
-            patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
-            patch("nanobot.agent.tools.shell.shutil.which", side_effect=lambda name, **_kwargs: str(trusted_bin / name)),
-            patch("nanobot.agent.tools.shell.wrap_command", return_value=f"{launcher} -- sh -c ls") as mock_wrap,
-            patch.object(processes, "spawn_process_tree", return_value=processes.ProcessTree(mock_proc)) as mock_spawn,
-            patch.object(ExecTool, "_guard_command", return_value=None),
-        ):
-            tool = ExecTool(sandbox=backend, working_dir="/workspace")
-            await tool.execute(command="ls")
-
-        mock_wrap.assert_called_once()
-        spawned_cmd = mock_spawn.call_args[0][0]
-        assert isinstance(spawned_cmd, list)
-        assert spawned_cmd[0] == str(trusted_bin / launcher)
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
-    async def test_sandbox_receives_configured_bind_roots(self, tmp_path, backend):
-        mock_proc = _CompletedProcess(b"sandboxed")
+        launcher = trusted_bin / ("bwrap" if backend == "bwrap" else "sandbox-exec")
+        workspace = tmp_path / "project"
         tool_bin = tmp_path / "tool-bin"
         tool_cache = tmp_path / "tool-cache"
 
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", False),
-            patch("nanobot.agent.tools.shell.shutil.which", side_effect=lambda name, **_kwargs: f"/usr/bin/{name}"),
-            patch("nanobot.agent.tools.shell.wrap_command", return_value=f"{backend} -- sh -c ls") as mock_wrap,
-            patch.object(processes, "spawn_process_tree", return_value=processes.ProcessTree(mock_proc)),
+            patch("nanobot.execution.sandbox.resolve_sandbox_launcher", return_value=str(launcher)),
+            patch.object(processes, "spawn_process_tree", return_value=processes.ProcessTree(mock_proc)) as mock_spawn,
             patch.object(ExecTool, "_guard_command", return_value=None),
         ):
             tool = ExecTool(
                 sandbox=backend,
-                working_dir="/workspace",
+                working_dir=str(workspace),
                 sandbox_ro_binds=[str(tool_bin)],
                 sandbox_rw_binds=[str(tool_cache)],
             )
-            await tool.execute(command="ls")
+            result = await tool.execute(command="ls")
 
-        kwargs = mock_wrap.call_args.kwargs
-        assert kwargs["sandbox_ro_binds"] == [
-            str(tool_bin.resolve(strict=False))
-        ]
-        assert kwargs["sandbox_rw_binds"] == [
-            str(tool_cache.resolve(strict=False))
-        ]
+        assert "sandboxed" in result
+        command, cwd, *_ = mock_spawn.call_args.args
+        assert isinstance(command, list)
+        assert command[0] == str(launcher)
+        assert cwd == str(workspace.resolve())
+        if backend == "bwrap":
+            assert command[-9:-3] == [
+                "--bind-try", str(tool_cache.resolve()), str(tool_cache.resolve()),
+                "--chdir", cwd, "--",
+            ]
+            assert command[-12:-9] == [
+                "--ro-bind-try", str(tool_bin.resolve()), str(tool_bin.resolve()),
+            ]
+        else:
+            profile = command[2]
+            ro = str(tool_bin.resolve()).replace("\\", "\\\\")
+            rw = str(tool_cache.resolve()).replace("\\", "\\\\")
+            assert f'(deny file-write* (subpath "{ro}"))' in profile
+            assert f'(allow file-read* file-write* (subpath "{rw}"))' in profile
 
 
 class TestExecuteEndToEnd:

@@ -8,7 +8,7 @@ import pytest
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 
 
 class _FakeTool(Tool):
@@ -135,7 +135,7 @@ def test_prepare_call_parses_json_string_arguments() -> None:
     assert error is None
 
 
-def test_prepare_call_decodes_json_string_for_nested_object_schema() -> None:
+def test_prepare_call_reports_json_string_for_nested_object_schema() -> None:
     registry = ToolRegistry()
     registry.register(
         _FakeTool(
@@ -179,9 +179,11 @@ def test_prepare_call_decodes_json_string_for_nested_object_schema() -> None:
     )
 
     assert tool is not None
-    assert error is None
+    assert error is not None
+    assert "target:" in error
+    assert "is not of type 'object'" in error
     assert params == {
-        "target": {"type": "path", "path": "Projects/nanobot.md"},
+        "target": '{"type":"path","path":"Projects/nanobot.md"}',
         "format": "content",
     }
 
@@ -228,7 +230,7 @@ def test_prepare_call_rejects_malformed_json_string_arguments() -> None:
     [{"type": "object"}, {}],
     [{"type": "object"}, True],
 ])
-def test_nested_json_cast_preserves_unions_that_can_accept_strings(union, branches):
+def test_string_values_satisfy_unions_that_allow_strings(union, branches):
     registry = ToolRegistry()
     registry.register(_FakeTool("echo", {
         "type": "object", "properties": {"value": {union: branches}},
@@ -240,7 +242,7 @@ def test_nested_json_cast_preserves_unions_that_can_accept_strings(union, branch
 
 
 @pytest.mark.parametrize("encoded", [True, False])
-def test_nested_json_cast_does_not_select_the_first_object_branch(encoded):
+def test_object_union_requires_an_object_value(encoded):
     registry = ToolRegistry()
     registry.register(_FakeTool("echo", {
         "type": "object", "properties": {"value": {"oneOf": [
@@ -249,25 +251,33 @@ def test_nested_json_cast_does_not_select_the_first_object_branch(encoded):
         ]}},
     }))
     value = {"count": 12}
-    _, params, error = registry.prepare_call("echo", {"value": json.dumps(value) if encoded else value})
-    assert error is None
-    assert params == {"value": value}
+    arguments = {"value": json.dumps(value) if encoded else value}
+    _, params, error = registry.prepare_call("echo", arguments)
+    assert params == arguments
+    if encoded:
+        assert is_tool_error_result(error)
+        assert "value:" in error
+        assert "is not of type 'object'" in error
+    else:
+        assert error is None
 
 
-@pytest.mark.parametrize("schema, value, expected", [
-    ({"type": "object"}, '{"count":12}', {"count": 12}),
-    ({"type": "array"}, '[{"count":12}]', [{"count": 12}]),
-    ({"type": ["object", "null"]}, '{"count":12}', {"count": 12}),
-    ({"type": ["object", "array"]}, '[1,2]', [1, 2]),
-    ({"anyOf": [{"type": "object"}, {"type": "array"}]}, '[1,2]', [1, 2]),
-    ({"type": ["string", "object"]}, '{"count":12}', '{"count":12}'),
-    ({"type": ["object", "string"]}, '{"count":12}', '{"count":12}'),
-    ({"type": "object"}, '{count:12}', '{count:12}'),
-    ({"type": "object"}, '[1,2]', '[1,2]'),
-    ({"type": "array"}, '{"count":12}', '{"count":12}'),
-    ({"$ref": "#/$defs/options"}, '{"count":12}', '{"count":12}'),
+@pytest.mark.parametrize("schema, value, valid", [
+    ({"type": "object"}, {"count": 12}, True),
+    ({"type": "array"}, [{"count": 12}], True),
+    ({"type": "object"}, '{"count":12}', False),
+    ({"type": "array"}, '[{"count":12}]', False),
+    ({"type": ["object", "null"]}, '{"count":12}', False),
+    ({"type": ["object", "array"]}, '[1,2]', False),
+    ({"anyOf": [{"type": "object"}, {"type": "array"}]}, '[1,2]', False),
+    ({"type": ["string", "object"]}, '{"count":12}', True),
+    ({"type": ["object", "string"]}, '{"count":12}', True),
+    ({"type": "object"}, '{count:12}', False),
+    ({"type": "object"}, '[1,2]', False),
+    ({"type": "array"}, '{"count":12}', False),
+    ({"$ref": "#/$defs/options"}, '{"count":12}', False),
 ])
-def test_nested_container_decoding_is_lossless_and_schema_directed(schema, value, expected):
+def test_registry_validates_values_without_mutating_arguments_or_schema(schema, value, valid):
     registry = ToolRegistry()
     registry.register(_FakeTool("echo", {
         "type": "object", "properties": {"value": schema},
@@ -276,10 +286,16 @@ def test_nested_container_decoding_is_lossless_and_schema_directed(schema, value
     original = {"value": value}
     schemas_before = json.dumps(registry.get_definitions())
     arguments_before = json.dumps(original)
-    _, params, _ = registry.prepare_call("echo", original)
-    assert params == {"value": expected}
+    _, params, error = registry.prepare_call("echo", original)
+    assert params == original
     assert json.dumps(original) == arguments_before
     assert json.dumps(registry.get_definitions()) == schemas_before
+    if valid:
+        assert error is None
+    else:
+        assert is_tool_error_result(error)
+        assert "value:" in error
+        assert "is not of type" in error
 
 
 def test_prepare_call_rejects_scalar_for_single_required_parameter() -> None:
@@ -301,7 +317,7 @@ def test_prepare_call_rejects_scalar_for_single_required_parameter() -> None:
     assert "parameters must be a JSON object" in error
 
 
-def test_prepare_call_rejects_unquoted_scalar_strings_before_schema_cast() -> None:
+def test_prepare_call_rejects_unquoted_scalar_strings() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool(
         "message",
@@ -391,7 +407,7 @@ async def test_registry_rejects_unknown_builtin_tool_parameters(tmp_path) -> Non
     )
 
     assert "Invalid parameters" in result
-    assert "unexpected parameter line_limit" in result
+    assert "Additional properties are not allowed ('line_limit' was unexpected)" in result
     assert "one" not in result
 
 

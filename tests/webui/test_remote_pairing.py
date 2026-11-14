@@ -346,7 +346,7 @@ async def test_rename_paired_instance_updates_only_verified_sibling_grants(tmp_p
     before = manager._read()
     receipts = {item.id: manager.pairing.path(item.id).joinpath("receipt").read_bytes() for item in requests}
     live = SimpleNamespace(tunnel=SimpleNamespace(active=True), error="", gateway_id="live-session",
-                           proxy=SimpleNamespace(pause=AsyncMock()))
+                           health_check=None, health_checked_at=0, proxy=SimpleNamespace(pause=AsyncMock()))
     manager.connections[first.id] = live
     result = await manager.action("rename", {"id": requests[1].id, "name": "My cloud"})
     assert [p["name"] for p in result["profiles"]] == ["My cloud", "My cloud", original.hostname]
@@ -369,7 +369,7 @@ async def test_repair_retains_route_and_reuses_only_a_healthy_existing_connectio
     profiles[first.id].local_port = 23456
     manager._write(profiles)
     live = SimpleNamespace(tunnel=SimpleNamespace(active=True), error="", gateway_id="live-session",
-                           proxy=SimpleNamespace(pause=AsyncMock()))
+                           health_check=None, health_checked_at=0, proxy=SimpleNamespace(pause=AsyncMock()))
     manager.connections[first.id] = live
 
     async def check(connection):

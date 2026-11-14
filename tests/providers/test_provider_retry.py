@@ -441,7 +441,7 @@ async def test_chat_with_retry_explicit_override_beats_defaults() -> None:
     ),
     LLMResponse(content="billing", finish_reason="error", error_status_code=402),
 ])
-async def test_account_failure_does_not_retry_without_images(error: LLMResponse) -> None:
+async def test_account_failure_preserves_images_without_retry(error: LLMResponse) -> None:
     provider = ScriptedProvider([error])
     messages = copy.deepcopy(_IMAGE_MSG)
     original = copy.deepcopy(messages)
@@ -466,175 +466,125 @@ _IMAGE_MSG = [
     ]},
 ]
 
-_IMAGE_MSG_NO_META = [
-    {"role": "user", "content": [
-        {"type": "text", "text": "describe this"},
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
-    ]},
-]
-
-
 @pytest.mark.asyncio
-async def test_non_transient_error_with_images_retries_without_images() -> None:
-    provider = ScriptedProvider([
-        LLMResponse(content="API调用参数有误,请检查文档", finish_reason="error"),
-        LLMResponse(content="ok, no image"),
-    ])
-
-    response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG))
-
-    assert response.content == "ok, no image"
-    assert provider.calls == 2
-    msgs_on_retry = provider.last_kwargs["messages"]
-    for msg in msgs_on_retry:
-        content = msg.get("content")
-        if isinstance(content, list):
-            assert all(b.get("type") != "image_url" for b in content)
-            assert any("not delivered" in (b.get("text") or "").lower() for b in content)
-
-
-@pytest.mark.asyncio
-async def test_successful_image_retry_mutates_original_messages_in_place() -> None:
-    provider = ScriptedProvider([
-        LLMResponse(content="model does not support images", finish_reason="error"),
-        LLMResponse(content="ok, no image"),
-    ])
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("error", [
+    LLMResponse(content="API调用参数有误,请检查文档", finish_reason="error", error_status_code=400),
+    LLMResponse(
+        content="model does not support images", finish_reason="error",
+        error_status_code=400, error_code="unsupported_image", error_should_retry=False,
+    ),
+])
+async def test_nontransient_image_error_returns_original_response(streaming, error) -> None:
+    provider = ScriptedProvider([error, LLMResponse(content="unexpected text-only answer")])
     messages = copy.deepcopy(_IMAGE_MSG)
+    original = copy.deepcopy(messages)
+    call = provider.chat_stream_with_retry if streaming else provider.chat_with_retry
 
-    response = await provider.chat_with_retry(messages=messages)
+    response = await call(messages=messages)
 
-    assert response.content == "ok, no image"
-    content = messages[0]["content"]
-    assert isinstance(content, list)
-    assert all(block.get("type") != "image_url" for block in content)
-    assert any("not delivered" in (block.get("text") or "").lower() for block in content)
+    assert response is error
+    assert provider.calls == 1
+    assert messages == original
+    assert LLMProvider.public_error_kind(response) == "unknown"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("messages", "payload", "pending_messages"),
-    [
-        (_IMAGE_MSG, {}, _IMAGE_MSG),
-        (
-            [{"role": "user", "content": "continue"}],
-            {
-                "items": [
-                    {
-                        "type": "message",
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_image",
-                                "image_url": "data:image/png;base64,abc",
-                            }
-                        ],
-                    }
-                ]
-            },
-            [],
-        ),
-    ],
-    ids=["pending-image", "opaque-payload-image"],
-)
-async def test_image_retry_discards_provider_state_with_images(
-    messages,
-    payload,
-    pending_messages,
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("budget", [None, 128])
+@pytest.mark.parametrize("transient", [False, True])
+async def test_image_requests_preserve_native_context_and_compaction_budget(
+    monkeypatch, streaming, budget, transient,
 ) -> None:
     class ContextScriptedProvider(ScriptedProvider):
         def __init__(self, responses):
             super().__init__(responses)
             self.contexts: list[ProviderCallContext] = []
+            self.inputs: list[list[dict]] = []
 
-        async def chat_with_context(
-            self,
-            *,
-            provider_context: ProviderCallContext,
-            **kwargs,
-        ) -> LLMResponse:
+        async def chat_with_context(self, *, provider_context, **kwargs) -> LLMResponse:
             self.contexts.append(provider_context)
+            self.inputs.append(copy.deepcopy(kwargs["messages"]))
             return await self.chat(**kwargs)
 
-    provider = ContextScriptedProvider([
-        LLMResponse(content="model does not support images", finish_reason="error"),
-        LLMResponse(content="ok, no image"),
-    ])
-    messages = copy.deepcopy(messages)
-    state = ProviderConversationState(
-        kind="openai_responses",
-        provider="openai:test",
-        model="gpt-5.6",
-        version=1,
-        payload=copy.deepcopy(payload),
-        pending_messages=copy.deepcopy(pending_messages),
-    )
+        async def chat_stream_with_context(self, *, provider_context, **kwargs) -> LLMResponse:
+            self.contexts.append(provider_context)
+            self.inputs.append(copy.deepcopy(kwargs["messages"]))
+            return await self.chat_stream(**kwargs)
 
-    response = await provider.chat_with_retry(
+    error = LLMResponse(
+        content="request failed", finish_reason="error",
+        error_status_code=503 if transient else 400,
+    )
+    success = LLMResponse(content="answer with images")
+    provider = ContextScriptedProvider([error, success])
+    messages = copy.deepcopy(_IMAGE_MSG)
+    original = copy.deepcopy(messages)
+    state = ProviderConversationState(
+        kind="openai_responses", provider="openai:test", model="gpt-5.6", version=1,
+        payload={"items": [{"type": "message", "role": "user", "content": [
+            {"type": "input_image", "image_url": "data:image/png;base64,abc"},
+        ]}]},
+        pending_messages=copy.deepcopy(_IMAGE_MSG),
+    )
+    original_state = state.to_private_record()
+    delays = []
+
+    async def sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", sleep)
+    call = provider.chat_stream_with_retry if streaming else provider.chat_with_retry
+    response = await call(
         messages=messages,
         provider_context=ProviderCallContext(
-            conversation_state=state,
-            session_id="webui:cache-test",
-            response_preset="saved fallback",
-            response_is_fallback=True,
+            conversation_state=state, session_id="webui:cache-test",
+            response_preset="saved preset", compaction_input_budget=budget,
         ),
     )
 
-    assert response.content == "ok, no image"
-    retry_context = provider.contexts[-1]
-    assert isinstance(retry_context, ProviderCallContext)
-    assert retry_context.conversation_state is None
-    assert retry_context.session_id == "webui:cache-test"
-    assert retry_context.response_preset == "saved fallback"
-    assert retry_context.response_is_fallback is True
-    public_content = messages[0]["content"]
-    if isinstance(public_content, list):
-        assert all(block.get("type") != "image_url" for block in public_content)
+    assert response is (success if transient else error)
+    assert provider.calls == (2 if transient else 1)
+    assert messages == original
+    assert state.to_private_record() == original_state
+    assert provider.inputs == [original] * provider.calls
+    for context in provider.contexts:
+        assert context.conversation_state is state
+        assert context.compaction_input_budget == budget
+        assert context.session_id == "webui:cache-test"
+        assert context.response_preset == "saved preset"
+        assert context.compaction is provider.contexts[0].compaction
+    assert len(delays) == (1 if transient else 0)
 
 
 @pytest.mark.asyncio
-async def test_non_transient_error_without_images_no_retry() -> None:
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_transient_then_terminal_image_error_preserves_input(monkeypatch, streaming) -> None:
+    error = LLMResponse(content="invalid request", finish_reason="error", error_status_code=400)
     provider = ScriptedProvider([
-        LLMResponse(content="401 unauthorized", finish_reason="error"),
+        LLMResponse(content="unavailable", finish_reason="error", error_status_code=503),
+        error,
+        LLMResponse(content="unexpected text-only answer"),
     ])
+    messages = copy.deepcopy(_IMAGE_MSG)
+    original = copy.deepcopy(messages)
+    statuses = []
 
-    response = await provider.chat_with_retry(
-        messages=[{"role": "user", "content": "hello"}],
-    )
+    async def sleep(_delay):
+        return None
 
-    assert provider.calls == 1
-    assert response.finish_reason == "error"
+    async def status(event):
+        statuses.append(event)
 
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", sleep)
+    call = provider.chat_stream_with_retry if streaming else provider.chat_with_retry
+    response = await call(messages=messages, on_retry_status=status)
 
-@pytest.mark.asyncio
-async def test_image_fallback_returns_error_on_second_failure() -> None:
-    provider = ScriptedProvider([
-        LLMResponse(content="some model error", finish_reason="error"),
-        LLMResponse(content="still failing", finish_reason="error"),
-    ])
-
-    response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG))
-
+    assert response is error
     assert provider.calls == 2
-    assert response.content == "still failing"
-    assert response.finish_reason == "error"
-
-
-@pytest.mark.asyncio
-async def test_image_fallback_without_meta_uses_default_placeholder() -> None:
-    provider = ScriptedProvider([
-        LLMResponse(content="error", finish_reason="error"),
-        LLMResponse(content="ok"),
-    ])
-
-    response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG_NO_META))
-
-    assert response.content == "ok"
-    assert provider.calls == 2
-    msgs_on_retry = provider.last_kwargs["messages"]
-    for msg in msgs_on_retry:
-        content = msg.get("content")
-        if isinstance(content, list):
-            assert any("not delivered" in (b.get("text") or "").lower() for b in content)
+    assert messages == original
+    assert [event.state for event in statuses] == ["waiting", "cleared"]
+    assert statuses[-1].error_kind == "unknown"
 
 
 @pytest.mark.asyncio

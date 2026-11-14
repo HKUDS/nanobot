@@ -33,6 +33,7 @@ import { ThreadLoadingFixture } from "./thread-loading-fixture";
 import { AnswerOrderFixture } from "./answer-order-fixture";
 import { SidebarActivityFixture } from "./sidebar-activity-fixture";
 import { ActivityLogosFixture } from "./activity-logos-fixture";
+import { ExecSessionFixture } from "./exec-session-fixture";
 import { HistoryHydrationFixture } from "./history-hydration-fixture";
 import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compaction-fixture";
 import { FileEditPathFixture } from "./file-edit-path-fixture";
@@ -44,10 +45,12 @@ import { ComposerActionFixture } from "./composer-action-fixture";
 import { MobileChatLayoutFixture } from "./mobile-chat-layout-fixture";
 import { ThemeToggleFixture } from "./theme-toggle-fixture";
 import { DisplayMathFixture } from "./display-math-fixture";
+import { MarkdownDollarRefsFixture } from "./markdown-dollar-refs-fixture";
 import { AttachmentLayoutFixture } from "./attachment-layout-fixture";
 import { LoadedSessionSearchFixture } from "./loaded-session-search-fixture";
 import { AppearanceFixture } from "./appearance-fixture";
 import { ContinuityFixture } from "./continuity-fixture";
+import { SessionTransitionFixture } from "./session-transition-fixture";
 import { installSubagentDockApi, SubagentDockFixture } from "./subagent-dock-fixture";
 
 const history: UIMessage[] = [
@@ -231,7 +234,9 @@ if (parameters.get("case") === "appearance" && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
 createRoot(document.getElementById("root")!).render(<TooltipProvider>
-  {parameters.get("case") === "continuity"
+  {parameters.get("case") === "session-transition"
+    ? <SessionTransitionFixture />
+    : parameters.get("case") === "continuity"
     ? <ContinuityFixture />
     : parameters.get("case") === "appearance"
     ? <AppearanceFixture />
@@ -261,12 +266,16 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <AnswerOrderFixture />
     : parameters.get("case") === "activity-logos"
     ? <ActivityLogosFixture parameters={parameters} />
+    : parameters.get("case") === "exec-session"
+    ? <ExecSessionFixture />
     : parameters.get("case") === "sidebar-activity"
     ? <SidebarActivityFixture />
     : parameters.get("case") === "chat-failure"
     ? <ChatFailureFixture parameters={parameters} />
     : parameters.get("case") === "display-math"
     ? <DisplayMathFixture />
+    : parameters.get("case") === "markdown-dollar-refs"
+    ? <MarkdownDollarRefsFixture />
     : parameters.get("case") === "code-wrapping"
     ? <CodeWrappingFixture />
     : parameters.get("case") === "typography"

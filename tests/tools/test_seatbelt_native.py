@@ -44,7 +44,7 @@ def layout(tmp_path, monkeypatch):
             (paths[name] / "sentinel").write_text("synthetic-data")
         paths["link"] = paths["workspace"] / "outside-link"
         paths["link"].symlink_to(paths["peer"], target_is_directory=True)
-        monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: paths["media"])
+        monkeypatch.setattr("nanobot.execution.sandbox.get_media_dir", lambda: paths["media"])
         yield paths
 
 

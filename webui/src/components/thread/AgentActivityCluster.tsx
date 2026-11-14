@@ -8,6 +8,7 @@ import {
   Fragment,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -28,6 +29,8 @@ import {
 } from "@/components/thread/activity/activity-text";
 import { FileEditGroup, type FileEditSummary } from "@/components/thread/activity/FileEditRow";
 import { GenericToolRun } from "@/components/thread/activity/GenericToolRun";
+import { ExecSessionCommandsContext } from "@/components/thread/activity/exec-session-context";
+import { describeExecSession, passiveRunningCheckSessionId, toolEventArguments, toolEventName } from "@/components/thread/activity/exec-session-model";
 import {
   canGroupGenericToolRuns,
   type GenericToolRunItem,
@@ -46,6 +49,7 @@ import { webSearchRunsByTraceLine } from "@/components/thread/activity/web-searc
 import {
   isReasoningOnlyAssistant,
 } from "@/lib/activity-timeline";
+import { formControlFocusClassName } from "@/components/ui/form-control";
 import { useFileEditDisplayMode } from "@/hooks/useFileEditDisplayMode";
 import { useLocalPreferences } from "@/hooks/useLocalPreferences";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -555,6 +559,7 @@ const ActivityMessageTimeline = memo(function ActivityMessageTimeline({
           <ActivityTraceTimeline
             message={message}
             active={active && index === messages.length - 1}
+            turnActive={active}
             cliAppsByName={cliAppsByName}
             mcpPresetsByName={mcpPresetsByName}
           />
@@ -662,18 +667,125 @@ function ActivityTraceList({
   );
 }
 
+interface ActivityTraceEntry {
+  line: string;
+  sessionEvent?: ToolProgressEvent;
+  sessionChecks?: ToolProgressEvent[];
+}
+
+const SESSION_CHECK_FOLD_THRESHOLD = 5;
+
+/** Keep individual observations available without mounting hundreds of identical rows. */
+function foldSessionChecks(entries: ActivityTraceEntry[]): ActivityTraceEntry[] {
+  const result: ActivityTraceEntry[] = [];
+  let index = 0;
+  while (index < entries.length) {
+    const first = entries[index].sessionEvent;
+    const id = first && passiveRunningCheckSessionId(first);
+    let end = index + 1;
+    if (id) {
+      while (end < entries.length) {
+        const next = entries[end].sessionEvent;
+        if (!next || passiveRunningCheckSessionId(next) !== id) break;
+        end += 1;
+      }
+    }
+    if (id && end - index >= SESSION_CHECK_FOLD_THRESHOLD) {
+      result.push({ line: "", sessionChecks: entries.slice(index, end).map((entry) => entry.sessionEvent!) });
+    } else {
+      result.push(...entries.slice(index, end));
+    }
+    index = end;
+  }
+  return result;
+}
+
+/** Restore exec_session call identities lost by display-text deduplication. */
+function activityTraceEntries(message: UIMessage): ActivityTraceEntry[] {
+  const lines = traceLines(message);
+  const events = message.toolEvents ?? [];
+  if (!events.some((event) => toolEventName(event) === "exec_session")) return lines.map((line) => ({ line }));
+  const lineKeys = new Set(lines.map(canonicalToolTrace));
+  const eventEntries: ActivityTraceEntry[] = [];
+  const rendered = new Set<string>();
+  const sessionIndices = new Map<string, number>();
+  for (const event of events) {
+    const line = formatToolCallTrace(event);
+    if (!line) continue;
+    const key = canonicalToolTrace(line);
+    if (toolEventName(event) === "exec_session") {
+      const callKey = event.call_id ?? key;
+      const existing = sessionIndices.get(callKey);
+      if (existing !== undefined) {
+        const previous = eventEntries[existing].sessionEvent!;
+        if ((GENERIC_TOOL_STATUS_RANK[phaseStatus(event.phase)]) >= GENERIC_TOOL_STATUS_RANK[phaseStatus(previous.phase)]) {
+          eventEntries[existing] = { line, sessionEvent: { ...previous, ...event } };
+        }
+      } else {
+        sessionIndices.set(callKey, eventEntries.length);
+        eventEntries.push({ line, sessionEvent: event });
+      }
+    } else if (lineKeys.has(key) && !rendered.has(key)) {
+      rendered.add(key);
+      eventEntries.push({ line });
+    }
+  }
+
+  // Anchor text-only lines before the next matching structured call, or after
+  // all calls when they are at the end. Repeated calls keep their identities.
+  const positions = new Map<string, number[]>();
+  eventEntries.forEach((entry, index) => {
+    const key = canonicalToolTrace(entry.line);
+    const indices = positions.get(key) ?? [];
+    indices.push(index);
+    positions.set(key, indices);
+  });
+  const occurrences = new Map<string, number>();
+  const before = new Map<number, string[]>();
+  let pending: string[] = [];
+  for (const line of lines) {
+    const key = canonicalToolTrace(line);
+    const indices = positions.get(key);
+    if (!indices?.length) {
+      pending.push(line);
+      continue;
+    }
+    const count = occurrences.get(key) ?? 0;
+    occurrences.set(key, count + 1);
+    if (!pending.length) continue;
+    const index = indices[Math.min(count, indices.length - 1)];
+    const anchored = before.get(index) ?? [];
+    for (const preceding of pending) anchored.push(preceding);
+    before.set(index, anchored);
+    pending = [];
+  }
+  const result: ActivityTraceEntry[] = [];
+  eventEntries.forEach((entry, index) => {
+    for (const line of before.get(index) ?? []) result.push({ line });
+    result.push(entry);
+  });
+  for (const line of pending) result.push({ line });
+  return result;
+}
+
+function phaseStatus(phase: unknown): GenericToolStatus {
+  return phase === "error" ? "error" : phase === "end" ? "done" : "running";
+}
+
 function ActivityTraceTimeline({
   message,
   active,
+  turnActive,
   cliAppsByName,
   mcpPresetsByName,
 }: {
   message: UIMessage;
   active: boolean;
+  turnActive: boolean;
   cliAppsByName: Map<string, CliAppInfo>;
   mcpPresetsByName: Map<string, McpPresetInfo>;
 }) {
-  const lines = traceLines(message);
+  const entries = foldSessionChecks(activityTraceEntries(message));
   const cliRunsByLine = cliRunMapByTraceLine(message);
   const mcpRunsByLine = mcpRunMapByTraceLine(message);
   const webSearchRunsByLine = webSearchRunsByTraceLine(message.toolEvents ?? []);
@@ -695,7 +807,22 @@ function ActivityTraceTimeline({
     normalLines = [];
   };
 
-  lines.forEach((line, index) => {
+  entries.forEach(({ line, sessionEvent, sessionChecks }, index) => {
+    if (sessionChecks) {
+      flushNormalLines(String(index));
+      items.push(<ExecSessionCheckGroup key={`${message.id}:checks:${sessionChecks[0].call_id ?? index}`} events={sessionChecks} turnActive={turnActive} />);
+      return;
+    }
+    if (sessionEvent || /^exec_session\(/.test(line.trim())) {
+      flushNormalLines(String(index));
+      let event = sessionEvent;
+      if (!event) {
+        const raw = /^exec_session\((.*)\)$/.exec(line.trim())?.[1] ?? "";
+        event = { name: "exec_session", arguments: raw, phase: active && index === entries.length - 1 ? "start" : "unknown" };
+      }
+      items.push(<ExecSessionRow key={`${message.id}:session:${event.call_id ?? index}`} event={event} turnActive={turnActive} />);
+      return;
+    }
     const traceKey = canonicalToolTrace(line);
     const webSearchRun = webSearchRunsByLine.get(traceKey);
     if (webSearchRun) {
@@ -784,6 +911,44 @@ function ActivityTraceTimeline({
     <>
       {items}
     </>
+  );
+}
+
+function ExecSessionCheckGroup({ events, turnActive }: { events: ToolProgressEvent[]; turnActive: boolean }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const earlier = events.slice(0, -1);
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        className={cn("ml-[1.625rem] w-fit rounded-sm py-0.5 text-left text-[13px] text-muted-foreground hover:underline", formControlFocusClassName)}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        {t(`message.agentActivity.${expanded ? "hideEarlierCommandChecks" : "showEarlierCommandChecks"}`, { count: earlier.length })}
+      </button>
+      {expanded ? earlier.map((event, index) => (
+        <ExecSessionRow key={event.call_id ?? index} event={event} turnActive={turnActive} />
+      )) : null}
+      <ExecSessionRow event={events[events.length - 1]} turnActive={turnActive} />
+    </>
+  );
+}
+
+function ExecSessionRow({ event, turnActive }: { event: ToolProgressEvent; turnActive: boolean }) {
+  const { t } = useTranslation();
+  const commands = useContext(ExecSessionCommandsContext);
+  const id = toolEventArguments(event).session_id;
+  const model = describeExecSession(event, turnActive, typeof id === "string" ? commands.get(id) : undefined, t);
+  return (
+    <ActivityStep
+      icon={Terminal}
+      active={model.active}
+      tone={model.tone}
+      label={formatActivityTarget(t, model.label, model.detail)}
+      detail={[model.observation, model.aside].filter(Boolean).join(" · ")}
+    />
   );
 }
 
@@ -936,14 +1101,6 @@ function cliRunError(event: ToolProgressEvent): string | undefined {
   if (typeof error === "string") return error;
   if (error && typeof error === "object") return JSON.stringify(error);
   return undefined;
-}
-
-function toolEventName(event: ToolProgressEvent): string {
-  return typeof (event as { function?: { name?: unknown } }).function?.name === "string"
-    ? String((event as { function?: { name?: unknown } }).function?.name)
-    : typeof event.name === "string"
-      ? event.name
-      : "";
 }
 
 function cliRunFromArguments(

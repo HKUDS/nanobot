@@ -396,6 +396,9 @@ class ReadFileTool(_FsTool):
         **kwargs: Any,
     ) -> Any:
         try:
+            # JSON Schema integers include 2.0; Python indices require int objects.
+            offset = int(offset)
+            limit = int(limit) if limit is not None else None
             if not path:
                 return ToolResult.error("Error reading file: Unknown path")
 
@@ -1159,7 +1162,7 @@ class EditFileTool(_FsTool):
             if replace_all:
                 selected = matches
             elif occurrence is not None:
-                selected = [matches[occurrence - 1]]
+                selected = [matches[int(occurrence) - 1]]
             elif line_hint is not None:
                 candidates = [match for match in matches if _match_covers_line(match, line_hint)]
                 if not candidates:

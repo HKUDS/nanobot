@@ -1417,7 +1417,7 @@ export async function fetchSidebarState(
 function modelGenerationSettingsPayload(
   configuration: Pick<
     ModelConfigurationCreate,
-    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort" | "api" | "extraHeaders" | "extraQuery" | "extraBody"
+    "maxTokens" | "contextWindowTokens" | "temperature" | "reasoningEffort" | "supportsImages" | "api" | "extraHeaders" | "extraQuery" | "extraBody"
   >,
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
@@ -1429,6 +1429,9 @@ function modelGenerationSettingsPayload(
   }
   if (configuration.temperature !== undefined) {
     payload.temperature = configuration.temperature;
+  }
+  if (configuration.supportsImages !== undefined) {
+    payload.supports_images = configuration.supportsImages;
   }
   if (configuration.reasoningEffort !== undefined) {
     payload.reasoning_effort = configuration.reasoningEffort ?? "";

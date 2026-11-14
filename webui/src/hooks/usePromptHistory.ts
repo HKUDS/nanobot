@@ -12,6 +12,14 @@ import { type PromptAnchor, userPromptAnchors } from "@/components/thread/prompt
 interface HistoryPage {
   messages: UIMessage[];
   body: WebuiThreadPersistedPayload;
+  details: Map<string, UIMessage[]>;
+}
+
+function expandDetails(messages: UIMessage[], details: ReadonlyMap<string, UIMessage[]>): UIMessage[] {
+  return messages.flatMap((message) => {
+    const rows = message.traceDetail && details.get(message.traceDetail.ref);
+    return rows ? rows.map((row) => ({ ...row, activitySegmentId: message.activitySegmentId })) : [message];
+  });
 }
 
 const HISTORY_PAGE_LIMIT = 3;
@@ -36,7 +44,7 @@ export interface PromptHistoryNavigation {
   cancel: () => void;
   latest: () => void;
   retry: () => void;
-  updateMessages: (update: (messages: UIMessage[]) => UIMessage[]) => void;
+  expandTraceDetail: (ref: string, rows: UIMessage[]) => void;
 }
 
 /** Browsing pages never replace the canonical latest page or live turn state. */
@@ -140,8 +148,12 @@ export function usePromptHistory(key: string | null, version: number, messages: 
     return merged;
   }, [currentScope, enabled, index, indexed, key, messages]);
 
-  const updateMessages = useCallback((update: (messages: UIMessage[]) => UIMessage[]) => {
-    setPages((current) => current.map((page) => ({ ...page, messages: update(page.messages) })));
+  const expandTraceDetail = useCallback((ref: string, rows: UIMessage[]) => {
+    setPages((current) => current.map((page) => {
+      if (!page.messages.some((message) => message.traceDetail?.ref === ref)) return page;
+      const details = new Map(page.details).set(ref, rows);
+      return { ...page, messages: expandDetails(page.messages, details), details };
+    }));
   }, []);
 
   const read = useCallback(async (cursor: string, direction: "before" | "after", id?: string, automatic = false) => {
@@ -166,7 +178,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       if (!id && generation && previousGeneration && generation !== previousGeneration) {
         throw new Error("History changed; select the message again");
       }
-      const page = { body, messages: projectWebuiThreadMessages(projectThreadEvents(body.events)) };
+      const page = { body, messages: projectWebuiThreadMessages(projectThreadEvents(body.events)), details: new Map<string, UIMessage[]>() };
       if (id && !page.messages.some((message) => message.id === id)) {
         setRefresh((value) => value + 1);
         throw new Error("History changed; select the message again");
@@ -198,11 +210,14 @@ export function usePromptHistory(key: string | null, version: number, messages: 
       const range = body.page?.record_range;
       if (range) {
         let joined = joinThreadFragments([], body);
+        const details = new Map(page.details);
         while (pages[index + 1]?.body.page?.record_range?.turn === range.turn) {
-          joined = joinThreadFragments(joined.pages, pages[++index].body);
+          const next = pages[++index];
+          joined = joinThreadFragments(joined.pages, next.body);
+          for (const [ref, detail] of next.details) details.set(ref, detail);
         }
         body = joined.body;
-        rows = projectWebuiThreadMessages(projectThreadEvents(body.events));
+        rows = expandDetails(projectWebuiThreadMessages(projectThreadEvents(body.events)), details);
       }
       const eventIndex = body.fork_boundary_event_index;
       if (eventIndex !== undefined) boundary = messages.length + projectWebuiThreadMessages(projectThreadEvents(body.events.slice(0, eventIndex))).length;
@@ -228,7 +243,7 @@ export function usePromptHistory(key: string | null, version: number, messages: 
 
   return { prompts, window, target: currentScope ? target : null, loading: currentScope && loading,
     operation: currentScope && (loading || error) ? operation : null,
-    error: currentScope ? error ?? indexError : null, cancel, latest, updateMessages,
+    error: currentScope ? error ?? indexError : null, cancel, latest, expandTraceDetail,
     retry: () => error ? retry.current() : setRefresh((value) => value + 1),
     jump: (id) => {
       const prompt = prompts.find((item) => item.id === id);

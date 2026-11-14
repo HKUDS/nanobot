@@ -1,0 +1,87 @@
+:root[data-session-transition] {
+  view-transition-name: none;
+}
+
+:root[data-session-transition] :is(.thread-message-viewport, .thread-empty-region) {
+  view-transition-name: var(--session-thread-name, session-thread-0);
+  view-transition-class: session-thread;
+}
+
+:root[data-session-transition] [data-active-composer] .thread-composer-surface {
+  view-transition-name: session-composer;
+}
+:root[data-session-transition] [data-active-composer] .thread-composer-input {
+  view-transition-name: session-input;
+}
+:root[data-session-transition] [data-active-composer] .thread-composer-footer {
+  view-transition-name: session-toolbar;
+}
+:root[data-session-transition] [data-active-composer] .thread-composer-meta {
+  view-transition-name: session-meta;
+}
+:root[data-session-transition] .goal-island {
+  view-transition-name: session-goal;
+}
+:root[data-session-transition] [data-active-composer] .subagent-task-dock {
+  view-transition-name: session-tasks;
+}
+
+:root[data-session-transition]::view-transition {
+  pointer-events: none;
+}
+:root[data-session-transition]::view-transition-group(*) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* The frame may change size; keep text at its original raster size and bottom anchor. */
+:root[data-session-transition]::view-transition-old(*),
+:root[data-session-transition]::view-transition-new(*) {
+  object-fit: none;
+  object-position: bottom left;
+  mix-blend-mode: normal;
+}
+:root[data-session-transition]::view-transition-old(session-composer),
+:root[data-session-transition]::view-transition-old(session-input),
+:root[data-session-transition]::view-transition-old(session-toolbar),
+:root[data-session-transition]::view-transition-old(session-meta) {
+  display: none;
+}
+:root[data-session-transition]::view-transition-new(session-composer),
+:root[data-session-transition]::view-transition-new(session-input),
+:root[data-session-transition]::view-transition-new(session-toolbar),
+:root[data-session-transition]::view-transition-new(session-meta) {
+  animation: none;
+}
+
+:root[data-session-transition]::view-transition-group(.session-thread) {
+  animation: none;
+}
+:root[data-session-transition]::view-transition-old(.session-thread),
+:root[data-session-transition]::view-transition-new(.session-thread) {
+  object-position: top left;
+}
+:root[data-session-transition]::view-transition-old(.session-thread) {
+  animation: session-thread-out 80ms ease-in both;
+}
+:root[data-session-transition]::view-transition-new(.session-thread) {
+  animation: session-thread-in 120ms ease-out 60ms both;
+}
+
+@keyframes session-thread-out {
+  to { opacity: 0; }
+}
+@keyframes session-thread-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-session-transition]::view-transition-group(*),
+  :root[data-session-transition]::view-transition-new(*) {
+    animation: none;
+  }
+  :root[data-session-transition]::view-transition-old(*) {
+    display: none;
+  }
+}

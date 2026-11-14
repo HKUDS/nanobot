@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · Objetivo",
+    "description": "Previsualiza el objetivo y sus detalles.",
+    "options": "Proporciona el estado, resumen, objetivo y un avance opcional.",
+    "state": "Estado",
+    "summary": "Preparar la versión",
+    "objective": "Revisa los cambios y verifica la versión.\n\n- Comprobar las pruebas\n- Revisar la documentación\n- Confirmar que está lista",
+    "recap": "Esperando aprobación."
+  },
   "rename": {
     "title": "RenameDialog · Renombrar grupos y proyectos",
     "description": "Prueba el cambio de nombre de grupos y proyectos. Los temas se renombran en la lista de chats.",

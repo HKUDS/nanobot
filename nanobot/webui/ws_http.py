@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
-from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit, urlunsplit
 
 from loguru import logger
 from websockets.datastructures import Headers
@@ -693,7 +693,21 @@ class GatewayHTTPHandler:
             return _http_error(403, "remote_connections_local_only")
         try:
             if path == "/api/remote-instances":
-                return _http_json_response(await self.remote_instances.health(), extra_headers=_NO_STORE_HEADERS)
+                parsed = urlsplit(request.path)
+                try:
+                    if parsed.fragment or len(parsed.query) > 4096:
+                        raise ValueError
+                    query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True, max_num_fields=20)
+                    if query.keys() - {"check"} or any(
+                        re.fullmatch(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}", key) is None
+                        for key in query.get("check", [])
+                    ):
+                        raise ValueError
+                except ValueError:
+                    return _http_error(400, "invalid_health_check")
+                check = {key.lower() for key in query.get("check", [])}
+                result = await self.remote_instances.health(check) if check else self.remote_instances.snapshot()
+                return _http_json_response(result, extra_headers=_NO_STORE_HEADERS)
             if not getattr(request, _WEBUI_MUTATION_REQUEST_ATTR, False):
                 return _http_error(405, "WebSocket required")
             payload = getattr(request, _WEBUI_MUTATION_PAYLOAD_ATTR, {})

@@ -38,6 +38,7 @@ interface ThreadHeaderProps {
   minimal?: boolean;
   promptNavigatorAction?: ReactNode;
   sessionInfoAction?: ReactNode;
+  goal?: ReactNode;
   temporaryChatEnabled?: boolean;
   temporaryChatDisabled?: boolean;
   onTemporaryChatEnabledChange?: (enabled: boolean) => void;
@@ -58,6 +59,7 @@ export function ThreadHeader({
   minimal = false,
   promptNavigatorAction,
   sessionInfoAction,
+  goal,
   temporaryChatEnabled = false,
   temporaryChatDisabled = false,
   onTemporaryChatEnabledChange,
@@ -68,7 +70,8 @@ export function ThreadHeader({
     <div
       data-testid="thread-header"
       className={cn(
-        "pointer-events-none inset-x-0 top-0 z-30 flex shrink-0 items-center justify-between gap-3 px-3 py-1",
+        "thread-header-container pointer-events-none inset-x-0 top-0 z-30 flex shrink-0 items-center justify-between gap-3 px-3 py-1",
+        goal && "thread-header-with-goal",
         "[position:var(--thread-header-position,absolute)]",
         minimal && "h-11",
         className,
@@ -76,6 +79,7 @@ export function ThreadHeader({
     >
       <div
         data-theme-surface
+        data-header-controls="start"
         className={cn(
           controlsClassName,
           "relative min-w-0",
@@ -103,6 +107,7 @@ export function ThreadHeader({
         ) : null}
         {handle ? (
           <span
+            data-header-handle
             className="flex shrink-0 items-center rounded-md px-1.5 py-1 text-[12px] font-medium"
           >
             <SessionHandleLabel id={handle.id}>
@@ -112,7 +117,8 @@ export function ThreadHeader({
         ) : null}
       </div>
 
-      <div data-theme-surface className={cn(controlsClassName, "ml-auto shrink-0")}>
+      {goal}
+      <div data-theme-surface data-header-controls="end" className={cn(controlsClassName, "ml-auto shrink-0")}>
         {sessionInfoAction}
         {promptNavigatorAction}
         {actions}

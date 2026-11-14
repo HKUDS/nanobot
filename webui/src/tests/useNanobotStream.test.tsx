@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { userPromptAnchors } from "@/components/thread/promptNavigation";
+import { execSessionCommands } from "@/components/thread/activity/exec-session-model";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
 import { normalizeActivityTimeline } from "@/lib/activity-timeline";
 import { composerUsageSnapshots } from "@/lib/model-request";
@@ -159,6 +160,37 @@ async function flushStreamFrame() {
 }
 
 describe("useNanobotStream", () => {
+  it("updates the command source on exec results, not on streamed text, and scopes it to the chat", async () => {
+    const fake = fakeClient();
+    const initial: UIMessage[] = Array.from({ length: 500 }, (_, index) => ({
+      id: `history-${index}`, role: "user", content: `Earlier ${index}`, createdAt: index,
+    }));
+    const { result, rerender } = renderHook(({ chat }: { chat: string }) => useNanobotStream(chat, initial), {
+      wrapper: wrap(fake.client), initialProps: { chat: "chat-a" },
+    });
+    const id = "012345abcdef";
+    const args = { command: "bun run test" };
+    act(() => {
+      fake.emit("chat-a", { event: "message", chat_id: "chat-a", turn_id: "turn", turn_seq: 1, kind: "tool_hint",
+        text: `exec(${JSON.stringify(args)})`, tool_events: [{ name: "exec", call_id: "exec-1", phase: "start", arguments: args }] });
+      fake.emit("chat-a", { event: "message", chat_id: "chat-a", turn_id: "turn", turn_seq: 2, kind: "tool_hint",
+        text: `exec(${JSON.stringify(args)})`, tool_events: [{ name: "exec", call_id: "exec-1", phase: "end", arguments: args,
+          result: `Process running. session_id: ${id}\nRuntime remaining: 100.0s\nElapsed: 1.0s\nInitial wait ended; session remains active.` }] });
+    });
+    const snapshot = result.current.execSourceMessages;
+    expect(execSessionCommands(snapshot).get(id)).toBe("bun run test");
+    act(() => {
+      for (let index = 0; index < 100; index++) fake.emit("chat-a", {
+        event: "delta", chat_id: "chat-a", turn_id: "turn", turn_seq: index + 3, stream_id: "answer", text: "x",
+      });
+    });
+    await flushStreamFrame();
+    expect(result.current.messages.at(-1)?.content).toBe("x".repeat(100));
+    expect(result.current.execSourceMessages).toBe(snapshot);
+    rerender({ chat: "chat-b" });
+    expect(execSessionCommands(result.current.execSourceMessages).has(id)).toBe(false);
+  });
+
   it.each([true, false])("keeps temporary and new persistent streams separate when the history key is absent (temporary=%s)", (temporary) => {
     const fake = fakeClient();
     const cache = new ThreadMessageCache(() => temporary);
