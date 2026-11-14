@@ -1,12 +1,14 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 const SLOW = 0.24;
 const FAST = 0.12;
 const rowClass = "flex h-6 min-w-0 items-center [&>*]:w-full";
 
 export function LatestActivityWheel({ row, visible }: { row: ReactElement; visible: boolean }) {
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const canRoll = visible && !reducedMotion;
   const last = useRef({ row, time: -Infinity });
   const [frame, setFrame] = useState<{ key: ReactElement["key"]; previous?: ReactElement; duration?: number }>({ key: row.key });

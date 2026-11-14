@@ -81,12 +81,28 @@ test("the collapsed row rolls with its icon and a burst lands on the latest acti
 
 test("narrow reduced-motion preview replaces the row without scrolling the page", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
+  const wheel = page.getByTestId("latest-activity-wheel");
+  await expect(wheel).toContainText("brief.md");
+  // Change the system preference while the wheel is already mounted.
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.reload();
   await page.getByRole("button", { name: "切换主题" }).click();
   const toggle = page.getByRole("button", { name: /处理中/ });
-  const wheel = page.getByTestId("latest-activity-wheel");
-  await page.getByRole("button", { name: "下一条" }).click({ clickCount: 3 });
+  const next = page.getByRole("button", { name: "下一条" });
+  await next.click({ clickCount: 2 });
+  await expect(wheel).toContainText("夜间列车旅行指南");
+  const maxTravel = await next.evaluate(async (button) => {
+    (button as HTMLButtonElement).click();
+    let travel = 0;
+    for (let frame = 0; frame < 6; frame += 1) {
+      await new Promise(requestAnimationFrame);
+      const strip = document.querySelector('[data-testid="latest-activity-wheel"]')!;
+      const rows = strip.querySelectorAll('[data-testid="activity-step"]');
+      const row = rows[rows.length - 1]?.parentElement;
+      if (row) travel = Math.max(travel, Math.abs(row.getBoundingClientRect().top - strip.getBoundingClientRect().top));
+    }
+    return travel;
+  });
+  expect(maxTravel).toBeLessThan(1);
   await expect(wheel).toContainText("Planning an overnight rail trip");
   await expect(wheel.getByTestId("activity-step")).toHaveCount(1);
   expect(await wheel.evaluate((element) => {
