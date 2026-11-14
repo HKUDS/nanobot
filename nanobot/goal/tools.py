@@ -179,7 +179,9 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
         metadata = payload["metadata"]
         goal_start_requested = explicit_goal_requested(request.metadata)
         goal_active = sustained_goal_active(metadata)
-        if not goal_start_requested and not goal_active:
+        goal = parse_goal_state(goal_state_raw(metadata))
+        goal_blocked = isinstance(goal, dict) and goal.get("status") == "blocked"
+        if not goal_start_requested and not goal_active and not goal_blocked:
             return None
 
         guidance = render_template(
@@ -187,6 +189,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             strip=True,
             goal_start_requested=goal_start_requested,
             goal_active=goal_active,
+            goal_blocked=goal_blocked,
         )
         state = wrap_runtime_context_lines(goal_state_runtime_lines(metadata))
         content = "\n\n".join(part for part in (guidance, state) if part)
@@ -238,7 +241,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
 @tool_parameters(
     tool_parameters_schema(
         action=StringSchema(
-            "How to update the active goal.",
+            "How to update the active goal, or cancel a blocked goal.",
             enum=_GOAL_ACTIONS,
         ),
         recap=StringSchema(
@@ -261,7 +264,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     )
 )
 class UpdateGoalTool(Tool, _GoalToolsMixin):
-    """Complete, cancel, block, or replace the active sustained goal."""
+    """Complete, cancel, block, or replace an active goal; cancel a blocked goal."""
 
     def __init__(
         self,
@@ -281,7 +284,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
     @property
     def description(self) -> str:
         return (
-            "Update the active sustained goal. Use action='complete' only after the objective "
+            "Update the active sustained goal, or cancel a blocked goal. Use action='complete' only after the objective "
             "is actually achieved and verified. Use action='cancel' when the user cancels, "
             "action='block' when progress is genuinely blocked, and action='replace' only when "
             "the requested objective changes."
@@ -299,10 +302,13 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         if sess is None:
             return ToolResult.error("Error: update_goal requires an active chat session.")
         prior = parse_goal_state(goal_state_raw(sess.metadata))
-        if not isinstance(prior, dict) or prior.get("status") != "active":
+        normalized = (action or "").strip().lower()
+        if not isinstance(prior, dict) or not (
+            prior.get("status") == "active"
+            or (prior.get("status") == "blocked" and normalized == "cancel")
+        ):
             return "No active goal to update."
 
-        normalized = (action or "").strip().lower()
         if normalized not in _GOAL_ACTIONS:
             return ToolResult.error(
                 "Error: action must be one of complete, cancel, block, or replace."

@@ -564,3 +564,34 @@ async def test_queued_goal_command_does_not_write_to_an_obsolete_generation(tmp_
         assert key not in loop._pending_queues
     finally:
         await loop.aclose()
+
+
+async def test_user_can_cancel_a_blocked_goal_in_a_later_turn(tmp_path):
+    provider = MagicMock(aclose=AsyncMock())
+    provider.get_default_model.return_value = "test-model"
+    provider.generation = GenerationSettings()
+    provider.estimate_prompt_tokens.return_value = (100, "test")
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id="cancel", name="update_goal", arguments={"action": "cancel", "recap": "Cancelled."},
+        )]),
+        LLMResponse(content="Cancelled."),
+    ])
+    loop = _assembled_loop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    session = await loop.sessions.state.get("cli:blocked-cancel")
+    await loop.sessions.state.update_metadata(session.key, {
+        GOAL_STATE_KEY: {"status": "blocked", "objective": "Finish the task."},
+    })
+    try:
+        result = await loop.process_direct("Cancel the goal", session_key=session.key)
+        assert result.content == "Cancelled."
+        messages = "\n".join(str(message.get("content", "")) for message in
+                             provider.chat_stream_with_retry.await_args_list[0].kwargs["messages"])
+        assert "Goal (blocked)" in messages
+        assert "Finish the task." in messages
+        assert "action='cancel'" in messages
+        saved = await loop.sessions.state.read(session.key)
+        assert saved.metadata[GOAL_STATE_KEY]["status"] == "cancelled"
+        assert provider.chat_stream_with_retry.await_count == 2
+    finally:
+        await loop.aclose()

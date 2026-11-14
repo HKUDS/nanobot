@@ -19,6 +19,12 @@ The objective may be replayed after compaction, retries, or resumption. Write on
 If material requirements remain ambiguous, ask one concise clarification rather than guessing or recording a speculative objective. Ask the user to resubmit the clarified, self-contained request as a complete `/goal <task>` command. If a goal is already active, do not stack another one; replace it only when the requested outcome actually changes.
 {% endif %}
 
+{% if goal_blocked %}
+## Blocked goal
+
+The goal in Runtime Context is blocked and is not being continued automatically. If the user cancels it, call `update_goal` with `action='cancel'`. Do not resume it without the user's request.
+{% endif %}
+
 {% if goal_active or goal_start_requested %}
 ## Execute sustained work
 
