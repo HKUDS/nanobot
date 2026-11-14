@@ -227,10 +227,10 @@ const PROVIDER_BRANDS: Record<string, ProviderBrand> = {
     color: "#3050FF",
     initials: "SX",
   },
-  siliconflow: brand("siliconflow.cn", "#111827", "SF"),
-  "template:shengsuanyun": { ...brand("shengsuanyun.com", "#5742EE", "SSY", [
+  shengsuanyun: { ...brand("shengsuanyun.com", "#5742EE", "SSY", [
     "https://www.shengsuanyun.com/svg/logo-C_e87Vaj.svg",
   ]), logoLayout: "tile" },
+  siliconflow: brand("siliconflow.cn", "#111827", "SF"),
   skywork: brand("skywork.ai", "#5B5BF6", "SW"),
   stepfun: brand("stepfun.com", "#2F6BFF", "SF", [
     "https://www.stepfun.com/step_favicon.svg",

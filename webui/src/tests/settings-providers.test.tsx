@@ -21,54 +21,6 @@ async function chooseProviderToConfigure(label: string) {
 describe("Settings providers", () => {
   installSettingsViewTestHooks();
 
-  it("sets up ShengSuanYun as a custom connection without updating an existing provider", async () => {
-    const user = userEvent.setup();
-    const payload = settingsPayload();
-    const existing = { name: "shengsuanyun_router", label: "ShengSuanYun Router", configured: true };
-    const unconfigured = { name: "template:shengsuanyun", label: "Existing custom connection", configured: false };
-    payload.providers = [existing, unconfigured];
-    payload.provider_api_configuration_supported = true;
-    payload.provider_setup_templates = [{
-      id: "shengsuanyun",
-      label: "ShengSuanYun Router",
-      suggested_name: "ShengSuanYun Router 2",
-      search_aliases: "胜算云 勝算雲",
-      api_base: "https://router.shengsuanyun.com/api/v1",
-      api: { supported_apis: ["chat_completions", "responses"], preferred_api: "chat_completions" },
-    }];
-    requestMutationMock.mockResolvedValueOnce({
-      ...payload,
-      created_provider: "custom-shengsuanyun-router-2",
-      providers: [existing, unconfigured, { name: "custom-shengsuanyun-router-2", label: "ShengSuanYun Router 2", configured: true, is_custom: true }],
-    });
-    renderProviderManager({ initialSection: "models", initialSettings: payload });
-    await user.click(screen.getByRole("button", { name: "Add provider" }));
-    await user.click(screen.getByRole("option", { name: unconfigured.label }));
-    const existingForm = screen.getByRole("dialog", { name: unconfigured.label });
-    await user.click(within(existingForm).getByRole("button", { name: "Back to providers" }));
-    await user.type(screen.getByRole("combobox", { name: "Search providers" }), "胜算云");
-    await user.keyboard("{ArrowDown}{Enter}");
-    const form = screen.getByRole("dialog", { name: "Custom" });
-    expect(within(form).getByPlaceholderText("My model provider")).toHaveValue("ShengSuanYun Router 2");
-    expect(within(form).getByLabelText("API URL")).toHaveValue("https://router.shengsuanyun.com/api/v1");
-    expect(requestMutationMock).not.toHaveBeenCalled();
-    const save = within(form).getByRole("button", { name: "Add provider" });
-    expect(save).toBeDisabled();
-    await user.type(within(form).getByPlaceholderText("Enter API key"), "test-key");
-    await user.click(save);
-    expect(requestMutationMock).toHaveBeenCalledTimes(1);
-    const [action, values] = requestMutationMock.mock.calls[0];
-    expect(action).toBe("settings.provider.create");
-    expect(values).toMatchObject({
-      name: "ShengSuanYun Router 2",
-      apiKey: "test-key",
-      apiBase: "https://router.shengsuanyun.com/api/v1",
-      api: { supported_apis: ["chat_completions", "responses"], preferred_api: "chat_completions" },
-    });
-    expect(await screen.findByRole("button", { name: "ShengSuanYun Router 2" })).toBeVisible();
-    expect(await screen.findByRole("button", { name: "ShengSuanYun Router" })).toBeVisible();
-  });
-
   it("manages providers unused by presets and returns focus through the manager", async () => {
     const user = userEvent.setup();
     const payload = settingsPayload();

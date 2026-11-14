@@ -63,7 +63,6 @@ import type {
   NanobotFeaturesPayload,
   ModelAPIConfig,
   ProviderOAuthAuthorizationRequired,
-  ProviderSetupTemplate,
   SettingsPayload,
 } from "@/lib/types";
 
@@ -526,8 +525,7 @@ export type ProviderSettingsEntry =
   | { kind: "edit"; provider: string };
 
 type ProviderSettingsView =
-  | { kind: "list" | "picker" }
-  | { kind: "custom"; requiresApiKey: boolean }
+  | { kind: "list" | "picker" | "custom" }
   | { kind: "provider"; name: string; adding: boolean };
 
 export function ProvidersSettings({
@@ -593,22 +591,13 @@ export function ProvidersSettings({
     emptyCustomProviderDraft,
   );
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
-  const { providerOptions, templatesByOption } = useMemo(() => {
-    const providerOptions = settings.providers.filter((provider) => !provider.configured && provider.name !== "custom");
-    const occupied = new Set(providerOptions.map((provider) => provider.name));
-    const entries = (settings.provider_setup_templates ?? []).map((template) => {
-      const icon = `template:${template.id}`;
-      // Picker IDs must not shadow saved connection IDs.
-      let name = icon;
-      while (occupied.has(name)) name += ":";
-      occupied.add(name);
-      return { template, option: { name, label: template.label, icon, searchAliases: template.search_aliases } };
-    });
-    return {
-      providerOptions: [...providerOptions, ...entries.map(({ option }) => option)],
-      templatesByOption: new Map(entries.map(({ option, template }) => [option.name, template])),
-    };
-  }, [settings.providers, settings.provider_setup_templates]);
+  const unconfiguredProviders = useMemo(
+    () =>
+      settings.providers.filter(
+        (provider) => !provider.configured && provider.name !== "custom",
+      ),
+    [settings.providers],
+  );
   const customProviderSaving = providerSaving === CUSTOM_PROVIDER_CREATION_KEY;
   const selectedProvider = view.kind === "provider"
     ? settings.providers.find((provider) => provider.name === view.name)
@@ -650,16 +639,10 @@ export function ProvidersSettings({
       returnToOrigin();
     }
   };
-  const beginCustomProviderCreation = (template?: ProviderSetupTemplate) => {
-    const draft = emptyCustomProviderDraft();
-    if (template) {
-      draft.name = template.suggested_name;
-      draft.apiBase = template.api_base;
-      draft.api = template.api;
-    }
-    setCustomProviderDraft(draft);
+  const beginCustomProviderCreation = () => {
+    setCustomProviderDraft(emptyCustomProviderDraft());
     setCustomProviderKeyVisible(false);
-    setView({ kind: "custom", requiresApiKey: Boolean(template) });
+    setView({ kind: "custom" });
   };
   const saveCustomProvider = async () => {
     if (customProviderSaving) return;
@@ -1085,8 +1068,7 @@ export function ProvidersSettings({
             disabled={
               customProviderSaving ||
               !customProviderDraft.name.trim() ||
-              !customProviderDraft.apiBase.trim() ||
-              (view.requiresApiKey && !customProviderDraft.apiKey.trim())
+              !customProviderDraft.apiBase.trim()
             }
             className="rounded-full"
           >
@@ -1146,15 +1128,10 @@ export function ProvidersSettings({
           </div>
         </div>
       ) : view.kind === "picker" ? (
-        <ProviderSearchList providers={providerOptions} showBrandLogos={showBrandLogos}
+        <ProviderSearchList providers={unconfiguredProviders} showBrandLogos={showBrandLogos}
           query={providerSearch} onQueryChange={setProviderSearch}
-          onSelect={(name) => {
-            const template = templatesByOption.get(name);
-            if (template) beginCustomProviderCreation(template);
-            else editProvider(name, true);
-          }}
-          onCustom={() => beginCustomProviderCreation()}
-          onClose={entry.kind === "manage" ? goBack : closePanel} />
+          onSelect={(name) => editProvider(name, true)}
+          onCustom={beginCustomProviderCreation} onClose={entry.kind === "manage" ? goBack : closePanel} />
       ) : (
         <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 pb-5">
           {view.kind === "custom" ? customProviderForm : selectedProvider ? renderProviderForm(selectedProvider) : null}

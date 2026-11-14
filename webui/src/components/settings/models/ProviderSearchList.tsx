@@ -26,6 +26,7 @@ const PROVIDER_SEARCH_ALIASES: Record<string, string> = {
   volcengine_coding_plan: "火山引擎 豆包 doubao",
   minimax: "海螺 稀宇",
   minimax_anthropic: "海螺 稀宇",
+  shengsuanyun: "胜算云 勝算雲",
   siliconflow: "硅基流动 矽基流動 硅基流動",
   stepfun: "阶跃星辰 階躍星辰",
   xiaomi_mimo: "小米 mimo",
@@ -34,12 +35,8 @@ const PROVIDER_SEARCH_ALIASES: Record<string, string> = {
   ant_ling: "蚂蚁 螞蟻 百灵 百靈",
 };
 
-type ProviderSearchOption = Pick<
-  SettingsPayload["providers"][number], "name" | "label" | "auth_type" | "model_catalog"
-> & { searchAliases?: string; icon?: string };
-
 export function ProviderSearchList({ providers, showBrandLogos, query, onQueryChange, onSelect, onCustom, onClose }: {
-  providers: ProviderSearchOption[];
+  providers: SettingsPayload["providers"];
   showBrandLogos: boolean;
   query: string;
   onQueryChange: (query: string) => void;
@@ -58,7 +55,7 @@ export function ProviderSearchList({ providers, showBrandLogos, query, onQueryCh
     const normalize = (value: string) => value.toLocaleLowerCase().replace(/[\s_.-]+/g, "");
     const normalizedQuery = normalize(query);
     return providers.filter((provider) => normalize(
-      `${provider.name} ${provider.label} ${provider.searchAliases ?? PROVIDER_SEARCH_ALIASES[provider.name] ?? ""}`,
+      `${provider.name} ${provider.label} ${PROVIDER_SEARCH_ALIASES[provider.name] ?? ""}`,
     ).includes(normalizedQuery));
   }, [providers, query]);
   const groups = useMemo(() => PROVIDER_GROUPS.map((group) => ({
@@ -94,7 +91,7 @@ export function ProviderSearchList({ providers, showBrandLogos, query, onQueryCh
               {group.providers.map((provider) => <ComboboxOption key={provider.name} {...getOptionProps(provider.name)}
                 aria-label={provider.label}
                 className="min-h-11 min-w-0 gap-2 rounded-xl px-2 py-2 text-[13px] font-normal sm:gap-3 sm:px-3 sm:text-sm">
-                <ProviderIcon provider={provider.icon ?? provider.name} showBrandLogos={showBrandLogos} compact />
+                <ProviderIcon provider={provider.name} showBrandLogos={showBrandLogos} compact />
                 <TruncatedTextTooltip text={provider.label} className="flex-1" />
               </ComboboxOption>)}
             </div>
@@ -115,7 +112,7 @@ export function ProviderSearchList({ providers, showBrandLogos, query, onQueryCh
   </>;
 }
 
-function providerGroup(provider: ProviderSearchOption): typeof PROVIDER_GROUPS[number]["id"] {
+function providerGroup(provider: SettingsPayload["providers"][number]): typeof PROVIDER_GROUPS[number]["id"] {
   if (provider.auth_type === "oauth") return "oauth";
   return provider.model_catalog === "local" ? "local" : "api_key";
 }
