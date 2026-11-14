@@ -42,14 +42,12 @@ class FakeResponse:
         payload: dict[str, Any],
         status_code: int = 200,
         content: bytes = b"",
-        sse_lines: list[str] | None = None,
     ) -> None:
         self._payload = payload
         self.status_code = status_code
         self.text = str(payload)
         self.content = content
         self.request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-        self._sse_lines = sse_lines
 
     def json(self) -> dict[str, Any]:
         return self._payload
@@ -58,15 +56,6 @@ class FakeResponse:
         if self.status_code >= 400:
             response = httpx.Response(self.status_code, request=self.request, text=self.text)
             raise httpx.HTTPStatusError("failed", request=self.request, response=response)
-
-    async def aiter_lines(self):
-        if self._sse_lines is not None:
-            for line in self._sse_lines:
-                yield line
-            return
-        # Fallback: treat response text as SSE lines
-        for line in self.text.split("\n"):
-            yield line
 
 
 class FakeClient:
@@ -83,23 +72,6 @@ class FakeClient:
     async def get(self, url: str, **kwargs: Any) -> FakeResponse:
         self.get_calls.append({"url": url, **kwargs})
         return self.get_response
-
-
-class CodexStreamingCompleteThenErrorResponse(FakeResponse):
-    async def aiter_lines(self):
-        yield 'data: {"type":"response.output_item.added","item":{"id":"ig_1","type":"image_generation_call","status":"in_progress"}}'
-        yield ""
-        yield (
-            f'data: {{"type":"response.output_item.done","item":{{"id":"ig_1",'
-            f'"type":"image_generation_call","result":"{PNG_DATA_URL}","status":"completed"}}}}'
-        )
-        yield ""
-        yield 'data: {"type":"response.completed","response":{"status":"completed"}}'
-        yield ""
-        raise httpx.RemoteProtocolError(
-            "peer closed connection without sending complete message body "
-            "(incomplete chunked read)"
-        )
 
 
 @pytest.fixture(autouse=True)
@@ -469,35 +441,26 @@ async def test_gemini_flash_forwards_aspect_ratio_and_image_size() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gemini_flash_2_5_drops_image_size() -> None:
+@pytest.mark.parametrize(
+    "aspect_ratio, model",
+    [
+        pytest.param("4:3", "gemini-2.5-flash-image", id="5_drops_image_size"),
+        pytest.param("16:9", "gemini-2.0-flash-preview-image-generation", id="0_drops_image_size"),
+    ],
+)
+async def test_gemini_flash_omits_unsupported_image_size(aspect_ratio, model) -> None:
     fake = FakeClient(_gemini_flash_image_response())
     client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
 
     await client.generate(
         prompt="draw a cat",
-        model="gemini-2.5-flash-image",
-        aspect_ratio="4:3",
+        model=model,
+        aspect_ratio=aspect_ratio,
         image_size="1K",
     )
 
     image_config = fake.calls[0]["json"]["generationConfig"]["imageConfig"]
-    assert image_config == {"aspectRatio": "4:3"}
-
-
-@pytest.mark.asyncio
-async def test_gemini_flash_2_0_drops_image_size() -> None:
-    fake = FakeClient(_gemini_flash_image_response())
-    client = GeminiImageGenerationClient(api_key="AIza-test", client=fake)  # type: ignore[arg-type]
-
-    await client.generate(
-        prompt="draw a cat",
-        model="gemini-2.0-flash-preview-image-generation",
-        aspect_ratio="16:9",
-        image_size="1K",
-    )
-
-    image_config = fake.calls[0]["json"]["generationConfig"]["imageConfig"]
-    assert image_config == {"aspectRatio": "16:9"}
+    assert image_config == {"aspectRatio": aspect_ratio}
 
 
 @pytest.mark.parametrize(
@@ -640,10 +603,6 @@ async def test_minimax_base64_response_uses_detected_mime() -> None:
     assert response.images == [f"data:image/jpeg;base64,{raw_b64}"]
 
 
-# ---------------------------------------------------------------------------
-# StepFun (阶跃星辰)
-# ---------------------------------------------------------------------------
-
 @pytest.mark.asyncio
 async def test_stepfun_payload_and_response_with_aspect_ratio() -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
@@ -709,7 +668,6 @@ async def test_stepfun_uses_explicit_image_size() -> None:
 
 @pytest.mark.asyncio
 async def test_stepfun_style_reference_on_1x_model(tmp_path: Path) -> None:
-    """step-1x-medium supports style_reference for reference-image generation."""
     ref = tmp_path / "ref.png"
     ref.write_bytes(PNG_BYTES)
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
@@ -732,7 +690,6 @@ async def test_stepfun_style_reference_on_1x_model(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_stepfun_no_style_reference_on_non_1x_model() -> None:
-    """step-image-edit-2 does not use style_reference; reference images are ignored."""
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = StepFunImageGenerationClient(
         api_key="sk-sf-test",
@@ -765,11 +722,6 @@ async def test_stepfun_no_images_raises() -> None:
 
     with pytest.raises(ImageGenerationError, match="returned no images"):
         await client.generate(prompt="draw", model="step-image-edit-2")
-
-
-# ---------------------------------------------------------------------------
-# OpenAI
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -876,15 +828,27 @@ async def test_openai_multiple_images() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_aspect_ratio_to_size() -> None:
+@pytest.mark.parametrize(
+    "expected_size, model, aspect_ratio",
+    [
+        pytest.param("1024x1024", "dall-e-3", "1:1", id="aspect_ratio_to_size"),
+        pytest.param("1024x1024", "dall-e-2", "16:9", id="dalle2_uses_square_size_for_non_square_ratios"),
+        pytest.param("1536x1024", "gpt-image-1", "16:9", id="gpt_image_uses_supported_landscape_size"),
+    ],
+)
+async def test_openai_aspect_ratio_uses_model_supported_size(
+    expected_size,
+    model,
+    aspect_ratio,
+) -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = OpenAIImageGenerationClient(
         api_key="sk-openai-test",
         client=fake,  # type: ignore[arg-type]
     )
 
-    await client.generate(prompt="draw", model="dall-e-3", aspect_ratio="1:1")
-    assert fake.calls[0]["json"]["size"] == "1024x1024"
+    await client.generate(prompt="draw", model=model, aspect_ratio=aspect_ratio)
+    assert fake.calls[0]["json"]["size"] == expected_size
 
 
 @pytest.mark.asyncio
@@ -900,32 +864,6 @@ async def test_openai_dalle3_uses_supported_orientation_sizes() -> None:
 
     assert fake.calls[0]["json"]["size"] == "1024x1792"
     assert fake.calls[1]["json"]["size"] == "1792x1024"
-
-
-@pytest.mark.asyncio
-async def test_openai_dalle2_uses_square_size_for_non_square_ratios() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = OpenAIImageGenerationClient(
-        api_key="sk-openai-test",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(prompt="draw", model="dall-e-2", aspect_ratio="16:9")
-
-    assert fake.calls[0]["json"]["size"] == "1024x1024"
-
-
-@pytest.mark.asyncio
-async def test_openai_gpt_image_uses_supported_landscape_size() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = OpenAIImageGenerationClient(
-        api_key="sk-openai-test",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(prompt="draw", model="gpt-image-1", aspect_ratio="16:9")
-
-    assert fake.calls[0]["json"]["size"] == "1536x1024"
 
 
 @pytest.mark.asyncio
@@ -1098,7 +1036,14 @@ async def test_openai_default_size_when_no_aspect_ratio() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_ignores_explicit_size_unsupported_by_model_family() -> None:
+@pytest.mark.parametrize(
+    "expected_size, image_size",
+    [
+        pytest.param("1792x1024", "1536x1024", id="ignores_explicit_size_unsupported_by_model_family"),
+        pytest.param("1024x1024", "1024x1024", id="uses_explicit_image_size"),
+    ],
+)
+async def test_openai_validates_explicit_size_for_model_family(expected_size, image_size) -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = OpenAIImageGenerationClient(
         api_key="sk-openai-test",
@@ -1109,30 +1054,11 @@ async def test_openai_ignores_explicit_size_unsupported_by_model_family() -> Non
         prompt="draw",
         model="dall-e-3",
         aspect_ratio="16:9",
-        image_size="1536x1024",
+        image_size=image_size,
     )
 
     body = fake.calls[0]["json"]
-    assert body["size"] == "1792x1024"
-
-
-@pytest.mark.asyncio
-async def test_openai_uses_explicit_image_size() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = OpenAIImageGenerationClient(
-        api_key="sk-openai-test",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(
-        prompt="draw",
-        model="dall-e-3",
-        aspect_ratio="16:9",
-        image_size="1024x1024",
-    )
-
-    body = fake.calls[0]["json"]
-    assert body["size"] == "1024x1024"
+    assert body["size"] == expected_size
 
 
 @pytest.mark.asyncio
@@ -1141,11 +1067,6 @@ async def test_openai_requires_api_key() -> None:
 
     with pytest.raises(ImageGenerationError, match="API key"):
         await client.generate(prompt="draw", model="dall-e-3")
-
-
-# ---------------------------------------------------------------------------
-# Custom OpenAI-compatible Images API
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1180,7 +1101,14 @@ async def test_custom_generate_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_custom_generate_preserves_provider_size_hint() -> None:
+@pytest.mark.parametrize(
+    "expected_size, image_size",
+    [
+        pytest.param("2K", "2K", id="preserves_provider_size_hint"),
+        pytest.param("1024x1024", "1K", id="maps_one_k_to_openai_dimension"),
+    ],
+)
+async def test_custom_generate_maps_size_hint(expected_size, image_size) -> None:
     fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
     client = CustomImageGenerationClient(
         api_key="sk-custom-test",
@@ -1191,28 +1119,10 @@ async def test_custom_generate_preserves_provider_size_hint() -> None:
     await client.generate(
         prompt="a cat on the moon",
         model="custom-image-model",
-        image_size="2K",
+        image_size=image_size,
     )
 
-    assert fake.calls[0]["json"]["size"] == "2K"
-
-
-@pytest.mark.asyncio
-async def test_custom_generate_maps_one_k_to_openai_dimension() -> None:
-    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
-    client = CustomImageGenerationClient(
-        api_key="sk-custom-test",
-        api_base="https://custom.example/v1",
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    await client.generate(
-        prompt="a cat on the moon",
-        model="custom-image-model",
-        image_size="1K",
-    )
-
-    assert fake.calls[0]["json"]["size"] == "1024x1024"
+    assert fake.calls[0]["json"]["size"] == expected_size
 
 
 @pytest.mark.asyncio
@@ -1279,86 +1189,60 @@ async def test_custom_generate_http_error() -> None:
         await client.generate(prompt="draw", model="custom-image-model")
 
 
-# ---------------------------------------------------------------------------
-# OpenAI Codex (Responses API)
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def codex_oauth(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    calls: list[dict[str, Any]] = []
+
+    def get_token(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(account_id="acct-123", access="oauth-token")
+
+    monkeypatch.setitem(sys.modules, "oauth_cli_kit", SimpleNamespace(get_token=get_token))
+    return calls
 
 
 @pytest.mark.asyncio
-async def test_codex_payload_and_response(monkeypatch) -> None:
-    import sys
-    from dataclasses import dataclass
-    from types import SimpleNamespace
+@pytest.mark.parametrize("base", [
+    "https://chatgpt.com/backend-api",
+    "https://chatgpt.com/backend-api/codex/",
+])
+async def test_codex_payload_and_response(codex_oauth, base: str) -> None:
+    import json
 
-    @dataclass
-    class FakeToken:
-        account_id: str = "acct-123"
-        access: str = "oauth-token"
+    requests: list[httpx.Request] = []
+    payload = {"created": 1778832973, "data": [{"b64_json": PNG_DATA_URL.split(",")[1]}]}
 
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=payload)
 
-    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-    fake_oauth = SimpleNamespace(get_token=lambda: FakeToken())
-    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
-
-    sse_lines = [
-        'data: {"type":"response.output_item.added","item":{"id":"ig_1","type":"image_generation_call","status":"in_progress"}}',
-        "",
-        f'data: {{"type":"response.output_item.done","item":{{"id":"ig_1","type":"image_generation_call","result":"{PNG_DATA_URL}","status":"completed"}}}}',
-        "",
-        'data: [DONE]',
-        "",
-    ]
-    fake = FakeClient(FakeResponse({}, sse_lines=sse_lines))
-    client = CodexImageGenerationClient(
-        api_key=None,
-        api_base="https://chatgpt.com/backend-api",
-        extra_headers={"X-Test": "1"},
-        client=fake,  # type: ignore[arg-type]
-    )
-
-    response = await client.generate(
-        prompt="draw a cat",
-        model="gpt-5.4",
-    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+        client = CodexImageGenerationClient(
+            api_key=None, api_base=base, extra_headers={"X-Test": "1"}, client=http,
+        )
+        response = await client.generate(prompt="draw a cat", model=client.model_options[0])
 
     assert response.images == [PNG_DATA_URL]
     assert response.content == ""
-    call = fake.calls[0]
-    assert call["url"] == "https://chatgpt.com/backend-api/codex/responses"
-    assert call["headers"]["Authorization"] == "Bearer oauth-token"
-    assert call["headers"]["chatgpt-account-id"] == "acct-123"
-    assert call["headers"]["OpenAI-Beta"] == "responses=experimental"
-    assert call["headers"]["X-Test"] == "1"
-    body = call["json"]
-    assert body["model"] == "gpt-5.4"
-    assert body["instructions"] == "Generate an image based on the user's request."
-    assert body["input"] == [{"role": "user", "content": "draw a cat"}]
-    assert body["tools"] == [{"type": "image_generation"}]
-    assert body["tool_choice"] == "auto"
-    assert body["store"] is False
-    assert body["stream"] is True
+    assert response.raw == payload
+    request = requests[0]
+    assert str(request.url) == "https://chatgpt.com/backend-api/codex/images/generations"
+    assert request.headers["Authorization"] == "Bearer oauth-token"
+    assert request.headers["chatgpt-account-id"] == "acct-123"
+    assert request.headers["X-Test"] == "1"
+    assert json.loads(request.content) == {
+        "model": "gpt-image-2", "prompt": "draw a cat",
+        "background": "opaque", "quality": "auto", "size": "auto",
+    }
 
 
 @pytest.mark.asyncio
-async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch) -> None:
-    import sys
-    from types import SimpleNamespace
-
+async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch, codex_oauth) -> None:
     proxy = "http://127.0.0.1:23458"
     captured: dict[str, Any] = {}
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    def fake_get_token(*, proxy=None):
-        captured["token_proxy"] = proxy
-        return SimpleNamespace(account_id="acct-123", access="oauth-token")
-
-    fake_oauth = SimpleNamespace(get_token=fake_get_token)
-    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
 
     class FakeAsyncClient:
         def __init__(self, **kwargs: Any) -> None:
@@ -1372,90 +1256,46 @@ async def test_codex_proxy_applies_to_oauth_and_http(monkeypatch) -> None:
 
         async def post(self, url: str, **kwargs: Any) -> FakeResponse:
             captured["request"] = {"url": url, **kwargs}
-            return FakeResponse(
-                {},
-                sse_lines=[
-                    f'data: {{"type":"response.output_item.done","item":{{"type":"image_generation_call","result":"{PNG_DATA_URL}"}}}}',
-                    "",
-                    "data: [DONE]",
-                    "",
-                ],
-            )
+            return FakeResponse({"data": [{"b64_json": PNG_DATA_URL.split(",")[1]}]})
 
-    monkeypatch.setattr(
-        "nanobot.providers.image_generation.httpx.AsyncClient",
-        FakeAsyncClient,
-    )
+    monkeypatch.setattr("nanobot.providers.image_generation.httpx.AsyncClient", FakeAsyncClient)
     client = CodexImageGenerationClient(api_key=None, proxy=proxy)
-
-    response = await client.generate(prompt="draw", model="gpt-5.4")
-
+    response = await client.generate(prompt="draw", model="gpt-image-2")
     assert response.images == [PNG_DATA_URL]
-    assert captured["token_proxy"] == proxy
+    assert codex_oauth == [{"proxy": proxy}]
     assert captured["client_kwargs"]["proxy"] == proxy
     assert captured["client_kwargs"]["trust_env"] is False
 
 
 @pytest.mark.asyncio
-async def test_codex_stops_reading_after_completed_event(monkeypatch) -> None:
-    import sys
-    from dataclasses import dataclass
-    from types import SimpleNamespace
-
-    @dataclass
-    class FakeToken:
-        account_id: str = "acct-123"
-        access: str = "oauth-token"
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-    fake_oauth = SimpleNamespace(get_token=lambda: FakeToken())
-    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
-
-    fake = FakeClient(CodexStreamingCompleteThenErrorResponse({}, sse_lines=[]))
+@pytest.mark.parametrize("prefix", ["openai-codex", "openai_codex"])
+async def test_codex_edit_reference_images_and_options(codex_oauth, tmp_path, prefix) -> None:
+    reference = tmp_path / "reference.png"
+    reference.write_bytes(PNG_BYTES)
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": PNG_DATA_URL.split(",")[1]}]}))
     client = CodexImageGenerationClient(
-        api_key=None, client=fake  # type: ignore[arg-type]
+        api_key=None, extra_body={"quality": "high", "background": None},
+        client=fake,  # type: ignore[arg-type]
     )
-
-    response = await client.generate(prompt="draw a cat", model="gpt-5.4")
-
+    response = await client.generate(
+        prompt="add a hat", model=f"{prefix}/gpt-image-2",
+        reference_images=[str(reference)], aspect_ratio="16:9",
+    )
     assert response.images == [PNG_DATA_URL]
-    assert response.content == ""
+    assert fake.calls[0]["url"] == "https://chatgpt.com/backend-api/codex/images/edits"
+    assert fake.calls[0]["json"] == {
+        "model": "gpt-image-2", "prompt": "add a hat", "quality": "high",
+        "size": "1536x1024",
+        "images": [{"image_url": "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode()}],
+    }
 
 
 @pytest.mark.asyncio
-async def test_codex_strips_model_prefix(monkeypatch) -> None:
-    import sys
-    from dataclasses import dataclass
-    from types import SimpleNamespace
-
-    @dataclass
-    class FakeToken:
-        account_id: str = "acct-123"
-        access: str = "oauth-token"
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-    fake_oauth = SimpleNamespace(get_token=lambda: FakeToken())
-    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
-
-    fake = FakeClient(FakeResponse({}, sse_lines=[
-        f'data: {{"type":"response.output_item.done","item":{{"type":"image_generation_call","result":"{PNG_DATA_URL}"}}}}',
-        "",
-        'data: [DONE]',
-        "",
-    ]))
-    client = CodexImageGenerationClient(
-        api_key=None, client=fake  # type: ignore[arg-type]
-    )
-
-    await client.generate(prompt="draw", model="openai-codex/gpt-5.4")
-
-    assert fake.calls[0]["json"]["model"] == "gpt-5.4"
+async def test_codex_explicit_size(codex_oauth) -> None:
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": PNG_DATA_URL.split(",")[1]}]}))
+    client = CodexImageGenerationClient(api_key=None, client=fake)  # type: ignore[arg-type]
+    await client.generate(prompt="draw", model="gpt-image-2", image_size="2048x1152")
+    assert fake.calls[0]["json"]["size"] == "2048x1152"
 
 
 @pytest.mark.asyncio
@@ -1464,115 +1304,25 @@ async def test_codex_requires_oauth(monkeypatch) -> None:
         raise RuntimeError("no token")
 
     monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-
     client = CodexImageGenerationClient(api_key=None)
-
     with pytest.raises(ImageGenerationError, match="OAuth token"):
-        await client.generate(prompt="draw", model="gpt-5.4")
+        await client.generate(prompt="draw", model="gpt-image-2")
 
 
 @pytest.mark.asyncio
-async def test_codex_no_images_raises(monkeypatch) -> None:
-    import sys
-    from dataclasses import dataclass
-    from types import SimpleNamespace
-
-    @dataclass
-    class FakeToken:
-        account_id: str = "acct-123"
-        access: str = "oauth-token"
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-    fake_oauth = SimpleNamespace(get_token=lambda: FakeToken())
-    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
-
-    fake = FakeClient(FakeResponse({}, sse_lines=[
-        'data: {"type":"response.completed","response":{"status":"completed"}}',
-        "",
-        'data: [DONE]',
-        "",
-    ]))
-    client = CodexImageGenerationClient(
-        api_key=None, client=fake  # type: ignore[arg-type]
-    )
-
+async def test_codex_no_images_raises(codex_oauth) -> None:
+    fake = FakeClient(FakeResponse({"data": []}))
+    client = CodexImageGenerationClient(api_key=None, client=fake)  # type: ignore[arg-type]
     with pytest.raises(ImageGenerationError, match="returned no images"):
-        await client.generate(prompt="draw", model="gpt-5.4")
+        await client.generate(prompt="draw", model="gpt-image-2")
 
 
 @pytest.mark.asyncio
-async def test_codex_extracts_text_content(monkeypatch) -> None:
-    import sys
-    from dataclasses import dataclass
-    from types import SimpleNamespace
-
-    @dataclass
-    class FakeToken:
-        account_id: str = "acct-123"
-        access: str = "oauth-token"
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-    fake_oauth = SimpleNamespace(get_token=lambda: FakeToken())
-    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
-
-    fake = FakeClient(FakeResponse({}, sse_lines=[
-        'data: {"type":"response.output_text.delta","delta":"Here "}',
-        "",
-        'data: {"type":"response.output_text.delta","delta":"is your cat image."}',
-        "",
-        f'data: {{"type":"response.output_item.done","item":{{"type":"image_generation_call","result":"{PNG_DATA_URL}"}}}}',
-        "",
-        'data: [DONE]',
-        "",
-    ]))
-    client = CodexImageGenerationClient(
-        api_key=None, client=fake  # type: ignore[arg-type]
-    )
-
-    response = await client.generate(prompt="draw a cat", model="gpt-5.4")
-
-    assert response.images == [PNG_DATA_URL]
-    assert response.content == "Here is your cat image."
-
-
-@pytest.mark.asyncio
-async def test_codex_json_result_format(monkeypatch) -> None:
-    """image_generation_call result can be a dict with image_url key."""
-    import sys
-    from dataclasses import dataclass
-    from types import SimpleNamespace
-
-    @dataclass
-    class FakeToken:
-        account_id: str = "acct-123"
-        access: str = "oauth-token"
-
-    async def fake_to_thread(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-
-    monkeypatch.setattr("asyncio.to_thread", fake_to_thread)
-    fake_oauth = SimpleNamespace(get_token=lambda: FakeToken())
-    monkeypatch.setitem(sys.modules, "oauth_cli_kit", fake_oauth)
-
-    fake = FakeClient(FakeResponse({}, sse_lines=[
-        f'data: {{"type":"response.output_item.done","item":{{"type":"image_generation_call","result":{{"image_url":"{PNG_DATA_URL}"}}}}}}',
-        "",
-        'data: [DONE]',
-        "",
-    ]))
-    client = CodexImageGenerationClient(
-        api_key=None, client=fake  # type: ignore[arg-type]
-    )
-
-    response = await client.generate(prompt="draw", model="gpt-5.4")
-
-    assert response.images == [PNG_DATA_URL]
+async def test_codex_http_error(codex_oauth) -> None:
+    fake = FakeClient(FakeResponse({"error": {"message": "image quota exceeded"}}, status_code=429))
+    client = CodexImageGenerationClient(api_key=None, client=fake)  # type: ignore[arg-type]
+    with pytest.raises(ImageGenerationError, match="HTTP 429.*image quota exceeded"):
+        await client.generate(prompt="draw", model="gpt-image-2")
 
 
 @pytest.mark.asyncio
@@ -1585,11 +1335,6 @@ async def test_openai_no_images_raises() -> None:
 
     with pytest.raises(ImageGenerationError, match="returned no images"):
         await client.generate(prompt="draw", model="dall-e-3")
-
-
-# ---------------------------------------------------------------------------
-# Zhipu
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -1690,11 +1435,6 @@ async def test_zhipu_image_generation_rejects_reference_images() -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# ModelScope (魔搭) image generation tests
-# ---------------------------------------------------------------------------
-
-
 class ModelScopeFakeClient:
     """Fake httpx client for ModelScope async task pattern.
 
@@ -1766,7 +1506,6 @@ async def test_modelscope_image_generation_submit_and_poll(
     assert response.images[0].startswith("data:image/png;base64,")
     assert generated_image_downloads == [("https://cdn.example/image.png", proxy)]
 
-    # Verify POST request
     post_call = fake.calls[0]
     assert post_call["url"] == "https://api-inference.modelscope.cn/v1/images/generations"
     assert post_call["headers"]["Authorization"] == "Bearer ms-token"
@@ -1775,7 +1514,6 @@ async def test_modelscope_image_generation_submit_and_poll(
     assert body["model"] == "Qwen/Qwen-Image"
     assert body["prompt"] == "A golden cat"
 
-    # Verify task polling GET
     assert "/tasks/abc123" in fake.get_calls[0]["url"]
     poll_headers = fake.get_calls[0]["headers"]
     assert poll_headers["X-ModelScope-Task-Type"] == "image_generation"
@@ -1866,7 +1604,6 @@ async def test_modelscope_image_generation_missing_task_id() -> None:
 
 @pytest.mark.asyncio
 async def test_modelscope_image_generation_with_reference_image() -> None:
-    """Reference images are converted to base64 data URLs for image editing models."""
     submit = FakeResponse({"task_id": "t1"})
     poll = [FakeResponse({"task_status": "SUCCEED", "output_images": ["https://cdn/img.png"]})]
     fake = ModelScopeFakeClient(submit, poll)
@@ -1875,7 +1612,6 @@ async def test_modelscope_image_generation_with_reference_image() -> None:
         client=fake,  # type: ignore[arg-type]
     )
 
-    # Create a temporary image file
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         f.write(PNG_BYTES)
@@ -1897,7 +1633,6 @@ async def test_modelscope_image_generation_with_reference_image() -> None:
 
 @pytest.mark.asyncio
 async def test_modelscope_image_generation_extra_body_passthrough() -> None:
-    """Extra body fields like loras are passed through to the API."""
     submit = FakeResponse({"task_id": "t1"})
     poll = [FakeResponse({"task_status": "SUCCEED", "output_images": ["https://cdn/img.png"]})]
     fake = ModelScopeFakeClient(submit, poll)
@@ -1916,12 +1651,10 @@ async def test_modelscope_image_generation_extra_body_passthrough() -> None:
 
 @pytest.mark.asyncio
 async def test_modelscope_image_generation_poll_timeout(monkeypatch) -> None:
-    """Polling that never reaches SUCCEED/FAILED raises a timeout error."""
     monkeypatch.setattr(
         "nanobot.providers.image_generation._MODELSCOPE_POLL_MAX_ATTEMPTS", 3
     )
     submit = FakeResponse({"task_id": "t1"})
-    # Always PENDING — never resolves.
     poll = [FakeResponse({"task_status": "PENDING"})]
     fake = ModelScopeFakeClient(submit, poll)
     client = ModelScopeImageGenerationClient(
@@ -1932,7 +1665,6 @@ async def test_modelscope_image_generation_poll_timeout(monkeypatch) -> None:
     with pytest.raises(ImageGenerationError, match="timed out"):
         await client.generate(prompt="test", model="m")
 
-    # Should have polled up to the (patched) attempt limit.
     assert len(fake.get_calls) == 3
 
 

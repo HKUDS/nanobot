@@ -1,14 +1,13 @@
-"""Tests for AgentRunner hook lifecycle: ordering, streaming deltas,
-cached-token propagation, and hook context."""
-
 from __future__ import annotations
 
+from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
+from nanobot.events import EventSink, ModelRequestEvent
 from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
@@ -149,13 +148,14 @@ async def test_runner_measures_stream_generation_without_time_to_first_token():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
+    publish = AsyncMock()
 
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("he")
         await on_content_delta("llo")
         return LLMResponse(
             content="hello",
-            usage=LLMUsage.reported(input_tokens=100, output_tokens=12),
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=12, cache_read_tokens=4),
         )
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -179,6 +179,7 @@ async def test_runner_measures_stream_generation_without_time_to_first_token():
             max_iterations=1,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=StreamingHook(),
+            events=EventSink(publish),
         ))
 
     assert result.usage is not None
@@ -186,6 +187,11 @@ async def test_runner_measures_stream_generation_without_time_to_first_token():
     assert result.usage.measured_output_tokens == 12
     assert result.usage.ttft_ms == 200
     assert result.usage.timed_requests == 1
+    assert result.usage.cache_read_tokens == 4
+    [completed] = [call.args[0] for call in publish.await_args_list
+                   if isinstance(call.args[0], ModelRequestEvent) and call.args[0].phase == "completed"]
+    assert completed.usage == result.usage
+    assert completed.round_usages == tuple(result.round_usages)
 
 
 @pytest.mark.asyncio
@@ -242,7 +248,6 @@ async def test_runner_length_recovery_streams_segments_once_and_returns_all_cont
 
 @pytest.mark.asyncio
 async def test_runner_passes_cache_read_tokens_to_hook_context():
-    """Hook context usage preserves a reported cache-read count."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunner
 
@@ -387,8 +392,9 @@ async def test_runner_calls_run_level_hooks_on_success():
 
 
 @pytest.mark.asyncio
-async def test_runner_run_level_context_is_detached_snapshot():
-    from nanobot.agent.hook import AgentHook, AgentRunHookContext
+@pytest.mark.parametrize("composite", [False, True])
+async def test_runner_run_level_context_is_detached_snapshot(composite):
+    from nanobot.agent.hook import AgentHook, AgentRunHookContext, CompositeHook
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
@@ -422,6 +428,7 @@ async def test_runner_run_level_context_is_detached_snapshot():
         async def on_finally(self, context: AgentRunHookContext) -> None:
             context.messages[0]["content"] = "mutated-finally"
 
+    hook = MutatingRunHook()
     runner = AgentRunner()
     result = await runner.run(make_run_spec(provider,
         initial_messages=[{"role": "user", "content": "hi"}],
@@ -429,7 +436,7 @@ async def test_runner_run_level_context_is_detached_snapshot():
         model="test-model",
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=MutatingRunHook(),
+        hook=CompositeHook([hook]) if composite else hook,
     ))
 
     assert request_messages[0][0]["content"] == "hi"
@@ -438,6 +445,68 @@ async def test_runner_run_level_context_is_detached_snapshot():
     assert result.tool_events == [
         {"name": "list_dir", "status": "ok", "detail": "tool result"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_runner_snapshots_for_composite_subclass_run_callback():
+    from nanobot.agent.hook import AgentRunHookContext, CompositeHook
+    from nanobot.agent.progress_hook import AgentProgressHook
+    from nanobot.agent.runner import AgentRunner
+
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="done"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    snapshots: list[list[dict]] = []
+
+    class CaptureCompositeHook(CompositeHook):
+        async def after_run(self, context: AgentRunHookContext) -> None:
+            snapshots.append([dict(message) for message in context.messages])
+            context.messages[0]["content"] = "hook-only"
+
+    hook = CaptureCompositeHook([AgentProgressHook()])
+    result = await AgentRunner().run(make_run_spec(provider,
+        initial_messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert hook.has_run_hooks() is True
+    assert snapshots == [result.messages]
+    assert result.messages[0]["content"] == "hi"
+    assert result.final_content == "done"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["error", "cancelled"])
+async def test_runner_skips_run_snapshots_without_consumers_on_exception(outcome):
+    import asyncio
+
+    from nanobot.agent.progress_hook import AgentProgressHook
+    from nanobot.agent.runner import AgentRunner
+
+    error = RuntimeError("provider exploded") if outcome == "error" else asyncio.CancelledError()
+    provider = MagicMock(spec=LLMProvider)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=error)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    with patch("nanobot.agent.runner.deepcopy", wraps=deepcopy) as copy_state:
+        with pytest.raises(type(error)):
+            await AgentRunner().run(make_run_spec(provider,
+                initial_messages=[{"role": "user", "content": "hi"}],
+                tools=tools,
+                model="test-model",
+                max_iterations=1,
+                max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+                hook=AgentProgressHook(),
+            ))
+
+    provider.chat_stream_with_retry.assert_awaited_once()
+    assert copy_state.call_count == 0
 
 
 @pytest.mark.asyncio

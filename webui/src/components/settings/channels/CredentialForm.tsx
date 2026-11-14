@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import type { ChannelConfigField } from "@/components/settings/channels/catalog";
+import type { ChannelConfigField } from "@/channel-plugins/catalog";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { cn } from "@/lib/utils";
 
 function channelFieldValue(field: ChannelConfigField, values: Record<string, string>): string {
@@ -129,6 +130,25 @@ export function CredentialForm({
             {error}
           </span>
         ) : null;
+        if (field.control === "switch" && field.kind === "bool") {
+          return (
+            <div key={field.key} className="flex items-center justify-between gap-4 py-2">
+              <label htmlFor={inputId} className="min-w-0">{header}</label>
+              <div className="flex shrink-0 items-center gap-2">
+                {errorMessage}
+                <ToggleButton
+                  id={inputId}
+                  checked={selectedOption === "true"}
+                  disabled={disabled}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={describedBy}
+                  label={field.label}
+                  onChange={(checked) => onChange(field.key, String(checked))}
+                />
+              </div>
+            </div>
+          );
+        }
         if (field.options?.length) {
           return (
             <fieldset
@@ -240,7 +260,7 @@ export function CredentialForm({
                   }
                   onClick={() => onToggleSecret(field.key)}
                   disabled={disabled}
-                  className="absolute right-0 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground sm:right-1 sm:h-8 sm:w-8"
+                  className="absolute right-0 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:text-foreground sm:right-1 sm:h-8 sm:w-8"
                 >
                   {visible ? (
                     <EyeOff className="h-3.5 w-3.5" aria-hidden />

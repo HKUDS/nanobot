@@ -1,7 +1,9 @@
+import asyncio
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 
 import pytest
 
@@ -13,6 +15,7 @@ from nanobot.session.session_handles import (
     _tier_size,
     normalize_session_handle,
 )
+from nanobot.session.types import SESSION_TYPE_KEY, SessionType
 
 
 def _persist(manager: SessionManager, key: str) -> None:
@@ -137,7 +140,7 @@ def test_session_snapshot_and_handle_sync_share_one_lock(
     resolver.list_all()
     snapshot_taken = Event()
     release_snapshot = Event()
-    original_list = manager.list_sessions
+    original_list = manager._store.list_metadata
 
     def paused_list():
         rows = original_list()
@@ -145,7 +148,7 @@ def test_session_snapshot_and_handle_sync_share_one_lock(
         assert release_snapshot.wait(timeout=2)
         return rows
 
-    monkeypatch.setattr(manager, "list_sessions", paused_list)
+    monkeypatch.setattr(manager._store, "list_metadata", paused_list)
     with ThreadPoolExecutor(max_workers=2) as pool:
         old_sync = pool.submit(resolver.list_all)
         assert snapshot_taken.wait(timeout=2)
@@ -183,3 +186,62 @@ def test_normalize_session_handle_accepts_optional_at_prefix() -> None:
         normalize_session_handle("aa")
     with pytest.raises(ValueError, match="invalid"):
         normalize_session_handle("not-a-handle")
+
+
+def test_session_owner_registration_controls_handle_allocation(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    _persist(manager, "websocket:conversation")
+    for kind in ("review", "scratch"):
+        session = manager.get_or_create(f"internal:{kind}")
+        session.metadata[SESSION_TYPE_KEY] = kind
+        manager.save(session)
+    resolver = SessionHandleResolver(manager)
+    before = resolver.handle_for_session("websocket:conversation")
+    assert {handle.session_key for handle in resolver.list_all()} == {"websocket:conversation"}
+
+    manager.types.register(SessionType("review", needs_handle=True, public_history=True))
+    manager.types.register(SessionType("scratch", needs_handle=False, public_history=False))
+    assert resolver.handle_for_session("internal:review") is not None
+    assert resolver.handle_for_session("internal:scratch") is None
+    assert resolver.handle_for_session("websocket:conversation") == before
+
+
+def test_private_type_cannot_be_resolved_through_an_existing_handle(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    _persist(manager, "internal:private")
+    resolver = SessionHandleResolver(manager)
+    old_handle = resolver.handle_for_session("internal:private")
+    assert old_handle is not None
+    session = manager.get_or_create("internal:private")
+    session.metadata[SESSION_TYPE_KEY] = "private"
+    manager.save(session)
+    manager.types.register(SessionType("private", needs_handle=False, public_history=False))
+    assert resolver.resolve(old_handle.name) is None
+    assert resolver.handle_for_session(session.key) is None
+
+    reopened = SessionManager(tmp_path)
+    assert SessionHandleResolver(reopened).list_all() == []
+
+
+async def test_runtime_existing_handles_do_not_wait_for_an_external_write_lock(tmp_path):
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    await state.get("websocket:existing")
+    expected = await state.ensure_session_handles()
+    ready, release = Event(), Event()
+
+    def hold():
+        with sqlite3.connect(manager._store.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            ready.set()
+            assert release.wait(5)
+
+    thread = Thread(target=hold)
+    thread.start()
+    try:
+        assert await asyncio.to_thread(ready.wait, 2)
+        assert await asyncio.wait_for(state.ensure_session_handles(), timeout=2) == expected
+    finally:
+        release.set()
+        thread.join()
+        await state.aclose()

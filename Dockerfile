@@ -6,12 +6,13 @@ WORKDIR /app/webui
 RUN npm ci
 COPY webui/ ./
 COPY packages/client-events/ /app/packages/client-events/
+COPY nanobot/channels/ /app/nanobot/channels/
 RUN mkdir -p /app/nanobot/web && npm run build
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates git bubblewrap openssh-client libmagic1 && \
+    apt-get install -y --no-install-recommends ca-certificates curl git bubblewrap openssh-client libmagic1 && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,28 +23,21 @@ ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 RUN uv venv --seed "$VIRTUAL_ENV"
 
-# Install Python dependencies first (cached layer). Hatch reads the custom build
-# hook from hatch_build.py even for this metadata-only install.
 ARG NANOBOT_EXTRAS=
-COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
-RUN mkdir -p nanobot && touch nanobot/__init__.py && \
-    if [ -n "$NANOBOT_EXTRAS" ]; then \
-        NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \
-            --python "$VIRTUAL_ENV/bin/python" --no-cache ".[${NANOBOT_EXTRAS}]"; \
-    else \
-        NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \
-            --python "$VIRTUAL_ENV/bin/python" --no-cache .; \
-    fi && \
-    rm -rf nanobot
+COPY pyproject.toml ./
+RUN set -- && \
+    for extra in $(printf '%s' "$NANOBOT_EXTRAS" | tr ',' ' '); do \
+        set -- "$@" --extra "$extra"; \
+    done && \
+    uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache -r pyproject.toml "$@"
 
-# Copy the full source and install
+COPY README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
+COPY docs/ docs/
 COPY nanobot/ nanobot/
 COPY scripts/install_channel_dependencies.py scripts/
 COPY --from=webui-builder /app/nanobot/web/dist/ nanobot/web/dist/
-RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache .
+RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache --no-deps .
 
-# Preinstall selected channel dependencies from their manifests. A comma-separated
-# list keeps the image configurable while preserving WhatsApp in the default image.
 ARG NANOBOT_CHANNELS=whatsapp
 RUN for channel in $(printf '%s' "$NANOBOT_CHANNELS" | tr ',' ' '); do \
         python -m scripts.install_channel_dependencies "$channel"; \
@@ -55,7 +49,6 @@ RUN for channel in $(printf '%s' "$NANOBOT_CHANNELS" | tr ',' ' '); do \
 # won't shadow it. Only used when RENDER=true; ignored by local runs.
 COPY render-config.json ./
 
-# Create the non-root user and hand ownership of the writable virtualenv to it.
 RUN useradd -m -u 1000 -s /bin/bash nanobot && \
     mkdir -p /home/nanobot/.nanobot && \
     chown -R nanobot:nanobot /home/nanobot /app/.venv
@@ -74,7 +67,6 @@ ENV HOME=/home/nanobot
 # non-graceful exit).
 ENV PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1
 
-# Gateway health endpoint and optional WebUI/WebSocket channel ports
 EXPOSE 18790 8765
 
 ENTRYPOINT ["entrypoint.sh"]

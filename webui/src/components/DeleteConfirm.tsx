@@ -12,7 +12,7 @@ import type { TFunction } from "i18next";
 import { Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { currentLocale } from "@/i18n";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format-time";
 import type { SessionAutomationJob } from "@/lib/types";
 
 interface DeleteConfirmProps {
@@ -42,6 +42,7 @@ export function DeleteConfirm({
     <AlertDialog open={open} onOpenChange={(o) => (!o ? onCancel() : undefined)}>
       <AlertDialogContent
         className="w-[min(calc(100vw-2rem),24rem)] gap-0 p-5 text-center"
+        onEscapeKeyDown={(event) => event.stopPropagation()}
       >
         <AlertDialogHeader className="items-center space-y-0 text-center">
           <Trash2
@@ -81,7 +82,6 @@ export function DeleteConfirm({
                     <span className="truncate">
                       {formatAutomationSchedule(job, t, locale)}
                     </span>
-                    <span aria-hidden>·</span>
                     <span className="truncate">{formatAutomationNextRun(job, t, locale)}</span>
                   </div>
                 </div>

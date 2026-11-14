@@ -1,6 +1,8 @@
 import importlib.util
 import io
 import json
+import posixpath
+import shlex
 import tarfile
 from pathlib import Path
 
@@ -33,7 +35,14 @@ def test_tui_source_archive_preserves_shared_module_import_path():
     spec.loader.exec_module(module)
     with tarfile.open(fileobj=io.BytesIO(module._source_archive(ROOT / "tui"))) as archive:
         names = set(archive.getnames())
-        assert "nanobot-tui-source/tui/src/protocol.ts" in names
+        assert "nanobot-tui-source/tui/src/client/validation.ts" in names
         assert "nanobot-tui-source/packages/client-events/notifications.ts" in names
         assert "nanobot-tui-source/tui/bun.lock" in names
         assert "nanobot-tui-source/LICENSE" in names
+        package = archive.extractfile("nanobot-tui-source/tui/package.json")
+        assert package is not None
+        scripts = json.load(package)["scripts"]
+        for command in ("check:imports", "test:imports"):
+            entrypoint = next(arg for arg in shlex.split(scripts[command]) if arg.endswith(".mjs"))
+            archived_path = posixpath.normpath(f"nanobot-tui-source/tui/{entrypoint}")
+            assert archived_path in names

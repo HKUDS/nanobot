@@ -2,20 +2,33 @@ import type { UIMessage } from "@/lib/types";
 
 export interface PromptAnchor {
   answerPreview: string;
+  inputId?: string;
   id: string;
+  turnId?: string;
   label: string;
   preview: string;
   createdAt: number;
   index: number;
+  cursor?: string;
 }
 
 export function userPromptAnchors(messages: UIMessage[]): PromptAnchor[] {
+  const answers = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    const preview = truncatePreview(compactPreview(message.content), 240);
+    if (preview) for (const id of message.responseInputIds ?? []) {
+      if (!answers.has(id)) answers.set(id, preview);
+    }
+  }
   let index = 0;
   return messages.flatMap((message, messageIndex) => {
     if (message.role !== "user") return [];
     const anchor: PromptAnchor = {
-      answerPreview: nextAssistantPreview(messages, messageIndex),
+      answerPreview: message.inputId ? answers.get(message.inputId) ?? "" : nextAssistantPreview(messages, messageIndex),
+      inputId: message.inputId,
       id: message.id,
+      ...(message.turnId ? { turnId: message.turnId } : {}),
       label: promptLabel(message.content, index),
       preview: promptPreview(message.content, index),
       createdAt: message.createdAt,

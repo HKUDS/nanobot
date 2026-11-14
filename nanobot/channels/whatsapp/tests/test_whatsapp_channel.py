@@ -18,6 +18,7 @@ from nanobot.channels.whatsapp.runtime import (
     _legacy_bridge_config_fields,
     _NeonizeAPI,
 )
+from nanobot.config.network import NetworkConfig
 
 
 class _Proto:
@@ -111,6 +112,42 @@ def _patch_neonize_api(monkeypatch, detect_mime=None, detect_buffer=None) -> Non
     )
 
 
+@pytest.mark.parametrize(
+    ("installed_version", "needs_upgrade"),
+    [("0.4.3.post0", True), ("0.5.2", False), ("0.10.0", False)],
+)
+def test_startup_preserves_compatible_neonize(monkeypatch, installed_version, needs_upgrade):
+    from nanobot import optional_features
+    from nanobot.channels.whatsapp.manifest import PLUGIN
+
+    versions = {
+        "neonize": installed_version,
+        "python-magic": "0.4.27",
+        "python-magic-bin": "0.4.14",
+        "segno": "1.6.1",
+    }
+    monkeypatch.setattr(
+        optional_features,
+        "distribution",
+        lambda name: SimpleNamespace(version=versions[name]),
+    )
+    installs: list[tuple[str, list[str]]] = []
+
+    def install_extra(name, dependencies, *, runner):
+        installs.append((name, dependencies))
+        versions["neonize"] = "0.5.2"
+        return optional_features.InstallResult(True, name, ["pip"])
+
+    monkeypatch.setattr(optional_features, "install_extra", install_extra)
+
+    failures = optional_features.ensure_enabled_channel_dependencies(
+        {"whatsapp"}, {"whatsapp": PLUGIN},
+    )
+
+    assert failures == {}
+    assert installs == ([("whatsapp", list(PLUGIN.dependencies))] if needs_upgrade else [])
+
+
 def _patch_receipt_type(monkeypatch):
     neonize = types.ModuleType("neonize")
     utils = types.ModuleType("neonize.utils")
@@ -139,7 +176,9 @@ async def test_connect_client_normalizes_proxy_without_a_scheme(monkeypatch) -> 
         "neonize._binder",
         SimpleNamespace(ProxySettings=ProxySettings),
     )
-    channel = _make_channel({"proxy": "127.0.0.1:23458"})
+    channel = WhatsAppChannel(
+        {"useProxy": True}, MessageBus(), network=NetworkConfig(proxy="127.0.0.1:23458"),
+    )
     client = SimpleNamespace(connect=AsyncMock(return_value=None))
 
     await channel._connect_client(client)
@@ -150,7 +189,9 @@ async def test_connect_client_normalizes_proxy_without_a_scheme(monkeypatch) -> 
 
 @pytest.mark.asyncio
 async def test_connect_client_without_proxy_uses_default_connection() -> None:
-    channel = _make_channel({"proxy": ""})
+    channel = WhatsAppChannel(
+        {"useProxy": False}, MessageBus(), network=NetworkConfig(proxy="127.0.0.1:23458"),
+    )
     client = SimpleNamespace(connect=AsyncMock(return_value=None))
 
     await channel._connect_client(client)
@@ -589,6 +630,40 @@ async def test_group_allow_from_does_not_allow_same_participant_in_other_group()
 
 
 @pytest.mark.asyncio
+async def test_message_before_startup_is_dropped_with_millisecond_timestamp() -> None:
+    bus = MessageBus()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    ch._started_at = 1_700_000_000.250
+    ch._send_read_receipt = AsyncMock()
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(message=_Proto(conversation="old message"), timestamp=1_700_000_000_249),
+    )
+
+    assert bus.inbound_size == 0
+    ch._send_read_receipt.assert_not_awaited()
+
+
+@pytest.mark.parametrize("timestamp", [1_700_000_000_251, 1_700_000_001_987])
+@pytest.mark.asyncio
+async def test_message_after_startup_has_timestamp_in_seconds(timestamp: int) -> None:
+    bus = MessageBus()
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    ch._started_at = 1_700_000_000.250
+
+    await ch._handle_neonize_message(
+        SimpleNamespace(download_any=AsyncMock()),
+        _event(message=_Proto(conversation="new message"), timestamp=timestamp),
+    )
+
+    assert bus.inbound_size == 1
+    msg = await bus.consume_inbound()
+    assert msg.content == "new message"
+    assert msg.metadata["timestamp"] == timestamp // 1000
+
+
+@pytest.mark.asyncio
 async def test_read_receipt_is_requested_once_after_dedup() -> None:
     ch = _make_channel()
     ch._send_read_receipt = AsyncMock()
@@ -759,7 +834,7 @@ async def test_unauthorized_voice_message_does_not_download_or_transcribe(
 @pytest.mark.asyncio
 async def test_unauthorized_dm_uses_base_pairing_flow(monkeypatch) -> None:
     _patch_neonize_api(monkeypatch)
-    monkeypatch.setattr("nanobot.channels.base.generate_code", lambda _ch, _sid: "ABCD-EFGH")
+    monkeypatch.setattr("nanobot.channels.base.generate_code", lambda _ch, _sid, *, on_change=None: "ABCD-EFGH")
     monkeypatch.setattr("nanobot.channels.base.is_approved", lambda _ch, _sid: False)
     client = SimpleNamespace(send_message=AsyncMock(), download_any=AsyncMock())
     ch = WhatsAppChannel({"enabled": True, "allowFrom": []}, MagicMock())
@@ -794,3 +869,32 @@ def test_reset_database_removes_sqlite_sidecars(tmp_path) -> None:
     assert not db.exists()
     assert not wal.exists()
     assert not shm.exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_media_uses_shared_proxy_without_bypassing_url_guard(monkeypatch) -> None:
+    network = NetworkConfig(proxy="http://user:pass@127.0.0.1:7890")
+    proxies = []
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, content=b"remote media")
+
+    def proxy_transport(*, proxy):
+        proxies.append(proxy)
+        return httpx.MockTransport(handler)
+
+    monkeypatch.setattr(whatsapp_module.httpx, "AsyncHTTPTransport", proxy_transport)
+    channel = WhatsAppChannel({"useProxy": True}, MessageBus(), network=network)
+
+    with pytest.raises(httpx.RequestError, match="private/internal"):
+        await channel._fetch_remote_media("http://127.0.0.1/media.wav")
+
+    assert proxies == [network.proxy]
+    assert requests == []
+
+    public_url = "https://93.184.216.34/media.wav"
+    assert await channel._fetch_remote_media(public_url) == b"remote media"
+    assert proxies == [network.proxy, network.proxy]
+    assert [str(request.url) for request in requests] == [public_url]

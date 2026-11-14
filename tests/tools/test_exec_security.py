@@ -1,5 +1,3 @@
-"""Tests for exec tool internal URL blocking."""
-
 from __future__ import annotations
 
 import socket
@@ -124,7 +122,7 @@ async def test_exec_full_access_skips_command_guard(tmp_path, command):
         restrict_to_workspace=False,
         deny_patterns=[r"echo\s+blocked"],
     )
-    result = await tool.execute(command=command)
+    result = await tool.execute(command=command, yield_time_ms=10000)
 
     assert "Exit code: 0" in result
     assert "Command blocked" not in result
@@ -136,7 +134,7 @@ async def test_exec_full_workspace_scope_skips_command_guard(tmp_path):
     token = bind_workspace_scope(scope)
     try:
         result = await tool.execute(
-            command="echo http://169.254.169.254/latest/meta-data/",
+            command="echo http://169.254.169.254/latest/meta-data/", yield_time_ms=10000,
         )
     finally:
         reset_workspace_scope(token)
@@ -148,14 +146,13 @@ async def test_exec_full_workspace_scope_skips_command_guard(tmp_path):
 @pytest.mark.asyncio
 async def test_exec_allows_normal_commands():
     tool = ExecTool(timeout=5)
-    result = await tool.execute(command="echo hello")
+    result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "hello" in result
     assert "Error" not in result.split("\n")[0]
 
 
 @pytest.mark.asyncio
 async def test_exec_allows_curl_to_public_url():
-    """Commands with public URLs should not be blocked by the internal URL check."""
     tool = ExecTool()
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
         guard_result = tool._guard_command("curl https://example.com/api", "/tmp")
@@ -164,7 +161,6 @@ async def test_exec_allows_curl_to_public_url():
 
 @pytest.mark.asyncio
 async def test_exec_blocks_chained_internal_url():
-    """Internal URLs buried in chained commands should still be caught."""
     tool = ExecTool(restrict_to_workspace=True)
     with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_private):
         result = await tool.execute(
@@ -216,7 +212,6 @@ def test_exec_blocks_writes_to_history_jsonl(command):
 )
 
 def test_exec_allows_reads_of_history_jsonl(command):
-    """Read-only access to history.jsonl must still be allowed."""
     tool = ExecTool()
     result = tool._guard_command(command, "/tmp")
     assert result is None
@@ -227,7 +222,6 @@ def test_exec_allows_reads_of_history_jsonl(command):
 
 @pytest.mark.asyncio
 async def test_exec_blocks_working_dir_outside_workspace(tmp_path):
-    """An LLM-supplied working_dir outside the workspace must be rejected."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
@@ -237,7 +231,6 @@ async def test_exec_blocks_working_dir_outside_workspace(tmp_path):
 
 @pytest.mark.asyncio
 async def test_exec_blocks_relative_working_dir_outside_workspace(tmp_path):
-    """A relative working_dir that escapes the workspace must be rejected."""
     workspace = tmp_path / "workspace"
     outside = tmp_path / "outside"
     workspace.mkdir()
@@ -278,36 +271,33 @@ async def test_exec_blocks_absolute_rm_via_hijacked_working_dir(tmp_path):
 
 @pytest.mark.asyncio
 async def test_exec_allows_working_dir_within_workspace(tmp_path):
-    """A working_dir that is a subdirectory of the workspace is fine."""
     workspace = tmp_path / "workspace"
     subdir = workspace / "project"
     subdir.mkdir(parents=True)
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
-    result = await tool.execute(command="echo ok", working_dir=str(subdir))
+    result = await tool.execute(command="echo ok", working_dir=str(subdir), yield_time_ms=10000)
     assert "ok" in result
     assert "outside the configured workspace" not in result
 
 
 @pytest.mark.asyncio
 async def test_exec_allows_working_dir_equal_to_workspace(tmp_path):
-    """Passing working_dir equal to the workspace root must be allowed."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
-    result = await tool.execute(command="echo ok", working_dir=str(workspace))
+    result = await tool.execute(command="echo ok", working_dir=str(workspace), yield_time_ms=10000)
     assert "ok" in result
     assert "outside the configured workspace" not in result
 
 
 @pytest.mark.asyncio
 async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
-    """Without restrict_to_workspace, the LLM may still choose any working_dir."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     other = tmp_path / "other"
     other.mkdir()
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=False, timeout=5)
-    result = await tool.execute(command="echo ok", working_dir=str(other))
+    result = await tool.execute(command="echo ok", working_dir=str(other), yield_time_ms=10000)
     assert "ok" in result
     assert "outside the configured workspace" not in result
 
@@ -320,15 +310,12 @@ async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
     [
         # The exact command from the #3599 reporter.
         'rm test_print.txt 2>/dev/null; echo "done"',
-        # Plain redirect of stdout / stderr.
         "find . -type f >/dev/null",
         "noisy_cmd 2>/dev/null",
         "noisy_cmd >/dev/null 2>&1",
-        # Read from /dev/urandom is also a benign device read.
         "head -c 16 /dev/urandom | xxd",
         "echo done >/dev/stderr",
         "echo line </dev/stdin",
-        # Per-process FD aliases never escape the workspace.
         "cat /dev/fd/3",
     ],
 )
@@ -473,9 +460,6 @@ def test_exec_sandbox_bind_parent_does_not_widen_workspace_guard(tmp_path, monke
     assert "path outside working dir" in blocked
 
 
-# --- format command blocking -----------------------------------------------
-
-
 @pytest.mark.parametrize(
     "command",
     [
@@ -490,7 +474,6 @@ def test_exec_sandbox_bind_parent_does_not_widen_workspace_guard(tmp_path, monke
 )
 
 def test_exec_blocks_format_command(command):
-    """The Windows ``format`` disk command must be denied."""
     tool = ExecTool()
     result = tool._guard_command(command, "/tmp")
     assert result is not None
@@ -500,23 +483,17 @@ def test_exec_blocks_format_command(command):
 @pytest.mark.parametrize(
     "command",
     [
-        # URL parameter &format= must NOT be blocked (regression).
         'curl -s "wttr.in/xxx?lang=zh&format=%l:+%c+%t+%h+%w&1"',
         'curl -s "wttr.in/xxx?format=%l:+%c+%t+%h+%w&1"',
-        # format as a non-command word in a normal argument.
         "echo format",
         "echo reformat",
     ],
 )
 
 def test_exec_allows_format_in_url_and_args(command):
-    """``format`` inside URL parameters or as a non-command arg must be allowed."""
     tool = ExecTool()
     result = tool._guard_command(command, "/tmp")
     assert result is None
-
-
-# --- workspace_root allows paths inside workspace but outside cwd ----------
 
 
 def test_exec_allows_workspace_paths_from_subdirectory(tmp_path):
@@ -532,8 +509,6 @@ def test_exec_allows_workspace_paths_from_subdirectory(tmp_path):
 
     tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
 
-    # A command run from the subdirectory that references a sibling path
-    # inside the workspace should be allowed.
     result = tool._guard_command(
         f"git clone {sibling}",
         str(subdir),

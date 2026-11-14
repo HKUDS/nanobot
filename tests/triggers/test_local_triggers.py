@@ -6,6 +6,7 @@ import json
 import os
 from contextlib import suppress
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -71,7 +72,6 @@ def test_trigger_store_atomic_writes_ignore_unsupported_directory_fsync(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Shared folders may allow opening directories but reject directory fsync."""
     store = LocalTriggerStore(tmp_path)
     real_open = os.open
     real_close = os.close
@@ -274,6 +274,32 @@ def test_recover_processing_deliveries_requeues_claimed_delivery(tmp_path: Path)
     assert reclaimed[0].content == "Review PR #4591"
     assert reclaimed[0].attempts == 1
     assert reclaimed[0].last_error == "delivery was recovered from interrupted processing"
+
+
+@pytest.mark.asyncio
+async def test_trigger_delivers_to_its_saved_session(tmp_path: Path) -> None:
+    store = LocalTriggerStore(tmp_path)
+    trigger = store.create(
+        name="Old trigger", channel="websocket", chat_id="chat-1",
+        session_key="unified:default",
+    )
+    store.enqueue(trigger.id, "Process this delivery")
+    submit_turn = AsyncMock()
+
+    task = asyncio.create_task(run_local_trigger_queue(
+        store=store, submit_turn=submit_turn, is_channel_enabled=_channel_is_enabled,
+    ))
+    try:
+        async with asyncio.timeout(3):
+            while not (current := store.get(trigger.id)) or current.last_status != "ok":
+                await asyncio.sleep(0.01)
+        message = submit_turn.await_args.args[0]
+        assert message.session_key == "unified:default"
+        assert (message.channel, message.chat_id) == ("websocket", "chat-1")
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 @pytest.mark.asyncio
@@ -621,7 +647,6 @@ def test_local_trigger_from_dict_accepts_null_run_at_ms() -> None:
 
 
 def test_local_trigger_from_dict_coerces_string_last_run_at_ms() -> None:
-    """String lastRunAtMs must coerce to int like cron store ms fields."""
     trigger = LocalTrigger.from_dict(
         {
             "id": "t1",
@@ -653,7 +678,6 @@ def test_local_trigger_from_dict_coerces_string_last_run_at_ms() -> None:
 
 
 def test_local_trigger_from_dict_accepts_null_run_history() -> None:
-    """Null runHistory must load as empty, matching CronJobState.from_store_dict."""
     trigger = LocalTrigger.from_dict(
         {
             "id": "t1",

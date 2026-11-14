@@ -1,5 +1,3 @@
-"""Provider used while the local WebUI is waiting for first-time setup."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -8,7 +6,7 @@ from nanobot.providers.base import LLMProvider, LLMResponse
 
 
 class UnconfiguredProvider(LLMProvider):
-    """Keep the gateway available for settings before a model is configured."""
+    """Keep the runtime available before a model is configured."""
 
     def __init__(self, default_model: str) -> None:
         super().__init__(provider_name="unconfigured")

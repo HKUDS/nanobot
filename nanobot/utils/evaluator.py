@@ -22,7 +22,6 @@ from nanobot.utils.workspace_prompts import (
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
-# Cap for a workspace-local heartbeat evaluator prompt override.
 EVALUATOR_PROMPT_MAX_CHARS = WORKSPACE_PROMPT_MAX_CHARS
 
 
@@ -129,9 +128,15 @@ async def evaluate_response(
 
         args = llm_response.tool_calls[0].arguments
         should_notify = args.get("should_notify", default_notify)
+        if not isinstance(should_notify, bool):
+            logger.warning(
+                "evaluate_response: non-boolean should_notify, defaulting to notify={}",
+                default_notify,
+            )
+            return default_notify
         reason = args.get("reason", "")
         logger.info("evaluate_response: should_notify={}, reason={}", should_notify, reason)
-        return bool(should_notify)
+        return should_notify
 
     except Exception:
         logger.exception("evaluate_response failed, defaulting to notify={}", default_notify)

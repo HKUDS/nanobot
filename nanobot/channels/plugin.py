@@ -1,5 +1,3 @@
-"""Typed metadata for self-contained channel packages."""
-
 from __future__ import annotations
 
 import importlib
@@ -11,6 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from packaging.requirements import InvalidRequirement, Requirement
 
+from nanobot.channels.connect import ChannelConnector
 from nanobot.channels.contracts import ChannelManagementSpec, ChannelSetupSpec
 
 if TYPE_CHECKING:
@@ -93,7 +92,7 @@ class ChannelPlugin:
             )
         return channel_cls
 
-    def load_connector(self) -> Any:
+    def load_connector(self) -> ChannelConnector:
         """Construct the optional channel-owned interactive connector."""
         if self.connector is None:
             raise ImportError(f"Channel plugin '{self.name}' does not provide a connector")
@@ -110,7 +109,9 @@ class ChannelPlugin:
                 f"Channel plugin '{self.name}' connector '{self.connector}' "
                 "does not provide handle()"
             )
-        return connector
+        # Dynamic plugin edge: handle() is the established connector contract.
+        # Lifecycle support is optional and checked by its maintenance owner.
+        return cast(ChannelConnector, connector)
 
 
 def _target_parts(target: str, *, label: str) -> tuple[str, str]:

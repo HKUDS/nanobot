@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from openai.types.chat import ChatCompletionChunk
 
 import nanobot.providers.openai_codex_provider as codex_provider
 from nanobot.providers.anthropic_provider import AnthropicProvider
@@ -22,6 +23,7 @@ class _AsyncStream:
     def __init__(self, chunks: list[Any]) -> None:
         self._chunks = chunks
         self._idx = 0
+        self.close = AsyncMock()
 
     def __aiter__(self) -> _AsyncStream:
         return self
@@ -74,28 +76,24 @@ async def test_openai_compat_stream_ignores_invalid_idle_timeout_env(monkeypatch
     monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "abc")
     provider = OpenAICompatProvider(api_key="sk-test", api_base="https://example.com/v1")
 
-    chunk = SimpleNamespace(
-        choices=[SimpleNamespace(
-            delta=SimpleNamespace(
-                content="ok",
-                reasoning_content=None,
-                reasoning=None,
-                tool_calls=None,
-                function_call=None,
-            ),
-            finish_reason="stop",
-        )],
-        usage=None,
-    )
+    chunk = ChatCompletionChunk.model_validate({
+        "id": "chatcmpl-timeout",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "test-model",
+        "choices": [{"index": 0, "delta": {"content": "ok"}, "finish_reason": "stop"}],
+    })
+    stream = _AsyncStream([chunk])
     provider._client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(
-            create=AsyncMock(return_value=_AsyncStream([chunk])),
+            create=AsyncMock(return_value=stream),
         )),
     )
 
     result = await provider.chat_stream(messages=[{"role": "user", "content": "hi"}])
 
     assert result.content == "ok"
+    stream.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

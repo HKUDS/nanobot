@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   type ChannelProviderPreset,
   type ChannelSetupPresentation,
-} from "@/components/settings/channels/catalog";
+} from "@/channel-plugins/catalog";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import type { NanobotFeatureInfo } from "@/lib/types";
 

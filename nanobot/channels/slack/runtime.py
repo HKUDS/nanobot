@@ -1,5 +1,3 @@
-"""Slack channel implementation using Socket Mode."""
-
 import asyncio
 import re
 from pathlib import Path
@@ -14,12 +12,15 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 from slackify_markdown import slackify_markdown  # pyright: ignore[reportMissingTypeStubs]
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.pairing import is_approved
 from nanobot.security.network import (
     PinnedDNSAsyncTransport,
@@ -30,12 +31,10 @@ from nanobot.utils.helpers import safe_filename, split_message
 
 
 def _as_json_object(value: Any) -> dict[str, Any] | None:
-    """Narrow Slack's untyped Socket Mode payloads at the boundary."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else None
 
 
 def _as_json_list(value: Any) -> list[Any] | None:
-    """Narrow Slack's untyped Socket Mode arrays at the boundary."""
     return cast(list[Any], value) if isinstance(value, list) else None
 
 
@@ -82,10 +81,11 @@ class SlackConfig(Base):
     # instead of every message). No effect for "mention"/"open" policies.
     group_require_mention: bool = False
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
-    proxy: str | None = None
+    use_proxy: bool = False
 
 
 SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
+SLACK_SECTION_TEXT_MAX_LEN = 3_000  # Block Kit section text limit
 SLACK_DOWNLOAD_TIMEOUT = 30.0
 # Abort Socket Mode WSS handshake after this many seconds. REST auth_test can still
 # succeed while WSS blocks (firewall / region). slack-sdk does not apply HTTP(S)_PROXY
@@ -95,7 +95,6 @@ _HTML_DOWNLOAD_PREFIXES = (b"<!doctype html", b"<html")
 
 
 async def _validate_slack_download_request(request: httpx.Request) -> None:
-    """Validate every Slack file request, including redirects, before transport."""
     ok, error = validate_url_target(str(request.url))
     if not ok:
         raise httpx.RequestError(f"unsafe Slack file URL: {error}", request=request)
@@ -106,6 +105,7 @@ class SlackChannel(BaseChannel):
 
     name = "slack"
     display_name = "Slack"
+    uses_shared_proxy = True
     _SLACK_ID_RE = re.compile(r"^[CDGUW][A-Z0-9]{2,}$")
     _SLACK_CHANNEL_REF_RE = re.compile(r"^<#([A-Z0-9]+)(?:\|[^>]+)?>$")
     _SLACK_USER_REF_RE = re.compile(r"^<@([A-Z0-9]+)(?:\|[^>]+)?>$")
@@ -116,11 +116,14 @@ class SlackChannel(BaseChannel):
 
     _THREAD_CONTEXT_CACHE_LIMIT = 10_000
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self, config: Any, bus: MessageBus, *, network: NetworkConfig | None = None,
+    ):
         if isinstance(config, dict):
             config = SlackConfig.model_validate(config)
-        super().__init__(config, bus)
+        super().__init__(config, bus, network=network)
         self.config: SlackConfig = config
+        self._proxy = self.network.resolve_proxy(self.config.use_proxy)
         self._web_client: AsyncWebClient | None = None
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None
@@ -145,10 +148,7 @@ class SlackChannel(BaseChannel):
 
         self._running = True
 
-        proxy = self.config.proxy.strip() if self.config.proxy else ""
-        if proxy and "://" not in proxy:
-            proxy = f"http://{proxy}"
-        proxy = proxy or None
+        proxy = self._proxy
         self._web_client = AsyncWebClient(token=self.config.bot_token, proxy=proxy)
         self._socket_client = SocketModeClient(
             app_token=self.config.app_token,
@@ -158,7 +158,6 @@ class SlackChannel(BaseChannel):
 
         self._socket_client.socket_mode_request_listeners.append(self._on_socket_request)
 
-        # Resolve bot user ID for mention handling
         try:
             web_api = self._require_web_api()
             auth = await web_api.auth_test()
@@ -201,9 +200,12 @@ class SlackChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
-        if not self._web_client:
-            self.logger.warning("client not running")
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
+        if not self._web_client:
+            raise ChannelNotReadyError("Slack client not running")
         try:
             web_api = self._require_web_api()
             target_chat_id = await self._resolve_target_chat_id(msg.chat_id)
@@ -260,7 +262,6 @@ class SlackChannel(BaseChannel):
                 except Exception:
                     self.logger.exception("Failed to upload file {}", media_path)
 
-            # Update reaction emoji when the final (non-progress) response is sent
             if not is_progress:
                 raw_event = slack_meta.get("event", {})
                 event = (
@@ -278,7 +279,6 @@ class SlackChannel(BaseChannel):
             raise
 
     async def _resolve_target_chat_id(self, target: str) -> str:
-        """Resolve human-friendly Slack targets to concrete IDs when needed."""
         if not self._web_client:
             return target
 
@@ -413,14 +413,12 @@ class SlackChannel(BaseChannel):
         client: AsyncBaseSocketModeClient,
         req: SocketModeRequest,
     ) -> None:
-        """Handle incoming Socket Mode requests."""
         if req.type == "interactive":
             await self._on_block_action(client, req)
             return
         if req.type != "events_api":
             return
 
-        # Acknowledge right away
         await client.send_socket_mode_response(
             SocketModeResponse(envelope_id=req.envelope_id)
         )
@@ -429,7 +427,6 @@ class SlackChannel(BaseChannel):
         event = _as_json_object(payload.get("event")) or {}
         event_type = event.get("type")
 
-        # Handle app mentions or plain messages
         if event_type not in ("message", "app_mention"):
             return
 
@@ -452,7 +449,6 @@ class SlackChannel(BaseChannel):
         if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
             return
 
-        # Debug: log basic event shape
         self.logger.debug(
             "event: type={} subtype={} user={} channel={} channel_type={} text={}",
             event_type,
@@ -498,7 +494,6 @@ class SlackChannel(BaseChannel):
             and channel_type != "im"
         ):
             thread_ts = event_ts
-        # Add :eyes: reaction to the triggering message (best-effort)
         try:
             if self._web_client and event_ts:
                 web_api = self._require_web_api()
@@ -531,7 +526,6 @@ class SlackChannel(BaseChannel):
         content = text if is_slash else await self._with_thread_context(
             text,
             chat_id=chat_id,
-            channel_type=channel_type,
             thread_ts=thread_ts,
             raw_thread_ts=raw_thread_ts,
             current_ts=event_ts,
@@ -560,7 +554,6 @@ class SlackChannel(BaseChannel):
             self.logger.exception("Error handling message from {}", sender_id)
 
     async def _download_slack_file(self, file_info: dict[str, Any]) -> tuple[str | None, str]:
-        """Download a Slack private file to the local media directory."""
         file_id = str(file_info.get("id") or "file")
         name = str(
             file_info.get("name")
@@ -586,14 +579,10 @@ class SlackChannel(BaseChannel):
                 mounts=(
                     {
                         "all://": httpx.AsyncHTTPTransport(
-                            proxy=httpx.Proxy(
-                                self.config.proxy
-                                if "://" in self.config.proxy
-                                else f"http://{self.config.proxy}"
-                            )
+                            proxy=httpx.Proxy(self._proxy)
                         )
                     }
-                    if self.config.proxy
+                    if self._proxy
                     else httpx_env_proxy_mounts()
                 ),
                 event_hooks={"request": [_validate_slack_download_request]},
@@ -631,7 +620,6 @@ class SlackChannel(BaseChannel):
         client: AsyncBaseSocketModeClient,
         req: SocketModeRequest,
     ) -> None:
-        """Handle button clicks from inline action buttons."""
         await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
         payload = cast(dict[str, Any], cast(Any, req).payload or {})
         actions = cast(list[Any], payload.get("actions") or [])
@@ -670,13 +658,10 @@ class SlackChannel(BaseChannel):
         text: str,
         *,
         chat_id: str,
-        channel_type: str,
         thread_ts: str | None,
         raw_thread_ts: str | None,
         current_ts: str | None,
     ) -> str:
-        """Include thread history the first time the bot is pulled into a Slack thread."""
-        del channel_type  # DM and channel threads are both fetched via conversations.replies
         if (
             not self.config.include_thread_context
             or not self._web_client
@@ -734,8 +719,12 @@ class SlackChannel(BaseChannel):
     @staticmethod
     def _build_button_blocks(text: str, buttons: list[list[str]]) -> list[dict[str, Any]]:
         """Build Slack Block Kit blocks with action buttons."""
+        # Slack renders ``blocks`` instead of ``text`` and caps each section's
+        # text at 3000 chars, so split the chunk across sections rather than
+        # dropping everything past the first 3000 chars.
         blocks: list[dict[str, Any]] = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": text[:3000]}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": part}}
+            for part in split_message(text, SLACK_SECTION_TEXT_MAX_LEN)
         ]
         elements: list[dict[str, Any]] = []
         for row in buttons:
@@ -751,7 +740,6 @@ class SlackChannel(BaseChannel):
         return blocks
 
     async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
-        """Remove the in-progress reaction and optionally add a done reaction."""
         if not self._web_client or not ts:
             return
         web_api = self._require_web_api()
@@ -781,7 +769,6 @@ class SlackChannel(BaseChannel):
                 return sender_id in self.config.dm.allow_from or is_approved(self.name, sender_id)
             return True
 
-        # Group / channel messages
         if self.config.group_policy == "allowlist":
             return chat_id in self.config.group_allow_from
         return True
@@ -840,11 +827,20 @@ class SlackChannel(BaseChannel):
             code_blocks.append(m.group(0))
             return f"\x00CB{len(code_blocks) - 1}\x00"
 
+        tables: list[str] = []
+
+        def _save_table(m: re.Match[str]) -> str:
+            tables.append(cls._convert_table(m))
+            return f"\ue000TB{len(tables) - 1}\ue000"
+
         text = cls._CODE_FENCE_RE.sub(_save_fence, text)
-        text = cls._TABLE_RE.sub(cls._convert_table, text)
+        text = cls._TABLE_RE.sub(_save_table, text)
         for i, block in enumerate(code_blocks):
             text = text.replace(f"\x00CB{i}\x00", block)
-        return cls._fixup_mrkdwn(slackify_markdown(text)).rstrip("\n")
+        text = slackify_markdown(text)
+        for i, table in enumerate(tables):
+            text = text.replace(f"\ue000TB{i}\ue000", table)
+        return cls._fixup_mrkdwn(text).rstrip("\n")
 
     @classmethod
     def _fixup_mrkdwn(cls, text: str) -> str:
@@ -882,5 +878,5 @@ class SlackChannel(BaseChannel):
             cells = (cells + [""] * len(headers))[: len(headers)]
             parts = [f"**{headers[i]}**: {cells[i]}" for i in range(len(headers)) if cells[i]]
             if parts:
-                rows.append(" · ".join(parts))
-        return "\n".join(rows)
+                rows.append(slackify_markdown("\n".join(parts)).rstrip("\n"))
+        return "\n\n".join(rows)

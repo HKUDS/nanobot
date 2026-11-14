@@ -20,7 +20,7 @@ from nanobot.runtime_context import (
     webui_quote_runtime_context,
 )
 from nanobot.sdk.types import snapshot_from_session
-from nanobot.session.manager import Session, _message_preview_text
+from nanobot.session.manager import Session, message_preview_text
 from nanobot.session.webui_turns import _title_inputs
 from nanobot.webui.transcript import _session_user_event
 
@@ -163,7 +163,7 @@ def test_webui_preview_title_and_backfill_hide_runtime_context() -> None:
     }
     session = Session(key="websocket:chat", messages=[persisted])
 
-    assert _message_preview_text(persisted) == "visible user text"
+    assert message_preview_text(persisted) == "visible user text"
     assert _title_inputs(session) == ("visible user text", "")
     event = _session_user_event("websocket:chat", persisted)
     assert event is not None

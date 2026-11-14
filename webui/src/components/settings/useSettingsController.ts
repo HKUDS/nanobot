@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { imageGenerationFormFromPayload } from "@/components/settings/capabilities/ImageGenerationSettings";
@@ -20,6 +20,8 @@ import type {
   SettingsSectionKey,
 } from "@/components/settings/contracts";
 import { agentDraftFromPayload } from "@/components/settings/models/ModelsSettings";
+import { modelAPISelection } from "@/components/settings/models/modelAPI";
+import { providerJsonValue } from "@/components/settings/models/providerForm";
 import { useModelSettingsActions } from "@/components/settings/models/useModelSettingsActions";
 import {
   useProviderFormsSync,
@@ -31,10 +33,12 @@ import { useRuntimeConfigSettings } from "@/components/settings/system/RuntimeCo
 import { createSystemSettingsActions } from "@/components/settings/system/createSystemSettingsActions";
 import { useSystemSettingsEffects } from "@/components/settings/system/useSystemSettingsEffects";
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
+import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
-import { useAutoSave } from "@/components/settings/shared/useAutoSave";
-import { fetchSettings, fetchSettingsUsage } from "@/lib/api";
+import { useEditCompletion } from "@/components/settings/shared/useEditCompletion";
+import { cancelProviderOAuth, fetchSettings } from "@/lib/api";
 import {
+  LOCAL_PREFS_CHANGED_EVENT,
   readLocalPreferences,
   writeLocalPreferences,
   type LocalPreferences,
@@ -78,7 +82,7 @@ export function useSettingsController({
   onNativeEngineRestart,
 }: SettingsControllerOptions) {
   const { t } = useTranslation();
-  const { client, getToken, token } = useClient();
+  const { client, getToken, token, webuiCapabilities } = useClient();
   const pageVisible = usePageVisibility();
   const remoteBrowserAccess =
     typeof window !== "undefined" && !isLoopbackHost(window.location.hostname);
@@ -90,47 +94,28 @@ export function useSettingsController({
   const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
     EMPTY_PENDING_RESTART_SECTIONS,
   );
+  const previousInitialSettingsRef = useRef(initialSettings);
+  const latestInitialSettingsRef = useRef(initialSettings);
+  latestInitialSettingsRef.current = initialSettings;
+  const restartRefreshRef = useRef<SettingsPayload | null>(null);
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
   const modelState = useModelSettingsState(initialSettings);
   const {
-    editingProviderKeys, expandedProvider, form, modelCallOrder, modelCallOrderSaving,
-    modelConfigurationSaving, modelMigrationSaving, modelPresetBeforeCreateRef,
-    modelPresetCreating, modelPresetEditingName, modelPresetNameError, modelPresetPendingDelete,
-    providerForms, providerOAuthCompleting,
-    providerOAuthDialogError, providerOAuthFlow, providerOAuthFlowRef, providerOAuthResponse,
-    providerSaving, saving, setForm,
-    setModelCallOrder, setModelPresetCreating, setModelPresetEditingName, setModelPresetNameError,
-    setModelPresetPendingDelete,
-    setProviderForms, setProviderOAuthCompleting, setProviderOAuthDialogError,
-    setProviderOAuthFlow, setProviderOAuthResponse, visibleProviderKeys,
+    form, modelPresetEditingName, providerOAuthFlowRef, setForm,
+    setModelCallOrder, setModelPresetCreating, setModelPresetEditingName,
+    setProviderOAuthCompleting, setProviderOAuthDialogError,
+    setProviderOAuthFlow, setProviderOAuthResponse,
   } = modelState;
   const capabilityState = useCapabilitySettingsState(initialSettings);
   const {
-    imageGenerationForm, imageGenerationSaving, networkSafetyForm, networkSafetySaving,
+    imageGenerationForm, networkSafetyForm,
     setImageGenerationForm, setNetworkSafetyForm, setTranscriptionForm, setWebSearchForm,
-    setWebSearchKeyEditing, setWebSearchKeyVisible, transcriptionForm,
-    transcriptionSaving, webSearchForm, webSearchKeyEditing, webSearchKeyVisible,
-    webSearchSaving,
+    transcriptionForm, webSearchForm,
   } = capabilityState;
-  const systemState = useSystemSettingsState();
-  const {
-    apiService, apiServiceAction, apiServiceError, apiServiceLoading, appsKindFilter, appsQuery,
-    automationAction, automationPendingDelete, automationPendingEdit, automations,
-    automationsError, automationsFilter, automationsLoading,
-    cliApps, cliAppsAction, cliAppsError, cliAppsFocusName, cliAppsLoading,
-    cliAppsMessage, customMcpForm, mcpConfigImport, mcpError, mcpFieldValues, mcpMessage,
-    mcpOAuthCallbackError, mcpOAuthCallbackUrl, mcpOAuthCompleting, mcpOAuthFlow,
-    mcpOAuthPopupBlocked, mcpPresetAction, mcpPresets, mcpPresetsLoading, nanobotFeatureAction,
-    nanobotFeatureConfirm, nanobotFeatures, nanobotFeaturesError, nanobotFeaturesLoading,
-    setAppsKindFilter, setAppsQuery, setAutomationPendingDelete,
-    setAutomationPendingEdit, setAutomationsFilter,
-    setCliAppsError,
-    setCliAppsMessage, setCustomMcpForm, setMcpConfigImport, setMcpError, setMcpFieldValues,
-    setMcpMessage, setMcpOAuthCallbackError, setMcpOAuthCallbackUrl,
-    setNanobotFeatureConfirm, setNanobotFeatures,
-    setNanobotFeaturesError,
-  } = systemState;
-  const featureCatalog = nanobotFeatures?.features ?? [];
+  const draftsRef = useRef({ form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm });
+  draftsRef.current = { form, imageGenerationForm, networkSafetyForm, transcriptionForm, webSearchForm };
+  const systemState = useSystemSettingsState(getToolsCatalog(client, token));
+  const featureCatalog = systemState.nanobotFeatures?.features ?? [];
 
   useEffect(() => {
     setActiveSection(initialSection);
@@ -154,8 +139,6 @@ export function useSettingsController({
         setForm(nextForm);
         setModelPresetEditingName(nextForm.modelPreset);
         setModelPresetCreating(false);
-      } else {
-        setForm((current) => ({ ...current, timezone: payload.agent.timezone }));
       }
       setModelCallOrder(payload.model_call_order ?? []);
       if (!options.preserveCapabilityForms) {
@@ -174,13 +157,17 @@ export function useSettingsController({
 
   const runtimeConfigState = useRuntimeConfigSettings(settings, client, applyPayload);
 
-  const closeProviderOAuthFlow = useCallback(() => {
+  const closeProviderOAuthFlow = useCallback((cancelPending = true) => {
+    const flow = providerOAuthFlowRef.current;
     providerOAuthFlowRef.current = null;
+    if (cancelPending && flow?.completion_input === "device_code") {
+      void cancelProviderOAuth(client, flow.provider, flow.flow_id).catch(() => {});
+    }
     setProviderOAuthFlow(null);
     setProviderOAuthResponse("");
     setProviderOAuthCompleting(false);
     setProviderOAuthDialogError(null);
-  }, []);
+  }, [client]);
   useProviderOAuthPolling({
     state: modelState,
     client,
@@ -196,13 +183,37 @@ export function useSettingsController({
   }, [applyPayload, initialSettings, settings]);
 
   useEffect(() => {
+    const previous = previousInitialSettingsRef.current;
+    previousInitialSettingsRef.current = initialSettings;
+    if (previous?.requires_restart && !initialSettings?.requires_restart) {
+      restartRefreshRef.current = initialSettings;
+    } else if (restartRefreshRef.current !== initialSettings) {
+      restartRefreshRef.current = null;
+    }
+    const shouldApplyRestartedSettings =
+      restartRefreshRef.current === initialSettings && settings?.requires_restart === true;
+    if (!shouldApplyRestartedSettings || !initialSettings) {
+      return;
+    }
+    applyPayload(initialSettings, { preserveAgentForm: true, preserveCapabilityForms: true });
+  }, [applyPayload, initialSettings, settings]);
+
+  useEffect(() => {
     let cancelled = false;
     const showLoading = settings === null;
+    const requestInitialSettings = latestInitialSettingsRef.current;
+    const requestDrafts = draftsRef.current;
     if (showLoading) setLoading(true);
-    fetchSettings(getToken())
+    fetchSettings(getToken(), "", client)
       .then((payload) => {
-        if (!cancelled) {
-          applyPayload(payload);
+        if (!cancelled && latestInitialSettingsRef.current === requestInitialSettings) {
+          const current = draftsRef.current;
+          applyPayload(payload, {
+            preserveAgentForm: current.form !== requestDrafts.form,
+            preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
+              current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
+              current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
+          });
           setError(null);
         }
       })
@@ -217,37 +228,8 @@ export function useSettingsController({
     return () => {
       cancelled = true;
     };
-  }, [applyPayload, getToken]);
+  }, [applyPayload, client, getToken]);
 
-  const hasSettings = settings !== null;
-  useEffect(() => {
-    if (activeSection !== "overview" || !hasSettings || !pageVisible) return;
-    let cancelled = false;
-    let refreshing = false;
-    const refresh = async () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        const usage = await fetchSettingsUsage(getToken());
-        if (!cancelled) {
-          setSettings((current) => (current ? { ...current, usage } : current));
-        }
-      } catch {
-        // Usage is best-effort telemetry; the settings snapshot remains usable.
-      } finally {
-        refreshing = false;
-      }
-    };
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 5000);
-    const onFocus = () => void refresh();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [activeSection, getToken, hasSettings, pageVisible]);
   const { refreshAutomations } = useSystemSettingsEffects({
     state: systemState,
     activeSection,
@@ -255,6 +237,18 @@ export function useSettingsController({
     pageVisible,
   });
 
+  useEffect(() => {
+    const synchronize = (event: Event) => setLocalPrefs((event as CustomEvent<LocalPreferences>).detail);
+    const reload = () => setLocalPrefs(readLocalPreferences());
+    window.addEventListener(LOCAL_PREFS_CHANGED_EVENT, synchronize);
+    window.addEventListener("storage", reload);
+    window.addEventListener("focus", reload);
+    return () => {
+      window.removeEventListener(LOCAL_PREFS_CHANGED_EVENT, synchronize);
+      window.removeEventListener("storage", reload);
+      window.removeEventListener("focus", reload);
+    };
+  }, []);
   useEffect(() => {
     writeLocalPreferences(localPrefs);
   }, [localPrefs]);
@@ -273,7 +267,12 @@ export function useSettingsController({
       form.maxTokens !== selectedPreset.max_tokens ||
       form.contextWindowTokens !== normalizeContextWindowTokens(selectedPreset.context_window_tokens) ||
       form.temperature !== selectedPreset.temperature ||
-      form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "")
+      form.reasoningEffort !== (selectedPreset.reasoning_effort ?? "") ||
+      form.supportsImages !== (selectedPreset.supports_images ?? true) ||
+      modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api) ||
+      form.extraHeaders !== providerJsonValue(selectedPreset.extra_headers) ||
+      form.extraQuery !== providerJsonValue(selectedPreset.extra_query) ||
+      form.extraBody !== providerJsonValue(selectedPreset.extra_body)
     );
   }, [form, modelPresetEditingName, settings]);
 
@@ -285,7 +284,11 @@ export function useSettingsController({
       imageGenerationForm.model !== settings.image_generation.model ||
       imageGenerationForm.defaultAspectRatio !== settings.image_generation.default_aspect_ratio ||
       imageGenerationForm.defaultImageSize !== settings.image_generation.default_image_size ||
-      imageGenerationForm.maxImagesPerTurn !== settings.image_generation.max_images_per_turn
+      imageGenerationForm.maxImagesPerTurn !== settings.image_generation.max_images_per_turn ||
+      (settings.image_generation.request_overrides_supported && (
+        imageGenerationForm.extraHeaders !== providerJsonValue(settings.image_generation.extra_headers) ||
+        imageGenerationForm.extraBody !== providerJsonValue(settings.image_generation.extra_body)
+      )) === true
     );
   }, [imageGenerationForm, settings]);
 
@@ -329,10 +332,17 @@ export function useSettingsController({
       onNativeEngineRestart
     ) {
       setHostEngineApplying(true);
+      const requestDrafts = draftsRef.current;
       try {
         const nextToken = await onNativeEngineRestart();
-        const payload = await fetchSettings(nextToken);
-        applyPayload(payload);
+        const payload = await fetchSettings(nextToken, "", client);
+        const current = draftsRef.current;
+        applyPayload(payload, {
+          preserveAgentForm: current.form !== requestDrafts.form,
+          preserveCapabilityForms: current.imageGenerationForm !== requestDrafts.imageGenerationForm ||
+            current.networkSafetyForm !== requestDrafts.networkSafetyForm ||
+            current.transcriptionForm !== requestDrafts.transcriptionForm || current.webSearchForm !== requestDrafts.webSearchForm,
+        });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -361,8 +371,8 @@ export function useSettingsController({
       setHostEngineApplying(true);
       try {
         const nextToken = await onNativeEngineRestart();
-        const refreshed = await fetchSettings(nextToken);
-        applyPayload(refreshed);
+        const refreshed = await fetchSettings(nextToken, "", client);
+        applyPayload(refreshed, { preserveAgentForm: true, preserveCapabilityForms: true });
         setPendingRestartSections(EMPTY_PENDING_RESTART_SECTIONS);
         setError(null);
       } catch (err) {
@@ -377,10 +387,8 @@ export function useSettingsController({
     state: systemState,
     featureCatalog,
     client,
-    token,
     getToken,
     t,
-    applyPayload,
     maybeRestartHostEngine,
     setPendingRestartSections,
     refreshAutomations,
@@ -397,9 +405,9 @@ export function useSettingsController({
     setError,
     onModelNameChange,
     remoteBrowserAccess,
+    optimizedPresetSave: webuiCapabilities.includes("webui.model-preset-save.v1"),
     closeProviderOAuthFlow,
     installCapabilities,
-    modelDirty,
     configuredModelProviderOptions,
   });
   const capabilityActions = useCapabilitySettingsActions({
@@ -411,211 +419,52 @@ export function useSettingsController({
     maybeRestartHostEngine,
     setPendingRestartSections,
     installCapabilities,
-    imageGenerationDirty,
-    transcriptionDirty,
-    networkSafetyDirty,
   });
-  const {
-    beginModelPresetCreation,
-    cancelModelPresetCreation,
-    changeModelCallOrder,
-    completeProviderOAuthResponse,
-    createCustomProvider,
-    handleDeleteModelConfiguration,
-    handleMigrateModelConfigurations,
-    handleToggleProvider,
-    runProviderOAuth,
-    saveModelSettings,
-    saveProvider,
-    toggleProviderKeyEditing,
-    toggleProviderKeyVisibility,
-  } = modelActions;
-  const {
-    handleWebSearchProviderChange,
-    resetWebSearchDraft,
-    saveImageGenerationSettings,
-    saveNetworkSafetySettings,
-    saveTranscriptionSettings,
-    saveWebSearch,
-  } = capabilityActions;
-  useAutoSave(imageGenerationForm, imageGenerationDirty, imageGenerationSaving, saveImageGenerationSettings,
+  const modelEdits = useEditCompletion(form, modelDirty, modelActions.saveModelSettings,
+    !modelState.modelPresetCreating && !!form.model.trim(), modelActions.modelEditIdentity);
+  const safetyEdits = useEditCompletion(networkSafetyForm, networkSafetyDirty, capabilityActions.saveNetworkSafetySettings);
+  const imageEdits = useEditCompletion(imageGenerationForm, imageGenerationDirty, capabilityActions.saveImageGenerationSettings,
     !imageGenerationForm.enabled || Boolean(settings?.image_generation.providers.find(
       (provider) => provider.name === imageGenerationForm.provider,
     )?.configured));
-  useAutoSave(transcriptionForm, transcriptionDirty, transcriptionSaving, saveTranscriptionSettings);
+  const transcriptionEdits = useEditCompletion(transcriptionForm, transcriptionDirty, capabilityActions.saveTranscriptionSettings);
   const webDraft = settings ? webSearchDraftState(settings, webSearchForm) : null;
-  useAutoSave(webSearchForm, webDraft?.dirty ?? false, webSearchSaving, saveWebSearch,
+  const webEdits = useEditCompletion(webSearchForm, webDraft?.dirty ?? false, capabilityActions.saveWebSearch,
     !webDraft?.missingCredential && (webSearchForm.provider !== "olostep" ||
       featureCatalog.some((feature) => feature.name === "olostep" && feature.installed)));
-  const {
-    handleApiServiceAction,
-    handleAutomationAction,
-    handleAutomationEdit,
-    handleCliAppAction,
-    handleImportMcpConfig,
-    handleMcpOAuthCancel,
-    handleMcpOAuthComplete,
-    handleMcpOAuthConnect,
-    handleMcpOAuthOpen,
-    handleMcpPresetAction,
-    handleMcpToolsChange,
-    handleNanobotFeatureAction,
-    handleSaveCustomMcp,
-  } = systemActions;
 
   return {
+    modelState,
+    modelActions,
+    capabilityState,
+    capabilityActions,
+    modelEdits,
+    safetyEdits,
+    imageEdits,
+    transcriptionEdits,
+    webEdits,
+    systemState,
+    systemActions,
     activeSection,
-    capabilityErrors: capabilityState.capabilityErrors,
     runtimeConfigState,
-    apiService,
-    apiServiceAction,
-    apiServiceError,
-    apiServiceLoading,
-    appsKindFilter,
-    appsQuery,
-    automationAction,
-    automationPendingDelete,
-    automationPendingEdit,
-    automations,
-    automationsError,
-    automationsFilter,
-    automationsLoading,
-    beginModelPresetCreation,
-    cancelModelPresetCreation,
-    changeModelCallOrder,
-    cliApps,
-    cliAppsAction,
-    cliAppsError,
-    cliAppsFocusName,
-    cliAppsLoading,
-    cliAppsMessage,
     closeProviderOAuthFlow,
-    completeProviderOAuthResponse,
-    createCustomProvider,
-    customMcpForm,
-    editingProviderKeys,
     error,
-    expandedProvider,
     featureCatalog,
-    form,
-    handleApiServiceAction,
-    handleAutomationAction,
-    handleAutomationEdit,
-    handleCliAppAction,
-    handleDeleteModelConfiguration,
-    handleImportMcpConfig,
-    handleMcpOAuthCancel,
-    handleMcpOAuthComplete,
-    handleMcpOAuthConnect,
-    handleMcpOAuthOpen,
-    handleMcpPresetAction,
-    handleMcpToolsChange,
-    handleMigrateModelConfigurations,
-    handleNanobotFeatureAction,
-    handleSaveCustomMcp,
-    handleToggleProvider,
-    handleWebSearchProviderChange,
     hostEngineApplying,
     imageGenerationDirty,
-    imageGenerationForm,
-    imageGenerationSaving,
-    installCapabilities,
     loading,
     localPrefs,
-    mcpConfigImport,
-    mcpError,
-    mcpFieldValues,
-    mcpMessage,
-    mcpOAuthCallbackError,
-    mcpOAuthCallbackUrl,
-    mcpOAuthCompleting,
-    mcpOAuthFlow,
-    mcpOAuthPopupBlocked,
-    mcpPresetAction,
-    mcpPresets,
-    mcpPresetsLoading,
-    modelCallOrder,
-    modelCallOrderSaving,
-    modelConfigurationSaving,
     modelDirty,
-    modelMigrationSaving,
-    modelPresetBeforeCreateRef,
-    modelPresetCreating,
-    modelPresetEditingName,
-    modelPresetNameError,
-    modelPresetPendingDelete,
-    nanobotFeatureAction,
-    nanobotFeatureConfirm,
-    nanobotFeatures,
-    nanobotFeaturesError,
-    nanobotFeaturesLoading,
     networkSafetyDirty,
-    networkSafetyForm,
-    networkSafetySaving,
     pendingRestartSections,
-    providerForms,
-    providerOAuthCompleting,
-    providerOAuthDialogError,
-    providerOAuthFlow,
-    providerOAuthResponse,
-    providerSaving,
     remoteBrowserAccess,
-    resetWebSearchDraft,
     restartViaSettingsSurface,
-    runProviderOAuth,
-    saveImageGenerationSettings,
-    saveModelSettings,
-    saveNetworkSafetySettings,
-    saveProvider,
-    saveTranscriptionSettings,
-    saveWebSearch,
-    saving,
     selectSection,
-    setAppsKindFilter,
-    setAppsQuery,
-    setAutomationPendingDelete,
-    setAutomationPendingEdit,
-    setAutomationsFilter,
-    setCliAppsError,
-    setCliAppsMessage,
-    setCustomMcpForm,
-    setForm,
-    setImageGenerationForm,
     setLocalPrefs,
-    setMcpConfigImport,
-    setMcpError,
-    setMcpFieldValues,
-    setMcpMessage,
-    setMcpOAuthCallbackError,
-    setMcpOAuthCallbackUrl,
-    setModelPresetCreating,
-    setModelPresetEditingName,
-    setModelPresetNameError,
-    setModelPresetPendingDelete,
-    setNanobotFeatureConfirm,
-    setNanobotFeatures,
-    setNanobotFeaturesError,
-    setNetworkSafetyForm,
-    setProviderForms,
-    setProviderOAuthDialogError,
-    setProviderOAuthResponse,
-    setTranscriptionForm,
-    setWebSearchForm,
-    setWebSearchKeyEditing,
-    setWebSearchKeyVisible,
     settings,
     t,
-    toggleProviderKeyEditing,
-    toggleProviderKeyVisibility,
     token,
     transcriptionDirty,
-    transcriptionForm,
-    transcriptionSaving,
-    visibleProviderKeys,
-    webSearchForm,
-    webSearchKeyEditing,
-    webSearchKeyVisible,
-    webSearchSaving,
   };
 }
 

@@ -1,4 +1,3 @@
-"""Nanobot optional feature helpers for WebUI Settings."""
 from __future__ import annotations
 
 from pathlib import Path

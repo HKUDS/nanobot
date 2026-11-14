@@ -1,5 +1,3 @@
-"""Tool registry for dynamic tool management."""
-
 from __future__ import annotations
 
 import json
@@ -10,6 +8,18 @@ from nanobot.agent.tools.context import ContextAware, current_request_context
 
 if TYPE_CHECKING:
     from nanobot.runtime_context import RuntimeContextProvider
+
+_ERROR_HINT = (
+    "\n\n[Consider this result in the context of the user's goal "
+    "and decide whether and how to proceed.]"
+)
+
+
+def with_tool_error_hint(payload: str) -> str:
+    """Append tool error guidance exactly once."""
+    if payload.endswith(_ERROR_HINT):
+        return payload
+    return payload + _ERROR_HINT
 
 
 def is_tool_error_result(result: Any) -> bool:
@@ -112,7 +122,7 @@ class ToolRegistry:
         name: str,
         params: Any,
     ) -> tuple[Tool | None, Any, str | None]:
-        """Resolve, cast, and validate one tool call."""
+        """Resolve and validate one tool call without changing argument values."""
         tool = self.get(name)
         if not tool:
             suggestion = self._suggest_name(str(name))
@@ -138,13 +148,13 @@ class ToolRegistry:
                 )
             )
 
-        cast_params = tool.cast_params(cast(dict[str, Any], params))
-        errors = tool.validate_params(cast_params)
+        arguments = cast(dict[str, Any], params)
+        errors = tool.validate_params(arguments)
         if errors:
-            return tool, cast_params, (
+            return tool, arguments, (
                 ToolResult.error(f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors))
             )
-        return tool, cast_params, None
+        return tool, arguments, None
 
     @classmethod
     def _coerce_argument_value(cls, value: Any) -> Any:
@@ -186,19 +196,21 @@ class ToolRegistry:
 
     async def execute(self, name: str, params: Any) -> Any:
         """Execute a tool by name with given parameters."""
-        hint = "\n\n[Analyze the error above and try a different approach.]"
         tool, params, error = self.prepare_call(name, params)
         if error:
-            return ToolResult.error(str(error) + hint)
+            return ToolResult.error(with_tool_error_hint(str(error)))
 
         try:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
             if is_tool_error_result(result):
-                return ToolResult.error(str(result) + hint)
+                return ToolResult.error(
+                    with_tool_error_hint(str(result)),
+                    error_code=result.error_code if isinstance(result, ToolResult) else None,
+                )
             return result
         except Exception as e:
-            return ToolResult.error(f"Error executing {name}: {str(e)}" + hint)
+            return ToolResult.error(with_tool_error_hint(f"Error executing {name}: {str(e)}"))
 
     @property
     def tool_names(self) -> list[str]:

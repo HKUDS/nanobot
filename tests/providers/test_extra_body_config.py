@@ -1,9 +1,8 @@
-"""Tests for provider extra_body config injection into request payloads."""
-
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+
+import pytest
 
 from nanobot.providers.openai_compat_provider import (
     OpenAICompatProvider,
@@ -11,13 +10,8 @@ from nanobot.providers.openai_compat_provider import (
 )
 from nanobot.providers.registry import find_by_name
 
-# ---------------------------------------------------------------------------
-# _deep_merge unit tests
-# ---------------------------------------------------------------------------
-
 
 class TestDeepMerge:
-    """Verify recursive dict merge semantics."""
 
     def test_flat_merge(self) -> None:
         assert _deep_merge({"a": 1}, {"b": 2}) == {"a": 1, "b": 2}
@@ -55,13 +49,7 @@ class TestDeepMerge:
         assert override == {"a": {"y": 2}}
 
 
-# ---------------------------------------------------------------------------
-# Provider construction
-# ---------------------------------------------------------------------------
-
-
 class TestExtraBodyInit:
-    """Verify the provider stores extra_body from config."""
 
     def test_default_is_empty(self) -> None:
         provider = OpenAICompatProvider(api_key="test")
@@ -77,11 +65,6 @@ class TestExtraBodyInit:
         assert provider._extra_body == body
 
 
-# ---------------------------------------------------------------------------
-# _build_kwargs integration
-# ---------------------------------------------------------------------------
-
-
 def _make_provider(extra_body: dict[str, Any] | None = None) -> OpenAICompatProvider:
     return OpenAICompatProvider(
         api_key="test-key",
@@ -95,7 +78,6 @@ def _simple_messages() -> list[dict[str, Any]]:
 
 
 class TestBuildKwargsExtraBody:
-    """Verify extra_body flows into _build_kwargs output."""
 
     def test_no_extra_body_no_key(self) -> None:
         provider = _make_provider()
@@ -142,20 +124,13 @@ class TestBuildKwargsExtraBody:
         assert kwargs["extra_body"] == {"custom_param": "value"}
 
     def test_extra_body_merges_with_thinking(self) -> None:
-        """Config extra_body should merge with (and override) thinking params."""
         from nanobot.providers.registry import ProviderSpec
 
-        spec = MagicMock(spec=ProviderSpec)
-        spec.thinking_style = "deepseek"
-        spec.supports_prompt_caching = False
-        spec.strip_model_prefix = False
-        spec.model_overrides = []
-        spec.name = "custom"
-        spec.supports_max_completion_tokens = False
-        spec.env_key = None
-        spec.default_api_base = None
-        spec.is_local = True
-        spec.detect_by_base_keyword = None
+        spec = ProviderSpec(
+            name="custom", keywords=(), env_key="",
+            request_apis=("chat_completions", "responses"),
+            thinking_style="thinking_type", is_local=True,
+        )
 
         provider = OpenAICompatProvider(
             api_key="test",
@@ -169,27 +144,10 @@ class TestBuildKwargsExtraBody:
             temperature=0.1, reasoning_effort="high", tool_choice=None,
         )
         body = kwargs.get("extra_body", {})
-        # Config param should be present
         assert body.get("custom_param") == "value"
-
-    def test_nested_extra_body_does_not_clobber_siblings(self) -> None:
-        """Nested dict merge should preserve sibling keys."""
-        provider = _make_provider({
-            "chat_template_kwargs": {"enable_thinking": False},
-        })
-        # Simulate internal code having set a sibling key
-        # by manually calling _build_kwargs — the internal logic
-        # doesn't set chat_template_kwargs, so we test the merge path
-        # by having extra_body itself contain nested keys
-        kwargs = provider._build_kwargs(
-            messages=_simple_messages(),
-            tools=None, model=None, max_tokens=100,
-            temperature=0.1, reasoning_effort=None, tool_choice=None,
-        )
-        assert kwargs["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+        assert body["thinking"] == {"type": "enabled"}
 
     def test_guided_json_injection(self) -> None:
-        """Real-world use case: vLLM guided decoding."""
         schema = {"type": "object", "properties": {"name": {"type": "string"}}}
         provider = _make_provider({"guided_json": schema})
         kwargs = provider._build_kwargs(
@@ -200,7 +158,6 @@ class TestBuildKwargsExtraBody:
         assert kwargs["extra_body"]["guided_json"] == schema
 
     def test_repetition_penalty_injection(self) -> None:
-        """Real-world use case: local model sampling param."""
         provider = _make_provider({"repetition_penalty": 1.15})
         kwargs = provider._build_kwargs(
             messages=_simple_messages(),
@@ -211,7 +168,6 @@ class TestBuildKwargsExtraBody:
 
 
 class TestBuildResponsesBodyExtraBody:
-    """Verify extra_body flows into Responses API request bodies."""
 
     def test_responses_extra_body_merges_top_level_fields(self) -> None:
         provider = OpenAICompatProvider(
@@ -261,6 +217,7 @@ class TestBuildResponsesBodyExtraBody:
                 "name": "read_file",
                 "description": "Read a file",
                 "parameters": {"type": "object"},
+                "strict": False,
             },
             {"type": "web_search"},
         ]
@@ -306,45 +263,20 @@ class TestBuildResponsesBodyExtraBody:
                 "name": "read_file",
                 "description": "Read a file",
                 "parameters": {"type": "object"},
+                "strict": False,
             },
             {"type": "web_search"},
         ]
         assert body["include"] == ["web_search_call.action.sources"]
         assert provider._should_use_responses_api(None, None) is True
 
-    def test_deepseek_default_search_replaces_the_local_search_function(self) -> None:
+    @pytest.mark.parametrize("extra_body", [None, {"tools": []}, {"tools": [{"type": "web_search"}]}])
+    def test_deepseek_preserves_the_local_search_function(self, extra_body) -> None:
         provider = OpenAICompatProvider(
             api_key="test-key",
             default_model="deepseek-v4-flash",
             spec=find_by_name("deepseek"),
-        )
-
-        body = provider._build_responses_body(
-            messages=_simple_messages(),
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "description": "Search with nanobot's configured backend",
-                    "parameters": {"type": "object"},
-                },
-            }],
-            model=None,
-            max_tokens=100,
-            temperature=0.1,
-            reasoning_effort=None,
-            tool_choice=None,
-        )
-
-        assert body["tools"] == [{"type": "web_search"}]
-        assert "include" not in body
-
-    def test_explicit_empty_tools_disables_deepseek_default_search(self) -> None:
-        provider = OpenAICompatProvider(
-            api_key="test-key",
-            default_model="deepseek-v4-flash",
-            spec=find_by_name("deepseek"),
-            extra_body={"tools": []},
+            extra_body=extra_body,
         )
 
         body = provider._build_responses_body(
@@ -369,6 +301,7 @@ class TestBuildResponsesBodyExtraBody:
             "name": "web_search",
             "description": "Search with nanobot's configured backend",
             "parameters": {"type": "object"},
+            "strict": False,
         }]
 
     def test_responses_extra_body_merges_include_without_duplicates(self) -> None:
@@ -396,13 +329,7 @@ class TestBuildResponsesBodyExtraBody:
         ]
 
 
-# ---------------------------------------------------------------------------
-# Schema validation
-# ---------------------------------------------------------------------------
-
-
 class TestSchemaConfig:
-    """Verify ProviderConfig accepts extra_body."""
 
     def test_default_is_none(self) -> None:
         from nanobot.config.schema import ProviderConfig

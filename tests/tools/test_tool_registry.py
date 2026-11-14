@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock
 
+import pytest
+
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 
 
 class _FakeTool(Tool):
@@ -132,6 +135,82 @@ def test_prepare_call_parses_json_string_arguments() -> None:
     assert error is None
 
 
+def test_prepare_call_reports_json_string_for_nested_object_schema() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        _FakeTool(
+            "read_note",
+            {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "path": {"type": "string"},
+                                },
+                                "required": ["type", "path"],
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "name": {"type": "string"},
+                                },
+                                "required": ["type", "name"],
+                            },
+                        ],
+                    },
+                    "format": {"type": "string"},
+                },
+                "required": ["target", "format"],
+            },
+        )
+    )
+
+    tool, params, error = registry.prepare_call(
+        "read_note",
+        {
+            "target": '{"type":"path","path":"Projects/nanobot.md"}',
+            "format": "content",
+        },
+    )
+
+    assert tool is not None
+    assert error is not None
+    assert "target:" in error
+    assert "is not of type 'object'" in error
+    assert params == {
+        "target": '{"type":"path","path":"Projects/nanobot.md"}',
+        "format": "content",
+    }
+
+
+def test_prepare_call_preserves_json_like_text_for_string_schema() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        _FakeTool(
+            "echo_text",
+            {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+            },
+        )
+    )
+
+    tool, params, error = registry.prepare_call(
+        "echo_text",
+        {"value": '{"type":"path"}'},
+    )
+
+    assert tool is not None
+    assert error is None
+    assert params == {"value": '{"type":"path"}'}
+
+
 def test_prepare_call_rejects_malformed_json_string_arguments() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("read_file"))
@@ -142,6 +221,81 @@ def test_prepare_call_rejects_malformed_json_string_arguments() -> None:
     assert params == '{path:"foo.txt"}'
     assert error is not None
     assert "parameters must be a JSON object" in error
+
+
+@pytest.mark.parametrize("union", ["oneOf", "anyOf"])
+@pytest.mark.parametrize("branches", [
+    [{"type": "object"}, {"type": "string"}],
+    [{"type": "string"}, {"type": "object"}],
+    [{"type": "object"}, {}],
+    [{"type": "object"}, True],
+])
+def test_string_values_satisfy_unions_that_allow_strings(union, branches):
+    registry = ToolRegistry()
+    registry.register(_FakeTool("echo", {
+        "type": "object", "properties": {"value": {union: branches}},
+    }))
+    original = {"value": '{"mode":"text"}'}
+    _, params, error = registry.prepare_call("echo", original)
+    assert error is None
+    assert params == original
+
+
+@pytest.mark.parametrize("encoded", [True, False])
+def test_object_union_requires_an_object_value(encoded):
+    registry = ToolRegistry()
+    registry.register(_FakeTool("echo", {
+        "type": "object", "properties": {"value": {"oneOf": [
+            {"type": "object", "properties": {"count": {"type": "string"}}},
+            {"type": "object", "properties": {"count": {"type": "integer"}}},
+        ]}},
+    }))
+    value = {"count": 12}
+    arguments = {"value": json.dumps(value) if encoded else value}
+    _, params, error = registry.prepare_call("echo", arguments)
+    assert params == arguments
+    if encoded:
+        assert is_tool_error_result(error)
+        assert "value:" in error
+        assert "is not of type 'object'" in error
+    else:
+        assert error is None
+
+
+@pytest.mark.parametrize("schema, value, valid", [
+    ({"type": "object"}, {"count": 12}, True),
+    ({"type": "array"}, [{"count": 12}], True),
+    ({"type": "object"}, '{"count":12}', False),
+    ({"type": "array"}, '[{"count":12}]', False),
+    ({"type": ["object", "null"]}, '{"count":12}', False),
+    ({"type": ["object", "array"]}, '[1,2]', False),
+    ({"anyOf": [{"type": "object"}, {"type": "array"}]}, '[1,2]', False),
+    ({"type": ["string", "object"]}, '{"count":12}', True),
+    ({"type": ["object", "string"]}, '{"count":12}', True),
+    ({"type": "object"}, '{count:12}', False),
+    ({"type": "object"}, '[1,2]', False),
+    ({"type": "array"}, '{"count":12}', False),
+    ({"$ref": "#/$defs/options"}, '{"count":12}', False),
+])
+def test_registry_validates_values_without_mutating_arguments_or_schema(schema, value, valid):
+    registry = ToolRegistry()
+    registry.register(_FakeTool("echo", {
+        "type": "object", "properties": {"value": schema},
+        "$defs": {"options": {"type": "object"}},
+    }))
+    original = {"value": value}
+    schemas_before = json.dumps(registry.get_definitions())
+    arguments_before = json.dumps(original)
+    _, params, error = registry.prepare_call("echo", original)
+    assert params == original
+    assert json.dumps(original) == arguments_before
+    assert json.dumps(registry.get_definitions()) == schemas_before
+    if valid:
+        assert error is None
+    else:
+        assert is_tool_error_result(error)
+        assert "value:" in error
+        assert "is not of type" in error
 
 
 def test_prepare_call_rejects_scalar_for_single_required_parameter() -> None:
@@ -163,7 +317,7 @@ def test_prepare_call_rejects_scalar_for_single_required_parameter() -> None:
     assert "parameters must be a JSON object" in error
 
 
-def test_prepare_call_rejects_unquoted_scalar_strings_before_schema_cast() -> None:
+def test_prepare_call_rejects_unquoted_scalar_strings() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool(
         "message",
@@ -253,7 +407,7 @@ async def test_registry_rejects_unknown_builtin_tool_parameters(tmp_path) -> Non
     )
 
     assert "Invalid parameters" in result
-    assert "unexpected parameter line_limit" in result
+    assert "Additional properties are not allowed ('line_limit' was unexpected)" in result
     assert "one" not in result
 
 
@@ -269,7 +423,8 @@ async def test_registry_preserves_successful_exec_output_that_starts_with_error(
     assert result == output
 
 
-async def test_registry_uses_structured_tool_result_for_errors() -> None:
+@pytest.mark.parametrize("already_hinted", [False, True])
+async def test_registry_uses_structured_tool_result_for_errors(already_hinted: bool) -> None:
     registry = ToolRegistry()
     output = "Error: plain tool output, not a structured failure"
     raw_tool = _FakeTool("raw_output")
@@ -280,16 +435,22 @@ async def test_registry_uses_structured_tool_result_for_errors() -> None:
 
     assert raw_result == output
 
+    error_hint = (
+        "\n\n[Consider this result in the context of the user's goal "
+        "and decide whether and how to proceed.]"
+    )
+    error_content = "Error: real failure" + (error_hint if already_hinted else "")
     failing_tool = _FakeTool("failing_tool")
-    failing_tool.execute = AsyncMock(return_value=ToolResult.error("Error: real failure"))
+    failing_tool.execute = AsyncMock(return_value=ToolResult.error(error_content, error_code="sandbox_launcher_missing"))
     registry.register(failing_tool)
 
     error_result = await registry.execute("failing_tool", {})
 
     assert isinstance(error_result, ToolResult)
     assert error_result.is_error
-    assert error_result.startswith("Error: real failure")
-    assert "[Analyze the error above" in error_result
+    assert error_result.error_code == "sandbox_launcher_missing"
+    assert error_result == "Error: real failure" + error_hint
+    assert json.dumps({"content": error_result}) == json.dumps({"content": "Error: real failure" + error_hint})
 
 
 def test_get_definitions_returns_cached_result() -> None:

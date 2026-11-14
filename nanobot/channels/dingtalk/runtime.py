@@ -1,5 +1,4 @@
 # pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false, reportPrivateUsage=false
-"""DingTalk/DingDing channel implementation using Stream Mode."""
 
 import asyncio
 import json
@@ -17,10 +16,12 @@ from urllib.parse import unquote, urljoin, urlparse
 import httpx
 from pydantic import Field
 
+from nanobot.bus.delivery import ChannelNotReadyError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
+from nanobot.events import ContextCompactionEvent
 from nanobot.security.network import validate_resolved_url, validate_url_target
 
 DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
@@ -30,7 +31,6 @@ _DINGTALK_SENDER_NAME_MAX_CHARS = 80
 
 
 def _escape_markdown_sender_name(value: str) -> str:
-    """Render an untrusted display name as one bounded Markdown-safe line."""
     normalized = " ".join(value.split())[:_DINGTALK_SENDER_NAME_MAX_CHARS]
     return "".join(
         f"\\{char}" if char in _DINGTALK_MARKDOWN_INLINE_SPECIALS else char
@@ -74,11 +74,9 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
     async def process(self, message: Any) -> tuple[Any, str]:
         """Process incoming stream message."""
         try:
-            # Parse using SDK's ChatbotMessage for robust handling
             chatbot_msg: Any = ChatbotMessage.from_dict(message.data)
             message_data = cast(dict[str, Any], message.data)
 
-            # Extract text content; fall back to raw dict if SDK object is empty
             content = ""
             if chatbot_msg.text:
                 content = cast(str, chatbot_msg.text.content).strip()
@@ -88,7 +86,6 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                 text_data = cast(dict[str, Any], message_data.get("text", {}))
                 content = cast(str, text_data.get("content", "")).strip()
 
-            # Handle file/image messages
             file_paths: list[str] = []
             if chatbot_msg.message_type == "picture" and chatbot_msg.image_content:
                 download_code = chatbot_msg.image_content.download_code
@@ -188,9 +185,10 @@ class NanobotDingTalkHandler(_CallbackHandlerBase):
                 )
                 return AckMessage.STATUS_OK, "OK"
 
-            self.channel.logger.info("Received message from {} ({}): {}", sender_name, sender_id, content)
+            self.channel.logger.debug(
+                "Received DingTalk message from {} ({})", sender_name, sender_id
+            )
 
-            # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
                 self.channel._on_message(
@@ -256,7 +254,6 @@ class DingTalkChannel(BaseChannel):
         self._http: httpx.AsyncClient | None = None
         self._start_task: asyncio.Task[Any] | None = None
 
-        # Access Token management for sending messages
         self._access_token: str | None = None
         self._token_expiry: float = 0
 
@@ -302,13 +299,11 @@ class DingTalkChannel(BaseChannel):
             credential = Credential(self.config.client_id, self.config.client_secret)
             self._client = DingTalkStreamClient(credential)
 
-            # Register standard handler
             handler = NanobotDingTalkHandler(self)
             self._client.register_callback_handler(ChatbotMessage.TOPIC, handler)
 
             self.logger.info("bot started with Stream Mode")
 
-            # Reconnect loop: restart stream if SDK exits or crashes
             while self._running:
                 try:
                     await self._client.start()
@@ -340,11 +335,9 @@ class DingTalkChannel(BaseChannel):
                 await start_task
         self._client = None
 
-        # Close the shared HTTP client
         if self._http:
             await self._http.aclose()
             self._http = None
-        # Cancel outstanding background tasks
         background_tasks = tuple(self._background_tasks)
         for task in background_tasks:
             task.cancel()
@@ -367,10 +360,9 @@ class DingTalkChannel(BaseChannel):
             if isawaitable(result):
                 await result
         except Exception:
-            self.logger.debug("DingTalk stream client close failed", exc_info=True)
+            self.logger.opt(exception=True).debug("DingTalk stream client close failed")
 
     async def _get_access_token(self) -> str | None:
-        """Get or refresh Access Token."""
         if self._access_token and time.time() < self._token_expiry:
             return self._access_token
 
@@ -479,7 +471,6 @@ class DingTalkChannel(BaseChannel):
         self,
         media_ref: str,
     ) -> tuple[bytes | None, str | None]:
-        """Fetch a remote media URL with SSRF, redirect, and size checks."""
         if not self._http:
             return None, None
 
@@ -487,89 +478,46 @@ class DingTalkChannel(BaseChannel):
             return None, None
 
         try:
-            # Prefer streaming with a running byte cap so large responses are not
-            # materialized before the limit is enforced. Test fakes may only
-            # implement get(), so keep a small compatibility fallback below.
-            stream = getattr(self._http, "stream", None)
-            if stream is not None:
-                current_url = media_ref
-                for _ in range(DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS + 1):
-                    async with stream("GET", current_url, follow_redirects=False) as resp:
-                        final_ok, final_err = validate_resolved_url(str(resp.url))
-                        if not final_ok:
-                            self.logger.warning(
-                                "remote media redirect blocked ref={} final={} reason={}",
-                                media_ref,
-                                resp.url,
-                                final_err,
-                            )
-                            return None, None
-                        if 300 <= resp.status_code < 400:
-                            next_url = self._next_remote_media_url(
-                                str(resp.url), resp.headers.get("location")
-                            )
-                            if not next_url:
-                                return None, None
-                            current_url = next_url
-                            continue
-                        if resp.status_code >= 400:
-                            self.logger.warning(
-                                "media download failed status={} ref={}",
-                                resp.status_code,
-                                current_url,
-                            )
-                            return None, None
-                        chunks: list[bytes] = []
-                        total = 0
-                        async for chunk in resp.aiter_bytes():
-                            total += len(chunk)
-                            if total > DINGTALK_MAX_REMOTE_MEDIA_BYTES:
-                                self.logger.warning(
-                                    "media download too large ref={} bytes>{}",
-                                    current_url,
-                                    DINGTALK_MAX_REMOTE_MEDIA_BYTES,
-                                )
-                                return None, None
-                            chunks.append(chunk)
-                        return b"".join(chunks), (resp.headers.get("content-type") or "")
-                self.logger.warning("media download exceeded redirect limit ref={}", media_ref)
-                return None, None
-
             current_url = media_ref
             for _ in range(DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS + 1):
-                resp = await self._http.get(current_url, follow_redirects=False)
-                final_ok, final_err = validate_resolved_url(str(getattr(resp, "url", current_url)))
-                if not final_ok:
-                    self.logger.warning(
-                        "remote media redirect blocked ref={} final={} reason={}",
-                        media_ref,
-                        getattr(resp, "url", current_url),
-                        final_err,
-                    )
-                    return None, None
-                if 300 <= resp.status_code < 400:
-                    next_url = self._next_remote_media_url(
-                        str(getattr(resp, "url", current_url)), resp.headers.get("location")
-                    )
-                    if not next_url:
+                async with self._http.stream("GET", current_url, follow_redirects=False) as resp:
+                    final_ok, final_err = validate_resolved_url(str(resp.url))
+                    if not final_ok:
+                        self.logger.warning(
+                            "remote media redirect blocked ref={} final={} reason={}",
+                            media_ref,
+                            resp.url,
+                            final_err,
+                        )
                         return None, None
-                    current_url = next_url
-                    continue
-                if resp.status_code >= 400:
-                    self.logger.warning(
-                        "media download failed status={} ref={}",
-                        resp.status_code,
-                        current_url,
-                    )
-                    return None, None
-                if len(resp.content) > DINGTALK_MAX_REMOTE_MEDIA_BYTES:
-                    self.logger.warning(
-                        "media download too large ref={} bytes>{}",
-                        current_url,
-                        DINGTALK_MAX_REMOTE_MEDIA_BYTES,
-                    )
-                    return None, None
-                return resp.content, (resp.headers.get("content-type") or "")
+                    if 300 <= resp.status_code < 400:
+                        next_url = self._next_remote_media_url(
+                            str(resp.url), resp.headers.get("location")
+                        )
+                        if not next_url:
+                            return None, None
+                        current_url = next_url
+                        continue
+                    if resp.status_code >= 400:
+                        self.logger.warning(
+                            "media download failed status={} ref={}",
+                            resp.status_code,
+                            current_url,
+                        )
+                        return None, None
+                    chunks: list[bytes] = []
+                    total = 0
+                    async for chunk in resp.aiter_bytes():
+                        total += len(chunk)
+                        if total > DINGTALK_MAX_REMOTE_MEDIA_BYTES:
+                            self.logger.warning(
+                                "media download too large ref={} bytes>{}",
+                                current_url,
+                                DINGTALK_MAX_REMOTE_MEDIA_BYTES,
+                            )
+                            return None, None
+                        chunks.append(chunk)
+                    return b"".join(chunks), (resp.headers.get("content-type") or "")
             self.logger.warning("media download exceeded redirect limit ref={}", media_ref)
             return None, None
         except httpx.TransportError:
@@ -665,16 +613,14 @@ class DingTalkChannel(BaseChannel):
 
         headers = {"x-acs-dingtalk-access-token": token}
         if chat_id.startswith("group:"):
-            # Group chat
             url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
             payload = {
                 "robotCode": self.config.client_id,
-                "openConversationId": chat_id[6:],  # Remove "group:" prefix,
+                "openConversationId": chat_id[6:],
                 "msgKey": msg_key,
                 "msgParam": json.dumps(msg_param, ensure_ascii=False),
             }
         else:
-            # Private chat
             url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
             payload = {
                 "robotCode": self.config.client_id,
@@ -776,9 +722,13 @@ class DingTalkChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through DingTalk."""
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
+            return
         token = await self._get_access_token()
         if not token:
-            raise RuntimeError("DingTalk access token unavailable")
+            raise ChannelNotReadyError("DingTalk access token unavailable")
 
         content = msg.content.strip() if msg.content else ""
         if content:
@@ -818,13 +768,7 @@ class DingTalkChannel(BaseChannel):
         conversation_type: str | None = None,
         conversation_id: str | None = None,
     ) -> None:
-        """Handle incoming message (called by NanobotDingTalkHandler).
-
-        Delegates to BaseChannel._handle_message() which enforces allow_from
-        permission checks before publishing to the bus.
-        """
         try:
-            self.logger.info("inbound: {} from {}", content, sender_name)
             if not sender_id:
                 self.logger.warning("dropping DingTalk message without a sender ID")
                 return
@@ -869,7 +813,6 @@ class DingTalkChannel(BaseChannel):
         filename: str,
         sender_id: str,
     ) -> str | None:
-        """Download a DingTalk file to the media directory, return local path."""
         from nanobot.config.paths import get_media_dir
 
         try:
@@ -878,7 +821,6 @@ class DingTalkChannel(BaseChannel):
                 self.logger.error("file download: no token or http client")
                 return None
 
-            # Step 1: Exchange downloadCode for a temporary download URL
             api_url = "https://api.dingtalk.com/v1.0/robot/messageFiles/download"
             headers = {"x-acs-dingtalk-access-token": token, "Content-Type": "application/json"}
             payload = {"downloadCode": download_code, "robotCode": self.config.client_id}
@@ -893,13 +835,11 @@ class DingTalkChannel(BaseChannel):
                 self.logger.error("download URL not found in response: {}", result)
                 return None
 
-            # Step 2: Download the file content
             file_resp = await self._http.get(download_url, follow_redirects=True)
             if file_resp.status_code != 200:
                 self.logger.error("file download failed: status={}", file_resp.status_code)
                 return None
 
-            # Save to media directory (accessible under workspace)
             download_dir = get_media_dir("dingtalk") / sender_id
             download_dir.mkdir(parents=True, exist_ok=True)
             file_path = download_dir / filename

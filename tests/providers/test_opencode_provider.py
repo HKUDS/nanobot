@@ -1,5 +1,3 @@
-"""Tests for the OpenCode Zen and OpenCode Go provider registrations."""
-
 import asyncio
 import hashlib
 import json
@@ -10,7 +8,7 @@ import pytest
 from nanobot.config.schema import Config, ProvidersConfig
 from nanobot.providers.base import ProviderCallContext
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import PROVIDERS, find_by_name
+from nanobot.providers.registry import PROVIDERS, ModelAPICapabilities, find_by_name
 
 
 def test_opencode_config_fields_exist() -> None:
@@ -130,6 +128,19 @@ def test_opencode_prefixes_are_stripped_before_request() -> None:
     assert go_kwargs["model"] == "o3"
 
 
+@pytest.mark.parametrize("model", ["muse-spark-1.2-contributor", "muse-spark-1.3-contributor"])
+def test_opencode_go_muse_spark_contributor_models_use_responses(model) -> None:
+    provider = OpenAICompatProvider(
+        api_key=None,
+        default_model=f"opencode-go/{model}",
+        spec=find_by_name("opencode_go"),
+    )
+
+    assert provider._should_use_responses_api(model, None) is True
+    assert provider._should_use_responses_api(f"opencode-go/{model}", None) is True
+    assert provider._should_use_responses_api("opencode-go/kimi-k2.5", None) is False
+
+
 def _fake_responses_output() -> dict[str, object]:
     return {
         "output": [{
@@ -181,7 +192,6 @@ def test_opencode_affinity_matches_hostname(base, enabled):
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("configured_header", [None, "x-opencode-session", "X-OpenCode-Session"])
 async def test_opencode_wire_affinity(monkeypatch, api_type, stream, configured_header):
-    """Exercise SDK header encoding/merging through the public provider entrypoints."""
     from openai import AsyncOpenAI
 
     from nanobot.providers import openai_compat_provider
@@ -237,7 +247,7 @@ async def test_opencode_wire_affinity(monkeypatch, api_type, stream, configured_
             headers[configured_header] = "configured"
         provider = OpenAICompatProvider(
             api_key="test", api_base="https://opencode.ai/zen/v1",
-            spec=find_by_name("openai"), api_type=api_type, extra_headers=headers,
+            spec=find_by_name("openai"), model_api=ModelAPICapabilities((api_type,), api_type), extra_headers=headers,
             default_model="gpt-5",
             extra_body={"context_management": [{"type": "compaction"}]} if compaction else None,
         )

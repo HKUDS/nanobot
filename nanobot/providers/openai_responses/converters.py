@@ -1,5 +1,3 @@
-"""Convert Chat Completions messages/tools to Responses API format."""
-
 from __future__ import annotations
 
 import json
@@ -44,7 +42,7 @@ def convert_messages(
                 if isinstance(reasoning, str) and reasoning:
                     input_items.append({
                         "type": "reasoning",
-                        "content": [{"type": "output_text", "text": reasoning}],
+                        "content": [{"type": "reasoning_text", "text": reasoning}],
                     })
             if isinstance(content, str) and content:
                 input_items.append({
@@ -183,11 +181,14 @@ def convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not name:
             continue
         params: object = fn.get("parameters") or {}
+        strict = fn.get("strict")
         converted.append({
             "type": "function",
             "name": name,
             "description": fn.get("description") or "",
             "parameters": params if isinstance(params, dict) else {},
+            # Responses may make optional fields required when strict is omitted.
+            "strict": strict if isinstance(strict, bool) else False,
         })
     return converted
 

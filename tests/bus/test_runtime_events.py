@@ -110,6 +110,15 @@ async def test_scheduled_dispatch_is_owned_and_can_be_drained():
     await bus.drain()
 
 
+async def test_drain_finishes_when_dispatch_completed_before_its_cleanup_callback():
+    bus = MessageBus()
+    task = bus.publish_nowait(RuntimeModelChanged("model", None))
+    await asyncio.sleep(0)
+    assert task is not None and task.done()
+    await bus.drain()
+    assert not bus._pending
+
+
 @pytest.mark.asyncio
 async def test_runtime_event_bus_filters_by_event_type() -> None:
     bus = MessageBus()
@@ -197,8 +206,7 @@ async def test_runtime_event_publisher_consumes_turn_metadata_on_complete() -> N
     publisher.record_turn_latency("cli:direct", 123)
     first_round = LLMUsage.reported(input_tokens=40, output_tokens=2)
     second_round = LLMUsage.reported(input_tokens=60, output_tokens=3)
-    publisher.record_turn_usage("cli:direct", [first_round])
-    publisher.record_turn_usage("cli:direct", [second_round])
+    publisher.record_turn_usage("cli:direct", [first_round, second_round])
 
     await publisher.turn_completed(
         channel="cli",

@@ -7,10 +7,7 @@ import {
 } from "@/components/settings/system/AppsSettings";
 import type { SystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import {
-  fetchApiService,
   fetchAutomations,
-  fetchCliApps,
-  fetchMcpPresets,
   fetchNanobotFeatures,
 } from "@/lib/api";
 
@@ -30,22 +27,27 @@ export function useSystemSettingsEffects({
   pageVisible,
 }: SystemSettingsEffectsOptions) {
   const {
-    setApiService,
-    setApiServiceError,
-    setApiServiceLoading,
     setAutomations,
     setAutomationsError,
     setAutomationsLoading,
-    setCliApps,
+    toolsCatalog,
+    toolsCatalogInvalidation,
     setCliAppsError,
     setCliAppsLoading,
     setMcpError,
-    setMcpPresets,
     setMcpPresetsLoading,
     setNanobotFeatures,
     setNanobotFeaturesError,
     setNanobotFeaturesLoading,
   } = state;
+
+  useEffect(() => {
+    setCliAppsError(null);
+    setMcpError(null);
+  }, [toolsCatalog]);
+
+  const cliPending = Boolean(state.cliApps?.catalog_refresh_pending);
+  const mcpConnecting = Boolean(state.mcpPresets?.presets.some(preset => preset.runtime_status === "connecting"));
 
   useEffect(() => {
     if (activeSection !== "apps") return;
@@ -54,17 +56,16 @@ export function useSystemSettingsEffects({
     let retryCount = 0;
     const loadCliApps = (showLoading: boolean) => {
       if (showLoading) setCliAppsLoading(true);
-      fetchCliApps(getToken())
-        .then((payload) => {
+      toolsCatalog.loadCliApps()
+        .then(() => {
           if (cancelled) return;
-          if (payload.catalog_refresh_pending && retryCount < CLI_APPS_REFRESH_MAX_RETRIES) {
+          if (toolsCatalog.getSnapshot().cliApps?.catalog_refresh_pending && retryCount < CLI_APPS_REFRESH_MAX_RETRIES) {
             retryCount += 1;
             retry = window.setTimeout(() => {
               retry = null;
               loadCliApps(false);
             }, CLI_APPS_REFRESH_RETRY_MS);
           }
-          setCliApps(payload);
           setCliAppsError(null);
           setCliAppsLoading(false);
         })
@@ -75,12 +76,15 @@ export function useSystemSettingsEffects({
           }
         });
     };
-    loadCliApps(true);
+    const cached = toolsCatalog.getSnapshot().cliApps;
+    setCliAppsLoading(!cached);
+    if (!toolsCatalog.cliFresh()) loadCliApps(!cached);
+    else if (cliPending) retry = window.setTimeout(() => loadCliApps(false), CLI_APPS_REFRESH_RETRY_MS);
     return () => {
       cancelled = true;
       if (retry !== null) window.clearTimeout(retry);
     };
-  }, [activeSection, getToken]);
+  }, [activeSection, toolsCatalog, toolsCatalogInvalidation, cliPending]);
 
   useEffect(() => {
     if (
@@ -129,39 +133,16 @@ export function useSystemSettingsEffects({
   }, [activeSection, getToken, pageVisible]);
 
   useEffect(() => {
-    if (activeSection !== "runtime") return;
-    let cancelled = false;
-    setApiServiceLoading(true);
-    fetchApiService(getToken())
-      .then((payload) => {
-        if (!cancelled) {
-          setApiService(payload);
-          setApiServiceError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setApiServiceError((err as Error).message);
-      })
-      .finally(() => {
-        if (!cancelled) setApiServiceLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSection, getToken]);
-
-  useEffect(() => {
     if (activeSection !== "apps" || !pageVisible) return;
     let cancelled = false;
     let retry: number | null = null;
     const loadMcpPresets = (showLoading: boolean) => {
       if (showLoading) setMcpPresetsLoading(true);
-      fetchMcpPresets(getToken())
-        .then((payload) => {
+      toolsCatalog.loadMcpPresets()
+        .then(() => {
           if (cancelled) return;
-          setMcpPresets(payload);
           setMcpError(null);
-          if (payload.presets.some((preset) => preset.runtime_status === "connecting")) {
+          if (toolsCatalog.getSnapshot().mcpPresets?.presets.some((preset) => preset.runtime_status === "connecting")) {
             retry = window.setTimeout(() => {
               retry = null;
               loadMcpPresets(false);
@@ -175,12 +156,15 @@ export function useSystemSettingsEffects({
           if (!cancelled && showLoading) setMcpPresetsLoading(false);
         });
     };
-    loadMcpPresets(true);
+    const cached = toolsCatalog.getSnapshot().mcpPresets;
+    setMcpPresetsLoading(!cached);
+    if (!toolsCatalog.mcpFresh()) loadMcpPresets(!cached);
+    else if (mcpConnecting) retry = window.setTimeout(() => loadMcpPresets(false), MCP_RUNTIME_STATUS_REFRESH_MS);
     return () => {
       cancelled = true;
       if (retry !== null) window.clearTimeout(retry);
     };
-  }, [activeSection, getToken, pageVisible]);
+  }, [activeSection, toolsCatalog, toolsCatalogInvalidation, pageVisible, mcpConnecting]);
 
   const refreshAutomations = useCallback(
     async (showLoading = false) => {

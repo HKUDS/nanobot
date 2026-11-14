@@ -1,5 +1,3 @@
-"""Shell execution tool."""
-
 from __future__ import annotations
 
 import asyncio
@@ -7,19 +5,16 @@ import os
 import re
 import shlex
 import shutil
-import signal
-import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
-from typing import Any, Protocol, cast
+from pathlib import Path
+from typing import Any, Literal
 from urllib.parse import unquote
 
 from loguru import logger
-from pydantic import Field
 
-from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
+from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.context import ToolContext, current_request_session_key
 from nanobot.agent.tools.exec_session import (
     DEFAULT_EXEC_SESSION_MANAGER,
@@ -31,57 +26,22 @@ from nanobot.agent.tools.exec_session import (
     clamp_session_int,
     format_session_poll,
 )
-from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.agent.tools.shell_config import ExecToolConfig
 from nanobot.config.paths import get_media_dir
-from nanobot.config_base import Base
+from nanobot.execution.sandbox import build_sandbox_argv
+from nanobot.security.sandbox_launcher import SandboxLauncherError
 from nanobot.security.workspace_access import current_scope_allows_loopback, current_tool_workspace
 from nanobot.security.workspace_policy import is_path_within
 
 _IS_WINDOWS = sys.platform == "win32"
-_PROCESS_TREE_OWNER_ATTR = "_nanobot_process_tree_owner"
 
 
-class _ProcessTreeOwner(Protocol):
-    creation_flags: int
-
-    def assign_and_resume(self, pid: int) -> None: ...
-
-    def release(self) -> None: ...
-
-    def terminate(self) -> None: ...
-
-
-def _reap_pid(pid: int) -> None:
-    """Best-effort ``waitpid`` to reap a child and prevent zombies.
-
-    Call this after killing or after normal completion of any subprocess
-    as a safety net — asyncio's child-watcher *should* have reaped it,
-    but in containers / edge-cases it sometimes doesn't.
-
-    Uses ``os`` capability checks rather than ``_IS_WINDOWS`` so this is
-    safe when tests patch the platform flag while still running on Windows
-    (``os.waitpid`` / ``os.WNOHANG`` do not exist there).
-    """
-    waitpid = getattr(os, "waitpid", None)
-    wnohang = getattr(os, "WNOHANG", None)
-    if waitpid is None or wnohang is None:
-        return
-    try:
-        waitpid(pid, wnohang)
-    except (ProcessLookupError, ChildProcessError):
-        # Already reaped, or not our child — both are fine.
-        pass
-    except OSError as exc:
-        logger.debug("_reap_pid({}): {}", pid, exc)
-
-
-# Policy note appended to recoverable workspace-boundary guard errors.
 _WORKSPACE_BOUNDARY_NOTE = (
     "\n\nNote: this is a hard policy boundary, not a transient failure. "
     "Do NOT retry with shell tricks (symlinks, base64 piping, alternative "
@@ -91,23 +51,9 @@ _WORKSPACE_BOUNDARY_NOTE = (
 )
 
 
-class ExecToolConfig(Base):
-    """Shell exec tool configuration."""
-    enable: bool = True
-    timeout: int = Field(default=60, ge=0)  # Hard timeout (s); 0 = no limit. Not capped by the per-call max.
-    path_prepend: str = ""
-    path_append: str = ""
-    sandbox: str = ""
-    sandbox_ro_binds: list[str] = Field(default_factory=list)
-    sandbox_rw_binds: list[str] = Field(default_factory=list)
-    allowed_env_keys: list[str] = Field(default_factory=list)
-    allow_patterns: list[str] = Field(default_factory=list)
-    deny_patterns: list[str] = Field(default_factory=list)
-
-
 @dataclass(slots=True)
 class _PreparedCommand:
-    command: str
+    command: str | list[str]
     cwd: str
     env: dict[str, str]
     timeout: int | None
@@ -115,16 +61,26 @@ class _PreparedCommand:
     login: bool
 
 
-@tool_parameters(
-    tool_parameters_schema(
+def _exec_parameters(config: ExecToolConfig) -> dict[str, Any]:
+    return tool_parameters_schema(
         command=StringSchema("The shell command to execute"),
         cmd=StringSchema("Compatibility alias for command"),
         working_dir=StringSchema("Optional working directory for the command"),
         workdir=StringSchema("Compatibility alias for working_dir"),
-        timeout=IntegerSchema(
-            description="Hard timeout in seconds (default 60, max 600).",
+        max_runtime=IntegerSchema(
+            description=(
+                "Hard runtime budget in seconds. Omit for the configured default "
+                f"({'unlimited' if config.max_runtime == 0 else str(config.max_runtime) + 's'}). "
+                f"Explicit requests must not exceed {config.max_runtime_limit}s. "
+                "Output does not extend the budget."
+            ),
             minimum=1,
-            maximum=600,
+            maximum=config.max_runtime_limit,
+        ),
+        timeout=IntegerSchema(
+            description="Compatibility alias for max_runtime; cannot be combined with it.",
+            minimum=1,
+            maximum=config.max_runtime_limit,
         ),
         shell=StringSchema(
             (
@@ -140,7 +96,7 @@ class _PreparedCommand:
             nullable=True,
         ),
         yield_time_ms=IntegerSchema(
-            description="Return after this many milliseconds if still running; omit to wait for exit.",
+            description="Return after this many milliseconds if still running (default 1000, max 30000); execution continues.",
             minimum=0,
             maximum=MAX_YIELD_MS,
             nullable=True,
@@ -158,7 +114,8 @@ class _PreparedCommand:
             nullable=True,
         ),
     )
-)
+
+
 class ExecTool(Tool):
     """Tool to execute shell commands."""
     _scopes = {"core", "subagent"}
@@ -178,10 +135,14 @@ class ExecTool(Tool):
         cfg = ctx.config.exec
         return cls(
             working_dir=ctx.workspace,
-            timeout=cfg.timeout,
+            max_runtime=cfg.max_runtime,
+            max_runtime_limit=cfg.max_runtime_limit,
+            idle_timeout=cfg.idle_timeout,
+            idle_action=cfg.idle_action,
             restrict_to_workspace=ctx.config.restrict_to_workspace,
             webui_allow_local_service_access=ctx.config.webui_allow_local_service_access,
             sandbox=cfg.sandbox,
+            sandbox_launcher=cfg.sandbox_launcher,
             path_prepend=cfg.path_prepend,
             path_append=cfg.path_append,
             sandbox_ro_binds=cfg.sandbox_ro_binds,
@@ -194,7 +155,7 @@ class ExecTool(Tool):
 
     def __init__(
         self,
-        timeout: int = 60,
+        timeout: int | None = None,
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
@@ -208,28 +169,42 @@ class ExecTool(Tool):
         sandbox_rw_binds: list[str] | None = None,
         allowed_env_keys: list[str] | None = None,
         session_manager: ExecSessionManager | None = None,
+        *,
+        max_runtime: int | None = None,
+        max_runtime_limit: int | None = None,
+        idle_timeout: int = 300,
+        idle_action: Literal["report", "terminate"] = "report",
+        sandbox_launcher: str = "",
     ):
-        self.timeout = timeout
+        if timeout is not None and max_runtime is not None:
+            raise ValueError("timeout and max_runtime are mutually exclusive")
+        values: dict[str, Any] = {"idle_timeout": idle_timeout, "idle_action": idle_action}
+        if (runtime := max_runtime if max_runtime is not None else timeout) is not None:
+            values["max_runtime"] = runtime
+        if max_runtime_limit is not None:
+            values["max_runtime_limit"] = max_runtime_limit
+        self._exec_config = ExecToolConfig.model_validate(values)
         self.working_dir = working_dir
         self.sandbox = sandbox
+        self.sandbox_launcher = sandbox_launcher
         self.deny_patterns = (deny_patterns or []) + [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format(?!=)\b",   # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            r"\brm\s+-[rf]{1,2}\b",
+            r"\bdel\s+/[fq]\b",
+            r"\brmdir\s+/s\b",
+            r"(?:^|[;&|]\s*)format(?!=)\b",
+            r"\b(mkfs|diskpart)\b",
+            r"\bdd\s+if=",
+            r">\s*/dev/sd",
+            r"\b(shutdown|reboot|poweroff)\b",
+            r":\(\)\s*\{.*\};\s*:",
             # Block writes to nanobot internal state files (#2989).
             # history.jsonl / .dream_cursor are managed by append_history();
             # direct writes corrupt the cursor format and crash /dream.
-            r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",            # > / >> redirect
-            r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",     # tee / tee -a
-            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",  # cp/mv target
-            r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",  # dd of=
-            r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
+            r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",
+            r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",
+            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",
+            r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",
+            r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
@@ -247,8 +222,13 @@ class ExecTool(Tool):
     def name(self) -> str:
         return "exec"
 
-    _MAX_TIMEOUT = 600
-    _MAX_OUTPUT = 10_000
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return _exec_parameters(self._exec_config)
+
+    @property
+    def timeout(self) -> int:
+        return self._exec_config.max_runtime
 
     # Kernel device files safe as stdio redirect targets (#3599).
     _BENIGN_DEVICE_PATHS: frozenset[str] = frozenset({
@@ -265,19 +245,20 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Execute a shell command."
+        return "Execute a shell command. timeout and max_runtime are mutually exclusive."
 
     @property
     def exclusive(self) -> bool:
         return True
 
     async def execute(
-        self, command: str | None = None, cmd: str | None = None,
+        self, command: str | list[str] | None = None, cmd: str | None = None,
         working_dir: str | None = None, workdir: str | None = None,
         timeout: int | None = None, shell: str | None = None,
         login: bool | None = None, yield_time_ms: int | None = None,
         max_output_chars: int | None = None,
         max_output_tokens: int | None = None,
+        max_runtime: int | None = None,
         **kwargs: Any,
     ) -> str:
         command = command or cmd
@@ -287,79 +268,36 @@ class ExecTool(Tool):
         if max_output_chars is None:
             max_output_chars = max_output_tokens
 
-        prepared = self._prepare_command(command, working_dir, timeout, shell, login)
+        if timeout is not None and max_runtime is not None:
+            return ToolResult.error("Error: timeout and max_runtime are mutually exclusive.")
+        try:
+            prepared = self._prepare_command(
+                command, working_dir, max_runtime if max_runtime is not None else timeout,
+                shell, login,
+            )
+        except ValueError as exc:
+            return ToolResult.error(f"Error: {exc}")
         if isinstance(prepared, str):
             return prepared
+        return await self._execute_session(prepared, yield_time_ms, max_output_chars)
 
-        if yield_time_ms is not None:
-            return await self._execute_session(prepared, yield_time_ms, max_output_chars)
-
-        process: asyncio.subprocess.Process | None = None
+    async def execute_to_completion(self, command: str, working_dir: str) -> str:
+        """Return the complete result for a trusted user shell command, without an agent observer."""
         try:
-            process = await self._spawn(
-                prepared.command,
-                prepared.cwd,
-                prepared.env,
-                prepared.shell_program,
-                prepared.login,
-                process_tree=True,
-            )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=prepared.timeout,
-                )
-            except asyncio.TimeoutError:
-                await self._kill_process_tree(process)
-                return ToolResult.error(f"Error: Command timed out after {prepared.timeout} seconds")
-            except asyncio.CancelledError:
-                await self._kill_process_tree(process)
-                raise
-
-            # Safety-net reap: asyncio *should* have reaped the child via
-            # communicate(), but in containers the child-watcher sometimes
-            # misses it, leaving a zombie.
-            _reap_pid(process.pid)
-
-            output_parts: list[str] = []
-
-            if stdout:
-                output_parts.append(stdout.decode("utf-8", errors="replace"))
-
-            if stderr:
-                stderr_text = stderr.decode("utf-8", errors="replace")
-                if stderr_text.strip():
-                    output_parts.append(f"STDERR:\n{stderr_text}")
-
-            output_parts.append(f"\nExit code: {process.returncode}")
-
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-
-            max_len = clamp_session_int(max_output_chars, self._MAX_OUTPUT, 1000, MAX_OUTPUT_CHARS)
-            if len(result) > max_len:
-                half = max_len // 2
-                result = (
-                    result[:half]
-                    + f"\n\n... ({len(result) - max_len:,} chars truncated) ...\n\n"
-                    + result[-half:]
-                )
-
-            self._release_process_tree(process)
-            return result
-
-        except Exception as e:
-            # Kill and reap the child if it was spawned but an unexpected
-            # error prevented communicate() from completing.
-            if process is not None:
-                await self._kill_process_tree(process)
-            return ToolResult.error(f"Error executing command: {str(e)}")
+            prepared = self._prepare_command(command, working_dir)
+        except ValueError as exc:
+            return ToolResult.error(f"Error: {exc}")
+        if isinstance(prepared, str):
+            return prepared
+        return await self._execute_session(prepared, None, None, until_exit=True)
 
     async def _execute_session(
         self,
         prepared: _PreparedCommand,
         yield_time_ms: int | None,
         max_output_chars: int | None,
+        *,
+        until_exit: bool = False,
     ) -> str:
         try:
             session_id, poll = await self._session_manager.start(
@@ -369,7 +307,13 @@ class ExecTool(Tool):
                 timeout=prepared.timeout,
                 shell_program=prepared.shell_program,
                 login=prepared.login,
-                yield_time_ms=clamp_session_int(yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS),
+                yield_time_ms=0 if until_exit else clamp_session_int(
+                    yield_time_ms, DEFAULT_YIELD_MS, 0, MAX_YIELD_MS,
+                ),
+                until_exit=until_exit,
+                stdin=(asyncio.subprocess.DEVNULL if yield_time_ms is None else asyncio.subprocess.PIPE),
+                idle_timeout=self._exec_config.idle_timeout,
+                idle_action=self._exec_config.idle_action,
                 owner_session_key=current_request_session_key(),
                 max_output_chars=clamp_session_int(
                     max_output_chars,
@@ -379,27 +323,32 @@ class ExecTool(Tool):
                 ),
             )
             result = format_session_poll(session_id, poll)
-            return ToolResult.error(result) if poll.timed_out else result
+            if not poll.done:
+                result += "\nInitial wait ended; session remains active."
+            return ToolResult.error(result) if poll.failed else result
         except Exception as exc:
-            return ToolResult.error(f"Error executing command: {exc}")
+            # Only an OS rejection of the actual launcher is attributable here.
+            # A command's nonzero exit or stderr is not proof of a sandbox fault.
+            code = "sandbox_start_failed" if (
+                isinstance(exc, OSError) and self.sandbox and not _IS_WINDOWS
+                and isinstance(prepared.command, list) and exc.filename == prepared.command[0]
+            ) else None
+            return ToolResult.error(f"Error executing command: {exc}", error_code=code)
 
-    def _resolve_timeout(self, timeout: int | None) -> int | None:
-        """Resolve the effective hard timeout in seconds (None = no limit).
-
-        A per-call timeout supplied by the model stays capped at _MAX_TIMEOUT so
-        the LLM cannot request unbounded execution. The config-level default
-        (self.timeout) may exceed that cap, and 0 disables the limit entirely
-        for trusted long-running tasks (#3595).
-        """
-        if timeout:
-            return min(timeout, self._MAX_TIMEOUT)
-        if self.timeout and self.timeout > 0:
-            return self.timeout
-        return None
+    def _resolve_timeout(self, timeout: object) -> int | None:
+        if timeout is not None:
+            if isinstance(timeout, bool) or not isinstance(timeout, int):
+                raise ValueError("max_runtime must be an integer number of seconds")
+            if not 1 <= timeout <= self._exec_config.max_runtime_limit:
+                raise ValueError(
+                    f"max_runtime must be between 1 and {self._exec_config.max_runtime_limit} seconds"
+                )
+            return timeout
+        return self.timeout or None
 
     def _prepare_command(
         self,
-        command: str,
+        command: str | list[str],
         working_dir: str | None = None,
         timeout: int | None = None,
         shell: str | None = None,
@@ -445,7 +394,7 @@ class ExecTool(Tool):
         # continuing to block commands after workspace restriction is disabled.
         if access.restrict_to_workspace:
             guard_error = self._guard_command(
-                command,
+                shlex.join(command) if isinstance(command, list) else command,
                 cwd,
                 restrict_to_workspace=True,
                 workspace_root=workspace_root,
@@ -453,28 +402,13 @@ class ExecTool(Tool):
             if guard_error:
                 return guard_error
 
-        if self.sandbox:
-            if _IS_WINDOWS:
-                logger.warning(
-                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
-                    self.sandbox,
-                )
-            else:
-                workspace = workspace_root or cwd
-                command = wrap_command(
-                    self.sandbox,
-                    command,
-                    workspace,
-                    cwd,
-                    sandbox_ro_binds=[str(p) for p in self.sandbox_ro_binds],
-                    sandbox_rw_binds=[str(p) for p in self.sandbox_rw_binds],
-                )
-                cwd = str(Path(workspace).resolve())
-
         effective_timeout = self._resolve_timeout(timeout)
         env = self._build_env()
 
-        if self.path_prepend or self.path_append:
+        if isinstance(command, list):
+            parent_path = os.environ.get("PATH", env.get("PATH", ""))
+            env["PATH"] = self._compose_path(parent_path)
+        elif self.path_prepend or self.path_append:
             if _IS_WINDOWS:
                 env["PATH"] = self._compose_path(env.get("PATH", ""))
             else:
@@ -483,6 +417,41 @@ class ExecTool(Tool):
         shell_program, shell_error = self._resolve_shell(shell)
         if shell_error:
             return shell_error
+
+        if self.sandbox:
+            if _IS_WINDOWS:
+                logger.warning(
+                    "Sandbox '{}' is not supported on Windows; running unsandboxed",
+                    self.sandbox,
+                )
+            else:
+                # The host launches the sandbox, not a caller-selected shell.
+                # Shell selection, profiles and PATH setup run after confinement.
+                if isinstance(command, list):
+                    payload = shlex.join(command)
+                else:
+                    interpreter = shell_program or shutil.which("bash") or "/bin/bash"
+                    args = [interpreter]
+                    if login and Path(interpreter).name in {"bash", "zsh"}:
+                        args.append("-l")
+                    payload = shlex.join([*args, "-c", command])
+                workspace = workspace_root or cwd
+                try:
+                    command = build_sandbox_argv(
+                        self.sandbox, payload, workspace, cwd,
+                        launcher=self.sandbox_launcher,
+                        sandbox_ro_binds=map(str, self.sandbox_ro_binds),
+                        sandbox_rw_binds=map(str, self.sandbox_rw_binds),
+                    )
+                except SandboxLauncherError as exc:
+                    if exc.reason == "launcher_missing":
+                        return ToolResult.error(
+                            f"Error: sandbox launcher not found: {exc.launcher}", error_code="sandbox_launcher_missing",
+                        )
+                    return ToolResult.error(
+                        f"Error: sandbox launcher rejected: {exc.reason}", error_code=f"sandbox_{exc.reason}",
+                    )
+                cwd = str(Path(workspace).resolve())
 
         return _PreparedCommand(
             command=command,
@@ -514,117 +483,6 @@ class ExecTool(Tool):
             segments.append("$NANOBOT_PATH_APPEND")
         path_expr = os.pathsep.join(segments)
         return f'export PATH="{path_expr}"; {command}'
-
-    @staticmethod
-    async def _spawn(
-        command: str, cwd: str, env: dict[str, str],
-        shell_program: str | None = None,
-        login: bool = False,
-        *,
-        stdin: int = asyncio.subprocess.DEVNULL,
-        process_tree: bool = False,
-    ) -> asyncio.subprocess.Process:
-        """Launch *command* in a platform-appropriate shell."""
-        if _IS_WINDOWS:
-            windows_job = None
-            process = None
-            creation_flags = 0
-            if process_tree and sys.platform == "win32":
-                windows_job = ExecTool._create_windows_job()
-                creation_flags = windows_job.creation_flags
-            # Default to PowerShell so single-line and multi-line commands
-            # share the same shell semantics.  cmd.exe is reachable via the
-            # explicit shell="cmd" parameter (see _resolve_shell).
-            default_program = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
-            program = shell_program or default_program
-            program_name = PureWindowsPath(program).name.lower()
-            try:
-                if program_name in ("cmd", "cmd.exe"):
-                    cmd_env = {**env, "COMSPEC": program}
-                    process = await asyncio.create_subprocess_shell(
-                        command,
-                        stdin=stdin,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=cwd,
-                        env=cmd_env,
-                        creationflags=creation_flags,
-                    )
-                else:
-                    command = ExecTool._normalize_powershell_command(command)
-                    command = (
-                        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
-                        "if ($PSVersionTable.PSVersion.Major -lt 6) { $OutputEncoding = [Console]::OutputEncoding }\n"
-                        "$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'\n"
-                        f"{command}\n"
-                        "if ($LASTEXITCODE -ne $null) { exit $LASTEXITCODE }"
-                    )
-                    process = await asyncio.create_subprocess_exec(
-                        program, "-NoProfile", "-NonInteractive", "-Command", command,
-                        stdin=stdin,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=cwd,
-                        env=env,
-                        creationflags=creation_flags,
-                    )
-                if windows_job is not None:
-                    windows_job.assign_and_resume(process.pid)
-                    setattr(process, _PROCESS_TREE_OWNER_ATTR, windows_job)
-                return process
-            except BaseException:
-                if windows_job is not None:
-                    windows_job.terminate()
-                if process is not None:
-                    await ExecTool._kill_process(process)
-                raise
-        shell_program = shell_program or shutil.which("bash") or "/bin/bash"
-        args: list[str] = [shell_program]
-        shell_name = Path(shell_program).name.lower()
-        if login and shell_name in {"bash", "bash.exe", "zsh", "zsh.exe"}:
-            args.append("-l")
-        args.extend(["-c", command])
-        if process_tree:
-            return await asyncio.create_subprocess_exec(
-                *args,
-                stdin=stdin,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env=env,
-                start_new_session=True,
-            )
-        return await asyncio.create_subprocess_exec(
-            *args,
-            stdin=stdin,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=cwd,
-            env=env,
-        )
-
-    @staticmethod
-    def _normalize_powershell_command(command: str) -> str:
-        stripped = command.lstrip()
-        if not stripped or stripped[0] not in {"'", '"'}:
-            return command
-
-        quote = stripped[0]
-        end = stripped.find(quote, 1)
-        if end == -1 or end + 1 >= len(stripped) or not stripped[end + 1].isspace():
-            return command
-
-        executable = stripped[1:end]
-        looks_like_windows_executable = (
-            bool(re.match(r"^[A-Za-z]:[\\/]", executable))
-            or executable.startswith(r"\\")
-            or executable.lower().endswith((".exe", ".cmd", ".bat", ".ps1"))
-        )
-        if not looks_like_windows_executable:
-            return command
-
-        leading = command[: len(command) - len(stripped)]
-        return f"{leading}& {stripped}"
 
     @staticmethod
     def _resolve_shell(shell: str | None) -> tuple[str | None, str | None]:
@@ -674,97 +532,13 @@ class ExecTool(Tool):
             return None, ToolResult.error(f"Error: shell not found: {shell}")
         return resolved, None
 
-    @staticmethod
-    async def _kill_process(process: asyncio.subprocess.Process) -> None:
-        """Kill a subprocess and reap it to prevent zombies.
-
-        Safe to call when the process has already exited (e.g. generic
-        exception handlers after a successful ``communicate()``): skips
-        ``kill()`` and only runs the safety-net reap.
-        """
-        if process.returncode is not None:
-            _reap_pid(process.pid)
-            return
-        try:
-            with suppress(ProcessLookupError):
-                process.kill()
-            with suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-        finally:
-            _reap_pid(process.pid)
-
-    @staticmethod
-    async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
-        """Kill a session process and descendants, then reap the root process."""
-        owner = ExecTool._process_tree_owner(process)
-        try:
-            if owner is not None:
-                owner.terminate()
-            elif _IS_WINDOWS:
-                if process.returncode is None:
-                    with suppress(OSError, asyncio.TimeoutError):
-                        await asyncio.wait_for(
-                            asyncio.to_thread(
-                                subprocess.run,
-                                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                                check=False,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                            ),
-                            timeout=5.0,
-                        )
-            else:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
-
-            if process.returncode is None:
-                with suppress(ProcessLookupError):
-                    process.kill()
-            with suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-        finally:
-            if owner is not None:
-                ExecTool._drop_process_tree_owner(process)
-            _reap_pid(process.pid)
-
-    @staticmethod
-    def _process_tree_owner(
-        process: asyncio.subprocess.Process,
-    ) -> _ProcessTreeOwner | None:
-        # _spawn is the only writer for this private ownership marker.
-        return cast(_ProcessTreeOwner | None, vars(process).get(_PROCESS_TREE_OWNER_ATTR))
-
-    @staticmethod
-    def _create_windows_job() -> _ProcessTreeOwner:
-        from nanobot.agent.tools._windows_job import WindowsJob
-
-        return WindowsJob.create()
-
-    @staticmethod
-    def _drop_process_tree_owner(process: asyncio.subprocess.Process) -> None:
-        with suppress(AttributeError):
-            delattr(process, _PROCESS_TREE_OWNER_ATTR)
-
-    @staticmethod
-    def _release_process_tree(process: asyncio.subprocess.Process) -> None:
-        owner = ExecTool._process_tree_owner(process)
-        if owner is None:
-            return
-        owner.release()
-        ExecTool._drop_process_tree_owner(process)
-
     def _build_env(self) -> dict[str, str]:
-        """Build a minimal environment for subprocess execution.
+        """Use platform defaults plus explicitly allowed environment keys.
 
-        On Unix, only HOME/LANG/TERM are passed by default. If callers request
-        ``login=True``, bash/zsh may source the user's profile and add PATH or
-        other variables.
-
-        On Windows, ``cmd.exe`` has no login-profile mechanism, so a curated
-        set of system variables (including PATH) is forwarded.  API keys and
-        other secrets are still excluded.
+        Unix defaults include HOME, LANG, TERM and PYTHONUNBUFFERED; Windows
+        keeps a curated set of host variables. ``allowed_env_keys`` opts in to
+        forwarding additional values, including secrets. A requested login
+        shell may also load environment from the user's profile.
         """
         if _IS_WINDOWS:
             sr = os.environ.get("SYSTEMROOT", r"C:\Windows")
@@ -812,7 +586,6 @@ class ExecTool(Tool):
         restrict_to_workspace: bool | None = None,
         workspace_root: str | None = None,
     ) -> str | None:
-        """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
         lower = cmd.lower()
 
@@ -879,7 +652,15 @@ class ExecTool(Tool):
                             + _WORKSPACE_BOUNDARY_NOTE
                         )
                     else:
-                        p = Path(expanded).expanduser().resolve()
+                        try:
+                            home_path = Path(expanded).expanduser()
+                        except RuntimeError:
+                            return ToolResult.error(
+                                "Error: Command blocked by safety guard "
+                                "(path outside working dir)"
+                                + _WORKSPACE_BOUNDARY_NOTE
+                            )
+                        p = home_path.resolve()
                     # Match against the un-resolved path first.  On Linux,
                     # /dev/stderr is a symlink to /proc/self/fd/2 and
                     # ``Path.resolve()`` would mask the device-file intent.

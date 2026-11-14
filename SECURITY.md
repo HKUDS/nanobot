@@ -124,12 +124,12 @@ File operations have path traversal protection, but:
 **API Calls:**
 - All external API calls use HTTPS by default
 - Timeouts are configured to prevent hanging requests
-- The OpenAI-compatible API server must set `api.api_key` when binding to `0.0.0.0` or `::`; otherwise startup fails to prevent unauthenticated network access
 - Consider using a firewall to restrict outbound connections if needed
 
 **WhatsApp:**
 - Keep the neonize session database under `~/.nanobot/whatsapp-auth` secure (mode 0700).
 - Use `nanobot channels login whatsapp --force` to remove and recreate the local session database when rotating linked devices.
+- The separate `whatsapp_agent` channel authenticates with a per-agent API token. Treat it as a secret, prefer `${WA_AGENT_TOKEN}` over a literal value in `config.json`, and regenerate it in WhatsApp when it may have leaked. Its poll cursor holds no token material.
 
 ### 6. Dependency Security
 

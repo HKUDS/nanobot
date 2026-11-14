@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 import { canonicalToolTrace, formatToolCallTrace } from "@/lib/tool-traces";
 import type { ToolProgressEvent } from "@/lib/types";
 
@@ -76,12 +78,13 @@ function presentWebSearchQuery(query: string): WebSearchQueryPresentation {
   const scopes: string[] = [];
   const safeQuery = redactActivityText(query);
   const cleanQuery = safeQuery
-    .replace(/(?:^|\s)site:([^\s]+)/gi, (_match, rawSite: string) => {
+    .replace(/(^|\s)site:([^\s]+)/gi, (_match, prefix: string, rawSite: string) => {
       const scope = webSearchScope(rawSite);
       if (scope && !scopes.includes(scope)) scopes.push(scope);
-      return " ";
+      return prefix;
     })
-    .replace(/\s+/g, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ *\n */g, "\n")
     .trim();
 
   return {
@@ -94,18 +97,17 @@ export function presentWebSearchAction(
   query: string,
   status: WebSearchStatus,
   target: WebSearchTarget = "web",
-): string {
+  t: TFunction,
+): { label: string; detail: string } {
   const presentation = presentWebSearchQuery(query);
-  const verb = status === "error"
-    ? "Could not search"
-    : status === "running"
-      ? "Searching"
-      : "Searched";
-  const queryTarget = [presentation.scope, presentation.query].filter(Boolean).join(" · ");
-  if (target === "x") {
-    return queryTarget ? `${verb} X · ${queryTarget}` : `${verb} X`;
-  }
-  return queryTarget ? `${verb} ${queryTarget}` : `${verb} the web`;
+  const key = status === "error" ? "searchFailed" : status === "running" ? "searching" : "searched";
+  const searchTarget = target === "x"
+    ? ["X", presentation.scope].filter(Boolean).join(" ")
+    : presentation.scope || t("message.agentActivity.web");
+  return {
+    label: t(`message.agentActivity.${key}`, { target: searchTarget }),
+    detail: presentation.query,
+  };
 }
 
 function mergeWebSearchRun(

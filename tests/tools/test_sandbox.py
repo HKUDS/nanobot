@@ -1,23 +1,24 @@
-"""Tests for nanobot.agent.tools.sandbox."""
-
 import shlex
 from pathlib import Path
 
 import pytest
 
-from nanobot.agent.tools.sandbox import _sbpl_quote, _seatbelt_is_within, wrap_command
+from nanobot.execution.sandbox import _sbpl_quote, _seatbelt_is_within, build_sandbox_argv
 
 
-def _parse(cmd: str) -> list[str]:
-    """Split a wrapped command back into tokens for assertion."""
-    return shlex.split(cmd)
+@pytest.fixture(autouse=True)
+def portable_launcher(monkeypatch):
+    # Test backend arguments on all platforms without installing either launcher.
+    def resolve(backend, *_args, **_kwargs):
+        return "bwrap" if backend == "bwrap" else "/usr/bin/sandbox-exec"
+
+    monkeypatch.setattr("nanobot.execution.sandbox.resolve_sandbox_launcher", resolve)
 
 
 class TestBwrapBackend:
     def test_basic_structure(self, tmp_path):
         ws = str(tmp_path / "project")
-        result = wrap_command("bwrap", "echo hi", ws, ws)
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "echo hi", ws, ws)
 
         assert tokens[0] == "bwrap"
         assert "--new-session" in tokens
@@ -32,16 +33,14 @@ class TestBwrapBackend:
 
     def test_workspace_bind_mounted_rw(self, tmp_path):
         ws = str(tmp_path / "project")
-        result = wrap_command("bwrap", "ls", ws, ws)
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "ls", ws, ws)
 
         bind_idx = [i for i, t in enumerate(tokens) if t == "--bind"]
         assert any(tokens[i + 1] == ws and tokens[i + 2] == ws for i in bind_idx)
 
     def test_home_env_points_to_workspace(self, tmp_path):
         ws = str(tmp_path / "project")
-        result = wrap_command("bwrap", "echo $HOME", ws, ws)
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "echo $HOME", ws, ws)
 
         setenv_idx = [i for i, t in enumerate(tokens) if t == "--setenv"]
         assert any(
@@ -51,8 +50,7 @@ class TestBwrapBackend:
 
     def test_parent_dir_masked_with_tmpfs(self, tmp_path):
         ws = tmp_path / "project"
-        result = wrap_command("bwrap", "ls", str(ws), str(ws))
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "ls", str(ws), str(ws))
 
         tmpfs_indices = [i for i, t in enumerate(tokens) if t == "--tmpfs"]
         tmpfs_targets = {tokens[i + 1] for i in tmpfs_indices}
@@ -61,8 +59,7 @@ class TestBwrapBackend:
     def test_tmp_dir_mounted_as_tmpfs(self, tmp_path):
         """Regression coverage for #1948: commands need writable scratch space."""
         ws = tmp_path / "project"
-        result = wrap_command("bwrap", "touch /tmp/probe", str(ws), str(ws))
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "touch /tmp/probe", str(ws), str(ws))
 
         tmpfs_indices = [i for i, t in enumerate(tokens) if t == "--tmpfs"]
         tmpfs_targets = {tokens[i + 1] for i in tmpfs_indices}
@@ -70,8 +67,7 @@ class TestBwrapBackend:
 
     def test_parent_mask_precedes_workspace_recreation(self, tmp_path):
         ws = tmp_path / "project"
-        result = wrap_command("bwrap", "ls", str(ws), str(ws))
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "ls", str(ws), str(ws))
 
         parent_mask = next(
             i for i, t in enumerate(tokens)
@@ -92,8 +88,7 @@ class TestBwrapBackend:
     def test_cwd_inside_workspace(self, tmp_path):
         ws = tmp_path / "project"
         sub = ws / "src" / "lib"
-        result = wrap_command("bwrap", "pwd", str(ws), str(sub))
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "pwd", str(ws), str(sub))
 
         chdir_idx = tokens.index("--chdir")
         assert tokens[chdir_idx + 1] == str(sub)
@@ -101,8 +96,7 @@ class TestBwrapBackend:
     def test_cwd_outside_workspace_falls_back(self, tmp_path):
         ws = tmp_path / "project"
         outside = tmp_path / "other"
-        result = wrap_command("bwrap", "pwd", str(ws), str(outside))
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "pwd", str(ws), str(outside))
 
         chdir_idx = tokens.index("--chdir")
         assert tokens[chdir_idx + 1] == str(ws.resolve())
@@ -110,16 +104,14 @@ class TestBwrapBackend:
     def test_command_with_special_characters(self, tmp_path):
         ws = str(tmp_path / "project")
         cmd = "echo 'hello world' && cat \"file with spaces.txt\""
-        result = wrap_command("bwrap", cmd, ws, ws)
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", cmd, ws, ws)
 
         sep = tokens.index("--")
         assert tokens[sep + 1:] == ["sh", "-c", cmd]
 
     def test_system_dirs_ro_bound(self, tmp_path):
         ws = str(tmp_path / "project")
-        result = wrap_command("bwrap", "ls", ws, ws)
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "ls", ws, ws)
 
         ro_bind_indices = [i for i, t in enumerate(tokens) if t == "--ro-bind"]
         ro_targets = {tokens[i + 1] for i in ro_bind_indices}
@@ -127,8 +119,7 @@ class TestBwrapBackend:
 
     def test_optional_dirs_use_ro_bind_try(self, tmp_path):
         ws = str(tmp_path / "project")
-        result = wrap_command("bwrap", "ls", ws, ws)
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "ls", ws, ws)
 
         try_indices = [i for i, t in enumerate(tokens) if t == "--ro-bind-try"]
         try_targets = {tokens[i + 1] for i in try_indices}
@@ -136,16 +127,14 @@ class TestBwrapBackend:
         assert "/etc/ssl/certs" in try_targets
 
     def test_media_dir_ro_bind(self, tmp_path, monkeypatch):
-        """Media directory should be read-only mounted inside the sandbox."""
         fake_media = tmp_path / "media"
         fake_media.mkdir()
         monkeypatch.setattr(
-            "nanobot.agent.tools.sandbox.get_media_dir",
+            "nanobot.execution.sandbox.get_media_dir",
             lambda: fake_media,
         )
         ws = str(tmp_path / "project")
-        result = wrap_command("bwrap", "ls", ws, ws)
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("bwrap", "ls", ws, ws)
 
         try_indices = [i for i, t in enumerate(tokens) if t == "--ro-bind-try"]
         try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in try_indices}
@@ -155,14 +144,13 @@ class TestBwrapBackend:
         ws = tmp_path / "project"
         tool_bin = tmp_path / "home" / ".local" / "bin"
 
-        result = wrap_command(
+        tokens = build_sandbox_argv(
             "bwrap",
             "uv --version",
             str(ws),
             str(ws),
             sandbox_ro_binds=[str(tool_bin)],
         )
-        tokens = _parse(result)
 
         try_indices = [i for i, t in enumerate(tokens) if t == "--ro-bind-try"]
         try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in try_indices}
@@ -172,14 +160,13 @@ class TestBwrapBackend:
         ws = tmp_path / "project"
         cache_dir = tmp_path / "cache"
 
-        result = wrap_command(
+        tokens = build_sandbox_argv(
             "bwrap",
             "touch cache/file",
             str(ws),
             str(ws),
             sandbox_rw_binds=[str(cache_dir)],
         )
-        tokens = _parse(result)
 
         bind_try_indices = [i for i, t in enumerate(tokens) if t == "--bind-try"]
         bind_try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in bind_try_indices}
@@ -189,7 +176,7 @@ class TestBwrapBackend:
     def test_custom_relative_bind_paths_are_ignored(self, tmp_path):
         ws = tmp_path / "project"
 
-        result = wrap_command(
+        tokens = build_sandbox_argv(
             "bwrap",
             "ls",
             str(ws),
@@ -197,7 +184,6 @@ class TestBwrapBackend:
             sandbox_ro_binds=["relative/bin"],
             sandbox_rw_binds=["relative/cache"],
         )
-        tokens = _parse(result)
 
         assert "relative/bin" not in tokens
         assert "relative/cache" not in tokens
@@ -206,7 +192,7 @@ class TestBwrapBackend:
         ws = tmp_path / "private" / "project"
         parent = ws.parent.resolve(strict=False)
 
-        result = wrap_command(
+        tokens = build_sandbox_argv(
             "bwrap",
             "cat ../config.json",
             str(ws),
@@ -214,7 +200,6 @@ class TestBwrapBackend:
             sandbox_ro_binds=[str(parent)],
             sandbox_rw_binds=[str(parent)],
         )
-        tokens = _parse(result)
 
         ro_try_indices = [i for i, token in enumerate(tokens) if token == "--ro-bind-try"]
         ro_try_pairs = {(tokens[i + 1], tokens[i + 2]) for i in ro_try_indices}
@@ -232,9 +217,8 @@ class TestSeatbeltBackend:
     """
 
     @staticmethod
-    def _profile(cmd: str) -> str:
+    def _profile(tokens: list[str]) -> str:
         """Return the SBPL profile from a wrapped command."""
-        tokens = _parse(cmd)
         return tokens[tokens.index("-p") + 1]
 
     @staticmethod
@@ -252,8 +236,7 @@ class TestSeatbeltBackend:
 
     def test_basic_structure(self, tmp_path):
         ws = str(tmp_path / "project")
-        result = wrap_command("seatbelt", "echo hi", ws, ws)
-        tokens = _parse(result)
+        tokens = build_sandbox_argv("seatbelt", "echo hi", ws, ws)
 
         assert tokens[0] == "/usr/bin/sandbox-exec"
         assert tokens[1] == "-p"
@@ -262,7 +245,7 @@ class TestSeatbeltBackend:
         assert tokens[-1].endswith("echo hi")
 
     def test_denies_by_default(self, tmp_path):
-        profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(tmp_path), str(tmp_path)))
 
         assert "(version 1)" in profile
         assert "(deny default)" in profile
@@ -274,13 +257,13 @@ class TestSeatbeltBackend:
         profile listing only system subpaths kills every wrapped command
         before it runs.
         """
-        profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(tmp_path), str(tmp_path)))
 
         assert '(allow file-read* (literal "/"))' in profile
 
     def test_workspace_allowed_read_write(self, tmp_path):
         ws = (tmp_path / "project").resolve()
-        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(ws), str(ws)))
 
         assert f"(allow file-read* file-write* (subpath {self._quote(ws)}))" in profile
 
@@ -291,15 +274,14 @@ class TestSeatbeltBackend:
         re-exposes only the workspace subtree.
         """
         ws = (tmp_path / "project").resolve()
-        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(ws), str(ws)))
 
         parent_deny = profile.index(f"(deny file-read* file-write* (subpath {self._quote(ws.parent)})")
         workspace_allow = profile.index(f"(allow file-read* file-write* (subpath {self._quote(ws)})")
         assert parent_deny < workspace_allow
 
     def test_no_parent_deny_when_workspace_is_the_root(self):
-        """Denying `/` would override the root read rule and break startup."""
-        profile = self._profile(wrap_command("seatbelt", "ls", "/", "/"))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", "/", "/"))
 
         assert "(deny file-read*" not in profile
 
@@ -311,21 +293,20 @@ class TestSeatbeltBackend:
         runs anything.
         """
         ws = (tmp_path / "project").resolve()
-        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(ws), str(ws)))
 
         assert f"(literal {self._quote(ws.parent)})" in self._metadata_rule(profile)
 
     def test_config_dir_is_searchable_but_not_listable(self, tmp_path):
-        """Metadata only: `cd workspace` works, `ls ..` and `cat ../config.json` do not."""
         ws = (tmp_path / "project").resolve()
-        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(ws), str(ws)))
 
         assert f"(literal {self._quote(ws.parent)})" in self._metadata_rule(profile)
         assert f"(allow file-read* (subpath {self._quote(ws.parent)}))" not in profile
         assert f"(allow file-read* file-write* (subpath {self._quote(ws.parent)}))" not in profile
 
     def test_host_scratch_directories_are_not_shared(self, tmp_path):
-        profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(tmp_path), str(tmp_path)))
 
         for path in ("/tmp", "/private/tmp", "/var", "/private/var", "/var/folders",
                      "/private/var/folders", "/Library", "/etc", "/private/etc"):
@@ -333,22 +314,22 @@ class TestSeatbeltBackend:
 
     def test_home_and_tmpdir_use_workspace(self, tmp_path):
         ws = tmp_path.resolve()
-        tokens = _parse(wrap_command("seatbelt", "mktemp", str(ws), str(ws)))
+        tokens = build_sandbox_argv("seatbelt", "mktemp", str(ws), str(ws))
         assert tokens[3:6] == ["/usr/bin/env", f"HOME={ws}", f"TMPDIR={ws}"]
 
     def test_network_matches_bwrap_policy(self, tmp_path):
-        profile = self._profile(wrap_command("seatbelt", "ls", str(tmp_path), str(tmp_path)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(tmp_path), str(tmp_path)))
         assert "(allow network*)" in profile
 
     def test_media_dir_read_only(self, tmp_path, monkeypatch):
         fake_media = (tmp_path / "media").resolve()
         fake_media.mkdir()
         monkeypatch.setattr(
-            "nanobot.agent.tools.sandbox.get_media_dir",
+            "nanobot.execution.sandbox.get_media_dir",
             lambda: fake_media,
         )
         ws = (tmp_path / "project").resolve()
-        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(ws), str(ws)))
 
         assert f"(allow file-read* (subpath {self._quote(fake_media)}))" in profile
         assert f"(deny file-write* (subpath {self._quote(fake_media)}))" in profile
@@ -356,23 +337,23 @@ class TestSeatbeltBackend:
     def test_cwd_inside_workspace(self, tmp_path):
         ws = (tmp_path / "project").resolve()
         sub = ws / "src" / "lib"
-        result = wrap_command("seatbelt", "pwd", str(ws), str(sub))
+        result = build_sandbox_argv("seatbelt", "pwd", str(ws), str(sub))
 
-        assert _parse(result)[-1] == f"cd {shlex.quote(str(sub))} || exit\npwd"
+        assert result[-1] == f"cd {shlex.quote(str(sub))} || exit\npwd"
 
     def test_cwd_outside_workspace_falls_back(self, tmp_path):
         ws = (tmp_path / "project").resolve()
         outside = tmp_path / "other"
-        result = wrap_command("seatbelt", "pwd", str(ws), str(outside))
+        result = build_sandbox_argv("seatbelt", "pwd", str(ws), str(outside))
 
-        assert _parse(result)[-1] == f"cd {shlex.quote(str(ws))} || exit\npwd"
+        assert result[-1] == f"cd {shlex.quote(str(ws))} || exit\npwd"
 
     def test_custom_read_only_binds(self, tmp_path):
         ws = (tmp_path / "project").resolve()
         tool_bin = (tmp_path / "home" / ".local" / "bin").resolve(strict=False)
 
         profile = self._profile(
-            wrap_command(
+            build_sandbox_argv(
                 "seatbelt", "uv --version", str(ws), str(ws),
                 sandbox_ro_binds=[str(tool_bin)],
             )
@@ -384,7 +365,7 @@ class TestSeatbeltBackend:
     def test_read_only_bind_overrides_workspace_write(self, tmp_path):
         ws = tmp_path.resolve()
         ro = ws / "readonly"
-        profile = self._profile(wrap_command(
+        profile = self._profile(build_sandbox_argv(
             "seatbelt", "ls", str(ws), str(ws), sandbox_ro_binds=[str(ro)],
         ))
         assert profile.index(f"(allow file-read* file-write* (subpath {self._quote(ws)}))") < (
@@ -396,8 +377,8 @@ class TestSeatbeltBackend:
         ws = (tmp_path / "workspace").resolve()
         ro = ws / 'tree with "quotes' / "branch" / "readonly"
         media = ro if source == "media" else tmp_path / "media"
-        monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: media)
-        profile = self._profile(wrap_command(
+        monkeypatch.setattr("nanobot.execution.sandbox.get_media_dir", lambda: media)
+        profile = self._profile(build_sandbox_argv(
             "seatbelt", "ls", str(ws), str(ws),
             sandbox_ro_binds=[str(ro)] if source == "bind" else [],
         ))
@@ -413,8 +394,8 @@ class TestSeatbeltBackend:
         ws = (tmp_path / "workspace").resolve()
         ro = ws / "tree" / "readonly"
         rw = {"root": ro, "parent": ro.parent, "child": ro / "cache"}[override]
-        monkeypatch.setattr("nanobot.agent.tools.sandbox.get_media_dir", lambda: ro)
-        profile = self._profile(wrap_command(
+        monkeypatch.setattr("nanobot.execution.sandbox.get_media_dir", lambda: ro)
+        profile = self._profile(build_sandbox_argv(
             "seatbelt", "ls", str(ws), str(ws),
             sandbox_ro_binds=[str(ro)], sandbox_rw_binds=[str(rw)],
         ))
@@ -447,7 +428,7 @@ class TestSeatbeltBackend:
         cache_dir = (tmp_path / "cache").resolve(strict=False)
 
         profile = self._profile(
-            wrap_command(
+            build_sandbox_argv(
                 "seatbelt", "touch cache/file", str(ws), str(ws),
                 sandbox_rw_binds=[str(cache_dir)],
             )
@@ -456,12 +437,11 @@ class TestSeatbeltBackend:
         assert f"(allow file-read* file-write* (subpath {self._quote(cache_dir)}))" in profile
 
     def test_custom_workspace_parent_binds_are_ignored(self, tmp_path):
-        """A bind must not uncover the masked config directory."""
         ws = tmp_path / "private" / "project"
         parent = ws.parent.resolve(strict=False)
 
         profile = self._profile(
-            wrap_command(
+            build_sandbox_argv(
                 "seatbelt", "cat ../config.json", str(ws), str(ws),
                 sandbox_ro_binds=[str(parent)],
                 sandbox_rw_binds=[str(parent)],
@@ -475,13 +455,12 @@ class TestSeatbeltBackend:
         """An unescaped quote would terminate the literal early and silently
         widen every rule that follows it."""
         ws = (tmp_path / 'pro"ject').resolve()
-        profile = self._profile(wrap_command("seatbelt", "ls", str(ws), str(ws)))
+        profile = self._profile(build_sandbox_argv("seatbelt", "ls", str(ws), str(ws)))
 
         escaped = str(ws).replace("\\", "\\\\").replace('"', '\\"')
         assert f'(allow file-read* file-write* (subpath "{escaped}"))' in profile
 
     def test_sbpl_quote_escapes_special_characters(self):
-        """Backslashes and double quotes must be escaped with C-style escaping."""
         assert _sbpl_quote(r'path\with"quotes') == r'"path\\with\"quotes"'
 
 
@@ -489,9 +468,9 @@ class TestUnknownBackend:
     def test_raises_value_error(self, tmp_path):
         ws = str(tmp_path / "project")
         with pytest.raises(ValueError, match="Unknown sandbox backend"):
-            wrap_command("nonexistent", "ls", ws, ws)
+            build_sandbox_argv("nonexistent", "ls", ws, ws)
 
     def test_empty_string_raises(self, tmp_path):
         ws = str(tmp_path / "project")
         with pytest.raises(ValueError):
-            wrap_command("", "ls", ws, ws)
+            build_sandbox_argv("", "ls", ws, ws)

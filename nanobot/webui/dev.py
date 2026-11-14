@@ -1,5 +1,3 @@
-"""Vite development-server lifecycle for the WebUI source checkout."""
-
 from __future__ import annotations
 
 import os
@@ -54,10 +52,10 @@ class WebUIDevServer:
             self.process.wait(timeout=2)
 
 
-def webui_dev_browser_url(webui_url: str) -> str:
+def webui_dev_browser_url(webui_url: str, *, port: int = WEBUI_DEV_PORT) -> str:
     """Move a configured WebUI URL to Vite while preserving its auth fragment."""
     parsed = urlsplit(webui_url)
-    return urlunsplit(("http", f"{WEBUI_DEV_HOST}:{WEBUI_DEV_PORT}", parsed.path, "", parsed.fragment))
+    return urlunsplit(("http", f"{WEBUI_DEV_HOST}:{port}", parsed.path, "", parsed.fragment))
 
 
 def webui_dev_proxy_target(webui_url: str) -> str:
@@ -124,7 +122,7 @@ def _vite_command(runner: str, vite_cli: Path) -> list[str]:
 def start_webui_dev_server(
     *,
     target_url: str,
-    browser_url: str,
+    port: int = WEBUI_DEV_PORT,
     source_dir: Path | None = None,
     runner: str | None = None,
     environ: Mapping[str, str] | None = None,
@@ -141,9 +139,9 @@ def start_webui_dev_server(
         raise WebUIDevError(
             "`nanobot webui --dev` requires a source checkout containing webui/package.json"
         )
-    if endpoint_reachable(WEBUI_DEV_HOST, WEBUI_DEV_PORT):
+    if endpoint_reachable(WEBUI_DEV_HOST, port):
         raise WebUIDevError(
-            f"WebUI development port {WEBUI_DEV_PORT} is already in use; stop that process first"
+            f"WebUI development port {port} is already in use; stop that process first"
         )
 
     command_runner = runner or pick_webui_build_runner()
@@ -157,7 +155,8 @@ def start_webui_dev_server(
         subprocess_run=subprocess_run,
         output=output,
     )
-    command = _vite_command(command_runner, vite_cli)
+    command = [*_vite_command(command_runner, vite_cli), "--port", str(port), "--strictPort",
+               "--logLevel", "warn", "--clearScreen", "false"]
     child_env = dict(environ or os.environ)
     child_env["NANOBOT_API_URL"] = target_url
 
@@ -175,19 +174,13 @@ def start_webui_dev_server(
             raise WebUIDevError(
                 f"WebUI development server exited before it was ready (code {process.returncode})"
             )
-        if endpoint_reachable(WEBUI_DEV_HOST, WEBUI_DEV_PORT):
-            if output is not None:
-                parsed_url = urlsplit(browser_url)
-                display_url = urlunsplit(
-                    (parsed_url.scheme, parsed_url.netloc, parsed_url.path, "", "")
-                )
-                output(f"WebUI dev server: {display_url}")
+        if endpoint_reachable(WEBUI_DEV_HOST, port):
             return server
         sleep(0.1)
 
     server.stop()
     raise WebUIDevError(
-        f"WebUI development server did not listen on {WEBUI_DEV_HOST}:{WEBUI_DEV_PORT} "
+        f"WebUI development server did not listen on {WEBUI_DEV_HOST}:{port} "
         f"within {timeout_s:g}s"
     )
 
@@ -196,13 +189,13 @@ def start_webui_dev_server(
 def run_webui_dev_server(
     *,
     target_url: str,
-    browser_url: str,
+    port: int = WEBUI_DEV_PORT,
     output: Callable[[str], None] | None = None,
 ) -> Generator[WebUIDevServer, None, None]:
     """Run a Vite sidecar for the duration of a foreground WebUI command."""
     server = start_webui_dev_server(
         target_url=target_url,
-        browser_url=browser_url,
+        port=port,
         output=output,
     )
     try:

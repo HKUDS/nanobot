@@ -108,33 +108,18 @@ def test_edit_file_rejects_unique_match_outside_line_hint(tmp_path):
 
 def test_edit_file_line_hint_can_cover_multiline_match(tmp_path):
     target = tmp_path / "block.txt"
-    target.write_text("before\nstart\nmiddle\nend\nafter\n")
+    target.write_text("before\nstart\nmiddle\nend\nbetween\nstart\nmiddle\nend\nafter\n")
     tool = EditFileTool(workspace=tmp_path)
 
     result = asyncio.run(tool.execute(
         path=str(target),
         old_text="start\nmiddle\nend",
         new_text="start\nchanged\nend",
-        line_hint=3,
+        line_hint=7,
     ))
 
     assert "Patch applied:" in result
-    assert target.read_text() == "before\nstart\nchanged\nend\nafter\n"
-
-
-def test_edit_file_can_edit_ipynb_as_json(tmp_path):
-    target = tmp_path / "analysis.ipynb"
-    target.write_text('{"cells": []}')
-    tool = EditFileTool(workspace=tmp_path)
-
-    result = asyncio.run(tool.execute(
-        path=str(target),
-        old_text='"cells": []',
-        new_text='"cells": [{"cell_type": "markdown", "source": "hi"}]',
-    ))
-
-    assert "Patch applied:" in result
-    assert '"source": "hi"' in target.read_text()
+    assert target.read_text() == "before\nstart\nmiddle\nend\nbetween\nstart\nchanged\nend\nafter\n"
 
 
 def test_edit_file_multiple_match_hint_mentions_occurrence(tmp_path):

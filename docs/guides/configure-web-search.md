@@ -1,8 +1,6 @@
 # How to Configure Web Search for a nanobot AI Agent
 
-nanobot includes built-in web search and web fetch tools. Search uses
-DuckDuckGo by default and can be configured for API-backed or self-hosted
-providers.
+nanobot includes built-in web search and web fetch tools. Search uses DuckDuckGo by default and can be configured for API-backed or self-hosted providers.
 
 ## What you will build
 
@@ -12,29 +10,26 @@ providers.
 
 ## When to use this
 
-Configure web search when the agent needs current information, public web
-research, source discovery, or page fetching during a task.
+Configure web search when the agent needs current information, public web research, source discovery, or page fetching during a task.
 
-## Install
+## Before you start
 
-```bash
-python -m pip install nanobot-ai
-nanobot onboard --wizard
-nanobot agent -m "Hello!"
-```
+Complete [Quick Start](../quick-start.md) if nanobot is not installed or cannot reply yet. If you already have a working WebUI or CLI session, continue here using that instance; no reinstall or second gateway is needed.
 
-Web tools are enabled by default. Configure them only when you want a specific
-provider, API key, proxy, fetch behavior, or SSRF allowlist.
+Web tools are enabled by default. Configure them only when you want a specific provider, API key, proxy, fetch behavior, or SSRF allowlist.
 
 ## Minimal working example
 
 For local interactive setup:
 
 1. Run `nanobot webui`.
-2. Open **Settings → Web**.
+2. Open **Settings → Capabilities → Web access**.
 3. Enable web search, choose a provider, and enter its API key if required.
 4. Save and restart when prompted.
 5. Ask a question that requires current information and inspect the cited sources.
+
+<details>
+<summary>Manual configuration</summary>
 
 For manual or deployment-managed config, use the default search provider:
 
@@ -66,8 +61,9 @@ Or use an API-backed provider:
 }
 ```
 
-Ask a question that requires current information and inspect the tool activity
-in the WebUI or logs.
+Ask a question that requires current information and inspect the tool activity in the WebUI or logs.
+
+</details>
 
 ## Production notes
 
@@ -78,16 +74,10 @@ in the WebUI or logs.
 
 ## Security notes
 
-- Web fetch and HTTP MCP share an SSRF guard.
-- Private, loopback, link-local, and cloud metadata addresses are blocked by
-  default.
-- With `useJinaReader` enabled (the default), fetched URLs are disclosed to the
-  remote reader service. Credential-bearing URLs (userinfo or token/signature
-  query parameters) are fetched locally instead; path-embedded secrets cannot
-  be detected, so disable the remote reader when URLs must stay local.
-- Add `tools.ssrfWhitelist` only for narrow trusted CIDRs.
-- Do not give public chat users unrestricted web and shell access without
-  review.
+- Web fetch and HTTP MCP share an address check that prevents requests to private or internal network locations. Private, loopback, link-local, and cloud metadata addresses are blocked by default.
+- With `useJinaReader` enabled (the default), fetched URLs are disclosed to the remote reader service. Credential-bearing URLs (userinfo or token/signature query parameters) are fetched locally instead; path-embedded secrets cannot be detected, so disable the remote reader when URLs must stay local.
+- Add `tools.ssrfWhitelist` only for narrow trusted CIDRs. This setting exempts those address ranges from the private-address block; use the smallest range needed.
+- Do not give public chat users unrestricted web and shell access without review.
 
 ## Troubleshooting
 

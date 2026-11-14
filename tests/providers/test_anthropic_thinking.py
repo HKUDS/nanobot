@@ -1,5 +1,3 @@
-"""Tests for Anthropic provider thinking / reasoning_effort modes."""
-
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -88,7 +86,6 @@ def test_opus_4_7_high_uses_adaptive_effort() -> None:
 
 
 def test_opus_4_7_omits_temperature_none() -> None:
-    """Without thinking, opus-4-7 must still omit temperature (API rejects it)."""
     kw = _build(_make_provider("claude-opus-4-7"), None)
     assert "temperature" not in kw
     assert "thinking" not in kw
@@ -99,8 +96,16 @@ def test_opus_4_8_omits_temperature_adaptive() -> None:
     assert "temperature" not in kw
 
 
-def test_opus_4_8_high_uses_adaptive_effort() -> None:
-    kw = _build(_make_provider("claude-opus-4-8"), "high", max_tokens=4096)
+@pytest.mark.parametrize(
+    "model",
+    [
+        pytest.param("claude-opus-4-8", id="opus_4_8_high_uses_adaptive_effort"),
+        pytest.param("claude-fable-5", id="fable_high_uses_adaptive_effort"),
+        pytest.param("claude-sonnet-5", id="sonnet_5_high_uses_adaptive_effort"),
+    ],
+)
+def test_adaptive_models_use_high_effort(model) -> None:
+    kw = _build(_make_provider(model), "high", max_tokens=4096)
     assert "temperature" not in kw
     assert kw["thinking"] == {"type": "adaptive"}
     assert kw["output_config"] == {"effort": "high"}
@@ -116,13 +121,6 @@ def test_fable_omits_temperature_adaptive() -> None:
     assert "temperature" not in kw
 
 
-def test_fable_high_uses_adaptive_effort() -> None:
-    kw = _build(_make_provider("claude-fable-5"), "high", max_tokens=4096)
-    assert "temperature" not in kw
-    assert kw["thinking"] == {"type": "adaptive"}
-    assert kw["output_config"] == {"effort": "high"}
-
-
 def test_fable_omits_temperature_none() -> None:
     kw = _build(_make_provider("claude-fable-5"), None)
     assert "temperature" not in kw
@@ -132,13 +130,6 @@ def test_sonnet_5_omits_temperature_adaptive() -> None:
     kw = _build(_make_provider("claude-sonnet-5"), "adaptive")
     assert "temperature" not in kw
     assert kw["thinking"] == {"type": "adaptive"}
-
-
-def test_sonnet_5_high_uses_adaptive_effort() -> None:
-    kw = _build(_make_provider("claude-sonnet-5"), "high", max_tokens=4096)
-    assert "temperature" not in kw
-    assert kw["thinking"] == {"type": "adaptive"}
-    assert kw["output_config"] == {"effort": "high"}
 
 
 def test_sonnet_5_omits_temperature_none() -> None:
@@ -203,7 +194,6 @@ def test_ordinary_model_sends_temperature() -> None:
 
 
 def test_reasoning_effort_string_none_does_not_enable_thinking() -> None:
-    """reasoning_effort='none' must not enable thinking — treated same as disabled."""
     kw = _build(_make_provider(), "none")
     assert "thinking" not in kw
     assert kw["temperature"] == 0.7

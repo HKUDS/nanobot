@@ -1,7 +1,5 @@
-"""Base class for agent tools."""
 from __future__ import annotations
 
-import math
 import typing
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -16,17 +14,6 @@ if typing.TYPE_CHECKING:
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
 
-# Matches :meth:`Tool._cast_value` / :meth:`Schema.validate_json_schema_value` behavior
-_JSON_TYPE_MAP: dict[str, type | tuple[type, ...]] = {
-    "string": str,
-    "integer": int,
-    "number": (int, float),
-    "boolean": bool,
-    "array": list,
-    "object": dict,
-}
-
-
 class Schema(ABC):
     """Abstract base for JSON Schema fragments describing tool parameters.
 
@@ -36,89 +23,16 @@ class Schema(ABC):
     """
 
     @staticmethod
-    def resolve_json_schema_type(t: Any) -> str | None:
-        """Resolve the non-null type name from JSON Schema ``type`` (e.g. ``['string','null']`` -> ``'string'``)."""
-        if isinstance(t, list):
-            types = cast(list[Any], t)
-            return cast(str | None, next((x for x in types if x != "null"), None))
-        return cast(str | None, t)
-
-    @staticmethod
-    def subpath(path: str, key: str) -> str:
-        return f"{path}.{key}" if path else key
-
-    @staticmethod
-    def validate_json_schema_value(val: Any, schema: dict[str, Any], path: str = "") -> list[str]:
+    def validate_json_schema_value(
+        val: Any, schema: dict[str, Any] | bool, path: str = "",
+    ) -> list[str]:
         """Validate ``val`` against a JSON Schema fragment; returns error messages (empty means valid).
 
         Used by :class:`Tool` and each concrete Schema's :meth:`validate_value`.
         """
-        raw_type = schema.get("type")
-        nullable = (isinstance(raw_type, list) and "null" in raw_type) or schema.get("nullable", False)
-        t = Schema.resolve_json_schema_type(raw_type)
-        label = path or "parameter"
+        from nanobot.agent.tools.json_schema import validate_value
 
-        if nullable and val is None:
-            return []
-        if t == "integer" and (not isinstance(val, int) or isinstance(val, bool)):
-            return [f"{label} should be integer"]
-        if t == "number" and (
-            not isinstance(val, _JSON_TYPE_MAP["number"]) or isinstance(val, bool)
-        ):
-            return [f"{label} should be number"]
-        if t in _JSON_TYPE_MAP and t not in ("integer", "number") and not isinstance(val, _JSON_TYPE_MAP[t]):
-            return [f"{label} should be {t}"]
-        if t == "number" and isinstance(val, float) and not math.isfinite(val):
-            return [f"{label} must be finite"]
-
-        errors: list[str] = []
-        if "enum" in schema and val not in schema["enum"]:
-            errors.append(f"{label} must be one of {schema['enum']}")
-        if t in ("integer", "number"):
-            if "minimum" in schema and val < schema["minimum"]:
-                errors.append(f"{label} must be >= {schema['minimum']}")
-            if "maximum" in schema and val > schema["maximum"]:
-                errors.append(f"{label} must be <= {schema['maximum']}")
-        if t == "string":
-            string_value = cast(str, val)
-            if "minLength" in schema and len(string_value) < schema["minLength"]:
-                errors.append(f"{label} must be at least {schema['minLength']} chars")
-            if "maxLength" in schema and len(string_value) > schema["maxLength"]:
-                errors.append(f"{label} must be at most {schema['maxLength']} chars")
-        if t == "object":
-            object_value = cast(dict[str, Any], val)
-            props = cast(dict[str, Any], schema.get("properties", {}))
-            required = cast(list[Any], schema.get("required", []))
-            for k in required:
-                if k not in object_value:
-                    errors.append(f"missing required {Schema.subpath(path, k)}")
-            additional = schema.get("additionalProperties", True)
-            for k, v in object_value.items():
-                if k in props:
-                    errors.extend(Schema.validate_json_schema_value(v, props[k], Schema.subpath(path, k)))
-                elif additional is False:
-                    errors.append(f"unexpected parameter {Schema.subpath(path, k)}")
-                elif isinstance(additional, dict):
-                    errors.extend(
-                        Schema.validate_json_schema_value(
-                            v,
-                            cast(dict[str, Any], additional),
-                            Schema.subpath(path, k),
-                        )
-                    )
-        if t == "array":
-            array_value = cast(list[Any], val)
-            if "minItems" in schema and len(array_value) < schema["minItems"]:
-                errors.append(f"{label} must have at least {schema['minItems']} items")
-            if "maxItems" in schema and len(array_value) > schema["maxItems"]:
-                errors.append(f"{label} must be at most {schema['maxItems']} items")
-            if "items" in schema:
-                prefix = f"{path}[{{}}]" if path else "[{}]"
-                for i, item in enumerate(array_value):
-                    errors.extend(
-                        Schema.validate_json_schema_value(item, schema["items"], prefix.format(i))
-                    )
-        return errors
+        return validate_value(val, schema, path)
 
     @staticmethod
     def fragment(value: Any) -> dict[str, Any]:
@@ -145,28 +59,21 @@ class ToolResult(str):
     """String-compatible tool output with structured status."""
 
     is_error: bool
+    error_code: str | None
 
-    def __new__(cls, content: str, *, is_error: bool = False) -> ToolResult:
+    def __new__(cls, content: str, *, is_error: bool = False, error_code: str | None = None) -> ToolResult:
         obj = str.__new__(cls, content)
         obj.is_error = is_error
+        obj.error_code = error_code
         return obj
 
     @classmethod
-    def error(cls, content: str) -> ToolResult:
-        return cls(content, is_error=True)
+    def error(cls, content: str, *, error_code: str | None = None) -> ToolResult:
+        return cls(content, is_error=True, error_code=error_code)
 
 
 class Tool(ABC):
     """Agent capability: read files, run commands, etc."""
-
-    _TYPE_MAP = _JSON_TYPE_MAP
-    _BOOL_TRUE = frozenset(("true", "1", "yes"))
-    _BOOL_FALSE = frozenset(("false", "0", "no"))
-
-    @staticmethod
-    def _resolve_type(t: Any) -> str | None:
-        """Pick first non-null type from JSON Schema unions like ``['string','null']``."""
-        return Schema.resolve_json_schema_type(t)
 
     @property
     @abstractmethod
@@ -201,7 +108,6 @@ class Tool(ABC):
         """Whether this tool should run alone even if concurrency is enabled."""
         return False
 
-    # --- Plugin metadata ---
 
     config_key: str = ""
     _plugin_discoverable: bool = True
@@ -231,68 +137,6 @@ class Tool(ABC):
     @staticmethod
     def error(content: str) -> ToolResult:
         return ToolResult.error(content)
-
-    def _cast_object(self, obj: Any, schema: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(obj, dict):
-            return obj
-        props = cast(dict[str, Any], schema.get("properties", {}))
-        additional = schema.get("additionalProperties")
-        casted: dict[str, Any] = {}
-        object_value = cast(dict[str, Any], obj)
-        for k, v in object_value.items():
-            if k in props:
-                casted[k] = self._cast_value(v, props[k])
-            elif isinstance(additional, dict):
-                casted[k] = self._cast_value(v, cast(dict[str, Any], additional))
-            else:
-                casted[k] = v
-        return casted
-
-    def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Apply safe schema-driven casts before validation."""
-        schema = self.parameters or {}
-        if schema.get("type", "object") != "object":
-            return params
-        return self._cast_object(params, schema)
-
-    def _cast_value(self, val: Any, schema: dict[str, Any]) -> Any:
-        t = self._resolve_type(schema.get("type"))
-
-        if t == "boolean" and isinstance(val, bool):
-            return val
-        if t == "integer" and isinstance(val, int) and not isinstance(val, bool):
-            return val
-        if t in self._TYPE_MAP and t not in ("boolean", "integer", "array", "object"):
-            expected = self._TYPE_MAP[t]
-            if isinstance(val, expected):
-                return val
-
-        if isinstance(val, str) and t in ("integer", "number"):
-            try:
-                return int(val) if t == "integer" else float(val)
-            except ValueError:
-                return val
-
-        if t == "string":
-            return val if val is None else str(val)
-
-        if t == "boolean" and isinstance(val, str):
-            low = val.lower()
-            if low in self._BOOL_TRUE:
-                return True
-            if low in self._BOOL_FALSE:
-                return False
-            return val
-
-        if t == "array" and isinstance(val, list):
-            items = schema.get("items")
-            array_value = cast(list[Any], val)
-            return [self._cast_value(x, items) for x in array_value] if items else array_value
-
-        if t == "object" and isinstance(val, dict):
-            return self._cast_object(val, schema)
-
-        return val
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
         """Validate against JSON schema; empty list means valid."""

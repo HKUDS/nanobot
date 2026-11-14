@@ -1,12 +1,14 @@
-"""Windows browser handoff without putting bootstrap URLs in process arguments.
+"""Windows and WSL browser handoff without credential-bearing process arguments.
 
 This stdlib-only module also runs in an isolated, short-lived child interpreter.
 The child owns the redirect file so its lifetime does not depend on the CLI staying
-open. URLs travel only through an anonymous pipe and the ACL-protected file.
+open. WSL uses the inbox Windows PowerShell for the same handoff. URLs travel only
+through an anonymous pipe and a private redirect file.
 """
 
 from __future__ import annotations
 
+import base64
 import ctypes
 import html
 import re
@@ -48,13 +50,22 @@ def launch_browser(url: str) -> bool:
     worker: threading.Thread | None = None
     opened = False
     try:
-        payload = _url_bytes(url) + b"\n"
-        # -I -S keeps user-site, cwd, PYTHONPATH and .pth startup code out of this
-        # stdlib-only helper. In particular, do not use BROWSER or URL arguments.
+        if sys.platform == "linux":
+            payload = base64.b64encode(_redirect_html(url)) + b"\n"
+            command = [
+                "powershell.exe", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand",
+                base64.b64encode(_WSL_OPEN_SCRIPT.encode("utf-16-le")).decode("ascii"),
+            ]
+        else:
+            payload = _url_bytes(url) + b"\n"
+            command = [sys.executable, "-I", "-S", str(Path(__file__).resolve()), "--serve"]
+        # -I -S / -NoProfile exclude user startup code. Both helpers receive
+        # credentials only through stdin and outlive the calling CLI.
         process = subprocess.Popen(
-            [sys.executable, "-I", "-S", str(Path(__file__).resolve()), "--serve"],
+            command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            close_fds=True, creationflags=0x08000000,  # CREATE_NO_WINDOW
+            close_fds=True, start_new_session=sys.platform != "win32",
+            creationflags=0x08000000 if sys.platform == "win32" else 0,  # CREATE_NO_WINDOW
         )
         incoming, outgoing = process.stdin, process.stdout
         if incoming is None or outgoing is None:
@@ -121,6 +132,87 @@ def _serve(incoming: BinaryIO, outgoing: BinaryIO, *, lifetime: float = _FILE_LI
         outgoing.flush()
         time.sleep(lifetime)
     return 0
+
+
+# The HTTP association selects the default browser even when an editor owns
+# .html files. Only the private file path reaches browser arguments, never the URL.
+_WSL_OPEN_SCRIPT = r'''
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$path = $null
+$guard = $null
+$owned = $false
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class NanobotBrowser {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct ExecuteInfo {
+        public uint cbSize, fMask;
+        public IntPtr hwnd;
+        public string lpVerb, lpFile, lpParameters, lpDirectory;
+        public int nShow;
+        public IntPtr hInstApp, lpIDList;
+        public string lpClass;
+        public IntPtr hkeyClass;
+        public uint dwHotKey;
+        public IntPtr hIcon, hProcess;
+    }
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern bool ShellExecuteEx(ref ExecuteInfo info);
+    public static bool Open(string path) {
+        var info = new ExecuteInfo();
+        info.cbSize = (uint)Marshal.SizeOf(info);
+        info.fMask = 0x501;
+        info.lpVerb = "open";
+        info.lpClass = "http";
+        info.lpFile = path;
+        info.nShow = 1;
+        return ShellExecuteEx(ref info);
+    }
+}
+'@
+    $content = [Convert]::FromBase64String([Console]::ReadLine())
+    $root = [Environment]::GetFolderPath('LocalApplicationData')
+    $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($root))
+    if ($drive.DriveFormat -notin @('NTFS', 'ReFS')) { exit 1 }
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $security = [Security.AccessControl.FileSecurity]::new()
+    $security.SetOwner($user)
+    $security.SetAccessRuleProtection($true, $false)
+    $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
+        $user, [Security.AccessControl.FileSystemRights]::FullControl,
+        [Security.AccessControl.AccessControlType]::Allow))
+    foreach ($old in [IO.Directory]::EnumerateFiles($root, 'NanobotWslBrowser-*.html')) {
+        try {
+            $info = [IO.FileInfo]::new($old)
+            if ($info.Name -notmatch '^NanobotWslBrowser-[0-9a-f]{32}\.html$' -or
+                $info.Attributes -band [IO.FileAttributes]::ReparsePoint -or
+                $info.LastWriteTimeUtc -ge [DateTime]::UtcNow.AddMinutes(-10)) { continue }
+            if ($info.GetAccessControl().GetOwner([Security.Principal.SecurityIdentifier]) -eq $user) {
+                [IO.File]::Delete($old)
+            }
+        } catch {}
+    }
+    $path = [IO.Path]::Combine($root, ('NanobotWslBrowser-' + [Guid]::NewGuid().ToString('N') + '.html'))
+    $file = [IO.FileStream]::new($path, [IO.FileMode]::CreateNew,
+        [Security.AccessControl.FileSystemRights]::Write, [IO.FileShare]::None,
+        4096, [IO.FileOptions]::None, $security)
+    $owned = $true
+    try { $file.Write($content, 0, $content.Length) } finally { $file.Dispose() }
+    $guard = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    if (-not [NanobotBrowser]::Open($path)) { exit 1 }
+    [Console]::Write('1')
+    [Console]::Out.Flush()
+    Start-Sleep -Seconds 120
+} catch {
+    exit 1
+} finally {
+    if ($guard) { $guard.Dispose() }
+    if ($owned) { try { [IO.File]::Delete($path) } catch {} }
+}
+'''
 
 
 def _bind(library: Any, name: str, result: Any, *arguments: Any) -> Any:

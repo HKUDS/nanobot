@@ -16,7 +16,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Allowed direct message senders",
+        "label": "Allowed DM users",
         "placeholder": "Phone numbers or UUIDs"
       },
       "group_allowFrom": {
@@ -24,7 +24,7 @@
         "placeholder": "Group IDs"
       },
       "groupMessageBufferSize": {
-        "label": "Group context messages"
+        "label": "Context messages"
       },
       "attachmentsDir": {
         "label": "Attachment directory"
@@ -58,7 +58,7 @@
         }
       },
       "group_requireMention": {
-        "label": "Require mention in groups",
+        "label": "Require group mention",
         "choices": {
           "true": "On",
           "false": "Off"

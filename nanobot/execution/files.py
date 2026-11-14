@@ -1,0 +1,596 @@
+"""Filesystem operations and their workspace authorization."""
+
+from __future__ import annotations
+
+import os
+import re
+import stat
+from collections.abc import Callable, Generator, Iterable
+from contextlib import AbstractContextManager, ExitStack, contextmanager, suppress
+from dataclasses import dataclass
+from heapq import nsmallest
+from operator import itemgetter
+from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
+
+from nanobot.config.paths import get_media_dir
+from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.security.workspace_policy import resolve_allowed_path, resolve_path
+
+if TYPE_CHECKING:
+    from nanobot.utils.document import DocumentLineSource, PdfExtraction
+
+
+class NotRegularFileError(OSError):
+    """The opened resource is not a regular file."""
+
+
+@contextmanager
+def _open_regular_file(
+    resolved_path: Path | str, *, dir_fd: int | None = None, write: bool = False,
+    expected: os.stat_result | None = None,
+) -> Generator[tuple[BinaryIO, int]]:
+    """Own one descriptor and check its type before reading or truncating it.
+
+    Callers must supply an authorized path or a child of an authorized directory handle.
+    Where supported, refuse a swapped-in final symlink and avoid waiting on
+    a swapped-in FIFO. This does not protect ancestor path components.
+    """
+    flags = (os.O_WRONLY | os.O_CREAT) if write else os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(resolved_path, flags, 0o666, dir_fd=dir_fd), "wb" if write else "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        if not stat.S_ISREG(opened.st_mode):
+            raise NotRegularFileError
+        if expected is not None and not os.path.samestat(expected, opened):
+            raise PermissionError("Search file changed before opening")
+        yield stream, opened.st_size
+
+
+_BLOCKED_DEVICE_PATHS = frozenset({
+    "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
+    "/dev/stdin", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/console",
+    "/dev/fd/0", "/dev/fd/1", "/dev/fd/2",
+})
+_PROCESS_STDIO = re.compile(r"/proc/(?:[0-9]+|self)/fd/[012]$")
+
+
+def _reject_device(path: str | Path, *, resolved: bool = False) -> None:
+    raw = str(path)
+    canonical = raw
+    if not resolved:
+        try:
+            canonical = str(Path(raw).resolve())
+        except (OSError, ValueError):
+            pass
+    if (
+        raw in _BLOCKED_DEVICE_PATHS or canonical in _BLOCKED_DEVICE_PATHS
+        or _PROCESS_STDIO.match(raw) or _PROCESS_STDIO.match(canonical)
+        or canonical.startswith("/dev/")
+    ):
+        raise PermissionError(
+            f"Reading {path} is blocked (device path that could hang or produce infinite output)."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ReadableFile:
+    """A file selected by the workspace read policy."""
+
+    path: Path
+    size: int
+    modified: float
+    suffix: str
+
+    def open(self) -> AbstractContextManager[tuple[BinaryIO, int]]:
+        return _open_regular_file(self.path)
+
+    @staticmethod
+    def open_size(stream: BinaryIO) -> int:
+        return os.fstat(stream.fileno()).st_size
+
+    def pdf_pages(self, pages: str | None, *, max_pages: int, max_chars: int) -> PdfExtraction:
+        from nanobot.utils.document import extract_pdf_pages
+
+        return extract_pdf_pages(self.path, pages=pages, max_pages=max_pages, max_chars=max_chars)
+
+    def document_lines(self, *, pages: str | None = None) -> DocumentLineSource | None:
+        from nanobot.utils.document import open_document_line_source
+
+        return open_document_line_source(self.path, pages=pages, suffix=self.suffix)
+
+
+@dataclass(frozen=True, slots=True)
+class FileSnapshot:
+    """Text for the edit preview: empty for missing files, None if unavailable."""
+
+    exists: bool
+    text: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class WritableFile:
+    """A selected write target; editing may inspect that file, not its parent."""
+
+    path: Path
+
+    def exists(self) -> bool:
+        return self.path.exists()
+
+    def size(self) -> int:
+        return self.path.stat().st_size
+
+    def read_bytes(self) -> bytes:
+        with _open_regular_file(self.path) as (stream, _):
+            return stream.read()
+
+    def write(self, content: str, *, create_parents: bool = False) -> None:
+        if create_parents:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        _write_regular_file(self.path, content.encode("utf-8"))
+
+    def snapshot(self, max_bytes: int) -> FileSnapshot:
+        """Read a bounded edit preview, not an independent path grant."""
+        try:
+            if not self.path.is_file():
+                return FileSnapshot(exists=False, text="")
+            with _open_regular_file(self.path) as (stream, size):
+                if size > max_bytes:
+                    return FileSnapshot(exists=True, text=None)
+                raw = stream.read(max_bytes + 1)
+        except OSError:
+            return FileSnapshot(exists=self.exists(), text=None)
+        if len(raw) > max_bytes or b"\x00" in raw:
+            return FileSnapshot(exists=True, text=None)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return FileSnapshot(exists=True, text=None)
+        return FileSnapshot(exists=True, text=text.replace("\r\n", "\n"))
+
+
+def _write_regular_file(path: Path, data: bytes) -> None:
+    with _open_regular_file(path, write=True) as (stream, _):
+        stream.truncate(0)
+        stream.write(data)
+
+
+def commit_file_edits(writes: dict[WritableFile, str]) -> None:
+    """Write validated patch targets; restore their previous bytes on failure."""
+    backups = {target: target.read_bytes() if target.exists() else None for target in writes}
+    attempted: list[WritableFile] = []
+    try:
+        for target, content in writes.items():
+            attempted.append(target)
+            target.write(content, create_parents=True)
+    except Exception:
+        for target in attempted:
+            data = backups[target]
+            # A replaced target can reject rollback. Continue restoring the
+            # other targets without replacing the original write error.
+            with suppress(OSError):
+                if data is None:
+                    target.path.unlink(missing_ok=True)
+                else:
+                    _write_regular_file(target.path, data)
+        raise
+
+
+@dataclass(frozen=True, slots=True)
+class DirectoryListing:
+    entries: list[tuple[Path, bool]]
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
+class SearchEntry:
+    name: str
+    is_directory: bool
+    is_directory_link: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SearchBytes:
+    """A bounded read; no data means the regular file exceeds the size limit."""
+
+    data: bytes | None
+    modified: float
+
+
+def _supports_directory_handles() -> bool:
+    return (
+        os.open in os.supports_dir_fd
+        and os.stat in os.supports_dir_fd
+        and os.stat in os.supports_follow_symlinks
+        and hasattr(os, "O_DIRECTORY")
+        and hasattr(os, "O_NOFOLLOW")
+    )
+
+
+def _is_path_link(info: os.stat_result) -> bool:
+    return stat.S_ISLNK(info.st_mode) or (
+        os.name == "nt" and bool(info.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FileSearch:
+    """An authorized search root; links are not recursive directories."""
+
+    root: Path
+    is_directory: bool
+    _authorize_read: Callable[[str | Path], Path]
+
+    def entries(self, directory: Path) -> Generator[SearchEntry]:
+        target = resolve_path(directory)
+        if not self.is_directory or not target.is_relative_to(self.root) or target != directory:
+            return
+        with os.scandir(target) as entries:
+            for entry in entries:
+                try:
+                    is_directory = entry.is_dir(follow_symlinks=False)
+                    directory_link = not is_directory and entry.is_symlink() and entry.is_dir()
+                    if os.name == "nt" and is_directory:
+                        directory_link = bool(
+                            entry.stat(follow_symlinks=False).st_file_attributes
+                            & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                        )
+                except OSError:
+                    continue
+                yield SearchEntry(entry.name, is_directory or directory_link, directory_link)
+
+    def _candidate(self, path: Path) -> Path:
+        target = Path(os.path.realpath(path, strict=True))
+        if target == self.root or (self.is_directory and target.is_relative_to(self.root)):
+            return target
+        return self._authorize_read(path)
+
+    def modified(self, path: Path) -> float:
+        try:
+            return self._candidate(path).stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _search_directory_stat(self, directory: Path) -> os.stat_result:
+        if (
+            not self.is_directory or not directory.is_relative_to(self.root)
+            or Path(os.path.realpath(directory, strict=True)) != directory
+        ):
+            raise PermissionError("Search directory is no longer within the search root")
+        info = directory.stat(follow_symlinks=False)
+        if not stat.S_ISDIR(info.st_mode) or _is_path_link(info):
+            raise PermissionError("Search directory changed")
+        return info
+
+    @contextmanager
+    def _check_search_directory(self, directory: Path) -> Generator[None]:
+        before = self._search_directory_stat(directory)
+        yield
+        try:
+            if os.path.samestat(before, self._search_directory_stat(directory)):
+                return
+        except OSError:
+            pass
+        raise PermissionError("Search directory changed during the scan; retry the search.")
+
+    @contextmanager
+    def _open_search_directory(self, directory: Path) -> Generator[int]:
+        """Pin a directory for a scan and validate it before releasing results."""
+        relative = directory.relative_to(self.root)
+        if ".." in relative.parts:
+            raise ValueError("Expected a directory within the search root")
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        root_info = self.root.stat(follow_symlinks=False)
+        fd = os.open(self.root, flags)
+        try:
+            if not os.path.samestat(root_info, os.fstat(fd)):
+                raise PermissionError("Search root changed")
+            for part in relative.parts:
+                child = os.open(part, flags, dir_fd=fd)
+                os.close(fd)
+                fd = child
+            yield fd
+            # A descriptor survives a rename. Discard its results if the
+            # authorized path no longer points to the directory we scanned.
+            try:
+                if (
+                    Path(os.path.realpath(directory, strict=True)) == directory
+                    and os.path.samestat(os.fstat(fd), directory.stat(follow_symlinks=False))
+                ):
+                    return
+            except OSError:
+                pass
+            raise PermissionError("Search directory changed during the scan; retry the search.")
+        finally:
+            os.close(fd)
+
+    def modified_children(
+        self, directory: Path, names: list[str], *, checkpoint: Callable[[], None],
+    ) -> list[float]:
+        """Get timestamps for direct children without transferring the directory handle."""
+        if not self.is_directory or not directory.is_relative_to(self.root) or ".." in directory.parts:
+            raise ValueError("Expected a directory within the search root")
+        if any(not name or name in (".", "..") or os.path.basename(name) != name for name in names):
+            raise ValueError("Expected direct child names")
+
+        # Small match sets do not amortize opening and rechecking the directory.
+        if len(names) >= 4:
+            try:
+                if _supports_directory_handles():
+                    with self._open_search_directory(directory) as fd:
+                        return self._modified_children(directory, names, checkpoint, fd)
+                with self._check_search_directory(directory):
+                    return self._modified_children(directory, names, checkpoint)
+            except OSError:
+                pass  # Reauthorize each child if the directory could not be pinned.
+
+        times: list[float] = []
+        for name in names:
+            checkpoint()
+            times.append(self.modified(directory / name))
+        return times
+
+    def _modified_children(
+        self, directory: Path, names: list[str], checkpoint: Callable[[], None], fd: int | None = None,
+    ) -> list[float]:
+        times: list[float] = []
+        for name in names:
+            checkpoint()
+            try:
+                info = os.stat(name if fd is not None else directory / name, dir_fd=fd, follow_symlinks=False)
+            except OSError:
+                times.append(0.0)
+            else:
+                times.append(self.modified(directory / name) if _is_path_link(info) else info.st_mtime)
+        return times
+
+    def read_file(self, path: Path) -> ReadableFile:
+        return _regular_file(self._candidate(path), suffix=path.suffix.lower())
+
+    def _read_search_bytes(
+        self, path: Path, limit: int, fd: int | None = None, *, checked_parent: bool = False,
+    ) -> SearchBytes | None:
+        expected: os.stat_result | None = None
+        if fd is None and not checked_parent:
+            try:
+                file = self.read_file(path)
+            except OSError:
+                return None
+            size, modified = file.size, file.modified
+            opened_path = file.path
+        else:
+            try:
+                opened_path = path.name if fd is not None else path
+                info = os.stat(opened_path, dir_fd=fd, follow_symlinks=False)
+            except OSError:
+                return None
+            if _is_path_link(info):
+                return self._read_search_bytes(path, limit)
+            if not stat.S_ISREG(info.st_mode):
+                return None
+            size, modified = info.st_size, info.st_mtime
+            if fd is None:
+                expected = info
+        if size > limit:
+            return SearchBytes(None, modified)
+        try:
+            opened = (
+                _open_regular_file(opened_path, expected=expected)
+                if expected is not None else _open_regular_file(opened_path, dir_fd=fd)
+            )
+            with opened as (stream, opened_size):
+                if opened_size > limit:
+                    return SearchBytes(None, modified)
+                # The extra byte detects growth without allocating the full
+                # scan limit for every small file.
+                data = stream.read(opened_size + 1)
+                if len(data) > opened_size:
+                    data += stream.read(limit + 1 - len(data))
+                return SearchBytes(data if len(data) <= limit else None, modified)
+        except OSError:
+            if not self.is_directory:
+                raise
+            return None  # The file disappeared, changed type, or became unreadable.
+
+    @contextmanager
+    def search_bytes_reader(self) -> Generator[Callable[[Path, int], SearchBytes | None]]:
+        """Read consecutive files under one checked parent."""
+        if not self.is_directory:
+            yield self._read_search_bytes
+            return
+
+        native = _supports_directory_handles()
+        parent: Path | None = None
+        fd: int | None = None
+        attempted = checked_parent = False
+        with ExitStack() as handle:
+            def read(path: Path, limit: int) -> SearchBytes | None:
+                nonlocal parent, fd, attempted, checked_parent
+                directory = path.parent
+                if directory != parent:
+                    handle.close()
+                    parent, fd, attempted, checked_parent = directory, None, False, False
+                    if native:
+                        return self._read_search_bytes(path, limit)
+                if not attempted:
+                    attempted = True
+                    # Only open directories with multiple candidates. If the host
+                    # cannot pin this path, keep using per-file authorization.
+                    try:
+                        _reject_device(directory, resolved=True)
+                        if native:
+                            fd = handle.enter_context(self._open_search_directory(directory))
+                        else:
+                            handle.enter_context(self._check_search_directory(directory))
+                            checked_parent = True
+                    except (OSError, ValueError):
+                        pass
+                if path.name in ("", ".", ".."):
+                    return self._read_search_bytes(path, limit)
+                return self._read_search_bytes(path, limit, fd, checked_parent=checked_parent)
+
+            yield read
+
+
+def _regular_file(target: Path, *, suffix: str | None = None) -> ReadableFile:
+    _reject_device(target, resolved=True)
+    info = target.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise NotRegularFileError
+    return ReadableFile(target, info.st_size, info.st_mtime, target.suffix.lower() if suffix is None else suffix)
+
+
+class WorkspaceFiles:
+    """File operations authorized against the effective request's workspace."""
+
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        extra_read_allowed_dirs: Iterable[Path] | None = None,
+        extra_write_allowed_dirs: Iterable[Path] | None = None,
+        extra_write_allowed_files: Iterable[Path] | None = None,
+        restrict_to_workspace: bool | None = None,
+        sandbox_restricts_workspace: bool = False,
+        extra_read_allowed_files: Iterable[Path] | None = None,
+        *,
+        builtin_skills: Path,
+        plugin_skill_roots: Callable[[Path, Path], Iterable[Path]],
+    ) -> None:
+        self._workspace = workspace
+        self._allowed_dir = allowed_dir
+        self._read_dirs = tuple(extra_read_allowed_dirs or ())
+        self._read_files = tuple(extra_read_allowed_files or ())
+        self._write_dirs = tuple(extra_write_allowed_dirs or ())
+        self._write_files = tuple(extra_write_allowed_files or ())
+        self._restricted = (
+            restrict_to_workspace if restrict_to_workspace is not None else allowed_dir is not None
+        )
+        self._sandbox_restricted = sandbox_restricts_workspace
+        self._builtin_skills = builtin_skills
+        self._plugin_skill_roots = plugin_skill_roots
+
+    @property
+    def display_workspace(self) -> Path | None:
+        return current_tool_workspace(self._workspace).project_path
+
+    def _allowed_root(self, request_root: Path | None) -> Path | None:
+        if self._allowed_dir is None or self._workspace is None:
+            return request_root
+        try:
+            if Path(self._allowed_dir).expanduser().resolve() == Path(self._workspace).expanduser().resolve():
+                return request_root
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return request_root if request_root is not None else self._allowed_dir
+        return self._allowed_dir
+
+    def _roots(self) -> tuple[Path | None, Path | None]:
+        access = current_tool_workspace(
+            self._workspace,
+            restrict_to_workspace=self._restricted,
+            sandbox_restricts_workspace=self._sandbox_restricted,
+        )
+        return access.project_path, self._allowed_root(access.allowed_root)
+
+    def _read_path(self, path: str | Path, *, include_file_grants: bool = True) -> Path:
+        workspace, root = self._roots()
+        extra_roots: list[Path] = []
+        if root is not None:
+            extra_roots = [get_media_dir(), *self._read_dirs]
+            if self._workspace is not None:
+                try:
+                    extra_roots.extend(self._plugin_skill_roots(self._workspace, resolve_path(path, workspace)))
+                except (OSError, RuntimeError):
+                    pass
+        return resolve_allowed_path(
+            path,
+            workspace=workspace,
+            allowed_root=root,
+            extra_allowed_roots=extra_roots,
+            extra_allowed_files=self._read_files if root is not None and include_file_grants else (),
+        )
+
+    def edit_target(self, path: str) -> WritableFile:
+        workspace, root = self._roots()
+        target = resolve_allowed_path(
+            path,
+            workspace=workspace,
+            allowed_root=root,
+            extra_allowed_roots=self._write_dirs if root is not None else (),
+            extra_allowed_files=self._write_files,
+        )
+        try:
+            mode = target.stat().st_mode
+        except FileNotFoundError:
+            pass  # Write operations can create regular files.
+        else:
+            if not stat.S_ISREG(mode):
+                raise NotRegularFileError(f"Not a regular file: {path}")
+        return WritableFile(target)
+
+    def read_file(self, path: str) -> ReadableFile:
+        _reject_device(path)
+        target = self._read_path(path)
+        if not target.exists():
+            requested = Path(path)
+            parts = requested.parts
+            if not requested.is_absolute() and len(parts) >= 2 and parts[0] == "skills":
+                builtin = self._builtin_skills.resolve()
+                candidate = (builtin / Path(*parts[1:])).resolve()
+                if candidate.is_relative_to(builtin) and candidate.is_file():
+                    target = candidate
+        if not target.exists():
+            _reject_device(target, resolved=True)
+            raise FileNotFoundError(path)
+        return _regular_file(target)
+
+    def list_directory(
+        self, path: str, *, recursive: bool, ignored: set[str], limit: int,
+    ) -> DirectoryListing:
+        directory = self._read_path(path)
+        if not directory.exists():
+            raise FileNotFoundError(path)
+        if not directory.is_dir():
+            raise NotADirectoryError(path)
+        directory = self._read_path(directory, include_file_grants=False)
+        tree = FileSearch(directory, True, self._read_path)
+        total = 0
+
+        def walk() -> Generator[tuple[Path, bool]]:
+            nonlocal total
+            pending = [directory]
+            while pending:
+                parent = pending.pop()
+                try:
+                    for entry in tree.entries(parent):
+                        if entry.name in ignored:
+                            continue
+                        child = parent / entry.name
+                        if recursive and entry.is_directory and not entry.is_directory_link:
+                            pending.append(child)
+                        total += 1
+                        yield child.relative_to(directory), entry.is_directory
+                except PermissionError:
+                    if not recursive:
+                        raise
+
+        # Scan all entries for the exact total, but retain only the requested prefix.
+        entries = nsmallest(max(1, limit), walk(), key=itemgetter(0))
+        return DirectoryListing(entries if limit > 0 else [], total)
+
+    def sibling_files(self, target: WritableFile) -> list[str]:
+        """Suggest names only when the caller can read the directory itself."""
+        try:
+            parent = self._read_path(target.path.parent)
+        except PermissionError:
+            return []
+        return [item.name for item in parent.iterdir() if item.is_file()] if parent.is_dir() else []
+
+    def search_tree(self, path: str) -> FileSearch:
+        target = self._read_path(path)
+        mode = target.stat().st_mode
+        if stat.S_ISDIR(mode):
+            target = self._read_path(target, include_file_grants=False)
+        elif not stat.S_ISREG(mode):
+            raise NotRegularFileError
+        return FileSearch(target, stat.S_ISDIR(mode), self._read_path)

@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 export function redactActivityText(value: string): string {
   return value
     .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1<redacted>@")
@@ -26,7 +28,10 @@ export function redactActivityText(value: string): string {
 }
 
 export function redactShellCommand(command: string): string {
-  return redactActivityText(command).replaceAll("<redacted>", "••••");
+  return redactActivityText(command)
+    .replace(/(^|[\s;])(-u(?:=|\s+)|--(?:proxy-)?user(?:=|\s+))(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s;]+)/gim, "$1$2<redacted>")
+    .replace(/(^|[\s;])(-u)(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s;]*:[^\s;]+)/gim, "$1$2<redacted>")
+    .replaceAll("<redacted>", "••••");
 }
 
 export function compactActivityPath(value: string): string {
@@ -48,16 +53,23 @@ export function safeActivityDetail(value: string, maxLength = 96): string {
   );
 }
 
-export function summarizeShellCommand(command: string): string {
+export function formatActivityTarget(t: TFunction, action: string, target: string): string {
+  return target
+    ? t("message.agentActivity.actionTarget", { action, target })
+    : action;
+}
+
+export function summarizeShellCommand(command: string, t: TFunction): { detail: string; aside?: string } {
   const lines = redactShellCommand(command.replace(/\r\n/g, "\n"))
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-  const firstLine = compactActivityPath(lines[0] || "command");
+  const firstLine = compactActivityPath(lines[0] || t("message.agentActivity.command"));
   const firstPreview = truncateMiddle(firstLine, 92);
-  return lines.length <= 1
-    ? firstPreview
-    : `${firstPreview} · script, ${lines.length} lines`;
+  return {
+    detail: firstPreview,
+    ...(lines.length > 1 ? { aside: t("message.agentActivity.scriptLines", { count: lines.length }) } : {}),
+  };
 }
 
 function truncateMiddle(value: string, maxLength: number): string {

@@ -1,0 +1,76 @@
+import json
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
+
+from nanobot.channels.websocket.runtime import WebSocketConfig
+from nanobot.config.loader import load_config, resolve_config_env_vars
+
+
+def _initialize(path: Path, web_token: str = "") -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ, NANOBOT_WEB_TOKEN=web_token)
+    return subprocess.run(
+        [sys.executable, "-m", "nanobot.cli.docker_bootstrap", str(path)],
+        env=env, capture_output=True, text=True,
+    )
+
+
+def test_render_blueprint_starts_gateway_through_entrypoint():
+    blueprint_path = Path(__file__).resolve().parents[1] / "render.yaml"
+    blueprint = yaml.safe_load(blueprint_path.read_text(encoding="utf-8"))
+    service = next(service for service in blueprint["services"] if service["name"] == "nanobot")
+    assert shlex.split(service["dockerCommand"]) == ["/usr/local/bin/entrypoint.sh", "gateway"]
+
+
+def test_first_boot_generates_valid_container_config(tmp_path):
+    path = tmp_path / "instance" / "config.json"
+    result = _initialize(path)
+    assert result.returncode == 0, result.stderr
+    config = resolve_config_env_vars(load_config(path))
+    ws = WebSocketConfig.model_validate(config.channels.model_dump()["websocket"])
+    assert config.gateway.host == ws.host == "0.0.0.0"
+    assert ws.enabled and ws.websocket_requires_token
+    assert len(ws.token_issue_secret) == 32
+    assert ws.token_issue_secret in result.stdout
+
+
+@pytest.mark.parametrize("secret", ['review&secret', 'review|secret', 'review"secret', r'review\secret'])
+def test_custom_secrets_survive_json_serialization(tmp_path, secret):
+    path = tmp_path / "config.json"
+    result = _initialize(path, secret)
+    assert result.returncode == 0, result.stderr
+    config = resolve_config_env_vars(load_config(path))
+    ws = WebSocketConfig.model_validate(config.channels.model_dump()["websocket"])
+    assert ws.token_issue_secret == secret
+
+
+def test_restart_preserves_user_settings_and_credentials(tmp_path):
+    path = tmp_path / "config.json"
+    assert _initialize(path, "original-web").returncode == 0
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["api"] = {"host": "0.0.0.0", "apiKey": "${RETIRED_SERVE_TOKEN}"}
+    data["providers"]["custom"] = {"apiKey": "provider-key", "apiBase": "http://model:8000/v1"}
+    path.write_text(json.dumps(data), encoding="utf-8")
+    previous = path.read_bytes()
+    result = _initialize(path, "replacement-web")
+    assert result.returncode == 0, result.stderr
+    assert path.read_bytes() == previous
+    assert "replacement-web" not in result.stdout
+
+
+def test_failed_write_does_not_leave_an_existing_config(tmp_path):
+    from unittest.mock import patch
+
+    from nanobot.cli.docker_bootstrap import initialize_config
+
+    path = tmp_path / "config.json"
+    with patch.object(Path, "replace", side_effect=PermissionError("read-only mount")):
+        with pytest.raises(PermissionError, match="read-only mount"):
+            initialize_config(path)
+    assert not path.exists()
+    assert not list(tmp_path.glob("*.tmp"))

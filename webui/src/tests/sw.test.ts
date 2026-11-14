@@ -11,7 +11,6 @@ const CACHE_NAME = "nanobot-static-v2";
 const ICON_CACHE_NAME = "nanobot-icons-v1";
 const ICON_CACHE_LIMIT = 128;
 
-/** Minimal Cache-compatible in-memory store with SW-style URL normalization. */
 class FakeCacheStore {
   entries = new Map<string, Response>();
 
@@ -49,17 +48,25 @@ interface LoadedSw {
   fetchMock: ReturnType<typeof vi.fn>;
   skipWaitingMock: ReturnType<typeof vi.fn>;
   claimMock: ReturnType<typeof vi.fn>;
+  showNotification: ReturnType<typeof vi.fn>;
+  matchClients: ReturnType<typeof vi.fn>;
+  openWindow: ReturnType<typeof vi.fn>;
+  noticeStore: FakeCacheStore;
   fire: (type: string, event?: Record<string, unknown>) => Promise<void>;
 }
 
-function loadSw(): LoadedSw {
+function loadSw(noticeStore = new FakeCacheStore()): LoadedSw {
   const listeners = new Map<string, Array<(event: Record<string, unknown>) => void>>();
   const skipWaitingMock = vi.fn();
   const claimMock = vi.fn();
+  const showNotification = vi.fn().mockResolvedValue(undefined);
+  const matchClients = vi.fn().mockResolvedValue([]);
+  const openWindow = vi.fn().mockResolvedValue(null);
   const self = {
     location: { origin: ORIGIN },
     skipWaiting: skipWaitingMock,
-    clients: { claim: claimMock },
+    clients: { claim: claimMock, matchAll: matchClients, openWindow },
+    registration: { showNotification },
     addEventListener: (type: string, cb: (event: Record<string, unknown>) => void) => {
       listeners.set(type, [...(listeners.get(type) ?? []), cb]);
     },
@@ -69,6 +76,7 @@ function loadSw(): LoadedSw {
   const stores = new Map<string, FakeCacheStore>([
     [CACHE_NAME, store],
     [ICON_CACHE_NAME, iconStore],
+    ["nanobot-notification-receipts-v1", noticeStore],
   ]);
   const deletedCacheNames: string[] = [];
   const caches = {
@@ -125,9 +133,108 @@ function loadSw(): LoadedSw {
     fetchMock,
     skipWaitingMock,
     claimMock,
+    showNotification,
+    matchClients,
+    openWindow,
+    noticeStore,
     fire,
   };
 }
+
+describe("browser notification worker", () => {
+  const source = { id: "tab-1", url: `${ORIGIN}/?token=private` };
+  const url = `${ORIGIN}/#/chat/websocket%3Aone`;
+  const data = { type: "nanobot:notify", key: "turn-1", body: "Task completed", url };
+  async function send(sw: LoadedSw, overrides = {}) {
+    const reply = vi.fn();
+    await sw.fire("message", { data: { ...data, ...overrides }, source, ports: [{ postMessage: reply }] });
+    return reply;
+  }
+
+  it("confirms notification support without displaying a test notification", async () => {
+    const sw = loadSw();
+    const reply = await send(sw, { type: "nanobot:notification-probe" });
+    expect(reply).toHaveBeenCalledWith("ready");
+    expect(sw.showNotification).not.toHaveBeenCalled();
+  });
+
+  it("returns test clicks to notification settings, including a still-open older page", async () => {
+    const sw = loadSw();
+    for (const section of ["notifications", "appearance"]) {
+      const target = `${ORIGIN}/#/settings?section=${section}`;
+      expect(await send(sw, { test: true, key: section, url: target })).toHaveBeenCalledWith("submitted");
+      await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: target } } });
+      expect(sw.openWindow).toHaveBeenLastCalledWith(target);
+    }
+  });
+
+  it("deduplicates concurrent tabs, dismissed notifications, and worker restarts", async () => {
+    const sw = loadSw();
+    const replies = await Promise.all([send(sw), send(sw)]);
+    expect(sw.showNotification).toHaveBeenCalledOnce();
+    expect(replies[0]).toHaveBeenCalledWith("submitted");
+    expect(replies[1]).toHaveBeenCalledWith("skipped");
+    const restarted = loadSw(sw.noticeStore);
+    expect(await send(restarted)).toHaveBeenCalledWith("skipped");
+    expect(restarted.showNotification).not.toHaveBeenCalled();
+    expect(sw.showNotification).toHaveBeenCalledWith("nanobot", expect.objectContaining({
+      body: "Task completed", data: { url, clientId: "tab-1" },
+    }));
+  });
+
+  it("isolates display rejection, then allows a later test or task", async () => {
+    const sw = loadSw();
+    sw.showNotification.mockRejectedValueOnce(new TypeError("unsupported display"));
+    expect(await send(sw)).toHaveBeenCalledWith("displayFailed");
+    expect(await send(sw)).toHaveBeenCalledWith("submitted");
+  });
+
+  it("suppresses background tabs if another tab on the host is visible, but permits testing", async () => {
+    const sw = loadSw();
+    sw.matchClients.mockResolvedValue([{ visibilityState: "visible" }]);
+    expect(await send(sw)).toHaveBeenCalledWith("skipped");
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    expect(await send(sw, { key: "test-1", test: true })).toHaveBeenCalledWith("submitted");
+  });
+
+  it.each(["https://evil.test/#/chat/one", `${ORIGIN}/?token=secret#/chat/one`, `${ORIGIN}/admin`, `https://user:pass@nanobot.test/#/chat/one`])("rejects an unsafe destination %s", async (unsafe) => {
+    const sw = loadSw();
+    expect(await send(sw, { url: unsafe })).toHaveBeenCalledWith("displayFailed");
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: unsafe } } });
+    expect(sw.showNotification).not.toHaveBeenCalled();
+    expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("focuses the original tab without reloading its connection or drafts", async () => {
+    const sw = loadSw();
+    const tab = { id: "tab-1", frameType: "top-level", postMessage: vi.fn(), focus: vi.fn().mockResolvedValue(null) };
+    sw.matchClients.mockResolvedValue([tab]);
+    const close = vi.fn();
+    await sw.fire("notificationclick", { notification: { close, data: { url, clientId: "tab-1" } } });
+    expect(close).toHaveBeenCalledOnce();
+    expect(tab.postMessage).toHaveBeenCalledWith({ type: "nanobot:notification-click", url });
+    expect(tab.focus).toHaveBeenCalledOnce();
+    expect(sw.openWindow).not.toHaveBeenCalled();
+  });
+
+  it("opens the destination when the source closed, even if an older page is still open", async () => {
+    const sw = loadSw();
+    const oldTab = { id: "old-page", frameType: "top-level", postMessage: vi.fn(), focus: vi.fn() };
+    sw.matchClients.mockResolvedValue([oldTab]);
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenCalledWith(url);
+    expect(oldTab.postMessage).not.toHaveBeenCalled();
+    expect(oldTab.focus).not.toHaveBeenCalled();
+  });
+
+  it("opens the same host with ordinary auth, but cannot restore a closed temporary chat", async () => {
+    const sw = loadSw();
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenCalledWith(url);
+    await sw.fire("notificationclick", { notification: { close: vi.fn(), data: { url: `${ORIGIN}/#/temporary/one`, clientId: "closed" } } });
+    expect(sw.openWindow).toHaveBeenLastCalledWith("/#/new");
+  });
+});
 
 function indexHtml(assetPaths: string[]): Response {
   const refs = assetPaths
@@ -139,10 +246,10 @@ function indexHtml(assetPaths: string[]): Response {
   return new Response(`<!doctype html><html><head>${refs}</head></html>`);
 }
 
-function fetchEvent(url: string) {
+function fetchEvent(url: string, init?: RequestInit) {
   const respondWith = vi.fn();
   const event = {
-    request: new Request(url, { method: "GET" }),
+    request: new Request(url, init),
     respondWith,
   };
   return { event, respondWith };
@@ -179,7 +286,6 @@ describe("service worker", () => {
   it("removes stale cache names and prunes unreferenced static entries on activate", async () => {
     const sw = loadSw();
     await sw.fire("install");
-    // Simulate the latest loaded build: index.html references only v2 assets.
     await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js", "/assets/index-v2.css"]));
     await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v2.css`, new Response("v2 css"));
@@ -223,8 +329,8 @@ describe("service worker", () => {
     ];
 
     for (const path of paths) {
-      const { respondWith } = fetchEvent(`${ORIGIN}${path}`);
-      await sw.fire("fetch", { request: new Request(`${ORIGIN}${path}`) });
+      const { event, respondWith } = fetchEvent(`${ORIGIN}${path}`);
+      await sw.fire("fetch", event);
       expect(respondWith, path).not.toHaveBeenCalled();
     }
     expect(sw.fetchMock).not.toHaveBeenCalled();
@@ -233,16 +339,14 @@ describe("service worker", () => {
   it("does not intercept non-GET or unrelated cross-origin requests", async () => {
     const sw = loadSw();
 
-    const { respondWith: post } = fetchEvent(`${ORIGIN}/api/v1/models`);
-    await sw.fire("fetch", {
-      request: new Request(`${ORIGIN}/api/v1/models`, { method: "POST" }),
-    });
+    const { event: postEvent, respondWith: post } = fetchEvent(
+      `${ORIGIN}/assets/app.js`, { method: "POST" },
+    );
+    await sw.fire("fetch", postEvent);
     expect(post).not.toHaveBeenCalled();
 
-    const { respondWith: cross } = fetchEvent("https://other.test/assets/app.js");
-    await sw.fire("fetch", {
-      request: new Request("https://other.test/assets/app.js"),
-    });
+    const { event: crossEvent, respondWith: cross } = fetchEvent("https://other.test/assets/app.js");
+    await sw.fire("fetch", crossEvent);
     expect(cross).not.toHaveBeenCalled();
     expect(sw.fetchMock).not.toHaveBeenCalled();
   });
@@ -402,11 +506,9 @@ describe("service worker", () => {
   it("serves navigation network-first, prunes on shell refresh, and falls back when offline", async () => {
     const sw = loadSw();
     await sw.store.put(`${ORIGIN}/`, indexHtml(["/assets/index-v2.js"]));
-    // Assets from an older build, still referenced by the cached v2 shell.
     await sw.store.put(`${ORIGIN}/assets/index-v2.js`, new Response("v2"));
     await sw.store.put(`${ORIGIN}/assets/index-v1.js`, new Response("v1"));
 
-    // Offline: network rejects, cached shell is returned.
     sw.fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     const offlineEvent = {
       request: new Request(`${ORIGIN}/`),
@@ -416,8 +518,6 @@ describe("service worker", () => {
     const offlineResponse = (await offlineEvent.respondWith.mock.calls[0][0]) as Response;
     expect(await offlineResponse.text()).toContain("assets/index-v2.js");
 
-    // Online: network response wins, refreshes the cached shell, and prunes
-    // entries the new index.html no longer references.
     const freshShell = indexHtml(["/assets/index-v3.js"]);
     sw.fetchMock.mockImplementation((input: Request | string) => {
       const url = new URL(typeof input === "string" ? input : input.url, ORIGIN);

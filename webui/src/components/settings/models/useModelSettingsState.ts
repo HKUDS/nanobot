@@ -5,8 +5,13 @@ import {
   agentDraftFromPayload,
   type AgentSettingsDraft,
 } from "@/components/settings/models/ModelsSettings";
-import type { ProviderForm } from "@/components/settings/models/ProviderSettings";
+import type { ProviderForm } from "@/components/settings/models/providerForm";
 import type { ProviderOAuthAuthorizationRequired, SettingsPayload } from "@/lib/types";
+
+export interface ProviderOperation {
+  provider: string;
+  action: "save" | "create" | "login" | "logout";
+}
 
 export function useModelSettingsState(initialSettings: SettingsPayload | null) {
   const initialForm = initialSettings
@@ -21,14 +26,14 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
   const [modelPresetPendingDelete, setModelPresetPendingDelete] =
     useState<SettingsPayload["model_presets"][number] | null>(null);
   const modelPresetBeforeCreateRef = useRef<string | null>(null);
-  const [providerSaving, setProviderSaving] = useState<string | null>(null);
+  const [providerOperation, setProviderOperation] = useState<ProviderOperation | null>(null);
+  const providerSaving = providerOperation?.provider ?? null;
   const [providerOAuthFlow, setProviderOAuthFlow] =
     useState<ProviderOAuthAuthorizationRequired | null>(null);
   const providerOAuthFlowRef = useRef<ProviderOAuthAuthorizationRequired | null>(null);
   const [providerOAuthResponse, setProviderOAuthResponse] = useState("");
   const [providerOAuthCompleting, setProviderOAuthCompleting] = useState(false);
   const [providerOAuthDialogError, setProviderOAuthDialogError] = useState<string | null>(null);
-  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerForms, setProviderForms] = useState<Record<string, ProviderForm>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
@@ -42,7 +47,6 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
 
   return {
     editingProviderKeys,
-    expandedProvider,
     form,
     modelCallOrder,
     modelCallOrderSaving,
@@ -60,9 +64,9 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     providerOAuthFlowRef,
     providerOAuthResponse,
     providerSaving,
+    providerOperation,
     saving,
     setEditingProviderKeys,
-    setExpandedProvider,
     setForm,
     setModelCallOrder,
     setModelCallOrderSaving,
@@ -77,7 +81,7 @@ export function useModelSettingsState(initialSettings: SettingsPayload | null) {
     setProviderOAuthDialogError,
     setProviderOAuthFlow,
     setProviderOAuthResponse,
-    setProviderSaving,
+    setProviderOperation,
     setSaving,
     setVisibleProviderKeys,
     visibleProviderKeys,

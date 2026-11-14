@@ -26,16 +26,33 @@ export function isReasoningOnlyAssistant(message: UIMessage): boolean {
     || !!message.media?.length
     || !!message.images?.length
   ) return false;
-  return !!(message.reasoning?.length || message.reasoningStreaming || message.isStreaming);
+  return !!(message.reasoning?.trim() || message.reasoningStreaming);
 }
 
 export function isAgentActivityMember(message: UIMessage): boolean {
   return isReasoningOnlyAssistant(message) || message.kind === "trace" || message.activityKind === "model";
 }
 
+/** Empty transport rows do not split an activity run at the history window boundary. */
+export function isActivityWindowMember(message: UIMessage): boolean {
+  return isAgentActivityMember(message) || isDisplayNoop(message);
+}
+
+/** Count transport rows before the first displayable row in a history window. */
+export function leadingDisplayNoopCount(messages: UIMessage[]): number {
+  const first = messages.findIndex((message) => !isDisplayNoop(message));
+  return first < 0 ? messages.length : first;
+}
+
+function isPendingActivityMember(message: UIMessage): boolean {
+  // An empty streamed answer can still indicate an unfinished turn on replay,
+  // without representing a reasoning step in the visible timeline.
+  return isAgentActivityMember(message) || (!!message.isStreaming && isDisplayNoop(message));
+}
+
 export function hasPendingAgentActivity(messages: UIMessage[]): boolean {
   const last = messages.at(-1);
-  if (!last || !isAgentActivityMember(last)) return false;
+  if (!last || !isPendingActivityMember(last)) return false;
   if (last.isStreaming || last.reasoningStreaming) return true;
 
   const lastTurnId = last.turnId;
@@ -44,18 +61,18 @@ export function hasPendingAgentActivity(messages: UIMessage[]): boolean {
   // final assistant answer exists after it, the activity is simply history.
   return !previous
     || previous.role !== "assistant"
-    || isAgentActivityMember(previous)
+    || isPendingActivityMember(previous)
     || previous.turnId !== lastTurnId;
 }
 
 /** Project gateway rows without changing their causal order.
  *
- * Messages use ``turnSeq`` when every row in the turn provides it and fall
- * back to stable arrival order otherwise. Only contiguous rows of the same
+ * Messages use their first contributing sequence (legacy rows use ``turnSeq``)
+ * when every row provides one, and stable arrival order otherwise. Only contiguous rows of the same
  * display class are combined: activity rows share a collapsible surface, and
  * adjacent answer slices share an answer bubble. A visible answer is always a
- * hard boundary between activity surfaces; completed empty transport frames
- * have no display semantics and therefore create no boundary.
+ * hard boundary between activity surfaces; empty transport frames have no
+ * display semantics and therefore create no boundary, even during streaming.
  */
 export function normalizeActivityTimeline(
   messages: UIMessage[],
@@ -64,6 +81,7 @@ export function normalizeActivityTimeline(
   let turnMessages: UIMessage[] = [];
   let activeTurnId: string | undefined;
   let activeTurnStartedAtMs: number | undefined;
+  let leadingNoopSourceMessageCount = 0;
 
   const flushTurn = () => {
     if (!turnMessages.length) {
@@ -77,10 +95,12 @@ export function normalizeActivityTimeline(
       activeTurnStartedAtMs,
     );
     if (projected.length) {
+      projected[0].sourceMessageCount += leadingNoopSourceMessageCount;
+      leadingNoopSourceMessageCount = 0;
       units.push(...projected);
     } else if (units.length) {
-      // A turn containing only completed transport placeholders has no
-      // display surface. Keep its source count on the preceding prompt so
+      // A turn containing only transport placeholders has no display surface.
+      // Keep its source count on the preceding prompt so
       // persisted fork-boundary offsets still map to a visible unit.
       const lastIndex = units.length - 1;
       const last = units[lastIndex];
@@ -88,6 +108,8 @@ export function normalizeActivityTimeline(
         ...last,
         sourceMessageCount: last.sourceMessageCount + turnMessages.length,
       };
+    } else {
+      leadingNoopSourceMessageCount += turnMessages.length;
     }
 
     turnMessages = [];
@@ -98,7 +120,8 @@ export function normalizeActivityTimeline(
   for (const message of messages) {
     if (message.role === "user") {
       flushTurn();
-      units.push({ type: "message", message, sourceMessageCount: 1 });
+      units.push({ type: "message", message, sourceMessageCount: 1 + leadingNoopSourceMessageCount });
+      leadingNoopSourceMessageCount = 0;
       activeTurnId = message.turnId;
       activeTurnStartedAtMs = validCreatedAtMs(message.createdAt);
       continue;
@@ -169,13 +192,16 @@ function projectOrderedTurn(
       activitySourceMessageCount += 1;
     } else if (answers.length) {
       answerSourceMessageCount += 1;
+    } else if (units.length) {
+      const lastIndex = units.length - 1;
+      units[lastIndex] = { ...units[lastIndex], sourceMessageCount: units[lastIndex].sourceMessageCount + 1 };
     } else {
       leadingNoopSourceMessageCount += 1;
     }
   };
 
   for (const message of messages) {
-    if (message.kind === "compaction") {
+    if (message.kind === "compaction" || message.renderAs === "text") {
       flushActivity();
       flushAnswers();
       units.push({
@@ -185,7 +211,7 @@ function projectOrderedTurn(
       });
       continue;
     }
-    if (isCompletedDisplayNoop(message)) {
+    if (isDisplayNoop(message)) {
       absorbDisplayNoop();
       continue;
     }
@@ -233,14 +259,15 @@ function isRawActivity(message: UIMessage): boolean {
   return isAgentActivityMember(message);
 }
 
-/** A completed transport placeholder carries ordering/accounting metadata but
- * no user-visible semantics, so it cannot define a display boundary. */
-function isCompletedDisplayNoop(message: UIMessage): boolean {
+/** A transport placeholder carries ordering/accounting metadata but no
+ * user-visible semantics, so it cannot define a display boundary. */
+function isDisplayNoop(message: UIMessage): boolean {
   return (
     message.role === "assistant"
     && message.kind !== "trace"
+    && message.kind !== "compaction"
+    && message.renderAs !== "text"
     && message.activityKind !== "model"
-    && !message.isStreaming
     && !message.reasoningStreaming
     && message.content.trim().length === 0
     && !message.reasoning?.trim()
@@ -267,12 +294,14 @@ function isAssistantAnswer(message: UIMessage): boolean {
 }
 
 function orderMessagesByTurnSeq(messages: UIMessage[]): UIMessage[] {
-  if (messages.length < 2 || !messages.every((message) => Number.isFinite(message.turnSeq))) {
+  if (messages.length < 2 || !messages.every((message) => Number.isFinite(message.projectionStartSeq ?? message.turnSeq))) {
     return messages;
   }
   return messages
     .map((message, index) => ({ message, index }))
-    .sort((left, right) => (left.message.turnSeq! - right.message.turnSeq!) || (left.index - right.index))
+    .sort((left, right) => (
+      (left.message.projectionStartSeq ?? left.message.turnSeq!) - (right.message.projectionStartSeq ?? right.message.turnSeq!)
+    ) || (left.index - right.index))
     .map(({ message }) => message);
 }
 
@@ -310,6 +339,7 @@ function reasoningOnlyMessageFromAnswer(message: UIMessage): UIMessage {
     turnId: message.turnId,
     turnPhase: "reasoning",
     turnSeq: message.turnSeq,
+    projectionStartSeq: message.projectionStartSeq,
   };
 }
 

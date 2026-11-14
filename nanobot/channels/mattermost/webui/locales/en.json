@@ -16,17 +16,17 @@
         "placeholder": "Optional team ID"
       },
       "groupPolicy": {
-        "label": "Channel behavior",
+        "label": "Channel rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages",
           "allowlist": "Allowlist"
         }
       },
       "groupPolicyInThread": {
-        "label": "Thread behavior",
+        "label": "Thread rules",
         "choices": {
-          "mention": "Mention only",
+          "mention": "Mentions only",
           "open": "All messages (no mention needed)",
           "allowlist": "Allowlist"
         }
@@ -47,21 +47,21 @@
         "label": "Allowed channels"
       },
       "replyInThread": {
-        "label": "Reply in thread",
+        "label": "Thread replies",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "includeThreadContext": {
-        "label": "Include thread context",
+        "label": "Thread context",
         "choices": {
           "true": "On",
           "false": "Off"
         }
       },
       "threadContextLimit": {
-        "label": "Thread context limit"
+        "label": "Context limit"
       },
       "streaming": {
         "label": "Streaming",
@@ -84,7 +84,7 @@
         }
       },
       "sendToolHints": {
-        "label": "Send tool hints",
+        "label": "Tool hints",
         "choices": {
           "true": "On",
           "false": "Off"
@@ -105,7 +105,7 @@
         }
       },
       "dm_allowFrom": {
-        "label": "Allowed direct-message users"
+        "label": "Allowed DM users"
       }
     }
   }

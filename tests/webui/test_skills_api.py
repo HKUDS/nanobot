@@ -1,8 +1,11 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
+from nanobot.agent import plugins as agent_plugins
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.webui.skills_api import (
@@ -72,6 +75,42 @@ def test_skill_detail_exposes_copyable_install_commands(tmp_path: Path) -> None:
             "command": "brew install acme/demo",
         }
     ]
+
+
+@pytest.mark.parametrize("detail", [False, True], ids=["list", "detail"])
+def test_skill_payload_verifies_plugins_once_per_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    detail: bool,
+) -> None:
+    monkeypatch.setattr(agent_plugins, "get_config_path", lambda: tmp_path / "config.json")
+    workspace_skill = _write_skill(tmp_path, "custom-skill") / "SKILL.md"
+    plugin = tmp_path / "plugins" / "demo"
+    _write_skill(plugin, "plugin-skill")
+    (plugin / "plugin.json").write_text(
+        json.dumps({"$schema": agent_plugins.AGENT_PLUGIN_SCHEMA, "name": "demo"}),
+        encoding="utf-8",
+    )
+    agent_plugins.set_agent_plugin_enabled(tmp_path, "demo", True)
+    fingerprint = Mock(wraps=agent_plugins._package_fingerprint)
+    monkeypatch.setattr(agent_plugins, "_package_fingerprint", fingerprint)
+
+    for expected_calls, description in enumerate(["Original", "Updated"], start=1):
+        workspace_skill.write_text(
+            f"---\nname: custom-skill\ndescription: {description}\n---\n",
+            encoding="utf-8",
+        )
+        if detail:
+            payload = webui_skill_detail_payload(tmp_path, "custom-skill")
+            assert payload is not None
+            skill = payload
+        else:
+            payload = webui_skills_payload(tmp_path)
+            skill = next(item for item in payload["skills"] if item["name"] == "custom-skill")
+            assert any(item["source"] == "plugin" for item in payload["skills"])
+
+        assert skill["description"] == description
+        assert fingerprint.call_count == expected_calls
 
 
 def test_set_webui_skill_enabled_persists_and_updates_runtime(

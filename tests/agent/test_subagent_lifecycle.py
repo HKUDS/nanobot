@@ -1,5 +1,3 @@
-"""Tests for SubagentManager lifecycle — spawn, run, announce, cancel."""
-
 import asyncio
 import time
 from pathlib import Path
@@ -9,6 +7,7 @@ import pytest
 
 from nanobot.agent import SubagentManager
 from nanobot.agent.hook import AgentHookContext
+from nanobot.agent.memory import Consolidator
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.subagent import (
     SubagentStatus,
@@ -18,17 +17,14 @@ from nanobot.agent.tools.context import current_request_context
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMUsage
 from nanobot.utils.llm_runtime import LLMRuntime
-from nanobot.utils.subagent_channel_display import scrub_subagent_announce_body
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _manager(tmp_path: Path, **kw) -> SubagentManager:
     defaults = dict(
         workspace=tmp_path,
         bus=MessageBus(),
         max_tool_result_chars=16_000,
+        consolidator=MagicMock(spec=Consolidator),
     )
     defaults.update(kw)
     return SubagentManager(**defaults)
@@ -69,8 +65,16 @@ async def _drain_subagent_tasks(sm: SubagentManager) -> None:
 @pytest.mark.asyncio
 async def test_close_cancels_tasks_before_closing_exec_sessions(tmp_path):
     sm = _manager(tmp_path)
-    task = asyncio.create_task(asyncio.Event().wait())
-    sm._running_tasks["t1"] = task
+    entered = asyncio.Event()
+
+    async def run(spec):
+        entered.set()
+        await asyncio.Event().wait()
+
+    sm.runner.run = run
+    await sm.spawn("task", runtime=_runtime())
+    task = next(iter(sm._running_tasks.values()))
+    await entered.wait()
 
     async def close_exec_sessions() -> int:
         assert task.done()
@@ -84,18 +88,14 @@ async def test_close_cancels_tasks_before_closing_exec_sessions(tmp_path):
     sm._exec_session_manager.close_all.assert_awaited_once()
 
 
-# ---------------------------------------------------------------------------
-# SubagentStatus defaults
-# ---------------------------------------------------------------------------
-
-
 class TestSubagentStatus:
     def test_defaults(self):
         s = SubagentStatus(
             task_id="abc", label="test", task_description="do stuff",
             started_at=time.monotonic(),
         )
-        assert s.phase == "initializing"
+        assert s.phase == "queued"
+        assert s.state == "queued"
         assert s.iteration == 0
         assert s.tool_events == []
         assert s.usage is None
@@ -115,6 +115,7 @@ class TestLegacyCompatibility:
                 MessageBus(),
                 16_000,
                 "legacy-model",
+                consolidator=MagicMock(spec=Consolidator),
             )
 
         assert sm.workspace == tmp_path
@@ -131,6 +132,7 @@ class TestLegacyCompatibility:
                 bus=MessageBus(),
                 max_tool_result_chars=16_000,
                 model="legacy-model",
+                consolidator=MagicMock(spec=Consolidator),
             )
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
@@ -173,11 +175,6 @@ class TestLegacyCompatibility:
             await sm.spawn("task")
 
 
-# ---------------------------------------------------------------------------
-# spawn
-# ---------------------------------------------------------------------------
-
-
 class TestSpawn:
     @pytest.mark.asyncio
     async def test_returns_string_with_task_id(self, tmp_path):
@@ -211,10 +208,13 @@ class TestSpawn:
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
         ))
+        assert not sm.runtime_statuses()
         await sm.spawn("my task", runtime=_runtime())
+        statuses = sm.runtime_statuses()
+        assert len(statuses) == 1
+        assert next(iter(statuses.values())).task_description == "my task"
         await _drain_subagent_tasks(sm)
-        # Status cleaned up after task completes
-        assert len(sm._task_statuses) == 0
+        assert [s.state for s in sm.statuses_for_session("cli:direct").values()] == ["done"]
 
     @pytest.mark.asyncio
     async def test_registers_in_session_tasks(self, tmp_path):
@@ -226,15 +226,14 @@ class TestSpawn:
         sm.runner.run = _slow_run
 
         await sm.spawn("task", runtime=_runtime(), session_key="s1")
-        assert "s1" in sm._session_tasks
-        assert len(sm._session_tasks["s1"]) == 1
+        assert len(sm.statuses_for_session("s1")) == 1
 
         block.set()
         await _drain_subagent_tasks(sm)
-        assert "s1" not in sm._session_tasks
+        assert [s.state for s in sm.statuses_for_session("s1").values()] == ["done"]
 
     @pytest.mark.asyncio
-    async def test_no_session_key_no_registration(self, tmp_path):
+    async def test_no_session_key_registers_channel_chat_owner(self, tmp_path):
         sm = _manager(tmp_path)
         block = asyncio.Event()
         async def _slow_run(spec):
@@ -243,7 +242,7 @@ class TestSpawn:
         sm.runner.run = _slow_run
 
         await sm.spawn("task", runtime=_runtime())
-        assert len(sm._session_tasks) == 0
+        assert len(sm.statuses_for_session("cli:direct")) == 1
 
         block.set()
         await _drain_subagent_tasks(sm)
@@ -259,7 +258,7 @@ class TestSpawn:
 
         long_label_source = "A" * 50
         await sm.spawn(long_label_source, runtime=_runtime(), session_key="s1")
-        status = next(iter(sm._task_statuses.values()))
+        status = next(iter(sm.runtime_statuses().values()))
         assert status.label == long_label_source[:30] + "..."
 
         block.set()
@@ -277,14 +276,14 @@ class TestSpawn:
         await sm.spawn(
             "task", runtime=_runtime(), label="Custom Label", session_key="s1"
         )
-        status = next(iter(sm._task_statuses.values()))
+        status = next(iter(sm.runtime_statuses().values()))
         assert status.label == "Custom Label"
 
         block.set()
         await _drain_subagent_tasks(sm)
 
     @pytest.mark.asyncio
-    async def test_cleanup_callback_removes_all_entries(self, tmp_path):
+    async def test_cleanup_callback_retains_terminal_status(self, tmp_path):
         sm = _manager(tmp_path)
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="done", messages=[], stop_reason="completed",
@@ -292,8 +291,7 @@ class TestSpawn:
         await sm.spawn("task", runtime=_runtime(), session_key="s1")
         await _drain_subagent_tasks(sm)
         assert len(sm._running_tasks) == 0
-        assert len(sm._task_statuses) == 0
-        assert len(sm._session_tasks) == 0
+        assert [s.state for s in sm.statuses_for_session("s1").values()] == ["done"]
 
     @pytest.mark.asyncio
     async def test_runtime_is_captured_before_background_task_starts(self, tmp_path):
@@ -331,11 +329,6 @@ class TestSpawn:
         await _drain_subagent_tasks(sm)
 
 
-# ---------------------------------------------------------------------------
-# _run_subagent
-# ---------------------------------------------------------------------------
-
-
 class TestRunSubagent:
     @pytest.mark.asyncio
     async def test_successful_run(self, tmp_path):
@@ -344,12 +337,14 @@ class TestRunSubagent:
             final_content="Task done!", messages=[], stop_reason="completed",
         ))
         with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
-            await sm._run_subagent(
-                "t1", "do task", "label",
-                {"channel": "cli", "chat_id": "direct"},
-                SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic()),
-                _runtime(),
+            await sm.spawn(
+                task="do task",
+                label="label",
+                origin_channel="cli",
+                origin_chat_id="direct",
+                runtime=_runtime(),
             )
+            await asyncio.gather(*sm._running_tasks.values(), return_exceptions=True)
             mock_announce.assert_called_once()
             assert mock_announce.call_args.args[-2] == "ok"
 
@@ -357,12 +352,16 @@ class TestRunSubagent:
     async def test_exception_run(self, tmp_path):
         sm = _manager(tmp_path)
         sm.runner.run = AsyncMock(side_effect=RuntimeError("LLM down"))
-        status = SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic())
         with patch.object(sm, "_announce_result", new_callable=AsyncMock) as mock_announce:
-            await sm._run_subagent(
-                "t1", "do task", "label",
-                {"channel": "cli", "chat_id": "direct"}, status, _runtime(),
+            await sm.spawn(
+                task="do task",
+                label="label",
+                origin_channel="cli",
+                origin_chat_id="direct",
+                runtime=_runtime(),
             )
+            await asyncio.gather(*sm._running_tasks.values(), return_exceptions=True)
+            status = next(iter(sm.runtime_statuses().values()))
             assert status.phase == "error"
             assert "LLM down" in status.error
             assert mock_announce.call_args.args[-2] == "error"
@@ -373,19 +372,18 @@ class TestRunSubagent:
         sm.runner.run = AsyncMock(return_value=AgentRunResult(
             final_content="ok", messages=[], stop_reason="completed",
         ))
-        status = SubagentStatus(task_id="t1", label="label", task_description="do task", started_at=time.monotonic())
         with patch.object(sm, "_announce_result", new_callable=AsyncMock):
-            await sm._run_subagent(
-                "t1", "do task", "label",
-                {"channel": "cli", "chat_id": "direct"}, status, _runtime(),
+            await sm.spawn(
+                task="do task",
+                label="label",
+                origin_channel="cli",
+                origin_chat_id="direct",
+                runtime=_runtime(),
             )
+            await asyncio.gather(*sm._running_tasks.values(), return_exceptions=True)
+            status = next(iter(sm.runtime_statuses().values()))
             assert status.phase == "done"
             assert status.stop_reason == "completed"
-
-
-# ---------------------------------------------------------------------------
-# _announce_result
-# ---------------------------------------------------------------------------
 
 
 class TestAnnounceResult:
@@ -419,165 +417,6 @@ class TestAnnounceResult:
         )
 
         assert published[0].session_key_override == "s1"
-
-    @pytest.mark.asyncio
-    async def test_result_marks_other_running_session_tasks(self, tmp_path):
-        sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
-        sibling = MagicMock()
-        sibling.done.return_value = False
-        sm._session_tasks["s1"] = {"t1", "t2"}
-        sm._running_tasks["t2"] = sibling
-        sm._pending_announcements.update({"t1": "message-1", "t2": "message-1"})
-
-        await sm._announce_result(
-            "t1",
-            "first",
-            "task one",
-            "result one",
-            {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
-            "ok",
-            "message-1",
-        )
-
-        msg = published[0]
-        assert msg.metadata["subagent_remaining_count"] == 1
-        assert "1 other background task is still running" in msg.content
-        assert "do not finalize" in msg.content.lower()
-        assert "background task" not in scrub_subagent_announce_body(msg.content)
-
-    @pytest.mark.asyncio
-    async def test_last_session_result_has_no_pending_notice(self, tmp_path):
-        sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
-        current = MagicMock()
-        current.done.return_value = False
-        sm._session_tasks["s1"] = {"t1"}
-        sm._running_tasks["t1"] = current
-        sm._pending_announcements["t1"] = "message-1"
-
-        await sm._announce_result(
-            "t1",
-            "last",
-            "last task",
-            "last result",
-            {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
-            "ok",
-            "message-1",
-        )
-
-        msg = published[0]
-        assert msg.metadata["subagent_remaining_count"] == 0
-        assert "other background task" not in msg.content
-
-    @pytest.mark.asyncio
-    async def test_inline_session_task_is_not_counted_as_pending_announcement(self, tmp_path):
-        sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
-        background = MagicMock()
-        background.done.return_value = False
-        inline = MagicMock()
-        inline.done.return_value = False
-        sm._session_tasks["s1"] = {"background", "inline"}
-        sm._running_tasks.update({"background": background, "inline": inline})
-        sm._pending_announcements["background"] = "message-1"
-
-        await sm._announce_result(
-            "background",
-            "last background",
-            "task",
-            "result",
-            {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
-            "ok",
-            "message-1",
-        )
-
-        assert published[0].metadata["subagent_remaining_count"] == 0
-        assert "other background task" not in published[0].content
-
-    @pytest.mark.asyncio
-    async def test_concurrent_completions_publish_decreasing_pending_counts(self, tmp_path):
-        sm = _manager(tmp_path)
-        published = []
-        first_publish_started = asyncio.Event()
-        release_first_publish = asyncio.Event()
-
-        async def publish(msg):
-            published.append(msg)
-            if len(published) == 1:
-                first_publish_started.set()
-                await release_first_publish.wait()
-
-        sm.bus.publish_inbound = AsyncMock(side_effect=publish)
-        first = MagicMock()
-        first.done.return_value = False
-        second = MagicMock()
-        second.done.return_value = False
-        sm._session_tasks["s1"] = {"t1", "t2"}
-        sm._running_tasks.update({"t1": first, "t2": second})
-        sm._pending_announcements.update({"t1": "message-1", "t2": "message-1"})
-
-        first_announcement = asyncio.create_task(
-            sm._announce_result(
-                "t1",
-                "first",
-                "task one",
-                "result one",
-                {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
-                "ok",
-                "message-1",
-            )
-        )
-        await first_publish_started.wait()
-        second_announcement = asyncio.create_task(
-            sm._announce_result(
-                "t2",
-                "second",
-                "task two",
-                "result two",
-                {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
-                "ok",
-                "message-1",
-            )
-        )
-        await second_announcement
-        release_first_publish.set()
-        await first_announcement
-
-        assert [msg.metadata["subagent_remaining_count"] for msg in published] == [1, 0]
-
-    @pytest.mark.asyncio
-    async def test_result_does_not_count_background_tasks_from_another_turn(self, tmp_path):
-        sm = _manager(tmp_path)
-        published = []
-        sm.bus.publish_inbound = AsyncMock(side_effect=lambda msg: published.append(msg))
-        same_turn = MagicMock()
-        same_turn.done.return_value = False
-        prior_turn = MagicMock()
-        prior_turn.done.return_value = False
-        sm._session_tasks["s1"] = {"current", "same-turn", "prior-turn"}
-        sm._running_tasks.update({"same-turn": same_turn, "prior-turn": prior_turn})
-        sm._pending_announcements.update({
-            "current": "message-2",
-            "same-turn": "message-2",
-            "prior-turn": "message-1",
-        })
-
-        await sm._announce_result(
-            "current",
-            "current result",
-            "task",
-            "result",
-            {"channel": "cli", "chat_id": "direct", "session_key": "s1"},
-            "ok",
-            "message-2",
-        )
-
-        assert published[0].metadata["subagent_remaining_count"] == 1
-        assert "1 other background task is still running" in published[0].content
 
     @pytest.mark.asyncio
     async def test_session_key_override_fallback(self, tmp_path):
@@ -633,11 +472,6 @@ class TestAnnounceResult:
         assert published[0].metadata["origin_message_id"] == "msg-123"
 
 
-# ---------------------------------------------------------------------------
-# cancel_by_session
-# ---------------------------------------------------------------------------
-
-
 class TestCancelBySession:
     @pytest.mark.asyncio
     async def test_cancels_running_tasks(self, tmp_path):
@@ -651,7 +485,7 @@ class TestCancelBySession:
         runtime = _runtime()
         await sm.spawn("task1", runtime=runtime, session_key="s1")
         await sm.spawn("task2", runtime=runtime, session_key="s1")
-        assert len(sm._session_tasks.get("s1", set())) == 2
+        assert len(sm.statuses_for_session("s1")) == 2
 
         count = await sm.cancel_by_session("s1")
         assert count == 2
@@ -691,7 +525,7 @@ class TestCancelBySession:
 
         assert not queued_entered.is_set()
         assert sm._running_tasks == {}
-        assert sm._session_tasks == {}
+        assert [s.state for s in sm.statuses_for_session("s1").values()] == ["cancelled", "cancelled"]
 
     @pytest.mark.asyncio
     async def test_already_done_not_counted(self, tmp_path):
@@ -704,11 +538,6 @@ class TestCancelBySession:
 
         count = await sm.cancel_by_session("s1")
         assert count == 0
-
-
-# ---------------------------------------------------------------------------
-# get_running_count / get_running_count_by_session
-# ---------------------------------------------------------------------------
 
 
 class TestRunningCounts:
@@ -742,29 +571,13 @@ class TestRunningCounts:
         assert sm.get_running_count_by_session("nonexistent") == 0
 
 
-# ---------------------------------------------------------------------------
-# _SubagentHook
-# ---------------------------------------------------------------------------
-
-
 class TestSubagentHook:
-    @pytest.mark.asyncio
-    async def test_before_execute_tools_logs(self, tmp_path):
-        hook = _SubagentHook("t1")
-        tool_call = MagicMock()
-        tool_call.name = "read_file"
-        tool_call.arguments = {"path": "/tmp/test"}
-        ctx = _make_hook_context(tool_calls=[tool_call])
-        result = await hook.before_execute_tools(ctx)
-        assert result is None
-        assert ctx.tool_calls == [tool_call]
-
     @pytest.mark.asyncio
     async def test_after_iteration_updates_status(self):
         status = SubagentStatus(
             task_id="t1", label="test", task_description="do", started_at=time.monotonic(),
         )
-        hook = _SubagentHook("t1", status)
+        hook = _SubagentHook(status)
         ctx = _make_hook_context(
             iteration=3,
             tool_events=[{"name": "read_file", "status": "ok", "detail": ""}],
@@ -776,19 +589,11 @@ class TestSubagentHook:
         assert status.usage == LLMUsage.reported(input_tokens=100, output_tokens=0)
 
     @pytest.mark.asyncio
-    async def test_after_iteration_no_status_noop(self):
-        hook = _SubagentHook("t1", status=None)
-        ctx = _make_hook_context(iteration=5)
-        result = await hook.after_iteration(ctx)
-        assert result is None
-        assert ctx.iteration == 5
-
-    @pytest.mark.asyncio
     async def test_after_iteration_sets_error(self):
         status = SubagentStatus(
             task_id="t1", label="test", task_description="do", started_at=time.monotonic(),
         )
-        hook = _SubagentHook("t1", status)
+        hook = _SubagentHook(status)
         ctx = _make_hook_context(error="something broke")
         await hook.after_iteration(ctx)
         assert status.error == "something broke"

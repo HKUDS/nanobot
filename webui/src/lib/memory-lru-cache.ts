@@ -1,8 +1,6 @@
-/** Byte- and entry-bounded in-memory LRU for JSON-shaped WebUI state. */
+/** Byte- and entry-bounded LRU; non-evictable working state is outside that budget. */
 export class MemoryLruCache<T> {
   private entries = new Map<string, { value: T; bytes: number }>();
-  private sizes = new WeakMap<object, number>();
-  private bytes = 0;
 
   constructor(
     private maxBytes: number,
@@ -18,39 +16,57 @@ export class MemoryLruCache<T> {
     return entry.value;
   }
 
+  /** Read without making a background observer retain an otherwise old entry. */
+  peek(key: string): T | undefined {
+    return this.entries.get(key)?.value;
+  }
+
   set(key: string, value: T): void {
-    this.delete(key);
     const bytes = this.estimate(value);
+    // A rejected replacement must not leave a stale snapshot under this key.
+    this.delete(key);
+    if (this.canEvict(key) && (bytes > this.maxBytes || this.maxEntries < 1)) return;
     this.entries.set(key, { value, bytes });
-    this.bytes += bytes;
-    for (const candidate of this.entries.keys()) {
-      if (this.bytes <= this.maxBytes && this.entries.size <= this.maxEntries) break;
-      if (this.canEvict(candidate)) this.delete(candidate);
+
+    let reclaimableBytes = 0;
+    let reclaimableEntries = 0;
+    for (const [candidate, entry] of this.entries) {
+      if (!this.canEvict(candidate)) continue;
+      reclaimableBytes += entry.bytes;
+      reclaimableEntries++;
+    }
+    for (const [candidate, entry] of this.entries) {
+      if (reclaimableBytes <= this.maxBytes && reclaimableEntries <= this.maxEntries) break;
+      if (!this.canEvict(candidate)) continue;
+      this.delete(candidate);
+      reclaimableBytes -= entry.bytes;
+      reclaimableEntries--;
     }
   }
 
   delete(key: string): void {
-    const entry = this.entries.get(key);
-    if (entry) this.bytes -= entry.bytes;
     this.entries.delete(key);
   }
 
   clear(): void {
     this.entries.clear();
-    this.sizes = new WeakMap<object, number>();
-    this.bytes = 0;
   }
 
-  private estimate(value: unknown): number {
+  private estimate(value: unknown, seen = new WeakSet<object>()): number {
     if (typeof value === "string") return value.length * 2;
     if (!value || typeof value !== "object") return 8;
-    const cached = this.sizes.get(value);
-    if (cached !== undefined) return cached;
-    const size = 32 + Object.values(value).reduce<number>(
-      (total, item) => total + this.estimate(item),
-      0,
-    );
-    this.sizes.set(value, size);
-    return size;
+    if (seen.has(value)) return 0;
+    seen.add(value);
+    let bytes = 32;
+    if (value instanceof Map) {
+      for (const [key, item] of value) {
+        bytes += this.estimate(key, seen) + this.estimate(item, seen);
+      }
+    } else {
+      for (const item of value instanceof Set ? value : Object.values(value)) {
+        bytes += this.estimate(item, seen);
+      }
+    }
+    return bytes;
   }
 }

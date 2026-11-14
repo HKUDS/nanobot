@@ -1,5 +1,3 @@
-"""Artifact persistence helpers for generated media."""
-
 from __future__ import annotations
 
 import base64

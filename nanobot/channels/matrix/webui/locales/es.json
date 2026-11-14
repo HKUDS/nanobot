@@ -4,7 +4,7 @@
     "officialLabel": "Abrir lista de clientes Matrix",
     "fields": {
       "homeserver": {
-        "label": "Servidor de la cuenta",
+        "label": "Homeserver",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -24,12 +24,16 @@
         "placeholder": "Obligatorio con token"
       },
       "groupPolicy": {
-        "label": "Comportamiento en grupos",
+        "label": "Reglas de grupo",
         "choices": {
           "mention": "Solo menciones",
           "open": "Todos los mensajes",
-          "allowlist": "Lista de permitidos"
+          "allowlist": "Lista de permitidos",
+          "listen": "Escuchar (responder al mencionar)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Excepciones de reglas por sala (JSON)"
       },
       "allowFrom": {
         "label": "Usuarios permitidos"
@@ -49,21 +53,28 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "Período de gracia para detener la sincronización"
+        "label": "Espera al detener sync (segundos)"
       },
       "maxMediaBytes": {
-        "label": "Tamaño máximo de medios"
+        "label": "Límite multimedia (bytes)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "Descargas multimedia simultáneas"
+        "label": "Descargas simultáneas"
       },
       "groupAllowFrom": {
         "label": "Grupos permitidos"
       },
       "allowRoomMentions": {
-        "label": "Permitir menciones de sala",
+        "label": "Menciones de sala",
         "choices": {
           "true": "encendido",
+          "false": "Apagado"
+        }
+      },
+      "replyToMessage": {
+        "label": "Citar al responder",
+        "choices": {
+          "true": "Encendido",
           "false": "Apagado"
         }
       },
@@ -74,9 +85,8 @@
           "false": "Apagado"
         }
       },
-      "proxy": {
-        "label": "Proxy de red",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Usar proxy"
       }
     }
   }

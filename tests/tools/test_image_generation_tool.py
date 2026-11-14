@@ -4,12 +4,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
-from nanobot.agent.tools.image_generation import ImageGenerationTool
+from nanobot.agent.tools.image_generation import ImageGenerationTool, ImageGenerationToolConfig
 from nanobot.config.loader import set_config_path
-from nanobot.config.schema import ImageGenerationToolConfig, ProviderConfig
-from nanobot.providers.image_generation import GeneratedImageResponse
+from nanobot.config.network import NetworkConfig
+from nanobot.config.schema import Config, ProviderConfig
+from nanobot.providers.image_generation import GeneratedImageResponse, image_gen_provider_configs
 
 PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
@@ -21,6 +23,51 @@ PNG_DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+
+
+async def test_dynamic_image_connection_and_overrides_reach_images_api(tmp_path):
+    config = Config.model_validate({
+        "providers": {"SenseNova": {
+            "apiBase": "https://image.test/v1", "apiKey": "fixture",
+            "extraHeaders": {"X-Route": "shared", "X-Keep": "yes"},
+            "extraBody": {"metadata": {"shared": True}},
+        }},
+        "tools": {"imageGeneration": {
+            "enabled": True, "provider": "SenseNova", "model": "image-model",
+            "extraHeaders": {"x-route": "images"},
+            "extraBody": {"metadata": {"watermark": False}},
+        }},
+    })
+    before = config.providers.model_dump()
+    tool = ImageGenerationTool(
+        workspace=tmp_path, config=config.tools.image_generation,
+        provider_configs=image_gen_provider_configs(config.providers),
+    )
+    client = tool._provider_client()
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"data": [{"b64_json": PNG_DATA_URL.split(",", 1)[1]}]})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as transport:
+        client._client = transport
+        result = await client.generate(prompt="draw water", model=tool.config.model)
+    assert result.images == [PNG_DATA_URL]
+    assert str(requests[0].url) == "https://image.test/v1/images/generations"
+    assert requests[0].headers.get_list("x-route") == ["images"]
+    assert requests[0].headers["x-keep"] == "yes"
+    assert json.loads(requests[0].content)["metadata"] == {"watermark": False}
+    assert config.providers.model_dump() == before
+    schema = tool.to_schema()
+    config.tools.image_generation.extra_headers = None
+    config.tools.image_generation.extra_body = None
+    inherited = tool._provider_client()
+    assert inherited.extra_headers["X-Route"] == "shared"
+    assert inherited.extra_body == {"metadata": {"shared": True}}
+    assert tool.to_schema() == schema
+    tool.provider_configs.clear()
+    assert tool._provider_client() is None
 
 
 class FakeImageClient:
@@ -45,7 +92,7 @@ async def test_generate_image_tool_stores_artifact_and_source_images(
     FakeImageClient.instances = []
     monkeypatch.setattr(
         "nanobot.agent.tools.image_generation.get_image_gen_provider",
-        lambda name: FakeImageClient if name == "openrouter" else None,
+        lambda name, connection=None: FakeImageClient if name == "openrouter" else None,
     )
     ref = tmp_path / "ref.png"
     ref.write_bytes(PNG_BYTES)
@@ -99,7 +146,7 @@ async def test_generate_image_tool_selects_aihubmix_provider(
     FakeImageClient.instances = []
     monkeypatch.setattr(
         "nanobot.agent.tools.image_generation.get_image_gen_provider",
-        lambda name: FakeImageClient if name == "aihubmix" else None,
+        lambda name, connection=None: FakeImageClient if name == "aihubmix" else None,
     )
     tool = ImageGenerationTool(
         workspace=tmp_path,
@@ -132,7 +179,7 @@ def test_image_generation_tool_passes_provider_proxy_to_client(
     FakeImageClient.instances = []
     monkeypatch.setattr(
         "nanobot.agent.tools.image_generation.get_image_gen_provider",
-        lambda name: FakeImageClient if name == "openai_codex" else None,
+        lambda name, connection=None: FakeImageClient if name == "openai_codex" else None,
     )
     proxy = "http://127.0.0.1:23458"
     tool = ImageGenerationTool(
@@ -140,9 +187,10 @@ def test_image_generation_tool_passes_provider_proxy_to_client(
         config=ImageGenerationToolConfig(
             enabled=True,
             provider="openai_codex",
-            model="openai-codex/gpt-5.4",
+            model="openai-codex/gpt-image-2",
         ),
-        provider_configs={"openai_codex": ProviderConfig(proxy=proxy)},
+        provider_configs={"openai_codex": ProviderConfig(use_proxy=True)},
+        network=NetworkConfig(proxy=proxy),
     )
 
     client = tool._provider_client()
@@ -173,7 +221,7 @@ async def test_generate_image_tool_allows_ollama_without_api_key(
     FakeImageClient.instances = []
     monkeypatch.setattr(
         "nanobot.agent.tools.image_generation.get_image_gen_provider",
-        lambda name: FakeImageClient if name == "ollama" else None,
+        lambda name, connection=None: FakeImageClient if name == "ollama" else None,
     )
     tool = ImageGenerationTool(
         workspace=tmp_path,

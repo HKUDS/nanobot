@@ -92,6 +92,7 @@ class UserInputEvent(AgentEvent):
 
     content: str
     created_at_ms: int
+    input_id: str
     provenance: dict[str, Any]
 
 
@@ -109,6 +110,7 @@ class TurnModelUpdatedEvent(AgentEvent):
     model_preset: str | None = None
     context_window_tokens: int | None = None
     fallback: bool = False
+    reauth_provider: str | None = None
 
 
 def outbound_message_for_event(

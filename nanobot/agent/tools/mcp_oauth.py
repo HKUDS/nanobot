@@ -552,6 +552,14 @@ class _RetryOAuthWithDiscoveredMetadata(BaseException):
     """Restart the SDK flow after discovery without logging a false OAuth failure."""
 
 
+class _OAuthAuthorizationInterrupted(BaseException):
+    """Carry expected authorization state past the SDK's generic error logger."""
+
+    def __init__(self, error: MCPAuthorizationRequiredError) -> None:
+        self.error = error
+        super().__init__(str(error))
+
+
 class _RetryOAuthWithStoredCredentials(BaseException):
     """Restart the SDK flow with credentials refreshed by another provider."""
 
@@ -605,7 +613,6 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
         )
 
     async def _initialize(self) -> None:
-        """Restore enough OAuth state to refresh without an interactive flow."""
         self._apply_snapshot(await self._nanobot_storage.get_snapshot())
         self._initialized = True
 
@@ -642,7 +649,6 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
         await lease.lock.release()
 
     async def _handle_refresh_response(self, response: httpx.Response) -> bool:
-        """Persist a rotated token pair while retaining credentials on transient errors."""
         lease = self._refresh_claim.get()
         if lease is None:
             raise MCPTokenRefreshError("MCP OAuth refresh response has no storage lease")
@@ -759,13 +765,15 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
             self.context.client_info = None
             self._token_issuer = None
             raise _RetryOAuthWithStoredCredentials
-        return await super()._perform_authorization()
+        try:
+            return await super()._perform_authorization()
+        except MCPAuthorizationRequiredError as exc:
+            raise _OAuthAuthorizationInterrupted(exc) from exc
 
     async def async_auth_flow(
         self,
         request: httpx.Request,
     ) -> AsyncGenerator[httpx.Request, httpx.Response]:
-        """Let a 401 discover the token endpoint, then restart once to refresh."""
         try:
             for attempt in range(3):
                 self._refresh_attempted.set(False)
@@ -790,6 +798,12 @@ class _RefreshingOAuthClientProvider(OAuthClientProvider):
                                 outgoing = await flow.asend(response)
                             except StopAsyncIteration:
                                 return
+                except _OAuthAuthorizationInterrupted as exc:
+                    logger.info(
+                        "MCP server '{}': OAuth request stopped at browser authorization",
+                        self._nanobot_storage.server_name,
+                    )
+                    raise exc.error from None
                 except _RetryOAuthWithDiscoveredMetadata:
                     # The SDK has now validated discovery metadata. Mark the token
                     # expired so its normal pre-request branch refreshes against the

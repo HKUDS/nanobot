@@ -8,29 +8,23 @@
         "placeholder": "Discord ボットトークン"
       },
       "allowChannels": {
-        "label": "許可するチャンネル",
+        "label": "許可チャンネル",
         "placeholder": "チャンネル ID（カンマ区切り）"
       },
       "groupPolicy": {
-        "label": "グループでの動作",
+        "label": "グループのルール",
         "choices": {
           "mention": "メンションのみ",
-          "open": "すべてのメッセージ",
+          "open": "全メッセージ",
           "allowlist": "許可リスト"
         }
       },
       "allowFrom": {
-        "label": "許可するユーザー",
+        "label": "許可ユーザー",
         "placeholder": "ユーザー ID（カンマ区切り）"
       },
-      "proxy": {
-        "label": "ネットワークプロキシ"
-      },
-      "proxyUsername": {
-        "label": "プロキシのユーザー名"
-      },
-      "proxyPassword": {
-        "label": "プロキシパスワード"
+      "useProxy": {
+        "label": "プロキシを使う"
       },
       "intents": {
         "label": "ゲートウェイの意図"
@@ -39,13 +33,20 @@
         "label": "絵文字を読む"
       },
       "workingEmoji": {
-        "label": "働く絵文字"
+        "label": "処理中の絵文字"
       },
       "workingEmojiDelay": {
-        "label": "絵文字の動作遅延"
+        "label": "絵文字の遅延（秒）"
       },
       "streaming": {
         "label": "ストリーミング",
+        "choices": {
+          "true": "オン",
+          "false": "オフ"
+        }
+      },
+      "replyToMessage": {
+        "label": "メッセージに返信",
         "choices": {
           "true": "オン",
           "false": "オフ"

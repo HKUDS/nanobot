@@ -1,8 +1,10 @@
-"""Tests for the Mistral provider registration and reasoning quirks."""
-
 from __future__ import annotations
 
 from unittest.mock import patch
+
+import pytest
+from openai.types.chat import ChatCompletionChunk
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 
 from nanobot.config.schema import ProvidersConfig
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -21,13 +23,11 @@ def _mistral_provider(default_model: str = "mistral-medium-3-5") -> OpenAICompat
 
 
 def test_mistral_config_field_exists() -> None:
-    """ProvidersConfig should have a mistral field."""
     config = ProvidersConfig()
     assert hasattr(config, "mistral")
 
 
 def test_mistral_provider_in_registry() -> None:
-    """Mistral should be registered in the provider registry."""
     specs = {s.name: s for s in PROVIDERS}
     assert "mistral" in specs
 
@@ -37,7 +37,6 @@ def test_mistral_provider_in_registry() -> None:
 
 
 def test_mistral_keyword_match_covers_model_families() -> None:
-    """Codestral, Devstral, Ministral, Magistral models route to the Mistral spec."""
     from nanobot.config.schema import Config
 
     for model in (
@@ -54,37 +53,35 @@ def test_mistral_keyword_match_covers_model_families() -> None:
         assert config.get_provider_name(model) == "mistral", model
 
 
-def test_reasoning_effort_low_remaps_to_none_omitted() -> None:
-    """Mistral rejects low/medium efforts: low should map to "none" (omitted)."""
+@pytest.mark.parametrize(
+    "model, effort",
+    [
+        pytest.param("mistral-medium-3-5", "low", id="low_remaps_to_none_omitted"),
+        pytest.param("mistral-vibe-cli-latest", "minimal", id="minimal_remaps_to_none_omitted"),
+    ],
+)
+def test_mistral_omits_low_reasoning_effort(model, effort) -> None:
     p = _mistral_provider()
     kwargs = p._build_kwargs(
         messages=[{"role": "user", "content": "hi"}],
         tools=None,
-        model="mistral-medium-3-5",
+        model=model,
         max_tokens=64,
         temperature=0.5,
-        reasoning_effort="low",
+        reasoning_effort=effort,
         tool_choice=None,
     )
     assert "reasoning_effort" not in kwargs
 
 
-def test_reasoning_effort_minimal_remaps_to_none_omitted() -> None:
-    p = _mistral_provider()
-    kwargs = p._build_kwargs(
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        model="mistral-vibe-cli-latest",
-        max_tokens=64,
-        temperature=0.5,
-        reasoning_effort="minimal",
-        tool_choice=None,
-    )
-    assert "reasoning_effort" not in kwargs
-
-
-def test_reasoning_effort_medium_remaps_to_high() -> None:
-    """Mistral has no 'medium' tier: bump up to 'high'."""
+@pytest.mark.parametrize(
+    "effort",
+    [
+        pytest.param("medium", id="medium_remaps_to_high"),
+        pytest.param("high", id="high_passes_through"),
+    ],
+)
+def test_mistral_uses_high_reasoning_effort(effort) -> None:
     p = _mistral_provider()
     kwargs = p._build_kwargs(
         messages=[{"role": "user", "content": "hi"}],
@@ -92,28 +89,13 @@ def test_reasoning_effort_medium_remaps_to_high() -> None:
         model="mistral-medium-3-5",
         max_tokens=64,
         temperature=0.5,
-        reasoning_effort="medium",
-        tool_choice=None,
-    )
-    assert kwargs["reasoning_effort"] == "high"
-
-
-def test_reasoning_effort_high_passes_through() -> None:
-    p = _mistral_provider()
-    kwargs = p._build_kwargs(
-        messages=[{"role": "user", "content": "hi"}],
-        tools=None,
-        model="mistral-medium-3-5",
-        max_tokens=64,
-        temperature=0.5,
-        reasoning_effort="high",
+        reasoning_effort=effort,
         tool_choice=None,
     )
     assert kwargs["reasoning_effort"] == "high"
 
 
 def test_magistral_strips_reasoning_effort() -> None:
-    """Magistral reasons implicitly; API rejects reasoning_effort kwarg."""
     p = _mistral_provider()
     for effort in ("low", "medium", "high", "minimal"):
         kwargs = p._build_kwargs(
@@ -129,7 +111,6 @@ def test_magistral_strips_reasoning_effort() -> None:
 
 
 def test_extract_thinking_content_from_mistral_response() -> None:
-    """Thinking blocks should land in reasoning_content, not content."""
     p = _mistral_provider()
     response = {
         "choices": [
@@ -158,7 +139,6 @@ def test_extract_thinking_content_from_mistral_response() -> None:
 
 
 def test_extract_thinking_content_with_tool_calls() -> None:
-    """A response with thinking + tool_calls (no text content) should still parse."""
     p = _mistral_provider()
     response = {
         "choices": [
@@ -197,7 +177,6 @@ def test_extract_thinking_content_with_tool_calls() -> None:
 
 
 def test_thinking_content_only_for_mistral_spec() -> None:
-    """Providers without extract_thinking_blocks should not lift thinking text."""
     other_spec = find_by_name("openai")
     assert other_spec is not None
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
@@ -230,7 +209,6 @@ def test_thinking_content_only_for_mistral_spec() -> None:
 
 
 def test_streaming_thinking_chunks_become_reasoning() -> None:
-    """Streamed thinking deltas (Mistral shape) feed reasoning_content."""
     chunks = [
         {
             "choices": [
@@ -277,32 +255,29 @@ def test_streaming_thinking_chunks_become_reasoning() -> None:
 
 
 def test_streaming_thinking_chunks_via_sdk_path() -> None:
-    """The SDK-style branch must coerce list-shaped delta.content to text.
+    """SDK chunks with list-shaped delta.content keep text and thinking separate.
 
-    Regression: Mistral's vibe-cli/medium-3-5 streamed delta.content as a
-    list, which was previously appended verbatim to content_parts and blew
-    up later with "can only concatenate str (not list) to str".
+    Mistral's vibe-cli/medium-3-5 streams content as a list. The SDK accepts
+    it through non-strict construction even though its schema declares str.
     """
 
-    class _Delta:
-        def __init__(self, content):
-            self.content = content
-            self.tool_calls = None
-            self.function_call = None
-
-    class _Choice:
-        def __init__(self, content, finish=None):
-            self.delta = _Delta(content)
-            self.finish_reason = finish
-
-    class _Chunk:
-        def __init__(self, content, finish=None):
-            self.choices = [_Choice(content, finish)]
+    def chunk(content, finish=None) -> ChatCompletionChunk:
+        return ChatCompletionChunk(
+            id="chatcmpl-mistral",
+            object="chat.completion.chunk",
+            created=0,
+            model="mistral-medium-3-5",
+            choices=[Choice(
+                index=0,
+                delta=ChoiceDelta.model_construct(content=content),
+                finish_reason=finish,
+            )],
+        )
 
     chunks = [
-        _Chunk([{"type": "thinking", "thinking": [{"type": "text", "text": "ponder"}]}]),
-        _Chunk([{"type": "text", "text": "Hello "}]),
-        _Chunk("world.", finish="stop"),
+        chunk([{"type": "thinking", "thinking": [{"type": "text", "text": "ponder"}]}]),
+        chunk([{"type": "text", "text": "Hello "}]),
+        chunk("world.", finish="stop"),
     ]
     parsed = OpenAICompatProvider._parse_chunks(chunks)
     assert parsed.content == "Hello world."
@@ -310,7 +285,6 @@ def test_streaming_thinking_chunks_via_sdk_path() -> None:
 
 
 def test_mistral_strips_reasoning_content_from_history() -> None:
-    """Mistral's request schema 400s on reasoning_content; it must be dropped."""
     p = _mistral_provider()
     messages = [
         {"role": "user", "content": "hi"},
@@ -327,7 +301,6 @@ def test_mistral_strips_reasoning_content_from_history() -> None:
 
 
 def test_mistral_tool_call_ids_get_normalized() -> None:
-    """Non-9-char tool_call IDs should be hashed to 9-char alphanumeric."""
     p = _mistral_provider()
     messages = [
         {"role": "user", "content": "hi"},

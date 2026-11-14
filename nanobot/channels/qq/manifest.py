@@ -1,5 +1,3 @@
-"""QQ management contract."""
-
 from nanobot.channels._manifest import field, required_fields
 from nanobot.channels.contracts import ChannelSetupSpec
 from nanobot.channels.plugin import ChannelPlugin
@@ -11,6 +9,7 @@ SETUP_SPEC = ChannelSetupSpec(
         "allowFrom": field("list"),
         "msgFormat": field("enum", choices={"plain", "markdown"}, default="plain"),
         "ackMessage": field(default="⏳ Processing..."),
+        "showCompactionNotices": field("bool", inheritable=True),
         "mediaDir": field(),
         "downloadChunkSize": field("int", default=1024 * 256),
         "downloadMaxBytes": field("int", default=1024 * 1024 * 200),
@@ -23,10 +22,11 @@ PLUGIN = ChannelPlugin(
     name="qq",
     display_name="QQ",
     runtime=f"{__package__}.runtime:QQChannel",
+    connector=f"{__package__}.connect:QQConnectStore",
     setup=SETUP_SPEC,
     dependencies=(
         "aiohttp>=3.9.0,<4.0.0",
         "qq-botpy>=1.2.0,<2.0.0",
     ),
-    webui="webui/index.ts",
+    webui="webui/index.tsx",
 )

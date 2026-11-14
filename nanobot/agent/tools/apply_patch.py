@@ -1,12 +1,11 @@
-"""Apply file edits by providing structured edit instructions."""
-
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, cast
 
 from nanobot.agent.tools.base import ToolResult, tool_parameters
-from nanobot.agent.tools.filesystem import _FsTool  # pyright: ignore[reportPrivateUsage]
+from nanobot.agent.tools.filesystem import _WritableFsTool  # pyright: ignore[reportPrivateUsage]
 from nanobot.agent.tools.schema import (
     ArraySchema,
     BooleanSchema,
@@ -14,6 +13,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.execution.files import WritableFile, commit_file_edits
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 
 
@@ -21,25 +21,15 @@ class _PatchError(ValueError):
     pass
 
 
-def _validate_patch_path(path: str) -> str:
+def _validate_patch_path(path: object) -> str:
+    if not isinstance(path, str):
+        raise _PatchError("path required for edit")
     normalized = path.strip()
     if not normalized:
         raise _PatchError("patch path cannot be empty")
     if "\0" in normalized:
         raise _PatchError(f"patch path contains a null byte: {path!r}")
     return normalized
-
-
-def _append_text(content: str, addition: str) -> str:
-    """Append text without merging it into an unterminated final line."""
-    base = content.replace("\r\n", "\n")
-    extra = addition.replace("\r\n", "\n")
-    if base and extra and not base.endswith("\n") and not extra.startswith("\n"):
-        base += "\n"
-    combined = base + extra
-    if combined and not combined.endswith("\n"):
-        combined += "\n"
-    return combined
 
 
 @tool_parameters(
@@ -51,11 +41,11 @@ def _append_text(content: str, addition: str) -> str:
                     "workspace; absolute paths and '..' obey the workspace access policy."
                 ),
                 action=StringSchema(
-                    "Operation type: replace or add.",
+                    "replace updates a unique text match; add creates a file or appends to an existing one.",
                     enum=["replace", "add"],
                 ),
                 old_text=StringSchema(
-                    "Exact text to search for in the file. Required for replace.",
+                    "Exact text occurring once in the file; required for replace.",
                     nullable=True,
                 ),
                 new_text=StringSchema(
@@ -64,7 +54,7 @@ def _append_text(content: str, addition: str) -> str:
                 ),
                 required=["path", "action"],
             ),
-            description="List of edits to apply. Each edit specifies a file and the change to make.",
+            description="File edits, applied in order.",
             min_items=1,
             max_items=20,
         ),
@@ -75,7 +65,7 @@ def _append_text(content: str, addition: str) -> str:
         required=["edits"],
     )
 )
-class ApplyPatchTool(_FsTool):
+class ApplyPatchTool(_WritableFsTool):
     """Apply file edits by providing structured edit instructions."""
     _scopes = {"core", "subagent"}
 
@@ -86,13 +76,21 @@ class ApplyPatchTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Default tool for code edits. Supports multi-file changes in a single call. "
-            "Provide a list of structured edits, each specifying a file path, action "
-            "(replace/add), and the exact text to change. "
-            "Paths are resolved by the current workspace access policy. "
-            "Set dry_run=true to validate and preview without writing files. "
+            "Default tool for code edits, including multi-file changes. "
+            "Returns a file-change summary. "
             "Use edit_file only for small exact replacements on a single file."
         )
+
+    def _file_edit_paths(self, params: Mapping[str, object]) -> Iterator[str]:
+        edits = params.get("edits")
+        if params.get("dry_run") is True or not isinstance(edits, list):
+            return
+        for edit in cast(list[object], edits):
+            if isinstance(edit, dict):
+                try:
+                    yield _validate_patch_path(cast(dict[str, object], edit).get("path"))
+                except _PatchError:
+                    continue
 
     async def execute(
         self,
@@ -104,86 +102,49 @@ class ApplyPatchTool(_FsTool):
             if not edits:
                 raise _PatchError("must provide edits")
 
-            writes: dict[Path, str] = {}
-            originals: dict[Path, str] = {}
-            actions: dict[Path, str] = {}
+            writes: dict[WritableFile, str] = {}
+            originals: dict[WritableFile, str | None] = {}
 
             for edit_value in edits:
                 if not isinstance(edit_value, dict):
                     raise _PatchError("each edit must be an object")
                 edit = cast(dict[str, Any], edit_value)
-                raw_path = edit.get("path")
-                if not isinstance(raw_path, str):
-                    raise _PatchError("path required for edit")
-                path = _validate_patch_path(raw_path)
+                path = _validate_patch_path(edit.get("path"))
                 action = edit.get("action")
                 if not isinstance(action, str):
                     raise _PatchError(f"action required for edit: {path}")
-                source = self._resolve_write(path)
+                source = self._files.edit_target(path)
+                if action not in ("add", "replace"):
+                    raise _PatchError(f"unknown action: {action}")
+                old_text = edit.get("old_text") or ""
+                if action == "replace" and not old_text:
+                    raise _PatchError(f"old_text required for replace: {path}")
+                new_text = edit.get("new_text")
+                if new_text is None:
+                    raise _PatchError(f"new_text required for {action}: {path}")
+                new_text = cast(str, new_text)
 
-                if action == "add":
-                    new_text = edit.get("new_text")
-                    if new_text is None:
-                        raise _PatchError(f"new_text required for add: {path}")
-                    new_text = cast(str, new_text)
-
-                    pending = writes.get(source)
-                    if pending is not None:
-                        content = pending
-                        exists = True
-                    elif source.exists():
-                        raw = source.read_bytes()
+                content = writes.get(source)
+                if content is None:
+                    if source.exists():
                         try:
-                            content = raw.decode("utf-8")
+                            content = source.read_bytes().decode("utf-8")
                         except UnicodeDecodeError:
                             raise _PatchError(f"file is not UTF-8 text: {path}")
-                        exists = True
-                    else:
-                        content = ""
-                        exists = False
-
-                    if exists:
-                        uses_crlf = "\r\n" in content
-                        new_norm = _append_text(content, new_text)
-                        if uses_crlf:
-                            new_norm = new_norm.replace("\n", "\r\n")
-                        writes[source] = new_norm
-                        action_name = "update"
-                    else:
-                        new_norm = new_text.replace("\r\n", "\n")
-                        if new_norm and not new_norm.endswith("\n"):
-                            new_norm += "\n"
-                        writes[source] = new_norm
-                        action_name = "add"
-
-                elif action == "replace":
-                    old_text = edit.get("old_text") or ""
-                    if not old_text:
-                        raise _PatchError(f"old_text required for replace: {path}")
-                    old_text = cast(str, old_text)
-                    new_text = edit.get("new_text")
-                    if new_text is None:
-                        raise _PatchError(f"new_text required for replace: {path}")
-                    new_text = cast(str, new_text)
-
-                    pending = writes.get(source)
-                    if pending is not None:
-                        content = pending
-                    elif source.exists():
-                        raw = source.read_bytes()
-                        try:
-                            content = raw.decode("utf-8")
-                        except UnicodeDecodeError:
-                            raise _PatchError(f"file is not UTF-8 text: {path}")
-                    else:
+                    elif action == "replace":
                         raise _PatchError(f"file to update does not exist: {path}")
+                    originals[source] = content
+                    if content is None:
+                        content = ""
 
-                    if pending is None and not source.is_file():
-                        raise _PatchError(f"path to update is not a file: {path}")
-
-                    uses_crlf = "\r\n" in content
-                    norm_content = content.replace("\r\n", "\n")
-                    norm_old = old_text.replace("\r\n", "\n")
+                norm_content = content.replace("\r\n", "\n")
+                if action == "add":
+                    norm_new = new_text.replace("\r\n", "\n")
+                    if norm_content and norm_new and not norm_content.endswith("\n") and not norm_new.startswith("\n"):
+                        norm_content += "\n"
+                    updated = norm_content + norm_new
+                else:
+                    norm_old = cast(str, old_text).replace("\r\n", "\n")
 
                     pos = norm_content.find(norm_old)
                     if pos < 0:
@@ -191,33 +152,24 @@ class ApplyPatchTool(_FsTool):
                     if norm_content.find(norm_old, pos + 1) >= 0:
                         raise _PatchError(f"old_text appears multiple times in {path}")
 
-                    new_norm = (
+                    updated = (
                         norm_content[:pos]
                         + new_text.replace("\r\n", "\n")
                         + norm_content[pos + len(norm_old) :]
                     )
-                    if new_norm and not new_norm.endswith("\n"):
-                        new_norm += "\n"
-                    if uses_crlf:
-                        new_norm = new_norm.replace("\n", "\r\n")
 
-                    writes[source] = new_norm
-                    action_name = "update"
+                if updated and not updated.endswith("\n"):
+                    updated += "\n"
+                writes[source] = updated.replace("\n", "\r\n") if "\r\n" in content else updated
 
-                else:
-                    raise _PatchError(f"unknown action: {action}")
-
-                originals.setdefault(source, content)
-                actions.setdefault(source, action_name)
-
-            diffs = {
-                source: FileDiff.from_text(originals[source], content)
-                for source, content in writes.items()
-            }
+            diffs: dict[Path, FileDiff] = {}
             summaries: list[str] = []
-            for source, diff in diffs.items():
-                action_name = actions[source]
-                path = display_file_edit_path(source, self._display_workspace())
+            for source, content in writes.items():
+                original = originals[source]
+                action_name = "add" if original is None else "update"
+                diff = FileDiff.from_text(original or "", content)
+                diffs[source.path] = diff
+                path = display_file_edit_path(source.path, self._files.display_workspace)
                 added, deleted = diff.added, diff.deleted
                 stats = f" (+{added}/-{deleted})" if added or deleted else ""
                 summaries.append(f"- {action_name} {path}{stats}")
@@ -225,27 +177,13 @@ class ApplyPatchTool(_FsTool):
             if dry_run:
                 return "Patch dry-run succeeded:\n" + "\n".join(summaries)
 
-            backups: dict[Path, bytes | None] = {}
-            for path in writes:
-                backups[path] = path.read_bytes() if path.exists() else None
-
-            try:
-                for path, content in writes.items():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(content, encoding="utf-8", newline="")
-            except Exception:
-                for path, data in backups.items():
-                    if data is None:
-                        if path.exists():
-                            path.unlink()
-                    else:
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(data)
-                raise
-
-            for path in writes:
-                self._file_states.record_write(path)
-            return FileEditResult("Patch applied:\n" + "\n".join(summaries), diffs)
+            commit_file_edits(writes)
+            for target in writes:
+                self._file_states.record_write(target.path)
+            return FileEditResult(
+                "Patch applied:\n" + "\n".join(summaries),
+                diffs,
+            )
         except PermissionError as exc:
             return ToolResult.error(f"Error: {exc}")
         except _PatchError as exc:

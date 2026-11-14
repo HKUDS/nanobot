@@ -4,7 +4,7 @@
     "officialLabel": "Mở danh sách ứng dụng Matrix",
     "fields": {
       "homeserver": {
-        "label": "Máy chủ tài khoản",
+        "label": "Homeserver",
         "placeholder": "https://matrix.org"
       },
       "userId": {
@@ -24,12 +24,16 @@
         "placeholder": "Bắt buộc khi dùng token"
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Quy tắc nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
-          "allowlist": "Danh sách cho phép"
+          "allowlist": "Danh sách cho phép",
+          "listen": "Lắng nghe (trả lời khi được nhắc)"
         }
+      },
+      "groupPolicyOverrides": {
+        "label": "Ngoại lệ quy tắc theo phòng (JSON)"
       },
       "allowFrom": {
         "label": "Người dùng được phép"
@@ -49,19 +53,26 @@
         }
       },
       "syncStopGraceSeconds": {
-        "label": "Thời gian gia hạn dừng đồng bộ hóa"
+        "label": "Chờ dừng đồng bộ (giây)"
       },
       "maxMediaBytes": {
-        "label": "Kích thước phương tiện tối đa"
+        "label": "Giới hạn media (byte)"
       },
       "maxConcurrentMediaDownloads": {
-        "label": "Tải xuống phương tiện đồng thời"
+        "label": "Tải xuống đồng thời"
       },
       "groupAllowFrom": {
         "label": "Nhóm được phép"
       },
       "allowRoomMentions": {
-        "label": "Cho phép đề cập đến phòng",
+        "label": "Nhắc cả phòng",
+        "choices": {
+          "true": "Bật",
+          "false": "Tắt"
+        }
+      },
+      "replyToMessage": {
+        "label": "Trả lời trích dẫn",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
@@ -74,9 +85,8 @@
           "false": "Tắt"
         }
       },
-      "proxy": {
-        "label": "Proxy mạng",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Dùng proxy"
       }
     }
   }

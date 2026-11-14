@@ -1,7 +1,10 @@
 import shlex
 import subprocess
 import sys
+import time
+from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
@@ -18,6 +21,7 @@ from nanobot.agent.tools import (
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool, ExecToolConfig
+from nanobot.execution import processes
 from nanobot.security.network import configure_ssrf_whitelist
 
 
@@ -78,7 +82,6 @@ class DecoratedSampleTool(Tool):
 
 
 def test_schema_validate_value_matches_tool_validate_params() -> None:
-    """ObjectSchema.validate_value 与 validate_json_schema_value、Tool.validate_params 一致。"""
     root = tool_parameters_schema(
         query=StringSchema(min_length=2),
         count=IntegerSchema(minimum=1, maximum=10),
@@ -110,11 +113,10 @@ def test_schema_validate_value_matches_tool_validate_params() -> None:
     expected = _Mini().validate_params(params)
     assert Schema.validate_json_schema_value(params, root, "") == expected
     assert obj.validate_value(params, "") == expected
-    assert IntegerSchema(minimum=1).validate_value(0, "n") == ["n must be >= 1"]
+    assert IntegerSchema(minimum=1).validate_value(0, "n") == ["n: 0 is less than the minimum of 1"]
 
 
 def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
-    """Schema 类生成的 JSON Schema 应与手写 dict 一致，便于校验行为一致。"""
     built = tool_parameters_schema(
         query=StringSchema(min_length=2),
         count=IntegerSchema(minimum=1, maximum=10),
@@ -148,33 +150,92 @@ async def test_registry_executes_decorated_tool_end_to_end() -> None:
     reg = ToolRegistry()
     reg.register(DecoratedSampleTool())
 
-    ok = await reg.execute("decorated_sample", {"query": "hello", "count": "3"})
+    ok = await reg.execute("decorated_sample", {"query": "hello", "count": 3})
     assert ok == "ok:3"
 
     err = await reg.execute("decorated_sample", {"query": "h", "count": 3})
     assert "Invalid parameters" in err
 
 
+@pytest.mark.parametrize("schema_type", ["integer", ["integer", "null"], ["integer", "string"]])
+def test_integer_schema_accepts_integral_json_numbers(schema_type) -> None:
+    assert Schema.validate_json_schema_value(3.0, {"type": schema_type}) == []
+
+
+async def test_registry_preserves_integral_json_number() -> None:
+    reg = ToolRegistry()
+    reg.register(DecoratedSampleTool())
+
+    result = await reg.execute("decorated_sample", {"query": "hello", "count": 3.0})
+
+    assert result == "ok:3.0"
+
+
 def test_validate_params_missing_required() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi"})
-    assert "missing required count" in "; ".join(errors)
+    assert "'count' is a required property" in "; ".join(errors)
 
 
 def test_validate_params_type_and_range() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "hi", "count": 0})
-    assert any("count must be >= 1" in e for e in errors)
+    assert any("count: 0 is less than the minimum of 1" in e for e in errors)
 
     errors = tool.validate_params({"query": "hi", "count": "2"})
-    assert any("count should be integer" in e for e in errors)
+    assert any("count: '2' is not of type 'integer'" in e for e in errors)
 
 
 def test_validate_params_enum_and_min_length() -> None:
     tool = SampleTool()
     errors = tool.validate_params({"query": "h", "count": 2, "mode": "slow"})
-    assert any("query must be at least 2 chars" in e for e in errors)
-    assert any("mode must be one of" in e for e in errors)
+    assert any("query: 'h' is too short" in e for e in errors)
+    assert any("mode: 'slow' is not one of" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "value, allowed, valid",
+    [
+        (True, 1, False),
+        (False, 0, False),
+        (1, True, False),
+        (0, False, False),
+        ([True], [1], False),
+        ({"enabled": True}, {"enabled": 1}, False),
+        (1.0, 1, True),
+        (True, True, True),
+        ("x", "x", True),
+        ({"a": 1, "b": 2}, {"b": 2.0, "a": 1.0}, True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_registry_enforces_json_enum_equality(value, allowed, valid) -> None:
+    calls = []
+
+    class EnumTool(SampleTool):
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return {
+                "type": "object",
+                "properties": {"value": {"enum": [allowed]}},
+                "required": ["value"],
+            }
+
+        async def execute(self, **kwargs: Any) -> str:
+            calls.append(kwargs["value"])
+            return "ok"
+
+    registry = ToolRegistry()
+    registry.register(EnumTool())
+
+    result = await registry.execute("sample", {"value": value})
+
+    if valid:
+        assert result == "ok"
+        assert calls == [value]
+    else:
+        assert f"value: {value!r} is not one of" in result
+        assert calls == []
 
 
 def test_validate_params_nested_object_and_array() -> None:
@@ -186,8 +247,8 @@ def test_validate_params_nested_object_and_array() -> None:
             "meta": {"flags": [1, "ok"]},
         }
     )
-    assert any("missing required meta.tag" in e for e in errors)
-    assert any("meta.flags[0] should be string" in e for e in errors)
+    assert any("meta: 'tag' is a required property" in e for e in errors)
+    assert any("meta.flags[0]: 1 is not of type 'string'" in e for e in errors)
 
 
 def test_validate_params_ignores_unknown_fields() -> None:
@@ -199,7 +260,7 @@ def test_validate_params_ignores_unknown_fields() -> None:
 def test_tool_parameters_schema_rejects_unknown_fields_by_default() -> None:
     tool = DecoratedSampleTool()
     errors = tool.validate_params({"query": "hi", "count": 2, "extra": "x"})
-    assert errors == ["unexpected parameter extra"]
+    assert errors == ["parameters: Additional properties are not allowed ('extra' was unexpected)"]
 
 
 def test_validate_params_validates_typed_additional_properties() -> None:
@@ -208,11 +269,11 @@ def test_validate_params_validates_typed_additional_properties() -> None:
         "properties": {},
         "additionalProperties": {"type": "integer"},
     }
-    tool = CastTestTool(schema)
+    tool = SchemaTestTool(schema)
 
     errors = tool.validate_params({"extra": "2"})
 
-    assert errors == ["extra should be integer"]
+    assert errors == ["extra: '2' is not of type 'integer'"]
 
 
 async def test_registry_returns_validation_error() -> None:
@@ -229,7 +290,6 @@ def test_exec_extract_absolute_paths_keeps_full_windows_path() -> None:
 
 
 def test_exec_extract_absolute_paths_captures_windows_drive_root_path() -> None:
-    """Windows drive root paths like `E:\\` must be extracted for workspace guarding."""
     # Note: raw strings cannot end with a single backslash.
     cmd = "dir E:\\"
     paths = ExecTool._extract_absolute_paths(cmd)
@@ -343,18 +403,76 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
     assert "hard policy boundary" in error
 
 
-def test_exec_guard_blocks_bare_tilde_cwd_escape(tmp_path) -> None:
-    tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cd ~ && cat secret.txt", str(tmp_path))
-    assert error is not None
-    assert error.startswith(
-        "Error: Command blocked by safety guard (path outside working dir)"
-    )
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix resolves named homes through passwd")
+@pytest.mark.parametrize(
+    "command",
+    ["cat ~unknown/file.txt", "cat --config=~unknown/file.txt", "cat <~unknown/file.txt"],
+)
+async def test_exec_rejects_unknown_user_home(tmp_path, monkeypatch, command) -> None:
+    home_path = f"~nanobot-missing-{tmp_path.name}/file.txt"
+    command = command.replace("~unknown/file.txt", home_path)
+    with pytest.raises(RuntimeError):
+        Path(home_path).expanduser()
+
+    spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command=command)
+
+    assert result.startswith("Error: Command blocked by safety guard (path outside working dir)")
+    assert "hard policy boundary" in result
+    spawn.assert_not_called()
 
 
-def test_exec_guard_blocks_named_user_home_path(tmp_path) -> None:
+async def test_exec_rejects_home_path_without_home_directory(tmp_path, monkeypatch) -> None:
+    for key in ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(key, raising=False)
+    if sys.platform != "win32":
+        import pwd
+
+        def missing_passwd_entry(uid):
+            # A container UID may have no passwd entry when HOME is unset.
+            raise KeyError(uid)
+
+        monkeypatch.setattr(pwd, "getpwuid", missing_passwd_entry)
+    with pytest.raises(RuntimeError):
+        Path("~/file.txt").expanduser()
+
+    spawn = AsyncMock(side_effect=AssertionError("Blocked commands must not start a process"))
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command="cat ~/file.txt")
+
+    assert result.startswith("Error: Command blocked by safety guard (path outside working dir)")
+    assert "hard policy boundary" in result
+    spawn.assert_not_called()
+
+
+async def test_exec_allows_resolved_home_inside_workspace(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("USERPROFILE" if sys.platform == "win32" else "HOME", str(tmp_path))
+    (tmp_path / "file.txt").write_text("allowed home content", encoding="utf-8")
+    result = await ExecTool(
+        working_dir=str(tmp_path), restrict_to_workspace=True,
+    ).execute(command="cat ~/file.txt", login=False, yield_time_ms=10000)
+
+    assert "allowed home content" in result
+    assert "Exit code: 0" in result
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("cd ~ && cat secret.txt", id="bare_tilde_cwd_escape"),
+        pytest.param("cat ~root/.bashrc", id="named_user_home_path"),
+        pytest.param("cat --config=~/.nanobot/config.json", id="equals_home_path_outside_workspace"),
+        pytest.param("cat --config=~root/.bashrc", id="equals_named_user_home_path"),
+    ],
+)
+def test_exec_guard_blocks_home_paths_outside_workspace(tmp_path, command) -> None:
     tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cat ~root/.bashrc", str(tmp_path))
+    error = tool._guard_command(command, str(tmp_path))
     assert error is not None
     assert error.startswith(
         "Error: Command blocked by safety guard (path outside working dir)"
@@ -383,24 +501,6 @@ def test_exec_guard_blocks_home_paths_with_special_shell_contexts(
 def test_exec_guard_allows_current_directory_tilde(tmp_path) -> None:
     tool = ExecTool(restrict_to_workspace=True)
     assert tool._guard_command("cat ~+/file.txt", str(tmp_path)) is None
-
-
-def test_exec_guard_blocks_equals_home_path_outside_workspace(tmp_path) -> None:
-    tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cat --config=~/.nanobot/config.json", str(tmp_path))
-    assert error is not None
-    assert error.startswith(
-        "Error: Command blocked by safety guard (path outside working dir)"
-    )
-
-
-def test_exec_guard_blocks_equals_named_user_home_path(tmp_path) -> None:
-    tool = ExecTool(restrict_to_workspace=True)
-    error = tool._guard_command("cat --config=~root/.bashrc", str(tmp_path))
-    assert error is not None
-    assert error.startswith(
-        "Error: Command blocked by safety guard (path outside working dir)"
-    )
 
 
 def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
@@ -497,22 +597,19 @@ def test_exec_extract_absolute_paths_ignores_pipe_tilde() -> None:
     assert not any(p.startswith("~") for p in paths)
 
 
-# --- cast_params tests ---
-
-
-class CastTestTool(Tool):
-    """Minimal tool for testing cast_params."""
+class SchemaTestTool(Tool):
+    """Minimal tool with a supplied parameter schema."""
 
     def __init__(self, schema: dict[str, Any]) -> None:
         self._schema = schema
 
     @property
     def name(self) -> str:
-        return "cast_test"
+        return "schema_test"
 
     @property
     def description(self) -> str:
-        return "test tool for casting"
+        return "test tool for schema validation"
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -522,243 +619,152 @@ class CastTestTool(Tool):
         return "ok"
 
 
-def test_cast_params_string_to_int() -> None:
-    tool = CastTestTool(
-        {
+@pytest.mark.parametrize("schema, value, valid", [
+    ({"type": "integer"}, "42", 42),
+    ({"type": "number"}, "3.14", 3.14),
+    ({"type": "boolean"}, "false", False),
+    ({"type": "string"}, 123, "123"),
+    ({"type": "array", "items": {"type": "integer"}}, ["1", "2"], [1, 2]),
+    ({"type": "object", "properties": {"port": {"type": "integer"}}}, {"port": "8080"}, {"port": 8080}),
+])
+def test_registry_rejects_wrong_types_and_accepts_corrected_arguments(schema, value, valid):
+    tool = SchemaTestTool({"type": "object", "properties": {"value": schema}})
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    _, arguments, error = registry.prepare_call(tool.name, {"value": value})
+
+    assert arguments == {"value": value}
+    assert error is not None
+    assert "value" in error
+    assert "is not of type" in error
+    assert registry.prepare_call(tool.name, {"value": valid})[2] is None
+
+
+@pytest.mark.parametrize("types", [["array", "object"], ["object", "array"]])
+@pytest.mark.parametrize("value", [[2], {"count": 2}])
+def test_type_union_validates_matching_container(types, value) -> None:
+    tool = SchemaTestTool({
+        "type": "object",
+        "properties": {"value": {
+            "type": types,
+            "properties": {"count": {"type": "integer", "minimum": 1}},
+            "items": {"type": "integer", "minimum": 1},
+        }},
+    })
+
+    assert tool.validate_params({"value": value}) == []
+    invalid = {"count": 0} if isinstance(value, dict) else [0]
+    assert "is less than the minimum of 1" in "; ".join(tool.validate_params({"value": invalid}))
+
+
+@pytest.mark.parametrize("types", [["integer", "string"], ["string", "integer"]])
+@pytest.mark.parametrize(
+    "value, error", [(0, "is less than the minimum of 1"), ("ab", "is too short")],
+)
+def test_type_union_enforces_matching_type_constraints(types, value, error) -> None:
+    tool = SchemaTestTool({
+        "type": "object",
+        "properties": {"value": {"type": types, "minimum": 1, "minLength": 3}},
+    })
+
+    assert error in "; ".join(tool.validate_params({"value": value}))
+
+
+@pytest.mark.parametrize("types", [["integer", "string"], ["string", "integer"]])
+@pytest.mark.parametrize("value", [True, 1.5, None])
+def test_type_union_rejects_undeclared_types_without_coercion(types, value) -> None:
+    tool = SchemaTestTool({
+        "type": "object",
+        "properties": {"value": {"type": types}},
+    })
+
+    assert tool.validate_params({"value": value})
+
+
+@pytest.mark.parametrize(
+    "types, value, error",
+    [
+        (["number", "boolean", "null"], True, None),
+        (["number", "boolean", "null"], 1.5, None),
+        (["number", "boolean", "null"], None, None),
+        (["string", "number"], float("inf"), "value: inf is not of type 'string', 'number'"),
+        (["string", "number"], float("nan"), "value: nan is not of type 'string', 'number'"),
+    ],
+)
+def test_type_union_preserves_numeric_boolean_and_null_values(types, value, error) -> None:
+    for order in (types, types[::-1]):
+        tool = SchemaTestTool({
             "type": "object",
-            "properties": {"count": {"type": "integer"}},
-        }
-    )
-    result = tool.cast_params({"count": "42"})
-    assert result["count"] == 42
-    assert isinstance(result["count"], int)
+            "properties": {"value": {"type": order}},
+        })
+
+        errors = tool.validate_params({"value": value})
+        expected = f"value: {value!r} is not of type {', '.join(repr(t) for t in order)}"
+        assert errors == ([expected] if error else [])
 
 
-def test_cast_params_string_to_number() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"rate": {"type": "number"}},
-        }
-    )
-    result = tool.cast_params({"rate": "3.14"})
-    assert result["rate"] == 3.14
-    assert isinstance(result["rate"], float)
+@pytest.mark.parametrize("value", [42, None])
+def test_nullable_integer_accepts_integer_and_null(value) -> None:
+    tool = SchemaTestTool({
+        "type": "object",
+        "properties": {"value": {"type": ["integer", "null"]}},
+    })
+
+    assert tool.validate_params({"value": value}) == []
 
 
-def test_cast_params_string_to_bool() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"enabled": {"type": "boolean"}},
-        }
-    )
-    assert tool.cast_params({"enabled": "true"})["enabled"] is True
-    assert tool.cast_params({"enabled": "false"})["enabled"] is False
-    assert tool.cast_params({"enabled": "1"})["enabled"] is True
-
-
-def test_cast_params_array_items() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {
-                "nums": {"type": "array", "items": {"type": "integer"}},
-            },
-        }
-    )
-    result = tool.cast_params({"nums": ["1", "2", "3"]})
-    assert result["nums"] == [1, 2, 3]
-
-
-def test_cast_params_nested_object() -> None:
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {
-                "config": {
-                    "type": "object",
-                    "properties": {
-                        "port": {"type": "integer"},
-                        "debug": {"type": "boolean"},
-                    },
-                },
-            },
-        }
-    )
-    result = tool.cast_params({"config": {"port": "8080", "debug": "true"}})
-    assert result["config"]["port"] == 8080
-    assert result["config"]["debug"] is True
-
-
-def test_cast_params_bool_not_cast_to_int() -> None:
-    """Booleans should not be silently cast to integers."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"count": {"type": "integer"}},
-        }
-    )
-    result = tool.cast_params({"count": True})
-    assert result["count"] is True
-    errors = tool.validate_params(result)
-    assert any("count should be integer" in e for e in errors)
-
-
-def test_cast_params_preserves_empty_string() -> None:
-    """Empty strings should be preserved for string type."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"name": {"type": "string"}},
-        }
-    )
-    result = tool.cast_params({"name": ""})
-    assert result["name"] == ""
-
-
-def test_cast_params_bool_string_false() -> None:
-    """Test that 'false', '0', 'no' strings convert to False."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"flag": {"type": "boolean"}},
-        }
-    )
-    assert tool.cast_params({"flag": "false"})["flag"] is False
-    assert tool.cast_params({"flag": "False"})["flag"] is False
-    assert tool.cast_params({"flag": "0"})["flag"] is False
-    assert tool.cast_params({"flag": "no"})["flag"] is False
-    assert tool.cast_params({"flag": "NO"})["flag"] is False
-
-
-def test_cast_params_bool_string_invalid() -> None:
-    """Invalid boolean strings should not be cast."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"flag": {"type": "boolean"}},
-        }
-    )
-    # Invalid strings should be preserved (validation will catch them)
-    result = tool.cast_params({"flag": "random"})
-    assert result["flag"] == "random"
-    result = tool.cast_params({"flag": "maybe"})
-    assert result["flag"] == "maybe"
-
-
-def test_cast_params_invalid_string_to_int() -> None:
-    """Invalid strings should not be cast to integer."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"count": {"type": "integer"}},
-        }
-    )
-    result = tool.cast_params({"count": "abc"})
-    assert result["count"] == "abc"  # Original value preserved
-    result = tool.cast_params({"count": "12.5.7"})
-    assert result["count"] == "12.5.7"
-
-
-def test_cast_params_invalid_string_to_number() -> None:
-    """Invalid strings should not be cast to number."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"rate": {"type": "number"}},
-        }
-    )
-    result = tool.cast_params({"rate": "not_a_number"})
-    assert result["rate"] == "not_a_number"
+def test_validate_params_rejects_boolean_as_integer() -> None:
+    tool = SchemaTestTool({"type": "object", "properties": {"count": {"type": "integer"}}})
+    assert tool.validate_params({"count": True}) == ["count: True is not of type 'integer'"]
 
 
 @pytest.mark.parametrize(
     "value",
     [float("nan"), float("inf"), float("-inf"), "NaN", "Infinity", "-Infinity"],
 )
-def test_cast_params_rejects_non_finite_numbers(value: float | str) -> None:
-    """JSON number parameters must remain finite after schema-driven casting."""
-    tool = CastTestTool(
+def test_validate_params_rejects_non_finite_numbers(value: float | str) -> None:
+    tool = SchemaTestTool(
         {
             "type": "object",
             "properties": {"rate": {"type": "number"}},
         }
     )
 
-    result = tool.cast_params({"rate": value})
-
-    assert tool.validate_params(result) == ["rate must be finite"]
+    assert tool.validate_params({"rate": value}) == [f"rate: {value!r} is not of type 'number'"]
 
 
 def test_validate_params_bool_not_accepted_as_number() -> None:
-    """Booleans should not pass number validation."""
-    tool = CastTestTool(
+    tool = SchemaTestTool(
         {
             "type": "object",
             "properties": {"rate": {"type": "number"}},
         }
     )
     errors = tool.validate_params({"rate": False})
-    assert any("rate should be number" in e for e in errors)
+    assert errors == ["rate: False is not of type 'number'"]
 
 
-def test_cast_params_none_values() -> None:
-    """Test None handling for different types."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "count": {"type": "integer"},
-                "items": {"type": "array"},
-                "config": {"type": "object"},
-            },
-        }
-    )
-    result = tool.cast_params(
-        {
-            "name": None,
-            "count": None,
-            "items": None,
-            "config": None,
-        }
-    )
-    # None should be preserved for all types
-    assert result["name"] is None
-    assert result["count"] is None
-    assert result["items"] is None
-    assert result["config"] is None
+@pytest.mark.parametrize("schema_type", ["string", "integer", "array", "object"])
+def test_validate_params_rejects_undeclared_null(schema_type) -> None:
+    tool = SchemaTestTool({"type": "object", "properties": {"value": {"type": schema_type}}})
+    assert tool.validate_params({"value": None}) == [f"value: None is not of type '{schema_type}'"]
 
 
-def test_cast_params_single_value_not_auto_wrapped_to_array() -> None:
-    """Single values should NOT be automatically wrapped into arrays."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"items": {"type": "array"}},
-        }
-    )
-    # Non-array values should be preserved (validation will catch them)
-    result = tool.cast_params({"items": 5})
-    assert result["items"] == 5  # Not wrapped to [5]
-    result = tool.cast_params({"items": "text"})
-    assert result["items"] == "text"  # Not wrapped to ["text"]
+@pytest.mark.parametrize("value", [5, "text"])
+def test_validate_params_rejects_scalar_for_array(value) -> None:
+    tool = SchemaTestTool({"type": "object", "properties": {"items": {"type": "array"}}})
+    assert tool.validate_params({"items": value}) == [f"items: {value!r} is not of type 'array'"]
 
 
-# --- ExecTool enhancement tests ---
-
-
-async def test_exec_always_returns_exit_code() -> None:
-    """Exit code should appear in output even on success (exit 0)."""
+async def test_completed_exec_returns_exit_code() -> None:
     tool = ExecTool()
-    result = await tool.execute(command="echo hello")
+    result = await tool.execute(command="echo hello", yield_time_ms=10000)
     assert "Exit code: 0" in result
     assert "hello" in result
 
 
 async def test_exec_head_tail_truncation(tmp_path) -> None:
-    """Long output should preserve both head and tail."""
     tool = ExecTool()
     # Generate output that exceeds _MAX_OUTPUT (10_000 chars).
     # Use a temp script file so the output-generating logic lives in a file
@@ -774,35 +780,66 @@ async def test_exec_head_tail_truncation(tmp_path) -> None:
         command = subprocess.list2cmdline([sys.executable, str(script_file)])
     else:
         command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
-    result = await tool.execute(command=command)
+    result = await tool.execute(command=command, yield_time_ms=10000)
     assert "chars truncated" in result
-    # Head portion should start with As
     assert result.startswith("A")
-    # Tail portion should end with the exit code which comes after Bs
     assert "Exit code:" in result
 
 
-async def test_exec_timeout_parameter() -> None:
-    """LLM-supplied timeout should override the constructor default."""
+@pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
+async def test_exec_timeout_parameter(runtime_parameter) -> None:
     tool = ExecTool(timeout=60)
-    # A very short timeout should cause the command to be killed
-    result = await tool.execute(command="sleep 10", timeout=1)
+    started_at = time.monotonic()
+    result = await tool.execute(
+        command=[sys.executable, "-c", "import time; time.sleep(10)"],
+        yield_time_ms=5000,
+        **{runtime_parameter: 1},
+    )
+
     assert "timed out" in result
-    assert "1 seconds" in result
+    assert time.monotonic() - started_at < 8
+    assert "Exit code: 0" not in result
 
 
-async def test_exec_timeout_capped_at_max() -> None:
-    """Timeout values above _MAX_TIMEOUT should be clamped."""
+@pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
+@pytest.mark.parametrize("runtime", [0, -1, 301])
+async def test_exec_runtime_rejects_out_of_range(
+    monkeypatch, runtime_parameter, runtime,
+) -> None:
+    spawn = AsyncMock(side_effect=AssertionError("Invalid runtime must not start a process"))
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
+    tool = ExecTool(max_runtime=301, max_runtime_limit=300)
+
+    result = await tool.execute(command="echo ok", **{runtime_parameter: runtime})
+
+    assert result.startswith("Error:")
+    assert "runtime" in result or "timeout" in result
+    spawn.assert_not_called()
+
+
+async def test_exec_runtime_aliases_are_mutually_exclusive(monkeypatch) -> None:
+    spawn = AsyncMock(side_effect=AssertionError("Conflicting runtime arguments must not spawn"))
+    monkeypatch.setattr(processes, "spawn_process_tree", spawn)
     tool = ExecTool()
-    # Should not raise — just clamp to 600
-    result = await tool.execute(command="echo ok", timeout=9999)
-    assert "Exit code: 0" in result
+    params = {"command": "echo ok", "max_runtime": 5, "timeout": 5}
+
+    result = await tool.execute(**params)
+
+    assert result.startswith("Error:")
+    assert "max_runtime" in result
+    assert "timeout" in result
+    spawn.assert_not_called()
 
 
-def test_exec_config_timeout_uncapped_and_zero() -> None:
-    """Config timeout is no longer capped at 600 and accepts 0 = no limit (#3595)."""
-    assert ExecToolConfig(timeout=0).timeout == 0
-    assert ExecToolConfig(timeout=3600).timeout == 3600
+def test_exec_config_runtime_defaults_and_timeout_alias() -> None:
+    cfg = ExecToolConfig()
+    assert cfg.max_runtime == 3600
+    assert cfg.max_runtime_limit == 86400
+    assert cfg.idle_timeout == 300
+    assert cfg.idle_action == "report"
+    assert ExecToolConfig(timeout=5).max_runtime == 5
+    assert ExecToolConfig(timeout=3600).max_runtime == 3600
+    assert ExecToolConfig(timeout=0).max_runtime == 0
     with pytest.raises(ValidationError):
         ExecToolConfig(timeout=-1)
 
@@ -823,44 +860,74 @@ def test_exec_config_accepts_bwrap_bind_aliases() -> None:
     assert dumped["sandboxRwBinds"] == ["/home/user/.cache/uv"]
 
 
-def test_resolve_timeout_config_uncapped_and_unlimited() -> None:
-    """Config timeout drives the hard timeout uncapped; 0 means no limit (#3595)."""
-    assert ExecTool(timeout=3600)._resolve_timeout(None) == 3600
-    assert ExecTool(timeout=0)._resolve_timeout(None) is None
+def test_resolve_timeout_uses_configured_hard_budget() -> None:
+    assert ExecTool()._resolve_timeout(None) == 3600
+    assert ExecTool(timeout=5)._resolve_timeout(None) == 5
+    assert ExecTool(max_runtime=172800, max_runtime_limit=60)._resolve_timeout(None) == 172800
 
 
-def test_resolve_timeout_per_call_still_capped() -> None:
-    """Per-call (LLM) timeout stays capped at _MAX_TIMEOUT even with unlimited config."""
-    assert ExecTool(timeout=0)._resolve_timeout(9999) == ExecTool._MAX_TIMEOUT
-    assert ExecTool(timeout=60)._resolve_timeout(120) == 120
+def test_resolve_timeout_respects_configured_limit_without_clamping() -> None:
+    assert ExecTool()._resolve_timeout(9999) == 9999
+    tool = ExecTool(max_runtime=60, max_runtime_limit=1200)
+    assert tool._resolve_timeout(1) == 1
+    assert tool._resolve_timeout(1200) == 1200
+    for runtime in (0, -1, 1201):
+        with pytest.raises(ValueError):
+            tool._resolve_timeout(runtime)
 
 
-# --- _resolve_type and nullable param tests ---
+@pytest.mark.parametrize("limit", [60, 1200, 86400])
+@pytest.mark.parametrize("runtime_parameter", ["timeout", "max_runtime"])
+def test_exec_runtime_schema_matches_configured_limit(limit, runtime_parameter) -> None:
+    tool = ExecTool(max_runtime=limit + 1, max_runtime_limit=limit)
+    runtime_schema = tool.parameters["properties"][runtime_parameter]
+    assert runtime_schema["minimum"] == 1
+    assert runtime_schema["maximum"] == limit
+    assert tool.validate_params({"command": "echo ok"}) == []
+    for runtime in (1, limit):
+        assert tool.validate_params({"command": "echo ok", runtime_parameter: runtime}) == []
+    for runtime in (0, -1, limit + 1):
+        assert tool.validate_params({"command": "echo ok", runtime_parameter: runtime})
+
+    runtime_schema["maximum"] = 1
+    assert tool.parameters["properties"][runtime_parameter]["maximum"] == limit
+    assert ExecTool().parameters["properties"][runtime_parameter]["maximum"] == 86400
 
 
-def test_resolve_type_simple_string() -> None:
-    """Simple string type passes through unchanged."""
-    assert Tool._resolve_type("string") == "string"
+@pytest.mark.parametrize("raw_type", ["null", ["null"]])
+@pytest.mark.parametrize("value", ["", 0, False, [], {}])
+def test_null_only_schema_rejects_non_null_values(raw_type, value) -> None:
+    schema = {"type": raw_type}
+    assert Schema.validate_json_schema_value(value, schema, "value") == [
+        f"value: {value!r} is not of type 'null'"
+    ]
+    assert Schema.validate_json_schema_value(None, schema) == []
 
 
-def test_resolve_type_union_with_null() -> None:
-    """Union type ['string', 'null'] resolves to 'string'."""
-    assert Tool._resolve_type(["string", "null"]) == "string"
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": ["string", "null"], "enum": ["fast"]},
+        {"type": ["integer", "null"], "enum": [1]},
+        {"type": ["string", "integer", "null"], "enum": ["fast", 1]},
+    ],
+)
+def test_nullable_schema_still_enforces_enum(schema) -> None:
+    assert Schema.validate_json_schema_value(None, schema, "mode") == [
+        f"mode: None is not one of {schema['enum']}"
+    ]
+    assert Schema.validate_json_schema_value(None, {**schema, "enum": [None]}) == []
+    for value in schema["enum"]:
+        assert Schema.validate_json_schema_value(value, schema) == []
 
 
-def test_resolve_type_only_null() -> None:
-    """Union type ['null'] resolves to None (no non-null type)."""
-    assert Tool._resolve_type(["null"]) is None
-
-
-def test_resolve_type_none_input() -> None:
-    """None input passes through as None."""
-    assert Tool._resolve_type(None) is None
+def test_nullable_string_schema_enforces_enum() -> None:
+    assert StringSchema(nullable=True, enum=["fast"]).validate_value(None)
+    assert StringSchema(nullable=True, enum=["fast", None]).validate_value(None) == []
 
 
 def test_validate_nullable_param_accepts_string() -> None:
-    """Nullable string param should accept a string value."""
-    tool = CastTestTool(
+    tool = SchemaTestTool(
         {
             "type": "object",
             "properties": {"name": {"type": ["string", "null"]}},
@@ -871,8 +938,7 @@ def test_validate_nullable_param_accepts_string() -> None:
 
 
 def test_validate_nullable_param_accepts_none() -> None:
-    """Nullable string param should accept None."""
-    tool = CastTestTool(
+    tool = SchemaTestTool(
         {
             "type": "object",
             "properties": {"name": {"type": ["string", "null"]}},
@@ -882,27 +948,35 @@ def test_validate_nullable_param_accepts_none() -> None:
     assert errors == []
 
 
-def test_validate_nullable_flag_accepts_none() -> None:
-    """OpenAI-normalized nullable params should still accept None locally."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"name": {"type": "string", "nullable": True}},
-        }
-    )
-    errors = tool.validate_params({"name": None})
-    assert errors == []
+@pytest.mark.parametrize("command", [
+    "cat ~unknown/file.txt",
+    "cat --config=~unknown/file.txt",
+    "cat <~unknown/file.txt",
+    "cat ~/file.txt",
+])
+def test_exec_guard_rejects_unresolvable_home_path(tmp_path, monkeypatch, command) -> None:
+    original = Path.expanduser
+
+    def expanduser(path):
+        if str(path).startswith("~"):
+            raise RuntimeError("Could not determine home directory.")
+        return original(path)
+
+    monkeypatch.setattr(Path, "expanduser", expanduser)
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command(command, str(tmp_path))
+    assert error is not None
+    assert error.startswith("Error: Command blocked by safety guard (path outside working dir)")
 
 
-def test_cast_nullable_param_no_crash() -> None:
-    """cast_params should not crash on nullable type (the original bug)."""
-    tool = CastTestTool(
-        {
-            "type": "object",
-            "properties": {"name": {"type": ["string", "null"]}},
-        }
-    )
-    result = tool.cast_params({"name": "hello"})
-    assert result["name"] == "hello"
-    result = tool.cast_params({"name": None})
-    assert result["name"] is None
+def test_exec_guard_allows_resolved_home_inside_workspace(tmp_path, monkeypatch) -> None:
+    original = Path.expanduser
+
+    def expanduser(path):
+        if str(path).startswith("~"):
+            return tmp_path / "file.txt"
+        return original(path)
+
+    monkeypatch.setattr(Path, "expanduser", expanduser)
+    tool = ExecTool(restrict_to_workspace=True)
+    assert tool._guard_command("cat ~/file.txt", str(tmp_path)) is None

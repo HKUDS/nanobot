@@ -13,6 +13,7 @@ from nanobot.agent.tools.context import (
     current_request_context,
     reset_request_context,
 )
+from nanobot.agent.tools.image_generation import ImageGenerationTool, register_image_generation_tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -103,6 +104,28 @@ def test_loop_from_config_uses_caller_owned_registry(tmp_path: Path) -> None:
 
     assert loop.tools is registry
     assert loop.tools.has("read_file")
+
+
+@pytest.mark.parametrize("provider_name", ["openrouter", "aihubmix"])
+def test_loop_uses_pre_registered_image_tool(
+    tmp_path: Path,
+    provider_name: str,
+) -> None:
+    config = _config_for_loop(tmp_path)
+    config.tools.image_generation.enabled = True
+    config.tools.image_generation.provider = provider_name
+    getattr(config.providers, provider_name).api_key = "configured-image-key"
+    registry = ToolRegistry()
+    register_image_generation_tool(config, registry, workspace=config.workspace_path)
+    configured_tool = registry.get("generate_image")
+    loop = AgentLoop.from_config(config, tool_registry=registry, provider=_provider_for_loop())
+
+    tool = registry.get("generate_image")
+    assert loop.tools is registry
+    assert isinstance(tool, ImageGenerationTool)
+    assert tool is configured_tool
+    assert tool.provider_configs[provider_name].api_key == "configured-image-key"
+    assert registry.has("read_file")
 
 
 @pytest.mark.asyncio

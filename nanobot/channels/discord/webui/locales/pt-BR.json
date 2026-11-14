@@ -12,7 +12,7 @@
         "placeholder": "IDs de canal separados por vírgulas"
       },
       "groupPolicy": {
-        "label": "Comportamento em grupos",
+        "label": "Regras de grupo",
         "choices": {
           "mention": "Somente menções",
           "open": "Todas as mensagens",
@@ -23,14 +23,8 @@
         "label": "Usuários permitidos",
         "placeholder": "IDs de usuário separados por vírgulas"
       },
-      "proxy": {
-        "label": "Proxy de rede"
-      },
-      "proxyUsername": {
-        "label": "Nome de usuário proxy"
-      },
-      "proxyPassword": {
-        "label": "Senha proxy"
+      "useProxy": {
+        "label": "Usar proxy"
       },
       "intents": {
         "label": "Intenções de gateway"
@@ -39,13 +33,20 @@
         "label": "Ler emoticons"
       },
       "workingEmoji": {
-        "label": "Emoji de trabalho"
+        "label": "Emoji de atividade"
       },
       "workingEmojiDelay": {
-        "label": "Atraso de emoji funcionando"
+        "label": "Atraso do emoji (segundos)"
       },
       "streaming": {
         "label": "Transmissão",
+        "choices": {
+          "true": "Ligado",
+          "false": "Desligado"
+        }
+      },
+      "replyToMessage": {
+        "label": "Responder à mensagem",
         "choices": {
           "true": "Ligado",
           "false": "Desligado"

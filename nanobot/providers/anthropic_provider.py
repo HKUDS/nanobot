@@ -1,5 +1,3 @@
-"""Anthropic provider — direct SDK integration for Claude models."""
-
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +8,7 @@ import secrets
 import string
 from collections import deque
 from collections.abc import Awaitable, Callable, Iterable
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
@@ -22,6 +20,10 @@ from nanobot.providers.base import (
     resolve_stream_idle_timeout_s,
     tool_arguments_object_for_replay,
 )
+from nanobot.providers.images import prepare_message_images
+
+if TYPE_CHECKING:
+    from nanobot.providers.registry import ProviderSpec
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -93,12 +95,18 @@ class AnthropicProvider(LLMProvider):
         extra_headers: dict[str, str] | None = None,
         *,
         provider_name: str = "anthropic",
+        extra_body: dict[str, Any] | None = None,
+        extra_query: dict[str, str] | None = None,
+        proxy: str | None = None,
+        spec: ProviderSpec | None = None,
     ):
         super().__init__(api_key, api_base, provider_name=provider_name)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._extra_body = dict(extra_body or {})
+        self._spec = spec
 
-        from anthropic import AsyncAnthropic
+        from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
 
         client_kw: dict[str, Any] = {}
         if api_key:
@@ -107,6 +115,10 @@ class AnthropicProvider(LLMProvider):
             client_kw["base_url"] = self._normalize_base_url(api_base)
         if extra_headers:
             client_kw["default_headers"] = extra_headers
+        if extra_query:
+            client_kw["default_query"] = extra_query
+        if proxy:
+            client_kw["http_client"] = DefaultAsyncHttpxClient(proxy=proxy, trust_env=False)
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
@@ -181,14 +193,10 @@ class AnthropicProvider(LLMProvider):
             return model[len("anthropic/"):]
         return model
 
-    # ------------------------------------------------------------------
-    # Message conversion: OpenAI chat format → Anthropic Messages API
-    # ------------------------------------------------------------------
 
     def _convert_messages(
         self, messages: list[dict[str, Any]],
     ) -> tuple[str | list[dict[str, Any]], list[dict[str, Any]]]:
-        """Return ``(system, anthropic_messages)``."""
         system: str | list[dict[str, Any]] = ""
         raw: list[dict[str, Any]] = []
         seen_tool_ids: set[str] = set()
@@ -490,9 +498,6 @@ class AnthropicProvider(LLMProvider):
 
         return merged
 
-    # ------------------------------------------------------------------
-    # Tool definition conversion
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _convert_tools(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
@@ -532,9 +537,6 @@ class AnthropicProvider(LLMProvider):
                 return {"type": "tool", "name": name}
         return {"type": "auto"}
 
-    # ------------------------------------------------------------------
-    # Prompt caching
-    # ------------------------------------------------------------------
 
     @classmethod
     def _apply_cache_control(
@@ -570,9 +572,6 @@ class AnthropicProvider(LLMProvider):
 
         return system, new_msgs, new_tools
 
-    # ------------------------------------------------------------------
-    # Build API kwargs
-    # ------------------------------------------------------------------
 
     def _build_kwargs(
         self,
@@ -585,7 +584,10 @@ class AnthropicProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None,
         supports_caching: bool = True,
     ) -> dict[str, Any]:
-        model_name = self._strip_prefix(model or self.default_model)
+        model_name = (
+            self._spec.request_model_name(model or self.default_model)
+            if self._spec is not None else self._strip_prefix(model or self.default_model)
+        )
         system, anthropic_msgs = self._convert_messages(self._sanitize_empty_content(messages))
         anthropic_tools = self._convert_tools(tools)
 
@@ -648,12 +650,11 @@ class AnthropicProvider(LLMProvider):
 
         if self.extra_headers:
             kwargs["extra_headers"] = self.extra_headers
+        if self._extra_body:
+            kwargs["extra_body"] = self._extra_body
 
         return kwargs
 
-    # ------------------------------------------------------------------
-    # Response parsing
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _parse_response(response: Any) -> LLMResponse:
@@ -720,9 +721,6 @@ class AnthropicProvider(LLMProvider):
             thinking_blocks=thinking_blocks or None,
         )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _is_streaming_required_error(e: Exception) -> bool:
@@ -742,7 +740,7 @@ class AnthropicProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
-            messages, tools, model, max_tokens, temperature,
+            await prepare_message_images(messages), tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
         try:
@@ -780,7 +778,7 @@ class AnthropicProvider(LLMProvider):
         on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
-            messages, tools, model, max_tokens, temperature,
+            await prepare_message_images(messages), tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
         idle_timeout_s = resolve_stream_idle_timeout_s()
@@ -866,3 +864,6 @@ class AnthropicProvider(LLMProvider):
 
     def get_default_model(self) -> str:
         return self.default_model
+
+    async def aclose(self) -> None:
+        await self._client.close()

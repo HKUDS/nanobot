@@ -1,5 +1,4 @@
 import asyncio
-import json
 from pathlib import Path
 from typing import Callable
 from unittest.mock import patch
@@ -8,7 +7,6 @@ import pytest
 
 from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.session_messages import (
-    ListSessionsTool,
     SendSessionMessageTool,
     SessionMessageError,
 )
@@ -68,27 +66,6 @@ def test_config_and_tool_schema_keep_only_the_basic_reply_contract(
     assert tool.parameters["required"] == ["to", "content", "expect_reply"]
     timeout = tool.parameters["properties"]["reply_timeout_seconds"]
     assert (timeout["minimum"], timeout["maximum"]) == (5, 60)
-
-
-@pytest.mark.asyncio
-async def test_list_sessions_includes_all_persisted_channels_except_current(
-    tmp_path: Path,
-) -> None:
-    sessions = SessionManager(tmp_path)
-    _persist(sessions, "websocket:current", "telegram:other", "slack:team")
-    tool = ListSessionsTool(sessions)
-
-    with request_context(RequestContext(
-        channel="websocket",
-        chat_id="current",
-        session_key="websocket:current",
-    )):
-        result = json.loads(await tool.execute())
-
-    assert set(result) == {
-        f"@{_handle(sessions, 'telegram:other').name}",
-        f"@{_handle(sessions, 'slack:team').name}",
-    }
 
 
 @pytest.mark.asyncio
@@ -366,9 +343,12 @@ async def test_reply_follows_a_recycled_handle(tmp_path: Path) -> None:
         expect_reply=False,
     )
     received = await bus.consume_inbound()
-    assert sessions.delete_session(source.session_key)
-    _persist(sessions, "websocket:replacement")
-    replacement = _handle(sessions, "websocket:replacement")
+    assert await sessions.state.delete(source.session_key)
+    await sessions.state.get("websocket:replacement")
+    replacement = await SessionHandleResolver(sessions).ahandle_for_session(
+        "websocket:replacement"
+    )
+    assert replacement is not None
     assert replacement.name == source.name
 
     with request_context(RequestContext(

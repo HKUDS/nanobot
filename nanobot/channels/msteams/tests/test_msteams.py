@@ -3,7 +3,6 @@ import time
 
 import pytest
 
-# Check optional msteams dependencies before running tests
 try:
     import nanobot.channels.msteams.runtime as msteams_module
 

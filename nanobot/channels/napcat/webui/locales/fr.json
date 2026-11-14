@@ -12,7 +12,7 @@
         "placeholder": "Jeton facultatif"
       },
       "groupPolicy": {
-        "label": "Comportement en groupe",
+        "label": "Règles des groupes",
         "choices": {
           "mention": "Mentions uniquement",
           "open": "Tous les messages",
@@ -24,17 +24,17 @@
         "placeholder": "ID QQ séparés par des virgules"
       },
       "groupPolicyOverrides": {
-        "label": "Remplacements de comportement de groupe (JSON)"
+        "label": "Exceptions de groupe (JSON)"
       },
       "welcomeNewMembers": {
-        "label": "Bienvenue aux nouveaux membres",
+        "label": "Accueillir les nouveaux membres",
         "choices": {
-          "true": "Sur",
+          "true": "Activé",
           "false": "Désactivé"
         }
       },
       "maxImageBytes": {
-        "label": "Taille maximale de l'image"
+        "label": "Limite d’image (octets)"
       }
     }
   }

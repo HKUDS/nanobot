@@ -11,7 +11,11 @@ from nanobot.channels.websocket.runtime import WebSocketConfig
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.webui.gateway_services import build_gateway_services
-from nanobot.webui.settings_api import settings_payload, update_agent_settings, update_api_settings
+from nanobot.webui.settings_api import (
+    settings_payload,
+    update_agent_settings,
+    update_runtime_config_settings,
+)
 from nanobot.webui.settings_services import (
     WebUIOAuthFlowRegistry,
     WebUISettingsServices,
@@ -19,12 +23,20 @@ from nanobot.webui.settings_services import (
 
 
 class _Flow:
+    has_pending_work = False
+
     def __init__(self, *, expired: bool = False) -> None:
         self.expired = expired
         self.cancel_count = 0
 
     def cancel(self) -> None:
         self.cancel_count += 1
+
+    def wait_closed(self) -> None:
+        pass
+
+    def complete(self, response=None):
+        return None
 
 
 def _gateway(config_path: Path, workspace: Path):
@@ -48,9 +60,9 @@ def test_gateway_settings_services_isolate_config_paths_and_oauth_flows(
     first_path = tmp_path / "first" / "config.json"
     second_path = tmp_path / "second" / "config.json"
     first_config = Config()
-    first_config.api.host = "127.0.0.2"
+    first_config.gateway.host = "127.0.0.2"
     second_config = Config()
-    second_config.api.host = "127.0.0.3"
+    second_config.gateway.host = "127.0.0.3"
     save_config(first_config, first_path)
     save_config(second_config, second_path)
 
@@ -61,14 +73,14 @@ def test_gateway_settings_services_isolate_config_paths_and_oauth_flows(
     assert second.settings.config.path == second_path.resolve()
     assert first.http.settings_routes.settings is first.settings
     assert second.http.settings_routes.settings is second.settings
-    assert first.settings.config.load().api.host == "127.0.0.2"
-    assert second.settings.config.load().api.host == "127.0.0.3"
-    assert first.settings.read(settings_payload)["api"]["host"] == "127.0.0.2"
-    assert second.settings.read(settings_payload)["api"]["host"] == "127.0.0.3"
+    assert first.settings.config.load().gateway.host == "127.0.0.2"
+    assert second.settings.config.load().gateway.host == "127.0.0.3"
+    assert first.settings.read(settings_payload)["runtime_config"]["gateway.host"] == "127.0.0.2"
+    assert second.settings.read(settings_payload)["runtime_config"]["gateway.host"] == "127.0.0.3"
 
-    first.settings.mutate(update_api_settings, {"port": ["19001"]})
-    assert load_config(first_path).api.port == 19001
-    assert load_config(second_path).api.port != 19001
+    first.settings.mutate(update_runtime_config_settings, {"gateway.port": 19001})
+    assert load_config(first_path).gateway.port == 19001
+    assert load_config(second_path).gateway.port != 19001
 
     first_flow = _Flow()
     second_flow = _Flow()
@@ -86,9 +98,9 @@ def test_settings_service_supports_a_new_config_directory(tmp_path: Path) -> Non
     config_path = tmp_path / "new" / "nested" / "config.json"
 
     services = WebUISettingsServices.create(config_path)
-    services.mutate(update_api_settings, {"port": ["19001"]})
+    services.mutate(update_runtime_config_settings, {"gateway.port": 19001})
 
-    assert load_config(config_path).api.port == 19001
+    assert load_config(config_path).gateway.port == 19001
 
 
 def test_settings_mutations_serialize_read_modify_write(
@@ -129,7 +141,7 @@ def test_settings_mutations_serialize_read_modify_write(
     def run_second() -> None:
         try:
             second_started.set()
-            services.mutate(update_api_settings, {"host": ["127.0.0.9"]})
+            services.mutate(update_runtime_config_settings, {"gateway.host": "127.0.0.9"})
         except BaseException as exc:  # noqa: BLE001 - re-raised in the test thread
             errors.append(exc)
 
@@ -149,7 +161,7 @@ def test_settings_mutations_serialize_read_modify_write(
     assert not errors
     saved = load_config(config_path)
     assert saved.agents.defaults.timezone == "Asia/Tokyo"
-    assert saved.api.host == "127.0.0.9"
+    assert saved.gateway.host == "127.0.0.9"
 
 
 def test_distinct_gateways_serialize_mutations_for_the_same_config(
@@ -184,7 +196,7 @@ def test_distinct_gateways_serialize_mutations_for_the_same_config(
     def mutate(
         services: WebUISettingsServices,
         operation: Callable[..., object],
-        query: dict[str, list[str]],
+        query: dict[str, str],
     ) -> None:
         try:
             services.mutate(operation, query)
@@ -198,7 +210,7 @@ def test_distinct_gateways_serialize_mutations_for_the_same_config(
     )
     second = threading.Thread(
         target=mutate,
-        args=(second_services, update_api_settings, {"host": ["127.0.0.9"]}),
+        args=(second_services, update_runtime_config_settings, {"gateway.host": "127.0.0.9"}),
         name="gateway-second",
     )
     first.start()
@@ -214,7 +226,7 @@ def test_distinct_gateways_serialize_mutations_for_the_same_config(
     assert not errors
     saved = load_config(config_path)
     assert saved.agents.defaults.timezone == "Asia/Tokyo"
-    assert saved.api.host == "127.0.0.9"
+    assert saved.gateway.host == "127.0.0.9"
 
 
 def test_oauth_registry_preserves_expiry_capacity_completion_and_cancel() -> None:
@@ -243,3 +255,85 @@ def test_oauth_registry_preserves_expiry_capacity_completion_and_cancel() -> Non
     registry.clear("openai_codex")
     assert replacement.cancel_count == 1
     assert registry.get("openai_codex", "replacement") is None
+
+
+def test_oauth_registry_capacity_counts_cancelled_workers_until_exit():
+    release = threading.Event()
+    cancelled = threading.Event()
+
+    class ThreadFlow(_Flow):
+        def __init__(self):
+            super().__init__()
+            self.thread = threading.Thread(target=lambda: release.wait(3))
+
+        @property
+        def has_pending_work(self):
+            return self.thread.is_alive()
+
+        def cancel(self):
+            cancelled.set()
+
+        def wait_closed(self):
+            self.thread.join()
+
+    registry = WebUIOAuthFlowRegistry(max_flows=1)
+    flow = ThreadFlow()
+    registry.register("github_copilot", "first", flow)
+    flow.thread.start()
+    replacement = _Flow()
+    try:
+        with pytest.raises(RuntimeError, match="still stopping"):
+            registry.register("github_copilot", "next", replacement)
+        assert cancelled.is_set()
+        assert registry.get("github_copilot", "first") is None
+        assert registry.get("github_copilot", "next") is None
+        assert registry.has_pending_work
+    finally:
+        release.set()
+        flow.wait_closed()
+    assert not registry.has_pending_work
+    registry.register("github_copilot", "next", replacement)
+    registry.close()
+    with pytest.raises(RuntimeError, match="closing"):
+        registry.register("github_copilot", "after-close", _Flow())
+
+
+def test_oauth_registry_keeps_flow_that_starts_while_cancellation_is_pending():
+    cancelling, allow_cancel, release_worker = (threading.Event() for _ in range(3))
+
+    class StartingFlow(_Flow):
+        def __init__(self):
+            super().__init__()
+            self.thread = threading.Thread(target=lambda: release_worker.wait(3))
+
+        @property
+        def has_pending_work(self):
+            return self.thread.is_alive()
+
+        def cancel(self):
+            cancelling.set()
+            assert allow_cancel.wait(3)
+
+        def wait_closed(self):
+            if self.thread.ident is not None:
+                self.thread.join()
+
+    registry = WebUIOAuthFlowRegistry(max_flows=2)
+    flow = StartingFlow()
+    registry.register("github_copilot", "starting", flow)
+    removal = threading.Thread(target=lambda: registry.remove("github_copilot", "starting", flow))
+    removal.start()
+    try:
+        assert cancelling.wait(1)
+        registry.register("xai_grok", "another", _Flow())
+        flow.thread.start()
+        allow_cancel.set()
+        removal.join(timeout=1)
+        assert not removal.is_alive()
+        assert registry.has_pending_work
+    finally:
+        allow_cancel.set()
+        release_worker.set()
+        removal.join(timeout=2)
+        flow.wait_closed()
+        registry.close()

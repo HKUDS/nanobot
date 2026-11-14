@@ -1,7 +1,7 @@
 import { MessageCircle } from "lucide-react";
 
 import type { ChannelUiContribution } from "@/channel-plugins/types";
-import { chatAppGuideUrl } from "@/components/settings/channels/catalog";
+import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 import { WhatsAppConnectFlow } from "./WhatsAppConnectFlow";
 
@@ -16,7 +16,7 @@ export default {
       mode: "connect",
       docsUrl: chatAppGuideUrl("whatsapp"),
       manualFields: [
-        { key: "channels.whatsapp.proxy", section: "connection" },
+        { key: "channels.whatsapp.useProxy", section: "connection", control: "switch" },
         { key: "channels.whatsapp.allowFrom", section: "access" },
         { key: "channels.whatsapp.groupPolicy", section: "behavior" },
       ],

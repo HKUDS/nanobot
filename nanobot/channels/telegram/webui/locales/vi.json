@@ -7,16 +7,15 @@
         "label": "Token bot",
         "placeholder": "123456:ABC..."
       },
-      "proxy": {
-        "label": "Proxy mạng",
-        "placeholder": "http://127.0.0.1:7890"
+      "useProxy": {
+        "label": "Dùng proxy"
       },
       "allowFrom": {
         "label": "Người dùng được phép",
         "placeholder": "* hoặc ID người dùng Telegram"
       },
       "groupPolicy": {
-        "label": "Hành vi trong nhóm",
+        "label": "Quy tắc nhóm",
         "choices": {
           "mention": "Chỉ khi được nhắc",
           "open": "Mọi tin nhắn",
@@ -54,7 +53,7 @@
         }
       },
       "inlineKeyboards": {
-        "label": "Bàn phím nội tuyến",
+        "label": "Nút tin nhắn",
         "choices": {
           "true": "Bật",
           "false": "Tắt"
@@ -68,7 +67,7 @@
         }
       },
       "streamEditInterval": {
-        "label": "Khoảng thời gian cập nhật luồng"
+        "label": "Khoảng cập nhật (giây)"
       },
       "webhookUrl": {
         "label": "URL webhook"
@@ -86,7 +85,7 @@
         "label": "Mã thông báo bí mật Webhook"
       },
       "webhookMaxConnections": {
-        "label": "Kết nối webhook tối đa"
+        "label": "Giới hạn kết nối Webhook"
       }
     }
   }

@@ -1,5 +1,3 @@
-"""Test message tool suppress logic for final replies."""
-
 import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -23,7 +21,6 @@ def _make_loop(tmp_path: Path) -> AgentLoop:
 
 
 class TestMessageToolSuppressLogic:
-    """Final reply suppressed only when message tool sends to the same target."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("ephemeral", [False, True])
@@ -53,7 +50,7 @@ class TestMessageToolSuppressLogic:
         result = await loop._process_message(msg, ephemeral=ephemeral)
 
         assert len(sent) == 1
-        assert result is None  # suppressed
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_not_suppress_when_sent_to_different_target(self, tmp_path: Path) -> None:
@@ -79,7 +76,7 @@ class TestMessageToolSuppressLogic:
 
         assert len(sent) == 1
         assert sent[0].channel == "email"
-        assert result is not None  # not suppressed
+        assert result is not None
         assert result.channel == "feishu"
 
     @pytest.mark.asyncio
@@ -138,18 +135,26 @@ class TestMessageToolSuppressLogic:
             LLMResponse(content="", tool_calls=[]),
             LLMResponse(content="", tool_calls=[]),
         ])
-        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        pending_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
+
+        async def next_response(*_args, **_kwargs):
+            response = next(calls)
+            if response.content == "First answer":
+                pending_queue.put_nowait(InboundMessage(
+                    channel="feishu",
+                    sender_id="user1",
+                    chat_id="chat123",
+                    content="follow-up",
+                ))
+            return response
+
+        loop.provider.chat_stream_with_retry = AsyncMock(side_effect=next_response)
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         sent: list[OutboundMessage] = []
         mt = loop.tools.get("message")
         if isinstance(mt, MessageTool):
             mt.set_send_callback(AsyncMock(side_effect=lambda m: sent.append(m)))
-
-        pending_queue = asyncio.Queue()
-        await pending_queue.put(
-            InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="follow-up")
-        )
 
         msg = InboundMessage(channel="feishu", sender_id="user1", chat_id="chat123", content="Start")
         result = await loop._process_message(msg, pending_queue=pending_queue)
@@ -188,7 +193,7 @@ class TestMessageToolSuppressLogic:
         assert result.final_content == "Done"
         assert progress == [
             ("Visible", False),
-            ('read foo.txt', True),
+            ("", True),
         ]
 
 class TestMessageToolSchema:
@@ -196,9 +201,10 @@ class TestMessageToolSchema:
     def test_schema_discourages_current_chat_replies(self) -> None:
         tool = MessageTool()
 
-        assert "Do not use this for the normal reply in the current chat" in tool.description
-        assert "generate_image creates images in the current chat" in tool.description
+        assert "For normal replies, including scheduled reminders and reports, answer directly" in tool.description
+        assert "the final reply is delivered to the current chat automatically" in tool.description
+        assert "deliver generated images via media" in tool.description
         assert (
-            "Do not use this for a normal reply in the current chat"
-            in tool.parameters["properties"]["content"]["description"]
+            "Use artifact paths returned by generate_image"
+            in tool.parameters["properties"]["media"]["description"]
         )

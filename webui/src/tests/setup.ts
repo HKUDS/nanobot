@@ -12,6 +12,16 @@ if (!HTMLElement.prototype.hasPointerCapture) {
 if (!HTMLElement.prototype.scrollIntoView) {
   HTMLElement.prototype.scrollIntoView = () => {};
 }
+// happy-dom has no animation timeline; rendered motion is covered in browser tests.
+if (!Element.prototype.getAnimations) {
+  Element.prototype.getAnimations = () => [];
+}
+
+// happy-dom does not load fonts; text measurements can run immediately.
+Object.defineProperty(document, "fonts", {
+  value: { ready: Promise.resolve() },
+  configurable: true,
+});
 
 function createTestStorage(): Storage {
   const store = new Map<string, string>();

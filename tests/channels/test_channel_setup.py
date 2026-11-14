@@ -18,6 +18,7 @@ EXPECTED_CHANNELS = {
     "discord",
     "email",
     "feishu",
+    "linear",
     "matrix",
     "mattermost",
     "mochat",
@@ -31,6 +32,7 @@ EXPECTED_CHANNELS = {
     "wecom",
     "weixin",
     "whatsapp",
+    "whatsapp_agent",
 }
 
 INTERNAL_CHANNEL_FIELDS = {
@@ -38,7 +40,6 @@ INTERNAL_CHANNEL_FIELDS = {
     "signal": {"allowFrom"},
     "weixin": {"token"},
     "whatsapp": {"databasePath", "lidMappings"},
-    # nanobot WebUI owns this transport and intentionally has no channel dialog.
     "websocket": {
         "allowFrom",
         "host",
@@ -116,6 +117,9 @@ def test_channel_setup_spec_separates_writable_and_snapshot_fields() -> None:
     assert discord is not None
     assert "allowFrom" in matrix.route_field_types
     assert "allowFrom" in matrix.snapshot_fields
+    assert matrix.route_field_types["replyToMessage"] == "bool"
+    assert "replyToMessage" in matrix.snapshot_fields
+    assert matrix.fields["replyToMessage"].default is True
     assert "allowFrom" in discord.route_field_types
     assert "allowFrom" not in discord.snapshot_fields
 
@@ -128,7 +132,7 @@ def test_webui_forms_have_writable_mattermost_and_whatsapp_contracts() -> None:
     assert whatsapp is not None
     assert mattermost.route_field_types["serverUrl"] == "string"
     assert mattermost.route_field_types["token"] == "secret"
-    assert whatsapp.route_field_types["proxy"] == "string"
+    assert whatsapp.route_field_types["useProxy"] == "bool"
     assert whatsapp.route_field_types["allowFrom"] == "list"
     assert whatsapp.route_field_types["groupPolicy"] == (
         "enum",

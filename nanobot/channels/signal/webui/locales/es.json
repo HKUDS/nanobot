@@ -16,7 +16,7 @@
         "placeholder": "8080"
       },
       "dm_allowFrom": {
-        "label": "Remitentes de mensajes directos permitidos",
+        "label": "Usuarios de DM permitidos",
         "placeholder": "Números o UUID"
       },
       "group_allowFrom": {
@@ -24,7 +24,7 @@
         "placeholder": "ID de grupo"
       },
       "groupMessageBufferSize": {
-        "label": "Mensajes de contexto grupal"
+        "label": "Mensajes de contexto"
       },
       "attachmentsDir": {
         "label": "Directorio de archivos adjuntos"
@@ -58,7 +58,7 @@
         }
       },
       "group_requireMention": {
-        "label": "Requerir mención en grupos",
+        "label": "Exigir mención en grupos",
         "choices": {
           "true": "encendido",
           "false": "Apagado"

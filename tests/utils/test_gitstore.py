@@ -1,5 +1,3 @@
-"""Tests for GitStore core operations."""
-
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -18,7 +16,6 @@ def git(tmp_path):
 
 
 class TestSummarizeWorkingTree:
-    """Ground-truth diff summary used to keep Dream audit records honest."""
 
     def test_empty_when_not_initialized(self, tmp_path):
         git = GitStore(tmp_path, tracked_files=["MEMORY.md"])
@@ -35,7 +32,6 @@ class TestSummarizeWorkingTree:
         assert "1 file changed, 2 insertions(+), 0 deletions(-)" in summary
 
     def test_only_reports_requested_paths(self, git, tmp_path):
-        # MEMORY.md changes, but we only ask about the unchanged SOUL.md.
         (tmp_path / "MEMORY.md").write_text("changed\n", encoding="utf-8")
         assert git.summarize_working_tree(["SOUL.md"]) == ""
 
@@ -45,28 +41,24 @@ class TestSummarizeWorkingTree:
         assert "MEMORY.md: +3 -0" in summary
 
     def test_detects_deletion(self, git, tmp_path):
-        # File removed from the working tree (must have content first; the
-        # fixture's tracked files start empty, so an empty-file delete is a no-op).
         (tmp_path / "MEMORY.md").write_text("has content\n", encoding="utf-8")
         git.auto_commit("add content")
         (tmp_path / "MEMORY.md").unlink()
         summary = git.summarize_working_tree(["MEMORY.md"])
-        assert summary  # a removal is still a change
+        assert summary
         assert "deletion" in summary
 
     def test_non_utf8_file_marked_binary_without_replacement_chars(self, git, tmp_path):
-        # Invalid UTF-8 must not leak replacement chars into the audit record.
         (tmp_path / "MEMORY.md").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x01")
         summary = git.summarize_working_tree(["MEMORY.md"])
         assert "MEMORY.md: binary or non-UTF-8 file changed" in summary
-        assert "\ufffd" not in summary  # no U+FFFD replacement chars leaked
+        assert "\ufffd" not in summary
 
 
 class TestNestedRepoProtection:
     """Regression tests for GitHub issue #2980: nested repo protection."""
 
     def test_init_refuses_inside_git_repo(self, tmp_path):
-        """init() should detect it's inside an existing git repo and refuse."""
         project = tmp_path / "project"
         project.mkdir()
         (project / ".git").mkdir()
@@ -81,7 +73,6 @@ class TestNestedRepoProtection:
         assert not (workspace / ".git").is_dir()
 
     def test_init_preserves_existing_gitignore(self, tmp_path):
-        """init() should preserve existing .gitignore entries and append new ones."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
@@ -99,7 +90,6 @@ class TestNestedRepoProtection:
         assert "!.gitignore" in gitignore
 
     def test_init_no_gitignore_creates_new(self, tmp_path):
-        """init() should create .gitignore with Dream content when none exists."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
@@ -112,11 +102,9 @@ class TestNestedRepoProtection:
         assert gitignore == expected
 
     def test_init_gitignore_merge_idempotent(self, tmp_path):
-        """init() should not duplicate Dream entries already in .gitignore."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
-        # Pre-existing .gitignore that already has some Dream entries
         existing = "*.pyc\n/*\n!MEMORY.md\n"
         (workspace / ".gitignore").write_text(existing, encoding="utf-8")
 
@@ -125,16 +113,13 @@ class TestNestedRepoProtection:
 
         assert result is True
         gitignore = (workspace / ".gitignore").read_text(encoding="utf-8")
-        # No duplicate lines
         lines = gitignore.splitlines()
         assert lines.count("/*") == 1
         assert lines.count("!MEMORY.md") == 1
-        # Existing entry preserved, new Dream entries appended
         assert "*.pyc" in gitignore
         assert "!.gitignore" in gitignore
 
     def test_init_outside_git_repo_works_normally(self, tmp_path):
-        """init() should succeed and create .git when not inside a git repo."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
 
@@ -145,7 +130,6 @@ class TestNestedRepoProtection:
         assert (workspace / ".git").is_dir()
 
     def test_staging_paths_are_absolute_from_workspace(self, tmp_path, monkeypatch):
-        """Git operations should not depend on the process working directory."""
         from dulwich import porcelain
 
         workspace = tmp_path / "workspace"
@@ -169,7 +153,6 @@ class TestNestedRepoProtection:
             assert all(path.is_relative_to(workspace) for path in staging_paths)
 
     def test_staging_paths_preserve_symlinks(self, tmp_path):
-        """Absolute staging paths should still identify the tracked symlink itself."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         target = tmp_path / "shared-memory.md"
@@ -187,7 +170,6 @@ class TestNestedRepoProtection:
         assert staging_path.is_symlink()
 
     def test_init_refuses_inside_git_worktree(self, tmp_path):
-        """init() should refuse when the parent checkout is a git worktree."""
         repo = tmp_path / "repo"
         repo.mkdir()
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
@@ -229,7 +211,6 @@ class TestNestedRepoProtection:
 
 
 class TestCommitIdEncoding:
-    """Commit ids must be usable with git, not hex-of-hex."""
 
     def test_auto_commit_returns_the_real_short_sha(self, git, tmp_path):
         (tmp_path / "MEMORY.md").write_text("- a fact\n", encoding="utf-8")

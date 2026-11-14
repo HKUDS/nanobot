@@ -1,5 +1,3 @@
-"""Tests for the ModelScope (魔搭) provider registration."""
-
 from unittest.mock import patch
 
 from nanobot.config.schema import Config, ProvidersConfig
@@ -95,7 +93,6 @@ def test_modelscope_strips_prefix_in_request_model() -> None:
         tool_choice=None,
     )
 
-    # strip_model_prefixes removes "modelscope/" → "Qwen/Qwen3.5-35B-A3B"
     assert kwargs["model"] == "Qwen/Qwen3.5-35B-A3B"
     assert kwargs["max_tokens"] == 1024
     assert "max_completion_tokens" not in kwargs

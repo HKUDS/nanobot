@@ -1,5 +1,3 @@
-"""Cron types."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,7 +15,6 @@ def _store_int(value: Any, default: int = 0) -> int: ...
 
 
 def _store_int(value: Any, default: int | None = 0) -> int | None:
-    """Coerce JSON numerics to int; treat null/blank like a missing key."""
     if value is None or value == "":
         return default
     return int(value)
@@ -54,13 +51,14 @@ class CronPayload:
     message: str = ""
     # Legacy delivery fields used by pre-session-bound cron jobs.
     deliver: bool = False
-    channel: str | None = None  # e.g. "whatsapp"
-    to: str | None = None  # e.g. phone number
+    channel: str | None = None
+    to: str | None = None
     channel_meta: dict[str, Any] = field(default_factory=dict)
     session_key: str | None = None  # original session key for correct session recording
     origin_channel: str | None = None
     origin_chat_id: str | None = None
     origin_metadata: dict[str, Any] = field(default_factory=dict)
+    binding_version: int = 0
 
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronPayload:
@@ -79,6 +77,7 @@ class CronPayload:
             origin_metadata=dict(
                 get_camel_snake(data, "originMetadata", "origin_metadata", {}) or {}
             ),
+            binding_version=_store_int(get_camel_snake(data, "bindingVersion", "binding_version", 0)),
         )
 
 
@@ -98,6 +97,7 @@ class CronRunRecord:
     duration_ms: int = 0
     error: str | None = None
     run_id: str | None = None
+    session_key: str | None = None
 
     @classmethod
     def from_store_dict(cls, data: dict[str, Any]) -> CronRunRecord:
@@ -108,6 +108,7 @@ class CronRunRecord:
             duration_ms=_store_int(get_camel_snake(data, "durationMs", "duration_ms", 0)),
             error=data.get("error"),
             run_id=run_id if isinstance(run_id, str) else None,
+            session_key=get_camel_snake(data, "sessionKey", "session_key"),
         )
 
 

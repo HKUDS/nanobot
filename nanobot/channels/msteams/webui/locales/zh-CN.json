@@ -8,7 +8,7 @@
         "placeholder": "Microsoft App ID"
       },
       "appPassword": {
-        "label": "客户端密钥",
+        "label": "应用密钥",
         "placeholder": "••••••"
       },
       "tenantId": {
@@ -20,7 +20,7 @@
         "placeholder": "/api/messages"
       },
       "allowFrom": {
-        "label": "允许的用户",
+        "label": "允许用户",
         "placeholder": "Teams 用户 ID，用逗号分隔"
       },
       "host": {
@@ -30,44 +30,44 @@
         "label": "监听端口"
       },
       "replyInThread": {
-        "label": "在话题中回复",
+        "label": "话题回复",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "mentionOnlyResponse": {
-        "label": "仅被提及时的回复"
+        "label": "提及回复"
       },
       "validateInboundAuth": {
-        "label": "验证入站请求",
+        "label": "请求验证",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "refTtlDays": {
-        "label": "会话保留天数"
+        "label": "引用保留（天）"
       },
       "pruneWebChatRefs": {
-        "label": "清理 Web Chat 会话",
+        "label": "清理 Web Chat",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "pruneNonPersonalRefs": {
-        "label": "清理非个人会话",
+        "label": "清理群聊",
         "choices": {
           "true": "开启",
           "false": "关闭"
         }
       },
       "refTouchIntervalS": {
-        "label": "会话刷新间隔"
+        "label": "刷新间隔（秒）"
       },
       "trustedServiceUrlHosts": {
-        "label": "可信服务主机"
+        "label": "可信主机"
       }
     }
   }

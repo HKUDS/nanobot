@@ -1,5 +1,3 @@
-"""Opaque conversation state for Responses API item replay."""
-
 from __future__ import annotations
 
 from copy import deepcopy
@@ -7,11 +5,17 @@ from typing import Any, cast
 
 from loguru import logger
 
-from nanobot.providers.base import LLMUsage, ProviderConversationState
+from nanobot.providers.base import LLMResponse, LLMUsage, ProviderConversationState
 from nanobot.providers.openai_responses.converters import convert_messages
+from nanobot.providers.openai_responses.errors import (
+    COMPACTION_FEATURES,
+    is_unsupported_feature_error,
+    response_error_details,
+)
 
 RESPONSES_STATE_KIND = "openai_responses"
 RESPONSES_STATE_VERSION = 1
+REPLAYABLE_FINISH_REASONS = frozenset({"stop", "tool_calls", "function_call"})
 _ITEMS_KEY = "items"
 _CONTEXT_TOKENS_KEY = "context_tokens"
 _COMPACTION_ITEM_TYPES = frozenset({
@@ -51,21 +55,22 @@ def prepare_responses_input(
     When no compatible state exists, it is converted normally as a safe
     fallback.
     """
-    instructions, fallback_items = convert_messages(
-        messages,
-        preserve_reasoning=preserve_reasoning,
+    prior_items = (
+        _state_items(state)
+        if state is not None and responses_state_matches(state, provider=provider, model=model)
+        else None
     )
-    if state is None or not responses_state_matches(
-        state,
-        provider=provider,
-        model=model,
-    ):
-        return instructions, fallback_items, False
-
-    prior_items = _state_items(state)
     if prior_items is None:
-        return instructions, fallback_items, False
+        instructions, items = convert_messages(messages, preserve_reasoning=preserve_reasoning)
+        return instructions, items, False
 
+    instructions = ""
+    for message in reversed(messages):
+        if message.get("role") == "system":
+            content = message.get("content")
+            instructions = content if isinstance(content, str) else ""
+            break
+    assert state is not None
     _, delta_items = convert_messages(
         state.pending_messages,
         preserve_reasoning=preserve_reasoning,
@@ -109,6 +114,29 @@ def build_responses_state(
     )
 
 
+def attach_responses_state(
+    result: LLMResponse,
+    *,
+    provider: str,
+    model: str,
+    input_items: list[dict[str, Any]],
+    output_items: list[dict[str, Any]],
+) -> None:
+    """Advance replay and compaction state only after a completed usable response."""
+    if result.finish_reason not in REPLAYABLE_FINISH_REASONS:
+        return
+    result.provider_state = build_responses_state(
+        provider=provider, model=model, input_items=input_items,
+        output_items=output_items, usage=result.usage,
+    )
+    result.provider_compaction_state = build_responses_compaction_state(
+        provider=provider, model=model, output_items=output_items,
+    )
+    result.provider_compaction_applied = result.provider_compaction_state is not None
+    if result.provider_compaction_applied:
+        result.provider_compaction_scope = "current_request"
+
+
 def build_responses_compaction_state(
     *,
     provider: str,
@@ -140,11 +168,19 @@ def responses_state_items(
 
 
 def responses_state_context_tokens(state: ProviderConversationState) -> int:
-    """Return the last server-reported active context size."""
+    """Return the reported active size or a locally estimated compacted prefix size."""
     value = state.payload.get(_CONTEXT_TOKENS_KEY)
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
     return max(0, value)
+
+
+def responses_compaction_items(result: LLMResponse) -> list[dict[str, Any]]:
+    """Return replay items ending at a valid trigger-compaction boundary."""
+    items = responses_state_items(result.provider_state) if result.provider_state is not None else None
+    if not items or items[-1].get("type") not in _COMPACTION_ITEM_TYPES:
+        raise RuntimeError("Responses compaction returned no compaction item")
+    return items
 
 
 def resolve_compact_threshold(
@@ -163,24 +199,8 @@ def is_compaction_compatibility_error(exc: Exception) -> bool:
     """Recognize endpoints that reject native Responses compaction fields."""
     if getattr(exc, "compaction_unsupported", False) is True:
         return True
-    response = getattr(exc, "response", None)
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None and response is not None:
-        status_code = getattr(response, "status_code", None)
-    body = (
-        getattr(exc, "body", None)
-        or getattr(exc, "doc", None)
-        or getattr(response, "text", None)
-        or str(exc)
-    )
-    text = str(body).lower()
-    has_compaction_marker = any(
-        marker in text
-        for marker in ("context_management", "compact_threshold", "compaction_trigger")
-    )
-    if not has_compaction_marker:
-        return False
-    return isinstance(exc, TypeError) or status_code in {400, 404, 422}
+    status, body = response_error_details(exc)
+    return is_unsupported_feature_error(status, body, COMPACTION_FEATURES)
 
 
 def _prune_before_latest_output_compaction(
@@ -228,3 +248,27 @@ def _prepare_replayed_items(
         if item.get("type") == "reasoning":
             item.pop("status", None)
     return replayed_items
+
+
+def without_response_item_ids(
+    request_body: dict[str, Any],
+) -> dict[str, Any]:
+    """Strip output item IDs for endpoints that replay stateless input without IDs."""
+    if request_body.get("store") is True:
+        return request_body
+    raw_input = request_body.get("input")
+    if not isinstance(raw_input, list):
+        return request_body
+
+    input_items: list[object] = cast(list[object], raw_input)
+    sanitized_input: list[object] = []
+    for raw_item in input_items:
+        if not isinstance(raw_item, dict):
+            sanitized_input.append(raw_item)
+            continue
+        item = cast(dict[str, Any], raw_item)
+        sanitized_input.append({key: value for key, value in item.items() if key != "id"})
+
+    body = dict(request_body)
+    body["input"] = sanitized_input
+    return body

@@ -1,6 +1,10 @@
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
-from nanobot.utils import helpers
+import pytest
+
+from nanobot.utils import helpers, token_encoding
 from nanobot.utils.helpers import (
     estimate_message_tokens,
     estimate_prompt_tokens,
@@ -16,6 +20,39 @@ class _NoCounterProvider:
 class _BrokenCounterProvider:
     def estimate_prompt_tokens(self, messages, tools=None, model=None):
         raise RuntimeError("counter unavailable")
+
+
+@pytest.fixture(autouse=True)
+def isolate_token_caches(monkeypatch, byte_encoding):
+    monkeypatch.setattr(token_encoding, "_encoding", byte_encoding)
+    helpers._TOOLS_TOKEN_CACHE.clear()
+    yield
+    helpers._TOOLS_TOKEN_CACHE.clear()
+
+
+@pytest.mark.parametrize("text", ["hello world", "你好，世界🙂", "print(123)\n", "<|endoftext|>"])
+def test_token_estimation_treats_prompt_text_as_ordinary(text, byte_encoding):
+    expected = len(byte_encoding.encode_ordinary(text)) + 4
+    assert estimate_prompt_tokens_chain(
+        _NoCounterProvider(), "custom-model", [{"role": "user", "content": text}],
+    ) == (expected, "tiktoken")
+    assert estimate_message_tokens({"role": "user", "content": text}) == expected
+    assert len(byte_encoding.encode_ordinary(truncate_text_to_tokens(text * 100, 40))) <= 40
+
+
+def test_provider_counter_does_not_initialize_fallback(monkeypatch):
+    def forbidden():
+        raise AssertionError("provider counter must take precedence")
+
+    class Provider:
+        def estimate_prompt_tokens(self, messages, tools=None, model=None):
+            assert model == "provider-specific-model"
+            return 1234, "provider-local"
+
+    monkeypatch.setattr(helpers, "_get_token_encoding", forbidden)
+    assert estimate_prompt_tokens_chain(
+        Provider(), "provider-specific-model", [{"role": "user", "content": "hi"}],
+    ) == (1234, "provider-local")
 
 
 def test_estimate_prompt_tokens_chain_falls_back_without_provider_counter() -> None:
@@ -58,7 +95,9 @@ def test_estimate_prompt_tokens_uses_conservative_fallback_when_tiktoken_fails(
         messages,
     )
 
-    actual_tokens = len(helpers.tiktoken.get_encoding("cl100k_base").encode(content)) + 4
+    encoding = token_encoding.get_token_encoding()
+    assert encoding is not None
+    actual_tokens = len(encoding.encode(content)) + 4
     assert tokens == len(content.encode("utf-8")) + 4
     assert tokens >= actual_tokens
     assert chain_tokens == tokens
@@ -92,27 +131,16 @@ def test_truncate_text_to_tokens_uses_utf8_byte_budget_fallback(monkeypatch) -> 
 
 
 def test_estimate_prompt_tokens_caches_tools_encoding(monkeypatch) -> None:
-    helpers._get_token_encoding.cache_clear()
-    helpers._TOOLS_TOKEN_CACHE.clear()
-
     class FakeEncoding:
         def __init__(self) -> None:
             self.encoded: list[str] = []
 
-        def encode(self, text: str) -> list[int]:
+        def encode_ordinary(self, text: str) -> list[int]:
             self.encoded.append(text)
             return list(range(max(1, len(text) // 4)))
 
     fake_encoding = FakeEncoding()
-    get_encoding_calls = 0
-
-    def fake_get_encoding(name: str) -> FakeEncoding:
-        nonlocal get_encoding_calls
-        assert name == "cl100k_base"
-        get_encoding_calls += 1
-        return fake_encoding
-
-    monkeypatch.setattr(helpers.tiktoken, "get_encoding", fake_get_encoding)
+    monkeypatch.setattr(token_encoding, "_encoding", fake_encoding)
     tools = [{"type": "function", "function": {"name": "demo", "description": "cached"}}]
     messages = [{"role": "user", "content": "hello"}]
 
@@ -120,25 +148,47 @@ def test_estimate_prompt_tokens_caches_tools_encoding(monkeypatch) -> None:
     second = estimate_prompt_tokens(messages, tools)
 
     assert first == second
-    assert get_encoding_calls == 1
     rendered_tools = "\n" + json.dumps(tools, ensure_ascii=False)
     assert fake_encoding.encoded.count(rendered_tools) == 1
 
 
-def test_estimate_prompt_tokens_recomputes_when_tool_items_change(monkeypatch) -> None:
-    helpers._get_token_encoding.cache_clear()
-    helpers._TOOLS_TOKEN_CACHE.clear()
+def test_concurrent_prompt_estimates_cache_both_tool_separator_counts(monkeypatch) -> None:
+    tools = [{"type": "function", "function": {"name": "demo"}}]
+    rendered = json.dumps(tools, ensure_ascii=False)
+    barrier = threading.Barrier(2)
+    encoded_tools = []
 
+    class Encoding:
+        def encode_ordinary(self, text: str) -> list[int]:
+            if text in (rendered, "\n" + rendered):
+                encoded_tools.append(text)
+                if len(encoded_tools) <= 2:
+                    barrier.wait(timeout=5)
+            return list(text.encode("utf-8"))
+
+    monkeypatch.setattr(helpers, "_get_token_encoding", Encoding)
+    messages = [{"role": "user", "content": "hello"}]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        empty = pool.submit(estimate_prompt_tokens, [], tools)
+        nonempty = pool.submit(estimate_prompt_tokens, messages, tools)
+        assert empty.result(timeout=5) == len(rendered)
+        assert nonempty.result(timeout=5) == len(rendered) + 1 + len("hello") + 4
+    assert estimate_prompt_tokens([], tools) == len(rendered)
+    assert estimate_prompt_tokens(messages, tools) == len(rendered) + 1 + len("hello") + 4
+    assert sorted(encoded_tools) == sorted([rendered, "\n" + rendered])
+
+
+def test_estimate_prompt_tokens_recomputes_when_tool_items_change(monkeypatch) -> None:
     class FakeEncoding:
         def __init__(self) -> None:
             self.encoded: list[str] = []
 
-        def encode(self, text: str) -> list[int]:
+        def encode_ordinary(self, text: str) -> list[int]:
             self.encoded.append(text)
             return list(range(max(1, len(text) // 4)))
 
     fake_encoding = FakeEncoding()
-    monkeypatch.setattr(helpers.tiktoken, "get_encoding", lambda _name: fake_encoding)
+    monkeypatch.setattr(token_encoding, "_encoding", fake_encoding)
 
     tools = [{"type": "function", "function": {"name": "before"}}]
     messages = [{"role": "user", "content": "hello"}]

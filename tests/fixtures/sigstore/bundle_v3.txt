@@ -1,0 +1,5 @@
+DO NOT MODIFY ME!
+
+this is the input for bundle_v3, which tests support for "v3" bundles.
+
+DO NOT MODIFY ME!

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export const INLINE_TOKEN_HIGHLIGHT_COLOR = "var(--inline-token-highlight)";
+export const INLINE_REFERENCE_HIGHLIGHT_COLOR = "var(--inline-reference-highlight)";
 
 export function InlineTokenHighlight({
   children,
@@ -13,7 +14,7 @@ export function InlineTokenHighlight({
 }: {
   children: ReactNode;
   className?: string;
-  color: string;
+  color?: string;
   testId?: string;
   title?: string;
 }) {
@@ -22,7 +23,7 @@ export function InlineTokenHighlight({
       data-testid={testId}
       title={title}
       className={cn(
-        "relative inline font-[550] transition-colors duration-150",
+        "relative inline font-[550] text-foreground transition-colors duration-150",
         className,
       )}
       style={{ color }}

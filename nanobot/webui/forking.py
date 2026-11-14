@@ -1,5 +1,3 @@
-"""WebUI chat fork orchestration."""
-
 from __future__ import annotations
 
 import uuid
@@ -9,14 +7,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 from loguru import logger
 
 from nanobot.session.manager import SessionManager
-from nanobot.session.webui_turns import WEBUI_TITLE_METADATA_KEY, clean_generated_title
+from nanobot.session.webui_turns import clean_generated_title
 from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
-from nanobot.webui.transcript import (
-    append_fork_marker,
-    delete_webui_transcript,
-    fork_transcript_before_user_index,
-    write_session_messages_as_transcript,
-)
+from nanobot.webui.transcript import session_display_facts
 
 if TYPE_CHECKING:
     from websockets.asyncio.server import ServerConnection
@@ -31,6 +24,8 @@ class WebUIForkHost(Protocol):
         self,
         connection: ServerConnection,
         detail: str,
+        *,
+        request_id: str | None = None,
     ) -> None: ...
 
     async def attach_webui_fork(
@@ -39,10 +34,11 @@ class WebUIForkHost(Protocol):
         *,
         fork_id: str,
         fork_key: str,
+        request_id: str | None = None,
     ) -> None: ...
 
 
-def create_webui_chat_fork(
+async def create_webui_chat_fork(
     session_manager: SessionManager,
     *,
     source_chat_id: str,
@@ -53,32 +49,12 @@ def create_webui_chat_fork(
     new_id = str(uuid.uuid4())
     source_key = webui_session_key(source_chat_id)
     target_key = webui_session_key(new_id)
-    try:
-        forked = session_manager.fork_session_before_user_index(
-            source_key,
-            target_key,
-            before_user_index,
-        )
-        if forked is None:
-            return None
-
-        transcript_ok = fork_transcript_before_user_index(
-            source_key,
-            target_key,
-            before_user_index,
-        )
-        if not transcript_ok:
-            write_session_messages_as_transcript(target_key, forked.messages)
-        append_fork_marker(target_key)
-
-        fork_title = clean_generated_title(title)
-        if fork_title:
-            forked.metadata[WEBUI_TITLE_METADATA_KEY] = fork_title
-            session_manager.save(forked, fsync=True)
-    except Exception:
-        delete_webui_transcript(target_key)
-        session_manager.delete_session(target_key)
-        raise
+    forked = await session_manager.state.fork(
+        source_key, target_key, before_user_index,
+        title=clean_generated_title(title), history_projection=session_display_facts,
+    )
+    if forked is None:
+        return None
     return new_id, target_key
 
 
@@ -86,6 +62,8 @@ async def handle_webui_fork_chat(
     channel: WebUIForkHost,
     connection: ServerConnection,
     envelope: Mapping[str, Any],
+    *,
+    request_id: str | None = None,
 ) -> None:
     """Handle the WebUI ``fork_chat`` websocket command.
 
@@ -93,38 +71,40 @@ async def handle_webui_fork_chat(
     validate the request, clone session/transcript state, attach the new chat,
     and hydrate the client.
     """
+    request_fields = {"request_id": request_id} if request_id is not None else {}
     source_chat_id = envelope.get("source_chat_id")
     raw_index = envelope.get("before_user_index")
     if not is_valid_webui_chat_id(source_chat_id):
-        await channel.send_webui_protocol_error(connection, "invalid source_chat_id")
+        await channel.send_webui_protocol_error(connection, "invalid source_chat_id", **request_fields)
         return
     if isinstance(raw_index, bool) or not isinstance(raw_index, int) or raw_index < 0:
-        await channel.send_webui_protocol_error(connection, "invalid before_user_index")
+        await channel.send_webui_protocol_error(connection, "invalid before_user_index", **request_fields)
         return
 
     session_manager = channel.gateway.session_manager
     if session_manager is None:
-        await channel.send_webui_protocol_error(connection, "session_manager_unavailable")
+        await channel.send_webui_protocol_error(connection, "session_manager_unavailable", **request_fields)
         return
 
     try:
-        forked = create_webui_chat_fork(
+        forked = await create_webui_chat_fork(
             session_manager,
             source_chat_id=source_chat_id,
             before_user_index=raw_index,
             title=envelope.get("title") if isinstance(envelope.get("title"), str) else None,
         )
         if forked is None:
-            await channel.send_webui_protocol_error(connection, "invalid fork source or index")
+            await channel.send_webui_protocol_error(connection, "invalid fork source or index", **request_fields)
             return
         fork_id, fork_key = forked
     except Exception as exc:
         logger.warning("fork_chat failed: {}", exc)
-        await channel.send_webui_protocol_error(connection, "fork_chat_failed")
+        await channel.send_webui_protocol_error(connection, "fork_chat_failed", **request_fields)
         return
 
     await channel.attach_webui_fork(
         connection,
         fork_id=fork_id,
         fork_key=fork_key,
+        **request_fields,
     )

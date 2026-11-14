@@ -1,14 +1,14 @@
-"""Route and publish the user-visible lifecycle of an agent turn."""
-
 from __future__ import annotations
 
 import dataclasses
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
+from nanobot.bus.delivery import DeliveryRequest
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.notification_delivery import notification_is_deliverable
 from nanobot.bus.outbound_events import (
@@ -19,10 +19,21 @@ from nanobot.bus.outbound_events import (
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventPublisher
-from nanobot.channels.notification_routes import notification_metadata
-from nanobot.events import AgentEvent, EventSink
+from nanobot.channels.notification_routes import notification_metadata, system_reply_metadata
+from nanobot.events import (
+    AgentEvent,
+    ContextCompactionEvent,
+    EventSink,
+    ResponseInputsEvent,
+    ResponseSource,
+    ResponseSourceEvent,
+)
 from nanobot.providers.base import LLMUsage
-from nanobot.session.keys import UNIFIED_SESSION_KEY, last_channel_from_metadata
+from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
+from nanobot.session.keys import is_internal_session
+from nanobot.session.message_metadata import input_history_metadata
+from nanobot.utils.cancellation import shield_and_drain
+from nanobot.utils.helpers import strip_think
 
 if TYPE_CHECKING:
     from nanobot.utils.llm_runtime import LLMRuntime
@@ -36,18 +47,24 @@ class TurnRoute:
     chat_id: str
     metadata: dict[str, Any] = field(default_factory=dict)
     publish_lifecycle: bool = False
+    # Public turn identity supplied by the owning channel adapter.
+    turn_id: str | None = None
 
 
 TurnRoutePolicy = Callable[[InboundMessage, str, TurnRoute], TurnRoute]
+TurnRouteAdmission = Callable[[TurnRoute, str, str], Awaitable[TurnRoute]]
 
 
 def _bind_events(
-    bus: MessageBus, route: TurnRoute,
+    bus: MessageBus, route: TurnRoute, session_key: str,
 ) -> EventSink:
     channel, chat_id = route.channel, route.chat_id
     metadata = deepcopy(route.metadata)
 
     def accepts(event_type: type[AgentEvent]) -> bool:
+        # A maintenance result destination does not own the internal context.
+        if is_internal_session(session_key) and issubclass(event_type, ContextCompactionEvent):
+            return False
         return notification_is_deliverable(
             event_type, channel=channel, publish_lifecycle=route.publish_lifecycle,
         )
@@ -77,10 +94,12 @@ class TurnDeliveryFactory:
         self,
         bus: MessageBus,
         route_policy: TurnRoutePolicy | None = None,
+        route_admission: TurnRouteAdmission | None = None,
     ) -> None:
         self.bus = bus
         self.runtime_event_publisher = RuntimeEventPublisher(bus)
         self.route_policy = route_policy
+        self.route_admission = route_admission
 
     def create(
         self,
@@ -89,7 +108,7 @@ class TurnDeliveryFactory:
         *,
         enable_stream: bool = False,
     ) -> TurnDelivery:
-        route = self._default_route(msg, session_key)
+        route = self.input_route(msg, session_key)
         if self.route_policy is not None:
             route = self.route_policy(msg, session_key, route)
             if not isinstance(cast(object, route), TurnRoute):
@@ -100,6 +119,7 @@ class TurnDeliveryFactory:
             input_message=msg,
             session_key=session_key,
             route=route,
+            route_admission=self.route_admission,
             enable_stream=enable_stream,
         )
 
@@ -121,8 +141,11 @@ class TurnDeliveryFactory:
         self,
         session_key: str,
         session_metadata: dict[str, Any],
+        *, generation: str,
     ) -> EventSink:
         """Bind idle notifications to one route without acquiring a turn owner."""
+        if is_internal_session(session_key):
+            return EventSink()
         saved_route = session_metadata.get("_compaction_route")
         if isinstance(saved_route, dict):
             saved_route = cast(dict[str, Any], saved_route)
@@ -132,25 +155,25 @@ class TurnDeliveryFactory:
                 return EventSink()
             if not isinstance(metadata, dict):
                 return EventSink()
-            metadata = cast(dict[str, Any], metadata)
+            metadata = dict(cast(dict[str, Any], metadata))
+            if isinstance(saved_generation := saved_route.get("generation"), str):
+                metadata[HISTORY_GENERATION_METADATA_KEY] = saved_generation
         else:
             # Older sessions have no route snapshot. Only direct clients have a
             # session key that is also an unambiguous delivery address.
-            route = (
-                last_channel_from_metadata(session_metadata)
-                if session_key == UNIFIED_SESSION_KEY
-                else tuple(session_key.split(":", 1))
-            )
-            if not route or len(route) != 2 or route[0] not in {"websocket", "cli"}:
+            route = session_key.split(":", 1)
+            if len(route) != 2 or route[0] not in {"websocket", "cli"}:
                 return EventSink()
             channel, chat_id = route
             metadata = {}
         metadata = deepcopy(metadata)
-
-        return _bind_events(self.bus, TurnRoute(channel, chat_id, metadata))
+        if channel == "websocket":
+            metadata.setdefault(HISTORY_GENERATION_METADATA_KEY, generation)
+        return _bind_events(self.bus, TurnRoute(channel, chat_id, metadata), session_key)
 
     @staticmethod
-    def _default_route(msg: InboundMessage, session_key: str) -> TurnRoute:
+    def input_route(msg: InboundMessage, session_key: str) -> TurnRoute:
+        """Resolve the input's destination without acquiring a turn lifecycle owner."""
         if msg.channel != "system":
             return TurnRoute(
                 channel=msg.channel,
@@ -162,13 +185,7 @@ class TurnDeliveryFactory:
         channel, chat_id = (
             msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
         )
-        metadata: dict[str, Any] = {}
-        if (
-            channel == "slack"
-            and session_key.startswith("slack:")
-            and session_key.count(":") >= 2
-        ):
-            metadata["slack"] = {"thread_ts": session_key.split(":", 2)[2]}
+        metadata = system_reply_metadata(channel, session_key)
         if origin_message_id := msg.metadata.get("origin_message_id"):
             metadata["origin_message_id"] = origin_message_id
         return TurnRoute(channel=channel, chat_id=chat_id, metadata=metadata)
@@ -183,7 +200,9 @@ class TurnDelivery:
     input_message: InboundMessage
     session_key: str
     route: TurnRoute
+    route_admission: TurnRouteAdmission | None = None
     enable_stream: bool = False
+    run_id: str = field(init=False)
     delivery_message: InboundMessage = field(init=False)
     lifecycle_message: InboundMessage = field(init=False)
     _stream_base_id: str | None = field(init=False, default=None)
@@ -191,13 +210,26 @@ class TurnDelivery:
     _stream_open: bool = field(init=False, default=False)
     events: EventSink = field(init=False)
     _routed_events: EventSink = field(init=False)
+    completed: bool = field(init=False, default=False)
     _stop_reason: str | None = field(init=False, default=None)
     _failure_error_kind: str | None = field(init=False, default=None)
     _retry_status: RetryStatusEvent | None = field(init=False, default=None)
+    _response_input_ids: tuple[str, ...] | None = field(init=False, default=None)
+    _response_source: ResponseSource | None = field(init=False, default=None)
+    _response_source_seen: bool = field(init=False, default=False)
+    _response_content: str | None = field(init=False, default=None)
+    _stream_sources: list[ResponseSource] = field(init=False, default_factory=list)
+    _stream_source_unknown: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
-        self._routed_events = _bind_events(self.bus, self.route)
-        self.events = EventSink(self._publish_event, self._routed_events.accepts)
+        self.run_id = uuid4().hex
+        input_id = input_history_metadata(self.input_message)["input_id"]
+        self._response_input_ids = (input_id,) if input_id else None
+        self._routed_events = _bind_events(self.bus, self.route, self.session_key)
+        self.events = EventSink(
+            self._publish_event,
+            lambda event_type: event_type is ResponseInputsEvent or self._routed_events.accepts(event_type),
+        )
         self.delivery_message = dataclasses.replace(
             self.input_message,
             channel=self.route.channel,
@@ -214,14 +246,40 @@ class TurnDelivery:
     def streaming(self) -> bool:
         return self._stream_base_id is not None
 
+    async def bind_session_generation(self, generation: str) -> None:
+        """Admit the destination before publishing any durable turn facts."""
+        previous = self.delivery_message.session_generation
+        metadata = dict(self.route.metadata)
+        stored_generation = metadata.get(HISTORY_GENERATION_METADATA_KEY)
+        if self.route.channel == "websocket" and (stored_generation is None or stored_generation == previous):
+            metadata[HISTORY_GENERATION_METADATA_KEY] = generation
+        route = dataclasses.replace(self.route, metadata=metadata)
+        if self.route_admission is not None:
+            route = await self.route_admission(route, self.session_key, generation)
+        self.route = route
+        self.delivery_message.metadata = dict(route.metadata)
+        self.delivery_message.session_generation = generation
+        self.lifecycle_message.session_generation = generation
+        if HISTORY_GENERATION_METADATA_KEY in route.metadata:
+            for message in (self.lifecycle_message, self.input_message):
+                message.metadata[HISTORY_GENERATION_METADATA_KEY] = route.metadata[
+                    HISTORY_GENERATION_METADATA_KEY
+                ]
+        self._routed_events = _bind_events(self.bus, self.route, self.session_key)
+
     def remember_session_route(self, session_metadata: dict[str, Any]) -> None:
         """Keep only routing fields needed to deliver a later idle notification."""
+        if is_internal_session(self.session_key):
+            session_metadata.pop("_compaction_route", None)
+            return
         # Keep the storage key readable by older gateways.
         session_metadata["_compaction_route"] = {
             "channel": self.route.channel,
             "chat_id": self.route.chat_id,
             "metadata": notification_metadata(self.route.channel, self.route.metadata),
         }
+        if generation := self.route.metadata.get(HISTORY_GENERATION_METADATA_KEY):
+            session_metadata["_compaction_route"]["generation"] = generation
 
     async def started(self) -> None:
         if self.route.publish_lifecycle:
@@ -246,15 +304,16 @@ class TurnDelivery:
                 self.delivery_message,
                 self.session_key,
                 runtime,
+                run_id=self.run_id,
             )
             return
-        self.runtime_event_publisher.record_turn_runtime(self.session_key, runtime)
+        self.runtime_event_publisher.record_turn_runtime(self.session_key, runtime, run_id=self.run_id)
 
     def record_latency(self, latency_ms: int | None) -> None:
-        self.runtime_event_publisher.record_turn_latency(self.session_key, latency_ms)
+        self.runtime_event_publisher.record_turn_latency(self.session_key, latency_ms, run_id=self.run_id)
 
     def record_usage(self, round_usages: list[LLMUsage]) -> None:
-        self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages)
+        self.runtime_event_publisher.record_turn_usage(self.session_key, round_usages, run_id=self.run_id)
 
     def record_stop_reason(
         self,
@@ -305,7 +364,30 @@ class TurnDelivery:
         if response is not None:
             completed_channel = response.channel
             completed_chat_id = response.chat_id
+            generation = self.route.metadata.get(HISTORY_GENERATION_METADATA_KEY)
+            if generation is not None and (response.channel, response.chat_id) == (self.route.channel, self.route.chat_id):
+                response = dataclasses.replace(response, metadata={**response.metadata, HISTORY_GENERATION_METADATA_KEY: generation})
+            if (
+                self._response_source is not None
+                and self._response_content is not None
+                and strip_think(self._response_content).strip() == response.content.strip()
+                and stop_reason not in {"error", "tool_error"}
+            ):
+                response = dataclasses.replace(response, metadata={
+                    **response.metadata,
+                    "response_sources": [dataclasses.asdict(self._response_source)],
+                })
+            if self._response_input_ids is not None and (response.channel, response.chat_id) == (self.route.channel, self.route.chat_id):
+                response = dataclasses.replace(response, metadata={
+                    **response.metadata, "response_input_ids": list(self._response_input_ids),
+                })
             if response.channel != "websocket" or stop_reason != "error":
+                delivery = DeliveryRequest.from_context(
+                    self.input_message.metadata, self.session_key,
+                    self.delivery_message.session_generation,
+                )
+                if delivery is not None:
+                    response = dataclasses.replace(response, delivery=delivery)
                 await self.bus.publish_outbound(response)
         elif self.lifecycle_message.channel == "cli":
             await self.bus.publish_outbound(
@@ -318,11 +400,9 @@ class TurnDelivery:
             )
         if publish_completion:
             outcome, failure_kind = _turn_outcome(stop_reason)
-            await self.runtime_event_publisher.turn_completed(
+            await self._publish_completion(
                 channel=completed_channel,
                 chat_id=completed_chat_id,
-                session_key=self.session_key,
-                metadata=self.lifecycle_message.metadata,
                 outcome=outcome,
                 failure_kind=failure_kind,
                 failure_error_kind=(self._failure_error_kind or (
@@ -332,6 +412,9 @@ class TurnDelivery:
                     self._retry_status.attempt if failure_kind == "model" and self._retry_status else None
                 ),
             )
+
+    async def cancelled(self) -> None:
+        await self._publish_completion(outcome="cancelled")
 
     async def fail(self, *, publish_completion: bool) -> None:
         await self.bus.publish_outbound(
@@ -343,14 +426,31 @@ class TurnDelivery:
             )
         )
         if publish_completion:
+            await self._publish_completion(outcome="failed", failure_kind="internal")
+
+    async def _publish_completion(
+        self, *, outcome: str, channel: str | None = None, chat_id: str | None = None,
+        failure_kind: str | None = None, failure_error_kind: str | None = None,
+        failure_attempts: int | None = None,
+    ) -> None:
+        if self.completed:
+            return
+
+        async def publish() -> None:
             await self.runtime_event_publisher.turn_completed(
-                channel=self.lifecycle_message.channel,
-                chat_id=self.lifecycle_message.chat_id,
+                channel=channel if channel is not None else self.lifecycle_message.channel,
+                chat_id=chat_id if chat_id is not None else self.lifecycle_message.chat_id,
                 session_key=self.session_key,
                 metadata=self.lifecycle_message.metadata,
-                outcome="failed",
-                failure_kind="internal",
+                outcome=outcome,
+                failure_kind=failure_kind,
+                failure_error_kind=failure_error_kind,
+                failure_attempts=failure_attempts,
+                run_id=self.run_id,
             )
+            self.completed = True
+
+        await shield_and_drain(publish())
 
     async def idle(self) -> None:
         await self.runtime_event_publisher.run_status_changed(
@@ -358,20 +458,52 @@ class TurnDelivery:
             self.session_key,
             "idle",
         )
-        self.runtime_event_publisher.clear_turn(self.session_key)
+        self.runtime_event_publisher.clear_turn(self.session_key, run_id=self.run_id)
 
     def _stream_id(self) -> str:
         assert self._stream_base_id is not None
         return f"{self._stream_base_id}:{self._stream_segment}"
 
     async def _publish_event(self, event: AgentEvent) -> None:
+        if isinstance(event, ResponseInputsEvent):
+            self._response_input_ids = event.input_ids
+            return
+        if isinstance(event, ResponseSourceEvent):
+            self._response_source_seen = True
+            self._response_source = event.source
+            self._response_content = event.content
+            return
         if isinstance(event, RetryStatusEvent):
             self._retry_status = event if event.state == "exhausted" else None
         if isinstance(event, StreamDeltaEvent | StreamEndEvent):
             if not self.streaming:
                 return
             event = dataclasses.replace(event, stream_id=self._stream_id())
-        if self._routed_events.publish is not None:
+            if isinstance(event, StreamDeltaEvent) and event.content:
+                source = self._response_source
+                if (
+                    self._response_content is not None
+                    and event.content.strip() not in strip_think(self._response_content)
+                ):
+                    source = None
+                if source is None:
+                    self._stream_source_unknown = True
+                if source is not None and source not in self._stream_sources:
+                    self._stream_sources.append(source)
+            if self._routed_events.accepts(type(event)):
+                metadata = deepcopy(self.route.metadata)
+                if self._response_input_ids is not None:
+                    metadata["response_input_ids"] = list(self._response_input_ids)
+                if self._response_source_seen and self._routed_events.accepts(ResponseSourceEvent):
+                    metadata["response_sources"] = (
+                        [] if self._stream_source_unknown else
+                        [dataclasses.asdict(source) for source in self._stream_sources]
+                    )
+                await self.bus.publish_event(
+                    event, channel=self.route.channel, chat_id=self.route.chat_id,
+                    metadata=metadata,
+                )
+        elif self._routed_events.publish is not None:
             await self._routed_events.publish(event)
         if isinstance(event, StreamDeltaEvent):
             self._stream_open = True
@@ -379,6 +511,8 @@ class TurnDelivery:
             self._stream_open = event.merge_next
             if not event.merge_next:
                 self._stream_segment += 1
+                self._stream_sources.clear()
+                self._stream_source_unknown = False
 
     async def abort_stream(self) -> None:
         """Close an interrupted stream so stateful channels can release its buffer."""

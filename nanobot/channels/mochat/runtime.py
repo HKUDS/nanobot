@@ -1,5 +1,4 @@
 # pyright: reportConstantRedefinition=false, reportMissingTypeStubs=false
-"""Mochat channel implementation using Socket.IO with HTTP polling fallback."""
 
 from __future__ import annotations
 
@@ -15,11 +14,13 @@ from typing import Any, cast
 import httpx
 from pydantic import Field
 
+from nanobot.bus.delivery import DeliveryRejectedError
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_runtime_subdir
-from nanobot.config.schema import Base
+from nanobot.config_base import Base
+from nanobot.events import ContextCompactionEvent
 
 try:
     import socketio
@@ -37,10 +38,6 @@ except ImportError:
 MAX_SEEN_MESSAGE_IDS = 2000
 CURSOR_SAVE_DEBOUNCE_S = 0.5
 
-
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
 
 @dataclass
 class MochatBufferedEntry:
@@ -69,17 +66,11 @@ class MochatTarget:
     is_panel: bool
 
 
-# ---------------------------------------------------------------------------
-# Pure helpers
-# ---------------------------------------------------------------------------
-
 def _safe_dict(value: Any) -> dict[str, Any]:
-    """Return *value* if it's a dict, else empty dict."""
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
 def _str_field(src: dict[str, Any], *keys: str) -> str:
-    """Return the first non-empty str value found for *keys*, stripped."""
     for k in keys:
         v = src.get(k)
         if isinstance(v, str) and v.strip():
@@ -92,7 +83,6 @@ def _make_synthetic_event(
     meta: Any, group_id: str, converse_id: str,
     timestamp: Any = None, *, author_info: Any = None,
 ) -> dict[str, Any]:
-    """Build a synthetic ``message.add`` event dict."""
     payload: dict[str, Any] = {
         "messageId": message_id, "author": author,
         "content": content, "meta": _safe_dict(meta),
@@ -213,10 +203,6 @@ def parse_timestamp(value: Any) -> int | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Config classes
-# ---------------------------------------------------------------------------
-
 class MochatMentionConfig(Base):
     """Mochat mention behavior configuration."""
 
@@ -255,10 +241,6 @@ class MochatConfig(Base):
     reply_delay_mode: str = "non-mention"
     reply_delay_ms: int = 120000
 
-
-# ---------------------------------------------------------------------------
-# Channel
-# ---------------------------------------------------------------------------
 
 class MochatChannel(BaseChannel):
     """Mochat channel using socket.io with fallback polling workers."""
@@ -301,7 +283,6 @@ class MochatChannel(BaseChannel):
         self._refresh_task: asyncio.Task[None] | None = None
         self._target_locks: dict[str, asyncio.Lock] = {}
 
-    # ---- lifecycle ---------------------------------------------------------
 
     async def start(self) -> None:
         """Start Mochat channel workers and websocket connection."""
@@ -350,9 +331,12 @@ class MochatChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send outbound message to session or panel."""
-        if not self.config.claw_token:
-            self.logger.warning("claw_token missing, skip send")
+        if isinstance(msg.event, ContextCompactionEvent) and not (
+            msg.event.notify or self.show_compaction_notices
+        ):
             return
+        if not self.config.claw_token:
+            raise DeliveryRejectedError("MoChat claw_token missing")
 
         parts = ([msg.content.strip()] if msg.content and msg.content.strip() else [])
         if msg.media:
@@ -367,8 +351,7 @@ class MochatChannel(BaseChannel):
 
         target = resolve_mochat_target(msg.chat_id)
         if not target.id:
-            self.logger.warning("outbound target is empty")
-            return
+            raise DeliveryRejectedError("MoChat outbound target is empty")
 
         is_panel = (target.is_panel or target.id in self._panel_set) and not target.id.startswith("session_")
         try:
@@ -382,7 +365,6 @@ class MochatChannel(BaseChannel):
             self.logger.exception("Failed to send message")
             raise
 
-    # ---- config / init helpers ---------------------------------------------
 
     def _seed_targets_from_config(self) -> None:
         sessions, self._auto_discover_sessions = self._normalize_id_list(self.config.sessions)
@@ -398,7 +380,6 @@ class MochatChannel(BaseChannel):
         cleaned = [str(v).strip() for v in values if str(v).strip()]
         return sorted({v for v in cleaned if v != "*"}), "*" in cleaned
 
-    # ---- websocket ---------------------------------------------------------
 
     async def _start_socket_client(self) -> bool:
         if not SOCKETIO_AVAILABLE:
@@ -484,7 +465,6 @@ class MochatChannel(BaseChannel):
                 await self._handle_notify_chat_message(payload)
         return handler
 
-    # ---- subscribe ---------------------------------------------------------
 
     async def _subscribe_all(self) -> bool:
         ok = await self._subscribe_sessions(sorted(self._session_set))
@@ -553,7 +533,6 @@ class MochatChannel(BaseChannel):
             else {"result": True, "data": raw}
         )
 
-    # ---- refresh / discovery -----------------------------------------------
 
     async def _refresh_loop(self) -> None:
         interval_s = max(1.0, self.config.refresh_interval_ms / 1000.0)
@@ -638,7 +617,6 @@ class MochatChannel(BaseChannel):
         if self._fallback_mode:
             await self._ensure_fallback_workers()
 
-    # ---- fallback workers --------------------------------------------------
 
     async def _ensure_fallback_workers(self) -> None:
         if not self._running:
@@ -707,7 +685,6 @@ class MochatChannel(BaseChannel):
                 self.logger.warning("panel polling error ({}): {}", panel_id, e)
             await asyncio.sleep(sleep_s)
 
-    # ---- inbound event processing ------------------------------------------
 
     async def _handle_watch_payload(self, payload: dict[str, Any], target_kind: str) -> None:
         if not isinstance(cast(object, payload), dict):
@@ -787,7 +764,6 @@ class MochatChannel(BaseChannel):
 
         await self._dispatch_entries(target_id, target_kind, [entry], was_mentioned)
 
-    # ---- dedup / buffering -------------------------------------------------
 
     def _remember_message_id(self, key: str, message_id: str) -> bool:
         seen_set = self._seen_set.setdefault(key, set())
@@ -849,7 +825,6 @@ class MochatChannel(BaseChannel):
                 state.timer.cancel()
         self._delay_states.clear()
 
-    # ---- notify handlers ---------------------------------------------------
 
     async def _handle_notify_chat_message(self, payload: Any) -> None:
         if not isinstance(payload, dict):
@@ -903,7 +878,6 @@ class MochatChannel(BaseChannel):
         )
         await self._process_inbound_event(session_id, evt, "session")
 
-    # ---- cursor persistence ------------------------------------------------
 
     def _mark_session_cursor(self, session_id: str, cursor: int) -> None:
         if cursor < 0 or cursor < self._session_cursor.get(session_id, 0):
@@ -946,7 +920,6 @@ class MochatChannel(BaseChannel):
         except Exception as e:
             self.logger.warning("Failed to save cursor file: {}", e)
 
-    # ---- HTTP helpers ------------------------------------------------------
 
     async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not self._http:
@@ -980,7 +953,6 @@ class MochatChannel(BaseChannel):
 
     async def _api_send(self, path: str, id_key: str, id_val: str,
                         content: str, reply_to: str | None, group_id: str | None = None) -> dict[str, Any]:
-        """Unified send helper for session and panel messages."""
         body: dict[str, Any] = {id_key: id_val, "content": content}
         if reply_to:
             body["replyTo"] = reply_to

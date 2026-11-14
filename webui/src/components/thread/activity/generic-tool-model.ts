@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 import { compactActivityPath, redactActivityText } from "./activity-text";
 
 export type GenericToolStatus = "running" | "done" | "error";
@@ -6,6 +8,7 @@ export type ToolFamily = "content-search" | "file-search" | "list" | "read" | "m
 interface ToolField {
   key:
     | "query"
+    | "args"
     | "pattern"
     | "glob"
     | "path"
@@ -68,6 +71,7 @@ const EXCLUDED_TOOLS = new Set([
   "cli_anything_run",
   "edit_file",
   "exec",
+  "exec_session",
   "exec_command",
   "execute_command",
   "run_cli_app",
@@ -85,14 +89,26 @@ export function parseGenericToolTrace(line: string): GenericToolTrace | null {
   const call = parseCall(line);
   if (!call || isExcludedTool(call.name)) return null;
   const family = toolFamily(call.name);
-  const fields = safeFields(call.args);
+  const fields: ToolField[] = call.name === "subagent" && typeof call.args === "string"
+    ? [{ key: "action", value: call.args.trim() }]
+    : safeFields(call.args);
+  if (call.name === "rg" && call.args && typeof call.args === "object") {
+    const argv = (call.args as Record<string, unknown>).args;
+    if (Array.isArray(argv) && argv.every((arg) => typeof arg === "string")) {
+      fields.push({ key: "args", value: argv.map((arg) =>
+        arg && !/[\s"']/u.test(arg) ? arg : JSON.stringify(arg),
+      ).join(" ") });
+    }
+  }
   const collectedSource = fields.some((field) => isCollectedSourcePath(field.value));
+  let groupKey = family === "generic"
+    ? `${family}:${call.name}`
+    : `${family}:${collectedSource ? "collected" : "workspace"}`;
+  if (call.name === "subagent") groupKey += `:${fields.find((field) => field.key === "action")?.value.toLowerCase() ?? ""}`;
   return {
     name: call.name,
     family,
-    groupKey: family === "generic"
-      ? `${family}:${call.name}`
-      : `${family}:${collectedSource ? "collected" : "workspace"}`,
+    groupKey,
     fields,
     collectedSource,
   };
@@ -110,16 +126,19 @@ function compactGenericToolPath(value: string): string {
   return compactActivityPath(normalized);
 }
 
-export function describeGenericToolRun(items: GenericToolRunItem[]): GenericToolPresentation {
+export function describeGenericToolRun(
+  items: GenericToolRunItem[],
+  t: TFunction,
+): GenericToolPresentation {
   const status = aggregateStatus(items);
   const family = items[0]?.trace.family ?? "generic";
   const name = items[0]?.trace.name ?? "tool";
   const collected = items.length > 0 && items.every((item) => item.trace.collectedSource);
   return {
     status,
-    label: activityLabel(family, status, collected, name, items),
+    label: activityLabel(family, status, collected, name, items, t),
     detail: activityDetail(items, family, name),
-    aside: activityAside(items, family),
+    aside: activityAside(items, family, t),
   };
 }
 
@@ -193,69 +212,87 @@ function activityLabel(
   collected: boolean,
   name: string,
   items: GenericToolRunItem[],
+  t: TFunction,
 ): string {
   if (family === "content-search") {
     return statusCopy(
       status,
-      collected ? "Reviewing sources" : "Searching files",
-      collected ? "Reviewed sources" : "Searched files",
-      collected ? "Could not review sources" : "Could not search files",
+      collected ? t("message.agentActivity.reviewingSources") : t("message.agentActivity.searchingFiles"),
+      collected ? t("message.agentActivity.reviewedSources") : t("message.agentActivity.searchedFiles"),
+      collected ? t("message.agentActivity.reviewSourcesFailed") : t("message.agentActivity.searchFilesFailed"),
     );
   }
   if (family === "file-search") {
-    return statusCopy(status, "Finding files", "Found files", "Could not find files");
+    return statusCopy(
+      status,
+      t("message.agentActivity.findingFiles"),
+      t("message.agentActivity.foundFiles"),
+      t("message.agentActivity.findFilesFailed"),
+    );
   }
   if (family === "list") {
-    return statusCopy(status, "Listing files", "Listed files", "Could not list files");
+    return statusCopy(
+      status,
+      t("message.agentActivity.listingFiles"),
+      t("message.agentActivity.listedFiles"),
+      t("message.agentActivity.listFilesFailed"),
+    );
   }
   if (family === "read") {
     return statusCopy(
       status,
-      collected ? "Reading source" : "Reading file",
-      collected ? "Read source" : "Read file",
-      collected ? "Could not read source" : "Could not read file",
+      collected ? t("message.agentActivity.readingSource") : t("message.agentActivity.readingFile"),
+      collected ? t("message.agentActivity.readSource") : t("message.agentActivity.readFile"),
+      collected ? t("message.agentActivity.readSourceFailed") : t("message.agentActivity.readFileFailed"),
     );
   }
   if (family === "memory") {
-    return statusCopy(status, "Searching memory", "Searched memory", "Could not search memory");
+    return statusCopy(
+      status,
+      t("message.agentActivity.searchingMemory"),
+      t("message.agentActivity.searchedMemory"),
+      t("message.agentActivity.searchMemoryFailed"),
+    );
   }
 
   const action = fieldValue(items[0]?.trace, "action").toLowerCase();
   switch (name) {
     case "generate_image":
-      return statusCopy(status, "Generating image", "Generated image", "Could not generate image");
+      return activityStatus(t, status, "generatingImage", "generatedImage", "generateImageFailed");
     case "spawn":
-      return statusCopy(status, "Delegating task", "Delegated task", "Could not delegate task");
+      return activityStatus(t, status, "delegatingTask", "delegatedTask", "delegateTaskFailed");
+    case "subagent":
+      if (action === "create") return activityStatus(t, status, "delegatingTask", "delegatedTask", "delegateTaskFailed");
+      if (action === "check") return activityStatus(t, status, "checkingSubtask", "checkedSubtask", "checkSubtaskFailed");
+      if (action === "send") return activityStatus(t, status, "messagingSubtask", "queuedSubtaskMessage", "messageSubtaskFailed");
+      if (action === "cancel") return activityStatus(t, status, "stoppingSubtask", "requestedSubtaskStop", "stopSubtaskFailed");
+      return activityStatus(t, status, "managingSubtasks", "managedSubtasks", "manageSubtasksFailed");
     case "message":
-      return statusCopy(status, "Sending message", "Sent message", "Could not send message");
+      return activityStatus(t, status, "sendingMessage", "sentMessage", "sendMessageFailed");
     case "my":
       return action === "set" || action === "modify"
-        ? statusCopy(status, "Updating agent settings", "Updated agent settings", "Could not update agent settings")
-        : statusCopy(status, "Checking agent settings", "Checked agent settings", "Could not check agent settings");
+        ? activityStatus(t, status, "updatingAgentSettings", "updatedAgentSettings", "updateAgentSettingsFailed")
+        : activityStatus(t, status, "checkingAgentSettings", "checkedAgentSettings", "checkAgentSettingsFailed");
     case "cron":
-      if (action === "add") return statusCopy(status, "Scheduling automation", "Scheduled automation", "Could not schedule automation");
-      if (action === "remove") return statusCopy(status, "Removing automation", "Removed automation", "Could not remove automation");
-      return statusCopy(status, "Checking automations", "Checked automations", "Could not check automations");
+      if (action === "add") return activityStatus(t, status, "schedulingAutomation", "scheduledAutomation", "scheduleAutomationFailed");
+      if (action === "remove") return activityStatus(t, status, "removingAutomation", "removedAutomation", "removeAutomationFailed");
+      return activityStatus(t, status, "checkingAutomations", "checkedAutomations", "checkAutomationsFailed");
     case "create_goal":
-      return statusCopy(status, "Starting long task", "Started long task", "Could not start long task");
+      return activityStatus(t, status, "startingLongTask", "startedLongTask", "startLongTaskFailed");
     case "update_goal":
-      return statusCopy(status, "Updating long task", "Updated long task", "Could not update long task");
-    // TODO(0.3.2): Remove write_stdin display compatibility after 0.3.1.
-    case "exec_session":
-    case "write_stdin":
-      return statusCopy(status, "Continuing command", "Continued command", "Could not continue command");
+      return activityStatus(t, status, "updatingLongTask", "updatedLongTask", "updateLongTaskFailed");
     case "list_exec_sessions":
-      return statusCopy(status, "Checking running commands", "Checked running commands", "Could not check running commands");
+      return activityStatus(t, status, "checkingRunningCommands", "checkedRunningCommands", "checkRunningCommandsFailed");
     case "screenshot":
     case "capture_screenshot":
-      return statusCopy(status, "Capturing screenshot", "Captured screenshot", "Could not capture screenshot");
+      return activityStatus(t, status, "capturingScreenshot", "capturedScreenshot", "captureScreenshotFailed");
     default: {
       const humanName = humanizeToolName(name);
       return statusCopy(
         status,
-        `Running ${humanName}`,
-        `Completed ${humanName}`,
-        `Could not complete ${humanName}`,
+        t("message.agentActivity.runningTool", { name: humanName }),
+        t("message.agentActivity.completedTool", { name: humanName }),
+        t("message.agentActivity.completeToolFailed", { name: humanName }),
       );
     }
   }
@@ -264,6 +301,7 @@ function activityLabel(
 function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: string): string {
   if (items.length !== 1) return "";
   const trace = items[0].trace;
+  if (name === "rg") return safeText(fieldValue(trace, "args"));
   if (family === "content-search") {
     return quote(fieldValue(trace, "query") || fieldValue(trace, "pattern"));
   }
@@ -282,6 +320,7 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
 
   switch (name) {
     case "spawn":
+    case "subagent":
       return safeText(fieldValue(trace, "label"));
     case "message":
       return safeText(fieldValue(trace, "channel"));
@@ -293,10 +332,6 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
       return safeText(fieldValue(trace, "ui_summary"));
     case "update_goal":
       return safeText(fieldValue(trace, "action"));
-    // TODO(0.3.2): Remove write_stdin display compatibility after 0.3.1.
-    case "exec_session":
-    case "write_stdin":
-      return compactIdentifier(fieldValue(trace, "session_id"));
     case "screenshot":
     case "capture_screenshot":
       return "";
@@ -305,14 +340,14 @@ function activityDetail(items: GenericToolRunItem[], family: ToolFamily, name: s
   }
 }
 
-function activityAside(items: GenericToolRunItem[], family: ToolFamily): string {
+function activityAside(items: GenericToolRunItem[], family: ToolFamily, t: TFunction): string {
   const pathCount = uniqueValues(items, ["path", "file_path"]).length;
-  if (pathCount > 1) return `${pathCount} files`;
+  if (pathCount > 1) return t("message.agentActivity.files", { count: pathCount });
   if (items.length <= 1) return "";
   if (family === "content-search" || family === "file-search" || family === "memory") {
-    return `${items.length} searches`;
+    return t("message.agentActivity.searches", { count: items.length });
   }
-  return `${items.length} actions`;
+  return t("message.agentActivity.actions", { count: items.length });
 }
 
 function fieldValue(trace: GenericToolTrace | undefined, key: ToolField["key"]): string {
@@ -330,6 +365,21 @@ function statusCopy(status: GenericToolStatus, running: string, done: string, fa
   return status === "running" ? running : status === "error" ? failed : done;
 }
 
+function activityStatus(
+  t: TFunction,
+  status: GenericToolStatus,
+  running: string,
+  done: string,
+  failed: string,
+): string {
+  return statusCopy(
+    status,
+    t(`message.agentActivity.${running}`),
+    t(`message.agentActivity.${done}`),
+    t(`message.agentActivity.${failed}`),
+  );
+}
+
 function compactDetail(value: string): string {
   return value ? truncateMiddle(compactGenericToolPath(value), 88) : "";
 }
@@ -341,12 +391,6 @@ function safeText(value: string): string {
 function quote(value: string): string {
   const safe = safeText(value);
   return safe ? `“${safe}”` : "";
-}
-
-function compactIdentifier(value: string): string {
-  const safe = safeText(value);
-  if (safe.length <= 16) return safe;
-  return `${safe.slice(0, 7)}…${safe.slice(-5)}`;
 }
 
 function humanizeToolName(name: string): string {

@@ -21,20 +21,22 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
 
-    "types": ["node", "vitest/globals", "@testing-library/jest-dom"],
+    "types": ["node", "vite/client", "vitest/globals", "@testing-library/jest-dom"],
+    "typeRoots": ["./node_modules/@types", "./node_modules"],
 
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
+      "vitest": ["./node_modules/vitest"],
       "lucide-react": ["./node_modules/lucide-react"],
-      "react": ["./node_modules/@types/react/index.d.ts"],
-      "react/*": ["./node_modules/@types/react/*"],
       "react-i18next": ["./node_modules/react-i18next"]
     }
   },
   "include": [
     "src",
     "../nanobot/channels/*/webui/**/*.ts",
-    "../nanobot/channels/*/webui/**/*.tsx"
+    "../nanobot/channels/*/webui/**/*.tsx",
+    "../nanobot/channels/*/tests/webui/**/*.ts",
+    "../nanobot/channels/*/tests/webui/**/*.tsx"
   ]
 }
