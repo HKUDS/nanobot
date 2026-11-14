@@ -32,19 +32,32 @@ for (const width of [1280, 390]) {
       expect(bounds!.y + bounds!.height / 2).toBe(pillBounds!.y + pillBounds!.height / 2);
       const model = page.getByText("Preview", { exact: true });
       const modelBounds = await model.boundingBox();
+      const send = action.locator('[data-action-icon="send"]');
+      await expect(send).toHaveCSS("opacity", "0");
+      const capture = await send.evaluateHandle((icon) => {
+        // Sample the real transition at activation, before a test round trip can outlast it.
+        const sample = { opacity: 0 };
+        const observer = new MutationObserver(() => {
+          if (!icon.hasAttribute("data-active")) return;
+          observer.disconnect();
+          const fade = icon.getAnimations().find((animation) => animation instanceof CSSTransition
+            && animation.transitionProperty === "opacity");
+          if (!fade || !fade.effect) return;
+          fade.pause();
+          fade.currentTime = Number(fade.effect.getTiming().duration) / 2;
+          sample.opacity = Number(getComputedStyle(icon).opacity);
+          fade.play();
+        });
+        observer.observe(icon, { attributes: true, attributeFilter: ["data-active"] });
+        return sample;
+      });
       await input.fill("Please work");
       await expect(action).toHaveAccessibleName("Send message");
-      const samples = await action.evaluate((button) => new Promise<number[]>((resolve) => {
-        const values: number[] = [];
-        const start = performance.now();
-        const sample = () => {
-          values.push(Number(getComputedStyle(button.querySelector('[data-action-icon="send"]')!).opacity));
-          if (performance.now() - start < 200) requestAnimationFrame(sample);
-          else resolve(values);
-        };
-        requestAnimationFrame(sample);
-      }));
-      expect(samples.some((opacity) => opacity > 0 && opacity < 1)).toBe(true);
+      const { opacity } = await capture.jsonValue();
+      await capture.dispose();
+      expect(opacity).toBeGreaterThan(0);
+      expect(opacity).toBeLessThan(1);
+      await expect(send).toHaveCSS("opacity", "1");
       expect(await action.boundingBox()).toEqual(bounds);
       expect(await model.boundingBox()).toEqual(modelBounds);
 

@@ -11,6 +11,8 @@ interface ThinkingReasoningShellProps {
   collapseLabel?: string;
   contentId?: string;
   label: string;
+  reservedLabel?: string;
+  preview?: ReactNode;
   children: ReactNode;
   hasDetails?: boolean;
   onToggle: () => void;
@@ -24,6 +26,8 @@ export function ThinkingReasoningShell({
   collapseLabel,
   contentId: providedContentId,
   label,
+  reservedLabel,
+  preview,
   children,
   hasDetails = true,
   onToggle,
@@ -32,21 +36,30 @@ export function ThinkingReasoningShell({
   const contentId = providedContentId ?? generatedContentId;
   const [hasExpanded, setHasExpanded] = useState(expanded);
   if (expanded && !hasExpanded) setHasExpanded(true);
-  const headerClassName = "touch-target inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md px-1.5";
+  const headerClassName = cn(
+    "touch-target inline-flex h-7 min-w-0 items-center gap-1.5 rounded-md px-1.5",
+    preview && "max-sm:self-start",
+  );
+  const labelClassName = "min-w-0 truncate text-[12px] font-normal leading-4";
+  const headerLabel = (
+    <span
+      data-sheen-text={active ? label : undefined}
+      className={cn(labelClassName, "text-muted-foreground", active && "streaming-text-sheen")}
+    >
+      {label}
+    </span>
+  );
   const headerContent = (
     <>
       <Activity className={cn("h-3.5 w-3.5 shrink-0", active ? "activity-current" : "text-muted-foreground")} strokeWidth={1.5} aria-hidden>
         {active ? <path className="activity-current-trace" pathLength={100} d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /> : null}
       </Activity>
-      <span
-        data-sheen-text={active ? label : undefined}
-        className={cn(
-          "min-w-0 truncate text-[12px] font-normal leading-4 text-muted-foreground",
-          active && "streaming-text-sheen",
-        )}
-      >
-        {label}
-      </span>
+      {reservedLabel ? (
+        <span className="grid min-w-0 tabular-nums [&>span]:col-start-1 [&>span]:row-start-1">
+          {headerLabel}
+          <span className={cn(labelClassName, "invisible")} aria-hidden>{reservedLabel}</span>
+        </span>
+      ) : headerLabel}
     </>
   );
   return (
@@ -57,7 +70,10 @@ export function ThinkingReasoningShell({
       data-block-context-rail={contextual && showHeader || undefined}
       data-block-context-expanded={contextual && expanded ? true : undefined}
     >
-      {showHeader ? <div className="flex min-h-7 items-center gap-1.5">
+      {showHeader ? <div className={cn(
+        "flex min-h-7 items-center gap-1.5",
+        preview && "max-sm:flex-col max-sm:items-stretch max-sm:gap-0",
+      )}>
         {hasDetails ? (
           <button
             type="button"
@@ -87,6 +103,7 @@ export function ThinkingReasoningShell({
             {headerContent}
           </div>
         )}
+        {preview}
       </div> : null}
 
       {hasDetails ? (

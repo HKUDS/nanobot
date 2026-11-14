@@ -33,6 +33,7 @@ import { ThreadLoadingFixture } from "./thread-loading-fixture";
 import { AnswerOrderFixture } from "./answer-order-fixture";
 import { SidebarActivityFixture } from "./sidebar-activity-fixture";
 import { ActivityLogosFixture } from "./activity-logos-fixture";
+import { ActivityWheelFixture } from "./activity-wheel-fixture";
 import { ExecSessionFixture } from "./exec-session-fixture";
 import { HistoryHydrationFixture } from "./history-hydration-fixture";
 import { IdleCompactionFixture, installIdleCompactionApi } from "./idle-compaction-fixture";
@@ -230,6 +231,7 @@ if (parameters.get("case") === "tools-catalog") installToolsCatalogPreviewApi();
 if (parameters.get("case") === "idle-compaction") installIdleCompactionApi();
 if (parameters.get("case") === "subagent-dock") installSubagentDockApi();
 await initializeI18n();
+if (parameters.get("case") === "activity-wheel") await setAppLanguage("zh-CN");
 if (parameters.get("case") === "appearance" && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
@@ -266,6 +268,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <AnswerOrderFixture />
     : parameters.get("case") === "activity-logos"
     ? <ActivityLogosFixture parameters={parameters} />
+    : parameters.get("case") === "activity-wheel"
+    ? <ActivityWheelFixture />
     : parameters.get("case") === "exec-session"
     ? <ExecSessionFixture />
     : parameters.get("case") === "sidebar-activity"

@@ -418,7 +418,7 @@ describe("ThreadMessages", () => {
     );
 
     expect(screen.getByText("I will check that.")).toBe(paragraph);
-    expect(screen.getByText(/working/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Working for / })).toBeInTheDocument();
   });
 
   it("projects a turn in causal order independently of streaming state", () => {
@@ -717,8 +717,8 @@ describe("ThreadMessages", () => {
       ...messages,
       { id: "tool", role: "tool", kind: "trace", content: "web_search(query)", turnId: "automation", createdAt: now },
     ]} isStreaming activeTurnId="automation" runStartedAt={(now - 3_000) / 1000} />);
-    expect(screen.getByTestId("agent-activity-content")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Working for 3s/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Working for 3s" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByTestId("latest-activity-wheel")).toBeInTheDocument();
     expect(screen.queryByTestId("activity-reasoning-marker")).not.toBeInTheDocument();
   });
 
@@ -1502,6 +1502,7 @@ describe("ThreadMessages", () => {
 
     render(<ThreadMessages messages={messages} isStreaming />);
 
+    fireEvent.click(screen.getByRole("button", { name: /^Working for / }));
     expect(screen.getByLabelText(/editing foo\.txt/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/edited foo\.txt/i)).not.toBeInTheDocument();
   });

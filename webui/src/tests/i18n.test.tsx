@@ -212,6 +212,7 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.help.webuiDefaultAccess",
   "settings.values.light",
   "settings.values.dark",
+  "settings.values.collapsed",
   "settings.values.expanded",
   "settings.values.enabled",
   "settings.values.disabled",
