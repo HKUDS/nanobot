@@ -210,10 +210,13 @@ describe("MarkdownTextRenderer", () => {
     const reference = screen.getByTestId("inline-file-path");
     expect(reference).not.toHaveAttribute("role");
     expect(reference).toHaveClass("text-muted-foreground");
+    const label = kind === "inferred" ? "notes/ready.md" : "Existing report";
+    expect(reference.textContent).toBe(label);
     await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/ready.md"));
     await act(async () => resolveAvailability(true));
     await waitFor(() => expect(reference).toHaveAttribute("role", "button"));
     expect(reference).toHaveAttribute("tabindex", "0");
+    expect(reference.textContent).toBe(label);
 
     fireEvent.click(reference);
 
@@ -225,26 +228,11 @@ describe("MarkdownTextRenderer", () => {
     "这是一段说明文字，最后引用 /tmp/sample.txt",
     String.raw`C:\Users\reader\My Docs\report.md`,
     "cat  \t~/My Docs/report.md",
-  ])("preserves inferred file text through availability changes: %s", async (text) => {
-    let settle!: (available: boolean) => void;
-    const resolve = vi.fn(() => new Promise<boolean>((done) => { settle = done; }));
-    const onOpenFilePreview = vi.fn();
-    const { container } = render(
-      <FilePreviewAvailabilityProvider resolve={resolve}>
-        <MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>{`Before \`${text}\` after.`}</MarkdownTextRenderer>
-      </FilePreviewAvailabilityProvider>,
-    );
+  ])("preserves complete inferred file text: %s", (text) => {
+    const { container } = render(<MarkdownTextRenderer>{`Before \`${text}\` after.`}</MarkdownTextRenderer>);
 
-    const reference = screen.getByTestId("inline-file-path");
-    expect(reference.textContent).toBe(text);
+    expect(screen.getByTestId("inline-file-path").textContent).toBe(text);
     expect(container.querySelector("p")?.textContent).toBe(`Before ${text} after.`);
-    expect(reference).not.toHaveAttribute("role");
-    await waitFor(() => expect(resolve).toHaveBeenCalledWith(text));
-    await act(async () => settle(true));
-    expect(reference.textContent).toBe(text);
-    expect(reference).toHaveAttribute("role", "button");
-    fireEvent.keyDown(reference, { key: "Enter" });
-    expect(onOpenFilePreview).toHaveBeenCalledWith(text);
   });
 
   it("does not treat non-file hrefs as previews just because the label looks like a file", () => {

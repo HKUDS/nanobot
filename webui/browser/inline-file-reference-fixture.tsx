@@ -23,7 +23,7 @@ export function InlineFileReferenceFixture() {
   const { theme } = useTheme();
   const [text, setText] = useState(source);
   const [streaming, setStreaming] = useState(true);
-  const [opened, setOpened] = useState({ path: "", count: 0 });
+  const [opened, setOpened] = useState("");
   return <ThemeProvider theme={theme}><FileActionsProvider value={{
     resolveMetadata: async (path) => ({ path, relative_path: path }),
     loadPreview: async (path) => ({
@@ -36,9 +36,9 @@ export function InlineFileReferenceFixture() {
       <button onClick={() => setStreaming(false)}>Complete message</button>
       <section aria-label="File references">
         <MessageBubble message={{ id: "file-references", role: "assistant", createdAt: 1, content: text, isStreaming: streaming }}
-          onOpenFilePreview={path => setOpened(previous => ({ path, count: previous.count + 1 }))} />
+          onOpenFilePreview={setOpened} />
       </section>
-      <output aria-label="Opened file" data-count={opened.count}>{opened.path}</output>
+      <output aria-label="Opened file">{opened}</output>
     </main>
   </FilePreviewAvailabilityProvider></FileActionsProvider></ThemeProvider>;
 }
