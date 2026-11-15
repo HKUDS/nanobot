@@ -258,6 +258,44 @@ describe("MarkdownTextRenderer", () => {
     expect(screen.getByText("src/**/*.json").tagName).toBe("CODE");
   });
 
+  it.each([120, 121, 260])("keeps %i-character inline code in the surrounding paragraph", (length) => {
+    const text = "x".repeat(length);
+    const { container } = render(<MarkdownTextRenderer>{`Before \`${text}\` after.`}</MarkdownTextRenderer>);
+    const code = container.querySelector("code");
+
+    expect(code).toHaveClass(length > 120 ? "markdown-wide-inline-code" : "markdown-inline-code");
+    expect(code?.textContent).toBe(text);
+    expect(code?.parentElement?.tagName).toBe("P");
+    expect(code?.parentElement?.textContent).toBe(`Before ${text} after.`);
+  });
+
+  it("preserves spaces and tabs in parsed inline code", () => {
+    const text = `begin  \t${"word ".repeat(30)}end`;
+    const { container } = render(<MarkdownTextRenderer>{`Before \`${text}\` after.`}</MarkdownTextRenderer>);
+
+    expect(container.querySelector("code")?.textContent).toBe(text);
+  });
+
+  it("keeps long inline code within a Markdown document preview", () => {
+    const text = "x".repeat(160);
+    const { container } = render(<MarkdownTextRenderer documentPath="/workspace/notes.md">{`Before \`${text}\` after.`}</MarkdownTextRenderer>);
+
+    expect(container.querySelector("code")).toHaveClass("markdown-wide-inline-code");
+    expect(container.querySelector("code")?.textContent).toBe(text);
+  });
+
+  it("keeps a long inferred file reference previewable", () => {
+    const path = `${"segment/".repeat(20)}report.md`;
+    const onOpenFilePreview = vi.fn();
+    render(<MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>{`Open \`${path}\`.`}</MarkdownTextRenderer>);
+
+    const reference = screen.getByTestId("inline-file-path");
+    expect(reference).toHaveTextContent("report.md");
+    expect(reference).toHaveAttribute("aria-label", path);
+    fireEvent.click(reference);
+    expect(onOpenFilePreview).toHaveBeenCalledWith(path);
+  });
+
   it.each([
     ["complete", "\n```"],
     ["streaming", ""],

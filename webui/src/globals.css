@@ -941,6 +941,16 @@
     word-wrap: break-word;
   }
 
+  .markdown-content > p code.markdown-inline-code,
+  .markdown-content > p code.markdown-wide-inline-code {
+    white-space: break-spaces;
+  }
+
+  .markdown-content > p code.markdown-wide-inline-code {
+    display: inline;
+    overflow: visible;
+  }
+
   .markdown-content pre,
   .not-prose pre {
     max-width: 100%;
