@@ -555,6 +555,7 @@ export default function MarkdownTextRenderer({
           return (
             <AvailableFileReferenceChip
               path={raw}
+              display="inline-code"
               onOpen={onOpenFilePreview}
             />
           );

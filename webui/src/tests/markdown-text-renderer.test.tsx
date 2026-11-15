@@ -138,7 +138,7 @@ describe("MarkdownTextRenderer", () => {
   });
 
   it.each([
-    { kind: "inferred", markdown: "Future file: `notes/missing.md`", path: "notes/missing.md", label: "missing.md" },
+    { kind: "inferred", markdown: "Future file: `notes/missing.md`", path: "notes/missing.md", label: "notes/missing.md" },
     { kind: "explicit", markdown: "[Future report](notes/missing.md)", path: "notes/missing.md", label: "Future report" },
     { kind: "malformed explicit", markdown: "[Python code](／home/example/workspace/model_check.py)", path: "／home/example/workspace/model_check.py", label: "Python code" },
   ])("keeps unavailable $kind file references non-interactive", async ({ markdown, path, label }) => {
@@ -188,6 +188,7 @@ describe("MarkdownTextRenderer", () => {
 
     expect(reference).not.toHaveAttribute("role");
     expect(reference).not.toHaveAttribute("tabindex");
+    expect(reference.textContent).toBe(kind === "inferred" ? "notes/locked.md" : "Unreadable report");
     fireEvent.click(reference);
     expect(onOpenFilePreview).not.toHaveBeenCalled();
   });
@@ -209,14 +210,29 @@ describe("MarkdownTextRenderer", () => {
     const reference = screen.getByTestId("inline-file-path");
     expect(reference).not.toHaveAttribute("role");
     expect(reference).toHaveClass("text-muted-foreground");
+    const label = kind === "inferred" ? "notes/ready.md" : "Existing report";
+    expect(reference.textContent).toBe(label);
     await waitFor(() => expect(resolve).toHaveBeenCalledWith("notes/ready.md"));
     await act(async () => resolveAvailability(true));
     await waitFor(() => expect(reference).toHaveAttribute("role", "button"));
     expect(reference).toHaveAttribute("tabindex", "0");
+    expect(reference.textContent).toBe(label);
 
     fireEvent.click(reference);
 
     expect(onOpenFilePreview).toHaveBeenCalledWith("notes/ready.md");
+  });
+
+  it.each([
+    "pytest tests/test_agent.py",
+    "这是一段说明文字，最后引用 /tmp/sample.txt",
+    String.raw`C:\Users\reader\My Docs\report.md`,
+    "cat  \t~/My Docs/report.md",
+  ])("preserves complete inferred file text: %s", (text) => {
+    const { container } = render(<MarkdownTextRenderer>{`Before \`${text}\` after.`}</MarkdownTextRenderer>);
+
+    expect(screen.getByTestId("inline-file-path").textContent).toBe(text);
+    expect(container.querySelector("p")?.textContent).toBe(`Before ${text} after.`);
   });
 
   it("does not treat non-file hrefs as previews just because the label looks like a file", () => {
@@ -290,7 +306,7 @@ describe("MarkdownTextRenderer", () => {
     render(<MarkdownTextRenderer onOpenFilePreview={onOpenFilePreview}>{`Open \`${path}\`.`}</MarkdownTextRenderer>);
 
     const reference = screen.getByTestId("inline-file-path");
-    expect(reference).toHaveTextContent("report.md");
+    expect(reference.textContent).toBe(path);
     expect(reference).toHaveAttribute("aria-label", path);
     fireEvent.click(reference);
     expect(onOpenFilePreview).toHaveBeenCalledWith(path);

@@ -27,6 +27,7 @@ import { DiagramFixture } from "./diagram-fixture";
 import { TypographyFixture } from "./typography-fixture";
 import { CodeWrappingFixture } from "./code-wrapping-fixture";
 import { InlineReferencesFixture } from "./inline-references-fixture";
+import { InlineFileReferenceFixture } from "./inline-file-reference-fixture";
 import { HistoryBoundaryFixture } from "./history-boundary-fixture";
 import { installHistoryBoundaryPreviewApi } from "./history-boundary-preview";
 import { ChatFailureFixture } from "./chat-failure-fixture";
@@ -297,6 +298,8 @@ createRoot(document.getElementById("root")!).render(<TooltipProvider>
     ? <ClientProvider client={railClient} token="fixture"><TypographyFixture /></ClientProvider>
     : parameters.get("case") === "inline-references"
     ? <ClientProvider client={railClient} token="fixture"><InlineReferencesFixture /></ClientProvider>
+    : parameters.get("case") === "inline-file-reference"
+    ? <InlineFileReferenceFixture />
     : parameters.get("case") === "idle-compaction"
     ? <IdleCompactionFixture />
     : parameters.get("case") === "history-hydration"
