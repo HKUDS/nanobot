@@ -264,6 +264,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
       return () => statusHandlers.delete(handler);
     };
     onRuntimeModelUpdate = () => () => {};
+    onBackgroundChange = () => () => {};
     onPairingChange = (handler: () => void) => {
       pairingChangeHandlers.add(handler);
       return () => pairingChangeHandlers.delete(handler);

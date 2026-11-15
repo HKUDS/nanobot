@@ -10,7 +10,10 @@ import { useObjectUrl } from "@/hooks/useObjectUrl";
 export function BackgroundSettings() {
   const { t } = useTranslation();
   const background = useBackground();
+  const latestBackground = useRef(background);
+  latestBackground.current = background;
   const input = useRef<HTMLInputElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const blurId = useId();
   const veilId = useId();
   const [open, setOpen] = useState(false);
@@ -19,12 +22,17 @@ export function BackgroundSettings() {
   const [fileError, setFileError] = useState(false);
   const [selectedBlur, setSelectedBlur] = useState(5);
   const [selectedVeil, setSelectedVeil] = useState(88);
+  const [blurTouched, setBlurTouched] = useState(false);
+  const [veilTouched, setVeilTouched] = useState(false);
   const image = removed ? null : file ?? background?.image ?? null;
   const preview = useObjectUrl(image);
 
   if (!background) return null;
   const hasPreview = !!file || (background.hasBackground && !removed);
-  const dirty = !!file || (removed && background.hasBackground) || selectedBlur !== background.blur || selectedVeil !== background.veil;
+  const effectiveBlur = blurTouched ? selectedBlur : background.blur;
+  const effectiveVeil = veilTouched ? selectedVeil : background.veil;
+  const styleDirty = effectiveBlur !== background.blur || effectiveVeil !== background.veil;
+  const dirty = !!file || (removed && background.hasBackground) || styleDirty;
   const setDialogOpen = (next: boolean) => {
     if (background.busy) return;
     setOpen(next);
@@ -33,36 +41,45 @@ export function BackgroundSettings() {
     setFileError(false);
     setSelectedBlur(background.blur);
     setSelectedVeil(background.veil);
+    setBlurTouched(false);
+    setVeilTouched(false);
     background.clearError();
   };
   const save = async () => {
     const imageSaved = file ? await background.upload(file) : removed ? await background.remove() : true;
     if (!imageSaved) return;
-    const styleSaved = selectedBlur !== background.blur || selectedVeil !== background.veil
-      ? await background.setStyle(selectedBlur, selectedVeil) : true;
+    const current = latestBackground.current!;
+    const nextBlur = blurTouched ? selectedBlur : current.blur;
+    const nextVeil = veilTouched ? selectedVeil : current.veil;
+    const styleSaved = nextBlur !== current.blur || nextVeil !== current.veil
+      ? await current.setStyle(nextBlur, nextVeil) : true;
     if (styleSaved) setDialogOpen(false);
   };
 
   return <>
-    <button type="button" className="settings-disclosure-row background-settings-row w-full text-left transition-colors settings-hover"
-      aria-label={t("settings.appearance.background")} onClick={() => setDialogOpen(true)}>
+    <button ref={trigger} type="button" className="settings-disclosure-row background-settings-row w-full text-left transition-colors settings-hover"
+      aria-label={t("settings.appearance.background")} disabled={!background.ready && !background.loadError}
+      onClick={() => background.loadError ? background.retry() : setDialogOpen(true)}>
       <span className="text-control-label text-foreground">{t("settings.appearance.background")}</span>
       <span className="background-settings-trigger">
-        {background.hasBackground
-          ? <span className="background-settings-thumbnail" aria-hidden />
-          : <span className="text-muted-foreground">{t("settings.appearance.backgroundChoose")}</span>}
+        {background.loadError ? <span className="text-destructive">{t("common.retry")}</span>
+          : background.hasBackground ? <span className="background-settings-thumbnail" aria-hidden />
+            : <span className="text-muted-foreground">{t("settings.appearance.backgroundChoose")}</span>}
       </span>
     </button>
     <Dialog open={open} onOpenChange={setDialogOpen}>
-      <DialogContent className="background-settings-dialog" aria-describedby={undefined} showCloseButton={false}>
+      <DialogContent className="background-settings-dialog" aria-describedby={undefined} showCloseButton={false}
+        onCloseAutoFocus={event => {
+          if (trigger.current?.isConnected) { event.preventDefault(); trigger.current.focus(); }
+        }}>
         <DialogTitle className="sr-only">{t("settings.appearance.background")}</DialogTitle>
         <button type="button" className="background-settings-preview" data-has-image={hasPreview || undefined}
           disabled={background.busy} onClick={() => input.current?.click()}
           aria-label={t(hasPreview ? "settings.appearance.backgroundReplace" : "settings.appearance.backgroundChoose")}
           style={{
             ...(preview ? { backgroundImage: `url("${preview}")` } : {}),
-            "--custom-background-blur": `${selectedBlur}px`,
-            "--custom-background-tint": `${selectedVeil / 100}`,
+            "--custom-background-blur": `${effectiveBlur}px`,
+            "--custom-background-tint": `${effectiveVeil / 100}`,
           } as CSSProperties}>
           {hasPreview ? <span className="background-settings-preview-action">
             <ImagePlus className="h-3.5 w-3.5" aria-hidden />
@@ -83,20 +100,24 @@ export function BackgroundSettings() {
         {hasPreview && <div className="background-blur-control">
           <div className="flex items-center justify-between gap-3">
             <label htmlFor={blurId} className="text-control-label">{t("settings.appearance.backgroundBlur")}</label>
-            <output htmlFor={blurId} className="text-xs tabular-nums text-muted-foreground">{selectedBlur} px</output>
+            <output htmlFor={blurId} className="text-xs tabular-nums text-muted-foreground">{effectiveBlur} px</output>
           </div>
-          <input id={blurId} type="range" min={0} max={20} step={1} value={selectedBlur} disabled={background.busy}
-            style={{ "--slider-progress": `${selectedBlur * 5}%` } as CSSProperties}
-            onChange={event => setSelectedBlur(Number(event.currentTarget.value))} />
+          <input id={blurId} type="range" min={0} max={20} step={1} value={effectiveBlur} disabled={background.busy}
+            style={{ "--slider-progress": `${effectiveBlur * 5}%` } as CSSProperties}
+            onChange={event => { setSelectedBlur(Number(event.currentTarget.value)); setBlurTouched(true); }} />
         </div>}
         {hasPreview && <div className="background-blur-control">
           <div className="flex items-center justify-between gap-3">
             <label htmlFor={veilId} className="text-control-label">{t("settings.appearance.backgroundFade")}</label>
-            <output htmlFor={veilId} className="text-xs tabular-nums text-muted-foreground">{selectedVeil}%</output>
+            <output htmlFor={veilId} className="text-xs tabular-nums text-muted-foreground">{effectiveVeil}%</output>
           </div>
-          <input id={veilId} type="range" min={0} max={100} step={1} value={selectedVeil} disabled={background.busy}
-            style={{ "--slider-progress": `${selectedVeil}%` } as CSSProperties}
-            onChange={event => setSelectedVeil(Number(event.currentTarget.value))} />
+          <input id={veilId} type="range" min={0} max={100} step={1} value={effectiveVeil} disabled={background.busy}
+            style={{ "--slider-progress": `${effectiveVeil}%` } as CSSProperties}
+            onChange={event => { setSelectedVeil(Number(event.currentTarget.value)); setVeilTouched(true); }} />
+        </div>}
+        {background.loadError && <div role="alert" className="flex items-center gap-2 text-xs text-destructive">
+          <span>{t("settings.status.loadError")}</span>
+          <Button type="button" variant="ghost" size="sm" onClick={background.retry}>{t("common.retry")}</Button>
         </div>}
         {fileError && <p role="alert" className="text-xs text-destructive">{t("settings.appearance.backgroundTooLarge")}</p>}
         {background.error && <p role="alert" className="text-xs text-destructive">{t("settings.appearance.backgroundError")}</p>}
@@ -106,7 +127,7 @@ export function BackgroundSettings() {
             {t("settings.appearance.backgroundRemove")}
           </Button>}
           <Button type="button" variant="ghost" size="sm" disabled={background.busy} onClick={() => setDialogOpen(false)}>{t("settings.actions.cancel")}</Button>
-          <Button type="button" size="sm" disabled={!dirty || background.busy || fileError || (hasPreview && !preview)} onClick={() => void save()}>{t(background.busy ? "settings.actions.saving" : "settings.actions.save")}</Button>
+          <Button type="button" size="sm" disabled={!dirty || background.busy || !background.ready || fileError || (hasPreview && !preview)} onClick={() => void save()}>{t(background.busy ? "settings.actions.saving" : "settings.actions.save")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

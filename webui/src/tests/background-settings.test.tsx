@@ -3,8 +3,8 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { BackgroundSettings } from "@/components/settings/overview/BackgroundSettings";
 
 const background = vi.hoisted(() => ({
-  hasBackground: true, image: null as Blob | null, blur: 5, veil: 88, busy: false, error: false,
-  upload: vi.fn(), remove: vi.fn(), setStyle: vi.fn(), clearError: vi.fn(),
+  hasBackground: true, image: null as Blob | null, blur: 5, veil: 88, busy: false, ready: true, loadError: false, error: false,
+  upload: vi.fn(), remove: vi.fn(), setStyle: vi.fn(), retry: vi.fn(), clearError: vi.fn(),
 }));
 vi.mock("@/providers/BackgroundProvider", () => ({ useBackground: () => background }));
 vi.mock("@/hooks/useObjectUrl", () => ({ useObjectUrl: (image: Blob | null) => image ? "blob:preview" : null }));
@@ -12,6 +12,8 @@ vi.mock("@/hooks/useObjectUrl", () => ({ useObjectUrl: (image: Blob | null) => i
 beforeEach(() => {
   vi.clearAllMocks();
   background.image = new Blob(["image"], { type: "image/png" });
+  background.blur = 5;
+  background.veil = 88;
   background.remove.mockResolvedValue(true);
   background.upload.mockResolvedValue(true);
   background.setStyle.mockResolvedValue(true);
@@ -95,4 +97,25 @@ it("selects an image from the preview without saving before confirmation", () =>
   expect(background.upload).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(background.upload).not.toHaveBeenCalled();
+});
+
+it("returns keyboard focus to the background setting after Escape", async () => {
+  render(<BackgroundSettings />);
+  const trigger = screen.getByRole("button", { name: "Background" });
+  trigger.focus();
+  fireEvent.click(trigger);
+  await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+});
+
+it("keeps a remotely changed untouched style field when saving a local adjustment", async () => {
+  const view = render(<BackgroundSettings />);
+  fireEvent.click(screen.getByRole("button", { name: "Background" }));
+  fireEvent.change(screen.getByRole("slider", { name: "Background fade" }), { target: { value: "40" } });
+  background.blur = 12;
+  view.rerender(<BackgroundSettings />);
+  expect(screen.getByRole("slider", { name: "Blur" })).toHaveProperty("value", "12");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(background.setStyle).toHaveBeenCalledWith(12, 40));
 });

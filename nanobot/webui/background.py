@@ -15,14 +15,15 @@ MAX_BYTES = 6 * 1024 * 1024
 FORMATS = {"image/png": "PNG", "image/jpeg": "JPEG", "image/webp": "WEBP"}
 
 
-def save_background(directory: Path, source: Path, mime: str) -> None:
+def save_background(directory: Path, source: Path | bytes, mime: str) -> None:
     """Decode and re-encode a bounded static raster before atomic replacement."""
-    if mime not in FORMATS or source.stat().st_size > MAX_BYTES:
+    if mime not in FORMATS or (source.stat().st_size if isinstance(source, Path) else len(source)) > MAX_BYTES:
         raise ValueError("Unsupported or oversized background")
+    image_source = source if isinstance(source, Path) else io.BytesIO(source)
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(source) as image:
+            with Image.open(image_source) as image:
                 if (image.format != FORMATS[mime] or image.width * image.height > MAX_PIXELS
                         or getattr(image, "n_frames", 1) != 1):
                     raise ValueError("Invalid background image")

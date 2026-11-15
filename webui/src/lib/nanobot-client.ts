@@ -240,6 +240,7 @@ export class NanobotClient {
   private errorHandlers = new Set<ErrorHandler>();
   private taskNoticeHandlers = new Set<(notice: TaskNotice) => void>();
   private pairingChangeHandlers = new Set<PairingChangeHandler>();
+  private backgroundChangeHandlers = new Set<() => void>();
   private readyHandlers = new Set<() => void>();
   private chatHandlers = new Map<string, Set<EventHandler>>();
   private transcriptHandlers = new Map<string, { handler: EventHandler }>();
@@ -321,6 +322,11 @@ export class NanobotClient {
   onPairingChange(handler: PairingChangeHandler): Unsubscribe {
     this.pairingChangeHandlers.add(handler);
     return () => { this.pairingChangeHandlers.delete(handler); };
+  }
+
+  onBackgroundChange(handler: () => void): Unsubscribe {
+    this.backgroundChangeHandlers.add(handler);
+    return () => { this.backgroundChangeHandlers.delete(handler); };
   }
 
   onReady(handler: () => void): Unsubscribe {
@@ -1082,6 +1088,13 @@ export class NanobotClient {
 
     if (parsed.event === "transcription_error") {
       this.rejectTranscription(parsed.request_id, parsed.detail || "error");
+      return;
+    }
+
+    if (parsed.event === "background_updated") {
+      for (const handler of this.backgroundChangeHandlers) {
+        try { handler(); } catch (error) { console.error("Background change handler failed", error); }
+      }
       return;
     }
 

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useClient } from "@/providers/ClientProvider";
 import { useObjectUrl } from "@/hooks/useObjectUrl";
 
@@ -9,6 +9,9 @@ interface BackgroundContextValue {
   veil: number;
   setStyle: (blur: number, veil: number) => Promise<boolean>;
   busy: boolean;
+  ready: boolean;
+  loadError: boolean;
+  retry: () => void;
   error: boolean;
   upload: (file: File) => Promise<boolean>;
   remove: () => Promise<boolean>;
@@ -29,28 +32,57 @@ export function BackgroundProvider({ children }: { children: ReactNode }) {
   const [veil, setVeilState] = useState(88);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
-  const load = useCallback(async () => {
-    const response = await fetch("/api/settings/background", {
-      headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin", cache: "no-store",
-    });
-    if (response.status === 404) { setImage(null); return; }
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    setImage(await response.blob());
+  const [imageStatus, setImageStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [styleStatus, setStyleStatus] = useState<"loading" | "ready" | "error">("loading");
+  const versions = useRef({ image: 0, style: 0 });
+
+  const loadImage = useCallback(async () => {
+    const version = ++versions.current.image;
+    setImageStatus(current => current === "error" ? "loading" : current);
+    try {
+      const response = await fetch("/api/settings/background", {
+        headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin", cache: "no-store",
+      });
+      if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`);
+      const next = response.status === 404 ? null : await response.blob();
+      if (versions.current.image === version) { setImage(next); setImageStatus("ready"); }
+    } catch {
+      if (versions.current.image === version) setImageStatus("error");
+    }
   }, [token]);
+
+  const loadStyle = useCallback(async () => {
+    const version = ++versions.current.style;
+    setStyleStatus(current => current === "error" ? "loading" : current);
+    try {
+      const response = await fetch("/api/settings/background-style", {
+        headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin", cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const value: unknown = await response.json();
+      if (!value || typeof value !== "object" || !("blur" in value) || !("veil" in value)
+        || typeof value.blur !== "number" || !Number.isInteger(value.blur) || value.blur < 0 || value.blur > 20
+        || typeof value.veil !== "number" || !Number.isInteger(value.veil) || value.veil < 0 || value.veil > 100) {
+        throw new Error("Invalid background style");
+      }
+      if (versions.current.style === version) { setBlurState(value.blur); setVeilState(value.veil); setStyleStatus("ready"); }
+    } catch {
+      if (versions.current.style === version) setStyleStatus("error");
+    }
+  }, [token]);
+
+  const refresh = useCallback(() => { void loadImage(); void loadStyle(); }, [loadImage, loadStyle]);
 
   useEffect(() => {
     if (!token) return;
-    void load().catch(() => setImage(null));
-    void fetch("/api/settings/background-style", { headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin", cache: "no-store" })
-      .then(async response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const value: unknown = await response.json();
-        if (value && typeof value === "object" && "blur" in value && typeof value.blur === "number"
-          && Number.isInteger(value.blur) && value.blur >= 0 && value.blur <= 20) setBlurState(value.blur);
-        if (value && typeof value === "object" && "veil" in value && typeof value.veil === "number"
-          && Number.isInteger(value.veil) && value.veil >= 0 && value.veil <= 100) setVeilState(value.veil);
-      }).catch(() => setError(true));
-  }, [load, token]);
+    refresh();
+    const unsubscribeChange = client.onBackgroundChange(refresh);
+    const unsubscribeReady = client.onReady(refresh);
+    return () => {
+      unsubscribeChange(); unsubscribeReady();
+      versions.current.image++; versions.current.style++;
+    };
+  }, [client, token, refresh]);
 
   useEffect(() => {
     if (!imageUrl) return;
@@ -75,23 +107,37 @@ export function BackgroundProvider({ children }: { children: ReactNode }) {
 
   const upload = async (file: File) => {
     setBusy(true); setError(false);
-    try { await client.uploadBackground(file); await load(); return true; }
-    catch { setError(true); return false; }
+    const version = ++versions.current.image;
+    try {
+      await client.uploadBackground(file);
+      if (versions.current.image === version) { setImage(file); setImageStatus("ready"); }
+      return true;
+    } catch { setError(true); return false; }
     finally { setBusy(false); }
   };
   const remove = async () => {
     setBusy(true); setError(false);
-    try { await client.requestMutation("background.delete", {}); setImage(null); return true; }
-    catch { setError(true); return false; }
+    const version = ++versions.current.image;
+    try {
+      await client.requestMutation("background.delete", {});
+      if (versions.current.image === version) { setImage(null); setImageStatus("ready"); }
+      return true;
+    } catch { setError(true); return false; }
     finally { setBusy(false); }
   };
   const setStyle = async (nextBlur: number, nextVeil: number) => {
     setBusy(true); setError(false);
-    try { await client.requestMutation("background.style", { blur: nextBlur, veil: nextVeil }); setBlurState(nextBlur); setVeilState(nextVeil); return true; }
-    catch { setError(true); return false; }
+    const version = ++versions.current.style;
+    try {
+      await client.requestMutation("background.style", { blur: nextBlur, veil: nextVeil });
+      if (versions.current.style === version) { setBlurState(nextBlur); setVeilState(nextVeil); setStyleStatus("ready"); }
+      return true;
+    } catch { setError(true); return false; }
     finally { setBusy(false); }
   };
-  return <BackgroundContext.Provider value={{ hasBackground: image !== null, image, blur, veil, setStyle, busy, error, upload, remove, clearError: () => setError(false) }}>
+  return <BackgroundContext.Provider value={{ hasBackground: image !== null, image, blur, veil, setStyle, busy,
+    ready: imageStatus === "ready" && styleStatus === "ready", loadError: imageStatus === "error" || styleStatus === "error",
+    retry: refresh, error, upload, remove, clearError: () => setError(false) }}>
     {children}
   </BackgroundContext.Provider>;
 }
