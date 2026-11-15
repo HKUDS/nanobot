@@ -1,7 +1,9 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 
 import { MessageBubble } from "@/components/MessageBubble";
-import MarkdownTextRenderer from "@/components/MarkdownTextRenderer";
+
+// Keep this lazy: history-boundary tests hold the renderer request while the fixture loads.
+const MarkdownTextRenderer = lazy(() => import("@/components/MarkdownTextRenderer"));
 
 const outsideCode = `begin  \t${"word ".repeat(25)}end`;
 const inlineSource = [
@@ -42,7 +44,9 @@ export function CodeWrappingFixture() {
       content: `\`\`\`markdown\n${code}\n\`\`\``,
     }} />
     <section data-testid="inline-code-wrapping">
-      <MarkdownTextRenderer streaming={streaming} highlightCode={false}>{inlineSource}</MarkdownTextRenderer>
+      <Suspense fallback={null}>
+        <MarkdownTextRenderer streaming={streaming} highlightCode={false}>{inlineSource}</MarkdownTextRenderer>
+      </Suspense>
     </section>
     <textarea aria-label="Inline message source" value={inlineMessage}
       onChange={event => setInlineMessage(event.target.value)} />
