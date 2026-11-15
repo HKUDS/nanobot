@@ -1048,7 +1048,9 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
             if self._client is not None:
                 response = await self._http_post(f"{self.api_base}/images/{endpoint}", headers=headers, body=body)
             else:
-                async with httpx.AsyncClient(**{**self._http_client_kwargs(), "timeout": max(self.timeout, 660.0)}) as client:
+                client_kwargs = self._http_client_kwargs()
+                client_kwargs["timeout"] = max(self.timeout, 660.0)
+                async with httpx.AsyncClient(**client_kwargs) as client:
                     response = await self._http_post(f"{self.api_base}/images/{endpoint}", headers=headers, body=body, client=client)
             response.raise_for_status()
         except httpx.TimeoutException as exc:
