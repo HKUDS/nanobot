@@ -967,7 +967,7 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
     """Async client for MiniMax image generation API."""
 
     provider_name = "minimax"
-    model_options = ("image-01",)
+    model_options = ("image-01", "MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed")
     missing_key_message = (
         "MiniMax API key is not configured. Set providers.minimax.apiKey."
     )
@@ -992,6 +992,9 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
     ) -> GeneratedImageResponse:
         if not self.api_key:
             raise ImageGenerationError(self.missing_key_message)
+
+        if model in ("MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed"):
+            return await self._generate_h3(prompt, model, reference_images, aspect_ratio, image_size)
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -1019,6 +1022,52 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
 
         return await self._generate_with_client(body, headers)
 
+    async def _generate_h3(
+        self, prompt: str, model: str, reference_images: list[str] | None,
+        aspect_ratio: str | None, image_size: str | None,
+    ) -> GeneratedImageResponse:
+        refs = reference_images or []
+        if len(refs) > 16:
+            raise ImageGenerationError("MiniMax H3 accepts at most 16 reference images")
+        body: dict[str, Any] = {"model": model, "prompt": prompt, "response_format": "b64_json"}
+        if image_size and image_size not in {"1K", "2K", "4K"}:
+            body["size"] = image_size
+        else:
+            if aspect_ratio:
+                body["aspect_ratio"] = aspect_ratio
+            if image_size:
+                body["area"] = image_size
+        if refs:
+            body["images"] = [{"image_url": image_path_to_data_url(path)} for path in refs]
+        body.update(self.extra_body)
+        body = {key: value for key, value in body.items() if value is not None}
+        _validate_minimax_h3_body(body)
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", **self.extra_headers}
+        endpoint = "edits" if refs else "generations"
+        try:
+            if self._client is not None:
+                response = await self._http_post(f"{self.api_base}/images/{endpoint}", headers=headers, body=body)
+            else:
+                client_kwargs = self._http_client_kwargs()
+                client_kwargs["timeout"] = max(self.timeout, 660.0)
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    response = await self._http_post(f"{self.api_base}/images/{endpoint}", headers=headers, body=body, client=client)
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise ImageGenerationError("MiniMax H3 timed out; generation may still complete and be billed") from exc
+        except httpx.HTTPStatusError as exc:
+            raise ImageGenerationError(f"MiniMax H3 image generation failed: {exc.response.text[:500]}") from exc
+        except httpx.RequestError as exc:
+            raise ImageGenerationError(f"MiniMax H3 request failed; generation may still be billed: {exc}") from exc
+        payload = response.json()
+        images = await _openai_images_from_payload(payload, proxy=self.proxy)
+        if not images:
+            errors = [item["error"] for item in _as_json_objects(payload.get("data")) if item.get("error")]
+            if errors:
+                raise ImageGenerationError(f"MiniMax H3 returned no images: {errors}")
+        self._require_images(images, payload)
+        return GeneratedImageResponse(images=images, content="", raw=payload)
+
     async def _generate_with_client(
         self,
         body: dict[str, Any],
@@ -1044,6 +1093,35 @@ class MiniMaxImageGenerationClient(ImageGenerationProvider):
         self._require_images(images, payload)
 
         return GeneratedImageResponse(images=images, content="", raw=payload)
+
+
+def _validate_minimax_h3_body(body: dict[str, Any]) -> None:
+    if body.get("stream"):
+        raise ImageGenerationError("MiniMax H3 streaming is not supported")
+    if body.get("n", 1) != 1:
+        raise ImageGenerationError("MiniMax H3 generates one image per request; use the tool's count parameter")
+    size = body.get("size")
+    if size and size != "auto":
+        match = re.fullmatch(r"(\d+)x(\d+)", str(size))
+        if not match:
+            raise ImageGenerationError("MiniMax H3 size must be WIDTHxHEIGHT or auto")
+        width, height = map(int, match.groups())
+        if not height or not 655_360 <= width * height <= 20_000_000 or not height <= 3 * width <= 9 * height:
+            raise ImageGenerationError("MiniMax H3 size is outside the supported area or aspect ratio")
+        if "aspect_ratio" in body or "area" in body:
+            raise ImageGenerationError("MiniMax H3 explicit size cannot be combined with aspect_ratio or area")
+    ratio = body.get("aspect_ratio")
+    if ratio and ratio != "auto":
+        match = re.fullmatch(r"(\d+):(\d+)", str(ratio))
+        if not match:
+            raise ImageGenerationError("MiniMax H3 aspect ratio must be X:Y")
+        width, height = map(int, match.groups())
+        if not (1 <= width <= 300 and 1 <= height <= 300 and height <= 3 * width <= 9 * height):
+            raise ImageGenerationError("MiniMax H3 aspect ratio is outside the supported range")
+    if body.get("area") not in (None, "1K", "2K", "4K"):
+        raise ImageGenerationError("MiniMax H3 area must be 1K, 2K, or 4K")
+    if body.get("disable_prompt_enhanced") and (not size or size == "auto") and (not ratio or ratio == "auto"):
+        raise ImageGenerationError("MiniMax H3 requires size or aspect ratio when prompt enhancement is disabled")
 
 
 def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
