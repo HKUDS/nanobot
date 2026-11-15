@@ -11,6 +11,25 @@ test("appearance puts interface settings before activity display", async ({ page
   ]);
 });
 
+test("reading preview and theme cards let a custom background through", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/browser/fixture.html?case=appearance");
+  const card = page.locator(".appearance-reading-card");
+  const preview = page.locator(".appearance-reading-preview");
+  const theme = page.locator(".appearance-theme-card").first();
+  await page.evaluate(() => { document.documentElement.dataset.customBackground = ""; });
+  for (const surface of [card, preview, theme]) {
+    expect(await surface.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgba\(/);
+  }
+  await page.getByRole("radio", { name: "Dark", exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  for (const surface of [card, preview, theme]) {
+    expect(await surface.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgba\(/);
+  }
+  await page.evaluate(() => { delete document.documentElement.dataset.customBackground; });
+  expect(await card.evaluate(node => getComputedStyle(node).backgroundColor)).toMatch(/^rgb\(/);
+});
+
 test("system theme stays live, explicit choices persist, and tabs agree", async ({ page, context }) => {
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/browser/fixture.html?case=appearance");

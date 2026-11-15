@@ -260,3 +260,17 @@ test("message lists and quotes retain their existing whitespace and scrolling", 
     overflowX: getComputedStyle(node).overflowX,
   }))).toEqual({ display: "block", whiteSpace: "pre", overflowX: "auto" });
 });
+
+test("inline code uses a translucent surface over a custom background", async ({ page }) => {
+  await page.goto("/browser/fixture.html?case=code-wrapping");
+  const code = page.getByTestId("inline-code-wrapping").locator(".markdown-inline-code").first();
+  await expect(code).toBeVisible();
+  const original = await code.evaluate(element => getComputedStyle(element).backgroundColor);
+  await page.evaluate(() => { document.documentElement.dataset.customBackground = ""; });
+  for (let i = 0; i < 2; i++) {
+    await expect(code).toHaveCSS("background-color", /rgba\(.+, 0\.45\)/);
+    await page.evaluate(() => document.documentElement.classList.toggle("dark"));
+  }
+  await page.evaluate(() => { delete document.documentElement.dataset.customBackground; });
+  await expect(code).toHaveCSS("background-color", original);
+});

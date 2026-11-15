@@ -699,6 +699,14 @@
       "interrupted": "任務需要處理，點選繼續。"
     },
     "appearance": {
+      "background": "背景圖片",
+      "backgroundChoose": "選擇圖片",
+      "backgroundTooLarge": "圖片不能超過 6 MiB",
+      "backgroundFade": "背景淡化",
+      "backgroundBlur": "模糊程度",
+      "backgroundReplace": "更換圖片",
+      "backgroundRemove": "移除",
+      "backgroundError": "圖片儲存失敗",
       "system": "跟隨系統",
       "reading": "閱讀",
       "readingHelp": "調整訊息、程式碼和輸入框，不改變導覽大小。",

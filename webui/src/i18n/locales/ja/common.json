@@ -699,6 +699,14 @@
       "interrupted": "対応が必要です。クリックして続行。"
     },
     "appearance": {
+      "background": "背景画像",
+      "backgroundChoose": "画像を選択",
+      "backgroundTooLarge": "画像は 6 MiB 以下にしてください",
+      "backgroundFade": "背景を薄くする",
+      "backgroundBlur": "ぼかし",
+      "backgroundReplace": "画像を変更",
+      "backgroundRemove": "削除",
+      "backgroundError": "画像を保存できませんでした",
       "system": "システムに合わせる",
       "reading": "読みやすさ",
       "readingHelp": "メッセージ、コード、入力欄の文字サイズを調整します。ナビゲーションは変わりません。",

@@ -621,6 +621,26 @@ class GatewayHTTPHandler:
         request: WsRequest,
         got: str,
     ) -> Any | None:
+        if got == "/api/settings/background-style":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            from nanobot.webui.background import load_background_style
+
+            directory = self.settings.config.path.parent / "webui"
+            return _http_json_response(
+                load_background_style(directory), extra_headers=_NO_STORE_HEADERS,
+            )
+        if got == "/api/settings/background":
+            if not self.check_api_token(request):
+                return _http_error(401, "Unauthorized")
+            path = self.settings.config.path.parent / "webui" / "background.png"
+            try:
+                body = path.read_bytes()
+            except FileNotFoundError:
+                return _http_error(404, "Background not found")
+            return _http_response(body, content_type="image/png", extra_headers=[
+                ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff"),
+            ])
         if got == "/api/remote-instances" or got.startswith("/api/remote-instances/"):
             return await self._dispatch_remote_instances(connection, request, got)
         if self.config.token_issue_path:

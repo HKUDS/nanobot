@@ -6,6 +6,8 @@ The WebUI shares its gateway and saved sessions with the native terminal client 
 
 For a visual tour, see the [README feature gallery](../README.md#-webui). This guide follows the current source tree; some features are newer than the published release.
 
+In **Settings → Appearance → Background**, choose an image, adjust blur and background fade, then save. The image and settings are shared by devices connected to the same instance. More fade makes the background subtler and can improve text readability. Images are centered and cropped as needed to fill the window.
+
 ## Open the WebUI
 
 ```bash

@@ -151,7 +151,7 @@ export function RemoteInstances({ children }: { children: ReactNode }) {
     openHostIds: frames.map((frame) => frame.connection.id),
     directoryError: hosts.directoryError, refresh: hosts.refresh, watchDirectory: hosts.watchDirectory, rename: hosts.rename, connect, disconnect: hosts.disconnect, remove: hosts.remove, cancel: hosts.cancel }}>
     <HostNavigationContext.Provider value={bridge.embedded || (available || selected ? picker : null)}>
-      <div className="flex h-full min-h-0 flex-col bg-background">
+      <div data-theme-surface className="flex h-full min-h-0 flex-col bg-background">
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <div ref={localPanel} data-host-view="local" aria-hidden={!!selected} {...(selected ? { inert: "" } : {})}
             style={{ visibility: selected ? "hidden" : "visible" }}

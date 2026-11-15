@@ -699,6 +699,14 @@
       "interrupted": "Tugas perlu perhatian. Klik untuk melanjutkan."
     },
     "appearance": {
+      "background": "Gambar latar",
+      "backgroundChoose": "Pilih gambar",
+      "backgroundTooLarge": "Ukuran gambar maksimal 6 MiB.",
+      "backgroundFade": "Pudarkan latar",
+      "backgroundBlur": "Keburaman",
+      "backgroundReplace": "Ganti gambar",
+      "backgroundRemove": "Hapus",
+      "backgroundError": "Gagal menyimpan gambar",
       "system": "Ikuti sistem",
       "reading": "Membaca",
       "readingHelp": "Sesuaikan pesan, kode, dan kolom pesan, tanpa mengubah navigasi.",

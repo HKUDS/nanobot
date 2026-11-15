@@ -18,6 +18,7 @@ from nanobot.channels.websocket.attachment_policy import validate_attachment_bat
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
 from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
@@ -1157,6 +1158,33 @@ class WebUICommandRouter:
         try:
             lock = self.request_locks.setdefault(connection, asyncio.Lock())
             async with lock:
+                if action in {"background.update", "background.delete", "background.style"}:
+                    from nanobot.webui.background import save_background, save_background_style
+
+                    try:
+                        with self._http_router.bus.admission.activity():
+                            directory = self._http_router.settings.config.path.parent / "webui"
+                            if action == "background.delete":
+                                (directory / "background.png").unlink(missing_ok=True)
+                            elif action == "background.style":
+                                try:
+                                    save_background_style(directory, payload.get("blur"), payload.get("veil"))
+                                except ValueError as exc:
+                                    return WebUIRequestResult(status=400, message=str(exc))
+                            else:
+                                reference = payload.get("reference")
+                                if not isinstance(reference, str):
+                                    return WebUIRequestResult(status=400, message="Invalid attachment reference")
+                                owner = self._uploads.owner(connection)
+                                try:
+                                    entry = self._uploads.store.inspect([reference], owner=owner)[0]
+                                    save_background(directory, entry.path, entry.mime)
+                                    self._uploads.store.discard([reference], owner=owner)
+                                except (AttachmentUploadError, ValueError) as exc:
+                                    return WebUIRequestResult(status=400, message=str(exc))
+                            return WebUIRequestResult(result={"ok": True})
+                    except RuntimeMaintenanceError:
+                        return WebUIRequestResult(status=503, message="Gateway update is being verified. Retry shortly.")
                 response = await self._http_router.dispatch_webui_mutation(
                     connection,
                     action,
