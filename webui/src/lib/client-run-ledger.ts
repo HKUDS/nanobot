@@ -486,6 +486,11 @@ export class ClientRunLedger {
       if (!turnId) continue;
       chat ??= this.ensureChat(chatId);
       chat.fenced.add(turnId);
+      // Explicit completion settles ownership even when the full page cannot be adopted.
+      this.rememberClosed(chat, turnId);
+      this.settle(chatId, turnId, effects);
+      // Anonymous recovery activity is independent of this named turn.
+      if (chat.latestTurnId === turnId) chat.effectiveStartedAt = null;
     }
     if (chat) this.trimTerminalSet(chat.fenced);
     effects.push({ kind: "prune-inbound", chatId, turnIds: Array.from(chat?.fenced ?? []) });
