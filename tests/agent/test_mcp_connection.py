@@ -34,24 +34,6 @@ def _mcp_notification(method: str, params: dict[str, Any] | None = None) -> Sess
     )
 
 
-def test_mcp_progress_detection_accepts_flattened_sdk_message_shape():
-    malformed = SimpleNamespace(
-        message=SimpleNamespace(
-            method="notifications/progress",
-            params={"progress": 20, "total": 600},
-        )
-    )
-    valid = SimpleNamespace(
-        message=SimpleNamespace(
-            method="notifications/progress",
-            params={"progressToken": "req-1", "progress": 25},
-        )
-    )
-
-    assert mcp_runtime._is_malformed_mcp_progress_notification(malformed) is True
-    assert mcp_runtime._is_malformed_mcp_progress_notification(valid) is False
-
-
 class _FakeMcpTool(Tool):
     def __init__(self, name: str) -> None:
         self._name = name
@@ -106,11 +88,8 @@ async def test_mcp_read_filter_drops_progress_notifications_without_progress_tok
     await send.send(valid_progress)
     await send.aclose()
 
-    wrapped = mcp_runtime._filter_malformed_mcp_progress_notifications(receive, "brightdata")
-    forwarded = []
-    async with wrapped:
-        async for message in wrapped:
-            forwarded.append(message)
+    async with mcp_runtime._MCPReceiveStream(receive) as wrapped:
+        forwarded = [message async for message in wrapped]
 
     assert forwarded == [tool_change, valid_progress]
 

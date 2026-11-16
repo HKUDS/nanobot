@@ -1542,8 +1542,8 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
     }
 
     class _SelectiveClientSession:
-        def __init__(self, read: object, _write: object) -> None:
-            self._session = sessions[read]
+        def __init__(self, _read: object, write: str) -> None:
+            self._session = sessions[write]
 
         async def __aenter__(self) -> object:
             return self._session
@@ -1555,7 +1555,7 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
     async def _selective_stdio_client(params: object):
         if params.command == "bad" and failure_mode == "exception":
             raise RuntimeError("boom")
-        yield params.command, object()
+        yield object(), params.command
 
     monkeypatch.setattr(sys.modules["mcp"], "ClientSession", _SelectiveClientSession)
     monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _selective_stdio_client)
@@ -1614,8 +1614,8 @@ async def test_connect_mcp_servers_rolls_back_completed_batch_on_cancellation(
     sessions = {"fast": _make_fake_session(["demo"])}
 
     class _SelectiveClientSession:
-        def __init__(self, read: object, _write: object) -> None:
-            self._session = sessions[str(read)]
+        def __init__(self, _read: object, write: str) -> None:
+            self._session = sessions[write]
 
         async def __aenter__(self) -> object:
             return self._session
@@ -1630,7 +1630,7 @@ async def test_connect_mcp_servers_rolls_back_completed_batch_on_cancellation(
             if command == "slow":
                 slow_started.set()
                 await asyncio.Event().wait()
-            yield command, object()
+            yield object(), command
         finally:
             closed.append(command)
 

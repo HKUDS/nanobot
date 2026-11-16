@@ -8,12 +8,16 @@ import re
 import shutil
 import traceback
 import urllib.parse
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import AsyncExitStack, suppress
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, cast, overload
 
 import httpx
+from anyio.abc import ObjectReceiveStream
 from loguru import logger
+from referencing import Registry
+from referencing import Resource as SchemaResource
+from referencing.exceptions import Unresolvable
 
 from nanobot.agent.tools.base import Schema, Tool, ToolResult
 from nanobot.agent.tools.context import tool_log_content_allowed
@@ -29,8 +33,10 @@ from nanobot.security.network import (
 from nanobot.utils.cancellation import task_is_cancelling
 
 if TYPE_CHECKING:
+    from anyio.streams.memory import MemoryObjectReceiveStream
     from mcp import ClientSession
-    from mcp.types import Prompt, Resource
+    from mcp.shared.message import SessionMessage
+    from mcp.types import PaginatedRequestParams, PaginatedResult, Prompt, Resource
     from mcp.types import Tool as MCPToolDefinition
 
     from nanobot.agent.tools.mcp_oauth import MCPOAuthHandlers
@@ -63,12 +69,38 @@ _MAX_STARTING_SERVERS = 4
 _SANITIZE_RE = re.compile(r"_+")
 _ReconnectCallback = Callable[[str, str, Tool], Awaitable[Tool | None]]
 _MCPResultT = TypeVar("_MCPResultT")
+_PageT = TypeVar("_PageT", bound="PaginatedResult", covariant=True)
+_EntryT = TypeVar("_EntryT")
 MCPServerLoader = Callable[[], tuple[Mapping[str, "MCPServerConfig"], NetworkConfig]]
 MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
 
 
 class MCPConnection(Protocol):
     async def aclose(self) -> None: ...
+
+
+class _ListPage(Protocol[_PageT]):
+    @overload
+    async def __call__(self) -> _PageT: ...
+    @overload
+    async def __call__(self, *, params: PaginatedRequestParams) -> _PageT: ...
+
+
+async def _list_all(
+    list_page: _ListPage[_PageT], entries: Callable[[_PageT], Sequence[_EntryT]],
+) -> list[_EntryT]:
+    from mcp.types import PaginatedRequestParams
+
+    page = await list_page()
+    result = list(entries(page))
+    seen: set[str] = set()
+    while (cursor := page.nextCursor) is not None:
+        if cursor in seen:
+            raise ValueError("MCP server returned a repeated pagination cursor")
+        seen.add(cursor)
+        page = await list_page(params=PaginatedRequestParams(cursor=cursor))
+        result.extend(entries(page))
+    return result
 
 
 async def _close_mcp_connection(name: str, connection: MCPConnection) -> None:
@@ -109,75 +141,30 @@ class _OwnedMCPConnection:
                 raise
 
 
-def _is_malformed_mcp_progress_notification(message: Any) -> bool:
-    payload = _mcp_jsonrpc_payload(message)
-    if _payload_value(payload, "method") != "notifications/progress":
-        return False
+class _MCPReceiveStream(ObjectReceiveStream["SessionMessage | Exception"]):
+    """Drop malformed progress events before the SDK logs their raw payload."""
 
-    params = _payload_value(payload, "params")
-    return not _progress_params_have_token(params)
-
-
-def _mcp_jsonrpc_payload(message: Any) -> Any:
-    envelope = getattr(message, "message", message)
-    return getattr(envelope, "root", None) or envelope
-
-
-def _payload_value(payload: Any, key: str) -> Any:
-    if isinstance(payload, Mapping):
-        return cast(Mapping[str, Any], payload).get(key)
-    return getattr(payload, key, None)
-
-
-def _progress_params_have_token(params: Any) -> bool:
-    if isinstance(params, Mapping):
-        return "progressToken" in params
-    return hasattr(params, "progressToken") or hasattr(params, "progress_token")
-
-
-class _MalformedProgressNotificationFilter:
-    def __init__(self, read_stream: Any, server_name: str) -> None:
+    def __init__(self, read_stream: ObjectReceiveStream[SessionMessage | Exception]) -> None:
         self._read_stream = read_stream
-        self._server_name = server_name
-        self._iterator: AsyncIterator[Any] | None = None
 
-    async def __aenter__(self) -> "_MalformedProgressNotificationFilter":
-        await self._read_stream.__aenter__()
-        return self
-
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:
-        return await self._read_stream.__aexit__(exc_type, exc, tb)
-
-    def __aiter__(self) -> "_MalformedProgressNotificationFilter":
-        self._iterator = self._read_stream.__aiter__()
-        return self
-
-    async def __anext__(self) -> Any:
-        iterator = self._iterator
-        if iterator is None:
-            iterator = self._read_stream.__aiter__()
-            self._iterator = iterator
+    async def receive(self) -> SessionMessage | Exception:
+        from mcp.types import JSONRPCNotification
 
         while True:
-            message = await anext(iterator)
-            if _is_malformed_mcp_progress_notification(message):
-                logger.debug(
-                    "MCP server '{}': dropped progress notification without progressToken",
-                    self._server_name,
-                )
+            message = await self._read_stream.receive()
+            if isinstance(message, Exception):
+                return message
+            payload = message.message.root
+            if (
+                isinstance(payload, JSONRPCNotification)
+                and payload.method == "notifications/progress"
+                and "progressToken" not in (payload.params or {})
+            ):
                 continue
             return message
 
     async def aclose(self) -> None:
-        close = getattr(self._read_stream, "aclose", None)
-        if close is not None:
-            await close()
-
-
-def _filter_malformed_mcp_progress_notifications(read_stream: Any, server_name: str) -> Any:
-    if not all(hasattr(read_stream, name) for name in ("__aenter__", "__aexit__", "__aiter__")):
-        return read_stream
-    return _MalformedProgressNotificationFilter(read_stream, server_name)
+        await self._read_stream.aclose()
 
 
 def _sanitize_name(name: str) -> str:
@@ -382,28 +369,6 @@ def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None
     return None
 
 
-def _resolve_local_schema_ref(root: dict[str, Any], ref: str) -> Any:
-    if not ref.startswith("#"):
-        raise ValueError("not a local JSON Pointer")
-
-    pointer = urllib.parse.unquote(ref[1:], errors="strict")
-    if not pointer:
-        return root
-    if not pointer.startswith("/"):
-        raise ValueError("not a local JSON Pointer")
-
-    current: Any = root
-    for raw_part in pointer[1:].split("/"):
-        part = raw_part.replace("~1", "/").replace("~0", "~")
-        if isinstance(current, dict):
-            current = cast(dict[str, Any], current)[part]
-        elif isinstance(current, list):
-            current = cast(list[Any], current)[int(part)]
-        else:
-            raise KeyError(part)
-    return current
-
-
 def _rewrite_local_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
     """Hoist arbitrary local JSON-Pointer refs into provider-compatible ``$defs``."""
     rewritten_refs: dict[str, str] = {}
@@ -433,8 +398,11 @@ def _rewrite_local_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
             name = rewritten_refs.get(ref)
             if name is None:
                 try:
-                    target = _resolve_local_schema_ref(schema, ref)
-                except (KeyError, IndexError, TypeError, UnicodeDecodeError, ValueError):
+                    # Resolve only against this document, without URI scope changes or retrieval.
+                    target = schema if ref == "#" else SchemaResource.opaque(schema).pointer(
+                        ref[1:], Registry[Any]().resolver()
+                    ).contents
+                except (Unresolvable, TypeError, ValueError):
                     logger.warning("MCP tool schema contains an unresolved local $ref: {}", ref)
                 else:
                     name = f"ref_{hashlib.sha256(ref.encode()).hexdigest()[:12]}"
@@ -977,7 +945,7 @@ async def connect_mcp_servers(
     entered the MCP SDK contexts alive so reconnect and shutdown can close
     AnyIO cancel scopes from their owning task.
     """
-    from mcp import ClientSession, StdioServerParameters, types
+    from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
@@ -1115,23 +1083,15 @@ async def connect_mcp_servers(
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
                 return False
 
-            read = _filter_malformed_mcp_progress_notifications(read, name)
-            session = await server_stack.enter_async_context(ClientSession(read, write))
+            # The SDK annotates the concrete memory stream, but consumes the AnyIO receive interface.
+            filtered = cast("MemoryObjectReceiveStream[SessionMessage | Exception]", _MCPReceiveStream(read))
+            session = await server_stack.enter_async_context(ClientSession(filtered, write))
             initialization = await session.initialize()
 
             # Finish discovery before registering tools so a failed page leaves no partial set.
             tool_defs: list[MCPToolDefinition] = []
             if initialization.capabilities.tools is not None:
-                page = await session.list_tools()
-                tool_defs.extend(page.tools)
-                seen_cursors: set[str] = set()
-                while page.nextCursor is not None:
-                    cursor = page.nextCursor
-                    if cursor in seen_cursors:
-                        raise ValueError("MCP tools/list returned a repeated pagination cursor")
-                    seen_cursors.add(cursor)
-                    page = await session.list_tools(params=types.PaginatedRequestParams(cursor=cursor))
-                    tool_defs.extend(page.tools)
+                tool_defs = await _list_all(session.list_tools, lambda page: page.tools)
 
             enabled_tools = set(cfg.enabled_tools)
             allow_all_tools = "*" in enabled_tools
@@ -1185,19 +1145,7 @@ async def connect_mcp_servers(
             register_extras = allow_all_tools
             if register_extras:
                 try:
-                    resources_result = await session.list_resources()
-                    resources = list(resources_result.resources)
-                    resource_cursors: set[str] = set()
-                    while resources_result.nextCursor is not None:
-                        cursor = resources_result.nextCursor
-                        if cursor in resource_cursors:
-                            raise ValueError("MCP resources/list returned a repeated pagination cursor")
-                        resource_cursors.add(cursor)
-                        resources_result = await session.list_resources(
-                            params=types.PaginatedRequestParams(cursor=cursor)
-                        )
-                        resources.extend(resources_result.resources)
-                    for resource in resources:
+                    for resource in await _list_all(session.list_resources, lambda page: page.resources):
                         wrapper = MCPResourceWrapper(
                             session, name, resource, resource_timeout=cfg.tool_timeout
                         )
@@ -1214,19 +1162,7 @@ async def connect_mcp_servers(
                     )
 
                 try:
-                    prompts_result = await session.list_prompts()
-                    prompts = list(prompts_result.prompts)
-                    prompt_cursors: set[str] = set()
-                    while prompts_result.nextCursor is not None:
-                        cursor = prompts_result.nextCursor
-                        if cursor in prompt_cursors:
-                            raise ValueError("MCP prompts/list returned a repeated pagination cursor")
-                        prompt_cursors.add(cursor)
-                        prompts_result = await session.list_prompts(
-                            params=types.PaginatedRequestParams(cursor=cursor)
-                        )
-                        prompts.extend(prompts_result.prompts)
-                    for prompt in prompts:
+                    for prompt in await _list_all(session.list_prompts, lambda page: page.prompts):
                         wrapper = MCPPromptWrapper(
                             session, name, prompt, prompt_timeout=cfg.tool_timeout
                         )
