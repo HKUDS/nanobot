@@ -699,6 +699,15 @@
       "interrupted": "La tarea necesita atención. Haz clic para continuar."
     },
     "appearance": {
+      "background": "Imagen de fondo",
+      "backgroundChoose": "Elegir imagen",
+      "backgroundTooLarge": "La imagen no puede superar 6 MiB.",
+      "backgroundFade": "Atenuar fondo",
+      "backgroundBlur": "Desenfoque",
+      "backgroundReplace": "Cambiar imagen",
+      "backgroundRemove": "Quitar",
+      "backgroundError": "No se pudo guardar el fondo. Inténtalo de nuevo.",
+      "backgroundPartialError": "El cambio de imagen se guardó, pero no la apariencia. Inténtalo de nuevo.",
       "system": "Sistema",
       "reading": "Lectura",
       "readingHelp": "Ajusta los mensajes, el código y el campo de escritura, sin cambiar la navegación.",

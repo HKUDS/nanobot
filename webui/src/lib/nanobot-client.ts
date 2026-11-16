@@ -742,6 +742,23 @@ export class NanobotClient {
     }
   }
 
+  async uploadBackground(file: File): Promise<void> {
+    const socket = this.socket;
+    const capability = this.upload;
+    const stillConnected = () => this.socket === socket
+      && socket?.readyState === WS_OPEN && this.upload === capability;
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image"));
+      reader.onerror = () => reject(new Error("Could not read image"));
+      reader.readAsDataURL(file);
+    });
+    const [attachment] = await uploadAttachments([{ data_url: dataUrl, name: file.name }], capability,
+      typeof window !== "undefined" ? window.location.href : this.currentUrl, stillConnected);
+    if (!attachment || !("reference" in attachment)) throw new Error("Could not upload image");
+    await this.requestMutation("background.update", { reference: attachment.reference });
+  }
+
   async sendAttachments(
     chatId: string, content: string, media: OutboundMedia[],
     options?: Parameters<NanobotClient["sendMessage"]>[3],

@@ -1874,3 +1874,53 @@
   box-sizing: border-box;
   white-space: nowrap;
 }
+
+/* The image is shared by the whole window; foreground surfaces stay translucent. */
+html[data-custom-background] {
+  --custom-background-tint: 0.88;
+  --custom-background-blur: 5px;
+}
+html[data-custom-background] body {
+  background: var(--custom-background-image) center / cover fixed no-repeat;
+}
+html[data-custom-background] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: hsl(var(--background) / var(--custom-background-tint));
+  backdrop-filter: blur(var(--custom-background-blur));
+  pointer-events: none;
+}
+/* Match the class without expanding this rule into Tailwind's @apply bg-background. */
+html[data-custom-background] [data-theme-surface][class~="bg-background"],
+html[data-custom-background] .bg-sidebar,
+html[data-custom-background] .bg-settings-canvas {
+  background-color: transparent;
+}
+html[data-custom-background] .thread-composer-dock {
+  background: transparent;
+}
+html[data-custom-background] .markdown-inline-code {
+  background-color: hsl(var(--muted) / 0.45);
+}
+html[data-custom-background] .thread-history-status {
+  --thread-history-background: hsl(var(--background) / 0.65);
+}
+html[data-custom-background] [data-testid="file-edit-diff"] {
+  background-color: hsl(var(--background) / 0.78);
+  backdrop-filter: blur(12px);
+}
+html[data-custom-background] .nanobot-file-diff {
+  --code-background: transparent;
+}
+html[data-custom-background] .bg-settings-surface,
+html[data-custom-background] .thread-composer-surface,
+html[data-custom-background] .user-message-surface,
+html[data-custom-background] .context-inspector-surface,
+html[data-custom-background] .side-panel-surface {
+  background-color: hsl(var(--settings-surface) / 0.78);
+  backdrop-filter: blur(12px);
+}
+html[data-custom-background] aside.bg-settings-surface {
+  background-color: hsl(var(--settings-surface) / 0.65);
+}

@@ -699,6 +699,15 @@
       "interrupted": "Tác vụ cần chú ý. Nhấp để tiếp tục."
     },
     "appearance": {
+      "background": "Ảnh nền",
+      "backgroundChoose": "Chọn ảnh",
+      "backgroundTooLarge": "Ảnh không được lớn hơn 6 MiB.",
+      "backgroundFade": "Làm nhạt nền",
+      "backgroundBlur": "Độ mờ",
+      "backgroundReplace": "Đổi ảnh",
+      "backgroundRemove": "Xóa",
+      "backgroundError": "Không thể lưu hình nền. Vui lòng thử lại.",
+      "backgroundPartialError": "Đã lưu thay đổi ảnh nhưng không thể lưu giao diện. Vui lòng thử lại.",
       "system": "Theo hệ thống",
       "reading": "Đọc",
       "readingHelp": "Điều chỉnh tin nhắn, mã và ô soạn thảo, không thay đổi phần điều hướng.",

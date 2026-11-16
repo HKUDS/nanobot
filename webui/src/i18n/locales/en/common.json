@@ -936,6 +936,15 @@
       "interrupted": "Task needs attention. Click to continue."
     },
     "appearance": {
+      "background": "Background",
+      "backgroundChoose": "Choose image",
+      "backgroundTooLarge": "Image must be 6 MiB or smaller.",
+      "backgroundFade": "Background fade",
+      "backgroundBlur": "Blur",
+      "backgroundReplace": "Change image",
+      "backgroundRemove": "Remove",
+      "backgroundError": "Could not save background. Try again.",
+      "backgroundPartialError": "Image change saved; could not save appearance. Try again.",
       "system": "System",
       "reading": "Reading",
       "readingHelp": "Adjust messages, code and the composer—not navigation.",

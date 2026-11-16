@@ -756,6 +756,15 @@
       "interrupted": "A tarefa precisa de atenção. Clique para continuar."
     },
     "appearance": {
+      "background": "Imagem de fundo",
+      "backgroundChoose": "Escolher imagem",
+      "backgroundTooLarge": "A imagem deve ter até 6 MiB.",
+      "backgroundFade": "Suavizar fundo",
+      "backgroundBlur": "Desfoque",
+      "backgroundReplace": "Trocar imagem",
+      "backgroundRemove": "Remover",
+      "backgroundError": "Não foi possível salvar o fundo. Tente novamente.",
+      "backgroundPartialError": "A alteração da imagem foi salva, mas a aparência não. Tente novamente.",
       "system": "Sistema",
       "reading": "Leitura",
       "readingHelp": "Ajuste as mensagens, o código e o campo de escrita, sem alterar a navegação.",

@@ -936,6 +936,15 @@
       "interrupted": "任务需要处理，点击继续。"
     },
     "appearance": {
+      "background": "背景图片",
+      "backgroundChoose": "选择图片",
+      "backgroundTooLarge": "图片不能超过 6 MiB",
+      "backgroundFade": "背景淡化",
+      "backgroundBlur": "模糊程度",
+      "backgroundReplace": "更换图片",
+      "backgroundRemove": "移除",
+      "backgroundError": "背景保存失败，请重试",
+      "backgroundPartialError": "图片更改已保存，外观保存失败，请重试",
       "system": "跟随系统",
       "reading": "阅读",
       "readingHelp": "调整消息、代码和输入框，不改变导航大小。",

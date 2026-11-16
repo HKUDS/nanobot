@@ -699,6 +699,15 @@
       "interrupted": "La tâche demande votre attention. Cliquez pour continuer."
     },
     "appearance": {
+      "background": "Image de fond",
+      "backgroundChoose": "Choisir une image",
+      "backgroundTooLarge": "L’image ne doit pas dépasser 6 Mio.",
+      "backgroundFade": "Atténuer le fond",
+      "backgroundBlur": "Flou",
+      "backgroundReplace": "Changer l’image",
+      "backgroundRemove": "Retirer",
+      "backgroundError": "Impossible d’enregistrer le fond. Réessayez.",
+      "backgroundPartialError": "La modification de l’image est enregistrée, mais pas l’apparence. Réessayez.",
       "system": "Système",
       "reading": "Lecture",
       "readingHelp": "Ajustez les messages, le code et la zone de saisie, sans changer la navigation.",

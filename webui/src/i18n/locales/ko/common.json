@@ -699,6 +699,15 @@
       "interrupted": "확인이 필요합니다. 눌러서 계속하세요."
     },
     "appearance": {
+      "background": "배경 이미지",
+      "backgroundChoose": "이미지 선택",
+      "backgroundTooLarge": "이미지는 6 MiB 이하여야 합니다",
+      "backgroundFade": "배경 흐리기",
+      "backgroundBlur": "흐림 정도",
+      "backgroundReplace": "이미지 변경",
+      "backgroundRemove": "제거",
+      "backgroundError": "배경을 저장하지 못했습니다. 다시 시도하세요.",
+      "backgroundPartialError": "이미지 변경은 저장되었지만 모양은 저장하지 못했습니다. 다시 시도하세요.",
       "system": "시스템 설정",
       "reading": "읽기",
       "readingHelp": "메시지, 코드, 입력창의 글자 크기를 조절합니다. 탐색 메뉴는 바뀌지 않습니다.",
