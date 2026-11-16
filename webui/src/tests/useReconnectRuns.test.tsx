@@ -80,6 +80,42 @@ afterEach(() => {
 });
 
 describe("durable run recovery", () => {
+  it("settles a missed old completion from mounted history while a newer turn remains active", async () => {
+    let finishRead!: (value: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((url: string) => String(url).includes("/webui-thread")
+      ? new Promise<Response>((resolve) => { finishRead = resolve; })
+      : Promise.resolve(new Response("{}", { status: 404 }))));
+    const { client, sockets, running, reopen, close } = setup();
+    running();
+    await reopen();
+    act(() => running("inactive", "turn-new", 456));
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client} token="renewed-token">{children}</ClientProvider>
+    );
+    const mounted = renderHook(() => useNanobotStream("inactive", [], false,
+      undefined, undefined, [], { key: "websocket:inactive" }), { wrapper });
+    const body: WebuiThreadPersistedPayload = {
+      ...completedThread(), schemaVersion: 3,
+      completed_turn_ids: ["turn-old"], has_pending_tool_calls: true, active_turn_id: "turn-new",
+    };
+    body.events.push({ event: "user_message", chat_id: "inactive", turn_id: "turn-new", text: "Next task", starts_turn: true });
+    await act(async () => { finishRead(response(body)); });
+    expect(mounted.result.current.messages.map((message) => message.content)).toContain("The complete answer");
+    expect(client.isRunCompleted("inactive", "turn-old")).toBe(true);
+    expect(client.getRunState("inactive")).toMatchObject({ active: true, latestTurnId: "turn-new", startedAt: 456 });
+    act(() => sockets.at(-1)!.receive({ event: "turn_end", chat_id: "inactive", turn_id: "turn-new" }));
+    expect(client.isRunCompleted("inactive", "turn-new")).toBe(true);
+    expect(client.getRunState("inactive")).toMatchObject({ active: false, unsettled: false, startedAt: null });
+    expect(mounted.result.current.isStreaming).toBe(false);
+    act(() => {
+      sockets.at(-1)!.receive({ event: "turn_end", chat_id: "inactive", turn_id: "turn-old" });
+      running("inactive", "turn-old", 999);
+    });
+    expect(mounted.result.current.isStreaming).toBe(false);
+    mounted.unmount();
+    close();
+  });
+
   it("settles an unmounted run without losing buffered or late output absent from its completed latest fragment", async () => {
     const chatId = "inactive";
     const turnId = "turn-old";
