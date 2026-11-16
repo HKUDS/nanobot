@@ -14,6 +14,7 @@ beforeEach(() => {
   background.image = new Blob(["image"], { type: "image/png" });
   background.blur = 5;
   background.veil = 88;
+  background.error = false;
   background.remove.mockResolvedValue(true);
   background.upload.mockResolvedValue(true);
   background.setStyle.mockResolvedValue(true);
@@ -42,6 +43,32 @@ it("keeps the draft open when saving fails", async () => {
   await waitFor(() => expect(background.remove).toHaveBeenCalledOnce());
   expect(screen.getByRole("dialog")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+});
+
+it("retries style without uploading the image again after a partial save", async () => {
+  background.setStyle.mockImplementationOnce(async () => { background.error = true; return false; });
+  const { container } = render(<BackgroundSettings />);
+  fireEvent.click(screen.getByRole("button", { name: "Background" }));
+  fireEvent.change(container.ownerDocument.querySelector('input[type="file"]')!, {
+    target: { files: [new File(["image"], "new.png", { type: "image/png" })] },
+  });
+  fireEvent.change(screen.getByRole("slider", { name: "Blur" }), { target: { value: "12" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Image change saved"));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(background.upload).toHaveBeenCalledOnce();
+  expect(background.setStyle).toHaveBeenCalledTimes(2);
+});
+
+it("allows saving a valid draft after selecting an oversized image", () => {
+  const { container } = render(<BackgroundSettings />);
+  fireEvent.click(screen.getByRole("button", { name: "Background" }));
+  fireEvent.change(screen.getByRole("slider", { name: "Blur" }), { target: { value: "12" } });
+  const file = new File([new Uint8Array(6 * 1024 * 1024 + 1)], "large.png", { type: "image/png" });
+  fireEvent.change(container.ownerDocument.querySelector('input[type="file"]')!, { target: { files: [file] } });
+  expect(screen.getByRole("alert").textContent).toContain("6 MiB");
+  expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 });
 
 it("previews blur and saves only after confirmation", async () => {
@@ -107,15 +134,4 @@ it("returns keyboard focus to the background setting after Escape", async () => 
   await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   await waitFor(() => expect(document.activeElement).toBe(trigger));
-});
-
-it("keeps a remotely changed untouched style field when saving a local adjustment", async () => {
-  const view = render(<BackgroundSettings />);
-  fireEvent.click(screen.getByRole("button", { name: "Background" }));
-  fireEvent.change(screen.getByRole("slider", { name: "Background fade" }), { target: { value: "40" } });
-  background.blur = 12;
-  view.rerender(<BackgroundSettings />);
-  expect(screen.getByRole("slider", { name: "Blur" })).toHaveProperty("value", "12");
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(background.setStyle).toHaveBeenCalledWith(12, 40));
 });

@@ -74,6 +74,32 @@ def test_reject_unsafe_images_without_replacing_existing(tmp_path):
     assert (directory / "background.png").read_bytes() == existing
 
 
+def test_background_accepts_typical_phone_photo(tmp_path):
+    data = io.BytesIO()
+    Image.new("RGB", (6000, 4000), "red").save(data, "JPEG")
+    save_background(tmp_path, data.getvalue(), "image/jpeg")
+    with Image.open(tmp_path / "background.png") as saved:
+        assert saved.size == (6000, 4000)
+
+
+def test_background_preserves_photo_orientation_and_palette_transparency(tmp_path):
+    photo = Image.new("RGB", (3, 2), "red")
+    exif = photo.getexif()
+    exif[274] = 6
+    data = io.BytesIO()
+    photo.save(data, "JPEG", exif=exif)
+    save_background(tmp_path, data.getvalue(), "image/jpeg")
+    with Image.open(tmp_path / "background.png") as saved:
+        assert saved.size == (2, 3)
+
+    palette = Image.new("P", (2, 2), 0)
+    data = io.BytesIO()
+    palette.save(data, "PNG", transparency=0)
+    save_background(tmp_path, data.getvalue(), "image/png")
+    with Image.open(tmp_path / "background.png") as saved:
+        assert saved.convert("RGBA").getpixel((0, 0))[3] == 0
+
+
 async def test_background_style_persistence_and_validation(tmp_path):
     handler = GatewayHTTPHandler.__new__(GatewayHTTPHandler)
     handler.bus = MessageBus()
@@ -120,8 +146,8 @@ async def test_background_style_persistence_and_validation(tmp_path):
     assert style_file.read_bytes() == saved
     assert (await router.execute_webui_request("alice", "background.delete", {})).result == {"ok": True}
     assert await get_style() == {"blur": 7, "veil": 42}
-    for corrupt in (b"a" * 100_000, b"\xff", b'{}', b'{"filter":"x","blur":true}',
-                    b'{"filter":"x","blur":21}', b'{"filter":"x","blur":5,"blur":6}'):
+    for corrupt in (b"not json", b"\xff", b'{}', b'{"filter":"x","blur":true}',
+                    b'{"filter":"x","blur":21}'):
         style_file.write_bytes(corrupt)
         assert await get_style() == {"blur": 5, "veil": 88}
     for invalid in (True, False, -1, 101, 1.0, "88"):

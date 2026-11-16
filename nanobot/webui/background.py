@@ -7,10 +7,11 @@ import os
 import tempfile
 import warnings
 from pathlib import Path
+from typing import TypeGuard, cast
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
-MAX_PIXELS = 16_000_000
+MAX_PIXELS = 32_000_000
 MAX_BYTES = 6 * 1024 * 1024
 FORMATS = {"image/png": "PNG", "image/jpeg": "JPEG", "image/webp": "WEBP"}
 
@@ -28,7 +29,8 @@ def save_background(directory: Path, source: Path | bytes, mime: str) -> None:
                         or getattr(image, "n_frames", 1) != 1):
                     raise ValueError("Invalid background image")
                 image.load()
-                clean = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+                image = ImageOps.exif_transpose(image)
+                clean = image.convert("RGBA" if "A" in image.getbands() or "transparency" in image.info else "RGB")
                 out = io.BytesIO()
                 clean.save(out, format="PNG")
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
@@ -43,11 +45,11 @@ def save_background(directory: Path, source: Path | bytes, mime: str) -> None:
         Path(name).unlink(missing_ok=True)
 
 
-def _valid_blur(blur: object) -> bool:
+def _valid_blur(blur: object) -> TypeGuard[int]:
     return type(blur) is int and 0 <= blur <= 20
 
 
-def _valid_veil(veil: object) -> bool:
+def _valid_veil(veil: object) -> TypeGuard[int]:
     return type(veil) is int and 0 <= veil <= 100
 
 
@@ -55,27 +57,16 @@ def load_background_style(directory: Path) -> dict[str, int]:
     """Read current or legacy instance style, defaulting invalid fields."""
     default = {"blur": 5, "veil": 88}
     try:
-        with (directory / "background-style").open("rb") as file:
-            data = file.read(257)
-        if len(data) > 256:
-            return default
-
-        def unique_pairs(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError("Duplicate key")
-                result[key] = value
-            return result
-
-        value = json.loads(data.decode("ascii"), object_pairs_hook=unique_pairs)
-    except (FileNotFoundError, UnicodeDecodeError, ValueError, RecursionError):
+        value = json.loads((directory / "background-style").read_text(encoding="utf-8"))
+    except (FileNotFoundError, UnicodeDecodeError, ValueError):
         return default
     if not isinstance(value, dict):
         return default
+    style = cast(dict[str, object], value)
+    blur, veil = style.get("blur"), style.get("veil")
     return {
-        "blur": value["blur"] if _valid_blur(value.get("blur")) else default["blur"],
-        "veil": value["veil"] if _valid_veil(value.get("veil")) else default["veil"],
+        "blur": blur if _valid_blur(blur) else default["blur"],
+        "veil": veil if _valid_veil(veil) else default["veil"],
     }
 
 
