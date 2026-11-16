@@ -210,3 +210,57 @@ async def test_owner_reuses_worker_connections_and_closes_them_after_drain(tmp_p
     assert {identifier for identifier, _ in closed} == {identifier for identifier, _ in connections}
     assert len(closed) == len(connections)
     assert all(thread_id != threading.get_ident() for _, thread_id in closed)
+
+
+async def test_history_replay_ack_is_atomic_and_preserves_newer_deliveries(tmp_path):
+    from nanobot.providers.base import ProviderConversationState
+    from nanobot.session.manager import project_history_messages
+
+    manager = SessionManager(tmp_path)
+    state = manager.state
+    draft = await state.import_messages("chat:replay", [{"role": "user", "content": "$25 quote"}])
+    consumed = frozenset(batch.id for batch in draft.pending_history_replay)
+    draft.provider_state = ProviderConversationState(
+        kind="fixture", provider="fixture", model="fixture", version=1, payload={},
+        pending_messages=project_history_messages(draft.messages),
+    )
+    draft.consumed_history_replay_ids = consumed
+    draft.add_message("user", "Current price?")
+    await state.record_delivery(
+        draft.key, "newer notification", {"_channel_delivery": True},
+        expected_generation=draft.generation,
+    )
+    queued = (await state.read(draft.key)).pending_history_replay
+    assert len(queued) == 2
+    with sqlite3.connect(manager._store.path) as db:
+        db.execute("""CREATE TRIGGER reject_replay_input BEFORE INSERT ON messages
+                      WHEN NEW.position >= 2 BEGIN SELECT RAISE(ABORT, 'input rejected'); END""")
+    with pytest.raises(sqlite3.IntegrityError, match="input rejected"):
+        await state.prepare_input(draft)
+    unchanged = await state.read(draft.key)
+    assert unchanged.pending_history_replay == queued
+    assert unchanged.provider_state is None
+    assert [message["content"] for message in unchanged.messages] == ["$25 quote", "newer notification"]
+    with sqlite3.connect(manager._store.path) as db:
+        db.execute("DROP TRIGGER reject_replay_input")
+    await state.prepare_input(draft)
+    assert [batch.id for batch in draft.pending_history_replay] == [queued[-1].id]
+    assert draft.provider_state.pending_messages == [{"role": "user", "content": "$25 quote"}]
+    await state.checkpoint_view(draft, {"step": 1})
+    draft.add_message("assistant", "$50")
+    await state.finish_turn(draft)
+    assert draft.pending_history_replay == [queued[-1]]
+    await state.aclose()
+
+    restarted = SessionManager(tmp_path).state
+    try:
+        restored = await restarted.read(draft.key)
+        assert restored.pending_history_replay == [queued[-1]]
+        forked = await restarted.fork(draft.key, "chat:fork", 1)
+        assert forked.pending_history_replay == []
+        await restarted.reset(draft.key)
+        assert (await restarted.read(draft.key)).pending_history_replay == []
+        with pytest.raises(SessionConflictError, match="reset"):
+            await restarted.prepare_input(draft)
+    finally:
+        await restarted.aclose()

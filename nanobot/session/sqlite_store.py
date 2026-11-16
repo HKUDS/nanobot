@@ -14,6 +14,7 @@ from typing import Any, TypeVar, cast
 from nanobot.providers.base import ProviderConversationState
 from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind, HistoryReader
 from nanobot.session.history_graph import history_record_size
+from nanobot.session.history_replay import HistoryReplayBatch
 from nanobot.session.history_visibility import is_hidden_history_message
 from nanobot.session.manager import (
     Session,
@@ -29,6 +30,7 @@ from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 _CHECKPOINT = "runtime_checkpoint"
 _INPUTS = ("pending_user_followups",)
+_HISTORY_REPLAY = "history_replay"
 _T = TypeVar("_T")
 
 # The expression below defines the v6 partial index and must stay stable for upgrades.
@@ -344,6 +346,10 @@ class SqliteSessionStore:
                 provider_state=ProviderConversationState.from_private_record(
                     _object(row["provider_state"])
                 ) if row["provider_state"] is not None else None,
+                pending_history_replay=[HistoryReplayBatch.from_record(_object(item[0])) for item in db.execute(
+                    "SELECT record FROM pending_inputs WHERE session_key=? AND kind=? ORDER BY position",
+                    (key, _HISTORY_REPLAY),
+                )],
                 revision=row["revision"], generation=row["generation"], persisted=True,
             )
             if not history:
@@ -443,6 +449,11 @@ class SqliteSessionStore:
                 ])
             db.execute("DELETE FROM messages WHERE session_key=? AND position>=?", (session.key, len(session.messages)))
             self._write_metadata(db, session.key, session.metadata, bump_revision=False)
+            db.execute("DELETE FROM pending_inputs WHERE session_key=? AND kind=?", (session.key, _HISTORY_REPLAY))
+            db.executemany("INSERT INTO pending_inputs (session_key, kind, position, record) VALUES (?, ?, ?, ?)", [
+                (session.key, _HISTORY_REPLAY, position, _encode(batch.to_record()))
+                for position, batch in enumerate(session.pending_history_replay)
+            ])
         session.revision += 1
         session.persisted = True
 

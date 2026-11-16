@@ -82,7 +82,13 @@ from nanobot.security.workspace_access import (
 from nanobot.session import turn_continuation
 from nanobot.session.automation_turns import automation_history_overrides
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
-from nanobot.session.manager import SESSION_CACHE_MAX_SIZE, Session, SessionManager, SessionPolicy
+from nanobot.session.manager import (
+    SESSION_CACHE_MAX_SIZE,
+    Session,
+    SessionManager,
+    SessionPolicy,
+    project_history_messages,
+)
 from nanobot.session.message_metadata import input_history_metadata, persisted_message
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
@@ -2093,6 +2099,8 @@ class AgentLoop:
         if ctx.on_runtime_admitted is not None:
             await ctx.on_runtime_admitted(runtime)
         is_subagent = ctx.kind is TurnKind.SYSTEM and ctx.msg.sender_id == "subagent"
+        replay_batches = tuple(session.pending_history_replay)
+        commit_replay = ctx.commit_session and (not ctx.ephemeral or not session.policy.persist)
 
         ctx.history = await self.runner.prepare_prompt(
             session.get_history, extend_to_user=is_subagent,
@@ -2127,6 +2135,15 @@ class AgentLoop:
             stored_state,
             runtime.model,
         ):
+            if replay_batches:
+                stored_state = stored_state.with_pending_messages([
+                    *stored_state.pending_messages,
+                    *project_history_messages([
+                        message for batch in replay_batches for message in batch.messages
+                    ]),
+                ])
+                if commit_replay:
+                    session.provider_state = stored_state
             current_provider_message = self.context.build_current_message(
                 ctx.msg.content,
                 media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
@@ -2168,6 +2185,8 @@ class AgentLoop:
                 staged_provider_state = True
         elif stored_state is not None:
             session.provider_state = None
+        if commit_replay:
+            session.consumed_history_replay_ids = frozenset(batch.id for batch in replay_batches)
         if ctx.kind is TurnKind.USER and ctx.commit_session:
             ctx.input_persisted_early = await self._persist_user_message_early(
                 ctx.msg,
@@ -2180,7 +2199,7 @@ class AgentLoop:
             # Upgrade the replay-safe baseline to the resumable state before
             # prompt assembly and the first model checkpoint.
             await self.sessions.state.prepare_input(session)
-        if not session.persisted and ctx.commit_session:
+        if ctx.commit_session and (not session.persisted or session.consumed_history_replay_ids):
             await self.sessions.state.prepare_input(session)
         ctx.transcript_input = self._build_transcript_input(ctx)
 

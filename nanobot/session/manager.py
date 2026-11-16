@@ -17,6 +17,7 @@ from nanobot.runtime_context import (
     public_history_message,
 )
 from nanobot.session.display_history import HistoryFact, HistoryReader
+from nanobot.session.history_replay import HistoryReplayBatch
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.location import SessionLocation
 from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
@@ -68,6 +69,78 @@ def _sanitize_assistant_replay_text(content: str) -> str:
         and not _TOOL_CALL_ECHO_RE.match(line)
     ]
     return "\n".join(lines).strip()
+
+
+def project_history_messages(
+    messages: Sequence[dict[str, Any]], *, include_runtime_context: bool = True,
+) -> list[dict[str, Any]]:
+    """Project canonical records without selecting or trimming a replay boundary."""
+    out: list[dict[str, Any]] = []
+    for message in messages:
+        if message.get("_command") or is_summary_checkpoint(message):
+            continue
+        has_persisted_runtime_context = isinstance(
+            message.get(RUNTIME_CONTEXT_HISTORY_META),
+            dict,
+        )
+        if not include_runtime_context:
+            message = public_history_message(message)
+        content = message.get("content", "")
+        role = message.get("role")
+        if role == "assistant" and isinstance(content, str):
+            content = _sanitize_assistant_replay_text(content)
+        # Synthesize an ``[image: path]`` breadcrumb from the persisted
+        # ``media`` kwarg so LLM replay still sees *something* where the
+        # image used to be. Without this, an image-only user turn
+        # replays as an empty user message — the assistant's reply then
+        # looks like it's responding to nothing.
+        content = content_with_media_breadcrumbs(
+            role,
+            content,
+            message.get("media"),
+        )
+        cli_apps = cast(object, message.get("cli_apps"))
+        if (
+            include_runtime_context
+            and not has_persisted_runtime_context
+            and role == "user"
+            and isinstance(cli_apps, list)
+            and cli_apps
+            and isinstance(content, str)
+        ):
+            cli_lines: list[str] = []
+            for item in cast(list[object], cli_apps[:8]):
+                if not isinstance(item, dict):
+                    continue
+                item_data = cast(dict[object, object], item)
+                name = str(item_data.get("name") or "").strip().lower()
+                if not name:
+                    continue
+                entry_point = (
+                    str(item_data.get("entry_point") or "unknown").strip() or "unknown"
+                )
+                cli_lines.append(
+                    f"[CLI App Attachment: @{name}; tool=run_cli_app; entry_point={entry_point}; "
+                    f"skill=skills/cli-app-{name}/SKILL.md]"
+                )
+            if cli_lines:
+                breadcrumbs = "\n".join(cli_lines)
+                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+        if role == "assistant" and isinstance(content, str) and not content.strip():
+            if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
+                continue
+        entry: dict[str, Any] = {"role": message["role"], "content": content}
+        if include_runtime_context and "input_id" in message and not is_hidden_history_message(message):
+            entry["_meta"] = {"input_id": message["input_id"]}
+        marker = message.get(HIDDEN_HISTORY_META)
+        if include_runtime_context and isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
+            # Attribution must distinguish persisted continuations from no-ID automation inputs.
+            entry[HIDDEN_HISTORY_META] = {"kind": "internal_continuation"}
+        for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
+            if key in message:
+                entry[key] = message[key]
+        out.append(entry)
+    return out
 
 
 def _text_preview(content: object) -> str:
@@ -143,12 +216,15 @@ class Session:
     # Keep the legacy storage name while persisted sessions and SDK callers migrate.
     last_consolidated: int = 0
     provider_state: ProviderConversationState | None = field(default=None, repr=False)
+    # The session owner retains passive appends independently of turn checkpoints.
+    pending_history_replay: list[HistoryReplayBatch] = field(default_factory=list, repr=False)
     policy: SessionPolicy = field(default_factory=SessionPolicy, repr=False, compare=False)
 
     # Owner-private committed snapshot. Never mutate or expose its records as draft data.
     _baseline: Session | None = field(default=None, repr=False, compare=False)
     # Explicit draft command, committed with history against the latest owner journal.
     consumed_followup_ids: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
+    consumed_history_replay_ids: frozenset[str] = field(default_factory=frozenset, repr=False, compare=False)
     persisted: bool = field(default=False, repr=False, compare=False)
     revision: int = field(default=0, repr=False, compare=False)
     generation: str = field(default_factory=lambda: uuid4().hex, repr=False, compare=False)
@@ -248,71 +324,7 @@ class Session:
         if start:
             sliced = sliced[start:]
 
-        out: list[dict[str, Any]] = []
-        for message in sliced:
-            if message.get("_command") or is_summary_checkpoint(message):
-                continue
-            has_persisted_runtime_context = isinstance(
-                message.get(RUNTIME_CONTEXT_HISTORY_META),
-                dict,
-            )
-            if not include_runtime_context:
-                message = public_history_message(message)
-            content = message.get("content", "")
-            role = message.get("role")
-            if role == "assistant" and isinstance(content, str):
-                content = _sanitize_assistant_replay_text(content)
-            # Synthesize an ``[image: path]`` breadcrumb from the persisted
-            # ``media`` kwarg so LLM replay still sees *something* where the
-            # image used to be. Without this, an image-only user turn
-            # replays as an empty user message — the assistant's reply then
-            # looks like it's responding to nothing.
-            content = content_with_media_breadcrumbs(
-                role,
-                content,
-                message.get("media"),
-            )
-            cli_apps = cast(object, message.get("cli_apps"))
-            if (
-                include_runtime_context
-                and not has_persisted_runtime_context
-                and role == "user"
-                and isinstance(cli_apps, list)
-                and cli_apps
-                and isinstance(content, str)
-            ):
-                cli_lines: list[str] = []
-                for item in cast(list[object], cli_apps[:8]):
-                    if not isinstance(item, dict):
-                        continue
-                    item_data = cast(dict[object, object], item)
-                    name = str(item_data.get("name") or "").strip().lower()
-                    if not name:
-                        continue
-                    entry_point = (
-                        str(item_data.get("entry_point") or "unknown").strip() or "unknown"
-                    )
-                    cli_lines.append(
-                        f"[CLI App Attachment: @{name}; tool=run_cli_app; entry_point={entry_point}; "
-                        f"skill=skills/cli-app-{name}/SKILL.md]"
-                    )
-                if cli_lines:
-                    breadcrumbs = "\n".join(cli_lines)
-                    content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
-            if role == "assistant" and isinstance(content, str) and not content.strip():
-                if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
-                    continue
-            entry: dict[str, Any] = {"role": message["role"], "content": content}
-            if include_runtime_context and "input_id" in message and not is_hidden_history_message(message):
-                entry["_meta"] = {"input_id": message["input_id"]}
-            marker = message.get(HIDDEN_HISTORY_META)
-            if include_runtime_context and isinstance(marker, dict) and cast(dict[str, Any], marker).get("kind") == "internal_continuation":
-                # Attribution must distinguish persisted continuations from no-ID automation inputs.
-                entry[HIDDEN_HISTORY_META] = {"kind": "internal_continuation"}
-            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
-                if key in message:
-                    entry[key] = message[key]
-            out.append(entry)
+        out = project_history_messages(sliced, include_runtime_context=include_runtime_context)
 
         if max_tokens > 0 and out:
             kept: list[dict[str, Any]] = []
@@ -352,6 +364,8 @@ class Session:
         self.messages = []
         self.last_archived = 0
         self.provider_state = None
+        self.pending_history_replay = []
+        self.consumed_history_replay_ids = frozenset()
         self.updated_at = datetime.now()
         self.metadata.pop("_last_summary", None)
         self.metadata.pop("_stopped_at_iteration_limit", None)
