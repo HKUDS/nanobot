@@ -1,10 +1,14 @@
+import asyncio
 import json
 import threading
+from contextlib import suppress
 from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import httpx
 import pytest
 
+from nanobot.gateway.health import serve_health
 from nanobot.gateway.runtime import (
     GatewayHealthIdentity,
     GatewayRuntime,
@@ -12,6 +16,7 @@ from nanobot.gateway.runtime import (
     GatewayStartOptions,
     _gateway_health_ready,
 )
+from nanobot.runtime_admission import RuntimeAdmission
 
 
 @pytest.fixture
@@ -72,3 +77,46 @@ def test_unready_or_invalid_response_cannot_confirm_restart(health_server, statu
     port, reply = health_server
     reply.update(status=status, body=body)
     assert not _gateway_health_ready("127.0.0.1", port, expected=GatewayHealthIdentity("a" * 64, "b" * 32, "0.3.6"))
+
+
+async def test_health_reports_live_websocket_readiness_during_maintenance(unused_tcp_port):
+    class Channels:
+        enabled_channels = ["websocket"]
+        running = False
+
+        def get_status(self):
+            return {"websocket": {"running": self.running, "state": "running" if self.running else "starting"}}
+
+    channels = Channels()
+    admission = RuntimeAdmission()
+    identity = GatewayHealthIdentity("a" * 64, "b" * 32, "0.4.1")
+    listening = asyncio.Event()
+    server = asyncio.create_task(serve_health(
+        "127.0.0.1", unused_tcp_port, channels=channels, identity=identity,
+        admission=admission, on_bound=lambda *_: listening.set(),
+    ))
+    try:
+        await asyncio.wait_for(listening.wait(), timeout=5)
+        async with httpx.AsyncClient(trust_env=False) as client:
+            url = f"http://127.0.0.1:{unused_tcp_port}/health"
+            with admission.pause_before_start():
+                response = await client.get(url)
+                assert response.status_code == 503
+                assert response.json() == {
+                    "status": "degraded", "process": "alive", "ready": False, "websocket": "starting",
+                    "runtime": asdict(identity), "maintenance": True,
+                }
+
+                channels.running = True
+                response = await client.get(url)
+                assert response.status_code == 200
+                assert response.json() == {
+                    "status": "ok", "process": "alive", "ready": True, "websocket": "running",
+                    "runtime": asdict(identity), "maintenance": True,
+                }
+
+            assert (await client.get(url)).json()["maintenance"] is False
+    finally:
+        server.cancel()
+        with suppress(asyncio.CancelledError):
+            await server

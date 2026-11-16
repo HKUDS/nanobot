@@ -1,10 +1,12 @@
 """Assemble and run one claimed Gateway, including protected updater startup."""
 
+from __future__ import annotations
+
 import asyncio
 import signal
-from collections.abc import Awaitable, Callable, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import ExitStack, suppress
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -23,21 +25,20 @@ from nanobot.agent.tools.image_generation import (
 from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.config.paths import get_data_dir, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.cron.migration import migrate_legacy_cron_store
+from nanobot.gateway.health import serve_health
 from nanobot.gateway.runtime import GatewayInstance, GatewayRuntime
 from nanobot.installation_lock import installation_access
-from nanobot.session.keys import HEARTBEAT_SESSION_KEY
-from nanobot.session.manager import SessionManager
-from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.token_encoding import warmup_token_encoding
 from nanobot.webui.context_source_hook import create_context_source_hook
-from nanobot.webui.sidebar_state import ensure_webui_session_archives
 
 if TYPE_CHECKING:
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.manager import ChannelManager
+    from nanobot.session.manager import SessionManager
     from nanobot.update_profiles import ProfileReceipt
     from nanobot.update_restart import GatewayStartup
 
@@ -179,125 +180,12 @@ def _install_gateway_shutdown_handlers(
     return restore
 
 
-def _advance_dream_cursor_if_behind(memory: Any) -> None:
-    latest = memory.get_latest_cursor()
-    if memory.get_last_dream_cursor() < latest:
-        memory.set_last_dream_cursor(latest)
-
-
-def _commit_dream_changes(memory: Any) -> str | None:
-    if not memory.git.is_initialized():
-        return None
-    diff_body = memory.dream_content_diff()
-    if not diff_body:
-        return None
-    message = memory.build_dream_commit_message(
-        "dream: periodic memory consolidation",
-        diff_body,
-    )
-    return memory.git.auto_commit(message)
-
-
-_HEARTBEAT_PREAMBLE = (
-    "[Your response will be delivered directly to the user's messaging app. "
-    "Output ONLY the final user-facing message. Never reference internal "
-    "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
-    "decision process. If nothing needs reporting, respond with just "
-    "'All clear.' and nothing else.]\n\n"
-)
-
-
-def _heartbeat_has_active_tasks(content: str) -> bool:
-    in_comment = False
-    in_active_section: bool = False
-    for line in content.splitlines():
-        stripped = line.strip()
-        if in_comment:
-            if "-->" in stripped:
-                in_comment = False
-            continue
-        if not stripped or stripped.startswith("#"):
-            if stripped.startswith("##") and not stripped.startswith("###"):
-                heading = stripped.lstrip("#").strip().lower()
-                in_active_section = heading.startswith("active tasks")
-            continue
-        if stripped.startswith("<!--"):
-            if "-->" not in stripped[4:]:
-                in_comment = True
-            continue
-        if in_active_section is False:
-            continue
-        return True
-    return False
-
-
-def _pick_heartbeat_target_from_sessions(
-    *,
-    enabled_channels: Iterable[str],
-    sessions: Iterable[dict[str, Any]],
-    archived_keys: Iterable[str],
-) -> tuple[str, str]:
-    enabled = set(enabled_channels)
-    archived = set(archived_keys)
-    for item in sessions:
-        key = item.get("key") or ""
-        if key in archived:
-            continue
-        if ":" not in key:
-            continue
-        channel, chat_id = key.split(":", 1)
-        if channel in {"cli", "system"}:
-            continue
-        if channel in enabled and chat_id:
-            return channel, chat_id
-    return "cli", "direct"
-
-
-_GATEWAY_HEALTH_MAX_CONNECTIONS = 64
-_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS = 2.0
-
-
-def _gateway_readiness_payload(channels: Any) -> tuple[bool, dict[str, object]]:
-    channel_status: dict[str, Any] = {}
-    get_status = getattr(channels, "get_status", None)
-    if callable(get_status):
-        try:
-            raw_status = get_status()
-            if isinstance(raw_status, dict):
-                channel_status = cast(dict[str, Any], raw_status)
-        except Exception:
-            logger.exception("Gateway readiness could not read channel status")
-
-    websocket = channel_status.get("websocket")
-    websocket_required = websocket is not None or "websocket" in getattr(
-        channels,
-        "enabled_channels",
-        (),
-    )
-    if not websocket_required:
-        websocket_state = "disabled"
-        ready = True
-    elif isinstance(websocket, dict):
-        websocket_status = cast(dict[str, Any], websocket)
-        ready = websocket_status.get("running") is True
-        state = websocket_status.get("state")
-        websocket_state = str(state) if isinstance(state, str) else "unavailable"
-    else:
-        ready = False
-        websocket_state = "unavailable"
-
-    return ready, {
-        "status": "ok" if ready else "degraded",
-        "process": "alive",
-        "ready": ready,
-        "websocket": websocket_state,
-    }
 
 
 async def _close_gateway_runtime(
     agent: AgentLoop,
     mcp_provider: MCPProvider,
-    channels: Any,
+    channels: ChannelManager,
     tasks: list[asyncio.Task[Any]],
     runtime_tasks: asyncio.Future[list[Any]] | None,
     *,
@@ -318,7 +206,6 @@ async def _close_gateway_runtime(
     for task in tasks:
         if not task.done():
             task.cancel()
-    pending: set[asyncio.Task[Any]] = set()
     if tasks:
         # Bounded: a coroutine that swallows cancellation (e.g. an SDK reconnect
         # loop) must not hold the stop open until systemd's timeout kills the
@@ -354,7 +241,7 @@ def run_gateway(
     presentation: GatewayPresentation,
     unconfigured_provider_error: str | None = None,
     gateway_instance: GatewayInstance | None = None,
-    update_startup: "GatewayStartup | None" = None,
+    update_startup: GatewayStartup | None = None,
 ) -> None:
     from nanobot.config.loader import get_config_path
     from nanobot.update_profiles import record_gateway_profile
@@ -389,8 +276,8 @@ def _run_claimed_gateway(
     gateway_runtime: GatewayRuntime,
     presentation: GatewayPresentation,
     unconfigured_provider_error: str | None,
-    update_startup: "GatewayStartup | None",
-    update_profile: "ProfileReceipt",
+    update_startup: GatewayStartup | None,
+    update_profile: ProfileReceipt,
 ) -> None:
     from nanobot.agent.model_presets import load_model_preset_catalog
     from nanobot.agent.tools.message import MessageTool
@@ -398,12 +285,9 @@ def _run_claimed_gateway(
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.config.watcher import watch_config_file
-    from nanobot.cron.bound_runner import run_bound_cron_job
-    from nanobot.cron.service import CronJobSkippedError, CronService
-    from nanobot.cron.session_turns import is_bound_cron_job
-    from nanobot.cron.types import CronJob, CronRunResult
+    from nanobot.cron.gateway_jobs import configure_gateway_jobs
+    from nanobot.cron.service import CronService
     from nanobot.llm_usage import record_llm_call
-    from nanobot.llm_usage.context import llm_usage_source
     from nanobot.providers.factory import (
         ProviderSnapshot,
         build_provider_snapshot,
@@ -467,7 +351,7 @@ def _run_claimed_gateway(
         monitor_gateway_clients,
     )
 
-    config_path = str(gateway_instance.config_path)
+    config_path = gateway_instance.config_path
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -533,159 +417,6 @@ def _run_claimed_gateway(
     if isinstance(message_tool, MessageTool):
         message_tool.set_send_callback(deliver_to_channel)
 
-    async def on_cron_job(job: CronJob) -> str | CronRunResult | None:
-        async def _silent(*_args: Any, **_kwargs: Any) -> None:
-            pass
-
-        # Dream is an internal job — run directly, not through the agent loop.
-        if job.name == "dream":
-            from nanobot.agent.memory import MemoryStore
-
-            dream_session_key = MemoryStore.dream_session_key
-
-            store = agent.context.memory
-            resp = None
-            diff_body = ""
-            try:
-                result = store.build_dream_prompt()
-                if result is None:
-                    logger.info("Dream: nothing to process")
-                    return None
-                prompt, last_cursor = result
-                key = dream_session_key()
-                dream_runtime = agent.dream_runtime()
-                await mcp_provider.connect()
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key=key,
-                    ephemeral=True,
-                    tools=store.build_dream_tools(),
-                    on_progress=_silent,
-                    runtime=dream_runtime,
-                )
-                # The real file delta grounds the audit record; normal completion
-                # decides whether this history batch has finished processing.
-                diff_body = store.dream_content_diff()
-                completed = MemoryStore.dream_run_completed(resp)
-                if completed:
-                    store.set_last_dream_cursor(last_cursor)
-                    if diff_body:
-                        logger.info(
-                            "Dream cron job completed, cursor advanced to {}",
-                            last_cursor,
-                        )
-                    else:
-                        logger.info(
-                            "Dream cron job completed with no memory changes; "
-                            "cursor advanced to {}",
-                            last_cursor,
-                        )
-                else:
-                    logger.warning(
-                        "Dream cron job did not complete ({}); cursor remains at {}",
-                        MemoryStore.dream_incompletion_reason(resp),
-                        store.get_last_dream_cursor(),
-                    )
-            except Exception:
-                logger.exception("Dream cron job failed")
-            finally:
-                sha = _commit_dream_changes(store)
-                if sha:
-                    logger.info("Dream commit: {}", sha)
-                store.compact_history()
-                await agent.sessions.state.prune_dream_sessions()
-            return None
-
-        if job.name == "heartbeat":
-            heartbeat_file = config.workspace_path / "HEARTBEAT.md"
-            try:
-                content = heartbeat_file.read_text(encoding="utf-8")
-            except OSError:
-                logger.debug("Heartbeat: HEARTBEAT.md missing")
-                return None
-            if not _heartbeat_has_active_tasks(content):
-                logger.debug("Heartbeat: HEARTBEAT.md has no active tasks")
-                return None
-
-            channel, chat_id = await _pick_heartbeat_target()
-            if channel == "cli":
-                return None
-            delivery_key = f"{channel}:{chat_id}"
-            delivery_session = await session_manager.state.read(delivery_key)
-            if delivery_session is None:
-                return None
-            delivery_generation = delivery_session.generation
-
-            prompt = (
-                _HEARTBEAT_PREAMBLE
-                + f"You are executing periodic heartbeat tasks. Read the active tasks below, perform each one, and report what you did:\n\n{content}"
-            )
-
-            # Internal check: funnel all output through the post-run gate so the
-            # turn can't deliver directly via the message tool and skip it.
-            suppress_token = None
-            if isinstance(message_tool, MessageTool):
-                suppress_token = message_tool.set_suppress_delivery(True)
-            try:
-                await mcp_provider.connect()
-                resp = await agent.process_direct(
-                    prompt,
-                    session_key=HEARTBEAT_SESSION_KEY,
-                    channel=channel,
-                    chat_id=chat_id,
-                    on_progress=_silent,
-                )
-            finally:
-                if isinstance(message_tool, MessageTool) and suppress_token is not None:
-                    message_tool.reset_suppress_delivery(suppress_token)
-
-            if not resp or not resp.content:
-                return
-
-            response = resp.content
-
-            evaluator_prompt = resolve_evaluator_prompt(config.workspace_path)
-
-            # Fail closed: stay silent on evaluator failure instead of notifying.
-            with llm_usage_source("cron"):
-                should_notify = await evaluate_response(
-                    response=response,
-                    task_context=prompt,
-                    provider=agent.provider,
-                    model=agent.model,
-                    evaluator_prompt=evaluator_prompt,
-                    default_notify=False,
-                )
-
-            if should_notify:
-                logger.info("Heartbeat: completed, delivering response")
-                await deliver_to_channel(
-                    OutboundMessage(channel=channel, chat_id=chat_id, content=response),
-                    record=True,
-                    session_key=delivery_key,
-                    session_generation=delivery_generation,
-                )
-            else:
-                logger.info("Heartbeat: silenced by post-run evaluation")
-            return response
-
-        if is_bound_cron_job(job):
-            return await run_bound_cron_job(job, agent=agent, cron=cron)
-
-        reason = "unbound agent cron job must be recreated from a chat session"
-        logger.warning(
-            "Cron: skipped unbound agent job '{}' ({}): {}",
-            job.name,
-            job.id,
-            reason,
-        )
-        raise CronJobSkippedError(reason)
-
-    cron.on_job = on_cron_job
-
-    def _webui_runtime_model_name() -> str | None:
-        return agent.model.strip() or None
-
     def _webui_refresh_runtime_config() -> None:
         agent.refresh_runtime_config()
 
@@ -696,7 +427,7 @@ def _run_claimed_gateway(
 
     async def _webui_image_generation_reload() -> dict[str, Any]:
         return await reload_image_generation_tool(
-            config_path=Path(config_path),
+            config_path=config_path,
             workspace=agent.workspace,
             registry=tools,
         )
@@ -707,7 +438,7 @@ def _run_claimed_gateway(
         session_manager=session_manager,
         cron_service=cron,
         local_trigger_store=trigger_store,
-        webui_runtime_model_name=_webui_runtime_model_name,
+        webui_runtime_model_name=lambda: agent.model.strip() or None,
         webui_refresh_runtime_config=_webui_refresh_runtime_config,
         webui_cron_pending_job_ids=agent.pending_cron_job_ids_for_session,
         webui_local_trigger_pending_ids=agent.pending_local_trigger_ids_for_session,
@@ -718,120 +449,19 @@ def _run_claimed_gateway(
         webui_recovery_action=recovery.handle_action,
         webui_subagent_manager=agent.subagents,
         webui_discard_session=agent.discard_session,
-        config_path=Path(config_path),
+        config_path=config_path,
     )
 
-    async def _pick_heartbeat_target() -> tuple[str, str]:
-        archived_keys = await ensure_webui_session_archives(session_manager.state)
-        return _pick_heartbeat_target_from_sessions(
-            enabled_channels=channels.enabled_channels,
-            sessions=await session_manager.state.list_sessions(),
-            archived_keys=archived_keys,
-        )
 
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
         console.print("[yellow]Warning: No channels enabled[/yellow]")
 
-    hb_cfg = config.gateway.heartbeat
-    if hb_cfg.enabled:
-        console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-    else:
-        console.print("[yellow]✗[/yellow] Heartbeat: disabled")
-
-    async def _health_server(host: str, health_port: int) -> None:
-        import json as _json
-
-        connection_slots = asyncio.Semaphore(_GATEWAY_HEALTH_MAX_CONNECTIONS)
-
-        async def handle(
-            reader: asyncio.StreamReader,
-            writer: asyncio.StreamWriter,
-        ) -> None:
-            if connection_slots.locked():
-                writer.close()
-                return
-
-            async with connection_slots:
-                try:
-                    data = await asyncio.wait_for(
-                        reader.read(4096),
-                        timeout=_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS,
-                    )
-                    request_line = data.split(b"\r\n", 1)[0].decode(
-                        "utf-8", errors="replace",
-                    )
-                    method, path = "", ""
-                    parts = request_line.split(" ")
-                    if len(parts) >= 2:
-                        method, path = parts[0], parts[1]
-
-                    if method == "GET" and path == "/health":
-                        ready, payload = _gateway_readiness_payload(channels)
-                        payload["runtime"] = asdict(health_identity)
-                        payload["maintenance"] = bus.admission.paused
-                        body = _json.dumps(payload)
-                        status = "200 OK" if ready else "503 Service Unavailable"
-                        content_type = "application/json"
-                    else:
-                        body = "Not Found"
-                        status = "404 Not Found"
-                        content_type = "text/plain"
-
-                    resp = (
-                        f"HTTP/1.0 {status}\r\n"
-                        f"Content-Type: {content_type}\r\n"
-                        f"Content-Length: {len(body)}\r\n"
-                        "Connection: close\r\n"
-                        f"\r\n{body}"
-                    )
-                    writer.write(resp.encode())
-                    await writer.drain()
-                except (asyncio.TimeoutError, ConnectionError):
-                    pass
-                finally:
-                    writer.close()
-
-        server = await asyncio.start_server(handle, host, health_port)
-        presentation.report_health(host, health_port)
-        async with server:
-            await server.serve_forever()
-    from nanobot.cron.types import CronJob, CronPayload, CronSchedule
-    dream_cfg = config.agents.defaults.dream
-    if dream_cfg.enabled:
-        cron.register_system_job(CronJob(
-            id="dream",
-            name="dream",
-            schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
-            payload=CronPayload(kind="system_event"),
-        ))
-        console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
-    else:
-        console.print("[yellow]○[/yellow] Dream: disabled")
-        # Cursor repair must not depend on a healthy cron store.
-        _advance_dream_cursor_if_behind(agent.context.memory)
-        cron.remove_system_job("dream")
-
-    if hb_cfg.enabled:
-        cron.register_system_job(CronJob(
-            id="heartbeat",
-            name="heartbeat",
-            schedule=CronSchedule(
-                kind="every",
-                every_ms=hb_cfg.interval_s * 1000,
-                tz=config.agents.defaults.timezone,
-            ),
-            payload=CronPayload(kind="system_event"),
-        ))
-    else:
-        cron.remove_system_job("heartbeat")
-
-    cron_status = cron.status()
-    cron_job_count = cast(int, cron_status["jobs"])
-    if cron_job_count > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_job_count} scheduled jobs")
-
+    configure_gateway_jobs(
+        cron, config=config, agent=agent, mcp_provider=mcp_provider, channels=channels,
+        deliver=deliver_to_channel, console=console,
+    )
     async def run() -> None:
         startup_gate = ExitStack()
         desktop_activated = asyncio.Event()
@@ -881,10 +511,7 @@ def _run_claimed_gateway(
                     name="nanobot-gateway-stop-request",
                 ),
                 asyncio.create_task(
-                    watch_config_file(
-                        Path(config_path),
-                        lambda: agent.invalidate_runtime_config(),
-                    ),
+                    watch_config_file(config_path, lambda: agent.invalidate_runtime_config()),
                     name="nanobot-config-watcher",
                 ),
                 asyncio.create_task(_run_agent(), name="nanobot-agent-loop"),
@@ -904,7 +531,7 @@ def _run_claimed_gateway(
                 ),
             ])
             if update_startup is not None:
-                async def activate(startup: "GatewayStartup") -> None:
+                async def activate(startup: GatewayStartup) -> None:
                     await startup.wait_for_activation(health_identity)
                     startup_gate.close()
                     desktop_activated.set()
@@ -918,7 +545,10 @@ def _run_claimed_gateway(
                     name="nanobot-update-stop",
                 ),
                 asyncio.create_task(
-                    _health_server(config.gateway.host, port),
+                    serve_health(
+                        config.gateway.host, port, channels=channels, identity=health_identity,
+                        admission=bus.admission, on_bound=presentation.report_health,
+                    ),
                     name="nanobot-health-server",
                 ),
             ))

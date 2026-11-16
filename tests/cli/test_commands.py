@@ -27,11 +27,13 @@ from nanobot.cli import webui as cli_webui
 from nanobot.cli import webui_support as cli_webui_support
 from nanobot.cli.commands import app
 from nanobot.config.schema import Config
+from nanobot.cron import gateway_jobs
 from nanobot.cron.service import CronJobSkippedError
 from nanobot.cron.session_turns import CRON_DEFER_UNTIL_IDLE_META, CRON_TRIGGER_META
 from nanobot.cron.types import CronJob, CronPayload, CronRunResult
 from nanobot.cron.webui_metadata import cron_proactive_delivery_metadata
 from nanobot.gateway import application as gateway_application
+from nanobot.gateway import health as gateway_health
 from nanobot.providers.factory import ProviderSnapshot, make_provider, provider_signature
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -308,11 +310,11 @@ def test_disabled_dream_cursor_only_advances_when_behind(tmp_path) -> None:
     store.append_history("first")
     store.append_history("second")
 
-    gateway_application._advance_dream_cursor_if_behind(store)
+    gateway_jobs._advance_dream_cursor_if_behind(store)
     assert store.get_last_dream_cursor() == 2
 
     store.set_last_dream_cursor(10)
-    gateway_application._advance_dream_cursor_if_behind(store)
+    gateway_jobs._advance_dream_cursor_if_behind(store)
     assert store.get_last_dream_cursor() == 10
 
 
@@ -324,7 +326,7 @@ def test_commit_dream_changes_skips_noop_run(tmp_path) -> None:
     store.git.auto_commit("initial")
     store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
 
-    assert gateway_application._commit_dream_changes(store) is None
+    assert gateway_jobs._commit_dream_changes(store) is None
     store.git.auto_commit.assert_not_called()
 
 
@@ -337,7 +339,7 @@ def test_commit_dream_changes_commits_real_edits(tmp_path) -> None:
     store.write_memory("# Memory\n- Research notes")
     store.git.auto_commit = MagicMock(wraps=store.git.auto_commit)
 
-    sha = gateway_application._commit_dream_changes(store)
+    sha = gateway_jobs._commit_dream_changes(store)
 
     assert sha is not None
     store.git.auto_commit.assert_called_once()
@@ -1970,20 +1972,20 @@ def test_agent_workspace_override_wins_over_config_workspace(mock_agent_runtime,
     ],
 )
 def test_heartbeat_has_active_tasks(content, expected):
-    from nanobot.gateway.application import _heartbeat_has_active_tasks
+    from nanobot.cron.gateway_jobs import _heartbeat_has_active_tasks
 
     assert _heartbeat_has_active_tasks(content) is expected
 
 
 def test_heartbeat_skips_bundled_template():
-    from nanobot.gateway.application import _heartbeat_has_active_tasks
+    from nanobot.cron.gateway_jobs import _heartbeat_has_active_tasks
     from nanobot.utils.helpers import load_bundled_template
 
     assert _heartbeat_has_active_tasks(load_bundled_template("HEARTBEAT.md")) is False
 
 
 def test_heartbeat_target_skips_archived_webui_sessions():
-    from nanobot.gateway.application import _pick_heartbeat_target_from_sessions
+    from nanobot.cron.gateway_jobs import _pick_heartbeat_target_from_sessions
 
     target = _pick_heartbeat_target_from_sessions(
         enabled_channels=["websocket"],
@@ -2205,8 +2207,12 @@ def test_heartbeat_empty_response_is_not_evaluated(
         def __init__(self, _workspace: Path) -> None:
             pass
 
-        def list_sessions(self) -> list[dict[str, str]]:
-            return [{"key": "telegram:u1"}]
+        @property
+        def state(self):
+            state = super().state
+            state.list_sessions.return_value = [{"key": "telegram:u1"}]
+            state.read = AsyncMock(return_value=SimpleNamespace(generation="heartbeat-target"))
+            return state
 
     class _FakeCron:
         def __init__(self, _store_path: Path, *, admission=None) -> None:
@@ -2231,6 +2237,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
             self.tools = {}
 
         async def process_direct(self, *_args, **_kwargs):
+            seen["heartbeat_target"] = (_kwargs["channel"], _kwargs["chat_id"])
             return SimpleNamespace(content="")
 
         async def aclose(self) -> None:
@@ -2259,8 +2266,8 @@ def test_heartbeat_empty_response_is_not_evaluated(
     )
     _patch_fake_agent_loop(monkeypatch, "nanobot.gateway.application.AgentLoop", _FakeAgentLoop)
     monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
-    monkeypatch.setattr("nanobot.gateway.application.ensure_webui_session_archives", AsyncMock(return_value=[]))
-    monkeypatch.setattr("nanobot.gateway.application.evaluate_response", _unexpected_evaluator)
+    monkeypatch.setattr(gateway_jobs, "ensure_webui_session_archives", AsyncMock(return_value=[]))
+    monkeypatch.setattr(gateway_jobs, "evaluate_response", _unexpected_evaluator)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
@@ -2268,6 +2275,7 @@ def test_heartbeat_empty_response_is_not_evaluated(
     cron = seen["cron"]
     response = asyncio.run(cron.on_job(CronJob(id="heartbeat", name="heartbeat")))
 
+    assert seen["heartbeat_target"] == ("telegram", "u1")
     assert response is None
 
 
@@ -3167,6 +3175,7 @@ def test_gateway_unbound_agent_cron_is_skipped(
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    config.agents.defaults.dream.enabled = True
     provider = _fake_provider()
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
@@ -3214,6 +3223,9 @@ def test_gateway_unbound_agent_cron_is_skipped(
             self.on_job = None
             seen["cron"] = self
 
+        def register_system_job(self, _job: CronJob) -> None:
+            raise _StopGatewayError("stop")
+
     class _FakeAgentLoop(_GatewayAgentContractStub):
         @classmethod
         def from_config(cls, config, bus=None, **extra):
@@ -3239,10 +3251,6 @@ def test_gateway_unbound_agent_cron_is_skipped(
         def stop(self) -> None:
             return None
 
-    class _StopAfterCronSetup:
-        def __init__(self, *_args, **_kwargs) -> None:
-            raise _StopGatewayError("stop")
-
     async def _capture_evaluate_response(
         *_args,
         **_kwargs,
@@ -3251,9 +3259,10 @@ def test_gateway_unbound_agent_cron_is_skipped(
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     _patch_fake_agent_loop(monkeypatch, "nanobot.gateway.application.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager",
+                        lambda *_args, **_kwargs: SimpleNamespace(enabled_channels=[]))
     monkeypatch.setattr(
-        "nanobot.gateway.application.evaluate_response",
+        "nanobot.cron.gateway_jobs.evaluate_response",
         _capture_evaluate_response,
     )
 
@@ -3295,6 +3304,7 @@ def test_gateway_bound_cron_runs_as_session_turn(
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    config.agents.defaults.dream.enabled = True
     provider = _fake_provider()
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
@@ -3327,6 +3337,9 @@ def test_gateway_bound_cron_runs_as_session_turn(
             self.on_job = None
             seen["cron"] = self
 
+        def register_system_job(self, _job: CronJob) -> None:
+            raise _StopGatewayError("stop")
+
         def write_run_record(self, run_id: str, record: dict[str, object]) -> None:
             seen["run_records"].append((run_id, record))
 
@@ -3358,17 +3371,14 @@ def test_gateway_bound_cron_runs_as_session_turn(
         def stop(self) -> None:
             return None
 
-    class _StopAfterCronSetup:
-        def __init__(self, *_args, **_kwargs) -> None:
-            raise _StopGatewayError("stop")
-
     async def _unexpected_evaluator(*_args, **_kwargs) -> bool:
         raise AssertionError("bound cron must not use legacy response evaluator")
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     _patch_fake_agent_loop(monkeypatch, "nanobot.gateway.application.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
-    monkeypatch.setattr("nanobot.gateway.application.evaluate_response", _unexpected_evaluator)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager",
+                        lambda *_args, **_kwargs: SimpleNamespace(enabled_channels=[]))
+    monkeypatch.setattr(gateway_jobs, "evaluate_response", _unexpected_evaluator)
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
     assert isinstance(result.exception, _StopGatewayError)
@@ -3862,6 +3872,9 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         def __init__(self, _config, _bus, **_kwargs) -> None:
             self.enabled_channels = ["telegram", "discord"]
 
+        def get_status(self) -> dict[str, object]:
+            return {}
+
         async def start_all(self) -> None:
             await asyncio.Event().wait()
 
@@ -3987,14 +4000,14 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
                 async def read(self, _size: int) -> bytes:
                     nonlocal started
                     started += 1
-                    if started == gateway_application._GATEWAY_HEALTH_MAX_CONNECTIONS:
+                    if started == gateway_health._MAX_CONNECTIONS:
                         all_started.set()
                     await release.wait()
                     return b"GET /health HTTP/1.1\r\n\r\n"
 
             active_writers = [
                 _FakeWriter()
-                for _ in range(gateway_application._GATEWAY_HEALTH_MAX_CONNECTIONS)
+                for _ in range(gateway_health._MAX_CONNECTIONS)
             ]
             active_tasks = [
                 asyncio.create_task(health_handler(_BlockingReader(), writer))
@@ -4020,8 +4033,8 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
                 await asyncio.Event().wait()
 
         monkeypatch.setattr(
-            gateway_application,
-            "_GATEWAY_HEALTH_READ_TIMEOUT_SECONDS",
+            gateway_health,
+            "_READ_TIMEOUT_SECONDS",
             0.01,
         )
         timed_out_writer = _FakeWriter()

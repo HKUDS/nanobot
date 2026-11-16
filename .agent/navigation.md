@@ -19,6 +19,7 @@ Choose the affected behavior below, then read its owner and existing tests. Foll
 | WebUI/TUI wire events or displayed history | [`webui/outbound_delivery.py`](../nanobot/webui/outbound_delivery.py), [`webui/transcript.py`](../nanobot/webui/transcript.py); [client compatibility](review-guide.md) | [`tests/webui/`](../tests/webui/), [`WebSocket tests`](../nanobot/channels/websocket/tests/), and affected client tests |
 | Workspace access or sandbox enforcement | [`security/workspace_access.py`](../nanobot/security/workspace_access.py), [`execution/files.py`](../nanobot/execution/files.py), [`execution/sandbox.py`](../nanobot/execution/sandbox.py); [security rules](security.md) | [`tests/security/`](../tests/security/), [`test_workspace_scope.py`](../tests/agent/test_workspace_scope.py), [`test_sandbox.py`](../tests/tools/test_sandbox.py) |
 | Gateway startup, shutdown, or launchers | [`gateway/`](../nanobot/gateway/), [`gateway/application.py`](../nanobot/gateway/application.py) | [`tests/gateway/`](../tests/gateway/), the matching launcher tests in [`tests/cli/`](../tests/cli/) |
+| Gateway health or built-in cron jobs | [`gateway/health.py`](../nanobot/gateway/health.py), [`cron/gateway_jobs.py`](../nanobot/cron/gateway_jobs.py) | [`test_readiness.py`](../tests/gateway/test_readiness.py), [`test_commands.py`](../tests/cli/test_commands.py) |
 
 For the end-to-end runtime flow, expand to [Architecture](../docs/architecture.md). For ownership changes, read [Design Constraints](design.md); directory proximity does not permit crossing those boundaries.
 
