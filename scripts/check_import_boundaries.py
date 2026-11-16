@@ -71,10 +71,15 @@ IMPORT_RULES = (
         (*_ADAPTERS, "nanobot.agent", "nanobot.session"),
         # This protected-startup entry composes the existing CLI, not a second
         # agent runtime. Keep its frozen worker entry and launch semantics stable.
-        allowed_targets=("nanobot.gateway.runtime", "nanobot.cli.gateway_runtime._run_gateway",
+        allowed_targets=("nanobot.gateway.runtime", "nanobot.cli.gateway_launch.run_gateway",
                          "nanobot.cli.entry.configure_windows_console",
                          "nanobot.cli.process_identity.set_cli_process_identity",
                          "nanobot.cli.runtime_config._load_runtime_config"),
+    ),
+    ImportRule(
+        "gateway-composition",
+        ("nanobot.gateway.application",),
+        ("nanobot.cli", "typer"),
     ),
     ImportRule(
         "core-execution",

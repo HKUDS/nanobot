@@ -1,13 +1,14 @@
+"""Assemble and run one claimed Gateway, including protected updater startup."""
+
 import asyncio
 import signal
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextlib import ExitStack, suppress
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-import typer
 from loguru import logger
 from rich.console import Console
 
@@ -23,44 +24,43 @@ from nanobot.agent.tools.mcp import MCPProvider
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.cli import terminal as cli_terminal
-from nanobot.cli.dock import watch_gateway_icon
-from nanobot.cli.runtime_config import _migrate_cron_store
-from nanobot.cli.webui_support import (
-    _gateway_health_bind_note,
-    _gateway_health_url,
-    _host_for_local_browser,
-    _launch_browser,
-    _prepare_webui_bundle_for_gateway,
-    _print_foreground_port_conflict,
-    _tcp_endpoint_reachable,
-    _webui_browser_url,
-    _webui_channel_enabled,
-    _webui_display_url,
-    _webui_endpoint_reachable,
-)
 from nanobot.config.paths import get_data_dir, is_default_workspace
 from nanobot.config.schema import Config
+from nanobot.cron.migration import migrate_legacy_cron_store
 from nanobot.gateway.runtime import GatewayHealthIdentity, GatewayInstance, GatewayRuntime
 from nanobot.installation_lock import installation_access
-from nanobot.security.network import is_loopback_host
 from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.token_encoding import warmup_token_encoding
-from nanobot.webui.build import BuildMode
 from nanobot.webui.context_source_hook import create_context_source_hook
-from nanobot.webui.dev import WebUIDevError, WebUIDevServer
+from nanobot.webui.dev import WebUIDevError
 from nanobot.webui.sidebar_state import ensure_webui_session_archives
 
 if TYPE_CHECKING:
     from nanobot.update_profiles import ProfileReceipt
     from nanobot.update_restart import GatewayStartup
 
-__all__ = ["_run_gateway"]
-
 console = Console()
+
+
+class GatewayRunError(Exception):
+    """The runtime has already reported an error; the launcher supplies its exit status."""
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayPresentation:
+    """Launcher actions; task scheduling, activation and shutdown stay in the Gateway."""
+
+    check_ports: Callable[[int, bool], None]
+    prepare_webui: Callable[[], None]
+    prepare_terminal: Callable[[], None]
+    report_health: Callable[[str, int], None]
+    client_tasks: Callable[
+        [int, GatewayInstance, asyncio.Event, asyncio.Event],
+        Iterable[tuple[str, Coroutine[Any, Any, None]]],
+    ]
 
 
 async def _deliver_to_channel(
@@ -122,32 +122,6 @@ class _MCPReadinessHook(AgentHook):
 
     async def before_run(self, context: AgentRunHookContext) -> None:
         await self._provider.connect()
-
-
-def _http_endpoint_responding(url: str, *, timeout_s: float = 0.25) -> bool:
-    import urllib.error
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen(url, timeout=timeout_s):
-            return True
-    except urllib.error.HTTPError:
-        return True
-    except (OSError, urllib.error.URLError, TimeoutError, ValueError):
-        return False
-
-
-async def _watch_webui_dev_server(
-    server: WebUIDevServer,
-    shutdown_event: asyncio.Event,
-    *,
-    poll_interval_s: float = 0.2,
-) -> None:
-    while not shutdown_event.is_set():
-        await asyncio.sleep(poll_interval_s)
-        if shutdown_event.is_set():
-            return
-        server.ensure_running()
 
 
 def _signal_name(signum: int) -> str:
@@ -287,21 +261,6 @@ _GATEWAY_HEALTH_MAX_CONNECTIONS = 64
 _GATEWAY_HEALTH_READ_TIMEOUT_SECONDS = 2.0
 
 
-def _print_gateway_health_endpoint(host: str, port: int) -> None:
-    console.print(
-        f"[green]✓[/green] Health endpoint: {_gateway_health_url(host, port)}"
-        f"{_gateway_health_bind_note(host)}"
-    )
-    if is_loopback_host(host):
-        return
-
-    console.print(
-        "[yellow]Warning: the unauthenticated health endpoint is listening beyond loopback "
-        "and may be reachable from other devices. "
-        f"Keep port {port} private or protect it with a firewall or reverse proxy.[/yellow]"
-    )
-
-
 def _gateway_readiness_payload(channels: Any) -> tuple[bool, dict[str, object]]:
     channel_status: dict[str, Any] = {}
     get_status = getattr(channels, "get_status", None)
@@ -391,20 +350,17 @@ async def _close_gateway_runtime(
             await runtime_tasks
 
 
-def _run_gateway(
+def run_gateway(
     config: Config,
     *,
     port: int | None = None,
     verbose: bool = False,
-    open_browser_url: str | None = None,
-    open_browser_ready_url: str | None = None,
+    presentation: GatewayPresentation,
     webui_static_dist: bool = True,
-    webui_bundle_mode: BuildMode = "warn",
     webui_runtime_surface: str = "browser",
     webui_runtime_capabilities: dict[str, Any] | None = None,
     health_server_enabled: bool = True,
     unconfigured_provider_error: str | None = None,
-    webui_dev_server: WebUIDevServer | None = None,
     gateway_instance: GatewayInstance | None = None,
     update_startup: "GatewayStartup | None" = None,
 ) -> None:
@@ -430,13 +386,11 @@ def _run_gateway(
                 config, port=port, gateway_instance=instance, gateway_runtime=gateway_runtime,
                 health_identity=profile.health_identity, update_startup=update_startup,
                 update_profile=profile,
-                open_browser_url=open_browser_url, open_browser_ready_url=open_browser_ready_url,
-                webui_static_dist=webui_static_dist, webui_bundle_mode=webui_bundle_mode,
+                presentation=presentation, webui_static_dist=webui_static_dist,
                 webui_runtime_surface=webui_runtime_surface,
                 webui_runtime_capabilities=webui_runtime_capabilities,
                 health_server_enabled=health_server_enabled,
                 unconfigured_provider_error=unconfigured_provider_error,
-                webui_dev_server=webui_dev_server,
             )
 
 
@@ -447,15 +401,12 @@ def _run_claimed_gateway(
     gateway_instance: GatewayInstance,
     gateway_runtime: GatewayRuntime,
     health_identity: GatewayHealthIdentity,
-    open_browser_url: str | None,
-    open_browser_ready_url: str | None,
+    presentation: GatewayPresentation,
     webui_static_dist: bool,
-    webui_bundle_mode: BuildMode,
     webui_runtime_surface: str,
     webui_runtime_capabilities: dict[str, Any] | None,
     health_server_enabled: bool,
     unconfigured_provider_error: str | None,
-    webui_dev_server: WebUIDevServer | None,
     update_startup: "GatewayStartup | None" = None,
     update_profile: "ProfileReceipt | None" = None,
 ) -> None:
@@ -488,30 +439,11 @@ def _run_claimed_gateway(
     from nanobot.triggers.local_store import LocalTriggerStore
     from nanobot.webui.recovery import RecoveryCoordinator
 
-    webui_url = _webui_browser_url(config)
-    gateway_host_for_browser = _host_for_local_browser(config.gateway.host)
-    if health_server_enabled and _tcp_endpoint_reachable(gateway_host_for_browser, port):
-        _print_foreground_port_conflict(
-            webui_url=webui_url,
-            gateway_host=config.gateway.host,
-            gateway_port=port,
-        )
-        raise typer.Exit(1)
-    if _webui_channel_enabled(config) and _webui_endpoint_reachable(webui_url):
-        _print_foreground_port_conflict(
-            webui_url=webui_url,
-            gateway_host=config.gateway.host,
-            gateway_port=port,
-        )
-        raise typer.Exit(1)
+    presentation.check_ports(port, health_server_enabled)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     warmup_token_encoding()
-    _prepare_webui_bundle_for_gateway(
-        config,
-        mode=webui_bundle_mode,
-        webui_static_dist=webui_static_dist,
-    )
+    presentation.prepare_webui()
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     fallback_model_observer = build_webui_fallback_model_observer(bus)
@@ -542,7 +474,7 @@ def _run_claimed_gateway(
             provider_snapshot = _observe_provider(build_provider_snapshot(config))
         except ValueError as exc:
             console.print(f"[red]Error: {exc}[/red]")
-            raise typer.Exit(1) from exc
+            raise GatewayRunError() from exc
     session_manager = SessionManager(config.workspace_path)
 
     # Use the same runtime identity for foreground and managed gateway processes.
@@ -555,7 +487,7 @@ def _run_claimed_gateway(
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
-        _migrate_cron_store(config)
+        migrate_legacy_cron_store(config.workspace_path)
 
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path, admission=bus.admission)
@@ -881,7 +813,7 @@ def _run_claimed_gateway(
                     writer.close()
 
         server = await asyncio.start_server(handle, host, health_port)
-        _print_gateway_health_endpoint(host, health_port)
+        presentation.report_health(host, health_port)
         async with server:
             await server.serve_forever()
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
@@ -919,47 +851,6 @@ def _run_claimed_gateway(
     if cron_job_count > 0:
         console.print(f"[green]✓[/green] Cron: {cron_job_count} scheduled jobs")
 
-    async def _open_browser_when_ready() -> None:
-        if not open_browser_url:
-            return
-        from urllib.parse import urlparse
-
-        # Channels start asynchronously. When the caller supplies a backend
-        # readiness route, wait for an actual HTTP response rather than probing
-        # the WebSocket listener with an incomplete TCP connection.
-        if open_browser_ready_url:
-            for _ in range(40):
-                if await asyncio.to_thread(
-                    _http_endpoint_responding,
-                    open_browser_ready_url,
-                ):
-                    break
-                await asyncio.sleep(0.1)
-
-        parsed = urlparse(open_browser_url)
-        target_host = parsed.hostname or config.gateway.host or "127.0.0.1"
-        target_port = parsed.port or port
-        for _ in range(40):
-            try:
-                _reader, writer = await asyncio.open_connection(
-                    target_host,
-                    target_port,
-                )
-                writer.close()
-                with suppress(Exception):
-                    await writer.wait_closed()
-                break
-            except OSError:
-                await asyncio.sleep(0.1)
-        display_url = _webui_display_url(open_browser_url)
-        try:
-            if _launch_browser(open_browser_url):
-                console.print(f"[green]✓[/green] Opened browser at {display_url}")
-            else:
-                console.print(f"[yellow]Could not open browser; visit {display_url}[/yellow]")
-        except Exception as e:
-            console.print(f"[yellow]Could not open browser ({e}); visit {display_url}[/yellow]")
-
     async def run() -> None:
         startup_gate = ExitStack()
         desktop_activated = asyncio.Event()
@@ -967,7 +858,7 @@ def _run_claimed_gateway(
         shutdown_task: asyncio.Task[Any] | None = None
         runtime_tasks: asyncio.Future[list[Any]] | None = None
         shutdown_event = asyncio.Event()
-        cli_terminal._ensure_interactive_tty_mode()
+        presentation.prepare_terminal()
         restore_shutdown_handlers = _install_gateway_shutdown_handlers(
             asyncio.get_running_loop(),
             shutdown_event,
@@ -1040,12 +931,6 @@ def _run_claimed_gateway(
                 tasks.append(asyncio.create_task(activate(update_startup), name="nanobot-update-activation"))
             else:
                 desktop_activated.set()
-            if _webui_channel_enabled(config):
-                tasks.append(asyncio.create_task(
-                    watch_gateway_icon(webui_url, instance=gateway_instance.paths.state_path,
-                                       activated=desktop_activated),
-                    name="nanobot-dock",
-                ))
             if update_profile is not None:
                 from nanobot.update_stop import watch_gateway_stop
 
@@ -1058,16 +943,8 @@ def _run_claimed_gateway(
                     _health_server(config.gateway.host, port),
                     name="nanobot-health-server",
                 ))
-            if open_browser_url:
-                tasks.append(asyncio.create_task(
-                    _open_browser_when_ready(),
-                    name="nanobot-open-browser",
-                ))
-            if webui_dev_server is not None:
-                tasks.append(asyncio.create_task(
-                    _watch_webui_dev_server(webui_dev_server, shutdown_event),
-                    name="nanobot-webui-dev-server",
-                ))
+            for name, work in presentation.client_tasks(port, gateway_instance, desktop_activated, shutdown_event):
+                tasks.append(asyncio.create_task(work, name=name))
             runtime_tasks = asyncio.gather(*tasks)
             shutdown_task = asyncio.create_task(
                 shutdown_event.wait(),
@@ -1090,7 +967,7 @@ def _run_claimed_gateway(
 
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
-            raise typer.Exit(1)
+            raise GatewayRunError()
         finally:
             try:
                 if shutdown_task and not shutdown_task.done():

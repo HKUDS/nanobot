@@ -6,7 +6,7 @@ from nanobot.agent.tools.context import RequestContext, request_context
 from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket.runtime import WebSocketChannel, WebSocketConfig
-from nanobot.cli.gateway_runtime import _deliver_to_channel
+from nanobot.gateway.application import _deliver_to_channel
 from nanobot.session.display_history import HISTORY_GENERATION_METADATA_KEY
 from nanobot.session.manager import SessionManager
 from nanobot.webui.gateway_services import build_gateway_services

@@ -101,6 +101,8 @@ Channels are discovered by scanning self-contained packages under `nanobot/chann
 
 ## WebUI and Gateway
 
+`nanobot/cli/gateway.py` parses Gateway commands, and `nanobot/cli/gateway_launch.py` adapts console, browser and Dock behavior. `nanobot/gateway/application.py` assembles the running instance, owns its tasks and cleanup, and enforces protected updater activation. `nanobot/gateway/runtime.py` owns process management and instance identity; status and stop commands do not load the Agent application.
+
 `nanobot gateway` starts:
 
 - enabled chat channels;

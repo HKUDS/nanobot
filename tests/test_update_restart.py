@@ -152,9 +152,9 @@ def test_actual_gateway_is_parked_until_exact_runtime_activation(private_home, t
     bootstrap = (
         f"import sys, runpy; sys.path.insert(0, {str(source)!r})\n"
         "from pathlib import Path\nimport os\n"
-        "from nanobot.cli import gateway_runtime\n"
+        "from nanobot.gateway import application\n"
         "from nanobot.agent.tools.mcp import MCPProvider\n"
-        "gateway_runtime.warmup_token_encoding = lambda: None\n"
+        "application.warmup_token_encoding = lambda: None\n"
         "async def observe_connect(self):\n"
         "    assert 'NANOBOT_UPDATE_STARTUP_TOKEN' not in os.environ\n"
         f"    Path({str(marker)!r}).touch()\n"

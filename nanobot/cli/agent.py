@@ -13,11 +13,11 @@ from nanobot import __logo__
 from nanobot.cli.log_control import _set_nanobot_logs
 from nanobot.cli.runtime_config import (
     _load_runtime_config,
-    _migrate_cron_store,
     _model_display,
     _print_agent_start_error,
 )
 from nanobot.config.schema import Config
+from nanobot.cron.migration import migrate_legacy_cron_store
 
 console = Console()
 
@@ -170,7 +170,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(runtime_config.workspace_path):
-        _migrate_cron_store(runtime_config)
+        migrate_legacy_cron_store(runtime_config.workspace_path)
 
     cron_store_path = runtime_config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)

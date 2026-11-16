@@ -187,7 +187,8 @@ def startup_profile(private_home, tmp_path, monkeypatch):
 
 
 def test_startup_is_visible_and_protected_before_workspace_writes(startup_profile, monkeypatch):
-    from nanobot.cli import gateway_runtime
+    from nanobot.cli import gateway_launch
+    from nanobot.gateway import application
     from nanobot.gateway.runtime import GatewayInstance, GatewayRuntime
 
     profile, config = startup_profile
@@ -207,10 +208,10 @@ def test_startup_is_visible_and_protected_before_workspace_writes(startup_profil
         seen.append(observed[0].receipt.run_id)
         raise RuntimeError("workspace initialization failed")
 
-    monkeypatch.setattr(gateway_runtime, "sync_workspace_templates", fail_initialization)
+    monkeypatch.setattr(application, "sync_workspace_templates", fail_initialization)
     for _ in range(2):
         with pytest.raises(RuntimeError, match="workspace initialization failed"):
-            gateway_runtime._run_gateway(config, health_server_enabled=False,
+            gateway_launch.run_gateway(config, health_server_enabled=False,
                                          webui_static_dist=False)
         observed = inspect_profiles(sys.prefix)
         assert len(observed) == 1 and observed[0].state == "stopped"
@@ -223,26 +224,28 @@ def test_startup_is_visible_and_protected_before_workspace_writes(startup_profil
 
 
 def test_duplicate_gateway_cannot_initialize_workspace_before_claim(startup_profile, monkeypatch):
-    from nanobot.cli import gateway_runtime
+    from nanobot.cli import gateway_launch
+    from nanobot.gateway import application
     from nanobot.gateway.runtime import GatewayAlreadyRunningError
 
     profile, config = startup_profile
-    monkeypatch.setattr(gateway_runtime, "sync_workspace_templates",
+    monkeypatch.setattr(application, "sync_workspace_templates",
                         lambda _path: pytest.fail("Duplicate startup touched the workspace"))
     with gateway(profile, sys.prefix):
         original = inspect_profiles(sys.prefix)
         with pytest.raises(GatewayAlreadyRunningError):
-            gateway_runtime._run_gateway(config, health_server_enabled=False,
+            gateway_launch.run_gateway(config, health_server_enabled=False,
                                          webui_static_dist=False)
         assert inspect_profiles(sys.prefix) == original
 
 
 @pytest.mark.parametrize("interrupted", [False, True])
 def test_gateway_entrypoint_refuses_installation_before_initialization(startup_profile, monkeypatch, interrupted):
-    from nanobot.cli import gateway_runtime
+    from nanobot.cli import gateway_launch
+    from nanobot.gateway import application
 
     profile, config = startup_profile
-    monkeypatch.setattr(gateway_runtime, "sync_workspace_templates",
+    monkeypatch.setattr(application, "sync_workspace_templates",
                         lambda _path: pytest.fail("Blocked startup touched the workspace"))
     if interrupted:
         pending = pending_update_path()
@@ -250,21 +253,22 @@ def test_gateway_entrypoint_refuses_installation_before_initialization(startup_p
         pending.write_text("interrupted")
     with nullcontext() if interrupted else installation_access(updating=True):
         with pytest.raises(InstallationBusyError):
-            gateway_runtime._run_gateway(config, health_server_enabled=False,
+            gateway_launch.run_gateway(config, health_server_enabled=False,
                                          webui_static_dist=False)
     assert inspect_profiles(sys.prefix) == []
     assert not (profile / "workspace").exists()
 
 
 def test_gateway_refuses_shared_data_maintenance_before_initializing_writers(startup_profile, monkeypatch):
-    from nanobot.cli import gateway_runtime
+    from nanobot.cli import gateway_launch
+    from nanobot.gateway import application
 
     profile, config = startup_profile
-    monkeypatch.setattr(gateway_runtime, "sync_workspace_templates",
+    monkeypatch.setattr(application, "sync_workspace_templates",
                         lambda _path: pytest.fail("Startup wrote to a store under maintenance"))
     with data_access([config.workspace_path / "sessions"], updating=True):
         with pytest.raises(InstallationBusyError, match="data is in use"):
-            gateway_runtime._run_gateway(config, health_server_enabled=False, webui_static_dist=False)
+            gateway_launch.run_gateway(config, health_server_enabled=False, webui_static_dist=False)
     assert inspect_profiles(sys.prefix) == []
     assert not (profile / "workspace").exists()
 
@@ -306,7 +310,8 @@ from nanobot.config.home import set_home_path
 from nanobot.config.loader import set_config_path
 from nanobot.config.schema import Config
 from nanobot.installation_lock import installation_access
-from nanobot.cli import gateway_runtime
+from nanobot.cli import gateway_launch
+from nanobot.gateway import application
 from nanobot.agent.loop import AgentLoop
 original_from_config = AgentLoop.from_config
 def create_agent(config, bus, **kwargs):
@@ -319,9 +324,9 @@ set_config_path(profile / 'config data' / 'config.json')
 config = Config.model_validate({'agents': {'defaults': {'workspace': str(profile / 'workspace'),
     'dream': {'enabled': False}}}, 'gateway': {'host': '127.0.0.1', 'port': port,
     'heartbeat': {'enabled': False}}})
-gateway_runtime.warmup_token_encoding = lambda: None
+application.warmup_token_encoding = lambda: None
 with installation_access():
-    gateway_runtime._run_gateway(config, webui_static_dist=False, unconfigured_provider_error='No provider for lifecycle test')
+    gateway_launch.run_gateway(config, webui_static_dist=False, unconfigured_provider_error='No provider for lifecycle test')
 """
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
@@ -397,8 +402,8 @@ def test_recorded_launch_restarts_same_actual_gateway(private_home, tmp_path, mo
     source_root = str(Path(__file__).resolve().parents[1])
     bootstrap = (
         f"import sys; sys.path.insert(0, {source_root!r})\n"
-        "from nanobot.cli import gateway_runtime\n"
-        "gateway_runtime.warmup_token_encoding = lambda: None\n"
+        "from nanobot.gateway import application\n"
+        "application.warmup_token_encoding = lambda: None\n"
         "from nanobot.cli.entry import main\nmain()\n"
     )
     processes = []
