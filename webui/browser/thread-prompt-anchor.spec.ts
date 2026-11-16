@@ -64,27 +64,30 @@ async function openThread(
 }
 
 test("moves the previous answer out of view smoothly when sending", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
   await page.setViewportSize({ width: 1440, height: 800 });
   await openThread(page, true, false, {
     shortHistory: true,
-    beforeSend: () => page.evaluate(() => {
-      const samples: number[] = [];
-      const state = { samples, done: false };
-      Object.assign(window, { __promptMotion: state });
-      document.querySelector("textarea")!.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter") return;
-        const started = performance.now();
-        const sample = () => {
-          const viewport = document.querySelector<HTMLElement>('[data-testid="thread-message-region"]');
-          if (viewport) samples.push(viewport.scrollTop);
-          if (performance.now() - started < 400) requestAnimationFrame(sample);
-          else state.done = true;
-        };
-        sample();
-      }, { once: true });
-    }),
+    beforeSend: async () => {
+      // Control animation time rather than requiring a minimum CI runner frame rate.
+      await page.clock.pauseAt(new Date("2026-01-01T00:01:00Z"));
+      await page.evaluate(() => {
+        const samples: number[] = [];
+        Object.assign(window, { __promptMotion: { samples } });
+        document.querySelector("textarea")!.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          const started = performance.now();
+          const sample = () => {
+            const viewport = document.querySelector<HTMLElement>('[data-testid="thread-message-region"]');
+            if (viewport) samples.push(viewport.scrollTop);
+            if (performance.now() - started < 400) requestAnimationFrame(sample);
+          };
+          sample();
+        }, { once: true });
+      });
+    },
   });
-  await page.waitForFunction(() => (window as unknown as { __promptMotion: { done: boolean } }).__promptMotion.done);
+  await page.clock.runFor(400);
   const positions = await page.evaluate(() => (window as unknown as { __promptMotion: { samples: number[] } }).__promptMotion.samples);
   const distinctPositions = new Set(positions.map((position) => Math.round(position)));
   expect(distinctPositions.size).toBeGreaterThan(3);
