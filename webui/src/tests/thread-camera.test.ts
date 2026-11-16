@@ -80,7 +80,7 @@ describe("ThreadCameraController", () => {
     expect(camera.isFollowing()).toBe(false);
   });
 
-  it("positions a prompt immediately and cancels any earlier navigation", () => {
+  it("jumps to a target and cancels any earlier navigation", () => {
     const { camera, viewport, frames } = cameraHarness();
     camera.navigateTo(1_000);
     expect(frames).toHaveLength(1);

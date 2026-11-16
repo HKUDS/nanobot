@@ -3,7 +3,6 @@ import type { InboundEvent, ThreadProjectionEvent } from "../src/lib/types";
 
 const chatId = "answer-order";
 
-
 async function openThread(
   page: Page,
   withHistory: boolean,
@@ -17,7 +16,7 @@ async function openThread(
   await page.route("**/api/commands", (route) => route.fulfill({ json: { commands: [] } }));
   const events: ThreadProjectionEvent[] = withHistory ? Array.from({ length: options.shortHistory ? 1 : 12 }, (_, index) => [
     { event: "user_message" as const, chat_id: chatId, turn_id: `old-${index}`, turn_seq: 1, text: `Earlier question ${index}`, starts_turn: true },
-    { event: "message" as const, chat_id: chatId, turn_id: `old-${index}`, turn_seq: 2, text: `Earlier answer ${index}. `.repeat(options.shortHistory ? 1 : 8) },
+    { event: "message" as const, chat_id: chatId, turn_id: `old-${index}`, turn_seq: 2, text: (immediateReply ? `## Earlier answer ${index}\n\nFirst paragraph.\n\nSecond paragraph.\n\n` : `Earlier answer ${index}. `).repeat(options.shortHistory ? 1 : 8) },
     { event: "turn_end" as const, chat_id: chatId, turn_id: `old-${index}`, turn_seq: 3 },
   ]).flat() : [];
   await page.route("**/api/sessions/*/webui-thread?*", (route) => {
@@ -136,6 +135,13 @@ for (const width of [390, 1440]) for (const withHistory of [false, true]) {
     } else {
       await expect.poll(promptOffset).toBeCloseTo(48, 0);
     }
+    if (width === 1440 && withHistory) {
+      const beforeResize = await viewport.evaluate((node) => node.scrollTop);
+      await page.setViewportSize({ width: 390, height: 800 });
+      await expect.poll(promptOffset).toBeLessThanOrEqual(48);
+      expect(await promptOffset()).toBeGreaterThanOrEqual(0);
+      expect(await viewport.evaluate((node) => node.scrollTop)).toBeGreaterThan(beforeResize);
+    }
     const initialOffset = await promptOffset();
     const initialTop = await viewport.evaluate((node) => node.scrollTop);
     const base = { chat_id: chatId, turn_id: turnId, stream_id: "answer" };
@@ -172,17 +178,36 @@ for (const width of [390, 1440]) for (const withHistory of [false, true]) {
   });
 }
 
-test("anchors even when the response finishes immediately", async ({ page }) => {
+test("keeps the prompt anchored through immediate completion and lazy history layout", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 800 });
-  const { errors } = await openThread(page, true, true);
+  let releaseMarkdown!: () => void;
+  const markdownReady = new Promise<void>((resolve) => { releaseMarkdown = resolve; });
+  await page.route("**/src/components/MarkdownTextRenderer.tsx*", async (route) => {
+    await markdownReady;
+    await route.continue();
+  });
+  const { errors } = await openThread(page, true, true, {
+    shortHistory: true,
+    beforeSend: () => page.locator("[data-assistant-message]").click(),
+  });
   const viewport = page.getByTestId("thread-message-region");
   const prompt = viewport.locator("[data-user-prompt-id]").filter({ hasText: "My anchored question" });
   await expect(viewport).toContainText("Immediate answer");
   await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
-  await expect.poll(() => prompt.evaluate((node) => {
+  const precedingBottom = () => prompt.evaluate((node) => {
     const viewport = node.closest('[data-testid="thread-message-region"]')!;
     return node.previousElementSibling!.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top;
-  })).toBeLessThanOrEqual(0);
+  });
+  await expect.poll(precedingBottom).toBeLessThanOrEqual(0);
+  releaseMarkdown();
+  await expect(viewport.getByRole("heading", { name: "Earlier answer 0" })).toBeAttached();
+  await expect.poll(precedingBottom).toBeLessThanOrEqual(0);
+  await expect.poll(precedingBottom).toBeGreaterThan(-1);
+  await expect.poll(() => prompt.evaluate((node) => {
+    const offset = node.getBoundingClientRect().top
+      - node.closest('[data-testid="thread-message-region"]')!.getBoundingClientRect().top;
+    return offset >= 0 && offset <= 48;
+  })).toBe(true);
   expect(errors).toEqual([]);
 });
 

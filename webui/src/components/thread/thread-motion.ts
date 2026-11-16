@@ -7,6 +7,7 @@ type ThreadMotionMode =
   | "idle"
   | "follow-latest"
   | "anchor-prompt"
+  | "reading-prompt"
   | "navigating-latest"
   | "navigating-history"
   | "browsing-history";
@@ -46,6 +47,13 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
     "boundary-scroll": "browsing-history",
+  },
+  "reading-prompt": {
+    "navigate-latest": "navigating-latest",
+    "navigate-history": "navigating-history",
+    "user-scroll": "browsing-history",
+    "boundary-scroll": "browsing-history",
+    "resume-follow": "current-automatic-mode",
   },
   "navigating-latest": {
     "navigate-latest": "navigating-latest",
@@ -189,8 +197,8 @@ export class ThreadMotionCoordinator {
     this.invalidateGeometry();
   }
 
-  updatePendingPromptId(promptId: string): void {
-    if (this.mode !== "anchor-prompt" || this.submittedPromptId === promptId) return;
+  updateSubmittedPromptId(promptId: string): void {
+    if (!this.isPromptMode() || this.submittedPromptId === promptId) return;
     this.submittedPromptId = promptId;
     this.invalidateGeometry();
   }
@@ -387,9 +395,12 @@ export class ThreadMotionCoordinator {
     this.invalidateGeometry();
   }
 
+  private isPromptMode(): boolean {
+    return this.mode === "anchor-prompt" || this.mode === "reading-prompt";
+  }
+
   private finishPromptAnchor(): void {
-    this.submittedPromptId = null;
-    this.mode = "idle";
+    this.mode = "reading-prompt";
   }
 
   private readonly flushGeometry = (): void => {
@@ -400,8 +411,8 @@ export class ThreadMotionCoordinator {
     const navigationPromptId = this.mode === "navigating-history"
       ? this.historyNavigationPromptId
       : null;
-    const promptId = navigationPromptId ?? (this.mode === "anchor-prompt" ? this.submittedPromptId : null);
-    const geometry = this.measure(promptId, this.mode === "anchor-prompt");
+    const promptId = navigationPromptId ?? (this.isPromptMode() ? this.submittedPromptId : null);
+    const geometry = this.measure(promptId, this.isPromptMode());
     if (!geometry) return;
     this.observeUserScroll();
     this.onGeometry?.(geometry);
@@ -426,9 +437,16 @@ export class ThreadMotionCoordinator {
       }
       return;
     }
-    if (this.mode === "anchor-prompt" && geometry.promptTop !== null) {
-      const result = this.camera.navigateTo(geometry.promptTop);
-      if (!result || result === "settled") this.finishPromptAnchor();
+    if (geometry.promptTop !== null) {
+      if (this.mode === "anchor-prompt") {
+        const result = this.camera.navigateTo(geometry.promptTop);
+        if (!result || result === "settled") this.finishPromptAnchor();
+      } else if (this.mode === "reading-prompt"
+        && Math.abs(geometry.promptTop - geometry.scrollTop) > GEOMETRY_EPSILON_PX) {
+        // Preserve the prompt's screen position through reflow above it, not the
+        // old scrollTop. Output growing below the prompt leaves this unchanged.
+        this.camera.jumpTo(geometry.promptTop);
+      }
     }
   };
 }

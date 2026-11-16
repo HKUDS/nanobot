@@ -887,7 +887,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       resetHistoryHeader();
       threadMotionRef.current?.anchorSubmittedPrompt(prompt.id);
     } else if (prompt && anchoredTurnIdRef.current === turnId) {
-      threadMotionRef.current?.updatePendingPromptId(prompt.id);
+      threadMotionRef.current?.updateSubmittedPromptId(prompt.id);
     }
   }, [activeTurnId, conversationReady, messages, resetHistoryHeader, submittedPromptTurnId]);
 
@@ -1031,6 +1031,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     if (content) observer?.observe(content);
     if (contentRegion) observer?.observe(contentRegion);
     if (messageContent) observer?.observe(messageContent);
+    // The reserved min-height can hide reflow inside a short transcript.
+    if (messageContent?.firstElementChild) observer?.observe(messageContent.firstElementChild);
     if (endGapRef.current) observer?.observe(endGapRef.current);
     if (composerDock) observer?.observe(composerDock);
     window.addEventListener("resize", invalidateGeometry);
@@ -1038,7 +1040,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       observer?.disconnect();
       window.removeEventListener("resize", invalidateGeometry);
     };
-  }, [hasMessages, reconcileHistoryScrollAnchor, refreshLastMessageRow, updateContentVisibility]);
+  }, [hasMessages, messagesKey, reconcileHistoryScrollAnchor, refreshLastMessageRow, updateContentVisibility]);
 
   useEffect(() => {
     const el = scrollRef.current;
