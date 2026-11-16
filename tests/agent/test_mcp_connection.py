@@ -15,8 +15,13 @@ from mcp.types import ErrorData
 
 from nanobot.agent.tools import mcp as mcp_runtime
 from nanobot.agent.tools.base import Tool
-from nanobot.agent.tools.mcp import MCPProvider, MCPResourceWrapper, MCPToolWrapper
-from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.mcp import (
+    MCPProvider,
+    MCPResourceWrapper,
+    MCPServerConnection,
+    MCPToolWrapper,
+)
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import Config, MCPServerConfig
@@ -122,12 +127,12 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     provider, _registry = _make_provider()
     attempts = 0
 
-    async def _fake_connect(_servers, _registry, *, network):
+    async def _fake_connect(_name, _cfg, *, network):
         nonlocal attempts
         attempts += 1
-        return {}
+        return None
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
 
     await provider.connect()
     await provider.connect()
@@ -150,26 +155,21 @@ async def test_maintenance_recovers_failed_server_without_a_turn(monkeypatch: py
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def connect(servers, staged, *, network):
+    async def connect(name, _cfg, *, network):
         nonlocal attempts
-        stacks = {}
-        if "recovering" in servers:
+        if name == "recovering":
             attempts += 1
             if attempts == 1:
                 await first_failure.wait()
-                return {}
+                return None
             retry_started.set()
             await finish_retry.wait()
-            assert set(servers) == {"recovering"}
-        for name in servers:
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stack.push_async_callback(_mark_closed, name)
-            stacks[name] = stack
-            staged.register(_FakeMcpTool(f"mcp_{name}_ping"))
-        return stacks
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        stack.push_async_callback(_mark_closed, name)
+        return MCPServerConnection(stack, (_FakeMcpTool(f"mcp_{name}_ping"),))
 
-    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", connect)
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_server", connect)
     monkeypatch.setattr(mcp_runtime, "_RETRY_DELAY_SECONDS", 0)
     worker = asyncio.create_task(provider.maintain(initial))
     try:
@@ -193,6 +193,55 @@ async def test_maintenance_recovers_failed_server_without_a_turn(monkeypatch: py
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["a.b", "a_b"])
+async def test_mcp_name_collision_cannot_redirect_a_published_tool(first, monkeypatch):
+    configs = {name: _stdio_server() for name in ("a.b", "a_b")}
+    registry = ToolRegistry()
+    provider = MCPProvider(configs, registry, server_loader=lambda: (configs, NetworkConfig()))
+    allow_second = asyncio.Event()
+    shared_name = "mcp_a_b_ping"
+    definition = mcp_types.Tool(name="ping", inputSchema={"type": "object"})
+    session = SimpleNamespace(
+        send_ping=AsyncMock(),
+        call_tool=AsyncMock(return_value=mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(type="text", text="pong")],
+        )),
+    )
+
+    async def connect(name, _config, *, network):
+        if name != first:
+            await allow_second.wait()
+        return MCPServerConnection(AsyncMock(), (
+            MCPToolWrapper(session, name, definition),
+            _FakeMcpTool(f"mcp_sibling_{name}"),
+        ))
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_server", connect)
+    work = asyncio.create_task(provider.connect())
+    try:
+        async with asyncio.timeout(2):
+            while not registry.has(shared_name):
+                await asyncio.sleep(0)
+            assert await registry.execute(shared_name, {}) == "pong"
+            allow_second.set()
+            await work
+        assert not registry.has(shared_name)
+        assert is_tool_error_result(await registry.execute(shared_name, {}))
+        assert set(registry.tool_names) == {
+            "mcp_sibling_a.b", "mcp_sibling_a_b",
+        }
+        # The old name must not be rebound to a different server after a reload.
+        del configs[first]
+        assert (await provider.reload())["ok"]
+        assert not registry.has(shared_name)
+        assert session.call_tool.await_count == 1
+    finally:
+        work.cancel()
+        await asyncio.gather(work, return_exceptions=True)
+        await provider.aclose()
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_does_not_report_failure_before_oauth_authorization(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -204,7 +253,7 @@ async def test_connect_mcp_does_not_report_failure_before_oauth_authorization(
     )
     provider, _registry = _make_provider(mcp_servers={"oauth-app": cfg})
     connect = AsyncMock()
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", connect)
     monkeypatch.setattr(
         "nanobot.agent.tools.mcp_oauth.mcp_oauth_has_credentials",
         lambda _name, _url: False,
@@ -236,14 +285,13 @@ async def test_mcp_provider_closes_connections_independently_from_agent_loop(
             closed_tasks.append(asyncio.current_task())
             assert asyncio.current_task() is self.owner
 
-    async def _fake_connect(servers, _registry, *, network):
-        stacks = {name: _OwnerCheckedStack() for name in servers}
-        return stacks
+    async def _fake_connect(name, _cfg, *, network):
+        return MCPServerConnection(_OwnerCheckedStack(), (_FakeMcpTool(f"mcp_{name}_search"),))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
 
     await provider.connect()
-    registry.register(_FakeMcpTool("mcp_playwright_search"))
+    assert registry.has("mcp_playwright_search")
     await provider.aclose()
 
     assert owner_tasks
@@ -260,7 +308,7 @@ async def test_close_server_ignores_server_cancelled_error(tmp_path):
         async def aclose(self) -> None:
             raise asyncio.CancelledError()
 
-    provider._connections = {"test": _ServerCancelledStack()}
+    provider._connections = {"test": MCPServerConnection(_ServerCancelledStack())}
 
     await provider._close_server("test")
 
@@ -281,8 +329,8 @@ async def test_provider_close_continues_after_server_cancelled_error(tmp_path):
             closed.append("second")
 
     provider._connections = {
-        "first": _ServerCancelledStack(),
-        "second": _TrackedStack(),
+        "first": MCPServerConnection(_ServerCancelledStack()),
+        "second": MCPServerConnection(_TrackedStack()),
     }
 
     await provider.aclose()
@@ -309,8 +357,8 @@ async def test_provider_close_finishes_other_connections_before_propagating_canc
             closed.append("second")
 
     provider._connections = {
-        "first": _BlockingStack(),
-        "second": _TrackedStack(),
+        "first": MCPServerConnection(_BlockingStack()),
+        "second": MCPServerConnection(_TrackedStack()),
     }
     task = asyncio.create_task(provider.aclose())
     await asyncio.wait_for(started.wait(), timeout=1)
@@ -334,7 +382,7 @@ async def test_mcp_cleanup_re_raises_external_cancellation(tmp_path, close_all: 
             started.set()
             await asyncio.Event().wait()
 
-    provider._connections = {"test": _BlockingStack()}
+    provider._connections = {"test": MCPServerConnection(_BlockingStack())}
 
     if close_all:
         task = asyncio.create_task(provider.aclose())
@@ -366,17 +414,13 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(servers, registry, *, network):
-        stacks = {}
-        for name in servers:
-            registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stack.push_async_callback(_mark_closed, name)
-            stacks[name] = stack
-        return stacks
+    async def _fake_connect(name, _cfg, *, network):
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        stack.push_async_callback(_mark_closed, name)
+        return MCPServerConnection(stack, (_FakeMcpTool(f"mcp_{name}_navigate"),))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
     provider, registry = _make_provider(mcp_servers={})
 
     added = await provider.reload()
@@ -415,17 +459,13 @@ async def test_reload_is_a_direct_provider_operation_without_an_agent_loop(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(servers, registry, *, network):
-        stacks = {}
-        for name in servers:
-            registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stack.push_async_callback(_mark_closed, name)
-            stacks[name] = stack
-        return stacks
+    async def _fake_connect(name, _cfg, *, network):
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        stack.push_async_callback(_mark_closed, name)
+        return MCPServerConnection(stack, (_FakeMcpTool(f"mcp_{name}_navigate"),))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
     registry = ToolRegistry()
     provider = MCPProvider({}, registry, server_loader=lambda: (configured, NetworkConfig()))
 
@@ -455,7 +495,7 @@ async def test_reload_timeout_marks_attempted_server_failed_and_allows_retry(
     started = asyncio.Event()
     attempts = 0
 
-    async def _fake_connect(servers, _registry, *, network):
+    async def _fake_connect(_name, _cfg, *, network):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
@@ -463,9 +503,9 @@ async def test_reload_timeout_marks_attempted_server_failed_and_allows_retry(
             await asyncio.Event().wait()
         stack = AsyncExitStack()
         await stack.__aenter__()
-        return {name: stack for name in servers}
+        return MCPServerConnection(stack)
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
     provider = MCPProvider(
         {"test": server},
         ToolRegistry(),
@@ -502,16 +542,12 @@ async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
     )
     save_config(config)
 
-    async def _fake_connect(servers, registry, *, network):
-        stacks = {}
-        for name in servers:
-            registry.register(_FakeMcpTool(f"mcp_{name}_navigate"))
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stacks[name] = stack
-        return stacks
+    async def _fake_connect(name, _cfg, *, network):
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        return MCPServerConnection(stack, (_FakeMcpTool(f"mcp_{name}_navigate"),))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
     provider, registry = _make_provider(
         mcp_servers={"browserbase": config.tools.mcp_servers["browserbase"]}
     )
@@ -549,13 +585,13 @@ async def test_reload_mcp_servers_skips_oauth_server_waiting_for_authorization(
 
     attempted: list[str] = []
 
-    async def _fake_connect(servers, _registry, *, network):
-        attempted.extend(servers)
+    async def _fake_connect(name, _cfg, *, network):
+        attempted.append(name)
         stack = AsyncExitStack()
         await stack.__aenter__()
-        return {"linear": stack}
+        return MCPServerConnection(stack)
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
     monkeypatch.setattr(
         "nanobot.agent.tools.mcp_oauth.mcp_oauth_has_credentials",
         lambda name, _url: name == "linear",
@@ -603,26 +639,23 @@ async def test_mcp_tool_reconnects_before_submission_after_session_terminated(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
 
-    async def _fake_connect(servers, registry, *, network):
+    async def _fake_connect(name, _cfg, *, network):
         nonlocal connect_count
-        stacks = {}
-        for name in servers:
-            connect_count += 1
-            session = _FakeSession(connect_count)
-            sessions.append(session)
-            tool_def = SimpleNamespace(
-                name="quote",
-                description="quote tool",
-                inputSchema={"type": "object", "properties": {}},
-            )
-            registry.register(MCPToolWrapper(session, name, tool_def, tool_timeout=5))
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stack.push_async_callback(_mark_closed, name)
-            stacks[name] = stack
-        return stacks
+        connect_count += 1
+        session = _FakeSession(connect_count)
+        sessions.append(session)
+        tool_def = SimpleNamespace(
+            name="quote",
+            description="quote tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        tool = MCPToolWrapper(session, name, tool_def, tool_timeout=5)
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        stack.push_async_callback(_mark_closed, name)
+        return MCPServerConnection(stack, (tool,))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
 
     await provider.connect()
     old_tool = registry.get("mcp_remote_quote")
@@ -663,23 +696,20 @@ async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
 
-    async def _fake_connect(servers, registry, *, network):
+    async def _fake_connect(name, _cfg, *, network):
         nonlocal connect_count
-        stacks = {}
-        for name in servers:
-            connect_count += 1
-            tool_def = SimpleNamespace(
-                name="quote",
-                description="quote tool",
-                inputSchema={"type": "object", "properties": {}},
-            )
-            registry.register(MCPToolWrapper(_FakeSession(connect_count), name, tool_def))
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stacks[name] = stack
-        return stacks
+        connect_count += 1
+        tool_def = SimpleNamespace(
+            name="quote",
+            description="quote tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        tool = MCPToolWrapper(_FakeSession(connect_count), name, tool_def)
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        return MCPServerConnection(stack, (tool,))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
 
     await provider.connect()
     old_tool = registry.get("mcp_remote_quote")
@@ -722,26 +752,24 @@ async def test_concurrent_mcp_reconnect_reuses_fresh_session(
                 ]
             )
 
-    async def _fake_connect(servers, registry, *, network):
+    async def _fake_connect(name, _cfg, *, network):
         nonlocal connect_count
-        stacks = {}
-        for name in servers:
-            connect_count += 1
-            session = _DeadSession() if connect_count == 1 else _LiveSession()
-            for resource_name in ("alpha", "beta"):
-                resource_def = SimpleNamespace(
-                    name=resource_name,
-                    uri=f"file:///{resource_name}",
-                    description=f"{resource_name} resource",
-                )
-                registry.register(MCPResourceWrapper(session, name, resource_def))
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stack.push_async_callback(_mark_closed, name)
-            stacks[name] = stack
-        return stacks
+        connect_count += 1
+        session = _DeadSession() if connect_count == 1 else _LiveSession()
+        tools = []
+        for resource_name in ("alpha", "beta"):
+            resource_def = SimpleNamespace(
+                name=resource_name,
+                uri=f"file:///{resource_name}",
+                description=f"{resource_name} resource",
+            )
+            tools.append(MCPResourceWrapper(session, name, resource_def))
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        stack.push_async_callback(_mark_closed, name)
+        return MCPServerConnection(stack, tuple(tools))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", _fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
 
     await provider.connect()
     old_alpha = registry.get("mcp_remote_resource_alpha")
@@ -786,21 +814,18 @@ async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_i
     async def mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def connect(servers, registry, *, network):
-        connections = {}
-        for name, cfg in servers.items():
-            attempts.append((name, network.proxy, network.resolve_proxy(cfg.use_proxy)))
-            sessions[name] = Session()
-            registry.register(MCPToolWrapper(sessions[name], name, SimpleNamespace(
-                name="echo", description="echo", inputSchema={"type": "object"},
-            )))
-            stack = AsyncExitStack()
-            await stack.__aenter__()
-            stack.push_async_callback(mark_closed, name)
-            connections[name] = stack
-        return connections
+    async def connect(name, cfg, *, network):
+        attempts.append((name, network.proxy, network.resolve_proxy(cfg.use_proxy)))
+        sessions[name] = Session()
+        tool = MCPToolWrapper(sessions[name], name, SimpleNamespace(
+            name="echo", description="echo", inputSchema={"type": "object"},
+        ))
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        stack.push_async_callback(mark_closed, name)
+        return MCPServerConnection(stack, (tool,))
 
-    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", connect)
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_server", connect)
     registry = ToolRegistry()
     provider = MCPProvider.from_config(
         config,

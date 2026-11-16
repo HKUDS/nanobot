@@ -10,6 +10,7 @@ import pytest
 from mcp.shared.auth import OAuthToken
 
 from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
+from nanobot.agent.tools.mcp import MCPServerConnection
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
 from nanobot.apps.cli import CliAppManager
 from nanobot.config.loader import load_config, save_config
@@ -660,8 +661,8 @@ def test_test_mcp_preset_connects_and_reports_tools(
         async def aclose(self) -> None:
             return None
 
-    async def fake_connect(servers, registry, *, network):
-        assert list(servers) == ["playwright"]
+    async def fake_connect(name, _cfg, *, network):
+        assert name == "playwright"
 
         class FakeTool:
             name = "mcp_playwright_browser_navigate"
@@ -669,10 +670,9 @@ def test_test_mcp_preset_connects_and_reports_tools(
             def to_schema(self):
                 return {"name": self.name, "description": "", "parameters": {}}
 
-        registry.register(FakeTool())
-        return {"playwright": FakeStack()}
+        return MCPServerConnection(FakeStack(), (FakeTool(),))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", fake_connect)
 
     payload = asyncio.run(mcp_presets_test_action({"name": ["playwright"]}))
 
@@ -697,8 +697,9 @@ def test_test_mcp_preset_inspects_tools_outside_the_enabled_allowlist(
         async def aclose(self) -> None:
             return None
 
-    async def fake_connect(servers, registry, *, network):
-        assert servers["playwright"].enabled_tools == ["*"]
+    async def fake_connect(name, cfg, *, network):
+        assert name == "playwright"
+        assert cfg.enabled_tools == ["*"]
 
         class FakeTool:
             def __init__(self, name: str) -> None:
@@ -707,11 +708,11 @@ def test_test_mcp_preset_inspects_tools_outside_the_enabled_allowlist(
             def to_schema(self):
                 return {"name": self.name, "description": "", "parameters": {}}
 
-        for index in range(20):
-            registry.register(FakeTool(f"mcp_playwright_tool_{index:02d}"))
-        return {"playwright": FakeStack()}
+        return MCPServerConnection(FakeStack(), tuple(
+            FakeTool(f"mcp_playwright_tool_{index:02d}") for index in range(20)
+        ))
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", fake_connect)
 
     payload = asyncio.run(mcp_presets_test_action({"name": ["playwright"]}))
 
@@ -734,10 +735,10 @@ def test_test_mcp_preset_scrubs_connection_errors(
         },
     )
 
-    async def fake_connect(_servers, _registry, *, network):
+    async def fake_connect(_name, _cfg, *, network):
         raise RuntimeError("failed https://mcp.browserbase.com/mcp?browserbaseApiKey=bb_live_secret")
 
-    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_servers", fake_connect)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", fake_connect)
 
     payload = asyncio.run(mcp_presets_test_action({"name": ["browserbase"]}))
 

@@ -2302,6 +2302,8 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 - Set `enabledTools` to `[]` to register no tools from that server. Resources and prompts are also skipped, since they have no per-name filter.
 - Set `enabledTools` to a non-empty list of names to register only those tools — resources and prompts are not registered.
 
+Choose distinct MCP server and tool names. Names such as `a.b` and `a_b` can produce the same wrapped tool name. If two MCP capabilities claim the same name, the gateway hides that name instead of sending calls to either server. Other tools stay available. Rename one of the conflicting servers or tools, then reload MCP settings to use its new name. To restore a previously conflicting name after removing the duplicate, restart the gateway.
+
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
 

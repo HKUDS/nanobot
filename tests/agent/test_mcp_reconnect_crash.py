@@ -215,14 +215,14 @@ async def test_mcp_reconnect_during_shutdown_does_not_crash(
 
     reconnect_started = asyncio.Event()
     finish_reconnect = asyncio.Event()
-    real_connect = mcp_module.connect_mcp_servers
+    real_connect = mcp_module.connect_mcp_server
 
     async def gated_connect(*args, **kwargs):
         reconnect_started.set()
         await finish_reconnect.wait()
         return await real_connect(*args, **kwargs)
 
-    monkeypatch.setattr(mcp_module, "connect_mcp_servers", gated_connect)
+    monkeypatch.setattr(mcp_module, "connect_mcp_server", gated_connect)
     call_task = asyncio.create_task(tool.execute(name="second"))
     await asyncio.wait_for(reconnect_started.wait(), timeout=5)
     close_task = asyncio.create_task(provider.aclose())

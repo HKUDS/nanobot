@@ -9,8 +9,9 @@ import aiohttp
 import pytest
 import pytest_asyncio
 from aiohttp import web
+from mcp_helpers import discover_into
 
-from nanobot.agent.tools.mcp import MCPProvider, MCPToolWrapper, connect_mcp_servers
+from nanobot.agent.tools.mcp import MCPProvider, MCPToolWrapper
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.network import NetworkConfig
@@ -246,7 +247,7 @@ async def test_failing_shared_proxy_never_retries_reachable_origin_directly(reco
     fixture = recording_mcp_proxy
     fixture.proxy_fails = True
     registry = ToolRegistry()
-    connections = await asyncio.wait_for(connect_mcp_servers(
+    connections = await asyncio.wait_for(discover_into(
         {"local": MCPServerConfig(type=transport, url=f"{fixture.origin}/mcp", use_proxy=True)},
         registry, network=NetworkConfig(proxy=fixture.proxy),
     ), timeout=5)
@@ -261,7 +262,7 @@ async def test_failing_shared_proxy_never_retries_reachable_origin_directly(reco
 async def test_missing_shared_address_does_not_open_http_connection(recording_mcp_proxy, transport) -> None:
     fixture = recording_mcp_proxy
     registry = ToolRegistry()
-    connections = await connect_mcp_servers(
+    connections = await discover_into(
         {"local": MCPServerConfig(type=transport, url=f"{fixture.origin}/mcp", use_proxy=True)},
         registry, network=NetworkConfig(),
     )

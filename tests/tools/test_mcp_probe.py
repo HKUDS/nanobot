@@ -7,9 +7,10 @@ from urllib.request import getproxies_environment
 
 import httpx
 import pytest
+from mcp_helpers import discover_into
 
 from nanobot.agent.tools import mcp as mcp_mod
-from nanobot.agent.tools.mcp import _probe_http_url, connect_mcp_servers
+from nanobot.agent.tools.mcp import _probe_http_url
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import MCPServerConfig
 from nanobot.security.network import configure_ssrf_whitelist
@@ -146,7 +147,7 @@ async def test_connect_skips_unreachable_streamable_http():
     registry = ToolRegistry()
     servers = {"dead": _make_http_cfg("http://93.184.216.34:19999/mcp")}
     with patch("nanobot.agent.tools.mcp._probe_http_url", _unreachable):
-        stacks = await connect_mcp_servers(servers, registry)
+        stacks = await discover_into(servers, registry)
     assert stacks == {}
     assert len(registry._tools) == 0
 
@@ -159,7 +160,7 @@ async def test_connect_skips_unreachable_sse():
     registry = ToolRegistry()
     servers = {"dead": _make_http_cfg("http://93.184.216.34:19999/sse", transport="sse")}
     with patch("nanobot.agent.tools.mcp._probe_http_url", _unreachable):
-        stacks = await connect_mcp_servers(servers, registry)
+        stacks = await discover_into(servers, registry)
     assert stacks == {}
     assert len(registry._tools) == 0
 
@@ -194,7 +195,7 @@ async def test_connect_isolates_streamable_http_status_failure(
     try:
         registry = ToolRegistry()
         stacks = await asyncio.wait_for(
-            connect_mcp_servers(
+            discover_into(
                 {
                     "cloudflare": MCPServerConfig(
                         type="streamableHttp",
@@ -228,7 +229,7 @@ async def test_probe_not_called_for_stdio():
     with patch("nanobot.agent.tools.mcp._probe_http_url", _spy_probe):
         cfg = MCPServerConfig(type="stdio", command="nonexistent-command-xyz")
         registry = ToolRegistry()
-        await connect_mcp_servers({"s": cfg}, registry)
+        await discover_into({"s": cfg}, registry)
 
     assert not called, "probe should not be called for stdio transport"
 
