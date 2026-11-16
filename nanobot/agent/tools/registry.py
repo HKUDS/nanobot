@@ -26,6 +26,14 @@ def is_tool_error_result(result: Any) -> bool:
     return isinstance(result, ToolResult) and result.is_error
 
 
+def _schema_name(schema: dict[str, Any]) -> str:
+    fn = schema.get("function")
+    if isinstance(fn, dict) and isinstance(name := cast(dict[str, Any], fn).get("name"), str):
+        return name
+    name = schema.get("name")
+    return name if isinstance(name, str) else ""
+
+
 class ToolRegistry:
     """
     Registry for agent tools.
@@ -82,17 +90,6 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return self.get(name) is not None
 
-    @staticmethod
-    def _schema_name(schema: dict[str, Any]) -> str:
-        """Extract a normalized tool name from either OpenAI or flat schemas."""
-        fn = schema.get("function")
-        if isinstance(fn, dict):
-            name = cast(dict[str, Any], fn).get("name")
-            if isinstance(name, str):
-                return name
-        name = schema.get("name")
-        return name if isinstance(name, str) else ""
-
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get tool definitions with stable ordering for cache-friendly prompts.
 
@@ -105,14 +102,14 @@ class ToolRegistry:
             builtins: list[dict[str, Any]] = []
             mcp_tools: list[dict[str, Any]] = []
             for schema in definitions:
-                name = self._schema_name(schema)
+                name = _schema_name(schema)
                 if name.startswith("mcp_"):
                     mcp_tools.append(schema)
                 else:
                     builtins.append(schema)
 
-            builtins.sort(key=self._schema_name)
-            mcp_tools.sort(key=self._schema_name)
+            builtins.sort(key=_schema_name)
+            mcp_tools.sort(key=_schema_name)
             self._cached_definitions = builtins + mcp_tools
 
         return self._cached_definitions
@@ -222,3 +219,25 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return self.has(name)
+
+
+class TurnToolCatalog:
+    """Keep advertised schemas stable while applying removals immediately."""
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self._source: list[dict[str, Any]] | None = None
+        self._advertised: list[dict[str, Any]] = []
+
+    def definitions(self, source: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self._source is None:
+            self._advertised = source
+        elif source is not self._source:
+            live = {_schema_name(entry): entry for entry in source}
+            self._advertised = [
+                entry for entry in self._advertised if live.get(_schema_name(entry)) == entry
+            ]
+        self._source = source
+        return self._advertised

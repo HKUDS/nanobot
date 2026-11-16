@@ -476,6 +476,7 @@ class AgentRunner:
                 await hook.on_stream_end(segment_context, resuming=True)
 
         response_input_ids: tuple[str, ...] = ()
+        last_user_input: dict[str, Any] | None = None
         iteration = -1
         followup_requested = False
         while (
@@ -500,6 +501,13 @@ class AgentRunner:
                 had_injections = True
             await end_length_segment(interrupted=drained_before_request)
             response_input_ids = self._response_input_ids(messages)
+            latest = messages[-1] if messages else None
+            if (
+                latest is not None and latest is not last_user_input
+                and latest.get("role") == "user" and not is_hidden_history_message(latest)
+            ):
+                last_user_input = latest
+                request_state.turn_tool_catalog.reset()
             if spec.events.accepts(ResponseInputsEvent):
                 await spec.events.emit(ResponseInputsEvent(response_input_ids))
             context = AgentHookContext(
@@ -1041,7 +1049,7 @@ class AgentRunner:
         messages, kwargs = await self._prepare_model_request(
             spec,
             messages,
-            tools=spec.tools.get_definitions(),
+            tools=request_state.turn_tool_catalog.definitions(spec.tools.get_definitions()),
             request_state=request_state,
             transcript=transcript,
         )

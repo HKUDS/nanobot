@@ -54,6 +54,9 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 # Mirror the MCP SDK's httpx defaults (MCP_DEFAULT_TIMEOUT / MCP_DEFAULT_SSE_READ_TIMEOUT).
 _HTTP_TIMEOUT = 30.0
 _HTTP_READ_TIMEOUT = 300.0
+_STARTUP_TIMEOUT_SECONDS = 10.0
+_RETRY_DELAY_SECONDS = 15.0
+_MAX_STARTING_SERVERS = 4
 
 # Characters allowed in tool names by model providers (Anthropic, OpenAI, etc.).
 # Replace anything outside [a-zA-Z0-9_-] with underscore and collapse runs.
@@ -1272,7 +1275,7 @@ async def connect_mcp_servers(
 
     async def connect_single_server(
         name: str, cfg: MCPServerConfig
-    ) -> tuple[str, MCPConnection | None]:
+    ) -> MCPConnection | None:
         loop = asyncio.get_running_loop()
         ready: asyncio.Future[bool] = loop.create_future()
         close_requested = asyncio.Event()
@@ -1293,7 +1296,9 @@ async def connect_mcp_servers(
         owner = asyncio.create_task(own_connection(), name=f"mcp:{name}")
         connection = _OwnedMCPConnection(owner, close_requested)
         try:
-            connected = await ready
+            # An interactive browser OAuth flow has its own lifetime.
+            timeout = _STARTUP_TIMEOUT_SECONDS if name not in (oauth_handlers or {}) else None
+            connected = await asyncio.wait_for(ready, timeout=timeout)
         except BaseException as exc:
             close_requested.set()
             owner.cancel()
@@ -1301,12 +1306,12 @@ async def connect_mcp_servers(
                 await asyncio.shield(owner)
             if isinstance(exc, asyncio.CancelledError) and not task_is_cancelling():
                 logger.warning("MCP server '{}': connection cancelled by server/SDK", name)
-                return name, None
+                return None
             raise
         if not connected:
             await connection.aclose()
-            return name, None
-        return name, connection
+            return None
+        return connection
 
     server_stacks: dict[str, MCPConnection] = {}
     attempted_names: list[str] = []
@@ -1315,12 +1320,14 @@ async def connect_mcp_servers(
         for name, cfg in mcp_servers.items():
             attempted_names.append(name)
             try:
-                result = await connect_single_server(name, cfg)
+                connection = await connect_single_server(name, cfg)
             except Exception as e:
                 _log_mcp_connection_failure(name, e, proxy=selected_proxies.get(name))
-                continue
-            if result[1] is not None:
-                server_stacks[result[0]] = result[1]
+                connection = None
+            if connection is not None:
+                server_stacks[name] = connection
+            else:
+                _unregister_server_tools(registry, name)
     except BaseException:
         # Callers can bound readiness/reload with a timeout. If cancellation
         # interrupts a later server, ownership of earlier connections has not
@@ -1358,6 +1365,15 @@ def _load_current_servers() -> tuple[dict[str, MCPServerConfig], NetworkConfig]:
     return _configured_servers(config), config.network
 
 
+def _pending_mcp_authorization(servers: Mapping[str, MCPServerConfig]) -> set[str]:
+    oauth = {name: cfg for name, cfg in servers.items() if cfg.auth == "oauth"}
+    if not oauth:
+        return set()
+    from nanobot.agent.tools.mcp_oauth import mcp_oauth_has_credentials
+
+    return {name for name, cfg in oauth.items() if not mcp_oauth_has_credentials(name, cfg.url)}
+
+
 class MCPProvider:
     """Own configured MCP connections and their dynamic tool registrations."""
 
@@ -1376,6 +1392,7 @@ class MCPProvider:
         self._connections: dict[str, MCPConnection] = {}
         self._runtime_statuses: dict[str, MCPRuntimeStatus] = {}
         self._lock = asyncio.Lock()
+        self._retry_needed = asyncio.Event()
         self._closing = False
 
     @classmethod
@@ -1416,16 +1433,58 @@ class MCPProvider:
     ) -> None:
         for name in server_names:
             self._runtime_statuses[name] = status
+            if status == "failed":
+                self._retry_needed.set()
 
-    def _record_connection_result(
-        self,
-        attempted: Iterable[str],
-        connected: Iterable[str],
-    ) -> None:
-        attempted_names = set(attempted)
-        connected_names = set(connected)
-        self._set_runtime_status(connected_names, "connected")
-        self._set_runtime_status(attempted_names - connected_names, "failed")
+    async def maintain(self, initial: asyncio.Event) -> None:
+        """Run the gateway's connection attempts independently of its turns."""
+        try:
+            await self.connect()
+        finally:
+            initial.set()
+        while not self._closing:
+            self._retry_needed.clear()
+            if "failed" not in self._runtime_statuses.values():
+                await self._retry_needed.wait()
+            await asyncio.sleep(_RETRY_DELAY_SECONDS)
+            await self.connect()
+
+    async def _connect_locked(self, servers: dict[str, MCPServerConfig]) -> dict[str, MCPConnection]:
+        slots = asyncio.Semaphore(_MAX_STARTING_SERVERS)
+
+        async def connect_one(name: str, config: MCPServerConfig) -> None:
+            async with slots:
+                staged = ToolRegistry()
+                connected = await connect_mcp_servers({name: config}, staged, network=self._network)
+                if self._closing:
+                    await _close_mcp_connections(connected)
+                    return
+                if name not in connected:
+                    self._set_runtime_status((name,), "failed")
+                    return
+                # Publish only after this server has finished discovery. Other
+                # servers don't share its transport or gate its ready tools.
+                self._connections[name] = connected[name]
+                self._set_runtime_status((name,), "connected")
+                for tool_name in staged.tool_names:
+                    tool = staged.get(tool_name)
+                    if isinstance(tool, _MCPWrapperBase):
+                        tool.set_reconnect_handler(self._refresh_terminated_server)
+                    if tool is not None:
+                        self._registry.register(tool)
+
+        self._set_runtime_status(servers, "connecting")
+        try:
+            if len(servers) == 1:
+                await connect_one(*next(iter(servers.items())))
+            else:
+                async with asyncio.TaskGroup() as group:
+                    for name, config in servers.items():
+                        group.create_task(connect_one(name, config))
+        except BaseException:
+            self._set_runtime_status((name for name in servers if name not in self._connections), "failed")
+            raise
+        return {name: self._connections[name] for name in servers if name in self._connections}
 
     async def connect(self) -> None:
         """Connect configured servers that are not currently live."""
@@ -1437,20 +1496,7 @@ class MCPProvider:
                 for name, cfg in self._servers.items()
                 if name not in self._connections
             }
-            oauth_servers = {
-                name: cfg
-                for name, cfg in configured_missing.items()
-                if cfg.auth == "oauth"
-            }
-            authorization_pending: set[str] = set()
-            if oauth_servers:
-                from nanobot.agent.tools.mcp_oauth import mcp_oauth_has_credentials
-
-                authorization_pending = {
-                    name
-                    for name, cfg in oauth_servers.items()
-                    if not mcp_oauth_has_credentials(name, cfg.url)
-                }
+            authorization_pending = _pending_mcp_authorization(configured_missing)
             for name in authorization_pending:
                 self._runtime_statuses.pop(name, None)
             missing_servers = {
@@ -1460,36 +1506,16 @@ class MCPProvider:
             }
             if not missing_servers:
                 return
-            self._set_runtime_status(missing_servers, "connecting")
             try:
-                connected = await connect_mcp_servers(missing_servers, self._registry, network=self._network)
-                if self._closing:
-                    await _close_mcp_connections(connected)
-                    return
-                self._connections.update(connected)
-                self._record_connection_result(missing_servers, connected)
-                self._attach_reconnect_handlers(connected)
+                connected = await self._connect_locked(missing_servers)
                 if connected:
                     logger.info("MCP connected servers: {}", sorted(connected))
-                else:
-                    logger.warning(
-                        "No MCP servers connected successfully "
-                        "(will retry on the next readiness check)"
-                    )
             except asyncio.CancelledError:
-                self._set_runtime_status(missing_servers, "failed")
                 if task_is_cancelling():
                     raise
-                logger.warning(
-                    "MCP connection cancelled (will retry on the next readiness check)"
-                )
-            except BaseException as exc:
-                self._set_runtime_status(missing_servers, "failed")
-                logger.warning(
-                    "Failed to connect MCP servers "
-                    "(will retry on the next readiness check): {}",
-                    exc,
-                )
+                logger.warning("MCP connection attempt cancelled by server/SDK")
+            except Exception as exc:
+                logger.warning("Failed to connect MCP servers: {}", exc)
 
     async def reload(self) -> dict[str, Any]:
         """Reconcile live MCP connections with the current configuration."""
@@ -1511,13 +1537,7 @@ class MCPProvider:
             current_servers = dict(self._servers)
             current_names = set(current_servers)
             next_names = set(next_servers)
-            from nanobot.agent.tools.mcp_oauth import mcp_oauth_has_credentials
-
-            authorization_pending = {
-                name
-                for name, cfg in next_servers.items()
-                if cfg.auth == "oauth" and not mcp_oauth_has_credentials(name, cfg.url)
-            }
+            authorization_pending = _pending_mcp_authorization(next_servers)
             removed = sorted(current_names - next_names)
             added = sorted(next_names - current_names)
             changed = sorted(
@@ -1538,32 +1558,12 @@ class MCPProvider:
 
             self._servers = next_servers
             self._network = next_network.model_copy(deep=True)
-            retry_missing = sorted(
-                name
-                for name in next_names
-                if name not in self._connections
-                and name not in set(added) | set(changed)
-                and name not in authorization_pending
-            )
-            to_connect_names = sorted(
-                (set(added) | set(changed) | set(retry_missing))
-                - authorization_pending
-            )
-            to_connect = {name: next_servers[name] for name in to_connect_names}
-            connected: dict[str, MCPConnection] = {}
-            if to_connect:
-                self._set_runtime_status(to_connect, "connecting")
-                try:
-                    connected = await connect_mcp_servers(to_connect, self._registry, network=self._network)
-                except BaseException:
-                    self._set_runtime_status(to_connect, "failed")
-                    raise
-                if self._closing:
-                    await _close_mcp_connections(connected)
-                    return self._closing_result()
-                self._connections.update(connected)
-                self._record_connection_result(to_connect, connected)
-                self._attach_reconnect_handlers(connected)
+            to_connect_names = next_names - self._connections.keys() - authorization_pending
+            retry_missing = sorted(to_connect_names.difference(added, changed))
+            to_connect = {name: next_servers[name] for name in sorted(to_connect_names)}
+            connected = await self._connect_locked(to_connect) if to_connect else {}
+            if self._closing:
+                return self._closing_result()
 
             failed = sorted(set(to_connect) - set(connected))
             unchanged = not removed and not added and not changed and not retry_missing
@@ -1613,26 +1613,6 @@ class MCPProvider:
             "requires_restart": True,
         }
 
-    def _attach_reconnect_handlers(self, server_names: Iterable[str]) -> None:
-        async def reconnect(
-            server_name: str,
-            tool_name: str,
-            stale_tool: Tool,
-        ) -> Tool | None:
-            return await self._refresh_terminated_server(
-                server_name,
-                tool_name,
-                stale_tool,
-            )
-
-        for server_name in server_names:
-            for tool_name in list(self._registry.tool_names):
-                tool = self._registry.get(tool_name)
-                if not _tool_belongs_to_server(tool, tool_name, server_name):
-                    continue
-                if isinstance(tool, _MCPWrapperBase):
-                    tool.set_reconnect_handler(reconnect)
-
     async def _refresh_terminated_server(
         self,
         server_name: str,
@@ -1665,18 +1645,7 @@ class MCPProvider:
             _unregister_server_tools(self._registry, server_name)
             await self._close_server(server_name)
 
-            self._set_runtime_status({server_name}, "connecting")
-            connected = await connect_mcp_servers(
-                {server_name: cfg},
-                self._registry,
-                network=self._network,
-            )
-            if self._closing:
-                await _close_mcp_connections(connected)
-                return None
-            self._connections.update(connected)
-            self._record_connection_result({server_name}, connected)
-            self._attach_reconnect_handlers(connected)
+            connected = await self._connect_locked({server_name: cfg})
             if server_name not in connected:
                 logger.warning(
                     "MCP server '{}' reconnect failed after session termination",

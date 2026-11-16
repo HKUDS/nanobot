@@ -4066,6 +4066,7 @@ def test_gateway_failure_exits_nonzero_after_cleanup(
     config = Config()
     config.gateway.port = 18791
     seen: dict[str, object] = {}
+    agent_started = asyncio.Event()
 
     class _FakeSessionManager(_EmptyGatewaySessionManager):
         def flush_all(self) -> int:
@@ -4077,7 +4078,6 @@ def test_gateway_failure_exits_nonzero_after_cleanup(
             return cls(**extra)
 
         def __init__(self, **_kwargs) -> None:
-            seen["hooks"] = _kwargs.get("hooks")
             self.model = "test-model"
             self.provider = object()
             self.sessions = _FakeSessionManager()
@@ -4088,6 +4088,7 @@ def test_gateway_failure_exits_nonzero_after_cleanup(
 
         async def run(self) -> None:
             seen["agent_task"] = asyncio.current_task()
+            agent_started.set()
             try:
                 await asyncio.Event().wait()
             finally:
@@ -4104,7 +4105,6 @@ def test_gateway_failure_exits_nonzero_after_cleanup(
 
     class _FakeMCPProvider:
         def __init__(self) -> None:
-            self.connect_task: asyncio.Task | None = None
             self.close_tasks: list[asyncio.Task | None] = []
 
         @classmethod
@@ -4113,10 +4113,16 @@ def test_gateway_failure_exits_nonzero_after_cleanup(
             seen["mcp_provider"] = provider
             return provider
 
-        async def connect(self) -> None:
-            self.connect_task = asyncio.current_task()
+        async def maintain(self, initial: asyncio.Event) -> None:
+            initial.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                seen["mcp_maintenance_stopped"] = True
 
         async def aclose(self) -> None:
+            if failure_phase == "runtime":
+                assert seen.get("mcp_maintenance_stopped")
             self.close_tasks.append(asyncio.current_task())
 
         def runtime_status(self) -> dict[str, str]:
@@ -4160,6 +4166,7 @@ def test_gateway_failure_exits_nonzero_after_cleanup(
             return False
 
         async def serve_forever(self) -> None:
+            await asyncio.wait_for(agent_started.wait(), timeout=5)
             raise _StopGatewayError("gateway runtime failed")
 
     async def _fake_start_server(_handler, _host: str, _port: int):
@@ -4191,16 +4198,11 @@ def test_gateway_failure_exits_nonzero_after_cleanup(
     assert isinstance(mcp_provider, _FakeMCPProvider)
     if failure_phase == "runtime":
         assert seen["agent_task_cleaned_up"] is True
-        assert mcp_provider.connect_task is seen["agent_task"]
-        assert mcp_provider.close_tasks[0] is mcp_provider.connect_task
+        assert seen["mcp_maintenance_stopped"] is True
+        assert mcp_provider.close_tasks[0] is seen["agent_task"]
         assert len(mcp_provider.close_tasks) == 2
     else:
         assert len(mcp_provider.close_tasks) == 1
-    hooks = seen["hooks"]
-    assert isinstance(hooks, list)
-    assert len(hooks) == 1
-    hook = hooks[0]
-    assert isinstance(hook, cli_gateway_runtime._MCPReadinessHook)
 
 
 @pytest.mark.parametrize("shutdown_signal", [

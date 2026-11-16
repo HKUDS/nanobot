@@ -159,6 +159,61 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_maintenance_recovers_failed_server_without_a_turn(monkeypatch: pytest.MonkeyPatch):
+    provider, registry = _make_provider(mcp_servers={"good": _stdio_server(), "recovering": _stdio_server()})
+    retry_started = asyncio.Event()
+    finish_retry = asyncio.Event()
+    first_failure = asyncio.Event()
+    initial = asyncio.Event()
+    closed: list[str] = []
+    attempts = 0
+
+    async def _mark_closed(name: str) -> None:
+        closed.append(name)
+
+    async def connect(servers, staged, *, network):
+        nonlocal attempts
+        stacks = {}
+        if "recovering" in servers:
+            attempts += 1
+            if attempts == 1:
+                await first_failure.wait()
+                return {}
+            retry_started.set()
+            await finish_retry.wait()
+            assert set(servers) == {"recovering"}
+        for name in servers:
+            stack = AsyncExitStack()
+            await stack.__aenter__()
+            stack.push_async_callback(_mark_closed, name)
+            stacks[name] = stack
+            staged.register(_FakeMcpTool(f"mcp_{name}_ping"))
+        return stacks
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", connect)
+    monkeypatch.setattr(mcp_runtime, "_RETRY_DELAY_SECONDS", 0)
+    worker = asyncio.create_task(provider.maintain(initial))
+    try:
+        async with asyncio.timeout(2):
+            while not registry.has("mcp_good_ping"):
+                await asyncio.sleep(0)
+            assert await registry.execute("mcp_good_ping", {}) == "ok"
+            first_failure.set()
+            await initial.wait()
+            await retry_started.wait()
+            assert not registry.has("mcp_recovering_ping")
+            finish_retry.set()
+            while not registry.has("mcp_recovering_ping"):
+                await asyncio.sleep(0)
+            assert await registry.execute("mcp_recovering_ping", {}) == "ok"
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        await provider.aclose()
+    assert sorted(closed) == ["good", "recovering"]
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_does_not_report_failure_before_oauth_authorization(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

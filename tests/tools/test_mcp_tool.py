@@ -2113,6 +2113,32 @@ def _make_fake_session_with_capabilities(
 
 
 @pytest.mark.asyncio
+async def test_timed_out_discovery_does_not_publish_tools(fake_mcp_runtime, monkeypatch) -> None:
+    session = _make_fake_session_with_capabilities(["search"])
+    listing = asyncio.Event()
+
+    async def list_resources() -> SimpleNamespace:
+        listing.set()
+        await asyncio.Event().wait()
+        raise AssertionError("the fixture must only exit via cancellation")
+
+    session.list_resources = list_resources
+    fake_mcp_runtime["session"] = session
+    monkeypatch.setattr(mcp_mod, "_STARTUP_TIMEOUT_SECONDS", 0.2)
+    registry = ToolRegistry()
+    provider = MCPProvider({"slow": MCPServerConfig(command="fake")}, registry)
+    try:
+        task = asyncio.create_task(provider.connect())
+        await asyncio.wait_for(listing.wait(), timeout=2)
+        assert not registry.has("mcp_slow_search")
+        await asyncio.wait_for(task, timeout=2)
+        assert provider.runtime_status() == {"slow": "failed"}
+        assert not registry.get_definitions()
+    finally:
+        await provider.aclose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("catalog", ["resources", "prompts"])
 async def test_connect_registers_all_resource_and_prompt_pages(
     fake_mcp_runtime: dict[str, object | None], catalog: str,
@@ -2433,14 +2459,6 @@ def test_long_server_name_tools_are_matched_by_server_name() -> None:
 
     assert len(wrapper.name) == 64
     assert not wrapper.name.startswith(mcp_mod._tool_prefix(server_name))
-
-    provider = MCPProvider(
-        {server_name: MCPServerConfig(command="fake")},
-        registry,
-    )
-    provider._attach_reconnect_handlers({server_name})
-    assert wrapper._reconnect is not None
-    assert other_wrapper._reconnect is None
 
     removed = mcp_mod._unregister_server_tools(registry, server_name)
 
