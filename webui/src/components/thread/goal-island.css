@@ -36,6 +36,9 @@
 }
 .goal-island,
 .goal-island-panel {
+  --goal-island-width: 100%;
+  --goal-island-height: 100%;
+  --goal-island-radius: 16px;
   --goal-surface: hsl(var(--sidebar) / 94%);
   --goal-highlight: rgb(255 255 255 / 80%);
   --goal-shadow: rgb(20 20 24 / 10%);
