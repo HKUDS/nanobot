@@ -140,25 +140,38 @@ def test_actual_gateway_is_parked_until_exact_runtime_activation(private_home, t
     cwd.mkdir()
     health_port, web_port = _port(), _port()
     config_path = profile / "config.json"
+    launch_marker = tmp_path / "mcp-launch-attempt"
+    child_marker = tmp_path / "mcp-started"
+    stdio_script = (
+        "import os, sys; from pathlib import Path; "
+        "assert 'NANOBOT_UPDATE_STARTUP_TOKEN' not in os.environ; "
+        "Path(sys.argv[1]).touch(); sys.stdin.buffer.read()"
+    )
     config_path.write_text(json.dumps({
         "agents": {"defaults": {"workspace": str(workspace), "dream": {"enabled": False},
                                 "provider": "custom", "model": "lifecycle-test"}},
         "providers": {"custom": {"apiKey": "fixture-not-a-secret", "apiBase": "http://127.0.0.1:1/v1"}},
         "gateway": {"host": "127.0.0.1", "port": health_port, "heartbeat": {"enabled": False}},
         "channels": {"websocket": {"enabled": True, "host": "127.0.0.1", "port": web_port}},
+        "tools": {"mcpServers": {"activation-fixture": {
+            "command": sys.executable, "args": ["-c", stdio_script, str(child_marker)],
+        }}},
     }))
     source = Path(__file__).resolve().parents[1]
-    marker = tmp_path / "mcp-started"
     bootstrap = (
         f"import sys, runpy; sys.path.insert(0, {str(source)!r})\n"
-        "from pathlib import Path\nimport os\n"
+        "from pathlib import Path\nimport os, subprocess\n"
         "from nanobot.cli import gateway_runtime\n"
-        "from nanobot.agent.tools.mcp import MCPProvider\n"
         "gateway_runtime.warmup_token_encoding = lambda: None\n"
-        "async def observe_connect(self):\n"
-        "    assert 'NANOBOT_UPDATE_STARTUP_TOKEN' not in os.environ\n"
-        f"    Path({str(marker)!r}).touch()\n"
-        "MCPProvider.connect = observe_connect\n"
+        # Observe the launch attempt synchronously, so a slow child cannot
+        # hide a premature launch from the parked-state assertion.
+        "class ObservedPopen(subprocess.Popen):\n"
+        "    def __init__(self, args, *positional, **kwargs):\n"
+        f"        if isinstance(args, (tuple, list)) and {str(child_marker)!r} in args:\n"
+        "            assert 'NANOBOT_UPDATE_STARTUP_TOKEN' not in os.environ\n"
+        f"            Path({str(launch_marker)!r}).touch()\n"
+        "        super().__init__(args, *positional, **kwargs)\n"
+        "subprocess.Popen = ObservedPopen\n"
     )
     original_popen = subprocess.Popen
     children = []
@@ -201,11 +214,13 @@ def test_actual_gateway_is_parked_until_exact_runtime_activation(private_home, t
     try:
         assert runtime.start_background(instance.start_options(port=health_port)).ok
         _wait(lambda: runtime.status().ready, "Original isolated gateway did not become ready")
+        _wait(child_marker.exists, "Original isolated gateway did not start the MCP child")
         previous = inspect_profiles(sys.prefix)[0].receipt
         assert previous.launch.working_directory == str(cwd)
         assert runtime.stop(timeout_s=10).ok
         assert children[-1].wait(timeout=10) == 0
-        marker.unlink()
+        launch_marker.unlink()
+        child_marker.unlink()
         directory, spec = _job(previous, legacy_scope=legacy_scope)
         original_wait = update_restart._wait_verified
 
@@ -230,7 +245,8 @@ def test_actual_gateway_is_parked_until_exact_runtime_activation(private_home, t
         assert parked.is_set(), "Coordinator skipped protected readiness"
         status, body = _http(health_port, "/health")
         assert status == 200 and json.loads(body)["maintenance"] is True
-        assert not marker.exists(), "MCP started before gateway activation"
+        assert not launch_marker.exists(), "MCP launch attempted before gateway activation"
+        assert not child_marker.exists(), "MCP child started before gateway activation"
         assert not (Path(previous.data_dir) / "delivery/outbox.sqlite3").exists()
         assert _http(web_port, "/webui/bootstrap")[0] == 503
         assert _http(web_port, "/api/uploads", method="POST")[0] == 503
@@ -247,7 +263,8 @@ def test_actual_gateway_is_parked_until_exact_runtime_activation(private_home, t
         assert not pending_update_path().exists()
         current = verify_restarted_profile(previous, version=spec.version, job_id=spec.plan_id, maintenance=False)
         assert current.run_id != previous.run_id
-        _wait(marker.exists, "MCP did not start after activation")
+        _wait(child_marker.exists, "MCP child did not start after activation")
+        assert launch_marker.exists()
         assert _http(web_port, "/webui/bootstrap")[0] == 200
         with installation_access(), data_access([workspace / "sessions"]):
             pass
