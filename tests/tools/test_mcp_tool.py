@@ -2530,6 +2530,9 @@ async def test_mcp_http_requests_use_selected_transport_without_route_fallback(
     def recording_transport(route: str) -> httpx.MockTransport:
         def respond(request: httpx.Request) -> httpx.Response:
             routes.append(route)
+            assert request.headers["x-mcp-test"] == "configured"
+            if transport == "sse":
+                assert request.headers["accept"] == "text/event-stream"
             return httpx.Response(200, json={"ok": True}, request=request)
         return httpx.MockTransport(respond)
 
@@ -2543,7 +2546,10 @@ async def test_mcp_http_requests_use_selected_transport_without_route_fallback(
 
     @asynccontextmanager
     async def sse_client(url, *, httpx_client_factory):
-        async with httpx_client_factory() as client:
+        async with httpx_client_factory(
+            headers={"Accept": "text/event-stream"}, timeout=httpx.Timeout(2.0, read=7.0),
+        ) as client:
+            assert client.timeout.read == 7.0
             response = await client.get(url)
             assert response.json() == {"ok": True}
         yield object(), object()
@@ -2569,6 +2575,7 @@ async def test_mcp_http_requests_use_selected_transport_without_route_fallback(
     connections = await discover_into(
         {"remote": MCPServerConfig(
             type=transport, url="https://93.184.216.34/mcp", use_proxy=use_proxy,
+            headers={"X-MCP-Test": "configured"},
         )},
         registry,
         network=NetworkConfig(proxy=shared_proxy),

@@ -73,20 +73,14 @@ _MCPResultT = TypeVar("_MCPResultT")
 _PageT = TypeVar("_PageT", bound="PaginatedResult", covariant=True)
 _EntryT = TypeVar("_EntryT")
 MCPServerLoader = Callable[[], tuple[Mapping[str, "MCPServerConfig"], NetworkConfig]]
-MCPRuntimeStatus = Literal["connecting", "connected", "failed"]
-
-
-class MCPConnection(Protocol):
-    async def aclose(self) -> None: ...
+_MCPAttemptStatus = Literal["connecting", "failed"]
+MCPRuntimeStatus = Literal[_MCPAttemptStatus, "connected"]
 
 
 @dataclass(frozen=True, slots=True)
 class MCPServerConnection:
-    connection: MCPConnection
+    aclose: Callable[[], Awaitable[None]]
     tools: tuple[Tool, ...] = ()
-
-    async def aclose(self) -> None:
-        await self.connection.aclose()
 
 
 class _ListPage(Protocol[_PageT]):
@@ -113,7 +107,7 @@ async def _list_all(
     return result
 
 
-async def _close_mcp_connection(name: str, connection: MCPConnection) -> None:
+async def _close_mcp_connection(name: str, connection: MCPServerConnection) -> None:
     try:
         await connection.aclose()
     except asyncio.CancelledError:
@@ -124,7 +118,7 @@ async def _close_mcp_connection(name: str, connection: MCPConnection) -> None:
         logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
 
 
-async def _close_mcp_connections(connections: Mapping[str, MCPConnection]) -> None:
+async def _close_mcp_connections(connections: Mapping[str, MCPServerConnection]) -> None:
     cancellation: asyncio.CancelledError | None = None
     for name, connection in connections.items():
         try:
@@ -133,22 +127,6 @@ async def _close_mcp_connections(connections: Mapping[str, MCPConnection]) -> No
             cancellation = cancellation or exc
     if cancellation is not None:
         raise cancellation
-
-
-class _OwnedMCPConnection:
-    """Close an MCP transport from the task that originally opened it."""
-
-    def __init__(self, owner: asyncio.Task[None], close_requested: asyncio.Event) -> None:
-        self._owner = owner
-        self._close_requested = close_requested
-
-    async def aclose(self) -> None:
-        self._close_requested.set()
-        try:
-            await asyncio.shield(self._owner)
-        except asyncio.CancelledError:
-            if not self._owner.cancelled():
-                raise
 
 
 class _MCPReceiveStream(ObjectReceiveStream["SessionMessage | Exception"]):
@@ -323,6 +301,16 @@ async def _validate_mcp_request_url(request: httpx.Request) -> None:
             f"Blocked unsafe MCP URL {_redact_url(str(request.url))} ({error})",
             request=request,
         )
+
+
+def _mcp_http_client(
+    proxy: str | None, headers: Mapping[str, str] | None,
+    timeout: httpx.Timeout | None, auth: httpx.Auth | None,
+) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        headers=headers, timeout=timeout, auth=auth, follow_redirects=True,
+        event_hooks={"request": [_validate_mcp_request_url]}, **_pinned_transport_kwargs(proxy),
+    )
 
 
 def _windows_command_basename(command: str) -> str:
@@ -955,7 +943,7 @@ async def connect_mcp_server(
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
 
-    # Stack-exit failures are logged outside open_single_server; retain the exact
+    # Stack-exit failures are logged outside discovery; retain the exact
     # selected value there too, including credentials resolved from environment refs.
     proxy: str | None = None
 
@@ -974,7 +962,8 @@ async def connect_mcp_server(
                     logger.warning("MCP server '{}': no command or url configured, skipping", name)
                     return None
 
-            if transport_type in {"sse", "streamableHttp"}:
+            is_http = transport_type in {"sse", "streamableHttp"}
+            if is_http:
                 ok, error = validate_url_target(cfg.url)
                 if not ok:
                     logger.warning(
@@ -990,7 +979,7 @@ async def connect_mcp_server(
             proxy = (network or NetworkConfig()).resolve_proxy(cfg.use_proxy)
             oauth_auth: httpx.Auth | None = None
             if cfg.auth == "oauth":
-                if transport_type not in {"sse", "streamableHttp"}:
+                if not is_http:
                     logger.warning(
                         "MCP server '{}': OAuth requires an SSE or Streamable HTTP transport",
                         name,
@@ -1011,6 +1000,10 @@ async def connect_mcp_server(
                     logger.info("MCP server '{}': waiting for browser authorization", name)
                     return None
 
+            if is_http and not await _probe_http_url(cfg.url, proxy=proxy):
+                logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
+                return None
+
             if transport_type == "stdio":
                 command, args, env = _normalize_windows_stdio_command(
                     cfg.command,
@@ -1025,10 +1018,6 @@ async def connect_mcp_server(
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
-                if not await _probe_http_url(cfg.url, proxy=proxy):
-                    logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
-                    return None
-
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
                     timeout: httpx.Timeout | None = None,
@@ -1039,45 +1028,21 @@ async def connect_mcp_server(
                         **(cfg.headers or {}),
                         **(headers or {}),
                     }
-                    return httpx.AsyncClient(
-                        headers=merged_headers or None,
-                        event_hooks={"request": [_validate_mcp_request_url]},
-                        follow_redirects=True,
-                        timeout=timeout,
-                        auth=auth,
-                        **_pinned_transport_kwargs(proxy),
-                    )
+                    return _mcp_http_client(proxy, merged_headers, timeout, auth)
 
-                sse_kwargs: dict[str, Any] = {
-                    "httpx_client_factory": httpx_client_factory,
-                }
+                sse_kwargs: dict[str, Any] = {"httpx_client_factory": httpx_client_factory}
                 if oauth_auth is not None:
                     sse_kwargs["auth"] = oauth_auth
                 read, write = await server_stack.enter_async_context(
                     sse_client(cfg.url, **sse_kwargs)
                 )
             elif transport_type == "streamableHttp":
-                if not await _probe_http_url(cfg.url, proxy=proxy):
-                    logger.warning("MCP server '{}': {} unreachable, skipping", name, _redact_url(cfg.url))
-                    return None
-
-                http_client_kwargs: dict[str, Any] = {
-                    "headers": cfg.headers or None,
-                    "event_hooks": {"request": [_validate_mcp_request_url]},
-                    "follow_redirects": True,
-                    # Read must outlast the tool call itself; otherwise a slow tool
-                    # fails with ReadTimeout before tool_timeout is reached.
-                    "timeout": httpx.Timeout(
-                        _HTTP_TIMEOUT,
-                        connect=10.0,
-                        read=max(_HTTP_READ_TIMEOUT, cfg.tool_timeout),
-                    ),
-                    **_pinned_transport_kwargs(proxy),
-                }
-                if oauth_auth is not None:
-                    http_client_kwargs["auth"] = oauth_auth
+                # Read must outlast the tool call itself.
+                timeout = httpx.Timeout(
+                    _HTTP_TIMEOUT, connect=10.0, read=max(_HTTP_READ_TIMEOUT, cfg.tool_timeout),
+                )
                 http_client = await server_stack.enter_async_context(
-                    httpx.AsyncClient(**http_client_kwargs)
+                    _mcp_http_client(proxy, cfg.headers or None, timeout, oauth_auth)
                 )
                 read, write, _ = await server_stack.enter_async_context(
                     streamable_http_client(cfg.url, http_client=http_client)
@@ -1207,13 +1172,23 @@ async def connect_mcp_server(
             raise
 
     owner = asyncio.create_task(own_connection(), name=f"mcp:{name}")
+
+    async def close() -> None:
+        # The SDK contexts must exit in the same task that opened them.
+        close_requested.set()
+        try:
+            await asyncio.shield(owner)
+        except asyncio.CancelledError:
+            if not owner.cancelled():
+                raise
+
     try:
         # Browser OAuth already has its own deadline.
         tools = await asyncio.wait_for(ready, timeout=None if oauth_handler else _STARTUP_TIMEOUT_SECONDS)
         if tools is None:
             await asyncio.shield(owner)
             return None
-        return MCPServerConnection(_OwnedMCPConnection(owner, close_requested), tools)
+        return MCPServerConnection(close, tools)
     except BaseException as exc:
         owner.cancel()
         with suppress(BaseException):
@@ -1277,7 +1252,7 @@ class MCPProvider:
         self._server_loader = server_loader or _load_current_servers
         self._connections: dict[str, MCPServerConnection] = {}
         self._tool_owners: dict[str, str | None] = {}
-        self._runtime_statuses: dict[str, MCPRuntimeStatus] = {}
+        self._attempt_status: dict[str, _MCPAttemptStatus] = {}
         self._lock = asyncio.Lock()
         self._retry_needed = asyncio.Event()
         self._closing = False
@@ -1307,21 +1282,12 @@ class MCPProvider:
 
     def runtime_status(self) -> dict[str, MCPRuntimeStatus]:
         """Return the latest connection-attempt result for configured servers."""
-        return {
-            name: status
-            for name, status in self._runtime_statuses.items()
-            if name in self._servers
-        }
+        return {**self._attempt_status, **dict.fromkeys(self._connections, "connected")}
 
-    def _set_runtime_status(
-        self,
-        server_names: Iterable[str],
-        status: MCPRuntimeStatus,
-    ) -> None:
+    def _mark_failed(self, server_names: Iterable[str]) -> None:
         for name in server_names:
-            self._runtime_statuses[name] = status
-            if status == "failed":
-                self._retry_needed.set()
+            self._attempt_status[name] = "failed"
+            self._retry_needed.set()
 
     async def maintain(self, initial: asyncio.Event) -> None:
         """Run the gateway's connection attempts independently of its turns."""
@@ -1331,7 +1297,7 @@ class MCPProvider:
             initial.set()
         while not self._closing:
             self._retry_needed.clear()
-            if "failed" not in self._runtime_statuses.values():
+            if "failed" not in self._attempt_status.values():
                 await self._retry_needed.wait()
             await asyncio.sleep(_RETRY_DELAY_SECONDS)
             await self.connect()
@@ -1343,7 +1309,7 @@ class MCPProvider:
             async with slots:
                 connected = await connect_mcp_server(name, config, network=self._network)
                 if connected is None:
-                    self._set_runtime_status((name,), "failed")
+                    self._mark_failed((name,))
                     return
                 if self._closing:
                     await _close_mcp_connection(name, connected)
@@ -1351,10 +1317,10 @@ class MCPProvider:
                 # Publish only after this server has finished discovery. Other
                 # servers don't share its transport or gate its ready tools.
                 self._connections[name] = connected
-                self._set_runtime_status((name,), "connected")
+                self._attempt_status.pop(name, None)
                 self._publish_tools(name, connected)
 
-        self._set_runtime_status(servers, "connecting")
+        self._attempt_status.update(dict.fromkeys(servers, "connecting"))
         try:
             if len(servers) == 1:
                 await connect_one(*next(iter(servers.items())))
@@ -1363,7 +1329,7 @@ class MCPProvider:
                     for name, config in servers.items():
                         group.create_task(connect_one(name, config))
         except BaseException:
-            self._set_runtime_status((name for name in servers if name not in self._connections), "failed")
+            self._mark_failed(servers.keys() - self._connections.keys())
             raise
         return self._connections.keys() & servers.keys()
 
@@ -1403,7 +1369,7 @@ class MCPProvider:
             }
             authorization_pending = _pending_mcp_authorization(configured_missing)
             for name in authorization_pending:
-                self._runtime_statuses.pop(name, None)
+                self._attempt_status.pop(name, None)
             missing_servers = {
                 name: cfg
                 for name, cfg in configured_missing.items()
@@ -1458,7 +1424,7 @@ class MCPProvider:
                 tools_removed += await self._close_server(name)
 
             for name in [*removed, *authorization_pending]:
-                self._runtime_statuses.pop(name, None)
+                self._attempt_status.pop(name, None)
 
             self._servers = next_servers
             self._network = next_network.model_copy(deep=True)
@@ -1582,7 +1548,7 @@ class MCPProvider:
         async with self._lock:
             connections = dict(self._connections)
             self._connections.clear()
-            self._runtime_statuses.clear()
+            self._attempt_status.clear()
             for connection in connections.values():
                 self._remove_tools(connection)
             await _close_mcp_connections(connections)

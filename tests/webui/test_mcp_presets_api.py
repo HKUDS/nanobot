@@ -670,7 +670,7 @@ def test_test_mcp_preset_connects_and_reports_tools(
             def to_schema(self):
                 return {"name": self.name, "description": "", "parameters": {}}
 
-        return MCPServerConnection(FakeStack(), (FakeTool(),))
+        return MCPServerConnection(FakeStack().aclose, (FakeTool(),))
 
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", fake_connect)
 
@@ -708,7 +708,7 @@ def test_test_mcp_preset_inspects_tools_outside_the_enabled_allowlist(
             def to_schema(self):
                 return {"name": self.name, "description": "", "parameters": {}}
 
-        return MCPServerConnection(FakeStack(), tuple(
+        return MCPServerConnection(FakeStack().aclose, tuple(
             FakeTool(f"mcp_playwright_tool_{index:02d}") for index in range(20)
         ))
 
