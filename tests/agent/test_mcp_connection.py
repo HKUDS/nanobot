@@ -119,11 +119,10 @@ async def test_mcp_connection_closes_sdk_context_in_its_opening_task(monkeypatch
 
     monkeypatch.setattr("mcp.client.stdio.stdio_client", stdio)
     monkeypatch.setattr("mcp.ClientSession", session)
-    connection = await mcp_runtime.connect_mcp_server(
-        "test", MCPServerConfig(command="fake", enabled_tools=[]),
-    )
-    assert connection is not None
-    await connection.aclose()
+    provider, _ = _make_provider(mcp_servers={"test": MCPServerConfig(command="fake", enabled_tools=[])})
+    await provider.connect()
+    assert provider.connected_server_names == {"test"}
+    await provider.aclose()
     opened, closed = tasks
     assert opened is closed and opened is not asyncio.current_task()
 
@@ -133,7 +132,7 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
     provider, _registry = _make_provider()
     attempts = 0
 
-    async def _fake_connect(_name, _cfg, *, network):
+    async def _fake_connect(_name, _cfg, *, network, stdio_slots):
         nonlocal attempts
         attempts += 1
         return None
@@ -150,7 +149,9 @@ async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch
 
 @pytest.mark.asyncio
 async def test_maintenance_recovers_failed_server_without_a_turn(monkeypatch: pytest.MonkeyPatch):
-    provider, registry = _make_provider(mcp_servers={"good": _stdio_server(), "recovering": _stdio_server()})
+    provider, registry = _make_provider(mcp_servers={
+        name: _stdio_server() for name in ("good", "recovering", "stalled")
+    })
     retry_started = asyncio.Event()
     finish_retry = asyncio.Event()
     first_failure = asyncio.Event()
@@ -161,8 +162,13 @@ async def test_maintenance_recovers_failed_server_without_a_turn(monkeypatch: py
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def connect(name, _cfg, *, network):
+    async def connect(name, _cfg, *, network, stdio_slots):
         nonlocal attempts
+        if name == "stalled":
+            try:
+                await asyncio.Event().wait()
+            finally:
+                closed.append(name)
         if name == "recovering":
             attempts += 1
             if attempts == 1:
@@ -184,8 +190,8 @@ async def test_maintenance_recovers_failed_server_without_a_turn(monkeypatch: py
                 await asyncio.sleep(0)
             assert await registry.execute("mcp_good_ping", {}) == "ok"
             first_failure.set()
-            await initial.wait()
             await retry_started.wait()
+            assert provider.runtime_status()["stalled"] == "connecting"
             assert not registry.has("mcp_recovering_ping")
             finish_retry.set()
             while not registry.has("mcp_recovering_ping"):
@@ -195,7 +201,7 @@ async def test_maintenance_recovers_failed_server_without_a_turn(monkeypatch: py
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
         await provider.aclose()
-    assert sorted(closed) == ["good", "recovering"]
+    assert sorted(closed) == ["good", "recovering", "stalled"]
 
 
 @pytest.mark.asyncio
@@ -214,7 +220,7 @@ async def test_mcp_name_collision_cannot_redirect_a_published_tool(first, monkey
         )),
     )
 
-    async def connect(name, _config, *, network):
+    async def connect(name, _config, *, network, stdio_slots):
         if name != first:
             await allow_second.wait()
         return MCPServerConnection(AsyncMock(), (
@@ -279,20 +285,10 @@ async def test_mcp_provider_closes_connections_independently_from_agent_loop(
     provider, registry = _make_provider(
         mcp_servers={"playwright": _stdio_server("playwright")}
     )
-    owner_tasks: list[asyncio.Task | None] = []
-    closed_tasks: list[asyncio.Task | None] = []
+    close = AsyncMock()
 
-    class _OwnerCheckedStack:
-        def __init__(self) -> None:
-            self.owner = asyncio.current_task()
-            owner_tasks.append(self.owner)
-
-        async def aclose(self) -> None:
-            closed_tasks.append(asyncio.current_task())
-            assert asyncio.current_task() is self.owner
-
-    async def _fake_connect(name, _cfg, *, network):
-        return MCPServerConnection(_OwnerCheckedStack().aclose, (_FakeMcpTool(f"mcp_{name}_search"),))
+    async def _fake_connect(name, _cfg, *, network, stdio_slots):
+        return MCPServerConnection(close, (_FakeMcpTool(f"mcp_{name}_search"),))
 
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
 
@@ -300,8 +296,7 @@ async def test_mcp_provider_closes_connections_independently_from_agent_loop(
     assert registry.has("mcp_playwright_search")
     await provider.aclose()
 
-    assert owner_tasks
-    assert closed_tasks == owner_tasks
+    close.assert_awaited_once()
     assert provider.connected_server_names == set()
     assert registry.get("mcp_playwright_search") is None
 
@@ -420,7 +415,7 @@ async def test_reload_mcp_servers_adds_and_removes_tools_without_restart(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(name, _cfg, *, network):
+    async def _fake_connect(name, _cfg, *, network, stdio_slots):
         stack = AsyncExitStack()
         await stack.__aenter__()
         stack.push_async_callback(_mark_closed, name)
@@ -465,7 +460,7 @@ async def test_reload_is_a_direct_provider_operation_without_an_agent_loop(
     async def _mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def _fake_connect(name, _cfg, *, network):
+    async def _fake_connect(name, _cfg, *, network, stdio_slots):
         stack = AsyncExitStack()
         await stack.__aenter__()
         stack.push_async_callback(_mark_closed, name)
@@ -506,7 +501,7 @@ async def test_reload_does_not_report_closed_connection_as_connected(monkeypatch
         close_started.set()
         await finish_close.wait()
 
-    async def connect(_name, cfg, *, network):
+    async def connect(_name, cfg, *, network, stdio_slots):
         if cfg.command == old.command:
             stack = AsyncMock(aclose=close_old)
         else:
@@ -541,44 +536,80 @@ async def test_reload_does_not_report_closed_connection_as_connected(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_reload_timeout_marks_attempted_server_failed_and_allows_retry(
+async def test_reload_wait_limit_keeps_slow_discovery_alive(
     monkeypatch: pytest.MonkeyPatch,
 ):
     server = _stdio_server("slow-mcp")
     started = asyncio.Event()
+    ready = asyncio.Event()
     attempts = 0
 
-    async def _fake_connect(_name, _cfg, *, network):
+    async def _fake_connect(_name, _cfg, *, network, stdio_slots):
         nonlocal attempts
         attempts += 1
-        if attempts == 1:
-            started.set()
-            await asyncio.Event().wait()
+        started.set()
+        await ready.wait()
         stack = AsyncExitStack()
         await stack.__aenter__()
         return MCPServerConnection(stack.aclose)
 
     monkeypatch.setattr("nanobot.agent.tools.mcp.connect_mcp_server", _fake_connect)
+    monkeypatch.setattr(mcp_runtime, "_RELOAD_WAIT_SECONDS", 0.02)
     provider = MCPProvider(
         {"test": server},
         ToolRegistry(),
         server_loader=lambda: ({"test": server}, NetworkConfig()),
     )
 
-    reload_task = asyncio.create_task(provider.reload())
-    await asyncio.wait_for(started.wait(), timeout=1.0)
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(reload_task, timeout=0.01)
+    try:
+        async with asyncio.timeout(2):
+            reload_task = asyncio.create_task(provider.reload())
+            await started.wait()
+            result = await reload_task
+            assert not result["ok"] and not result["requires_restart"]
+            assert result["failed"] == []
+            assert result["connecting"] == ["test"]
+            assert provider.runtime_status() == {"test": "connecting"}
+            assert (await provider.reload())["connecting"] == ["test"]
+            ready.set()
+            await provider.connect()
+            assert provider.runtime_status() == {"test": "connected"}
+        assert attempts == 1
+    finally:
+        await provider.aclose()
 
-    assert provider.connected_server_names == set()
-    assert provider.runtime_status() == {"test": "failed"}
 
-    result = await provider.reload()
+@pytest.mark.asyncio
+async def test_reload_cancels_removed_discovery_and_publishes_new_configuration(monkeypatch):
+    stale_started = asyncio.Event()
+    stale_closed = AsyncMock()
+    configs = {"test": _stdio_server("old-mcp")}
+    registry = ToolRegistry()
+    provider = MCPProvider(configs, registry, server_loader=lambda: (configs, NetworkConfig()))
 
-    assert result["ok"] is True
-    assert provider.connected_server_names == {"test"}
-    assert provider.runtime_status() == {"test": "connected"}
-    await provider.aclose()
+    async def connect(name, config, *, network, stdio_slots):
+        if config.command == "old-mcp":
+            stale_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                return MCPServerConnection(stale_closed, (_FakeMcpTool(f"mcp_{name}_old"),))
+        return MCPServerConnection(AsyncMock(), (_FakeMcpTool(f"mcp_{name}_new"),))
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_server", connect)
+    work = asyncio.create_task(provider.connect())
+    try:
+        async with asyncio.timeout(2):
+            await stale_started.wait()
+            configs["test"] = _stdio_server("new-mcp")
+            assert (await provider.reload())["connected"] == ["test"]
+            await work
+            assert await registry.execute("mcp_test_new", {}) == "ok"
+            assert is_tool_error_result(await registry.execute("mcp_test_old", {}))
+            stale_closed.assert_awaited_once()
+    finally:
+        await provider.aclose()
+        await work
 
 
 @pytest.mark.asyncio
@@ -595,7 +626,7 @@ async def test_reload_mcp_servers_retries_configured_server_without_live_stack(
     )
     save_config(config)
 
-    async def _fake_connect(name, _cfg, *, network):
+    async def _fake_connect(name, _cfg, *, network, stdio_slots):
         stack = AsyncExitStack()
         await stack.__aenter__()
         return MCPServerConnection(stack.aclose, (_FakeMcpTool(f"mcp_{name}_navigate"),))
@@ -638,7 +669,7 @@ async def test_reload_mcp_servers_skips_oauth_server_waiting_for_authorization(
 
     attempted: list[str] = []
 
-    async def _fake_connect(name, _cfg, *, network):
+    async def _fake_connect(name, _cfg, *, network, stdio_slots):
         attempted.append(name)
         stack = AsyncExitStack()
         await stack.__aenter__()
@@ -692,7 +723,7 @@ async def test_mcp_tool_reconnects_before_submission_after_session_terminated(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
 
-    async def _fake_connect(name, _cfg, *, network):
+    async def _fake_connect(name, _cfg, *, network, stdio_slots):
         nonlocal connect_count
         connect_count += 1
         session = _FakeSession(connect_count)
@@ -749,7 +780,7 @@ async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
                 content=[mcp_types.TextContent(type="text", text="recovered")]
             )
 
-    async def _fake_connect(name, _cfg, *, network):
+    async def _fake_connect(name, _cfg, *, network, stdio_slots):
         nonlocal connect_count
         connect_count += 1
         tool_def = SimpleNamespace(
@@ -805,7 +836,7 @@ async def test_concurrent_mcp_reconnect_reuses_fresh_session(
                 ]
             )
 
-    async def _fake_connect(name, _cfg, *, network):
+    async def _fake_connect(name, _cfg, *, network, stdio_slots):
         nonlocal connect_count
         connect_count += 1
         session = _DeadSession() if connect_count == 1 else _LiveSession()
@@ -867,7 +898,7 @@ async def test_shared_proxy_snapshot_survives_reconnect_and_reloads_only_opted_i
     async def mark_closed(name: str) -> None:
         closed.append(name)
 
-    async def connect(name, cfg, *, network):
+    async def connect(name, cfg, *, network, stdio_slots):
         attempts.append((name, network.proxy, network.resolve_proxy(cfg.use_proxy)))
         sessions[name] = Session()
         tool = MCPToolWrapper(sessions[name], name, SimpleNamespace(

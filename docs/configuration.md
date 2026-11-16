@@ -2248,7 +2248,7 @@ The [MCP service presets](./mcp-presets.md) include hosted services with browser
 
 </details>
 
-nanobot opens the server's authorization page and handles the callback through the gateway. The tools become available immediately when hot reload succeeds; otherwise the WebUI asks for a restart. OAuth tokens and dynamic client registration data are stored in the nanobot data directory under `auth/mcp.json`; they are not written to `config.json`. Removing the MCP server from Apps also removes its saved OAuth credentials. Normal gateway startup never opens a browser or registers a new OAuth client when credentials are missing—interactive authorization starts only after a user clicks **Connect**.
+nanobot opens the server's authorization page and handles the callback through the gateway. Tools become available when the connection finishes discovery. If an authorized server is still connecting, check its status in **Apps**; a slow connection can finish without a restart. OAuth tokens and dynamic client registration data are stored in the nanobot data directory under `auth/mcp.json`; they are not written to `config.json`. Removing the MCP server from Apps also removes its saved OAuth credentials. Normal gateway startup never opens a browser or registers a new OAuth client when credentials are missing—interactive authorization starts only after a user clicks **Connect**.
 
 For a remotely accessed WebUI, HTTPS is recommended. Configure `channels.websocket.publicWsUrl` with the browser-facing `wss://` endpoint so nanobot can register the matching HTTPS callback and finish automatically. A loopback WebUI may use HTTP. When a remote WebUI is served over plain HTTP, nanobot instead registers a localhost callback and asks you to paste the complete callback URL from the browser address bar after authorization.
 
@@ -2304,7 +2304,7 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 
 Choose distinct MCP server and tool names. Names such as `a.b` and `a_b` can produce the same wrapped tool name. If two MCP capabilities claim the same name, the gateway hides that name instead of sending calls to either server. Other tools stay available. Rename one of the conflicting servers or tools, then reload MCP settings to use its new name. To restore a previously conflicting name after removing the duplicate, restart the gateway.
 
-MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
+The gateway discovers MCP tools in the background. A slow or unresponsive server does not prevent chat or block other servers from publishing their tools. A tool discovered after a model request starts becomes available on the next user input. If a server stays in **Connecting**, use **Apps** to check it or remove it from the configuration and reload. `toolTimeout` limits individual tool calls, not startup discovery.
 
 
 

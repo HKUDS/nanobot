@@ -19,6 +19,8 @@ interface SystemSettingsEffectsOptions {
 }
 
 const MCP_RUNTIME_STATUS_REFRESH_MS = 1_000;
+const MCP_RUNTIME_STATUS_FAST_POLLS = 10;
+const MCP_RUNTIME_STATUS_SLOW_REFRESH_MS = 5_000;
 
 export function useSystemSettingsEffects({
   state,
@@ -136,6 +138,14 @@ export function useSystemSettingsEffects({
     if (activeSection !== "apps" || !pageVisible) return;
     let cancelled = false;
     let retry: number | null = null;
+    let polls = 0;
+    const scheduleMcpRefresh = () => {
+      retry = window.setTimeout(() => {
+        retry = null;
+        loadMcpPresets(false);
+      }, polls++ < MCP_RUNTIME_STATUS_FAST_POLLS
+        ? MCP_RUNTIME_STATUS_REFRESH_MS : MCP_RUNTIME_STATUS_SLOW_REFRESH_MS);
+    };
     const loadMcpPresets = (showLoading: boolean) => {
       if (showLoading) setMcpPresetsLoading(true);
       toolsCatalog.loadMcpPresets()
@@ -143,10 +153,7 @@ export function useSystemSettingsEffects({
           if (cancelled) return;
           setMcpError(null);
           if (toolsCatalog.getSnapshot().mcpPresets?.presets.some((preset) => preset.runtime_status === "connecting")) {
-            retry = window.setTimeout(() => {
-              retry = null;
-              loadMcpPresets(false);
-            }, MCP_RUNTIME_STATUS_REFRESH_MS);
+            scheduleMcpRefresh();
           }
         })
         .catch((err) => {
@@ -159,7 +166,7 @@ export function useSystemSettingsEffects({
     const cached = toolsCatalog.getSnapshot().mcpPresets;
     setMcpPresetsLoading(!cached);
     if (!toolsCatalog.mcpFresh()) loadMcpPresets(!cached);
-    else if (mcpConnecting) retry = window.setTimeout(() => loadMcpPresets(false), MCP_RUNTIME_STATUS_REFRESH_MS);
+    else if (mcpConnecting) scheduleMcpRefresh();
     return () => {
       cancelled = true;
       if (retry !== null) window.clearTimeout(retry);

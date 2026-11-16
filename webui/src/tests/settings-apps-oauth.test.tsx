@@ -457,6 +457,52 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByRole("heading", { name: "Xmind" })).toBeInTheDocument();
   });
 
+  it("backs off polling a long-running MCP connection and stops after it settles", async () => {
+    const connectingPreset = {
+      ...xmindMcpPreset,
+      installed: true,
+      configured: true,
+      available: true,
+      status: "configured",
+    };
+    let requests = 0;
+    let ready = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return jsonResponse(settingsPayload());
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 0 });
+      if (url === "/api/settings/mcp-presets") {
+        requests += 1;
+        return jsonResponse({
+          presets: [{ ...connectingPreset, runtime_status: ready ? "connected" : "connecting" }],
+          installed_count: 1,
+        });
+      }
+      return { ok: false, status: 404, text: async () => "Not found" } as Response;
+    }));
+    const client = { requestMutation: requestMutationMock, status: "open", onStatus: () => () => {} } as never;
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => { renderSettingsView({ client, initialSection: "apps" }); });
+      expect(requests).toBe(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(requests).toBe(11);
+      await act(async () => { await vi.advanceTimersByTimeAsync(50_000); });
+      expect(requests).toBe(21);
+
+      ready = true;
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(screen.getByRole("button", { name: "Manage Xmind" })).toBeInTheDocument();
+      expect(requests).toBe(22);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      expect(requests).toBe(22);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   it("retries a failed custom MCP and only shows a success check after it connects", async () => {
     const failedCustom = {
       ...xmindMcpPreset,

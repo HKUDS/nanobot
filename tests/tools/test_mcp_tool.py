@@ -144,7 +144,7 @@ def _make_wrapper(session: object, *, timeout: float = 0.1) -> MCPToolWrapper:
 async def test_mcp_provider_connect_propagates_external_cancellation(monkeypatch) -> None:
     started = asyncio.Event()
 
-    async def connect(_name, _cfg, *, network):
+    async def connect(_name, _cfg, *, network, stdio_slots):
         started.set()
         await asyncio.sleep(60)
         return None
@@ -2107,27 +2107,29 @@ def _make_fake_session_with_capabilities(
 
 
 @pytest.mark.asyncio
-async def test_timed_out_discovery_does_not_publish_tools(fake_mcp_runtime, monkeypatch) -> None:
+async def test_incomplete_discovery_stays_unpublished_until_it_finishes(fake_mcp_runtime) -> None:
     session = _make_fake_session_with_capabilities(["search"])
     listing = asyncio.Event()
+    ready = asyncio.Event()
 
     async def list_resources() -> SimpleNamespace:
         listing.set()
-        await asyncio.Event().wait()
-        raise AssertionError("the fixture must only exit via cancellation")
+        await ready.wait()
+        return SimpleNamespace(resources=[], nextCursor=None)
 
     session.list_resources = list_resources
     fake_mcp_runtime["session"] = session
-    monkeypatch.setattr(mcp_mod, "_STARTUP_TIMEOUT_SECONDS", 0.2)
     registry = ToolRegistry()
     provider = MCPProvider({"slow": MCPServerConfig(command="fake")}, registry)
     try:
         task = asyncio.create_task(provider.connect())
-        await asyncio.wait_for(listing.wait(), timeout=2)
-        assert not registry.has("mcp_slow_search")
-        await asyncio.wait_for(task, timeout=2)
-        assert provider.runtime_status() == {"slow": "failed"}
-        assert not registry.get_definitions()
+        async with asyncio.timeout(2):
+            await listing.wait()
+            assert not registry.get_definitions()
+            ready.set()
+            await task
+            assert provider.runtime_status() == {"slow": "connected"}
+            assert registry.has("mcp_slow_search")
     finally:
         await provider.aclose()
 
