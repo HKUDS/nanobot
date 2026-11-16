@@ -58,7 +58,7 @@ _MCP_ATTACHMENT_KEYS = (
 _DEFAULT_TEST_TIMEOUT = 20
 _DEFAULT_CUSTOM_TIMEOUT = 30
 _CUSTOM_ACTIONS = {"custom", "import", "import-cursor", "tools"}
-_MCP_RUNTIME_STATUSES = {"connecting", "connected", "failed"}
+_MCP_RUNTIME_STATUSES = {"connecting", "connecting_slow", "connected", "failed", "startup_timeout"}
 
 McpReload = Callable[[], Awaitable[dict[str, Any]]]
 McpRuntimeStatus = Callable[[], Mapping[str, str]]

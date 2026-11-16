@@ -971,6 +971,8 @@
       "statusMissingCredentials": "Precisa de chave",
       "connectingAccount": "Conectando {{name}}",
       "connectingLabel": "Conectando…",
+      "connectingSlow": "A conexão está demorando mais…",
+      "startupTimedOut": "O tempo de inicialização expirou.",
       "continueSignIn": "Continuar login",
       "preparingSignIn": "Preparando login seguro…",
       "openSignInToContinue": "Abra a página de login para continuar.",

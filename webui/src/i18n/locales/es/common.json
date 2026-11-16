@@ -1182,6 +1182,8 @@
       "statusMissingCredentials": "Necesita clave",
       "connectingAccount": "Conectando {{name}}",
       "connectingLabel": "Conectando…",
+      "connectingSlow": "La conexión está tardando más…",
+      "startupTimedOut": "Se agotó el tiempo de inicio.",
       "continueSignIn": "Continuar inicio de sesión",
       "preparingSignIn": "Preparando un inicio de sesión seguro…",
       "openSignInToContinue": "Abre la página de inicio de sesión para continuar.",

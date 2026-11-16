@@ -466,7 +466,7 @@ describe("SettingsView Apps catalog", () => {
       status: "configured",
     };
     let requests = 0;
-    let ready = false;
+    let runtimeStatus = "connecting";
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(settingsPayload());
@@ -474,7 +474,7 @@ describe("SettingsView Apps catalog", () => {
       if (url === "/api/settings/mcp-presets") {
         requests += 1;
         return jsonResponse({
-          presets: [{ ...connectingPreset, runtime_status: ready ? "connected" : "connecting" }],
+          presets: [{ ...connectingPreset, runtime_status: runtimeStatus }],
           installed_count: 1,
         });
       }
@@ -486,12 +486,19 @@ describe("SettingsView Apps catalog", () => {
     try {
       await act(async () => { renderSettingsView({ client, initialSection: "apps" }); });
       expect(requests).toBe(1);
+      expect(screen.getByRole("button", { name: "Xmind" })).toHaveAccessibleDescription("Connecting…");
+      runtimeStatus = "connecting_slow";
       await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
       expect(requests).toBe(11);
+      expect(screen.getByRole("button", { name: "Xmind" }))
+        .toHaveAccessibleDescription("Taking longer to connect…");
+      runtimeStatus = "startup_timeout";
       await act(async () => { await vi.advanceTimersByTimeAsync(50_000); });
       expect(requests).toBe(21);
+      expect(screen.getByRole("button", { name: "Xmind" })).toHaveAccessibleDescription("Startup timed out.");
+      expect(screen.getByRole("button", { name: "Manage Xmind" })).toHaveTextContent("Fix connection");
 
-      ready = true;
+      runtimeStatus = "connected";
       await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
       expect(screen.getByRole("button", { name: "Manage Xmind" })).toBeInTheDocument();
       expect(requests).toBe(22);
@@ -503,7 +510,7 @@ describe("SettingsView Apps catalog", () => {
     }
   });
 
-  it("retries a failed custom MCP and only shows a success check after it connects", async () => {
+  it.each(["connected", "connecting_slow"] as const)("reports %s after manually retrying a failed custom MCP", async (status) => {
     const failedCustom = {
       ...xmindMcpPreset,
       name: "team-docs",
@@ -517,7 +524,9 @@ describe("SettingsView Apps catalog", () => {
       runtime_status: "failed",
       connection_summary: "https://mcp.example.com/mcp",
     };
-    const connectedCustom = { ...failedCustom, runtime_status: "connected" };
+    const retriedCustom = { ...failedCustom, runtime_status: status };
+    const pending = status === "connecting_slow";
+    const pendingMessage = "MCP config reloaded; still connecting: team-docs";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/settings") return jsonResponse(settingsPayload());
@@ -531,13 +540,14 @@ describe("SettingsView Apps catalog", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     requestMutationMock.mockResolvedValueOnce({
-      presets: [connectedCustom],
+      presets: [retriedCustom],
       installed_count: 1,
       requires_restart: false,
       hot_reload: {
-        ok: true,
-        message: "MCP connections refreshed without restarting nanobot.",
-        connected: ["team-docs"],
+        ok: !pending,
+        message: pending ? pendingMessage : "MCP connections refreshed without restarting nanobot.",
+        connected: pending ? [] : ["team-docs"],
+        connecting: pending ? ["team-docs"] : [],
         failed: [],
       },
       last_action: { ok: true, message: "Retried connection for MCP server team-docs." },
@@ -557,6 +567,12 @@ describe("SettingsView Apps catalog", () => {
       { name: "team-docs" },
       20_000,
     ));
+    if (pending) {
+      await waitFor(() => expect(screen.getByRole("button", { name: /^team-docs$/ }))
+        .toHaveAccessibleDescription("Taking longer to connect…"));
+      expect(screen.queryByText(pendingMessage)).not.toBeInTheDocument();
+      return;
+    }
     const connected = await screen.findByRole("button", { name: "Manage team-docs" });
     expect(connected).toHaveTextContent("Manage");
     await selectToolType("All");

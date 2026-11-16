@@ -205,6 +205,40 @@ async def test_maintenance_recovers_failed_server_without_a_turn(monkeypatch: py
 
 
 @pytest.mark.asyncio
+async def test_consecutive_connection_failures_back_off_without_new_turns(monkeypatch):
+    provider, registry = _make_provider()
+    initial = asyncio.Event()
+    starts: list[float] = []
+    loop = asyncio.get_running_loop()
+    first_delay = 0.04
+
+    async def connect(_name, _cfg, *, network, stdio_slots):
+        starts.append(loop.time())
+        if len(starts) < 3:
+            return None
+        stack = AsyncExitStack()
+        await stack.__aenter__()
+        return MCPServerConnection(stack.aclose, (_FakeMcpTool("mcp_test_ping"),))
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_server", connect)
+    monkeypatch.setattr(mcp_runtime, "_RETRY_DELAY_SECONDS", first_delay)
+    worker = asyncio.create_task(provider.maintain(initial))
+    try:
+        async with asyncio.timeout(5):
+            await initial.wait()
+            while not registry.has("mcp_test_ping"):
+                await asyncio.sleep(0.01)
+            assert await registry.execute("mcp_test_ping", {}) == "ok"
+        assert len(starts) == 3
+        assert starts[1] - starts[0] >= first_delay
+        assert starts[2] - starts[1] >= 2 * first_delay
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        await provider.aclose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("first", ["a.b", "a_b"])
 async def test_mcp_name_collision_cannot_redirect_a_published_tool(first, monkeypatch):
     configs = {name: _stdio_server() for name in ("a.b", "a_b")}
@@ -571,11 +605,65 @@ async def test_reload_wait_limit_keeps_slow_discovery_alive(
             assert result["connecting"] == ["test"]
             assert provider.runtime_status() == {"test": "connecting"}
             assert (await provider.reload())["connecting"] == ["test"]
+            monkeypatch.setattr(mcp_runtime, "_STARTUP_SLOW_SECONDS", 0)
+            assert provider.runtime_status() == {"test": "connecting_slow"}
             ready.set()
             await provider.connect()
             assert provider.runtime_status() == {"test": "connected"}
         assert attempts == 1
     finally:
+        await provider.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shutdown_during_cleanup", [False, True])
+async def test_startup_timeout_closes_transport_and_leaves_no_tools(monkeypatch, shutdown_during_cleanup):
+    opened = asyncio.Event()
+    closing = asyncio.Event()
+    release = asyncio.Event()
+    closed = asyncio.Event()
+
+    @asynccontextmanager
+    async def stdio(_params):
+        try:
+            opened.set()
+            yield None, None
+        finally:
+            closing.set()
+            if shutdown_during_cleanup:
+                await release.wait()
+            closed.set()
+
+    @asynccontextmanager
+    async def session(_read, _write):
+        async def initialize():
+            await asyncio.Event().wait()
+
+        yield SimpleNamespace(initialize=initialize)
+
+    monkeypatch.setattr("mcp.client.stdio.stdio_client", stdio)
+    monkeypatch.setattr("mcp.ClientSession", session)
+    monkeypatch.setattr(mcp_runtime, "_STARTUP_TIMEOUT_SECONDS", 0.05)
+    provider, registry = _make_provider()
+    try:
+        async with asyncio.timeout(2):
+            if shutdown_during_cleanup:
+                connect = asyncio.create_task(provider.connect())
+                await closing.wait()
+                shutdown = asyncio.create_task(provider.aclose())
+                done, _ = await asyncio.wait((shutdown,), timeout=0.05)
+                assert not done, "gateway shutdown must drain the transport owner"
+                release.set()
+                await shutdown
+                await connect
+            else:
+                await provider.connect()
+                assert provider.runtime_status() == {"test": "startup_timeout"}
+        assert opened.is_set()
+        assert closed.is_set()
+        assert not registry.get_definitions()
+    finally:
+        release.set()
         await provider.aclose()
 
 

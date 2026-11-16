@@ -62,7 +62,10 @@ _WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yar
 _HTTP_TIMEOUT = 30.0
 _HTTP_READ_TIMEOUT = 300.0
 _RELOAD_WAIT_SECONDS = 10.0
+_STARTUP_SLOW_SECONDS = 10.0
+_STARTUP_TIMEOUT_SECONDS = 60.0
 _RETRY_DELAY_SECONDS = 15.0
+_MAX_RETRY_DELAY_SECONDS = 120.0
 _MAX_CONCURRENT_STDIO_LAUNCHES = 4
 
 # Characters allowed in tool names by model providers (Anthropic, OpenAI, etc.).
@@ -73,7 +76,8 @@ _MCPResultT = TypeVar("_MCPResultT")
 _PageT = TypeVar("_PageT", bound="PaginatedResult", covariant=True)
 _EntryT = TypeVar("_EntryT")
 MCPServerLoader = Callable[[], tuple[Mapping[str, "MCPServerConfig"], NetworkConfig]]
-MCPRuntimeStatus = Literal["connecting", "failed", "connected"]
+_FailureStatus = Literal["failed", "startup_timeout"]
+MCPRuntimeStatus = Literal["connecting", "connecting_slow", "connected"] | _FailureStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -1185,7 +1189,7 @@ async def connect_mcp_server(
                 raise
 
     try:
-        # Transport limits still apply; callers decide how long to wait for discovery.
+        # The connection owner cleans up when its caller cancels discovery.
         tools = await ready
         if tools is None:
             await asyncio.shield(owner)
@@ -1194,7 +1198,7 @@ async def connect_mcp_server(
     except BaseException as exc:
         owner.cancel()
         with suppress(BaseException):
-            await asyncio.shield(owner)
+            await shield_and_drain(owner)
         if isinstance(exc, asyncio.CancelledError):
             if task_is_cancelling():
                 raise
@@ -1231,6 +1235,19 @@ def _pending_mcp_authorization(servers: Mapping[str, MCPServerConfig]) -> set[st
     return {name for name, cfg in oauth.items() if not mcp_oauth_has_credentials(name, cfg.url)}
 
 
+@dataclass(frozen=True, slots=True)
+class _StartupAttempt:
+    started_at: float
+    task: asyncio.Task[None]
+
+
+@dataclass(frozen=True, slots=True)
+class _StartupFailure:
+    status: _FailureStatus
+    delay: float
+    retry_at: float
+
+
 class MCPProvider:
     """Own configured MCP connections and their dynamic tool registrations."""
 
@@ -1248,8 +1265,8 @@ class MCPProvider:
         self._server_loader = server_loader or _load_current_servers
         self._connections: dict[str, MCPServerConnection] = {}
         self._tool_owners: dict[str, str | None] = {}
-        self._connecting: dict[str, asyncio.Task[None]] = {}
-        self._failed: set[str] = set()
+        self._connecting: dict[str, _StartupAttempt] = {}
+        self._failed: dict[str, _StartupFailure] = {}
         self._stdio_slots = asyncio.Semaphore(_MAX_CONCURRENT_STDIO_LAUNCHES)
         self._lock = asyncio.Lock()
         self._attempt_finished = asyncio.Event()
@@ -1279,12 +1296,16 @@ class MCPProvider:
         return set(self._connections)
 
     def runtime_status(self) -> dict[str, MCPRuntimeStatus]:
-        """Return the latest connection-attempt result for configured servers."""
-        return {
-            **dict.fromkeys(self._failed, "failed"),
-            **dict.fromkeys(self._connecting, "connecting"),
-            **dict.fromkeys(self._connections, "connected"),
+        """Project connection facts for the settings client."""
+        status: dict[str, MCPRuntimeStatus] = {
+            name: failure.status for name, failure in self._failed.items()
         }
+        if self._connecting:
+            slow_before = asyncio.get_running_loop().time() - _STARTUP_SLOW_SECONDS
+            for name, attempt in self._connecting.items():
+                status[name] = "connecting_slow" if attempt.started_at <= slow_before else "connecting"
+        status.update(dict.fromkeys(self._connections, "connected"))
+        return status
 
     async def maintain(self, initial: asyncio.Event) -> None:
         """Run the gateway's connection attempts independently of its turns."""
@@ -1299,54 +1320,91 @@ class MCPProvider:
                     first = {task for task in first if not task.done()}
                     if not first:
                         initial.set()
-                if not self._failed:
-                    await self._attempt_finished.wait()
-                    continue
-                await asyncio.sleep(_RETRY_DELAY_SECONDS)
                 async with self._lock:
-                    if not self._closing:
-                        self._start_missing()
+                    if self._closing:
+                        break
+                    now = asyncio.get_running_loop().time()
+                    due = {name for name, failure in self._failed.items() if failure.retry_at <= now}
+                    if due:
+                        self._start_missing(due)
+                    next_retry = min(
+                        (failure.retry_at for name, failure in self._failed.items()
+                         if name not in self._connecting),
+                        default=None,
+                    )
+                with suppress(TimeoutError):
+                    async with asyncio.timeout_at(next_retry):
+                        await self._attempt_finished.wait()
         finally:
             initial.set()
 
-    def _start_missing(self) -> dict[str, asyncio.Task[None]]:
-        missing = {name: cfg for name, cfg in self._servers.items() if name not in self._connections}
+    def _start_missing(self, names: set[str] | None = None) -> dict[str, asyncio.Task[None]]:
+        missing = {
+            name: cfg for name, cfg in self._servers.items()
+            if name not in self._connections and (names is None or name in names)
+        }
         pending_auth = _pending_mcp_authorization(missing)
-        self._failed.difference_update(pending_auth)
+        for name in pending_auth:
+            self._failed.pop(name, None)
         return {name: self._start_attempt(name, cfg) for name, cfg in missing.items() if name not in pending_auth}
 
     def _start_attempt(self, name: str, config: MCPServerConfig) -> asyncio.Task[None]:
         attempt = self._connecting.get(name)
         if attempt is None:
-            self._failed.discard(name)
-            attempt = asyncio.create_task(self._connect_one(name, config, self._network), name=f"mcp-start:{name}")
+            started_at = asyncio.get_running_loop().time()
+            task = asyncio.create_task(
+                self._connect_one(name, config, self._network, started_at + _STARTUP_TIMEOUT_SECONDS),
+                name=f"mcp-start:{name}",
+            )
+            attempt = _StartupAttempt(started_at, task)
             self._connecting[name] = attempt
-        return attempt
+        return attempt.task
 
-    async def _connect_one(self, name: str, config: MCPServerConfig, network: NetworkConfig) -> None:
+    def _record_failure(self, name: str, status: _FailureStatus) -> None:
+        previous = self._failed.get(name)
+        delay = min(previous.delay * 2, _MAX_RETRY_DELAY_SECONDS) if previous else _RETRY_DELAY_SECONDS
+        self._failed[name] = _StartupFailure(status, delay, asyncio.get_running_loop().time() + delay)
+
+    async def _connect_one(
+        self, name: str, config: MCPServerConfig, network: NetworkConfig, deadline: float,
+    ) -> None:
         task = asyncio.current_task()
+
+        def is_current() -> bool:
+            attempt = self._connecting.get(name)
+            return attempt is not None and attempt.task is task
+
+        failure: _FailureStatus = "failed"
         try:
             try:
-                connection = await connect_mcp_server(name, config, network=network, stdio_slots=self._stdio_slots)
+                async with asyncio.timeout_at(deadline):
+                    connection = await connect_mcp_server(
+                        name, config, network=network, stdio_slots=self._stdio_slots,
+                    )
+            except TimeoutError:
+                logger.warning("MCP server '{}' startup timed out after {} seconds", name, _STARTUP_TIMEOUT_SECONDS)
+                failure = "startup_timeout"
+                connection = None
             except Exception as exc:
                 logger.warning("MCP server '{}' connection failed: {}", name, type(exc).__name__)
                 connection = None
 
-            if self._closing or self._connecting.get(name) is not task:
+            if self._closing or not is_current():
                 if connection is not None:
                     await _close_mcp_connection(name, connection)
             elif connection is None:
-                self._failed.add(name)
+                self._record_failure(name, failure)
             else:
+                self._failed.pop(name, None)
                 self._connections[name] = connection
                 self._publish_tools(name, connection)
         finally:
-            if self._connecting.get(name) is task:
+            if is_current():
                 del self._connecting[name]
             self._attempt_finished.set()
 
     async def _cancel_attempts(self, names: Iterable[str]) -> None:
-        tasks = [self._connecting.pop(name) for name in names if name in self._connecting]
+        tasks = [self._connecting.pop(name).task for name in names if name in self._connecting]
         for task in tasks:
             task.cancel()
         if tasks:
@@ -1392,11 +1450,12 @@ class MCPProvider:
             async with self._lock:
                 owned = {
                     name for name in attempts.keys() - existing
-                    if self._connecting.get(name) is attempts[name]
+                    if (attempt := self._connecting.get(name)) is not None and attempt.task is attempts[name]
                 }
                 await self._cancel_attempts(owned)
                 if not self._closing:
-                    self._failed.update(owned)
+                    for name in owned:
+                        self._record_failure(name, "failed")
             raise
 
     async def reload(self) -> dict[str, Any]:
@@ -1435,7 +1494,8 @@ class MCPProvider:
             for name in [*removed, *changed]:
                 tools_removed += await self._close_server(name)
 
-            self._failed.difference_update(removed, authorization_pending)
+            for name in set(removed) | set(changed) | authorization_pending:
+                self._failed.pop(name, None)
             self._servers = next_servers
             self._network = next_network.model_copy(deep=True)
             to_connect_names = next_names - self._connections.keys() - authorization_pending
@@ -1460,8 +1520,8 @@ class MCPProvider:
                     "requires_restart": False,
                 }
 
-            failed = sorted(to_connect_names & self._failed)
             connecting = sorted(to_connect_names & self._connecting.keys())
+            failed = sorted((to_connect_names & self._failed.keys()) - self._connecting.keys())
             unchanged = not removed and not added and not changed and not retry_missing
             ok = not failed and not connecting
             if failed:
@@ -1533,13 +1593,15 @@ class MCPProvider:
             if current_tool is not None and current_tool is not stale_tool:
                 return current_tool
 
-            attempt = self._connecting.get(server_name)
-            if attempt is None:
+            current_attempt = self._connecting.get(server_name)
+            if current_attempt is None:
                 logger.warning("MCP server '{}' session terminated; refreshing connection", server_name)
                 await self._close_server(server_name)
                 if self._closing:
                     return None
                 attempt = self._start_attempt(server_name, cfg)
+            else:
+                attempt = current_attempt.task
 
         # Only this tool call is bounded by toolTimeout. Do not cancel a shared reconnect.
         await asyncio.wait((attempt,))

@@ -10,6 +10,7 @@ import {
   fetchAutomations,
   fetchNanobotFeatures,
 } from "@/lib/api";
+import type { McpPresetsPayload } from "@/lib/types";
 
 interface SystemSettingsEffectsOptions {
   state: SystemSettingsState;
@@ -21,6 +22,12 @@ interface SystemSettingsEffectsOptions {
 const MCP_RUNTIME_STATUS_REFRESH_MS = 1_000;
 const MCP_RUNTIME_STATUS_FAST_POLLS = 10;
 const MCP_RUNTIME_STATUS_SLOW_REFRESH_MS = 5_000;
+
+function hasPendingMcpConnection(payload: McpPresetsPayload | null | undefined): boolean {
+  return payload?.presets.some(({ runtime_status }) =>
+    runtime_status === "connecting" || runtime_status === "connecting_slow" || runtime_status === "startup_timeout"
+  ) ?? false;
+}
 
 export function useSystemSettingsEffects({
   state,
@@ -49,7 +56,7 @@ export function useSystemSettingsEffects({
   }, [toolsCatalog]);
 
   const cliPending = Boolean(state.cliApps?.catalog_refresh_pending);
-  const mcpConnecting = Boolean(state.mcpPresets?.presets.some(preset => preset.runtime_status === "connecting"));
+  const mcpConnecting = hasPendingMcpConnection(state.mcpPresets);
 
   useEffect(() => {
     if (activeSection !== "apps") return;
@@ -152,7 +159,7 @@ export function useSystemSettingsEffects({
         .then(() => {
           if (cancelled) return;
           setMcpError(null);
-          if (toolsCatalog.getSnapshot().mcpPresets?.presets.some((preset) => preset.runtime_status === "connecting")) {
+          if (hasPendingMcpConnection(toolsCatalog.getSnapshot().mcpPresets)) {
             scheduleMcpRefresh();
           }
         })
