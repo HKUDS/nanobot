@@ -483,7 +483,7 @@ export function ThreadShell({
     dismissed: boolean;
   } | null>(null);
   const sandboxNotice = useSandboxNotice(client, chatId, webuiCapabilities.includes("webui.sandbox-settings.v1"));
-  const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
+  const [submittedViewportTurn, setSubmittedViewportTurn] = useState<{ chatId: string; turnId: string } | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
   const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
@@ -568,7 +568,6 @@ export function ThreadShell({
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
-    setSubmittedViewportTurnId(null);
     onTurnEnd?.();
   }, [chatId, onTurnEnd]);
   const {
@@ -652,7 +651,7 @@ export function ThreadShell({
       filePreviewCloseTimerRef.current = null;
     }
     setClosingPreview(null);
-    setSubmittedViewportTurnId(null);
+    setSubmittedViewportTurn(null);
   }, [previewSessionKey]);
 
   useEffect(() => {
@@ -722,15 +721,12 @@ export function ThreadShell({
       ?? historyActiveTurnId
       ?? restoredViewportTurnId
     : null;
-  const activeTurnStartedHere =
-    viewportTurnId !== null && viewportTurnId === submittedViewportTurnId;
+  const submittedViewportTurnId = submittedViewportTurn?.chatId === chatId
+    ? submittedViewportTurn.turnId : null;
   useEffect(() => {
     if (!chatId || !messagesReady || turnActive) return;
     activeViewportTurnByChatIdRef.current.delete(chatId);
-    setSubmittedViewportTurnId((current) =>
-      current === rememberedViewportTurnId ? null : current,
-    );
-  }, [chatId, messagesReady, rememberedViewportTurnId, turnActive]);
+  }, [chatId, messagesReady, turnActive]);
   const filePreviewAvailabilityCache = useMemo(
     () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
     [previewSessionKey],
@@ -970,7 +966,7 @@ export function ThreadShell({
     const submitted = send(pending.content, pending.images, pending.options);
     if (submitted && !submitted.sideChannel) {
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-      setSubmittedViewportTurnId(submitted.turnId);
+      setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
     }
     if (submitted?.delivery) {
       void submitted.delivery.then(() => pending.finish?.(true), (error: unknown) => {
@@ -1009,7 +1005,7 @@ export function ThreadShell({
     );
     if (submitted && !submitted.sideChannel) {
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-      setSubmittedViewportTurnId(submitted.turnId);
+      setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
     }
     onPendingFirstMessageConsumed?.(pendingFirstMessage.id);
   }, [
@@ -1084,7 +1080,7 @@ export function ThreadShell({
         && options?.continueActiveTurn !== true
       ) {
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-        setSubmittedViewportTurnId(submitted.turnId);
+        setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
       }
       return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
@@ -1515,7 +1511,7 @@ export function ThreadShell({
             composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
             onComposerLayoutChange={alignSidebar}
             activeTurnId={viewportTurnId}
-            activeTurnStartedHere={activeTurnStartedHere}
+            submittedPromptTurnId={submittedViewportTurnId}
             conversationKey={historyKey}
             conversationReady={messagesReady}
             onVisibleMessagesChange={reportVisibleMessages}

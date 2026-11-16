@@ -7,17 +7,12 @@ type ThreadMotionMode =
   | "idle"
   | "follow-latest"
   | "anchor-prompt"
-  | "follow-output"
-  | "follow-completion"
+  | "reading-prompt"
   | "navigating-latest"
   | "navigating-history"
   | "browsing-history";
 
-type AutomaticThreadMotionMode =
-  | "idle"
-  | "follow-latest"
-  | "anchor-prompt"
-  | "follow-output";
+type AutomaticThreadMotionMode = "idle" | "follow-latest";
 
 type ThreadMotionEvent =
   | "navigate-latest"
@@ -26,7 +21,6 @@ type ThreadMotionEvent =
   | "user-scroll"
   | "boundary-scroll"
   | "composer-input"
-  | "turn-completed"
   | "resume-follow";
 
 type ThreadMotionTransition = ThreadMotionMode | "current-automatic-mode";
@@ -52,19 +46,14 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
-    "turn-completed": "follow-completion",
+    "boundary-scroll": "browsing-history",
   },
-  "follow-output": {
+  "reading-prompt": {
     "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
-    "turn-completed": "follow-completion",
-  },
-  "follow-completion": {
-    "navigate-latest": "navigating-latest",
-    "navigate-history": "navigating-history",
-    "user-scroll": "browsing-history",
-    "composer-input": "idle",
+    "boundary-scroll": "browsing-history",
+    "resume-follow": "current-automatic-mode",
   },
   "navigating-latest": {
     "navigate-latest": "navigating-latest",
@@ -100,18 +89,8 @@ export interface ThreadMotionGeometry {
   promptTop: number | null;
 }
 
-interface ThreadMotionTurn {
-  id: string | null;
-  promptId: string | null;
-  hasOutput: boolean;
-  entry?: "submitted" | "restored";
-}
-
 interface ThreadMotionSnapshot {
   mode: ThreadMotionMode;
-  turnId: string | null;
-  promptPositioned: boolean;
-  measurementPending: boolean;
 }
 
 export interface ThreadMotionScheduler {
@@ -123,7 +102,6 @@ type ThreadMotionCamera = Pick<
   ThreadCameraController,
   | "cancel"
   | "dispose"
-  | "followTo"
   | "isFollowing"
   | "jumpTo"
   | "navigateTo"
@@ -133,7 +111,7 @@ type ThreadMotionCamera = Pick<
 
 interface ThreadMotionCoordinatorOptions {
   camera: ThreadMotionCamera;
-  measure: (promptId: string | null) => ThreadMotionGeometry | null;
+  measure: (promptId: string | null, submitted?: boolean) => ThreadMotionGeometry | null;
   onGeometry?: (geometry: ThreadMotionGeometry) => void;
   onAutoFollow?: () => void;
   onLatestNavigationSettled?: () => void;
@@ -164,17 +142,12 @@ export class ThreadMotionCoordinator {
   private readonly onAutoFollow?: ThreadMotionCoordinatorOptions["onAutoFollow"];
   private readonly onLatestNavigationSettled?: () => void;
   private readonly scheduler: ThreadMotionScheduler;
-  private turn: ThreadMotionTurn = {
-    id: null,
-    promptId: null,
-    hasOutput: false,
-  };
+  private turnId: string | null = null;
   private mode: ThreadMotionMode = "idle";
   private historyNavigationPromptId: string | null = null;
-  private promptPositioned = false;
+  private submittedPromptId: string | null = null;
   private measurementFrameId: number | null = null;
   private geometryDirty = false;
-  private composerInputDuringTurn = false;
   // Only input toward latest may resume follow; layout can also return a
   // reading position to the tail without the user scrolling forward.
   private resumeFollowArmed = false;
@@ -189,55 +162,44 @@ export class ThreadMotionCoordinator {
   }
 
   snapshot(): ThreadMotionSnapshot {
-    return {
-      mode: this.mode,
-      turnId: this.turn.id,
-      promptPositioned: this.promptPositioned,
-      measurementPending: this.measurementFrameId !== null,
-    };
+    return { mode: this.mode };
   }
 
-  updateTurn(turn: ThreadMotionTurn): void {
-    if (!turn.id) {
-      this.completeTurn();
-      return;
-    }
-
-    const isNewTurn = this.turn.id !== turn.id;
-    this.turn = turn;
-    if (isNewTurn) {
-      this.camera.reset();
-      this.composerInputDuringTurn = false;
-      this.resumeFollowArmed = false;
-      this.promptPositioned = turn.entry === "restored";
-      this.mode = this.promptPositioned && turn.hasOutput
-        ? "follow-output"
-        : "anchor-prompt";
-    } else if (!this.isHistoryMode() && this.promptPositioned) {
-      this.mode = turn.hasOutput ? "follow-output" : "anchor-prompt";
+  updateTurn(turnId: string | null): void {
+    if (this.turnId === turnId) return;
+    this.turnId = turnId;
+    // Opening a running conversation still positions its initial history once,
+    // but subsequent output must not keep pulling the reader to the tail.
+    if (turnId && this.mode === "follow-latest") {
+      this.camera.cancel();
+      this.mode = "idle";
     }
     this.invalidateGeometry();
   }
 
-  completeTurn(): void {
-    if (!this.turn.id) {
-      this.invalidateGeometry();
-      return;
-    }
-    // Protocol completion can share a React commit with the last large text
-    // batch and begins the run-drawer exit. Keep camera ownership through
-    // those final layout changes; only a new turn, explicit user navigation,
-    // or input for the next prompt may end completion follow.
-    this.transition("turn-completed");
-    if (
-      this.composerInputDuringTurn
-      && this.transition("composer-input")
-    ) {
-      this.camera.cancel();
-    }
-    this.turn = { id: null, promptId: null, hasOutput: false };
-    this.composerInputDuringTurn = false;
-    this.promptPositioned = false;
+  followOpeningLayout(): void {
+    if (this.mode !== "idle") return;
+    this.mode = "follow-latest";
+    this.invalidateGeometry();
+  }
+
+  finishOpeningLayout(): void {
+    if (this.mode !== "follow-latest") return;
+    this.camera.cancel();
+    this.mode = "idle";
+  }
+
+  anchorSubmittedPrompt(promptId: string): void {
+    this.camera.reset();
+    this.resumeFollowArmed = false;
+    this.submittedPromptId = promptId;
+    this.mode = "anchor-prompt";
+    this.invalidateGeometry();
+  }
+
+  updateSubmittedPromptId(promptId: string): void {
+    if (!this.isPromptMode() || this.submittedPromptId === promptId) return;
+    this.submittedPromptId = promptId;
     this.invalidateGeometry();
   }
 
@@ -257,10 +219,6 @@ export class ThreadMotionCoordinator {
   }
 
   handleComposerInput(): void {
-    // Input and protocol completion can arrive in either order. Remember
-    // editing that starts just before turn_end so the completion drawer
-    // cannot reacquire the camera a few milliseconds later.
-    if (this.turn.id) this.composerInputDuringTurn = true;
     if (!this.transition("composer-input")) return;
     this.camera.cancel();
   }
@@ -331,7 +289,9 @@ export class ThreadMotionCoordinator {
   }
 
   cameraSettled(): void {
-    if (this.mode === "navigating-latest") {
+    if (this.mode === "anchor-prompt") {
+      this.finishPromptAnchor();
+    } else if (this.mode === "navigating-latest") {
       this.settleLatestNavigation();
       this.onLatestNavigationSettled?.();
     }
@@ -393,12 +353,11 @@ export class ThreadMotionCoordinator {
     }
     this.geometryDirty = false;
     this.camera.reset();
-    this.turn = { id: null, promptId: null, hasOutput: false };
-    this.composerInputDuringTurn = false;
+    this.turnId = null;
     this.resumeFollowArmed = false;
     this.mode = "idle";
     this.historyNavigationPromptId = null;
-    this.promptPositioned = false;
+    this.submittedPromptId = null;
   }
 
   dispose(): void {
@@ -415,10 +374,7 @@ export class ThreadMotionCoordinator {
   }
 
   private automaticMode(): AutomaticThreadMotionMode {
-    if (!this.turn.id) return "follow-latest";
-    return this.promptPositioned && this.turn.hasOutput
-      ? "follow-output"
-      : "anchor-prompt";
+    return this.turnId ? "idle" : "follow-latest";
   }
 
   private transition(event: ThreadMotionEvent): boolean {
@@ -434,20 +390,17 @@ export class ThreadMotionCoordinator {
     return true;
   }
 
-  private followGeometry(geometry: ThreadMotionGeometry): void {
-    const target = geometry.maxScrollTop;
-    const result = this.camera.followTo(target);
-    if (
-      result
-      && Math.abs(target - geometry.scrollTop) > GEOMETRY_EPSILON_PX
-    ) {
-      this.onAutoFollow?.();
-    }
-  }
-
   private settleLatestNavigation(): void {
     if (!this.transition("navigation-settled")) return;
     this.invalidateGeometry();
+  }
+
+  private isPromptMode(): boolean {
+    return this.mode === "anchor-prompt" || this.mode === "reading-prompt";
+  }
+
+  private finishPromptAnchor(): void {
+    this.mode = "reading-prompt";
   }
 
   private readonly flushGeometry = (): void => {
@@ -458,10 +411,8 @@ export class ThreadMotionCoordinator {
     const navigationPromptId = this.mode === "navigating-history"
       ? this.historyNavigationPromptId
       : null;
-    const needsPromptGeometry =
-      navigationPromptId !== null
-      || (!this.isHistoryMode() && this.turn.id !== null && !this.promptPositioned);
-    const geometry = this.measure(navigationPromptId ?? (needsPromptGeometry ? this.turn.promptId : null));
+    const promptId = navigationPromptId ?? (this.isPromptMode() ? this.submittedPromptId : null);
+    const geometry = this.measure(promptId, this.isPromptMode());
     if (!geometry) return;
     this.observeUserScroll();
     this.onGeometry?.(geometry);
@@ -480,53 +431,22 @@ export class ThreadMotionCoordinator {
       }
       return;
     }
-    if (this.mode === "follow-completion") {
-      this.followGeometry(geometry);
-      return;
-    }
     if (this.mode === "follow-latest") {
       if (geometry.maxScrollTop - geometry.scrollTop > GEOMETRY_EPSILON_PX) {
         this.camera.jumpTo(geometry.maxScrollTop);
       }
       return;
     }
-    if (this.isHistoryMode() || !this.turn.id) return;
-    if (!this.turn.promptId && this.turn.entry !== "restored") {
-      this.mode = "anchor-prompt";
-      return;
-    }
-
-    if (!this.promptPositioned) {
-      if (geometry.promptTop === null) {
-        this.mode = "anchor-prompt";
-        return;
+    if (geometry.promptTop !== null) {
+      if (this.mode === "anchor-prompt") {
+        const result = this.camera.navigateTo(geometry.promptTop);
+        if (!result || result === "settled") this.finishPromptAnchor();
+      } else if (this.mode === "reading-prompt"
+        && Math.abs(geometry.promptTop - geometry.scrollTop) > GEOMETRY_EPSILON_PX) {
+        // Preserve the prompt's screen position through reflow above it, not the
+        // old scrollTop. Output growing below the prompt leaves this unchanged.
+        this.camera.jumpTo(geometry.promptTop);
       }
-      // Before output exists, the real lower scroll boundary is the only
-      // position with zero hidden downward travel. Once output exists, first
-      // establish the prompt origin; automatic follow below then resolves the
-      // current tail in this same authoritative geometry frame.
-      this.camera.jumpTo(
-        this.turn.hasOutput ? geometry.promptTop : geometry.maxScrollTop,
-      );
-      this.promptPositioned = true;
-    } else if (
-      !this.turn.hasOutput
-      && Math.abs(geometry.maxScrollTop - geometry.scrollTop)
-        > GEOMETRY_EPSILON_PX
-    ) {
-      // Hero docking, the run drawer, fonts, and responsive chrome can all
-      // change document height while the model is still silent. Every
-      // authoritative geometry frame reasserts the real lower boundary so no
-      // stale downward scroll pocket survives a layout transition.
-      this.camera.jumpTo(geometry.maxScrollTop);
     }
-
-    if (!this.turn.hasOutput) {
-      this.mode = "anchor-prompt";
-      return;
-    }
-
-    this.mode = "follow-output";
-    this.followGeometry(geometry);
   };
 }

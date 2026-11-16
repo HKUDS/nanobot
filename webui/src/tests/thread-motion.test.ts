@@ -39,11 +39,11 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     dispose: vi.fn(),
     observeScroll: vi.fn(() => 0),
     reset: vi.fn(() => { cameraFollowing = false; }),
-    jumpTo: vi.fn(),
-    followTo: vi.fn(() => "settled" as const),
+    jumpTo: vi.fn((top: number) => { geometry = { ...geometry, scrollTop: top }; }),
     isFollowing: vi.fn(() => cameraFollowing),
-    navigateTo: vi.fn(() => {
-      cameraFollowing = nextNavigationResult === "started";
+    navigateTo: vi.fn((top: number) => {
+      cameraFollowing = nextNavigationResult !== "settled";
+      if (!cameraFollowing) geometry = { ...geometry, scrollTop: top };
       return nextNavigationResult;
     }),
   };
@@ -73,6 +73,13 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
   const setCameraFollowing = (following: boolean) => {
     cameraFollowing = following;
   };
+  const settleCamera = () => {
+    if (cameraFollowing) {
+      geometry = { ...geometry, scrollTop: camera.navigateTo.mock.lastCall![0] };
+    }
+    cameraFollowing = false;
+    coordinator.cameraSettled();
+  };
   const setNextNavigationResult = (result: ThreadCameraFollowResult) => {
     nextNavigationResult = result;
   };
@@ -87,469 +94,184 @@ function motionHarness(initial?: Partial<ThreadMotionGeometry>) {
     scheduler,
     advanceFrame,
     setCameraFollowing,
+    settleCamera,
     setGeometry,
     setNextNavigationResult,
   };
 }
 
 describe("ThreadMotionCoordinator", () => {
-  it("coalesces discrete invalidations into one authoritative geometry frame", () => {
-    const {
-      camera,
-      coordinator,
-      frames,
-      measure,
-      scheduler,
-      advanceFrame,
-    } = motionHarness();
-
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
+  it("coalesces anchoring, ignores output below the prompt, and corrects reflow above it", () => {
+    const { camera, coordinator, measure, scheduler, advanceFrame, setGeometry, settleCamera } = motionHarness();
+    coordinator.updateTurn("turn-1");
+    coordinator.anchorSubmittedPrompt("prompt-1");
     coordinator.invalidateGeometry();
-    coordinator.invalidateGeometry();
-
-    expect(scheduler.request).toHaveBeenCalledTimes(1);
-    expect(frames).toHaveLength(1);
-    expect(measure).not.toHaveBeenCalled();
-
+    expect(scheduler.request).toHaveBeenCalledOnce();
     advanceFrame();
+    expect(camera.navigateTo.mock.calls).toEqual([[404]]);
+    expect(camera.jumpTo).not.toHaveBeenCalled();
 
-    expect(measure).toHaveBeenCalledTimes(1);
-    expect(measure).toHaveBeenCalledWith("prompt-1");
-    expect(camera.jumpTo).toHaveBeenCalledWith(404);
-    expect(camera.followTo).toHaveBeenCalledWith(1_400);
-    expect(coordinator.snapshot()).toMatchObject({
-      mode: "follow-output",
-      promptPositioned: true,
-      measurementPending: false,
-    });
-  });
-
-  it("reconciles observed layout growth before the next paint", () => {
-    const {
-      camera,
-      coordinator,
-      frames,
-      scheduler,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
-
-    coordinator.resumeAutoFollow();
-    advanceFrame();
-    camera.jumpTo.mockClear();
-    scheduler.cancel.mockClear();
-
-    setGeometry({ scrollTop: 1_400, scrollHeight: 2_054 });
+    settleCamera();
+    expect(coordinator.snapshot().mode).toBe("reading-prompt");
+    setGeometry({ scrollHeight: 2_200 });
     coordinator.invalidateGeometry();
+    advanceFrame();
+    expect(camera.jumpTo).not.toHaveBeenCalled();
+
+    coordinator.updateTurn(null);
+    setGeometry({ scrollHeight: 2_400, promptTop: 620 });
     coordinator.reconcileObservedGeometry();
-
-    expect(camera.jumpTo).toHaveBeenCalledWith(1_554);
-    expect(scheduler.cancel).toHaveBeenCalledTimes(1);
-    expect(frames).toHaveLength(0);
-    expect(coordinator.snapshot()).toMatchObject({ measurementPending: false });
+    expect(measure).toHaveBeenLastCalledWith("prompt-1", true);
+    expect(camera.jumpTo).toHaveBeenCalledWith(620);
+    expect(camera.navigateTo).toHaveBeenCalledOnce();
   });
 
-  it("pins repeated output growth on each authoritative geometry frame", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
+  it("corrects reflow after a submitted prompt settles without animation", () => {
+    const { camera, coordinator, advanceFrame, setGeometry, setNextNavigationResult } = motionHarness({ promptTop: 400 });
+    setNextNavigationResult("settled");
+    coordinator.anchorSubmittedPrompt("prompt-1");
     advanceFrame();
-    camera.cancel.mockClear();
-    camera.followTo.mockClear();
-
-    setGeometry({ scrollTop: 1_400, scrollHeight: 1_928 });
-    coordinator.invalidateGeometry();
-    coordinator.invalidateGeometry();
-    advanceFrame();
-    setGeometry({ scrollTop: 1_410, scrollHeight: 1_944 });
-    coordinator.invalidateGeometry();
-    advanceFrame();
-
-    expect(camera.followTo.mock.calls).toEqual([[1_428], [1_444]]);
-    expect(camera.cancel).not.toHaveBeenCalled();
+    setGeometry({ promptTop: 520 });
+    coordinator.reconcileObservedGeometry();
+    expect(camera.jumpTo).toHaveBeenCalledWith(520);
   });
 
-  it.each([
-    "geometry-before-completion",
-    "completion-before-geometry",
-  ] as const)("keeps following final layout for %s ordering", (ordering) => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
+  it.each(["before the frame", "during animation", "at the scroll boundary", "after settlement"])(
+    "preserves user takeover through layout growth and completion %s",
+    (timing) => {
+      const { camera, coordinator, advanceFrame, setGeometry, settleCamera } = motionHarness(
+        timing === "at the scroll boundary" ? { scrollTop: 0, promptTop: 0 } : undefined,
+      );
+      coordinator.updateTurn("turn-1");
+      coordinator.anchorSubmittedPrompt("prompt-1");
+      if (timing !== "before the frame") advanceFrame();
+      if (timing === "at the scroll boundary" || timing === "after settlement") settleCamera();
+      camera.navigateTo.mockClear();
+      if (timing === "at the scroll boundary") coordinator.handleUserScrollIntent(false);
+      else coordinator.takeUserControl();
+      setGeometry({ scrollHeight: 2_100, promptTop: 700 });
+      coordinator.updateTurn(null);
+      advanceFrame();
+      settleCamera();
+      expect(camera.navigateTo).not.toHaveBeenCalled();
+      expect(camera.jumpTo).not.toHaveBeenCalled();
+      expect(coordinator.snapshot().mode).toBe("browsing-history");
+    },
+  );
+
+  it("does not resume streaming follow when the reader reaches the tail", () => {
+    const { camera, coordinator, onAutoFollow, advanceFrame, setGeometry, settleCamera } = motionHarness();
+    coordinator.updateTurn("turn-1");
+    coordinator.anchorSubmittedPrompt("prompt-1");
     advanceFrame();
-    camera.cancel.mockClear();
-    camera.followTo.mockClear();
-
-    const applyFinalGeometry = () => {
-      setGeometry({
-        scrollTop: 1_400,
-        scrollHeight: 2_400,
-      });
-      coordinator.invalidateGeometry();
-    };
-    if (ordering === "geometry-before-completion") applyFinalGeometry();
-    coordinator.completeTurn();
-    if (ordering === "completion-before-geometry") applyFinalGeometry();
-
-    expect(coordinator.snapshot().mode).toBe("follow-completion");
-    expect(camera.cancel).not.toHaveBeenCalled();
-    advanceFrame();
-    expect(camera.followTo).toHaveBeenLastCalledWith(1_900);
-
-    setGeometry({
-      scrollTop: 1_900,
-      scrollHeight: 2_450,
-    });
-    coordinator.invalidateGeometry();
-    advanceFrame();
-    expect(camera.followTo).toHaveBeenLastCalledWith(1_950);
-  });
-
-  it("releases completion follow when composer editing begins", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
-    advanceFrame();
-    coordinator.completeTurn();
-    camera.jumpTo.mockClear();
-    camera.followTo.mockClear();
-    camera.cancel.mockClear();
-
-    coordinator.handleComposerInput();
-    setGeometry({
-      scrollTop: 1_400,
-      scrollHeight: 1_940,
-      composerHeight: 160,
-    });
-    coordinator.invalidateGeometry();
-    advanceFrame();
-
-    expect(camera.cancel).toHaveBeenCalledTimes(1);
-    expect(camera.jumpTo).not.toHaveBeenCalled();
-    expect(camera.followTo).not.toHaveBeenCalled();
+    settleCamera();
+    coordinator.handleUserScrollIntent(true);
+    coordinator.handleUserScrollIntent(true, true);
+    expect(coordinator.observeScroll(true)).toBe("automatic");
+    expect(onAutoFollow).toHaveBeenCalledTimes(1);
     expect(coordinator.snapshot().mode).toBe("idle");
-  });
-
-  it("remembers composer editing that begins before turn completion", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
-    advanceFrame();
-    camera.followTo.mockClear();
-    camera.cancel.mockClear();
-
-    coordinator.handleComposerInput();
-    expect(coordinator.snapshot().mode).toBe("follow-output");
-
-    coordinator.completeTurn();
-    setGeometry({
-      scrollTop: 1_400,
-      scrollHeight: 1_940,
-      composerHeight: 160,
-    });
-    advanceFrame();
-
-    expect(camera.cancel).toHaveBeenCalledTimes(1);
-    expect(camera.followTo).not.toHaveBeenCalled();
-    expect(coordinator.snapshot().mode).toBe("idle");
-  });
-
-  it("keeps turn identity stable when canonical replay replaces DOM ids", () => {
-    const {
-      camera,
-      coordinator,
-      measure,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-stable",
-      promptId: "optimistic-prompt",
-      hasOutput: true,
-    });
-    advanceFrame();
     camera.jumpTo.mockClear();
-    measure.mockClear();
-
-    setGeometry({ scrollHeight: 2_020, promptTop: 120 });
-    coordinator.updateTurn({
-      id: "turn-stable",
-      promptId: "canonical-prompt",
-      hasOutput: true,
-    });
-    advanceFrame();
-
-    expect(measure).toHaveBeenCalledWith(null);
-    expect(camera.jumpTo).not.toHaveBeenCalled();
-    expect(camera.followTo).toHaveBeenLastCalledWith(1_520);
-  });
-
-  it("continues from the bottom when a running turn is restored before prompt identity", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-    } = motionHarness({
-      scrollTop: 1_400,
-    });
-
-    coordinator.updateTurn({
-      id: "turn-restored",
-      promptId: null,
-      hasOutput: true,
-      entry: "restored",
-    });
-    advanceFrame();
-
-    expect(camera.jumpTo).not.toHaveBeenCalled();
-    expect(camera.followTo).toHaveBeenCalledWith(1_400);
-    expect(coordinator.snapshot()).toMatchObject({
-      mode: "follow-output",
-      promptPositioned: true,
-    });
-  });
-
-  it("continues measuring while browsing history but does not steal the viewport", () => {
-    const {
-      camera,
-      coordinator,
-      onGeometry,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
-    advanceFrame();
-    camera.followTo.mockClear();
-    onGeometry.mockClear();
-
-    coordinator.takeUserControl();
-    setGeometry({ scrollTop: 200, scrollHeight: 2_100 });
+    camera.navigateTo.mockClear();
+    setGeometry({ scrollHeight: 2_400 });
     coordinator.invalidateGeometry();
     advanceFrame();
+    expect(camera.jumpTo).not.toHaveBeenCalled();
+    expect(camera.navigateTo).not.toHaveBeenCalled();
+  });
 
-    expect(onGeometry).toHaveBeenCalledTimes(1);
-    expect(camera.followTo).not.toHaveBeenCalled();
-    expect(coordinator.snapshot().mode).toBe("browsing-history");
-
+  it("stops idle tail following when a running turn is restored", () => {
+    const { camera, coordinator, advanceFrame, setGeometry } = motionHarness();
     coordinator.resumeAutoFollow();
     advanceFrame();
-    expect(camera.followTo).toHaveBeenCalledWith(1_600);
+    expect(camera.jumpTo).toHaveBeenCalledWith(1_400);
+    camera.jumpTo.mockClear();
+    coordinator.updateTurn("restored-turn");
+    setGeometry({ scrollTop: 1_400, scrollHeight: 2_000 });
+    advanceFrame();
+    expect(camera.jumpTo).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("idle");
   });
 
-  it("keeps an explicitly resumed idle thread pinned to its latest bottom without animating", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
+  it("settles restored transcript layout at the tail until new output arrives", () => {
+    const { camera, coordinator, advanceFrame, setGeometry } = motionHarness();
+    coordinator.updateTurn("restored-turn");
+    coordinator.followOpeningLayout();
+    setGeometry({ scrollTop: 1_400, scrollHeight: 2_000 });
+    advanceFrame();
+    expect(camera.jumpTo).toHaveBeenCalledWith(1_500);
+    coordinator.finishOpeningLayout();
+    camera.jumpTo.mockClear();
+    setGeometry({ scrollTop: 1_500, scrollHeight: 2_200 });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+    expect(camera.jumpTo).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("idle");
+  });
 
+  it("lets user input take control while restored transcript layout is settling", () => {
+    const { camera, coordinator, advanceFrame, setGeometry } = motionHarness();
+    coordinator.updateTurn("restored-turn");
+    coordinator.followOpeningLayout();
+    coordinator.takeUserControl();
+    coordinator.finishOpeningLayout();
+    setGeometry({ scrollHeight: 2_000 });
+    advanceFrame();
+    expect(camera.jumpTo).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().mode).toBe("browsing-history");
+  });
+
+  it("keeps an explicitly resumed idle thread pinned as its layout grows", () => {
+    const { camera, coordinator, scheduler, frames, advanceFrame, setGeometry } = motionHarness();
     coordinator.resumeAutoFollow();
     advanceFrame();
     expect(camera.jumpTo).toHaveBeenLastCalledWith(1_400);
-    expect(coordinator.snapshot().mode).toBe("follow-latest");
-
     camera.jumpTo.mockClear();
-    setGeometry({
-      scrollTop: 1_400,
-      scrollHeight: 2_000,
-    });
+    scheduler.cancel.mockClear();
+    setGeometry({ scrollTop: 1_400, scrollHeight: 2_054 });
     coordinator.invalidateGeometry();
-    advanceFrame();
-
-    expect(camera.jumpTo).toHaveBeenCalledWith(1_500);
-    expect(camera.followTo).not.toHaveBeenCalled();
-
+    coordinator.reconcileObservedGeometry();
+    expect(camera.jumpTo).toHaveBeenCalledWith(1_554);
+    expect(scheduler.cancel).toHaveBeenCalledTimes(1);
+    expect(frames).toHaveLength(0);
     coordinator.takeUserControl();
     camera.jumpTo.mockClear();
-    setGeometry({
-      scrollTop: 300,
-      scrollHeight: 2_100,
-    });
+    setGeometry({ scrollTop: 300, scrollHeight: 2_100 });
     coordinator.invalidateGeometry();
     advanceFrame();
-
     expect(camera.jumpTo).not.toHaveBeenCalled();
-    expect(coordinator.snapshot().mode).toBe("browsing-history");
   });
 
-  it("treats scroll events as observations until explicit user intent takes control", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness({
-      scrollTop: 700,
-      scrollHeight: 1_200,
-      clientHeight: 500,
-      maxScrollTop: 700,
-    });
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: false,
-    });
+  it("retargets explicit latest navigation while moving, then stops following", () => {
+    const { camera, coordinator, advanceFrame, setCameraFollowing, setGeometry } = motionHarness();
+    coordinator.updateTurn("turn-1");
+    coordinator.anchorSubmittedPrompt("prompt-1");
     advanceFrame();
+    coordinator.takeUserControl();
+    camera.navigateTo.mockClear();
+    coordinator.navigateLatestTo(1_400);
+    setGeometry({ scrollTop: 900, scrollHeight: 2_100 });
+    coordinator.invalidateGeometry();
+    advanceFrame();
+    expect(camera.navigateTo.mock.calls).toEqual([[1_400], [1_600]]);
+    setCameraFollowing(false);
+    expect(coordinator.observeScroll(true)).toBe("navigation");
+    expect(coordinator.snapshot().mode).toBe("idle");
     camera.jumpTo.mockClear();
-
-    setGeometry({
-      scrollTop: 700,
-      scrollHeight: 1_280,
-    });
-    expect(coordinator.observeScroll(false)).toBe("automatic");
-    expect(coordinator.snapshot().mode).toBe("anchor-prompt");
+    setGeometry({ scrollTop: 1_600, scrollHeight: 2_300 });
+    coordinator.invalidateGeometry();
     advanceFrame();
-    expect(camera.jumpTo).toHaveBeenCalledWith(780);
-
-    coordinator.takeUserControl();
-    expect(coordinator.observeScroll(true)).toBe("user");
-    expect(coordinator.snapshot().mode).toBe("browsing-history");
-
-    expect(coordinator.observeScroll(false)).toBe("user");
-    expect(coordinator.snapshot().mode).toBe("browsing-history");
-
-    coordinator.handleUserScrollIntent(true, true);
-    expect(coordinator.observeScroll(true)).toBe("automatic");
-    expect(coordinator.snapshot().mode).toBe("anchor-prompt");
+    expect(camera.jumpTo).not.toHaveBeenCalled();
   });
 
-  it("resumes shallow history browsing when user intent turns toward latest", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-    } = motionHarness({
-      scrollTop: 1_400,
-    });
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
-    advanceFrame();
-    camera.followTo.mockClear();
-
-    coordinator.handleUserScrollIntent(true);
-    expect(coordinator.observeScroll(true)).toBe("user");
-    advanceFrame();
-    expect(camera.followTo).not.toHaveBeenCalled();
-
-    coordinator.handleUserScrollIntent(true, true);
-    expect(coordinator.observeScroll(true)).toBe("automatic");
-    expect(coordinator.snapshot().mode).toBe("follow-output");
-    advanceFrame();
-    expect(camera.followTo).toHaveBeenCalledWith(1_400);
-  });
-
-  it("resumes shallow history browsing from forward intent at the boundary", () => {
-    const {
-      advanceFrame,
-      coordinator,
-      onAutoFollow,
-    } = motionHarness({
-      scrollTop: 1_400,
-    });
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
-    advanceFrame();
-
-    coordinator.handleUserScrollIntent(true);
-    expect(coordinator.observeScroll(true)).toBe("user");
-
-    coordinator.handleUserScrollIntent(false, true);
-    expect(coordinator.snapshot().mode).toBe("follow-output");
-    expect(onAutoFollow).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves history browsing when an active turn is cleared", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
-    advanceFrame();
-    coordinator.takeUserControl();
-    camera.followTo.mockClear();
-
-    coordinator.updateTurn({
-      id: null,
-      promptId: null,
-      hasOutput: false,
-    });
-    advanceFrame();
-
-    expect(coordinator.snapshot().mode).toBe("browsing-history");
-    expect(camera.followTo).not.toHaveBeenCalled();
-  });
-
-  it("keeps history navigation independent from active turn completion", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
+  it("keeps history navigation in control through turn completion", () => {
+    const { camera, coordinator, advanceFrame, setGeometry } = motionHarness();
+    coordinator.updateTurn("turn-1");
+    coordinator.anchorSubmittedPrompt("prompt-1");
     advanceFrame();
     setGeometry({ promptTop: 900 });
     coordinator.navigateHistoryToPrompt("prompt-2");
     camera.cancel.mockClear();
-
-    coordinator.completeTurn();
-
+    coordinator.updateTurn(null);
     expect(camera.cancel).not.toHaveBeenCalled();
     expect(coordinator.snapshot().mode).toBe("navigating-history");
   });
@@ -624,134 +346,6 @@ describe("ThreadMotionCoordinator", () => {
     expect(coordinator.snapshot().mode).toBe("follow-latest");
   });
 
-  it("retargets smooth latest navigation before resuming automatic follow", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setCameraFollowing,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
-    advanceFrame();
-    coordinator.takeUserControl();
-    camera.followTo.mockClear();
-    camera.navigateTo.mockClear();
-
-    expect(coordinator.navigateLatestTo(1_400)).toBe("started");
-    expect(coordinator.snapshot().mode).toBe("navigating-latest");
-
-    setGeometry({
-      scrollTop: 900,
-      scrollHeight: 2_100,
-    });
-    coordinator.invalidateGeometry();
-    advanceFrame();
-
-    expect(camera.navigateTo.mock.calls).toEqual([[1_400], [1_600]]);
-    expect(camera.followTo).not.toHaveBeenCalled();
-
-    setGeometry({ scrollTop: 1_600 });
-    setCameraFollowing(false);
-    expect(coordinator.observeScroll(true)).toBe("navigation");
-    expect(coordinator.snapshot().mode).toBe("follow-output");
-
-    advanceFrame();
-    expect(camera.followTo).toHaveBeenCalledWith(1_600);
-  });
-
-  it("keeps latest navigation through completion and final layout growth", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setCameraFollowing,
-      setGeometry,
-    } = motionHarness();
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: true,
-    });
-    advanceFrame();
-    coordinator.takeUserControl();
-    coordinator.navigateLatestTo(1_400);
-    camera.followTo.mockClear();
-    camera.navigateTo.mockClear();
-
-    coordinator.completeTurn();
-    setGeometry({
-      scrollTop: 1_000,
-      scrollHeight: 2_300,
-    });
-    coordinator.invalidateGeometry();
-    advanceFrame();
-
-    expect(camera.navigateTo).toHaveBeenCalledWith(1_800);
-    expect(camera.followTo).not.toHaveBeenCalled();
-    expect(coordinator.snapshot().mode).toBe("navigating-latest");
-
-    setGeometry({ scrollTop: 1_800 });
-    setCameraFollowing(false);
-    expect(coordinator.observeScroll(true)).toBe("navigation");
-    expect(coordinator.snapshot().mode).toBe("follow-latest");
-
-    camera.jumpTo.mockClear();
-    setGeometry({
-      scrollTop: 1_800,
-      scrollHeight: 2_400,
-    });
-    coordinator.invalidateGeometry();
-    advanceFrame();
-
-    expect(camera.jumpTo).toHaveBeenCalledWith(1_900);
-  });
-
-  it("pins a waiting prompt to the exact lower boundary across all layout changes", () => {
-    const {
-      camera,
-      coordinator,
-      advanceFrame,
-      setGeometry,
-    } = motionHarness({
-      scrollHeight: 930,
-      clientHeight: 500,
-      maxScrollTop: 430,
-    });
-    coordinator.updateTurn({
-      id: "turn-1",
-      promptId: "prompt-1",
-      hasOutput: false,
-    });
-    advanceFrame();
-    expect(camera.jumpTo).toHaveBeenLastCalledWith(430);
-
-    setGeometry({
-      composerHeight: 148,
-      scrollHeight: 958,
-      promptTop: 404,
-    });
-    coordinator.invalidateGeometry();
-    advanceFrame();
-
-    expect(camera.jumpTo.mock.calls).toEqual([[430], [458]]);
-    expect(camera.followTo).not.toHaveBeenCalled();
-    expect(coordinator.snapshot().mode).toBe("anchor-prompt");
-
-    setGeometry({
-      scrollTop: 458,
-      scrollHeight: 990,
-    });
-    coordinator.invalidateGeometry();
-    advanceFrame();
-
-    expect(camera.jumpTo.mock.calls).toEqual([[430], [458], [490]]);
-  });
-
   it("retargets a prompt navigation from authoritative geometry without restarting the camera", () => {
     const { camera, coordinator, measure, setGeometry } = motionHarness();
     coordinator.navigateHistoryToPrompt("prompt-46");
@@ -763,6 +357,7 @@ describe("ThreadMotionCoordinator", () => {
     setGeometry({ promptTop: 520 });
     coordinator.reconcileObservedGeometry();
 
+    expect(measure).toHaveBeenLastCalledWith("prompt-46", false);
     expect(camera.navigateTo).toHaveBeenLastCalledWith(520);
     expect(camera.cancel).not.toHaveBeenCalled();
     expect(coordinator.snapshot().mode).toBe("navigating-history");
