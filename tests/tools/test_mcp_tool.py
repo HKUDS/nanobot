@@ -12,6 +12,7 @@ from urllib.request import getproxies_environment
 
 import httpx
 import pytest
+from mcp import types
 from mcp_helpers import discover_into
 
 import nanobot.agent.tools.mcp as mcp_mod
@@ -40,25 +41,8 @@ def test_type_checking_only_mcp_annotations_are_deferred() -> None:
     assert mcp_mod.connect_mcp_server.__annotations__["cfg"] == "MCPServerConfig"
 
 
-class _FakeTextContent:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class _FakeTextResourceContents:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-
-class _FakeBlobResourceContents:
-    def __init__(self, blob: bytes) -> None:
-        self.blob = blob
-
-
-class _FakeImageContent:
-    def __init__(self, data: str, mime_type: str = "image/png") -> None:
-        self.data = data
-        self.mimeType = mime_type
+def _text(text: str) -> types.TextContent:
+    return types.TextContent(type="text", text=text)
 
 
 @pytest.fixture
@@ -80,13 +64,7 @@ def _fake_mcp_module(
     monkeypatch: pytest.MonkeyPatch, fake_mcp_runtime: dict[str, object | None]
 ) -> None:
     mod = ModuleType("mcp")
-    mod.types = SimpleNamespace(
-        TextContent=_FakeTextContent,
-        TextResourceContents=_FakeTextResourceContents,
-        BlobResourceContents=_FakeBlobResourceContents,
-        ImageContent=_FakeImageContent,
-        PaginatedRequestParams=SimpleNamespace,
-    )
+    mod.types = types
 
     class _FakeStdioServerParameters:
         def __init__(
@@ -288,7 +266,7 @@ async def test_registry_executes_mcp_tools_with_boolean_subschemas(
     value_schema, params, error,
 ) -> None:
     session = SimpleNamespace(
-        call_tool=AsyncMock(return_value=SimpleNamespace(content=[_FakeTextContent("ok")])),
+        call_tool=AsyncMock(return_value=SimpleNamespace(content=[_text("ok")])),
     )
     tool_def = SimpleNamespace(
         name="demo",
@@ -314,7 +292,7 @@ async def test_registry_executes_mcp_tools_with_boolean_subschemas(
 @pytest.mark.parametrize("value", ["00123", "doc-A", 42])
 async def test_registry_preserves_mcp_type_union_arguments(types, value) -> None:
     session = SimpleNamespace(
-        call_tool=AsyncMock(return_value=SimpleNamespace(content=[_FakeTextContent("ok")])),
+        call_tool=AsyncMock(return_value=SimpleNamespace(content=[_text("ok")])),
     )
     tool_def = SimpleNamespace(
         name="lookup",
@@ -588,22 +566,24 @@ def test_normalize_windows_stdio_command_skips_existing_shells(
 
 @pytest.mark.asyncio
 async def test_execute_returns_text_blocks() -> None:
-    async def call_tool(_name: str, arguments: dict) -> object:
+    audio = types.AudioContent(type="audio", data="YQ==", mimeType="audio/wav")
+
+    async def call_tool(_name: str, arguments: dict) -> types.CallToolResult:
         assert arguments == {"value": 1}
-        return SimpleNamespace(content=[_FakeTextContent("hello"), 42])
+        return types.CallToolResult(content=[_text("hello"), audio])
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
 
     result = await wrapper.execute(value=1)
 
-    assert result == "hello\n42"
+    assert result == f"hello\n{audio}"
 
 
 @pytest.mark.asyncio
 async def test_execute_wraps_mcp_is_error_result() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
-            content=[_FakeTextContent("Error: server-side MCP failure")],
+            content=[_text("Error: server-side MCP failure")],
             isError=True,
         )
 
@@ -651,7 +631,7 @@ async def test_registry_adds_error_hint_to_malformed_mcp_result() -> None:
 async def test_execute_preserves_success_text_that_starts_with_error() -> None:
     async def call_tool(_name: str, arguments: dict) -> object:
         return SimpleNamespace(
-            content=[_FakeTextContent("Error: generated report successfully")],
+            content=[_text("Error: generated report successfully")],
             isError=False,
         )
 
@@ -670,18 +650,24 @@ _PNG_B64 = (
 
 
 @pytest.mark.asyncio
-async def test_execute_persists_image_block_as_artifact(tmp_path: Path) -> None:
+@pytest.mark.parametrize("embedded", [False, True], ids=["image", "embedded-blob"])
+async def test_execute_persists_image_block_as_artifact(tmp_path: Path, embedded: bool) -> None:
     from nanobot.config.loader import set_config_path
 
     set_config_path(tmp_path / "config.json")
 
-    async def call_tool(_name: str, arguments: dict) -> object:
-        return SimpleNamespace(
-            content=[
-                _FakeTextContent("here you go"),
-                _FakeImageContent(_PNG_B64, "image/png"),
-            ]
-        )
+    async def call_tool(_name: str, arguments: dict) -> types.CallToolResult:
+        image: types.ImageContent | types.EmbeddedResource
+        if embedded:
+            image = types.EmbeddedResource(
+                type="resource",
+                resource=types.BlobResourceContents(
+                    uri="file:///tmp/cat.png", blob=_PNG_B64, mimeType="image/png",
+                ),
+            )
+        else:
+            image = types.ImageContent(type="image", data=_PNG_B64, mimeType="image/png")
+        return types.CallToolResult(content=[_text("here you go"), image])
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
 
@@ -705,8 +691,10 @@ async def test_execute_notes_unstorable_image_block(tmp_path: Path) -> None:
 
     set_config_path(tmp_path / "config.json")
 
-    async def call_tool(_name: str, arguments: dict) -> object:
-        return SimpleNamespace(content=[_FakeImageContent("not-valid-base64!!", "image/png")])
+    async def call_tool(_name: str, arguments: dict) -> types.CallToolResult:
+        return types.CallToolResult(content=[
+            types.ImageContent(type="image", data="not-valid-base64!!", mimeType="image/png"),
+        ])
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool))
 
@@ -826,7 +814,7 @@ async def test_connect_mcp_servers_loads_all_tool_pages(
     session = _make_fake_session([])
     session.list_tools = list_tools
     session.call_tool = AsyncMock(
-        return_value=SimpleNamespace(content=[_FakeTextContent("second page result")])
+        return_value=SimpleNamespace(content=[_text("second page result")])
     )
     fake_mcp_runtime["session"] = session
     registry = ToolRegistry()
@@ -1936,7 +1924,10 @@ async def test_resource_wrapper_execute_returns_text() -> None:
     async def read_resource(uri: str) -> object:
         assert uri == "file:///tmp/data.txt"
         return SimpleNamespace(
-            contents=[_FakeTextResourceContents("line1"), _FakeTextResourceContents("line2")]
+            contents=[
+                types.TextResourceContents(uri=uri, text="line1"),
+                types.TextResourceContents(uri=uri, text="line2"),
+            ],
         )
 
     wrapper = _make_resource_wrapper(SimpleNamespace(read_resource=read_resource))
@@ -1946,12 +1937,15 @@ async def test_resource_wrapper_execute_returns_text() -> None:
 
 @pytest.mark.asyncio
 async def test_resource_wrapper_execute_handles_blob() -> None:
+    blob = "AAEC"
+
     async def read_resource(uri: str) -> object:
-        return SimpleNamespace(contents=[_FakeBlobResourceContents(b"\x00\x01\x02")])
+        return SimpleNamespace(contents=[types.BlobResourceContents(uri=uri, blob=blob)])
 
     wrapper = _make_resource_wrapper(SimpleNamespace(read_resource=read_resource))
     result = await wrapper.execute()
-    assert "[Binary resource: 3 bytes]" in result
+    assert result.startswith("[Binary resource: ")
+    assert blob not in result
 
 
 @pytest.mark.asyncio
@@ -2021,11 +2015,11 @@ async def test_prompt_wrapper_execute_returns_text() -> None:
         assert name == "myprompt"
         msg1 = SimpleNamespace(
             role="user",
-            content=[_FakeTextContent("You are an expert on {{topic}}.")],
+            content=[_text("You are an expert on {{topic}}.")],
         )
         msg2 = SimpleNamespace(
             role="assistant",
-            content=[_FakeTextContent("Understood. Ask me anything.")],
+            content=[_text("Understood. Ask me anything.")],
         )
         return SimpleNamespace(messages=[msg1, msg2])
 
@@ -2483,7 +2477,7 @@ async def test_optional_mcp_filters_reach_server_unchanged(params, error):
     async def call_tool(name, arguments):
         assert name == "list_issues"
         assert not ({"query", "customView"} <= arguments.keys())
-        return SimpleNamespace(content=[_FakeTextContent("ok")])
+        return SimpleNamespace(content=[_text("ok")])
 
     session = SimpleNamespace(call_tool=AsyncMock(side_effect=call_tool))
     wrapper = MCPToolWrapper(session, "linear", SimpleNamespace(

@@ -34,6 +34,11 @@ def _schema_name(schema: dict[str, Any]) -> str:
     return name if isinstance(name, str) else ""
 
 
+def _schema_sort_key(schema: dict[str, Any]) -> tuple[bool, str]:
+    name = _schema_name(schema)
+    return name.startswith("mcp_"), name
+
+
 class ToolRegistry:
     """
     Registry for agent tools.
@@ -99,18 +104,8 @@ class ToolRegistry:
         """
         if self._cached_definitions is None:
             definitions = [tool.to_schema() for tool in self._tools.values()]
-            builtins: list[dict[str, Any]] = []
-            mcp_tools: list[dict[str, Any]] = []
-            for schema in definitions:
-                name = _schema_name(schema)
-                if name.startswith("mcp_"):
-                    mcp_tools.append(schema)
-                else:
-                    builtins.append(schema)
-
-            builtins.sort(key=_schema_name)
-            mcp_tools.sort(key=_schema_name)
-            self._cached_definitions = builtins + mcp_tools
+            definitions.sort(key=_schema_sort_key)
+            self._cached_definitions = definitions
 
         return self._cached_definitions
 

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from anyio.streams.memory import MemoryObjectReceiveStream
     from mcp import ClientSession
     from mcp.shared.message import SessionMessage
-    from mcp.types import PaginatedRequestParams, PaginatedResult, Prompt, Resource
+    from mcp.types import ContentBlock, PaginatedRequestParams, PaginatedResult, Prompt, Resource
     from mcp.types import Tool as MCPToolDefinition
 
     from nanobot.agent.tools.mcp_oauth import MCPOAuthHandlers
@@ -633,24 +633,6 @@ class _MCPWrapperBase(Tool):
                 return ToolResult.error(f"(MCP {operation} failed: {type(exc).__name__})")
 
 
-def _image_block_data_url(block: Any, types: Any) -> str | None:
-    image_cls = getattr(types, "ImageContent", None)
-    if image_cls is not None and isinstance(block, image_cls):
-        mime = getattr(block, "mimeType", None) or "image/png"
-        return f"data:{mime};base64,{block.data}"
-
-    embedded_cls = getattr(types, "EmbeddedResource", None)
-    blob_cls = getattr(types, "BlobResourceContents", None)
-    if embedded_cls is not None and isinstance(block, embedded_cls):
-        resource = getattr(block, "resource", None)
-        if blob_cls is not None and isinstance(resource, blob_cls):
-            blob_resource = cast(Any, resource)
-            mime = getattr(blob_resource, "mimeType", None) or ""
-            if isinstance(mime, str) and mime.startswith("image/"):
-                return f"data:{mime};base64,{blob_resource.blob}"
-    return None
-
-
 def _mcp_image_tool_result(text_parts: list[str], artifacts: list[dict[str, Any]]) -> str:
     payload: dict[str, Any] = {
         "artifacts": artifacts,
@@ -738,7 +720,9 @@ class MCPToolWrapper(_MCPWrapperBase):
                 f"(MCP tool returned malformed content: {type(exc).__name__})"
             )
 
-    def _render_call_result(self, content: Any, arguments: Mapping[str, Any]) -> str:
+    def _render_call_result(
+        self, content: Sequence[ContentBlock], arguments: Mapping[str, Any],
+    ) -> str:
         """Turn MCP content blocks into a tool result string.
 
         Text is concatenated as before. Image blocks are decoded and saved as
@@ -754,15 +738,23 @@ class MCPToolWrapper(_MCPWrapperBase):
             if isinstance(block, types.TextContent):
                 text_parts.append(block.text)
                 continue
-            data_url = _image_block_data_url(block, types)
-            if data_url is not None:
-                stored = self._store_image_block(data_url, arguments)
-                if stored is not None:
-                    artifacts.append(stored)
-                else:
-                    text_parts.append("(MCP tool returned an image that could not be stored)")
+            if isinstance(block, types.ImageContent):
+                data_url = f"data:{block.mimeType or 'image/png'};base64,{block.data}"
+            elif (
+                isinstance(block, types.EmbeddedResource)
+                and isinstance(resource := block.resource, types.BlobResourceContents)
+                and resource.mimeType
+                and resource.mimeType.startswith("image/")
+            ):
+                data_url = f"data:{resource.mimeType};base64,{resource.blob}"
+            else:
+                text_parts.append(str(block))
                 continue
-            text_parts.append(str(block))
+            stored = self._store_image_block(data_url, arguments)
+            if stored is not None:
+                artifacts.append(stored)
+            else:
+                text_parts.append("(MCP tool returned an image that could not be stored)")
 
         if artifacts:
             return _mcp_image_tool_result(text_parts, artifacts)
