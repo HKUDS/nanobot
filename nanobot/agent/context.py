@@ -7,7 +7,6 @@ from typing import Any, Mapping, Sequence, cast
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.tools import mcp as mcp_tools
 from nanobot.agent.tools import sessions as session_tools
 from nanobot.apps.cli import utils as cli_app_utils
 from nanobot.context_sources import record_source, system_source_scope
@@ -25,11 +24,11 @@ from nanobot.utils.prompt_templates import render_template
 
 def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     """Return persisted kwargs for turn-attached capabilities."""
-    return (
-        cli_app_utils.session_extra(metadata)
-        | mcp_tools.session_extra(metadata)
-        | session_tools.session_extra(metadata)
-    )
+    extra = cli_app_utils.session_extra(metadata)
+    mcp_presets = metadata.get("mcp_presets") if isinstance(metadata, Mapping) else None
+    if isinstance(mcp_presets, list) and mcp_presets:
+        extra["mcp_presets"] = mcp_presets
+    return extra | session_tools.session_extra(metadata)
 
 
 @dataclass(frozen=True, slots=True)

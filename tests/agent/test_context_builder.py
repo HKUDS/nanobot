@@ -2,12 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder, TranscriptInput
+from nanobot.agent.context import ContextBuilder, TranscriptInput, session_extra
 from nanobot.runtime_context import RuntimeContextBlock
 
 
 def _builder(tmp_path: Path, **kw) -> ContextBuilder:
     return ContextBuilder(workspace=tmp_path, **kw)
+
+
+def test_session_extra_keeps_mcp_mentions_in_turn_history():
+    assert session_extra({}) == {}
+    mention = {"name": "browserbase", "display_name": "Browserbase"}
+    assert session_extra({"mcp_presets": [mention]}) == {"mcp_presets": [mention]}
 
 
 class TestMergeMessageContent:

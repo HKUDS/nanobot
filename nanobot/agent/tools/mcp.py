@@ -175,6 +175,10 @@ def _sanitize_mcp_tool_name(name: str) -> str:
     return _limit_tool_name(_sanitize_name(name))
 
 
+def _wrapped_tool_name(server_name: str, tool_name: str) -> str:
+    return _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_name}")
+
+
 def _is_transient(exc: BaseException) -> bool:
     return type(exc).__name__ in _TRANSIENT_EXC_NAMES
 
@@ -659,9 +663,11 @@ class MCPToolWrapper(_MCPWrapperBase):
         server_name: str,
         tool_def: MCPToolDefinition,
         tool_timeout: int = 30,
+        *,
+        wrapped_name: str | None = None,
     ):
         self._original_name = tool_def.name
-        self._name = _sanitize_mcp_tool_name(f"mcp_{server_name}_{tool_def.name}")
+        self._name = wrapped_name if wrapped_name is not None else _wrapped_tool_name(server_name, tool_def.name)
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._input_schema = raw_schema
@@ -1059,10 +1065,10 @@ async def connect_mcp_server(
             allow_all_tools = "*" in enabled_tools
             tools: list[Tool] = []
             matched_enabled_tools: set[str] = set()
-            available_raw_names = [tool_def.name for tool_def in tool_defs]
-            available_wrapped_names = [_sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}") for tool_def in tool_defs]
+            available_wrapped_names: list[str] = []
             for tool_def in tool_defs:
-                wrapped_name = _sanitize_mcp_tool_name(f"mcp_{name}_{tool_def.name}")
+                wrapped_name = _wrapped_tool_name(name, tool_def.name)
+                available_wrapped_names.append(wrapped_name)
                 if (
                     not allow_all_tools
                     and tool_def.name not in enabled_tools
@@ -1074,7 +1080,9 @@ async def connect_mcp_server(
                         name,
                     )
                     continue
-                tools.append(MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout))
+                tools.append(MCPToolWrapper(
+                    session, name, tool_def, tool_timeout=cfg.tool_timeout, wrapped_name=wrapped_name,
+                ))
                 matched_enabled_tools.update((tool_def.name, wrapped_name))
 
             if enabled_tools and not allow_all_tools:
@@ -1085,7 +1093,7 @@ async def connect_mcp_server(
                         "Available wrapped names: {}",
                         name,
                         ", ".join(unmatched_enabled_tools),
-                        ", ".join(available_raw_names) or "(none)",
+                        ", ".join(tool_def.name for tool_def in tool_defs) or "(none)",
                         ", ".join(available_wrapped_names) or "(none)",
                     )
 
@@ -1196,12 +1204,6 @@ async def connect_mcp_server(
         else:
             raise
         return None
-
-
-def session_extra(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Return persisted session kwargs for MCP preset attachments."""
-    mcp_presets = metadata.get("mcp_presets") if isinstance(metadata, Mapping) else None
-    return {"mcp_presets": mcp_presets} if isinstance(mcp_presets, list) and mcp_presets else {}
 
 
 def _configured_servers(config: Config) -> dict[str, MCPServerConfig]:
