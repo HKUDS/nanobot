@@ -457,7 +457,10 @@ describe("SettingsView Apps catalog", () => {
     expect(await screen.findByRole("heading", { name: "Xmind" })).toBeInTheDocument();
   });
 
-  it("backs off polling a long-running MCP connection and stops after it settles", async () => {
+  it.each([
+    ["failed", "Connection failed."],
+    ["startup_timeout", "Startup timed out."],
+  ])("backs off polling through %s and stops after recovery", async (failureStatus, failureLabel) => {
     const connectingPreset = {
       ...xmindMcpPreset,
       installed: true,
@@ -492,15 +495,15 @@ describe("SettingsView Apps catalog", () => {
       expect(requests).toBe(11);
       expect(screen.getByRole("button", { name: "Xmind" }))
         .toHaveAccessibleDescription("Taking longer to connect…");
-      runtimeStatus = "startup_timeout";
+      runtimeStatus = failureStatus;
       await act(async () => { await vi.advanceTimersByTimeAsync(50_000); });
       expect(requests).toBe(21);
-      expect(screen.getByRole("button", { name: "Xmind" })).toHaveAccessibleDescription("Startup timed out.");
+      expect(screen.getByRole("button", { name: "Xmind" })).toHaveAccessibleDescription(failureLabel);
       expect(screen.getByRole("button", { name: "Manage Xmind" })).toHaveTextContent("Fix connection");
 
       runtimeStatus = "connected";
       await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
-      expect(screen.getByRole("button", { name: "Manage Xmind" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Manage Xmind" })).toHaveTextContent("Manage");
       expect(requests).toBe(22);
       await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
       expect(requests).toBe(22);

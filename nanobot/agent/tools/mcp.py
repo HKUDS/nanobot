@@ -1378,6 +1378,9 @@ class MCPProvider:
         try:
             try:
                 async with asyncio.timeout_at(deadline):
+                    # Cleanup belongs to this shared attempt, not the tool call.
+                    # Reload/shutdown must drain it before replacing the server.
+                    await shield_and_drain(self._close_server(name))
                     connection = await connect_mcp_server(
                         name, config, network=network, stdio_slots=self._stdio_slots,
                     )
@@ -1596,14 +1599,11 @@ class MCPProvider:
             current_attempt = self._connecting.get(server_name)
             if current_attempt is None:
                 logger.warning("MCP server '{}' session terminated; refreshing connection", server_name)
-                await self._close_server(server_name)
-                if self._closing:
-                    return None
                 attempt = self._start_attempt(server_name, cfg)
             else:
                 attempt = current_attempt.task
 
-        # Only this tool call is bounded by toolTimeout. Do not cancel a shared reconnect.
+        # Cancelling this caller must not cancel shared cleanup or discovery.
         await asyncio.wait((attempt,))
         return self._registered_tool(server_name, tool_name)
 

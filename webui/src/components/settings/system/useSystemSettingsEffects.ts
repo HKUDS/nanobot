@@ -25,7 +25,8 @@ const MCP_RUNTIME_STATUS_SLOW_REFRESH_MS = 5_000;
 
 function hasPendingMcpConnection(payload: McpPresetsPayload | null | undefined): boolean {
   return payload?.presets.some(({ runtime_status }) =>
-    runtime_status === "connecting" || runtime_status === "connecting_slow" || runtime_status === "startup_timeout"
+    runtime_status === "connecting" || runtime_status === "connecting_slow"
+    || runtime_status === "failed" || runtime_status === "startup_timeout"
   ) ?? false;
 }
 

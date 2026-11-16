@@ -845,6 +845,79 @@ async def test_mcp_tool_reconnects_before_submission_after_session_terminated(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_during", ["cleanup", "discovery"])
+async def test_cancelled_tool_call_does_not_interrupt_shared_reconnect(cancel_during, monkeypatch):
+    provider, registry = _make_provider(mcp_servers={"remote": _stdio_server()})
+    close_started = asyncio.Event()
+    finish_close = asyncio.Event()
+    old_closed = asyncio.Event()
+    discovery_started = asyncio.Event()
+    finish_discovery = asyncio.Event()
+    attempts = 0
+
+    async def connect(name, _cfg, *, network, stdio_slots):
+        nonlocal attempts
+        attempts += 1
+        first = attempts == 1
+        if not first:
+            assert old_closed.is_set()
+            discovery_started.set()
+            await finish_discovery.wait()
+        session = SimpleNamespace(
+            send_ping=AsyncMock(side_effect=(
+                McpError(ErrorData(code=-32000, message="Session terminated")) if first else None
+            )),
+            call_tool=AsyncMock(return_value=mcp_types.CallToolResult(
+                content=[mcp_types.TextContent(type="text", text="recovered")],
+            )),
+        )
+
+        async def close():
+            if first:
+                close_started.set()
+                await finish_close.wait()
+                old_closed.set()
+
+        tool = MCPToolWrapper(session, name, mcp_types.Tool(
+            name="echo", inputSchema={"type": "object"},
+        ))
+        return MCPServerConnection(close, (tool,))
+
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_server", connect)
+    initial = asyncio.Event()
+    worker = asyncio.create_task(provider.maintain(initial))
+    call = None
+    try:
+        async with asyncio.timeout(2):
+            await initial.wait()
+            call = asyncio.create_task(registry.execute("mcp_remote_echo", {}))
+            await close_started.wait()
+            if cancel_during == "discovery":
+                finish_close.set()
+                await discovery_started.wait()
+            call.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await call
+            finish_close.set()
+            await discovery_started.wait()
+            finish_discovery.set()
+            while not registry.has("mcp_remote_echo"):
+                await asyncio.sleep(0)
+            assert await registry.execute("mcp_remote_echo", {}) == "recovered"
+            assert attempts == 2
+            assert provider.runtime_status() == {"remote": "connected"}
+    finally:
+        finish_close.set()
+        finish_discovery.set()
+        if call is not None:
+            call.cancel()
+            await asyncio.gather(call, return_exceptions=True)
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        await provider.aclose()
+
+
+@pytest.mark.asyncio
 async def test_mcp_reconnect_handler_uses_sanitized_server_prefix(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
