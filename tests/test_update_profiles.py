@@ -172,7 +172,7 @@ def test_separate_profile_and_environment_cannot_hide_a_shared_workspace_writer(
 
 
 @pytest.fixture
-def startup_profile(private_home, tmp_path, monkeypatch):
+def startup_profile(private_home, tmp_path, monkeypatch, unused_tcp_port):
     from nanobot.config.schema import Config
 
     profile = tmp_path / "startup profile"
@@ -181,7 +181,7 @@ def startup_profile(private_home, tmp_path, monkeypatch):
     config = Config.model_validate({
         "agents": {"defaults": {"workspace": str(profile / "workspace"),
                                 "dream": {"enabled": False}}},
-        "gateway": {"heartbeat": {"enabled": False}},
+        "gateway": {"port": unused_tcp_port, "heartbeat": {"enabled": False}},
     })
     return profile, config
 
@@ -211,8 +211,7 @@ def test_startup_is_visible_and_protected_before_workspace_writes(startup_profil
     monkeypatch.setattr(application, "sync_workspace_templates", fail_initialization)
     for _ in range(2):
         with pytest.raises(RuntimeError, match="workspace initialization failed"):
-            gateway_launch.run_gateway(config, health_server_enabled=False,
-                                         webui_static_dist=False)
+            gateway_launch.run_gateway(config)
         observed = inspect_profiles(sys.prefix)
         assert len(observed) == 1 and observed[0].state == "stopped"
         assert not observed[0].receipt.active
@@ -234,8 +233,7 @@ def test_duplicate_gateway_cannot_initialize_workspace_before_claim(startup_prof
     with gateway(profile, sys.prefix):
         original = inspect_profiles(sys.prefix)
         with pytest.raises(GatewayAlreadyRunningError):
-            gateway_launch.run_gateway(config, health_server_enabled=False,
-                                         webui_static_dist=False)
+            gateway_launch.run_gateway(config)
         assert inspect_profiles(sys.prefix) == original
 
 
@@ -253,8 +251,7 @@ def test_gateway_entrypoint_refuses_installation_before_initialization(startup_p
         pending.write_text("interrupted")
     with nullcontext() if interrupted else installation_access(updating=True):
         with pytest.raises(InstallationBusyError):
-            gateway_launch.run_gateway(config, health_server_enabled=False,
-                                         webui_static_dist=False)
+            gateway_launch.run_gateway(config)
     assert inspect_profiles(sys.prefix) == []
     assert not (profile / "workspace").exists()
 
@@ -268,7 +265,7 @@ def test_gateway_refuses_shared_data_maintenance_before_initializing_writers(sta
                         lambda _path: pytest.fail("Startup wrote to a store under maintenance"))
     with data_access([config.workspace_path / "sessions"], updating=True):
         with pytest.raises(InstallationBusyError, match="data is in use"):
-            gateway_launch.run_gateway(config, health_server_enabled=False, webui_static_dist=False)
+            gateway_launch.run_gateway(config)
     assert inspect_profiles(sys.prefix) == []
     assert not (profile / "workspace").exists()
 
@@ -326,7 +323,7 @@ config = Config.model_validate({'agents': {'defaults': {'workspace': str(profile
     'heartbeat': {'enabled': False}}})
 application.warmup_token_encoding = lambda: None
 with installation_access():
-    gateway_launch.run_gateway(config, webui_static_dist=False, unconfigured_provider_error='No provider for lifecycle test')
+    gateway_launch.run_gateway(config, unconfigured_provider_error='No provider for lifecycle test')
 """
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))

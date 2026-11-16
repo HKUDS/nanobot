@@ -27,7 +27,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.paths import get_data_dir, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.cron.migration import migrate_legacy_cron_store
-from nanobot.gateway.runtime import GatewayHealthIdentity, GatewayInstance, GatewayRuntime
+from nanobot.gateway.runtime import GatewayInstance, GatewayRuntime
 from nanobot.installation_lock import installation_access
 from nanobot.session.keys import HEARTBEAT_SESSION_KEY
 from nanobot.session.manager import SessionManager
@@ -35,7 +35,6 @@ from nanobot.utils.evaluator import evaluate_response, resolve_evaluator_prompt
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.token_encoding import warmup_token_encoding
 from nanobot.webui.context_source_hook import create_context_source_hook
-from nanobot.webui.dev import WebUIDevError
 from nanobot.webui.sidebar_state import ensure_webui_session_archives
 
 if TYPE_CHECKING:
@@ -53,14 +52,11 @@ class GatewayRunError(Exception):
 class GatewayPresentation:
     """Launcher actions; task scheduling, activation and shutdown stay in the Gateway."""
 
-    check_ports: Callable[[int, bool], None]
+    check_ports: Callable[[int], None]
     prepare_webui: Callable[[], None]
     prepare_terminal: Callable[[], None]
     report_health: Callable[[str, int], None]
-    client_tasks: Callable[
-        [int, GatewayInstance, asyncio.Event, asyncio.Event],
-        Iterable[tuple[str, Coroutine[Any, Any, None]]],
-    ]
+    watch_dock: Callable[[Path, asyncio.Event], Coroutine[Any, Any, None] | None]
 
 
 async def _deliver_to_channel(
@@ -356,10 +352,6 @@ def run_gateway(
     port: int | None = None,
     verbose: bool = False,
     presentation: GatewayPresentation,
-    webui_static_dist: bool = True,
-    webui_runtime_surface: str = "browser",
-    webui_runtime_capabilities: dict[str, Any] | None = None,
-    health_server_enabled: bool = True,
     unconfigured_provider_error: str | None = None,
     gateway_instance: GatewayInstance | None = None,
     update_startup: "GatewayStartup | None" = None,
@@ -384,12 +376,7 @@ def run_gateway(
                 update_startup.validate_profile(profile)
             _run_claimed_gateway(
                 config, port=port, gateway_instance=instance, gateway_runtime=gateway_runtime,
-                health_identity=profile.health_identity, update_startup=update_startup,
-                update_profile=profile,
-                presentation=presentation, webui_static_dist=webui_static_dist,
-                webui_runtime_surface=webui_runtime_surface,
-                webui_runtime_capabilities=webui_runtime_capabilities,
-                health_server_enabled=health_server_enabled,
+                update_startup=update_startup, update_profile=profile, presentation=presentation,
                 unconfigured_provider_error=unconfigured_provider_error,
             )
 
@@ -400,15 +387,10 @@ def _run_claimed_gateway(
     port: int,
     gateway_instance: GatewayInstance,
     gateway_runtime: GatewayRuntime,
-    health_identity: GatewayHealthIdentity,
     presentation: GatewayPresentation,
-    webui_static_dist: bool,
-    webui_runtime_surface: str,
-    webui_runtime_capabilities: dict[str, Any] | None,
-    health_server_enabled: bool,
     unconfigured_provider_error: str | None,
-    update_startup: "GatewayStartup | None" = None,
-    update_profile: "ProfileReceipt | None" = None,
+    update_startup: "GatewayStartup | None",
+    update_profile: "ProfileReceipt",
 ) -> None:
     from nanobot.agent.model_presets import load_model_preset_catalog
     from nanobot.agent.tools.message import MessageTool
@@ -437,9 +419,11 @@ def _run_claimed_gateway(
     )
     from nanobot.triggers.local_runner import run_local_trigger_queue
     from nanobot.triggers.local_store import LocalTriggerStore
+    from nanobot.update_stop import watch_gateway_stop
     from nanobot.webui.recovery import RecoveryCoordinator
 
-    presentation.check_ports(port, health_server_enabled)
+    health_identity = update_profile.health_identity
+    presentation.check_ports(port)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     warmup_token_encoding()
@@ -727,9 +711,6 @@ def _run_claimed_gateway(
         webui_refresh_runtime_config=_webui_refresh_runtime_config,
         webui_cron_pending_job_ids=agent.pending_cron_job_ids_for_session,
         webui_local_trigger_pending_ids=agent.pending_local_trigger_ids_for_session,
-        webui_static_dist=webui_static_dist,
-        webui_runtime_surface=webui_runtime_surface,
-        webui_runtime_capabilities=webui_runtime_capabilities,
         webui_mcp_runtime_status=mcp_provider.runtime_status,
         webui_mcp_reload=mcp_provider.reload,
         webui_image_generation_reload=_webui_image_generation_reload,
@@ -931,20 +912,19 @@ def _run_claimed_gateway(
                 tasks.append(asyncio.create_task(activate(update_startup), name="nanobot-update-activation"))
             else:
                 desktop_activated.set()
-            if update_profile is not None:
-                from nanobot.update_stop import watch_gateway_stop
-
-                tasks.append(asyncio.create_task(
+            tasks.extend((
+                asyncio.create_task(
                     watch_gateway_stop(update_profile, agent.maintenance, shutdown_event, startup_gate),
                     name="nanobot-update-stop",
-                ))
-            if health_server_enabled:
-                tasks.append(asyncio.create_task(
+                ),
+                asyncio.create_task(
                     _health_server(config.gateway.host, port),
                     name="nanobot-health-server",
-                ))
-            for name, work in presentation.client_tasks(port, gateway_instance, desktop_activated, shutdown_event):
-                tasks.append(asyncio.create_task(work, name=name))
+                ),
+            ))
+            dock = presentation.watch_dock(gateway_instance.paths.state_path, desktop_activated)
+            if dock is not None:
+                tasks.append(asyncio.create_task(dock, name="nanobot-dock"))
             runtime_tasks = asyncio.gather(*tasks)
             shutdown_task = asyncio.create_task(
                 shutdown_event.wait(),
@@ -960,8 +940,6 @@ def _run_claimed_gateway(
                 runtime_tasks.cancel()
         except KeyboardInterrupt:
             console.print("\nShutting down...")
-        except WebUIDevError:
-            raise
         except Exception:
             import traceback
 
@@ -997,6 +975,5 @@ def _run_claimed_gateway(
                 restore_shutdown_handlers()
 
     with webui_turn_coordinator.connected():
-        if health_server_enabled:
-            gateway_runtime.publish_health_host(config.gateway.host)
+        gateway_runtime.publish_health_host(config.gateway.host)
         asyncio.run(run())

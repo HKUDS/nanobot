@@ -301,9 +301,8 @@ def _prepare_webui_bundle_for_gateway(
     config: Config,
     *,
     mode: BuildMode,
-    webui_static_dist: bool = True,
 ) -> None:
-    if not webui_static_dist or not _webui_channel_enabled(config):
+    if not _webui_channel_enabled(config):
         return
 
     def _print(message: str) -> None:

@@ -4,7 +4,6 @@ import re
 import shutil
 import signal
 import sys
-import urllib.error
 from contextlib import contextmanager, nullcontext, suppress
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +21,6 @@ from nanobot.agent.turn_delivery import TurnDeliveryFactory
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.cli import commands as cli_commands
-from nanobot.cli import gateway_launch
 from nanobot.cli import provider as provider_commands
 from nanobot.cli import terminal as cli_terminal
 from nanobot.cli import webui as cli_webui
@@ -2537,62 +2535,6 @@ def test_webui_dev_waits_for_external_gateway_via_health_endpoint(monkeypatch) -
     assert sidecar_checks == 2
 
 
-async def test_webui_dev_monitor_fails_when_sidecar_exits() -> None:
-    dev_server = MagicMock()
-    dev_server.ensure_running.side_effect = WebUIDevError(
-        "WebUI development server exited unexpectedly (code 23)"
-    )
-
-    with pytest.raises(WebUIDevError, match=r"exited unexpectedly \(code 23\)"):
-        await gateway_launch._watch_webui_dev_server(
-            dev_server,
-            asyncio.Event(),
-            poll_interval_s=0,
-        )
-
-
-async def test_webui_dev_monitor_ignores_an_expected_gateway_shutdown() -> None:
-    dev_server = MagicMock()
-    shutdown_event = asyncio.Event()
-    shutdown_event.set()
-
-    await gateway_launch._watch_webui_dev_server(
-        dev_server,
-        shutdown_event,
-        poll_interval_s=0,
-    )
-
-    dev_server.ensure_running.assert_not_called()
-
-
-def test_browser_readiness_accepts_http_auth_response(monkeypatch) -> None:
-    def auth_required(*_args, **_kwargs):
-        raise urllib.error.HTTPError(
-            "http://127.0.0.1:8765/webui/bootstrap",
-            401,
-            "authentication required",
-            hdrs=None,
-            fp=None,
-        )
-
-    monkeypatch.setattr("urllib.request.urlopen", auth_required)
-
-    assert gateway_launch._http_endpoint_responding(
-        "http://127.0.0.1:8765/webui/bootstrap"
-    ) is True
-
-
-def test_browser_readiness_rejects_connection_error(monkeypatch) -> None:
-    def unavailable(*_args, **_kwargs):
-        raise urllib.error.URLError("connection refused")
-
-    monkeypatch.setattr("urllib.request.urlopen", unavailable)
-
-    assert gateway_launch._http_endpoint_responding(
-        "http://127.0.0.1:8765/webui/bootstrap"
-    ) is False
-
-
 @pytest.mark.parametrize("resume_args", [[], ["--yes"]])
 def test_webui_resumes_first_run_without_provider_setup(
     monkeypatch, tmp_path: Path, resume_args: list[str],
@@ -3560,11 +3502,13 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     monkeypatch,
     tmp_path: Path,
     setup_error: str | None,
+    unused_tcp_port: int,
 ) -> None:
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
     config.agents.defaults.dream.enabled = False
     config.gateway.heartbeat.enabled = False
+    config.gateway.port = unused_tcp_port
     bus = MessageBus()
     seen: dict[str, object] = {}
 
@@ -3676,7 +3620,6 @@ def test_gateway_local_trigger_queue_submits_agent_turns(
     with pytest.raises(typer.Exit) as exc_info:
         cli_commands._run_gateway(
             config,
-            health_server_enabled=False,
             unconfigured_provider_error=setup_error,
         )
     assert exc_info.value.exit_code == 1
