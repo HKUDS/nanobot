@@ -410,7 +410,7 @@ describe("ThreadViewport", () => {
     expect(scroller.lastElementChild).toHaveClass("h-px", "shrink-0");
   });
 
-  it("pins a waiting prompt to the exact lower scroll boundary", async () => {
+  it("positions a waiting prompt at the reading inset", async () => {
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
     const threaded: UIMessage[] = [
       { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
@@ -449,13 +449,13 @@ describe("ThreadViewport", () => {
           isStreaming
           composer={<div>composer</div>}
           activeTurnId="turn-2"
-          activeTurnStartedHere
+          submittedPromptTurnId="turn-2"
         />,
       );
     });
     await flushAnimationFrame();
 
-    expect(jumpTo).toHaveBeenCalledWith(700);
+    expect(jumpTo).toHaveBeenCalledWith(372);
     expect(screen.getByTestId("thread-message-region")).toHaveClass("justify-start");
   });
 
@@ -494,7 +494,7 @@ describe("ThreadViewport", () => {
           isStreaming
           composer={<div>composer</div>}
           activeTurnId="turn-2"
-          activeTurnStartedHere
+          submittedPromptTurnId="turn-2"
         />,
       );
     });
@@ -510,8 +510,8 @@ describe("ThreadViewport", () => {
     expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
       .not.toBeInTheDocument();
     await flushAnimationFrame();
-    expect(jumpTo).toHaveBeenCalledWith(780);
-    expect(scroller.scrollTop).toBe(780);
+    expect(jumpTo).toHaveBeenCalledWith(372);
+    expect(scroller.scrollTop).toBe(372);
   });
 
   it("lets the first prompt supersede a pending empty-conversation camera command", async () => {
@@ -551,7 +551,7 @@ describe("ThreadViewport", () => {
           conversationKey="chat-a"
           conversationReady={false}
           activeTurnId="turn-first"
-          activeTurnStartedHere
+          submittedPromptTurnId="turn-first"
         />,
       );
     });
@@ -572,14 +572,14 @@ describe("ThreadViewport", () => {
           conversationKey="chat-a"
           conversationReady
           activeTurnId="turn-first"
-          activeTurnStartedHere
+          submittedPromptTurnId="turn-first"
         />,
       );
     });
     await flushAnimationFrame();
 
     expect(jumpTo).toHaveBeenCalledTimes(1);
-    expect(jumpTo).toHaveBeenCalledWith(700);
+    expect(jumpTo).toHaveBeenCalledWith(0);
   });
 
   it("anchors the latest user prompt even when assistant output is already present", async () => {
@@ -626,7 +626,7 @@ describe("ThreadViewport", () => {
           isStreaming
           composer={<div>composer</div>}
           activeTurnId="turn-2"
-          activeTurnStartedHere
+          submittedPromptTurnId="turn-2"
         />,
       );
     });
@@ -635,10 +635,9 @@ describe("ThreadViewport", () => {
     expect(jumpTo).toHaveBeenCalledWith(1372);
   });
 
-  it("drives the camera from a message commit when canonical replay replaces the prompt DOM id", async () => {
+  it("keeps the reading position when canonical replay replaces the prompt DOM id", async () => {
     const resizeObserver = stubResizeObserver();
-    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo")
-      .mockReturnValue("started");
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
 
     try {
       const optimistic: UIMessage[] = [
@@ -693,10 +692,13 @@ describe("ThreadViewport", () => {
             isStreaming
             composer={<div>composer</div>}
             activeTurnId="turn-stable"
+            submittedPromptTurnId="turn-stable"
           />,
         );
       });
-      followTo.mockClear();
+      await flushAnimationFrame();
+      expect(scroller.scrollTop).toBe(1_372);
+      jumpTo.mockClear();
 
       await act(async () => {
         rerender(
@@ -715,15 +717,15 @@ describe("ThreadViewport", () => {
             isStreaming
             composer={<div>composer</div>}
             activeTurnId="turn-stable"
+            submittedPromptTurnId="turn-stable"
           />,
         );
       });
       await flushAnimationFrame();
-      // Streaming React commits only invalidate geometry. The next display
-      // frame measures once and issues the follow command.
-      expect(followTo).toHaveBeenCalledWith(1_500);
+      expect(container.querySelector('[data-user-prompt-id="canonical-user"]')).toBeInTheDocument();
+      expect(scroller.scrollTop).toBe(1_372);
+      expect(jumpTo).not.toHaveBeenCalled();
 
-      followTo.mockClear();
       Object.defineProperty(scroller, "scrollHeight", {
         configurable: true,
         value: 2_120,
@@ -739,18 +741,17 @@ describe("ThreadViewport", () => {
       });
       await flushAnimationFrame();
 
-      // ResizeObserver remains the asynchronous reflow fallback.
-      expect(followTo).toHaveBeenCalledWith(1_620);
+      expect(scroller.scrollTop).toBe(1_372);
+      expect(jumpTo).not.toHaveBeenCalled();
     } finally {
-      followTo.mockRestore();
+      jumpTo.mockRestore();
       resizeObserver.restore();
     }
   });
 
-  it("settles observed streamed layout growth before paint", async () => {
+  it("keeps the anchored reading position through streamed and observed layout growth", async () => {
     const resizeObserver = stubResizeObserver();
-    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo")
-      .mockReturnValue("started");
+    const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
 
     try {
       const threaded: UIMessage[] = [
@@ -794,12 +795,13 @@ describe("ThreadViewport", () => {
             isStreaming
             composer={<div>composer</div>}
             activeTurnId="turn-2"
-            activeTurnStartedHere
+            submittedPromptTurnId="turn-2"
           />,
         );
       });
       await flushAnimationFrame();
-      followTo.mockClear();
+      expect(scroller.scrollTop).toBe(1_372);
+      jumpTo.mockClear();
 
       Object.defineProperty(scroller, "scrollHeight", {
         configurable: true,
@@ -816,9 +818,8 @@ describe("ThreadViewport", () => {
         );
       });
       await flushAnimationFrame();
-      expect(followTo).toHaveBeenCalledTimes(1);
-      expect(followTo).toHaveBeenLastCalledWith(1432);
-      followTo.mockClear();
+      expect(scroller.scrollTop).toBe(1_372);
+      expect(jumpTo).not.toHaveBeenCalled();
 
       const messageRegion = screen.getByTestId("thread-message-region");
       const messageContent = messageRegion.firstElementChild;
@@ -835,9 +836,8 @@ describe("ThreadViewport", () => {
       act(() => {
         contentObserver!.callback([], contentObserver!);
       });
-      expect(followTo).toHaveBeenCalledTimes(1);
-      expect(followTo).toHaveBeenLastCalledWith(1448);
-      followTo.mockClear();
+      expect(scroller.scrollTop).toBe(1_372);
+      expect(jumpTo).not.toHaveBeenCalled();
 
       Object.defineProperty(scroller, "scrollHeight", {
         configurable: true,
@@ -860,8 +860,8 @@ describe("ThreadViewport", () => {
         );
       });
       await flushAnimationFrame();
-      expect(followTo).toHaveBeenLastCalledWith(2048);
-      followTo.mockClear();
+      expect(scroller.scrollTop).toBe(1_372);
+      expect(jumpTo).not.toHaveBeenCalled();
 
       scroller.scrollTop = 100;
       act(() => {
@@ -875,16 +875,14 @@ describe("ThreadViewport", () => {
         contentObserver!.callback([], contentObserver!);
       });
       await flushAnimationFrame();
-      expect(followTo).not.toHaveBeenCalled();
       expect(scroller.scrollTop).toBe(100);
     } finally {
-      followTo.mockRestore();
+      jumpTo.mockRestore();
       resizeObserver.restore();
     }
   });
 
-  it("keeps shallow wheel and touch scrolling user-owned until intent reverses", async () => {
-    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
+  it("keeps wheel and touch reading positions stable even after returning to the tail", async () => {
     const threaded: UIMessage[] = [
       { id: "u1", role: "user", content: "old question", turnId: "turn-1", createdAt: 1 },
       { id: "a1", role: "assistant", content: "old answer", turnId: "turn-1", createdAt: 2 },
@@ -924,11 +922,10 @@ describe("ThreadViewport", () => {
         isStreaming
         composer={<div>composer</div>}
         activeTurnId="turn-2"
-        activeTurnStartedHere
+        submittedPromptTurnId="turn-2"
       />,
     );
     await flushAnimationFrame();
-    followTo.mockClear();
 
     mockMessageEnd(scroller);
     act(() => {
@@ -938,7 +935,6 @@ describe("ThreadViewport", () => {
     });
     await flushAnimationFrame();
 
-    expect(followTo).not.toHaveBeenCalled();
     expect(scroller.scrollTop).toBe(1_380);
     expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
 
@@ -949,12 +945,10 @@ describe("ThreadViewport", () => {
     });
     await flushAnimationFrame();
 
-    expect(followTo).toHaveBeenCalledWith(1_404);
     expect(scroller.scrollTop).toBe(1_404);
     expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
       .not.toBeInTheDocument();
 
-    followTo.mockClear();
     act(() => {
       fireEvent.touchStart(scroller, { touches: [{ clientX: 100, clientY: 300 }] });
       fireEvent.touchMove(scroller, { touches: [{ clientY: 324 }] });
@@ -963,7 +957,6 @@ describe("ThreadViewport", () => {
     });
     await flushAnimationFrame();
 
-    expect(followTo).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Scroll to bottom" })).toBeInTheDocument();
 
     act(() => {
@@ -974,7 +967,7 @@ describe("ThreadViewport", () => {
     });
     await flushAnimationFrame();
 
-    expect(followTo).toHaveBeenCalledWith(1_404);
+    expect(scroller.scrollTop).toBe(1_404);
     expect(screen.queryByRole("button", { name: "Scroll to bottom" }))
       .not.toBeInTheDocument();
   });
@@ -1185,7 +1178,7 @@ describe("ThreadViewport", () => {
     expect(navigateLatestTo).toHaveBeenCalledWith(1_800);
   });
 
-  it("pins the waiting boundary across composer and grid-track growth", async () => {
+  it("keeps the waiting reading position across composer and grid-track growth", async () => {
     const resizeObserver = stubResizeObserver();
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
 
@@ -1262,7 +1255,8 @@ describe("ThreadViewport", () => {
       });
       await flushAnimationFrame();
 
-      expect(jumpTo).toHaveBeenCalledWith(728);
+      expect(jumpTo).not.toHaveBeenCalled();
+      expect(scroller.scrollTop).toBe(700);
 
       jumpTo.mockClear();
       Object.defineProperty(scroller, "scrollHeight", {
@@ -1274,16 +1268,16 @@ describe("ThreadViewport", () => {
       });
       await flushAnimationFrame();
 
-      expect(jumpTo).toHaveBeenCalledWith(768);
+      expect(jumpTo).not.toHaveBeenCalled();
+      expect(scroller.scrollTop).toBe(700);
     } finally {
       resizeObserver.restore();
     }
   });
 
-  it("releases completion follow when single-line input starts before completion", async () => {
+  it("keeps the reading position while editing before completion", async () => {
     const resizeObserver = stubResizeObserver();
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
-    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
 
     try {
       const threaded: UIMessage[] = [
@@ -1309,7 +1303,6 @@ describe("ThreadViewport", () => {
       rerender(viewport(true, "turn-1"));
       await flushAnimationFrame();
       jumpTo.mockClear();
-      followTo.mockClear();
 
       const composerDock = screen.getByTestId("thread-composer-dock");
       const composerEntry: ResizeObserverEntry = {
@@ -1336,16 +1329,14 @@ describe("ThreadViewport", () => {
       });
       await flushAnimationFrame();
 
-      expect(followTo).toHaveBeenCalled();
+      expect(scroller.scrollTop).toBe(700);
 
-      followTo.mockClear();
       fireEvent.input(screen.getByLabelText("Message input"), {
         target: { value: "x" },
       });
       const scrollTopAfterInput = scroller.scrollTop;
       rerender(viewport(false));
       await flushAnimationFrame();
-      expect(followTo).not.toHaveBeenCalled();
       Object.defineProperty(scroller, "scrollHeight", {
         configurable: true,
         value: 1_280,
@@ -1359,7 +1350,6 @@ describe("ThreadViewport", () => {
       await flushAnimationFrame();
 
       expect(jumpTo).not.toHaveBeenCalled();
-      expect(followTo).not.toHaveBeenCalled();
       expect(scroller.scrollTop).toBe(scrollTopAfterInput);
     } finally {
       resizeObserver.restore();
@@ -2547,10 +2537,36 @@ describe("ThreadViewport", () => {
     await waitFor(() => expect(scroller.scrollTop).toBe(1800));
   });
 
+  it("resets a submitted anchor when switching between temporary conversations", async () => {
+    const oldMessages: UIMessage[] = [
+      { id: "old-prompt", role: "user", content: "old question", turnId: "old-turn", createdAt: 1 },
+    ];
+    const nextMessages: UIMessage[] = [
+      { id: "new-prompt", role: "user", content: "new question", turnId: "new-turn", createdAt: 2 },
+    ];
+    const { container, rerender } = render(
+      <ThreadViewport messages={oldMessages} isStreaming temporary messagesKey="temporary-a" />,
+    );
+    const scroller = getScroller(container);
+    mockScrollGeometry(scroller, 2_400, 600, 700);
+    const prompt = container.querySelector<HTMLElement>('[data-user-prompt-id="old-prompt"]')!;
+    Object.defineProperty(prompt, "offsetTop", { configurable: true, value: 420 });
+    rerender(
+      <ThreadViewport messages={oldMessages} isStreaming temporary messagesKey="temporary-a"
+        activeTurnId="old-turn" submittedPromptTurnId="old-turn" />,
+    );
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(372);
+
+    rerender(<ThreadViewport messages={nextMessages} isStreaming={false} temporary messagesKey="temporary-b" />);
+    await flushAnimationFrame();
+    expect(scroller.scrollTop).toBe(1_800);
+    expect(container.querySelector('[data-user-prompt-id="new-prompt"]')).toBeInTheDocument();
+  });
+
   it("pins an opened conversation to late layout growth without animating", async () => {
     const resizeObserver = stubResizeObserver();
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
-    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
 
     try {
       const { container, rerender } = render(
@@ -2581,7 +2597,6 @@ describe("ThreadViewport", () => {
       );
       await waitFor(() => expect(scroller.scrollTop).toBe(1800));
       jumpTo.mockClear();
-      followTo.mockClear();
 
       const messageRegion = screen.getByTestId("thread-message-region");
       const messageContent = messageRegion.firstElementChild;
@@ -2602,10 +2617,8 @@ describe("ThreadViewport", () => {
 
       expect(jumpTo).toHaveBeenCalledWith(2400);
       expect(scroller.scrollTop).toBe(2400);
-      expect(followTo).not.toHaveBeenCalled();
     } finally {
       jumpTo.mockRestore();
-      followTo.mockRestore();
       resizeObserver.restore();
     }
   });
@@ -2617,7 +2630,6 @@ describe("ThreadViewport", () => {
       "navigateLatestTo",
     );
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
-    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
 
     try {
       const { container } = render(
@@ -2641,7 +2653,6 @@ describe("ThreadViewport", () => {
 
       navigateLatestTo.mockClear();
       jumpTo.mockClear();
-      followTo.mockClear();
       fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
       expect(navigateLatestTo).toHaveBeenCalledWith(1800);
       expect(scroller.scrollTop).toBe(300);
@@ -2664,7 +2675,6 @@ describe("ThreadViewport", () => {
       await waitFor(() => expect(scroller.scrollTop).toBe(2400));
 
       expect(jumpTo).not.toHaveBeenCalled();
-      expect(followTo).not.toHaveBeenCalled();
 
       act(() => {
         scroller.dispatchEvent(new Event("scroll"));
@@ -2686,14 +2696,12 @@ describe("ThreadViewport", () => {
     } finally {
       navigateLatestTo.mockRestore();
       jumpTo.mockRestore();
-      followTo.mockRestore();
       resizeObserver.restore();
     }
   });
 
   it("waits for the next conversation's transcript before restoring its bottom", async () => {
     const jumpTo = vi.spyOn(ThreadCameraController.prototype, "jumpTo");
-    const followTo = vi.spyOn(ThreadCameraController.prototype, "followTo");
     const handoffAnimation = {
       cancel: vi.fn(),
       oncancel: null,
@@ -2782,7 +2790,7 @@ describe("ThreadViewport", () => {
     await waitFor(() => expect(scroller.scrollTop).toBe(2400));
     await flushAnimationFrame();
     expect(jumpTo.mock.calls).toEqual([[2400]]);
-    expect(followTo).toHaveBeenCalledWith(2400);
+    expect(scroller.scrollTop).toBe(2400);
     expect(handoffAnimation.cancel).toHaveBeenCalled();
     expect(animate).toHaveBeenCalledWith(
       [{ opacity: 0.82 }, { opacity: 1 }],

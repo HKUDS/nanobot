@@ -94,20 +94,6 @@ export class ThreadCameraController {
     this.write(viewport, this.target);
   }
 
-  /**
-   * Automatic follow is a layout constraint, not navigation. Resolve it in
-   * the geometry frame so streamed content and viewport resizing cannot build
-   * up hidden travel below the visible tail.
-   */
-  followTo(top: number): ThreadCameraFollowResult | null {
-    const viewport = this.getViewport();
-    if (!viewport) return null;
-    this.cancel();
-    this.target = Math.max(0, top);
-    this.write(viewport, this.target);
-    return "settled";
-  }
-
   navigateTo(top: number): ThreadCameraFollowResult | null {
     return this.moveTo(top);
   }
