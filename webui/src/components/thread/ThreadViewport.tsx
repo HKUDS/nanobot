@@ -117,6 +117,18 @@ function promptTopInset(scroller: HTMLElement): number {
   return Number.isFinite(padding) ? padding : PROMPT_TOP_INSET_PX;
 }
 
+function submittedPromptInset(scroller: HTMLElement, prompt: HTMLElement): number {
+  const inset = promptTopInset(scroller);
+  const previous = prompt.previousElementSibling;
+  let previousUnit = previous;
+  while (previousUnit && !previousUnit.hasAttribute("data-thread-display-unit")) {
+    previousUnit = previousUnit.previousElementSibling;
+  }
+  if (!previous || !previousUnit) return inset;
+  const gap = prompt.getBoundingClientRect().top - previous.getBoundingClientRect().bottom;
+  return Math.max(0, Math.min(inset, gap));
+}
+
 function historyPrefetchDistance(scroller: HTMLElement): number {
   return Math.min(
     HISTORY_PREFETCH_MAX_PX,
@@ -331,6 +343,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
   const anchoredTurnIdRef = useRef<string | null>(null);
   const anchoredPromptIdRef = useRef<string | null>(null);
   const openingMessagesRef = useRef<UIMessage[] | null>(null);
+  const finishOpeningAfterLayoutRef = useRef(false);
   const conversationIdentity = conversationKey ?? messagesKey;
   const lastConversationKeyRef = useRef<string | null>(conversationIdentity);
   const conversationHandoffPendingRef = useRef(false);
@@ -424,7 +437,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     });
     threadMotionRef.current = new ThreadMotionCoordinator({
       camera,
-      measure: (promptId) => {
+      measure: (promptId, submitted = false) => {
         const scrollEl = scrollRef.current;
         const composerDock = composerDockRef.current;
         if (!scrollEl) return null;
@@ -440,13 +453,16 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           if (anchor) {
             const anchorOffset = anchor.getBoundingClientRect().top - content.getBoundingClientRect().top;
             const fadeGap = endGapRef.current?.getBoundingClientRect().height ?? 0;
-            const height = Math.max(0, anchorOffset + scrollEl.clientHeight - promptTopInset(scrollEl) - fadeGap - 1);
+            const height = Math.ceil(Math.max(0, anchorOffset + scrollEl.clientHeight - submittedPromptInset(scrollEl, anchor) - fadeGap - 1));
             content.style.minHeight = `${height}px`;
           } else {
             content.style.removeProperty("min-height");
           }
         }
         const prompt = promptId ? findPromptElement(scrollEl, promptId) : null;
+        const targetTop = prompt
+          ? promptTop(scrollEl, prompt) - (submitted ? submittedPromptInset(scrollEl, prompt) : promptTopInset(scrollEl))
+          : null;
         const scrollHeight = scrollEl.scrollHeight;
         const clientHeight = scrollEl.clientHeight;
         const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
@@ -456,11 +472,8 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
           clientHeight,
           maxScrollTop,
           composerHeight,
-          promptTop: prompt
-            ? Math.min(
-                maxScrollTop,
-                Math.max(0, promptTop(scrollEl, prompt) - promptTopInset(scrollEl)),
-              )
+          promptTop: targetTop !== null
+            ? Math.min(maxScrollTop, Math.max(0, submitted ? Math.ceil(targetTop) : targetTop))
             : null,
         };
       },
@@ -469,6 +482,16 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
         updateContentVisibility();
       },
       onGeometry: (geometry: ThreadMotionGeometry) => {
+        const frameHeight = viewportFrameRef.current?.clientHeight ?? 0;
+        if (finishOpeningAfterLayoutRef.current && geometry.clientHeight > 0
+          && frameHeight > 0 && geometry.clientHeight <= frameHeight) {
+          finishOpeningAfterLayoutRef.current = false;
+          const motion = threadMotionRef.current;
+          if (motion?.snapshot().mode === "follow-latest") {
+            motion.jumpTo(geometry.maxScrollTop);
+            motion.finishOpeningLayout();
+          }
+        }
         composerLayoutChangeRef.current?.();
         if (Math.abs(composerDockHeightRef.current - geometry.composerHeight) >= 1) {
           composerDockHeightRef.current = geometry.composerHeight;
@@ -812,6 +835,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     anchoredTurnIdRef.current = null;
     anchoredPromptIdRef.current = null;
     openingMessagesRef.current = null;
+    finishOpeningAfterLayoutRef.current = false;
     messageContentRef.current?.style.removeProperty("min-height");
     threadMotionRef.current?.reset();
     setNavigatingToBottom(false);
@@ -839,7 +863,16 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
     }
     if (openingMessagesRef.current && openingMessagesRef.current !== messages) {
       openingMessagesRef.current = null;
-      threadMotionRef.current?.finishOpeningLayout();
+      const frameHeight = viewportFrameRef.current?.clientHeight ?? 0;
+      const scrollHeight = scrollRef.current?.clientHeight ?? 0;
+      // The grid can briefly size the scrollport to the full transcript while
+      // transitioning from the welcome layout. Wait for usable geometry before
+      // ending the initial tail placement, even if a new message arrives first.
+      if (frameHeight > 0 && scrollHeight > frameHeight) {
+        finishOpeningAfterLayoutRef.current = true;
+      } else {
+        threadMotionRef.current?.finishOpeningLayout();
+      }
     }
     threadMotionRef.current?.updateTurn(activeTurnId);
     const turnId = submittedPromptTurnId ?? anchoredTurnIdRef.current;
@@ -850,6 +883,7 @@ export const ThreadViewport = forwardRef<ThreadViewportHandle, ThreadViewportPro
       historyScrollAnchorRef.current = null;
       restoreScrollAfterPrependRef.current = null;
       pendingConversationScrollRef.current = false;
+      finishOpeningAfterLayoutRef.current = false;
       resetHistoryHeader();
       threadMotionRef.current?.anchorSubmittedPrompt(prompt.id);
     } else if (prompt && anchoredTurnIdRef.current === turnId) {

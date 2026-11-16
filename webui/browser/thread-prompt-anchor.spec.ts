@@ -3,15 +3,21 @@ import type { InboundEvent, ThreadProjectionEvent } from "../src/lib/types";
 
 const chatId = "answer-order";
 
-async function openThread(page: Page, withHistory: boolean, immediateReply = false) {
+
+async function openThread(
+  page: Page,
+  withHistory: boolean,
+  immediateReply = false,
+  options: { shortHistory?: boolean; beforeSend?: () => Promise<void> } = {},
+) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
   await page.route("**/api/**", (route) => route.fulfill({ status: 404, json: {} }));
   await page.route("**/api/commands", (route) => route.fulfill({ json: { commands: [] } }));
-  const events: ThreadProjectionEvent[] = withHistory ? Array.from({ length: 12 }, (_, index) => [
+  const events: ThreadProjectionEvent[] = withHistory ? Array.from({ length: options.shortHistory ? 1 : 12 }, (_, index) => [
     { event: "user_message" as const, chat_id: chatId, turn_id: `old-${index}`, turn_seq: 1, text: `Earlier question ${index}`, starts_turn: true },
-    { event: "message" as const, chat_id: chatId, turn_id: `old-${index}`, turn_seq: 2, text: `Earlier answer ${index}. `.repeat(8) },
+    { event: "message" as const, chat_id: chatId, turn_id: `old-${index}`, turn_seq: 2, text: `Earlier answer ${index}. `.repeat(options.shortHistory ? 1 : 8) },
     { event: "turn_end" as const, chat_id: chatId, turn_id: `old-${index}`, turn_seq: 3 },
   ]).flat() : [];
   await page.route("**/api/sessions/*/webui-thread?*", (route) => {
@@ -47,6 +53,7 @@ async function openThread(page: Page, withHistory: boolean, immediateReply = fal
   await expect(page.getByRole("status", { name: "Loading conversation…" })).toHaveCount(0);
   const input = page.getByRole("textbox", { name: "Message input", exact: true });
   await input.fill("My anchored question");
+  await options.beforeSend?.();
   await input.press("Enter");
   await expect.poll(() => sent.find((frame) => frame.turn_id)?.turn_id).toBeTruthy();
   const turnId = sent.find((frame) => frame.turn_id)!.turn_id!;
@@ -56,6 +63,59 @@ async function openThread(page: Page, withHistory: boolean, immediateReply = fal
     emit: (...frames: InboundEvent[]) => frames.forEach((frame) => socket.send(JSON.stringify(frame))),
   };
 }
+
+test("moves the previous answer out of view smoothly when sending", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await openThread(page, true, false, {
+    shortHistory: true,
+    beforeSend: () => page.evaluate(() => {
+      const samples: number[] = [];
+      const state = { samples, done: false };
+      Object.assign(window, { __promptMotion: state });
+      document.querySelector("textarea")!.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        const started = performance.now();
+        const sample = () => {
+          const viewport = document.querySelector<HTMLElement>('[data-testid="thread-message-region"]');
+          if (viewport) samples.push(viewport.scrollTop);
+          if (performance.now() - started < 400) requestAnimationFrame(sample);
+          else state.done = true;
+        };
+        sample();
+      }, { once: true });
+    }),
+  });
+  await page.waitForFunction(() => (window as unknown as { __promptMotion: { done: boolean } }).__promptMotion.done);
+  const positions = await page.evaluate(() => (window as unknown as { __promptMotion: { samples: number[] } }).__promptMotion.samples);
+  const distinctPositions = new Set(positions.map((position) => Math.round(position)));
+  expect(distinctPositions.size).toBeGreaterThan(3);
+  const viewport = page.getByTestId("thread-message-region");
+  const prompt = viewport.locator("[data-user-prompt-id]").filter({ hasText: "My anchored question" });
+  const geometry = await prompt.evaluate((node) => {
+    const viewport = node.closest('[data-testid="thread-message-region"]')!;
+    const previous = node.previousElementSibling!;
+    return {
+      previousBottom: previous.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top,
+      promptTop: node.getBoundingClientRect().top - viewport.getBoundingClientRect().top,
+    };
+  });
+  expect(geometry.previousBottom).toBeLessThanOrEqual(0);
+  expect(geometry.promptTop).toBeGreaterThanOrEqual(0);
+  expect(geometry.promptTop).toBeLessThanOrEqual(48);
+});
+
+test("anchors the prompt with reduced motion enabled", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const { errors } = await openThread(page, true, false, { shortHistory: true });
+  const viewport = page.getByTestId("thread-message-region");
+  const prompt = viewport.locator("[data-user-prompt-id]").filter({ hasText: "My anchored question" });
+  await expect.poll(() => prompt.evaluate((node) => {
+    const region = node.closest('[data-testid="thread-message-region"]')!;
+    return node.previousElementSibling!.getBoundingClientRect().bottom - region.getBoundingClientRect().top;
+  })).toBeLessThanOrEqual(0);
+  expect(errors).toEqual([]);
+});
 
 for (const width of [390, 1440]) for (const withHistory of [false, true]) {
   test(`anchors a submitted prompt without following streamed text at ${width}px, history=${withHistory}`, async ({ page }) => {
@@ -68,18 +128,26 @@ for (const width of [390, 1440]) for (const withHistory of [false, true]) {
       const viewport = node.closest('[data-testid="thread-message-region"]')!;
       return node.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
     });
-    await expect.poll(promptOffset).toBeCloseTo(48, 0);
+    if (withHistory) {
+      await expect.poll(() => prompt.evaluate((node) => {
+        const viewport = node.closest('[data-testid="thread-message-region"]')!;
+        return node.previousElementSibling!.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top;
+      })).toBeLessThanOrEqual(0);
+    } else {
+      await expect.poll(promptOffset).toBeCloseTo(48, 0);
+    }
+    const initialOffset = await promptOffset();
     const initialTop = await viewport.evaluate((node) => node.scrollTop);
     const base = { chat_id: chatId, turn_id: turnId, stream_id: "answer" };
     emit({ event: "delta", ...base, turn_seq: 1, text: "The short opening." });
     await expect(page.getByText("The short opening.", { exact: true })).toBeVisible();
-    await expect.poll(promptOffset).toBeCloseTo(48, 0);
+    await expect.poll(promptOffset).toBeCloseTo(initialOffset, 0);
     expect(await viewport.evaluate((node) => node.scrollTop)).toBeCloseTo(initialTop, 0);
 
     emit({ event: "delta", ...base, turn_seq: 2, text: `\n\n${"Long streamed answer line.\n\n".repeat(90)}END-FIRST-BATCH` });
     await expect(viewport).toContainText("END-FIRST-BATCH");
     expect(await viewport.evaluate((node) => node.scrollTop)).toBeCloseTo(initialTop, 0);
-    await expect.poll(promptOffset).toBeCloseTo(48, 0);
+    await expect.poll(promptOffset).toBeCloseTo(initialOffset, 0);
 
     await viewport.hover();
     await page.mouse.wheel(0, 360);
@@ -113,8 +181,8 @@ test("anchors even when the response finishes immediately", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Stop response" })).toHaveCount(0);
   await expect.poll(() => prompt.evaluate((node) => {
     const viewport = node.closest('[data-testid="thread-message-region"]')!;
-    return node.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
-  })).toBeCloseTo(48, 0);
+    return node.previousElementSibling!.getBoundingClientRect().bottom - viewport.getBoundingClientRect().top;
+  })).toBeLessThanOrEqual(0);
   expect(errors).toEqual([]);
 });
 
@@ -132,6 +200,10 @@ test("does not apply a previous conversation's anchor after switching away and b
   await page.getByRole("button", { name: "Switch topic" }).click();
   await expect(page.getByText("My anchored question", { exact: true })).toHaveCount(1);
   await expect(viewport).toContainText("Output while away.");
+  await expect.poll(() => viewport.evaluate((node) => node.clientHeight)).toBeLessThan(800);
+  await expect.poll(() => page.locator(".thread-layout").evaluate((node) =>
+    node.getAnimations().some((animation) => animation.playState === "running"),
+  )).toBe(false);
   await expect.poll(() => viewport.evaluate((node) => node.scrollHeight - node.clientHeight - node.scrollTop))
     .toBeLessThanOrEqual(1);
   const reopenedTop = await viewport.evaluate((node) => node.scrollTop);

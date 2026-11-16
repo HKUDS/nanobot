@@ -45,6 +45,7 @@ const THREAD_MOTION_TRANSITIONS: Readonly<
     "navigate-latest": "navigating-latest",
     "navigate-history": "navigating-history",
     "user-scroll": "browsing-history",
+    "boundary-scroll": "browsing-history",
   },
   "navigating-latest": {
     "navigate-latest": "navigating-latest",
@@ -102,7 +103,7 @@ type ThreadMotionCamera = Pick<
 
 interface ThreadMotionCoordinatorOptions {
   camera: ThreadMotionCamera;
-  measure: (promptId: string | null) => ThreadMotionGeometry | null;
+  measure: (promptId: string | null, submitted?: boolean) => ThreadMotionGeometry | null;
   onGeometry?: (geometry: ThreadMotionGeometry) => void;
   onAutoFollow?: () => void;
   onLatestNavigationSettled?: () => void;
@@ -280,7 +281,9 @@ export class ThreadMotionCoordinator {
   }
 
   cameraSettled(): void {
-    if (this.mode === "navigating-latest") {
+    if (this.mode === "anchor-prompt") {
+      this.finishPromptAnchor();
+    } else if (this.mode === "navigating-latest") {
       this.settleLatestNavigation();
       this.onLatestNavigationSettled?.();
     }
@@ -384,6 +387,11 @@ export class ThreadMotionCoordinator {
     this.invalidateGeometry();
   }
 
+  private finishPromptAnchor(): void {
+    this.submittedPromptId = null;
+    this.mode = "idle";
+  }
+
   private readonly flushGeometry = (): void => {
     this.measurementFrameId = null;
     if (!this.geometryDirty) return;
@@ -393,7 +401,7 @@ export class ThreadMotionCoordinator {
       ? this.historyNavigationPromptId
       : null;
     const promptId = navigationPromptId ?? (this.mode === "anchor-prompt" ? this.submittedPromptId : null);
-    const geometry = this.measure(promptId);
+    const geometry = this.measure(promptId, this.mode === "anchor-prompt");
     if (!geometry) return;
     this.observeUserScroll();
     this.onGeometry?.(geometry);
@@ -419,9 +427,8 @@ export class ThreadMotionCoordinator {
       return;
     }
     if (this.mode === "anchor-prompt" && geometry.promptTop !== null) {
-      this.camera.jumpTo(geometry.promptTop);
-      this.submittedPromptId = null;
-      this.mode = "idle";
+      const result = this.camera.navigateTo(geometry.promptTop);
+      if (!result || result === "settled") this.finishPromptAnchor();
     }
   };
 }
