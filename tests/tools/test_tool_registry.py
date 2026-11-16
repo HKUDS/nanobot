@@ -8,7 +8,7 @@ import pytest
 
 from nanobot.agent.tools.base import Tool, ToolResult
 from nanobot.agent.tools.filesystem import ReadFileTool
-from nanobot.agent.tools.registry import ToolRegistry, TurnToolCatalog, is_tool_error_result
+from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 
 
 class _FakeTool(Tool):
@@ -59,20 +59,6 @@ def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
         "mcp_fs_list",
         "mcp_git_status",
     ]
-
-
-def test_turn_tool_catalog_defers_new_tools_but_not_revocations() -> None:
-    registry = _registry_with_names(["read_file", "mcp_old"])
-    catalog = TurnToolCatalog()
-    initial = catalog.definitions(registry.get_definitions())
-    registry.register(_FakeTool("mcp_new"))
-    assert catalog.definitions(registry.get_definitions()) == initial
-    registry.unregister("mcp_old")
-    assert _tool_names(catalog.definitions(registry.get_definitions())) == ["read_file"]
-    assert registry.prepare_call("mcp_old", {})[0] is None
-
-    catalog.reset()
-    assert _tool_names(catalog.definitions(registry.get_definitions())) == ["read_file", "mcp_new"]
 
 
 def test_prepare_call_rejects_near_miss_tool_name_with_suggestion() -> None:

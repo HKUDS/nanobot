@@ -21,7 +21,6 @@ from uuid import uuid4
 from loguru import logger
 
 from nanobot.agent.context import TranscriptInput
-from nanobot.agent.tools.registry import TurnToolCatalog
 from nanobot.context_sources import drain_system_sources
 from nanobot.events import NO_EVENTS, ContextCompactionEvent, EventSink
 from nanobot.providers.base import (
@@ -255,7 +254,6 @@ class ModelRequestState:
     usage: LLMUsage | None = None
     messages: list[dict[str, Any]] | None = None
     tool_definitions: list[dict[str, Any]] | None = None
-    turn_tool_catalog: TurnToolCatalog = field(default_factory=TurnToolCatalog)
     provider_compaction_applied: bool = False
     compacted_tool_results: set[str] = field(default_factory=set)
     events: EventSink = NO_EVENTS

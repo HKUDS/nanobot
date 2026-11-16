@@ -26,16 +26,13 @@ def is_tool_error_result(result: Any) -> bool:
     return isinstance(result, ToolResult) and result.is_error
 
 
-def _schema_name(schema: dict[str, Any]) -> str:
-    fn = schema.get("function")
-    if isinstance(fn, dict) and isinstance(name := cast(dict[str, Any], fn).get("name"), str):
-        return name
-    name = schema.get("name")
-    return name if isinstance(name, str) else ""
-
-
 def _schema_sort_key(schema: dict[str, Any]) -> tuple[bool, str]:
-    name = _schema_name(schema)
+    fn = schema.get("function")
+    name = cast(dict[str, Any], fn).get("name") if isinstance(fn, dict) else None
+    if not isinstance(name, str):
+        name = schema.get("name")
+    if not isinstance(name, str):
+        name = ""
     return name.startswith("mcp_"), name
 
 
@@ -214,25 +211,3 @@ class ToolRegistry:
 
     def __contains__(self, name: str) -> bool:
         return self.has(name)
-
-
-class TurnToolCatalog:
-    """Keep advertised schemas stable while applying removals immediately."""
-
-    def __init__(self) -> None:
-        self.reset()
-
-    def reset(self) -> None:
-        self._source: list[dict[str, Any]] | None = None
-        self._advertised: list[dict[str, Any]] = []
-
-    def definitions(self, source: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if self._source is None:
-            self._advertised = source
-        elif source is not self._source:
-            live = {_schema_name(entry): entry for entry in source}
-            self._advertised = [
-                entry for entry in self._advertised if live.get(_schema_name(entry)) == entry
-            ]
-        self._source = source
-        return self._advertised

@@ -17,38 +17,6 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
-@pytest.mark.asyncio
-async def test_tool_catalog_refreshes_on_real_followup_but_not_tool_round():
-    from nanobot.agent.runner import AgentRunner
-
-    provider = MagicMock()
-    tools = MagicMock()
-    old = {"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}
-    late = {"type": "function", "function": {"name": "mcp_new", "parameters": {"type": "object"}}}
-    tools.get_definitions.return_value = [old]
-    tools.get.return_value = MagicMock(parallel_safe=False)
-    tools.execute = AsyncMock(return_value="result")
-    pending: asyncio.Queue = asyncio.Queue()
-    catalogs = []
-
-    async def chat(**kwargs):
-        catalogs.append(kwargs.get("tools"))
-        if len(catalogs) == 1:
-            tools.get_definitions.return_value = [old, late]
-            return LLMResponse(content=None, finish_reason="tool_calls",
-                               tool_calls=[ToolCallRequest(id="call", name="read_file", arguments={})])
-        if len(catalogs) == 2:
-            pending.put_nowait({"role": "user", "content": "Now use the integration."})
-        return LLMResponse(content="ok")
-
-    provider.chat_stream_with_retry = chat
-    spec = make_run_spec(provider, model="test", tools=tools, initial_messages=[{"role": "user", "content": "Look"}],
-                         max_iterations=3, max_tool_result_chars=1000,
-                         injection_callback=_make_injection_callback(pending))
-    await AgentRunner().run(spec)
-    assert catalogs == [[old], [old], [old, late]]
-
-
 def _make_injection_callback(queue: asyncio.Queue):
     """Return an async callback that drains *queue* into a list of dicts."""
     async def inject_cb():
