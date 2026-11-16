@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useClient } from "@/providers/ClientProvider";
 import { useObjectUrl } from "@/hooks/useObjectUrl";
+import { fetchWithTimeout } from "@/lib/http";
 
 interface BackgroundContextValue {
   hasBackground: boolean;
@@ -25,7 +26,8 @@ export function useBackground() {
 }
 
 export function BackgroundProvider({ children }: { children: ReactNode }) {
-  const { client, token } = useClient();
+  const { client, token, getToken } = useClient();
+  const hasToken = !!token;
   const [image, setImage] = useState<Blob | null>(null);
   const imageUrl = useObjectUrl(image);
   const [blur, setBlurState] = useState(5);
@@ -40,8 +42,8 @@ export function BackgroundProvider({ children }: { children: ReactNode }) {
     const version = ++versions.current.image;
     setImageStatus(current => current === "error" ? "loading" : current);
     try {
-      const response = await fetch("/api/settings/background", {
-        headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin", cache: "no-store",
+      const response = await fetchWithTimeout("/api/settings/background", {
+        headers: { Authorization: `Bearer ${getToken()}` }, credentials: "same-origin", cache: "no-store",
       });
       if (!response.ok && response.status !== 404) throw new Error(`HTTP ${response.status}`);
       const next = response.status === 404 ? null : await response.blob();
@@ -49,14 +51,14 @@ export function BackgroundProvider({ children }: { children: ReactNode }) {
     } catch {
       if (versions.current.image === version) setImageStatus("error");
     }
-  }, [token]);
+  }, [getToken]);
 
   const loadStyle = useCallback(async () => {
     const version = ++versions.current.style;
     setStyleStatus(current => current === "error" ? "loading" : current);
     try {
-      const response = await fetch("/api/settings/background-style", {
-        headers: { Authorization: `Bearer ${token}` }, credentials: "same-origin", cache: "no-store",
+      const response = await fetchWithTimeout("/api/settings/background-style", {
+        headers: { Authorization: `Bearer ${getToken()}` }, credentials: "same-origin", cache: "no-store",
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const value: unknown = await response.json();
@@ -69,20 +71,17 @@ export function BackgroundProvider({ children }: { children: ReactNode }) {
     } catch {
       if (versions.current.style === version) setStyleStatus("error");
     }
-  }, [token]);
+  }, [getToken]);
 
   const refresh = useCallback(() => { void loadImage(); void loadStyle(); }, [loadImage, loadStyle]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!hasToken) return;
     refresh();
-    const unsubscribeChange = client.onBackgroundChange(refresh);
-    const unsubscribeReady = client.onReady(refresh);
     return () => {
-      unsubscribeChange(); unsubscribeReady();
       versions.current.image++; versions.current.style++;
     };
-  }, [client, token, refresh]);
+  }, [hasToken, refresh]);
 
   useEffect(() => {
     if (!imageUrl) return;

@@ -1639,7 +1639,6 @@ export type InboundEvent =
       text_from_seq?: number;
     } & InboundTurnMetadata)
   | { event: "pairing_changed" }
-  | { event: "background_updated" }
   | {
       event: "runtime_model_updated";
       model_name: string;

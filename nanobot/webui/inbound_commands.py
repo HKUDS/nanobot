@@ -1196,13 +1196,11 @@ class WebUICommandRouter:
                                         self._background_references.add(key)
                                         try:
                                             await asyncio.to_thread(save_background, directory, data, entry.mime)
-                                            self._uploads.store.discard([reference], owner=owner)
                                         finally:
                                             self._background_references.discard(key)
+                                            self._uploads.store.discard([reference], owner=owner)
                                     except (AttachmentUploadError, ValueError) as exc:
                                         return WebUIRequestResult(status=400, message=str(exc))
-                                # Invalidation only; clients re-fetch both resources.
-                                await self.broadcast_webui_event("background_updated")
                                 return WebUIRequestResult(result={"ok": True})
                         except RuntimeMaintenanceError:
                             return WebUIRequestResult(status=503, message="Gateway update is being verified. Retry shortly.")

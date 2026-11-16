@@ -258,21 +258,6 @@ describe("NanobotClient", () => {
     client.close();
   });
 
-  it("notifies background listeners when the gateway broadcasts a change", () => {
-    const client = new NanobotClient({ url: "ws://test", reconnect: false,
-      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
-    const listener = vi.fn();
-    const unsubscribe = client.onBackgroundChange(listener);
-    client.connect();
-    lastSocket().fakeOpen();
-    lastSocket().fakeMessage({ event: "background_updated" });
-    expect(listener).toHaveBeenCalledOnce();
-    unsubscribe();
-    lastSocket().fakeMessage({ event: "background_updated" });
-    expect(listener).toHaveBeenCalledOnce();
-    client.close();
-  });
-
   it("emits live task notices without mounted chats, not when the chat replays", () => {
     const client = new NanobotClient({ url: "ws://test", reconnect: false,
       socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket });
