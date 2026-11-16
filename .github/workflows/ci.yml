@@ -301,7 +301,7 @@ jobs:
           retention-days: 7
 
   webui_checks:
-    name: WebUI checks and build
+    name: WebUI static checks
     needs: changes
     if: needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
@@ -331,6 +331,10 @@ jobs:
         working-directory: webui
         run: bun run test:imports
 
+      - name: Test CI shard planning and failure gates
+        working-directory: webui
+        run: bun run test:ci
+
       - name: Lint WebUI
         working-directory: webui
         run: bun run lint
@@ -339,20 +343,69 @@ jobs:
         working-directory: webui
         run: bun run typecheck
 
-      - name: Test WebUI
+      - name: Type check browser tests and fixtures
         working-directory: webui
-        run: bun run test:coverage
+        run: bun run typecheck:browser
 
-      - name: Build WebUI
+  webui_build:
+    name: WebUI production build
+    needs: changes
+    if: needs.changes.outputs.webui_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Install WebUI dependencies
+        working-directory: webui
+        run: bun install --frozen-lockfile
+      - name: Type check production sources and build WebUI
         working-directory: webui
         run: bun run build
 
+  webui_unit:
+    name: WebUI unit and coverage
+    needs: changes
+    if: needs.changes.outputs.webui_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Install WebUI dependencies
+        working-directory: webui
+        run: bun install --frozen-lockfile
+      # Vitest 2's Istanbul blob merge can mark an unhit inner branch covered
+      # using another shard's outer range. Keep the original full V8 coverage gate.
+      - name: Run all unit tests with original coverage thresholds
+        working-directory: webui
+        run: bun run test:coverage --reporter=default --reporter=json --outputFile.json=test-results/unit/results.json
+      - name: Retain unit and coverage results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-unit-coverage
+          path: |
+            webui/test-results/unit/results.json
+            webui/coverage/coverage-summary.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
   webui_browser:
-    name: WebUI browser
+    name: WebUI browser (${{ matrix.shard }}/4)
     needs: changes
     if: needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - uses: actions/checkout@v4
@@ -370,33 +423,44 @@ jobs:
         working-directory: webui
         run: bun x playwright install --with-deps chromium
 
-      - name: Test browser layout and history motion
+      - name: Test full-suite browser shard with real layout and motion
         working-directory: webui
-        run: bun run test:browser --trace=retain-on-failure
+        run: bun run test:browser:shard --shard=${{ matrix.shard }}/4
 
-      - name: Retain browser failure details
-        if: failure()
+      - name: Retain browser timings and failure details
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-failures
+          name: browser-results-${{ matrix.shard }}
           path: |
+            webui/test-results/browser/results-*.json
             webui/test-results/browser/**/trace.zip
             webui/test-results/browser/**/test-failed-*.png
             webui/test-results/browser/**/error-context.md
+          if-no-files-found: error
+          overwrite: true
           retention-days: 7
 
   webui:
-    needs: [changes, webui_checks, webui_browser]
+    needs: [changes, webui_checks, webui_build, webui_unit, webui_browser]
     if: always() && needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 1
 
     steps:
-      - name: Require both WebUI jobs to pass
+      - name: Require every full-suite WebUI lane to pass
         env:
-          CHECKS_RESULT: ${{ needs.webui_checks.result }}
-          BROWSER_RESULT: ${{ needs.webui_browser.result }}
-        run: test "$CHECKS_RESULT" = success && test "$BROWSER_RESULT" = success
+          CHECK_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          failed = {name: job["result"] for name, job in json.loads(os.environ["CHECK_RESULTS"]).items()
+                    if job["result"] != "success"}
+          if failed:
+              raise SystemExit(f"WebUI checks did not all pass: {failed}")
+          PY
 
   tui:
     needs: changes
@@ -582,7 +646,7 @@ jobs:
 
   required:
     name: CI required
-    needs: [changes, test, windows_process, windows_installers, webui_checks, webui_browser, webui, tui, docker, native]
+    needs: [changes, test, windows_process, windows_installers, webui_checks, webui_build, webui_unit, webui_browser, webui, tui, docker, native]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
