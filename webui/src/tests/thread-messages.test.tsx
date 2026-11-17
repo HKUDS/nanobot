@@ -1262,9 +1262,9 @@ describe("ThreadMessages", () => {
     openAssistantBlockMenu();
     fireEvent.click(await screen.findByRole("button", { name: /worked/i }));
     expect(screen.getByText(/could not create subtask/i)).toBeVisible();
-    expect(screen.getByText(/subtask status retrieved/i)).toBeVisible();
+    expect(screen.getByText(/checked subtask/i)).toBeVisible();
     expect(screen.getByText(/ran command/i)).toBeVisible();
-    expect(screen.queryByText(/^subtask created/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^created subtask/i)).not.toBeInTheDocument();
   });
 
   it("keeps the fork boundary after a hidden subagent create activity", () => {

@@ -34,18 +34,18 @@ describe("generic tool activity semantics", () => {
   });
 
   it.each([
-    ['find_files({"glob":"*.tsx"})', "File search complete", "*.tsx"],
+    ['find_files({"glob":"*.tsx"})', "Found files", "*.tsx"],
     ['grep({"pattern":"dream_cursor"})', "Searched files", "“dream_cursor”"],
     ['list_dir({"path":"memory"})', "Listed files", "memory"],
     ['read_file({"path":"docs/guide.md"})', "Read file", "docs/guide.md"],
     ['memory_search({"query":"launch date"})', "Searched memory", "“launch date”"],
     ['generate_image({"prompt":"private launch art"})', "Generated image", ""],
-    ['spawn({"label":"Research competitors","task":"private task"})', "Subtask created", "Research competitors"],
-    ['subagent("create")', "Subtask created", ""],
-    ['subagent({"action":"create","label":"Research competitors","task":"private task"})', "Subtask created", "Research competitors"],
-    ['subagent("check")', "Subtask status retrieved", ""],
-    ['subagent("send")', "Message queued for subtask", ""],
-    ['subagent("cancel")', "Stop request processed", ""],
+    ['spawn({"label":"Research competitors","task":"private task"})', "Created subtask", "Research competitors"],
+    ['subagent("create")', "Created subtask", ""],
+    ['subagent({"action":"create","label":"Research competitors","task":"private task"})', "Created subtask", "Research competitors"],
+    ['subagent("check")', "Checked subtask", ""],
+    ['subagent("send")', "Queued subtask message", ""],
+    ['subagent("cancel")', "Subtask stop requested", ""],
     ['message({"channel":"telegram","content":"private message"})', "Sent message", "telegram"],
     ['my({"action":"check","key":"context_window_tokens"})', "Checked agent settings", "context_window_tokens"],
     ['my({"action":"set","key":"model","value":"private-model"})', "Updated agent settings", "model"],
@@ -113,8 +113,8 @@ describe("generic tool activity semantics", () => {
       { trace: first, status: "done" },
       { trace: second, status: "done" },
     ], i18n.t)).toMatchObject({
-      label: "文件搜索完成",
-      aside: "2 次",
+      label: "已搜索文件",
+      aside: "2 次搜索",
     });
   });
 

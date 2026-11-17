@@ -133,9 +133,9 @@ describe("AgentActivityCluster", () => {
     openLiveActivity();
     const rows = screen.getAllByTestId("activity-step").map((row) => row.textContent);
     expect(rows).toEqual([
-      "Command was still running at the last check npm test --token ••••",
+      "Command still running npm test --token ••••",
       "Read file README.md",
-      "Command failed (exit code 7) npm test --token ••••",
+      "Command failed (exit 7) npm test --token ••••",
     ]);
     expect(container.innerHTML).not.toContain(id);
     expect(container.innerHTML).not.toContain("secret-value");
@@ -168,7 +168,7 @@ describe("AgentActivityCluster", () => {
     render(<AgentActivityCluster messages={[message]} isTurnStreaming hasBodyBelow={false} />);
     openLiveActivity();
     expect(screen.getAllByTestId("activity-step").map((row) => row.textContent)).toEqual([
-      "Command was still running at the last check", "Command completed", "Reading file later.txt",
+      "Command still running", "Command completed", "Reading file later.txt",
     ]);
   });
 
@@ -208,14 +208,14 @@ describe("AgentActivityCluster", () => {
     expect(container).toHaveTextContent("Could not check command test-b");
     expect(container).toHaveTextContent("Command completed test-a");
     expect(container).not.toHaveTextContent("private");
-    fireEvent.click(screen.getByRole("button", { name: "Show earlier command checks (9)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show 9 earlier checks" }));
     expect(screen.getAllByTestId("activity-step")).toHaveLength(14);
-    expect(screen.getByRole("button", { name: "Hide earlier command checks (9)" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Hide 9 earlier checks" })).toHaveAttribute("aria-expanded", "true");
     rerender(view(11));
     expect(screen.getAllByTestId("activity-step")).toHaveLength(15);
-    fireEvent.click(screen.getByRole("button", { name: "Hide earlier command checks (10)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide 10 earlier checks" }));
     expect(screen.getAllByTestId("activity-step")).toHaveLength(5);
-    expect(screen.getByRole("button", { name: "Show earlier command checks (6)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show 6 earlier checks" })).toBeInTheDocument();
   });
 
   it("shows a generic session label until its source command becomes available", () => {
@@ -306,11 +306,11 @@ describe("AgentActivityCluster", () => {
 
     await act(async () => setAppLanguage("zh-CN"));
 
-    expect(screen.getByText(`文件搜索完成 “${query}”`)).toBeInTheDocument();
+    expect(screen.getByText(`已搜索文件 “${query}”`)).toBeInTheDocument();
     expect(screen.getByText(`正在读取文件 ${path}`)).toBeInTheDocument();
     expect(screen.getByLabelText("正在使用 Blender, --json --background scene.blend")).toBeInTheDocument();
     expect(screen.getByLabelText("正在打开 example.com, Browserbase")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "编辑" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "已编辑" })).toBeInTheDocument();
     expect(screen.getByTestId("activity-file-reference")).toHaveTextContent(path);
 
     await act(async () => setAppLanguage("ja"));
@@ -357,15 +357,15 @@ describe("AgentActivityCluster", () => {
   it.each([
     {
       locale: "en" as const,
-      waiting: "Connection failed Retrying in 5s",
-      retrying: "Connection failed Retrying",
-      exhausted: "Connection failed Ending turn",
+      waiting: "Connection failed. Retrying in 5s",
+      retrying: "Connection failed. Retrying",
+      exhausted: "Connection failed. Ending turn",
     },
     {
       locale: "zh-CN" as const,
-      waiting: "连接失败 5 秒后重试",
-      retrying: "连接失败 正在重试",
-      exhausted: "连接失败 正在结束本次任务",
+      waiting: "连接失败，5 秒后重试",
+      retrying: "连接失败，正在重试",
+      exhausted: "连接失败，正在结束本轮",
     },
   ])("shows localized model retry progress in the activity header ($locale)", async ({
     locale, waiting, retrying, exhausted,
@@ -771,7 +771,7 @@ describe("AgentActivityCluster", () => {
             retryStatus={{ state: "waiting", attempt: 1, max_attempts: 4, error_kind: "connection" }}
           />,
         );
-        expect(screen.getByRole("status", { name: "Connection failed Retrying" }))
+        expect(screen.getByRole("status", { name: "Connection failed. Retrying" }))
           .toBeVisible();
         unmount();
         render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow />);
@@ -1732,7 +1732,7 @@ describe("AgentActivityCluster", () => {
     );
 
     openLiveActivity();
-    expect(screen.getByText("File search complete *.tsx")).toBeInTheDocument();
+    expect(screen.getByText("Found files *.tsx")).toBeInTheDocument();
     expect(screen.getByText("Listed files memory")).toBeInTheDocument();
     expect(screen.getByText("Searching files “dream_cursor”")).toBeInTheDocument();
     expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
@@ -1903,7 +1903,7 @@ describe("AgentActivityCluster", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Worked" }));
 
-    expect(screen.getByLabelText("Ran command cat << 'EOF' | bash, script, 6 lines")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ran command cat << 'EOF' | bash, script (6 lines)")).toBeInTheDocument();
     expect(screen.queryByText(/SECRET_TOKEN/)).not.toBeInTheDocument();
     expect(screen.queryByText(/for id in/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Done$/)).not.toBeInTheDocument();
@@ -1926,7 +1926,7 @@ describe("AgentActivityCluster", () => {
       />,
     );
 
-    expect(screen.getByText("Checking current time")).toBeInTheDocument();
+    expect(screen.getByText("Checking time")).toBeInTheDocument();
     expect(screen.queryByText(/%Y-%m-%d/)).not.toBeInTheDocument();
     expect(screen.queryByText("Web")).not.toBeInTheDocument();
   });
