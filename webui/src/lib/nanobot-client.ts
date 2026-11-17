@@ -439,9 +439,9 @@ export class NanobotClient {
     this.applyRunEffects(this.runs.transition({ kind: "fence", chatId, completedTurnIds }));
   }
 
-  /** Settle explicit fragment completions without claiming coverage of live content. */
-  settleFragmentRunLifecycle(chatId: string, completedTurnIds: readonly string[]): void {
-    this.applyRunEffects(this.runs.transition({ kind: "settle-fragment-lifecycle", chatId, completedTurnIds }));
+  /** Settle explicit completions without claiming coverage of live content. */
+  settleCompletedRunLifecycle(chatId: string, completedTurnIds: readonly string[]): void {
+    this.applyRunEffects(this.runs.transition({ kind: "settle-completed-lifecycle", chatId, completedTurnIds }));
   }
 
   /** Whether a mounted transcript owns delivery for this chat. */
