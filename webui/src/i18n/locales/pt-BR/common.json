@@ -1970,6 +1970,14 @@
         "removeContext": "Remova os anexos e o texto citado antes de executar um comando."
       },
       "chooseAI": "Escolher modelo",
+      "modelOptions": {
+        "title": "Para esta conversa",
+        "inherit": "Herdar",
+        "on": "Ativado",
+        "off": "Desativado",
+        "codexFast": "Modo rápido do Codex",
+        "scope": "Aplica-se à próxima mensagem, não às tarefas em andamento. Herdar usa o valor da predefinição ou do provedor mostrado à direita."
+      },
       "switchModel": "Trocar modelo",
       "manageModels": "Gerenciar presets",
       "fallbackNotice": "Esta resposta usou um modelo alternativo: {{model}}.",

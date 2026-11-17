@@ -1968,6 +1968,14 @@
         "removeContext": "Elimina los archivos adjuntos y el texto citado antes de ejecutar un comando."
       },
       "chooseAI": "Elegir modelo",
+      "modelOptions": {
+        "title": "Para este chat",
+        "inherit": "Heredar",
+        "on": "Activado",
+        "off": "Desactivado",
+        "codexFast": "Modo rápido de Codex",
+        "scope": "Se aplica con el próximo mensaje, no a las tareas en curso. Heredar usa el valor del preajuste o del proveedor que se muestra a la derecha."
+      },
       "switchModel": "Cambiar modelo",
       "manageModels": "Gestionar preajustes",
       "fallbackNotice": "Esta respuesta usó un modelo alternativo: {{model}}.",

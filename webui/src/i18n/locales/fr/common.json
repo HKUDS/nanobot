@@ -1968,6 +1968,14 @@
         "removeContext": "Retirez les pièces jointes et le texte cité avant d’exécuter une commande."
       },
       "chooseAI": "Choisir le modèle",
+      "modelOptions": {
+        "title": "Pour cette discussion",
+        "inherit": "Hériter",
+        "on": "Activé",
+        "off": "Désactivé",
+        "codexFast": "Mode rapide Codex",
+        "scope": "S’applique au prochain message, pas aux tâches en cours. Hériter utilise la valeur du préréglage ou du fournisseur affichée à droite."
+      },
       "switchModel": "Changer de modèle",
       "manageModels": "Gérer les préréglages",
       "fallbackNotice": "Cette réponse a utilisé un modèle de secours : {{model}}.",

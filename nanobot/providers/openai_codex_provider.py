@@ -255,6 +255,12 @@ class OpenAICodexProvider(LLMProvider):
         if self._extra_body:
             # Apply explicit provider overrides last, matching other provider backends.
             body.update(self._extra_body)
+        if provider_context is not None:
+            fast_mode = provider_context.model_options.codex_fast_mode
+            if fast_mode is True:
+                body["service_tier"] = "priority"
+            elif fast_mode is False:
+                body.pop("service_tier", None)
         effective_cache_key = body.get("prompt_cache_key")
         request_model = _diagnostic_token(body.get("model"))
         effective_reasoning = body.get("reasoning")

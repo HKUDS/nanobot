@@ -10,6 +10,7 @@ import type {
   ChannelConnectPayload,
   ChannelValidationPayload,
   ChatSummary,
+  SessionModelOptions,
   ContextGraph,
   CliAppsPayload,
   FilePreviewPayload,
@@ -204,6 +205,7 @@ export async function listSessions(
     title?: string;
     preview?: string;
     model_preset?: string | null;
+    model_options?: SessionModelOptions;
     run_started_at?: number | null;
     recovery_state?: RecoveryState | null;
     workspace_scope?: WorkspaceScopePayload | null;
@@ -226,6 +228,7 @@ export async function listSessions(
       title: s.title ?? "",
       preview: s.preview ?? "",
       modelPreset: s.model_preset ?? null,
+      modelOptions: s.model_options ?? { reasoning_effort: null, codex_fast_mode: null },
       runStartedAt: s.run_started_at ?? null,
       recoveryState: s.recovery_state ?? null,
       workspaceScope: s.workspace_scope ?? null,

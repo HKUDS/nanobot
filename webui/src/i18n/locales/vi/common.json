@@ -1968,6 +1968,14 @@
         "removeContext": "Xóa tệp đính kèm và văn bản trích dẫn trước khi chạy lệnh."
       },
       "chooseAI": "Chọn mô hình",
+      "modelOptions": {
+        "title": "Cho cuộc trò chuyện này",
+        "inherit": "Kế thừa",
+        "on": "Bật",
+        "off": "Tắt",
+        "codexFast": "Chế độ nhanh Codex",
+        "scope": "Áp dụng từ tin nhắn tiếp theo, không ảnh hưởng tác vụ đang chạy. Kế thừa dùng giá trị mặc định của cấu hình hoặc nhà cung cấp ở bên phải."
+      },
       "switchModel": "Đổi mô hình",
       "manageModels": "Quản lý bộ thiết lập",
       "fallbackNotice": "Phản hồi này đã sử dụng mô hình dự phòng: {{model}}.",

@@ -1,3 +1,4 @@
+import { ModelOptionsControl, type ModelOptionsControlProps } from "@/components/thread/ModelOptionsControl";
 import { formatModelContextWindow } from "@/lib/model-context-format";
 import {
   ModelsIcon,
@@ -93,6 +94,8 @@ interface ModelPresetBadgeProps {
   modelPreset?: string | null;
   modelPresets?: ModelPresetOption[];
   onPresetChange?: (name: string) => void;
+  modelOptionsControl?: ModelOptionsControlProps;
+  onMenuOpenChange?: (open: boolean) => void;
   onManageModels?: () => void;
   onRequestComposerFocus?: () => void;
   provider?: string | null;
@@ -109,6 +112,8 @@ export function ModelPresetBadge({
   modelPreset,
   modelPresets = [],
   onPresetChange,
+  modelOptionsControl,
+  onMenuOpenChange,
   onManageModels,
   onRequestComposerFocus,
   provider,
@@ -121,6 +126,7 @@ export function ModelPresetBadge({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
+  useEffect(() => { onMenuOpenChange?.(open); }, [onMenuOpenChange, open]);
   const [motion, setMotion] = useState<PresetMotion | null>(null);
   const [motionWidth, setMotionWidth] = useState<number | null>(null);
   const gestureRef = useRef<PresetGesture | null>(null);
@@ -151,7 +157,7 @@ export function ModelPresetBadge({
       : modelPresets.map((preset, index) => index === listedIndex ? activePreset : preset);
   const opensSetup = Boolean(onClick);
   const canSwitch = !opensSetup && Boolean(onPresetChange) && activeName !== "" && presets.length > 1;
-  const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels));
+  const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels) || Boolean(modelOptionsControl?.data));
   const pickerPresets = activeName && onPresetChange ? presets : [activePreset];
   const currentIndex = Math.max(0, presets.findIndex((preset) => preset.name === activeName));
   const pillHeight = isHero ? 32 : 36;
@@ -425,6 +431,7 @@ export function ModelPresetBadge({
         }}
         className={cn(
           pickerWidthClassName,
+          "max-h-[var(--radix-popover-content-available-height)] overflow-y-auto",
           "origin-[var(--radix-popover-content-transform-origin)] p-1.5 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-bottom-1 data-[state=open]:slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none",
         )}
       >
@@ -454,6 +461,7 @@ export function ModelPresetBadge({
             />
           ))}
         </div>
+        {modelOptionsControl ? <ModelOptionsControl {...modelOptionsControl} /> : null}
         {onManageModels ? (
           <div className="mt-1 border-t border-border/55 pt-1">
             <button
@@ -462,7 +470,7 @@ export function ModelPresetBadge({
               className={cn(
                 floatingItemClassName,
                 floatingItemFocusClassName,
-                "flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground",
+                "flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground max-sm:min-h-11",
               )}
             >
               <ModelsIcon className="size-4 shrink-0" strokeWidth={1.75} />

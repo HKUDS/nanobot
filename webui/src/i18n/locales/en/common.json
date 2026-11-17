@@ -2150,6 +2150,14 @@
         "removeContext": "Remove attachments and quoted text before running a command."
       },
       "chooseAI": "Choose model",
+      "modelOptions": {
+        "title": "For this chat",
+        "inherit": "Inherit",
+        "on": "On",
+        "off": "Off",
+        "codexFast": "Codex Fast mode",
+        "scope": "Applies with your next message, not to tasks already running. Inherit uses the preset or provider default shown on the right."
+      },
       "switchModel": "Switch model",
       "manageModels": "Manage presets",
       "fallbackNotice": "This response used a fallback model: {{model}}.",

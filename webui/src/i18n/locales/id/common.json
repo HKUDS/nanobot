@@ -1968,6 +1968,14 @@
         "removeContext": "Hapus lampiran dan teks kutipan sebelum menjalankan perintah."
       },
       "chooseAI": "Pilih model",
+      "modelOptions": {
+        "title": "Untuk chat ini",
+        "inherit": "Warisi",
+        "on": "Aktif",
+        "off": "Nonaktif",
+        "codexFast": "Mode cepat Codex",
+        "scope": "Berlaku pada pesan berikutnya, bukan tugas yang sedang berjalan. Warisi memakai nilai preset atau penyedia yang ditampilkan di kanan."
+      },
       "switchModel": "Ganti model",
       "manageModels": "Kelola preset",
       "fallbackNotice": "Respons ini menggunakan model cadangan: {{model}}.",

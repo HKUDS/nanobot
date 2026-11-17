@@ -105,6 +105,12 @@ Open a topic's sidebar action menu and choose **Create group** to turn it into a
 
 To use work from another topic, mention it with `@` and tell nanobot what you need. See [Composer](#composer) for how to add a topic reference.
 
+### Model options for a topic
+
+Open the model preset menu beside the composer to choose **Reasoning effort** for the next message in this topic. Codex presets also offer **Fast mode**. Each option can follow its preset/provider configuration or use an explicit choice. Turning Fast mode off overrides a configured priority tier; turning it on requests faster processing with increased Codex usage, subject to model and account availability.
+
+Choices do not edit shared presets or provider settings and do not change an already-running task. Unsent choices are remembered in this browser; the last values sent with an ordinary message are saved with the topic and survive a gateway restart. Switching presets clears both overrides. Temporary chats do not show these controls.
+
 ### Activity and context usage
 
 While nanobot works, **Working for** shows the latest activity beside the timer, or below it on narrow screens. Select the timer to see the full reasoning and tool activity. Set **Settings → Appearance → Activity details** to **Expanded** if you prefer to see the details by default.

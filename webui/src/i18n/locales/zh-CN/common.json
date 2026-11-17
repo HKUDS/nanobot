@@ -2150,6 +2150,14 @@
         "removeContext": "执行命令前，请移除附件和引用文本。"
       },
       "chooseAI": "选择模型",
+      "modelOptions": {
+        "title": "当前会话",
+        "inherit": "继承",
+        "on": "开启",
+        "off": "关闭",
+        "codexFast": "Codex 快速模式",
+        "scope": "随下一条消息生效，不影响运行中的任务。继承使用右侧的预设或服务商默认值。"
+      },
       "switchModel": "切换模型",
       "manageModels": "管理预设",
       "fallbackNotice": "本次已使用备用模型：{{model}}。",

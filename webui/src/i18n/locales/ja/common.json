@@ -1968,6 +1968,14 @@
         "removeContext": "コマンドを実行する前に、添付ファイルと引用テキストを削除してください。"
       },
       "chooseAI": "モデルを選択",
+      "modelOptions": {
+        "title": "このチャット",
+        "inherit": "継承",
+        "on": "オン",
+        "off": "オフ",
+        "codexFast": "Codex 高速モード",
+        "scope": "次のメッセージから適用され、実行中のタスクには影響しません。継承は右側のプリセットまたはプロバイダーの既定値を使います。"
+      },
       "switchModel": "モデルを切り替え",
       "manageModels": "プリセット管理",
       "fallbackNotice": "この応答では代替モデルを使用しました：{{model}}。",

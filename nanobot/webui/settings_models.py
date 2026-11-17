@@ -47,7 +47,7 @@ from nanobot.providers.registry import (
     create_dynamic_spec,
     find_by_name,
 )
-from nanobot.providers.request_overrides import isolate_request_overrides
+from nanobot.providers.request_overrides import apply_request_overrides, isolate_request_overrides
 from nanobot.providers.routing import resolve_automatic_model_api, resolve_model_api
 from nanobot.runtime_admission import RuntimeAdmission
 from nanobot.webui import request_settings
@@ -1040,6 +1040,37 @@ def reasoning_effort_values_for(provider_name: str, model: str) -> list[str]:
     return list(_DEFAULT_REASONING_EFFORT_VALUES)
 
 
+class ReasoningOption(TypedDict):
+    default: str | None
+    values: list[str]
+
+
+class FastModeOption(TypedDict):
+    default: bool
+
+
+class ModelOptionsCapabilities(TypedDict):
+    reasoning_effort: ReasoningOption
+    codex_fast_mode: NotRequired[FastModeOption]
+
+
+def model_options_capabilities(config: Config, preset: ModelPresetConfig) -> ModelOptionsCapabilities:
+    provider_name = config.get_provider_name(preset.model, preset=preset) or preset.provider
+    options: ModelOptionsCapabilities = {
+        "reasoning_effort": {
+            "default": preset.reasoning_effort,
+            "values": [value for value in reasoning_effort_values_for(provider_name, preset.model) if value],
+        },
+    }
+    spec = find_by_name(provider_name)
+    if spec is not None and spec.backend == "openai_codex":
+        connection = apply_request_overrides(config.get_provider(preset.model, preset=preset), preset)
+        options["codex_fast_mode"] = {
+            "default": bool(connection and (connection.extra_body or {}).get("service_tier") == "priority"),
+        }
+    return options
+
+
 def model_api_resolution_payload(config: Config, query: QueryParams) -> dict[str, Any]:
     """Resolve a draft's automatic API using provider-owned routing rules."""
     model = (query_first(query, "model") or "").strip()
@@ -1111,6 +1142,7 @@ def model_settings_payload(
             "temperature": defaults.temperature,
             "supports_images": defaults.supports_images,
             "reasoning_effort": defaults.reasoning_effort,
+            "model_options": model_options_capabilities(config, config.resolve_default_preset()),
             "api": defaults.api.model_dump(mode="json") if defaults.api is not None else None,
             "reasoning_effort_values": reasoning_effort_values_for(
                 config.get_provider_name(
@@ -1140,6 +1172,7 @@ def model_settings_payload(
                 "temperature": preset.temperature,
                 "supports_images": preset.supports_images,
                 "reasoning_effort": preset.reasoning_effort,
+                "model_options": model_options_capabilities(config, preset),
                 "api": preset.api.model_dump(mode="json") if preset.api is not None else None,
                 **{
                     field: request_settings.redact_request_secrets(getattr(preset, field))

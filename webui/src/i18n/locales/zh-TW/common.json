@@ -1968,6 +1968,14 @@
         "removeContext": "執行命令前，請移除附件和引用文字。"
       },
       "chooseAI": "選擇模型",
+      "modelOptions": {
+        "title": "目前對話",
+        "inherit": "繼承",
+        "on": "開啟",
+        "off": "關閉",
+        "codexFast": "Codex 快速模式",
+        "scope": "隨下一則訊息生效，不影響執行中的任務。繼承使用右側的預設或服務商預設值。"
+      },
       "switchModel": "切換模型",
       "manageModels": "管理預設",
       "fallbackNotice": "本次已使用備用模型：{{model}}。",

@@ -22,6 +22,7 @@ from nanobot.providers.base import (
     RetryStatusCallback,
 )
 from nanobot.providers.compaction import ProviderStateCommitError, provider_compaction_scope
+from nanobot.providers.model_options import ModelOptions
 from nanobot.providers.oauth_catalog_cache import oauth_catalog_auth_rejected
 from nanobot.providers.registry import find_by_name
 
@@ -647,6 +648,7 @@ class FallbackProvider(LLMProvider):
                         if provider_context.response_preset is not None else None
                     ),
                     response_is_fallback=provider_context.response_preset is not None,
+                    model_options=ModelOptions(),
                 )
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)

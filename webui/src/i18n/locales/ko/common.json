@@ -1968,6 +1968,14 @@
         "removeContext": "명령을 실행하기 전에 첨부 파일과 인용문을 제거하세요."
       },
       "chooseAI": "모델 선택",
+      "modelOptions": {
+        "title": "현재 채팅",
+        "inherit": "상속",
+        "on": "켜기",
+        "off": "끄기",
+        "codexFast": "Codex 빠른 모드",
+        "scope": "다음 메시지부터 적용되며 실행 중인 작업에는 영향을 주지 않습니다. 상속은 오른쪽에 표시된 프리셋 또는 공급자 기본값을 사용합니다."
+      },
       "switchModel": "모델 전환",
       "manageModels": "프리셋 관리",
       "fallbackNotice": "이 응답은 대체 모델을 사용했습니다: {{model}}.",
