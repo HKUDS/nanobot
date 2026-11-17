@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from functools import partial
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from mcp.shared.auth import OAuthToken
 
 from nanobot.agent.plugins import AGENT_PLUGIN_MCP_SCHEMA, AGENT_PLUGIN_SCHEMA
 from nanobot.agent.tools.mcp_oauth import MCPOAuthStorage, mcp_oauth_has_credentials
+from nanobot.apps.cli import CliAppManager
 from nanobot.config.loader import load_config, save_config
 from nanobot.config.schema import Config
 from nanobot.webui.mcp_presets_api import (
@@ -160,6 +162,33 @@ def test_agent_plugin_reuses_mcp_catalog_and_runtime_action(
     config_path.write_text(json.dumps(config), encoding="utf-8")
     rows = [item for item in mcp_presets_payload()["presets"] if item["name"] == "plugin-desktop"]
     assert len(rows) == 1 and rows[0]["source"] == "custom"
+
+
+def test_cli_installer_exposes_managed_plugin_owner_without_claiming_other_plugins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_config(tmp_path, monkeypatch)
+    workspace = load_config().workspace_path
+    manager = CliAppManager(workspace=workspace)
+    app = {"name": "example", "display_name": "Example", "package_manager": "bundled", "entry_point": sys.executable}
+    monkeypatch.setattr(CliAppManager, "get_app", lambda self, name, **kwargs: app)
+    monkeypatch.setattr(CliAppManager, "payload", lambda self, **kwargs: {})
+    monkeypatch.setattr(CliAppManager, "_fetch_skill_content", lambda self, app: None)
+    manager.install("example")
+
+    unrelated = workspace / "plugins" / "cli-app-unrelated"
+    unrelated.mkdir(parents=True)
+    (unrelated / "plugin.json").write_text(json.dumps({
+        "$schema": AGENT_PLUGIN_SCHEMA, "name": "cli-app-unrelated", "description": "A separate plugin",
+    }), encoding="utf-8")
+
+    rows = {item["name"]: item for item in mcp_presets_payload()["presets"] if item["source"] == "agent-plugin"}
+    assert rows["plugin-cli-app-example"]["managed_by_cli"] == "example"
+    assert rows["plugin-cli-app-unrelated"]["managed_by_cli"] is None
+
+    manager.uninstall("example")
+    names = {item["name"] for item in mcp_presets_payload()["presets"] if item["source"] == "agent-plugin"}
+    assert names == {"plugin-cli-app-unrelated"}
 
 
 @pytest.mark.asyncio

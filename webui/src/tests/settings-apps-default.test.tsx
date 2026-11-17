@@ -42,7 +42,7 @@ describe("Apps default filter", () => {
     renderSettingsView({ initialSettings: settingsPayload() });
 
     expect(await screen.findByRole("heading", { name: "Example App" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "CLI Apps" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("preserves a manual choice while MCP loads, then defaults to the cached Ready items on re-entry", async () => {
@@ -56,9 +56,9 @@ describe("Apps default filter", () => {
     renderSettingsView({ client, initialSettings: settingsPayload() });
     await act(async () => {});
     expect(screen.queryByRole("heading", { name: "Example App" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Apps" }));
+    fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
     await act(async () => { pending.resolve(jsonResponse({ presets: [mcp], installed_count: 1 })); });
-    expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "CLI Apps" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("heading", { name: "Example App" })).toBeInTheDocument();
 
     cleanup();

@@ -209,7 +209,7 @@ async function loadFixture() {
 const fixture = await loadFixture();
 await initializeI18n();
 if (fixtureCase === "activity-wheel") await setAppLanguage("zh-CN");
-if ((["appearance", "session-transition"].includes(fixtureCase ?? "") || historyPreview) && parameters.has("lang")) {
+if ((["appearance", "session-transition", "tools-catalog"].includes(fixtureCase ?? "") || historyPreview) && parameters.has("lang")) {
   await setAppLanguage(normalizeLocale(parameters.get("lang")));
 }
 createRoot(document.getElementById("root")!).render(<TooltipProvider>{fixture}</TooltipProvider>);

@@ -41,6 +41,7 @@ import {
   SETTINGS_SEARCH_INPUT_CLASS,
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
+import { AgentPluginDialog } from "@/components/settings/system/AgentPluginDialog";
 import {
   McpManagementDialog,
   type McpManagementTab,
@@ -67,7 +68,7 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type AppsKindFilter = "ready" | "cli" | "mcp";
+export type AppsKindFilter = "ready" | "cli" | "plugins" | "mcp";
 type AppsCatalogItem =
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
@@ -216,24 +217,31 @@ export function AppsCatalogSettings({
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const filterOptions = [
     { value: "ready", label: tx("settings.apps.filterAll", "Ready") },
-    { value: "cli", label: tx("settings.apps.filterCli", "Apps") },
+    { value: "cli", label: tx("settings.apps.filterCli", "CLI Apps") },
+    { value: "plugins", label: tx("settings.apps.filterPlugins", "Plugins") },
     { value: "mcp", label: tx("settings.apps.filterMcp", "MCP") },
   ];
   const normalizedQuery = query.trim().toLowerCase();
+  const installedCliNames = new Set((cliApps?.apps ?? []).filter((app) => app.installed).map((app) => app.name));
+  const managedPlugins = new Map(
+    (mcpPresets?.presets ?? [])
+      .filter((preset) => preset.source === "agent-plugin" && preset.managed_by_cli)
+      .map((preset) => [preset.managed_by_cli!, preset]),
+  );
   const items: AppsCatalogItem[] = [
     ...(cliApps?.apps ?? []).map((app) => ({ id: `cli:${app.name}`, kind: "cli" as const, app })),
-    ...(mcpPresets?.presets ?? []).map((preset) => ({
-      id: `mcp:${preset.name}`,
-      kind: "mcp" as const,
-      preset,
-    })),
+    ...(mcpPresets?.presets ?? [])
+      .filter((preset) => !preset.managed_by_cli || !installedCliNames.has(preset.managed_by_cli))
+      .map((preset) => ({ id: `mcp:${preset.name}`, kind: "mcp" as const, preset })),
   ]
     .filter((item) => {
       const matchesFilter = filter === "ready"
         ? appsReady(item)
         : filter === "cli"
-          ? item.kind === "cli" || item.preset.source === "agent-plugin"
-          : item.kind === "mcp" && item.preset.source !== "agent-plugin";
+          ? item.kind === "cli"
+          : filter === "plugins"
+            ? item.kind === "mcp" && item.preset.source === "agent-plugin"
+            : item.kind === "mcp" && item.preset.source !== "agent-plugin";
       return matchesFilter && (!normalizedQuery || appsSearchText(item).includes(normalizedQuery));
     })
     .sort((left, right) => {
@@ -250,10 +258,12 @@ export function AppsCatalogSettings({
     ? tx("settings.apps.empty", "No tools match your search.")
     : filter === "cli"
       ? tx("settings.apps.emptyApps", "No apps available.")
-      : filter === "mcp"
-        ? tx("settings.apps.emptyIntegrations", "No MCP tools available.")
-        : tx("settings.apps.emptyReady", "No tools are ready yet.");
-  const emptyBrowseTarget: AppsKindFilter | null = normalizedQuery
+      : filter === "plugins"
+        ? tx("settings.apps.emptyPlugins", "No Agent Plugins installed.")
+        : filter === "mcp"
+          ? tx("settings.apps.emptyIntegrations", "No MCP tools available.")
+          : tx("settings.apps.emptyReady", "No tools are ready yet.");
+  const emptyBrowseTarget: AppsKindFilter | null = normalizedQuery || filter === "plugins"
     ? null
     : filter === "cli"
       ? "mcp"
@@ -296,6 +306,7 @@ export function AppsCatalogSettings({
             value={filter}
             options={filterOptions}
             onChange={(value) => onFilterChange(value as AppsKindFilter)}
+            className="max-[480px]:grid max-[480px]:w-full max-[480px]:grid-cols-2 max-[480px]:rounded-2xl"
           />
         </div>
       </section>
@@ -325,7 +336,9 @@ export function AppsCatalogSettings({
           <SettingsSectionTitle>
             {filter === "mcp"
               ? tx("settings.apps.mcpTools", "MCP tools")
-              : tx("settings.apps.featured", "Tools")}
+              : filter === "plugins"
+                ? tx("settings.apps.filterPlugins", "Plugins")
+                : tx("settings.apps.featured", "Tools")}
           </SettingsSectionTitle>
           <span className="text-[12px] tabular-nums text-muted-foreground">
             {loading ? "—" : items.length}
@@ -338,9 +351,12 @@ export function AppsCatalogSettings({
                 <CliAppsCatalogRow
                   key={item.id}
                   app={item.app}
+                  plugin={item.app.installed ? managedPlugins.get(item.app.name) : undefined}
                   actionKey={cliActionKey}
+                  pluginActionKey={mcpActionKey}
                   showBrandLogos={showBrandLogos}
                   onAction={onCliAction}
+                  onPluginAction={onMcpAction}
                 />
               ) : (
                 <McpAppsCatalogRow
@@ -399,10 +415,9 @@ export function AppsCatalogSettings({
               </Button>
             ) : (
               <p className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
-                {tx(
-                  "settings.apps.emptyIntegrationsHint",
-                  "Add a custom MCP server below.",
-                )}
+                {filter === "plugins"
+                  ? tx("settings.apps.emptyPluginsHint", "Add a plugin to the workspace plugins directory to enable it here.")
+                  : tx("settings.apps.emptyIntegrationsHint", "Add a custom MCP server below.")}
               </p>
             )}
           </div>
@@ -427,16 +442,23 @@ export function AppsCatalogSettings({
 
 function CliAppsCatalogRow({
   app,
+  plugin,
   actionKey,
+  pluginActionKey,
   showBrandLogos,
   onAction,
+  onPluginAction,
 }: {
   app: CliAppInfo;
+  plugin?: McpPresetInfo;
   actionKey: string | null;
+  pluginActionKey: string | null;
   showBrandLogos: boolean;
   onAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
+  onPluginAction: (action: "enable" | "disable", name: string) => void;
 }) {
   const { t } = useTranslation();
+  const [pluginOpen, setPluginOpen] = useState(false);
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const installBusy = actionKey === `install:${app.name}`;
   const updateBusy = actionKey === `update:${app.name}`;
@@ -454,6 +476,11 @@ function CliAppsCatalogRow({
           <AppsTypeBadge>{tx("settings.apps.cliLabel", "App")}</AppsTypeBadge>
         </div>
         <p className="mt-0.5 truncate text-[12.5px] leading-5 text-muted-foreground">{description}</p>
+        {plugin?.enabled === false ? (
+          <button type="button" onClick={() => setPluginOpen(true)} className="text-left text-[12px] font-medium text-destructive underline">
+            {tx("settings.apps.pluginDisabled", "Agent Plugin disabled")}
+          </button>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         {app.installed ? (
@@ -470,6 +497,12 @@ function CliAppsCatalogRow({
                 </AppsActionButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {plugin ? (
+                  <DropdownMenuItem disabled={busy} onClick={() => setPluginOpen(true)}>
+                    <AppActionsIcon aria-hidden />
+                    {tx("settings.apps.pluginDetails", "Agent Plugin")}
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem disabled={busy} onClick={() => onAction("test", app.name)}>
                   <PlayCircle aria-hidden />
                   {tx("settings.cliApps.test", "Test CLI")}
@@ -512,6 +545,15 @@ function CliAppsCatalogRow({
           </AppsActionButton>
         )}
       </div>
+      {plugin && pluginOpen ? (
+        <AgentPluginDialog
+          plugin={plugin}
+          open={pluginOpen}
+          actionKey={pluginActionKey}
+          onOpenChange={setPluginOpen}
+          onAction={onPluginAction}
+        />
+      ) : null}
     </article>
   );
 }
@@ -595,7 +637,7 @@ function McpAppsCatalogRow({
   const runtimeFailed = !toggleable && preset.installed && preset.runtime_status === "failed";
   const connecting = Boolean(oauthFlow) || (runtimeConnecting && configuredInstalled);
   const statusLabel = toggleable
-    ? tx("settings.nanobotFeatures.enabled", "Enabled")
+    ? preset.enabled ? tx("settings.values.enabled", "Enabled") : tx("settings.values.disabled", "Disabled")
     : runtimeConnected
       ? tx("connection.open", "Connected")
       : mcpPresetStatusLabel(preset.status, tx);
@@ -895,7 +937,15 @@ function McpAppsCatalogRow({
         </div>
       ) : null}
 
-      {managementOpen ? (
+      {managementOpen && agentPlugin ? (
+        <AgentPluginDialog
+          plugin={preset}
+          open={managementOpen}
+          actionKey={actionKey}
+          onOpenChange={setManagementOpen}
+          onAction={onAction}
+        />
+      ) : managementOpen ? (
         <McpManagementDialog
           onConfigureProxy={onConfigureProxy}
           preset={preset}
