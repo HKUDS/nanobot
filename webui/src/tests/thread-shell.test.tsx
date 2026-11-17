@@ -92,7 +92,7 @@ function makeClient() {
     getRunGeneration: lifecycle.getRunGeneration.bind(lifecycle),
     canReconcileCanonicalCompletion,
     reconcileCanonicalCompletion,
-    settleFragmentRunLifecycle: vi.fn(lifecycle.settleFragmentRunLifecycle.bind(lifecycle)),
+    settleCompletedRunLifecycle: vi.fn(lifecycle.settleCompletedRunLifecycle.bind(lifecycle)),
     fenceCanonicalCompletedTurns: lifecycle.fenceCanonicalCompletedTurns.bind(lifecycle),
     getGoalState: lifecycle.getGoalState.bind(lifecycle),
     onTranscript: lifecycle.onTranscript.bind(lifecycle),
@@ -266,9 +266,8 @@ function publishReconnectCompletion(
   const generation = client.getRunGeneration(chatId);
   const { completedTurnIds, snapshot } = persistedCanonicalRunState(body);
   expect(client.canReconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)).toBe(true);
-  // useReconnectRuns publishes synchronously before settling/fencing the ledger.
+  // A mounted transcript takes over reconciliation from the recovery reader.
   webuiThreadCache.set(`websocket:${chatId}`, body);
-  expect(client.reconcileCanonicalCompletion(chatId, generation, completedTurnIds, snapshot)).toBe(true);
 }
 
 function httpJson(body: unknown) {

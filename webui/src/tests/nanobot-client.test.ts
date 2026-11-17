@@ -391,7 +391,7 @@ describe("NanobotClient", () => {
     socket.fakeOpen();
     socket.fakeMessage({ event: "recovery_state", chat_id: "chat", status: "resuming", recovery_id: "r1", attempts: 1 });
     socket.fakeMessage({ event: "goal_status", chat_id: "chat", turn_id: "recovery:r1", status: "running", started_at: 100 });
-    client.settleFragmentRunLifecycle("chat", ["recovery:r1"]);
+    client.settleCompletedRunLifecycle("chat", ["recovery:r1"]);
     socket.fakeMessage({ event: "attached", chat_id: "chat", recovery_state: {
       status: "awaiting_user", recovery_id: "r1", reason: "loop_guard", attempts: 1,
     } });
@@ -2101,9 +2101,9 @@ describe("NanobotClient", () => {
     const oldContent = { event: "message", chat_id: "chat", turn_id: "history-0", text: "Unconsumed older content" };
     socket.fakeMessage(buffered);
     socket.fakeMessage(oldContent);
-    client.settleFragmentRunLifecycle("chat", ["current"]);
+    client.settleCompletedRunLifecycle("chat", ["current"]);
     const history = Array.from({ length: 300 }, (_, index) => `history-${index}`);
-    client.settleFragmentRunLifecycle("chat", history);
+    client.settleCompletedRunLifecycle("chat", history);
 
     expect(history.filter((id) => client.isRunCompleted("chat", id))).toHaveLength(255);
     expect(client.isRunCompleted("chat", "history-0")).toBe(false);

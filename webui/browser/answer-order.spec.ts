@@ -35,6 +35,8 @@ async function openThread(page: Page, events: ThreadProjectionEvent[] = [], loca
     });
   });
   await page.goto(`/browser/fixture.html?case=answer-order${reconnect ? "&reconnect=1" : ""}`);
+  // The load event does not await the fixture module's asynchronous startup.
+  await page.evaluate(async (entry) => { await import(entry); }, "/browser/fixture.tsx");
   await expect.poll(() => attached.has(chatId)).toBe(true);
   await expect(page.getByRole("status", { name: "Loading conversation…" })).toHaveCount(0);
   return {
