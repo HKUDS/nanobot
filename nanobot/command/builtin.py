@@ -380,11 +380,7 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
         result = await run_dream(loop, commit_prefix="dream: manual run")
         elapsed = time.monotonic() - t0
         if result.error:
-            content = (
-                f"Dream did not complete after {elapsed:.1f}s ({result.error}). "
-                f"Completed {result.completed_batches} history batch(es); "
-                "remaining history is still pending for the next run."
-            )
+            content = f"Dream did not complete after {elapsed:.1f}s ({result.error})."
         elif not result.had_input:
             content = _format_dream_no_input_message()
         elif result.changed:

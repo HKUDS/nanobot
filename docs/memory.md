@@ -52,9 +52,9 @@ Dream reads:
 - the current `memory/MEMORY.md`
 - relevant linked pages in `memory/wiki/`, when more detail is needed
 
-Each manual or scheduled run drains the unprocessed history present when it starts. Records are sent whole, oldest first, in batches of at most 20 with an 8,000-token prompt target. The first record is always included whole even if it exceeds that target; if the full request cannot fit the model's context, the run fails without marking that batch processed. Dream no longer clips each record to 1,000 characters.
+Each manual or scheduled invocation starts one Dream task for all unprocessed history present when it begins. The runtime supplies the `history.jsonl` path, fixed start/end lines, and cursor range instead of embedding clipped records in the prompt. Dream reads that range oldest first with the existing `read_file(offset, limit)` tool, chooses manageable page sizes, and can update memory while it reads. It continues from the last line actually returned and stops at the fixed end line even if new records have arrived. There is no outer loop restarting Dream every 20 records or enforcing an 8,000-token history batch.
 
-A normally completed batch advances the cursor even when no memory edit is needed. An incomplete or failed batch stops the run; earlier completed batches remain processed and the rest can resume next time. Records added during a run wait for the next run, and overlapping manual and scheduled runs are serialized within the agent. Already processed records are not automatically replayed on upgrade.
+A normally completed task advances the cursor to the captured boundary even when no memory edit is needed. If the task fails or reaches its execution limits, the entire range remains pending for the next invocation; edits already written are retained, not rolled back. The model's normal context and tool-output limits still apply, so large reads should be paginated rather than treated as complete when truncated. Records added during a run wait for the next run, and overlapping manual and scheduled runs are serialized within the agent. Already processed records are not automatically replayed on upgrade.
 
 Dream makes focused edits to resident memory and relevant wiki pages rather than rewriting everything. Core preferences and behavior constraints remain resident; task-specific detail can move into the wiki with a brief navigation link.
 
@@ -201,7 +201,7 @@ This creates:
 workspace/prompts/dream.md
 ```
 
-Edit that file in plain Markdown. When it has content, Dream follows it for this workspace before reading the latest conversation history. You do not need to paste history into the file; Dream adds the current `## Conversation History` block automatically. Existing custom guides are not overwritten: a guide that only maintains the resident files can continue doing so; add wiki routing and navigation guidance if you want it to use the new layer.
+Edit that file in plain Markdown. When it has content, Dream follows it for this workspace before reading the latest conversation history. You do not need to paste history into the file; Dream adds a `## Conversation History` block with the file path and fixed reading range automatically. Existing custom guides are not overwritten: a guide that only maintains the resident files can continue doing so; add wiki routing and navigation guidance if you want it to use the new layer.
 
 To return to nanobot's default behavior, delete `prompts/dream.md` or leave it empty.
 

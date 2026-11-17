@@ -31,7 +31,6 @@ from nanobot.utils.helpers import (
     build_assistant_message,
     content_with_media_breadcrumbs,
     ensure_dir,
-    estimate_prompt_tokens,
     estimate_prompt_tokens_chain,
     strip_think,
     truncate_text,
@@ -320,10 +319,10 @@ class MemoryStore:
             return None
         return value
 
-    def _iter_valid_entries(self) -> Iterator[tuple[dict[str, Any], int]]:
+    def _iter_valid_entries(self) -> Iterator[tuple[range, dict[str, Any], int]]:
         poisoned: Any = None
         malformed_cursor: int | None = None
-        for entry in self._read_entries():
+        for lines, entry in self._iter_entries():
             raw = entry.get("cursor")
             if raw is None:
                 continue
@@ -334,7 +333,7 @@ class MemoryStore:
             if not self._valid_history_payload(entry):
                 malformed_cursor = cursor
                 continue
-            yield entry, cursor
+            yield lines, entry, cursor
         if poisoned is not None and not self._corruption_logged:
             self._corruption_logged = True
             logger.warning(
@@ -375,7 +374,7 @@ class MemoryStore:
         if cursor_counter is not None:
             if last_cursor is not None:
                 return max(cursor_counter, last_cursor) + 1
-            max_history_cursor = max((c for _, c in self._iter_valid_entries()), default=0)
+            max_history_cursor = max((c for _, _, c in self._iter_valid_entries()), default=0)
             return max(cursor_counter, max_history_cursor) + 1
 
         # Fast path: trust the tail when intact.  Otherwise scan the whole
@@ -383,11 +382,11 @@ class MemoryStore:
         # invariant was broken by external writes.
         if last_cursor is not None:
             return last_cursor + 1
-        return max((c for _, c in self._iter_valid_entries()), default=0) + 1
+        return max((c for _, _, c in self._iter_valid_entries()), default=0) + 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
         """Return history entries with a valid cursor > *since_cursor*."""
-        return [e for e, c in self._iter_valid_entries() if c > since_cursor]
+        return [e for _, e, c in self._iter_valid_entries() if c > since_cursor]
 
     def compact_history(self) -> None:
         """Drop oldest processed entries without discarding pending Dream input."""
@@ -420,11 +419,15 @@ class MemoryStore:
         self._write_entries(kept)
 
 
-    def _read_entries(self) -> list[dict[str, Any]]:
-        entries: list[dict[str, Any]] = []
+    def _iter_entries(self) -> Iterator[tuple[range, dict[str, Any]]]:
         with suppress(FileNotFoundError):
             with open(self.history_file, "r", encoding="utf-8") as f:
+                line_number = 1
                 for line in f:
+                    # Match read_file's splitlines, including Unicode separators
+                    # that JSON leaves unescaped inside string values.
+                    lines = range(line_number, line_number + len(line.splitlines()))
+                    line_number = lines.stop
                     line = line.strip()
                     if line:
                         try:
@@ -432,9 +435,10 @@ class MemoryStore:
                         except json.JSONDecodeError:
                             continue
                         if isinstance(parsed, dict):
-                            entries.append(cast(dict[str, Any], parsed))
+                            yield lines, cast(dict[str, Any], parsed)
 
-        return entries
+    def _read_entries(self) -> list[dict[str, Any]]:
+        return [entry for _, entry in self._iter_entries()]
 
     def _read_last_entry(self) -> dict[str, Any] | None:
         try:
@@ -506,34 +510,30 @@ class MemoryStore:
             return text
         return self.default_dream_prompt()
 
-    def build_dream_prompt(
-        self, *, max_entries: int = 20, max_tokens: int = 8000,
-        through_cursor: int | None = None,
-    ) -> tuple[str, int] | None:
-        """Batch complete history records, oldest first, without advancing progress.
+    def build_dream_prompt(self) -> tuple[str, int] | None:
+        """Describe the pending journal range for one file-reading Dream task.
 
-        The token target bounds batches, not individual records. An oversized
-        first record is sent whole; the normal context limit can reject it
-        without losing its unprocessed tail. Resident memory arrives through
-        the normal system context.
+        Appends preserve these read_file line numbers. Dream is serialized, and
+        history compaction runs only after the task finishes reading its range.
         """
-        entries = self.read_unprocessed_history(since_cursor=self.get_last_dream_cursor())
-        if through_cursor is not None:
-            entries = [entry for entry in entries if entry["cursor"] <= through_cursor]
-        if not entries:
+        since_cursor = self.get_last_dream_cursor()
+        with self._append_lock:
+            pending = [
+                (lines, cursor)
+                for lines, _, cursor in self._iter_valid_entries()
+                if cursor > since_cursor
+            ]
+        if not pending:
             return None
 
-        prompt = f"{self._dream_template()}\n\n## Conversation History\n"
-        last_cursor: int | None = None
-        for entry in entries[:max_entries]:
-            candidate = prompt + f"[{entry['timestamp']}] {entry['content']}\n"
-            if last_cursor is not None and estimate_prompt_tokens([
-                {"role": "user", "content": candidate},
-            ]) > max_tokens:
-                break
-            prompt = candidate
-            last_cursor = entry["cursor"]
-        return (prompt, last_cursor) if last_cursor is not None else None
+        last_cursor = max(cursor for _, cursor in pending)
+        history_prompt = render_template(
+            "agent/dream_history.md", strip=True,
+            path=str(self.history_file.resolve()),
+            start_line=pending[0][0].start, end_line=pending[-1][0].stop - 1,
+            count=len(pending), since_cursor=since_cursor, last_cursor=last_cursor,
+        )
+        return f"{self._dream_template()}\n\n{history_prompt}", last_cursor
 
     def dream_content_diff(self) -> str:
         """Structured summary of uncommitted changes to the durable memory files.

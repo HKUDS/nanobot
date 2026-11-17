@@ -37,10 +37,7 @@ class _FakeStore:
     def get_last_dream_cursor(self) -> int:
         return self._last_dream_cursor
 
-    def get_latest_cursor(self):
-        return self._dream_prompt_result[1] if self._dream_prompt_result else self._last_dream_cursor
-
-    def build_dream_prompt(self, *, through_cursor=None):
+    def build_dream_prompt(self):
         if self._dream_prompt_result and self._last_dream_cursor < self._dream_prompt_result[1]:
             return self._dream_prompt_result
         return None
@@ -306,7 +303,7 @@ async def test_dream_advances_cursor_when_completed_after_tool_error(tmp_path) -
 
 
 @pytest.mark.asyncio
-async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
+async def test_dream_noop_task_consumes_the_entire_pending_range(tmp_path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     store = MemoryStore(workspace)
@@ -340,11 +337,8 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
 
     await _run_dream_command(ctx)
 
-    assert len(processed_prompts) == 2
-    assert "entry-20" in processed_prompts[0]
-    assert "entry-21" not in processed_prompts[0]
-    assert "entry-21" in processed_prompts[1]
-    assert "entry-01" not in processed_prompts[1]
+    assert len(processed_prompts) == 1
+    assert "Read lines 1-21 (inclusive): 21 pending records" in processed_prompts[0]
     assert store.get_last_dream_cursor() == 21
     assert store.build_dream_prompt() is None
 

@@ -614,14 +614,11 @@ def _run_claimed_gateway(
 
             result = await run_dream(agent, commit_prefix="dream: periodic memory consolidation")
             if result.error:
-                logger.warning(
-                    "Dream stopped after {} completed batches ({}); remaining history is pending",
-                    result.completed_batches, result.error,
-                )
+                logger.warning("Dream did not complete ({})", result.error)
             elif not result.had_input:
                 logger.info("Dream: nothing to process")
             else:
-                logger.info("Dream completed {} history batches", result.completed_batches)
+                logger.info("Dream completed the pending history range")
             if result.commit_sha:
                 logger.info("Dream commit: {}", result.commit_sha)
             return None

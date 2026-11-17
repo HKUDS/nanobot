@@ -1,6 +1,7 @@
 import asyncio
+import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -25,62 +26,106 @@ def loop_for(store, process):
 
 
 @pytest.mark.asyncio
-async def test_drains_snapshot_with_full_tails_and_defers_new_history(tmp_path):
-    store = MemoryStore(tmp_path)
-    tail = "[correction] The current deployment is region-west."
-    # Beyond the old 1,000-character clip, but fits with 19 short records even
-    # when the tokenizer is not ready and batching uses the byte estimate.
-    checkpoint = "[durable] Existing project knowledge.\n" * 60 + tail
-    store.append_history(checkpoint)
-    for index in range(24):
+async def test_one_dream_reads_full_pages_and_defers_new_history(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.supports_tools = True
+    provider.generation = GenerationSettings()
+    provider.estimate_prompt_tokens.return_value = (200_000, "test-provider")
+    loop = AgentLoop(
+        bus=MessageBus(), provider=provider, workspace=tmp_path,
+        context_window_tokens=512_000,
+    )
+    store = loop.context.memory
+    store.git.init()
+    checkpoints = ["Project knowledge. " * 3000 + f"TAIL-{i}" for i in range(3)]
+    for checkpoint in checkpoints:
+        store.append_history(checkpoint)
+    for index in range(23):
         store.append_history(f"queued record {index}")
-    prompts, keys = [], []
+    model_calls = 0
+    read_records = []
 
-    async def process(prompt, **kwargs):
-        prompts.append(prompt)
-        keys.append(kwargs["session_key"])
-        if len(prompts) == 1:
+    def call(name, **arguments):
+        return LLMResponse(content=None, tool_calls=[ToolCallRequest(
+            id=f"call-{model_calls}", name=name, arguments=arguments,
+        )], finish_reason="tool_calls")
+
+    def collect_read(messages):
+        text = next(message["content"] for message in reversed(messages) if message["role"] == "tool")
+        for line in text.splitlines():
+            number, separator, encoded = line.partition("| ")
+            if separator and number.isdigit():
+                read_records.append(json.loads(encoded))
+        return text
+
+    async def chat(**kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        messages = kwargs["messages"]
+        assert store.get_last_dream_cursor() == 0
+        if model_calls == 1:
+            assert "Read lines 1-26" in messages[-1]["content"]
             store.append_history("Arrived while Dream was running")
-        return response()
+            return call("read_file", path=str(store.history_file), offset=1, limit=26)
+        if model_calls == 2:
+            text = collect_read(messages)
+            assert "Showing lines 1-2 of 27" in text
+            assert [entry["content"] for entry in read_records] == checkpoints[:2]
+            return call("read_file", path=str(store.history_file), offset=3, limit=24)
+        if model_calls == 3:
+            collect_read(messages)
+            assert [entry["cursor"] for entry in read_records] == list(range(1, 27))
+            assert read_records[2]["content"] == checkpoints[2]
+            assert read_records[-1]["content"] == "queued record 22"
+            return call("write_file", path=str(store.wiki_dir / "index.md"), content="# Wiki\nCurrent knowledge")
+        return LLMResponse(content="History range consolidated.")
 
-    loop = loop_for(store, process)
-    first = await run_dream(loop, commit_prefix="dream: periodic memory consolidation")
-
-    assert first.error is None
-    assert first.completed_batches == 2
-    assert checkpoint in prompts[0]
-    assert tail in prompts[0]
-    assert "queued record 23" in prompts[-1]
-    assert all("Arrived while Dream" not in prompt for prompt in prompts)
-    assert store.get_last_dream_cursor() == 25
-    assert len(set(keys)) == len(keys)
-    second = await run_dream(loop, commit_prefix="dream: manual run")
-    assert second.completed_batches == 1
-    assert "Arrived while Dream" in prompts[-1]
-    assert store.get_last_dream_cursor() == 26
+    provider.chat_stream_with_retry = AsyncMock(side_effect=chat)
+    try:
+        result = await run_dream(loop, commit_prefix="dream: periodic memory consolidation")
+        assert result.error is None
+        assert model_calls == 4
+        assert store.get_last_dream_cursor() == 26
+        assert result.commit_sha
+        assert (store.wiki_dir / "index.md").read_text(encoding="utf-8") == "# Wiki\nCurrent knowledge"
+        assert len(await loop.sessions.state.list_sessions()) == 1
+        next_prompt, next_cursor = store.build_dream_prompt()
+        assert "Read lines 27-27" in next_prompt
+        assert next_cursor == 27
+    finally:
+        await loop.sessions.state.aclose()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["length", "exception"])
-async def test_failed_batch_remains_pending_after_restart(tmp_path, failure):
-    store = MemoryStore(tmp_path)
+@pytest.mark.parametrize("failure", ["length", "max_iterations", "exception"])
+async def test_failed_task_keeps_entire_range_pending_after_restart(tmp_path, failure):
+    store = MemoryStore(tmp_path, max_history_entries=5)
+    store.git.init()
     for index in range(25):
         store.append_history(f"record-{index:02d}")
-    calls = 0
 
     async def process(prompt, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            if failure == "exception":
-                raise RuntimeError("Provider unavailable")
-            return response(failure)
-        return response()
+        assert "Read lines 1-25" in prompt
+        page = await kwargs["tools"].execute("read_file", {
+            "path": str(store.history_file), "offset": 1, "limit": 10,
+        })
+        assert "record-00" in page and "record-09" in page
+        store.write_memory("# Memory\nPartial update")
+        if failure == "exception":
+            raise RuntimeError("Provider unavailable")
+        return response(failure)
 
     result = await run_dream(loop_for(store, process), commit_prefix="dream: manual run")
     assert result.error
-    assert result.completed_batches == 1
-    assert store.get_last_dream_cursor() == 20
+    assert store.get_last_dream_cursor() == 0
+    assert len(store.read_unprocessed_history(0)) == 25
+    assert result.commit_sha
+    assert store.read_memory() == "# Memory\nPartial update"
 
     restarted = MemoryStore(tmp_path)
     resumed = []
@@ -91,10 +136,9 @@ async def test_failed_batch_remains_pending_after_restart(tmp_path, failure):
 
     result = await run_dream(loop_for(restarted, finish), commit_prefix="dream: manual run")
     assert result.error is None
-    assert result.completed_batches == 1
     assert restarted.get_last_dream_cursor() == 25
-    assert "record-20" in resumed[0] and "record-24" in resumed[0]
-    assert "record-00" not in resumed[0]
+    assert len(resumed) == 1
+    assert "Read lines 1-25" in resumed[0]
 
 
 @pytest.mark.asyncio
@@ -126,8 +170,8 @@ async def test_overlapping_manual_and_periodic_runs_do_not_repeat_history(tmp_pa
         release.set()
         outcomes = await asyncio.gather(first, second)
     assert len(calls) == 1
-    assert [outcome.completed_batches for outcome in outcomes] == [1, 0]
-    assert not outcomes[1].had_input
+    assert all(outcome.error is None for outcome in outcomes)
+    assert [outcome.had_input for outcome in outcomes] == [True, False]
     assert store.get_last_dream_cursor() == 1
 
 

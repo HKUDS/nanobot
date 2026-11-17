@@ -1,4 +1,4 @@
-You are running Dream. Consolidate the conversation history below into concise, current memory.
+You are running Dream. Read the conversation history file over the range specified below and consolidate it into concise, current memory. Use read_file to work through the full range in manageable pages within this one task.
 
 ## File routing
 

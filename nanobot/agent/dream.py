@@ -16,14 +16,13 @@ if TYPE_CHECKING:
 @dataclass
 class DreamResult:
     had_input: bool = False
-    completed_batches: int = 0
     changed: bool = False
     error: str | None = None
     commit_sha: str | None = None
 
 
 async def run_dream(loop: AgentLoop, *, commit_prefix: str) -> DreamResult:
-    """Drain the pending journal at admission, serializing Dream writers."""
+    """Run one Dream over the pending journal range, serializing writers."""
     store = loop.context.memory
     result = DreamResult()
 
@@ -32,27 +31,22 @@ async def run_dream(loop: AgentLoop, *, commit_prefix: str) -> DreamResult:
 
     async with store.dream_lock:
         try:
-            through_cursor = store.get_latest_cursor()
-            batch = store.build_dream_prompt(through_cursor=through_cursor)
-            if batch is not None:
+            history = store.build_dream_prompt()
+            if history is not None:
                 result.had_input = True
-                runtime = loop.dream_runtime()
-                while batch is not None:
-                    prompt, last_cursor = batch
-                    response = await loop.process_direct(
-                        prompt,
-                        session_key=MemoryStore.dream_session_key(),
-                        ephemeral=True,
-                        tools=store.build_dream_tools(),
-                        on_progress=silent,
-                        runtime=runtime,
-                    )
-                    if not MemoryStore.dream_run_completed(response):
-                        result.error = MemoryStore.dream_incompletion_reason(response)
-                        break
+                prompt, last_cursor = history
+                response = await loop.process_direct(
+                    prompt,
+                    session_key=MemoryStore.dream_session_key(),
+                    ephemeral=True,
+                    tools=store.build_dream_tools(),
+                    on_progress=silent,
+                    runtime=loop.dream_runtime(),
+                )
+                if MemoryStore.dream_run_completed(response):
                     store.set_last_dream_cursor(last_cursor)
-                    result.completed_batches += 1
-                    batch = store.build_dream_prompt(through_cursor=through_cursor)
+                else:
+                    result.error = MemoryStore.dream_incompletion_reason(response)
         except Exception as exc:
             result.error = str(exc)
             logger.exception("Dream failed")
