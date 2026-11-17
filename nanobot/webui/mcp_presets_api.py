@@ -602,7 +602,7 @@ def mcp_presets_payload(
     ]
     existing_names = {str(row["name"]) for row in (*preset_rows, *custom_rows)}
     managed_plugins = CliAppManager(workspace=config.workspace_path).managed_plugin_owners()
-    plugin_rows = [
+    plugin_rows: list[dict[str, Any]] = [
         _agent_plugin_payload(plugin) | {"managed_by_cli": managed_plugins.get(plugin.root)}
         for plugin in discover_agent_plugins(config.workspace_path)
         if f"plugin-{plugin.name}" not in existing_names
