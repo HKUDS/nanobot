@@ -32,7 +32,6 @@ class TestBuildDreamPrompt:
         assert f"History file: {store.history_file.resolve()}" in prompt
         assert "Read lines 1-1 (inclusive): 1 pending records" in prompt
         assert "0 < cursor <= 1" in prompt
-        assert "Use read_file with offset and limit" in prompt
 
     def test_cursor_advances_only_new_entries(self, store):
         store.append_history("first")

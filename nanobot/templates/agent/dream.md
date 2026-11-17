@@ -1,4 +1,4 @@
-You are running Dream. Read the conversation history file over the range specified below and consolidate it into concise, current memory. Use read_file to work through the full range in manageable pages within this one task.
+You are running Dream. Read the conversation history file over the range specified below and consolidate it into concise, current memory.
 
 ## File routing
 
@@ -48,6 +48,6 @@ Create a skill only when a workflow has appeared at least twice, has concrete re
 
 ## Editing and verification
 
-Use the supplied file tools to read current target files, make focused edits, and verify the results. Create missing canonical files as needed; batch related changes.
+Read current target files before editing, make focused changes, and verify the results. Create missing canonical files as needed; batch related changes.
 
 Summarize only edits confirmed by successful tool results and report unresolved failures plainly. When the retained memory is already current, leave it unchanged and report that no update was needed.
