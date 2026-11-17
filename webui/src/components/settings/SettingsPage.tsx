@@ -35,7 +35,7 @@ import {
   SettingsSectionTitle,
   RestartRequiredNotice,
 } from "@/components/settings/shared/SettingsControls";
-import { AppsCatalogSettings } from "@/components/settings/system/AppsSettings";
+import { AppsCatalogPage } from "@/components/settings/system/AppsSettings";
 import {
   AutomationDeleteDialog,
   AutomationEditDialog,
@@ -497,7 +497,6 @@ export function SettingsPage({
             onBeforeCloseChange={registerChannelCompletion}
             onConfigureMcp={(name) => {
               setMcpSetupName(name);
-              systemState.setAppsKindFilter("mcp");
               systemState.setAppsQuery(name);
               selectSection("apps");
             }}
@@ -521,7 +520,7 @@ export function SettingsPage({
       case "apps":
         return (
           <div className="settings-stack">
-            <AppsCatalogSettings
+            <AppsCatalogPage
               onConfigureProxy={configureProxy}
               setupName={mcpSetupName}
               onSetupOpened={() => setMcpSetupName(null)}
@@ -530,7 +529,6 @@ export function SettingsPage({
               cliAppsLoading={systemState.cliAppsLoading}
               mcpPresetsLoading={systemState.mcpPresetsLoading}
               query={systemState.appsQuery}
-              filter={systemState.appsKindFilter}
               cliActionKey={systemState.cliAppsAction}
               mcpActionKey={systemState.mcpPresetAction}
               mcpOAuthFlow={systemState.mcpOAuthFlow}
@@ -549,7 +547,6 @@ export function SettingsPage({
               showBrandLogos={localPrefs.brandLogos}
               requiresRestartPending={pendingRestartSections.runtime}
               onQueryChange={systemState.setAppsQuery}
-              onFilterChange={systemState.setAppsKindFilter}
               onCliAction={systemActions.handleCliAppAction}
               onMcpAction={systemActions.handleMcpPresetAction}
               onMcpOAuthConnect={systemActions.handleMcpOAuthConnect}

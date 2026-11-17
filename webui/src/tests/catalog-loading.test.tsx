@@ -57,6 +57,7 @@ describe("catalog loading", () => {
     cleanup();
     fetch.mockClear();
     renderSettingsView({ client, initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("button", { name: "Apps" }));
     expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Computer Use" })).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
@@ -66,6 +67,7 @@ describe("catalog loading", () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + TOOLS_CATALOG_TTL_MS + 1);
     try {
       renderSettingsView({ client, initialSettings: settingsPayload() });
+      fireEvent.click(screen.getByRole("button", { name: "Apps" }));
       expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Computer Use" })).toBeInTheDocument();
       expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
@@ -134,6 +136,7 @@ describe("catalog loading", () => {
       return Promise.resolve(jsonResponse(settingsPayload()));
     }));
     renderSettingsView({ initialSettings: settingsPayload() });
+    fireEvent.click(screen.getByRole("button", { name: "Apps" }));
     expect(screen.getByRole("status", { name: "Loading apps…" })).toHaveAttribute("aria-busy", "true");
 
     await act(async () => { cli.resolve(jsonResponse({ apps: [app], installed_count: 1 })); });
