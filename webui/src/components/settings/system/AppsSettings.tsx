@@ -10,6 +10,7 @@ import {
   useId,
   useMemo,
   useState,
+  type ComponentProps,
   type ComponentPropsWithoutRef,
   type Dispatch,
   type ReactNode,
@@ -100,6 +101,23 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
   toolTimeout: "30",
   useProxy: false,
 };
+
+export function AppsCatalogPage(props: Omit<ComponentProps<typeof AppsCatalogSettings>, "filter" | "onFilterChange">) {
+  const [selection, setSelection] = useState<AppsKindFilter | null>(() => props.setupName ? "mcp" : null);
+  const hasReady = Boolean(
+    props.cliApps?.apps.some((app) => app.installed) || props.mcpPresets?.presets.some(mcpPresetReady),
+  );
+  const waiting = (props.cliAppsLoading && !props.cliApps) || (props.mcpPresetsLoading && !props.mcpPresets);
+  const filter = selection ?? (hasReady || waiting ? "ready" : "cli");
+
+  useEffect(() => {
+    if (selection === null && (hasReady || (props.cliApps && props.mcpPresets))) {
+      setSelection(hasReady ? "ready" : "cli");
+    }
+  }, [selection, hasReady, props.cliApps, props.mcpPresets]);
+
+  return <AppsCatalogSettings {...props} filter={filter} onFilterChange={setSelection} />;
+}
 
 export function AppsCatalogSettings({
   setupName,
@@ -962,12 +980,13 @@ function appsTitle(item: AppsCatalogItem): string {
   return item.kind === "cli" ? item.app.display_name : item.preset.display_name;
 }
 
+function mcpPresetReady(preset: McpPresetInfo): boolean {
+  if (preset.enabled !== undefined) return preset.enabled;
+  return preset.installed && preset.configured && preset.runtime_status === "connected";
+}
+
 function appsReady(item: AppsCatalogItem): boolean {
-  if (item.kind === "cli") return item.app.installed;
-  if (item.preset.enabled !== undefined) return item.preset.enabled;
-  return item.preset.installed &&
-    item.preset.configured &&
-    item.preset.runtime_status === "connected";
+  return item.kind === "cli" ? item.app.installed : mcpPresetReady(item.preset);
 }
 
 function appsSearchText(item: AppsCatalogItem): string {
