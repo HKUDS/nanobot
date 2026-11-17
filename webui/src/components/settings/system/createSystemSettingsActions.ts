@@ -172,6 +172,7 @@ export function createSystemSettingsActions({
       setCliApps(payload);
       if (action !== "test") {
         notifyCliAppsChanged(payload);
+        state.toolsCatalog.invalidateMcpPresets();
       }
       setCliAppsMessage(payload.last_action?.message ?? null);
       setCliAppsFocusName(action === "uninstall" ? null : name);

@@ -457,6 +457,13 @@ class CliAppManager:
         """Return registry names explicitly installed through CLI Apps."""
         return sorted(str(name) for name in self._load_installed())
 
+    def managed_plugin_owners(self) -> dict[Path, str]:
+        """Map the plugin directories managed by installed CLI Apps to their owners."""
+        return {
+            (self.workspace / _plugin_skill_relative_path(name)).parents[2].resolve(): name
+            for name in self.installed_names()
+        }
+
     def installed_skill_aliases(self) -> dict[str, str]:
         """Map pre-plugin CLI App skill names to their portable identities."""
         aliases: dict[str, str] = {}
