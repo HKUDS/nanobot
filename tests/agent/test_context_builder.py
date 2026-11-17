@@ -127,6 +127,23 @@ class TestLoadBootstrapFiles:
         assert "project soul collision" not in result
         assert "project user collision" not in result
 
+    def test_resident_memory_keeps_navigation_without_loading_wiki_pages(self, tmp_path):
+        builder = _builder(tmp_path)
+        builder.memory.write_soul("Always verify corrections.")
+        builder.memory.write_user("Prefer concise Chinese replies.")
+        builder.memory.write_memory("Deployment details: [Wiki](wiki/index.md).")
+        builder.memory.wiki_dir.mkdir()
+        (builder.memory.wiki_dir / "index.md").write_text(
+            "Detailed deployment uses region-west.\n" * 1000, encoding="utf-8",
+        )
+
+        prompt = builder.build_system_prompt()
+
+        assert "Always verify corrections." in prompt
+        assert "Prefer concise Chinese replies." in prompt
+        assert "Deployment details: [Wiki](wiki/index.md)." in prompt
+        assert "Detailed deployment uses region-west." not in prompt
+
     def test_selected_project_without_agents_does_not_fall_back(self, tmp_path):
         agent_home = tmp_path / "agent-home"
         project = tmp_path / "project"

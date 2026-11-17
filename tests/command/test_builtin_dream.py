@@ -32,12 +32,18 @@ class _FakeStore:
         self._dream_prompt_result = dream_prompt_result
         self._content_diff = content_diff
         self.compact_history_called = False
+        self.dream_lock = asyncio.Lock()
 
     def get_last_dream_cursor(self) -> int:
         return self._last_dream_cursor
 
-    def build_dream_prompt(self):
-        return self._dream_prompt_result
+    def get_latest_cursor(self):
+        return self._dream_prompt_result[1] if self._dream_prompt_result else self._last_dream_cursor
+
+    def build_dream_prompt(self, *, through_cursor=None):
+        if self._dream_prompt_result and self._last_dream_cursor < self._dream_prompt_result[1]:
+            return self._dream_prompt_result
+        return None
 
     def build_dream_tools(self):
         return None
@@ -334,16 +340,13 @@ async def test_dream_noop_batch_unlocks_following_history(tmp_path) -> None:
 
     await _run_dream_command(ctx)
 
-    assert len(processed_prompts) == 1
+    assert len(processed_prompts) == 2
     assert "entry-20" in processed_prompts[0]
     assert "entry-21" not in processed_prompts[0]
-    assert store.get_last_dream_cursor() == 20
-    next_result = store.build_dream_prompt()
-    assert next_result is not None
-    next_prompt, next_cursor = next_result
-    assert next_cursor == 21
-    assert "entry-21" in next_prompt
-    assert "entry-01" not in next_prompt
+    assert "entry-21" in processed_prompts[1]
+    assert "entry-01" not in processed_prompts[1]
+    assert store.get_last_dream_cursor() == 21
+    assert store.build_dream_prompt() is None
 
 
 @pytest.mark.asyncio

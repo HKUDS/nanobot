@@ -106,15 +106,31 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert prompt.startswith(store.default_dream_prompt() + "\n\n## Conversation History\n")
 
-    def test_truncates_long_entries_at_1000_chars(self, store):
-        long_content = "x" * 2000
-        store.append_history(long_content)
-        result = store.build_dream_prompt()
+    def test_keeps_complete_checkpoint_even_above_batch_token_target(self, store):
+        long_content = "[durable] Existing project knowledge.\n" * 100
+        long_content += "[correction] The current deployment is region-west, not region-east."
+        cursor = store.append_history(long_content)
+        store.append_history("next checkpoint")
+        result = store.build_dream_prompt(max_tokens=1)
         assert result is not None
-        prompt, _ = result
-        assert long_content not in prompt
-        assert "x" * 1000 in prompt
-        assert "x" * 1001 not in prompt
+        prompt, last_cursor = result
+        assert long_content in prompt
+        assert "next checkpoint" not in prompt
+        assert last_cursor == cursor
+        assert store.get_last_dream_cursor() == 0
+
+    def test_token_budget_defers_whole_records(self, store):
+        from nanobot.utils.helpers import estimate_prompt_tokens
+
+        store.append_history("First complete checkpoint.\n" * 100)
+        store.append_history("Second complete checkpoint.\n" * 100)
+        first_prompt, first_cursor = store.build_dream_prompt(max_entries=1)
+        budget = estimate_prompt_tokens([{"role": "user", "content": first_prompt}])
+        assert store.build_dream_prompt(max_tokens=budget) == (first_prompt, first_cursor)
+        store.set_last_dream_cursor(first_cursor)
+        next_prompt, next_cursor = store.build_dream_prompt(max_tokens=budget)
+        assert "Second complete checkpoint.\n" * 100 in next_prompt
+        assert next_cursor == 2
 
     def test_batches_oldest_unprocessed_entries_first(self, store):
         for i in range(25):
@@ -242,6 +258,23 @@ class TestDreamTools:
         assert "Project Y active" in store.memory_file.read_text(encoding="utf-8")
         assert "Precise" in store.soul_file.read_text(encoding="utf-8")
         assert "**Name**: Ada" in store.user_file.read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_dream_can_create_and_update_wiki_pages(self, store):
+        tools = store.build_dream_tools()
+        path = "memory/wiki/projects/example.md"
+        assert "Successfully wrote" in await tools.execute(
+            "write_file", {"path": path, "content": "# Example\nRegion east\n"},
+        )
+        assert "Region east" in await tools.execute("read_file", {"path": path})
+        assert "Patch applied" in await tools.execute("apply_patch", {"edits": [{
+            "path": path, "action": "replace", "old_text": "Region east", "new_text": "Region west",
+        }]})
+        await tools.execute("read_file", {"path": path})
+        assert "Patch applied" in await tools.execute("edit_file", {
+            "path": path, "old_text": "Region west", "new_text": "Region north",
+        })
+        assert "Region north" in (store.workspace / path).read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     async def test_dream_can_write_workspace_skills(self, store):
@@ -419,6 +452,25 @@ class TestEphemeralDirect:
         assert runtime.model_preset == "dream"
         assert loop.model == "test-model"
         assert loop.model_preset is None
+
+    async def test_oversized_dream_input_stays_pending_at_runtime_limit(self, _make_loop):
+        from nanobot.agent.dream import run_dream
+
+        loop, _ = _make_loop
+        store = loop.context.memory
+        checkpoint = "[durable] Project knowledge.\n" * 500 + "TAIL: current decision"
+        cursor = store.append_history(checkpoint)
+        loop.provider.estimate_prompt_tokens.return_value = (100_000, "test-provider")
+
+        result = await run_dream(loop, commit_prefix="dream: manual run")
+
+        assert result.error and "context budget" in result.error
+        assert result.completed_batches == 0
+        assert store.get_last_dream_cursor() == 0
+        assert store.read_unprocessed_history(0)[0]["cursor"] == cursor
+        measured = loop.provider.estimate_prompt_tokens.call_args.args[0]
+        assert any(checkpoint in str(message.get("content")) for message in measured)
+        loop.provider.chat_stream_with_retry.assert_not_awaited()
 
     async def test_ephemeral_skips_raw_archive(self, tmp_path, _make_loop):
         from unittest.mock import patch
@@ -873,3 +925,17 @@ class TestDreamContentDiff:
         store.git.auto_commit("initial")
         store.set_last_dream_cursor(99)
         assert store.dream_content_diff() == ""
+
+    def test_wiki_changes_are_in_dream_diff_and_version_history(self, store):
+        store.git.init()
+        store.wiki_dir.mkdir()
+        (store.wiki_dir / "index.md").write_text("# Wiki\nDeployment details\n", encoding="utf-8")
+        store.set_last_dream_cursor(7)
+        diff = store.dream_content_diff()
+        assert "memory/wiki/index.md" in diff
+        assert "Deployment details" in diff
+        assert ".dream_cursor" not in diff
+        sha = store.git.auto_commit(store.build_dream_commit_message("dream: test", diff))
+        commit, saved_diff = store.git.show_commit_diff(sha)
+        assert "memory/wiki/index.md" in saved_diff
+        assert "Deployment details" in commit.message

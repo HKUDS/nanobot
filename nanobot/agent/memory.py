@@ -31,6 +31,7 @@ from nanobot.utils.helpers import (
     build_assistant_message,
     content_with_media_breadcrumbs,
     ensure_dir,
+    estimate_prompt_tokens,
     estimate_prompt_tokens_chain,
     strip_think,
     truncate_text,
@@ -50,7 +51,7 @@ if TYPE_CHECKING:
 
 
 class MemoryStore:
-    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
+    """File I/O for the memory journal, resident memory, and on-demand wiki."""
 
     _DEFAULT_MAX_HISTORY = 1000
     # Durable files whose real working-tree delta grounds Dream commit messages.
@@ -68,6 +69,7 @@ class MemoryStore:
         self.max_history_entries = max_history_entries
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
+        self.wiki_dir = self.memory_dir / "wiki"
         self.history_file = self.memory_dir / "history.jsonl"
         self.legacy_history_file = self.memory_dir / "HISTORY.md"
         self.soul_file = workspace / "SOUL.md"
@@ -79,9 +81,10 @@ class MemoryStore:
         self._oversize_logged = False
         self._dream_prompt_oversize_logged = False
         self._append_lock = threading.Lock()
+        self.dream_lock = asyncio.Lock()
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
-        ])
+        ], tracked_dirs=["memory/wiki"])
         self._maybe_migrate_legacy_history()
 
     @property
@@ -503,27 +506,34 @@ class MemoryStore:
             return text
         return self.default_dream_prompt()
 
-    def build_dream_prompt(self, *, max_entries: int = 20) -> tuple[str, int] | None:
-        """Build the Dream prompt with unprocessed history context.
+    def build_dream_prompt(
+        self, *, max_entries: int = 20, max_tokens: int = 8000,
+        through_cursor: int | None = None,
+    ) -> tuple[str, int] | None:
+        """Batch complete history records, oldest first, without advancing progress.
 
-        Returns ``(prompt, last_cursor)`` or ``None`` if nothing to process.
-
-        The current contents of the durable memory files (SOUL.md, USER.md,
-        memory/MEMORY.md) reach Dream through the normal agent system context.
+        The token target bounds batches, not individual records. An oversized
+        first record is sent whole; the normal context limit can reject it
+        without losing its unprocessed tail. Resident memory arrives through
+        the normal system context.
         """
-        last_cursor = self.get_last_dream_cursor()
-        entries = self.read_unprocessed_history(since_cursor=last_cursor)
+        entries = self.read_unprocessed_history(since_cursor=self.get_last_dream_cursor())
+        if through_cursor is not None:
+            entries = [entry for entry in entries if entry["cursor"] <= through_cursor]
         if not entries:
             return None
 
-        batch = entries[:max_entries]
-        history_text = "\n".join(
-            f"[{e['timestamp']}] {truncate_text(e['content'], 1000)}"
-            for e in batch
-        )
-        template = self._dream_template()
-        prompt = f"{template}\n\n## Conversation History\n{history_text}"
-        return (prompt, batch[-1]["cursor"])
+        prompt = f"{self._dream_template()}\n\n## Conversation History\n"
+        last_cursor: int | None = None
+        for entry in entries[:max_entries]:
+            candidate = prompt + f"[{entry['timestamp']}] {entry['content']}\n"
+            if last_cursor is not None and estimate_prompt_tokens([
+                {"role": "user", "content": candidate},
+            ]) > max_tokens:
+                break
+            prompt = candidate
+            last_cursor = entry["cursor"]
+        return (prompt, last_cursor) if last_cursor is not None else None
 
     def dream_content_diff(self) -> str:
         """Structured summary of uncommitted changes to the durable memory files.
@@ -533,7 +543,9 @@ class MemoryStore:
         """
         if not self._git.is_initialized():
             return ""
-        return self._git.summarize_working_tree(list(self._DREAM_CONTENT_PATHS))
+        return self._git.summarize_working_tree(
+            list(self._DREAM_CONTENT_PATHS), directories=["memory/wiki"],
+        )
 
     def build_dream_tools(self) -> ToolRegistry:
         """Build the restricted tool registry used by Dream runs."""
@@ -561,18 +573,21 @@ class MemoryStore:
         tools.register(EditFileTool(
             workspace=workspace,
             allowed_dir=skills_dir,
+            extra_write_allowed_dirs=[self.wiki_dir],
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         tools.register(ApplyPatchTool(
             workspace=workspace,
             allowed_dir=skills_dir,
+            extra_write_allowed_dirs=[self.wiki_dir],
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
         tools.register(WriteFileTool(
             workspace=workspace,
             allowed_dir=skills_dir,
+            extra_write_allowed_dirs=[self.wiki_dir],
             extra_write_allowed_files=editable_files,
             file_states=file_states,
         ))
@@ -675,8 +690,8 @@ class MemoryStore:
 
     @staticmethod
     def dream_session_key() -> str:
-        """Return a unique session key for a Dream run, e.g. ``dream:20260528-100000``."""
-        return f"dream:{datetime.now():%Y%m%d-%H%M%S}"
+        """Give every batch its own session, including batches in the same second."""
+        return f"dream:{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}"
 
     @staticmethod
     def build_dream_commit_message(prefix: str, diff_body: str) -> str:

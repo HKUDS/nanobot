@@ -917,6 +917,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
                 "USER.md",
                 "memory/MEMORY.md",
             ],
+            tracked_dirs=["memory/wiki"],
         )
         gs.init()
     except Exception:

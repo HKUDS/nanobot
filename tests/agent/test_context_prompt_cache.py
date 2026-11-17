@@ -79,10 +79,8 @@ def test_system_prompt_reflects_current_dream_memory_contract(tmp_path, selected
     prompt = builder.build_system_prompt(workspace=project)
 
     assert "memory/history.jsonl" in prompt
-    assert (
-        "Only Dream memory-consolidation tasks may edit the profile and long-term memory files "
-        "listed above."
-    ) in prompt
+    assert "memory/wiki/ (read on demand)" in prompt
+    assert "Only Dream memory-consolidation tasks may edit the profile, long-term memory, and wiki." in prompt
 
 
 def test_provider_context_appended_after_user_content(tmp_path) -> None:

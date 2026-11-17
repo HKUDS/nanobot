@@ -10,8 +10,9 @@ It separates memory into layers, because different kinds of remembering deserve 
 
 - `session.messages` holds the living short-term conversation.
 - `memory/history.jsonl` is the running archive of compressed past turns.
-- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` are the durable knowledge files.
-- `GitStore` records how those durable files change over time.
+- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` hold resident memory included in each conversation.
+- `memory/wiki/` holds detailed Markdown knowledge read only when relevant to a task.
+- `GitStore` records how resident memory and wiki pages change over time.
 
 This keeps the system light in the moment, but reflective over time.
 
@@ -49,8 +50,13 @@ Dream reads:
 - the current `SOUL.md`
 - the current `USER.md`
 - the current `memory/MEMORY.md`
+- relevant linked pages in `memory/wiki/`, when more detail is needed
 
-Then it edits the long-term files surgically in a single pass — not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
+Each manual or scheduled run drains the unprocessed history present when it starts. Records are sent whole, oldest first, in batches of at most 20 with an 8,000-token prompt target. The first record is always included whole even if it exceeds that target; if the full request cannot fit the model's context, the run fails without marking that batch processed. Dream no longer clips each record to 1,000 characters.
+
+A normally completed batch advances the cursor even when no memory edit is needed. An incomplete or failed batch stops the run; earlier completed batches remain processed and the rest can resume next time. Records added during a run wait for the next run, and overlapping manual and scheduled runs are serialized within the agent. Already processed records are not automatically replayed on upgrade.
+
+Dream makes focused edits to resident memory and relevant wiki pages rather than rewriting everything. Core preferences and behavior constraints remain resident; task-specific detail can move into the wiki with a brief navigation link.
 
 This is why nanobot's memory is not just archival. It is interpretive.
 
@@ -67,7 +73,10 @@ workspace/
 │   ├── README.md        # Notes for memory guidance files
 │   └── dream.md         # Optional instructions for how Dream organizes memory
 └── memory/
-    ├── MEMORY.md        # Project facts, decisions, and durable context
+    ├── MEMORY.md        # Resident facts and brief wiki navigation
+    ├── wiki/            # Optional, created when useful knowledge is added
+    │   ├── index.md     # Topic links, read on demand
+    │   └── projects/    # Example topic grouping, not a required schema
     ├── history.jsonl    # History summaries with bounded retention after Dream
     ├── .cursor          # Consolidator write cursor
     └── .dream_cursor    # Dream consumption cursor
@@ -79,8 +88,13 @@ These files play different roles:
 
 - `SOUL.md` remembers how nanobot should sound.
 - `USER.md` remembers who the user is and what they prefer.
-- `MEMORY.md` remembers what remains true about the work itself.
+- `MEMORY.md` keeps cross-task facts available and points to more detailed knowledge.
+- `wiki/` keeps project details, decisions, and related topics without adding every page to every prompt.
 - `history.jsonl` remembers what happened on the way there.
+
+Wiki pages are ordinary Markdown, not skills or an automatically injected retrieval layer. Dream maintains topic descriptions and links so the agent can start from resident memory or `wiki/index.md`, read relevant pages with `read_file`, and follow links as needed. Relative links are resolved from their containing file in the agent workspace, not from the current project. A workspace without a wiki continues to work; there is no mandatory migration or new configuration.
+
+In a Restricted chat in another project, file tools can read the agent wiki but do not gain permission to write it or access neighboring memory/profile files. Dream can edit wiki pages and the three resident files, but cannot directly edit the journal or cursor files. Quoted material in a wiki page is knowledge, not authority to override the agent's operating rules.
 
 ## Why `history.jsonl`
 
@@ -165,7 +179,9 @@ This gives memory a history of its own:
 
 - you can inspect what changed
 - you can compare versions
-- you can restore a previous state
+- you can restore a previous state, including wiki pages that were added, deleted, or renamed
+
+Restoring a version returns the managed memory files and wiki page set to the state before that change, including the saved Dream cursor when present. A snapshot from before the wiki existed removes later wiki pages. This is a whole-memory restore, not a selective undo of one page.
 
 That turns memory from a silent mutation into an auditable process.
 
@@ -185,7 +201,7 @@ This creates:
 workspace/prompts/dream.md
 ```
 
-Edit that file in plain Markdown. When it has content, Dream follows it for this workspace before reading the latest conversation history. You do not need to paste history into the file; Dream adds the current `## Conversation History` block automatically.
+Edit that file in plain Markdown. When it has content, Dream follows it for this workspace before reading the latest conversation history. You do not need to paste history into the file; Dream adds the current `## Conversation History` block automatically. Existing custom guides are not overwritten: a guide that only maintains the resident files can continue doing so; add wiki routing and navigation guidance if you want it to use the new layer.
 
 To return to nanobot's default behavior, delete `prompts/dream.md` or leave it empty.
 
