@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.goal_permission import GoalInputScope
 from nanobot.agent.tools.context import RequestContext
-from nanobot.bus.runtime_events import RuntimeEventContext
-from nanobot.goal.state import mutate_goal
+from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventContext
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
     discard_legacy_goal_state_key,
@@ -99,12 +98,21 @@ class GoalExecutionPolicy:
             discard_legacy_goal_state_key(metadata)
             return True
 
+        context = RuntimeEventContext(
+            channel=request.channel, chat_id=request.chat_id,
+            session_key=request.session_key, session_generation=request.session_generation,
+            metadata=dict(request.metadata),
+        )
+
+        async def commit_and_publish() -> None:
+            changed, metadata = await self._state.mutate_metadata(
+                context.session_key, block, expected_generation=context.session_generation,
+            )
+            if changed and self._bus is not None:
+                await self._bus.publish(GoalStateChanged(context=context, session_metadata=metadata))
+
         try:
-            await shield_and_drain(mutate_goal(self._state, self._bus, RuntimeEventContext(
-                channel=request.channel, chat_id=request.chat_id,
-                session_key=request.session_key, session_generation=request.session_generation,
-                metadata=dict(request.metadata),
-            ), block))
+            await shield_and_drain(commit_and_publish())
         except SessionConflictError:
             # Reset/delete retired this execution; its failure belongs to the old generation.
             return

@@ -586,17 +586,10 @@ async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, ending: str
             elif ending == "length":
                 if number <= 20:
                     text, reason = "Partial work." if number == 17 else "", "length"
-                elif number == 21:
+                else:
+                    assert number == 21
                     assert "What is the status?" in str(payload["messages"])
                     text, reason = "The goal is blocked.", "stop"
-                elif number == 22:
-                    assert "Please resume the goal" in str(payload["messages"])
-                    tool = ("update_goal", {"action": "resume"})
-                elif number == 23:
-                    tool = ("update_goal", {"action": "complete", "recap": "Verified after resuming."})
-                else:
-                    assert number == 24
-                    text, reason = "Verified after resuming.", "stop"
             elif stop_during_checkpoint:
                 assert number == 17
                 assert "Handle this independent input" in str(payload["messages"])
@@ -774,18 +767,6 @@ with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
                 assert status_end["goal_state"]["status"] == "blocked"
                 assert len(requests) == 21
                 await receive_until(lambda event: event.get("event") == "goal_status" and event.get("status") == "idle")
-                await ws.send(json.dumps({"type": "message", "chat_id": chat_id,
-                                          "content": "Please resume the goal", "webui": True,
-                                          "turn_id": "resume-goal"}))
-                resumed = await receive_until(lambda event: (
-                    event.get("event") == "goal_state" and event.get("goal_state", {}).get("active")
-                ))
-                assert resumed["goal_state"]["objective"] == "Verify the synthetic task."
-                resumed_end = await receive_until(lambda event: event.get("event") == "turn_end")
-                assert resumed_end.get("outcome", "completed") == "completed"
-                assert resumed_end["turn_id"] == "resume-goal"
-                assert not resumed_end["goal_state"]["active"]
-                assert len(requests) == 24
             else:
                 await asyncio.wait_for(closing_request.wait(), 20)
                 waiting = await receive_until(lambda event: (

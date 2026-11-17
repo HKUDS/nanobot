@@ -542,7 +542,7 @@ async def test_agent_cannot_cancel_a_goal(tmp_path, status):
         before = (await sm.state.read_header("websocket:c1")).metadata[GOAL_STATE_KEY]
         result = await _execute(update, ctx, action="cancel", recap="Cancelled by agent")
         assert result.is_error
-        assert "complete, block, replace, or resume" in result
+        assert "complete, block, or replace" in result
         assert (await sm.state.read_header("websocket:c1")).metadata[GOAL_STATE_KEY] == before
         guidance = await create.runtime_context_provider()(_request_context(metadata={}))
         assert guidance is not None and "/cancel_goal" in guidance.content

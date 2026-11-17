@@ -8,15 +8,13 @@ from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.goal_permission import (
     goal_mutation_allowed,
-    goal_resume_allowed,
     revoke_goal_mutation_permission,
 )
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import RequestContext, current_request_context
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 from nanobot.bus.queue import MessageBus
-from nanobot.bus.runtime_events import RuntimeEventContext
-from nanobot.goal.state import mutate_goal
+from nanobot.bus.runtime_events import GoalStateChanged, RuntimeEventContext
 from nanobot.runtime_context import RuntimeContextBlock, wrap_runtime_context_lines
 from nanobot.session.goal_state import (
     GOAL_STATE_KEY,
@@ -35,7 +33,7 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session, SessionManager
 
 
-_GOAL_ACTIONS = ("complete", "block", "replace", "resume")
+_GOAL_ACTIONS = ("complete", "block", "replace")
 _CREATE_UNAVAILABLE_ERROR = (
     "Error: create_goal is unavailable for this turn. Ask the user to submit the complete "
     "objective as `/goal <task>`."
@@ -83,26 +81,19 @@ class _GoalToolsMixin:
         blob: dict[str, Any],
         *,
         revoke_permission: bool = False,
-    ) -> bool:
+    ) -> None:
         saved = False
-        prior = deepcopy(goal_state_raw(sess.metadata))
-        rc = current_request_context()
-        assert rc is not None
 
         async def save_and_publish() -> None:
             nonlocal saved
-            def change(metadata: dict[str, Any]) -> bool:
-                if goal_state_raw(metadata) != prior:
-                    return False
+            def change(metadata: dict[str, Any]) -> None:
                 metadata[GOAL_STATE_KEY] = deepcopy(blob)
                 discard_legacy_goal_state_key(metadata)
-                return True
-            saved, sess.metadata = await mutate_goal(
-                self._sessions.state, self._bus, RuntimeEventContext(
-                    channel=rc.channel, chat_id=rc.chat_id, session_key=sess.key,
-                    session_generation=sess.generation, metadata=dict(rc.metadata),
-                ), change,
+            _, sess.metadata = await self._sessions.state.mutate_metadata(
+                sess.key, change, expected_generation=sess.generation,
             )
+            saved = True
+            await self._publish_goal_state_changed(sess.metadata)
 
         try:
             await shield_and_drain(save_and_publish())
@@ -111,7 +102,25 @@ class _GoalToolsMixin:
             if revoke_permission and saved:
                 revoke_goal_mutation_permission()
 
-        return saved
+    async def _publish_goal_state_changed(self, metadata: dict[str, Any]) -> None:
+        bus = self._bus
+        rc = current_request_context()
+        if bus is None or rc is None:
+            return
+        cid = (rc.chat_id or "").strip()
+        if not cid:
+            return
+        await bus.publish(
+            GoalStateChanged(
+                context=RuntimeEventContext(
+                    channel=rc.channel,
+                    chat_id=cid,
+                    session_key=rc.session_key or f"{rc.channel}:{cid}",
+                    metadata=dict(rc.metadata or {}),
+                ),
+                session_metadata=dict(metadata),
+            )
+        )
 
 
 @tool_parameters(
@@ -220,8 +229,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
             "ui_summary": summary,
             "started_at": _iso_now(),
         }
-        if not await self._save_goal_state(sess, blob):
-            return ToolResult.error("Error: the goal changed before creation could be committed.")
+        await self._save_goal_state(sess, blob)
         extra = f"\nSummary line: {summary}" if summary else ""
         return (
             "Goal recorded. Keep working toward the objective using ordinary tools. "
@@ -233,7 +241,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
 @tool_parameters(
     tool_parameters_schema(
         action=StringSchema(
-            "How to update the active goal, or resume a blocked goal at the user's request.",
+            "How to update the active goal.",
             enum=_GOAL_ACTIONS,
         ),
         recap=StringSchema(
@@ -256,7 +264,7 @@ class CreateGoalTool(Tool, _GoalToolsMixin):
     )
 )
 class UpdateGoalTool(Tool, _GoalToolsMixin):
-    """Update an active goal or explicitly resume a blocked one."""
+    """Complete, block, or replace an active goal."""
 
     def __init__(
         self,
@@ -279,8 +287,6 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
             "Update the active sustained goal. Use action='complete' only after the objective "
             "is actually achieved and verified, action='block' when progress is genuinely blocked "
             "or the user asks to stop, and action='replace' only when the requested objective changes. "
-            "Use action='resume' on a blocked goal only when the user explicitly asks to continue it; "
-            "preserve its existing objective. Do not resume for ordinary chat or background notifications. "
             "Only the user can cancel a goal, using /cancel_goal or the WebUI button."
         )
 
@@ -298,18 +304,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         prior = parse_goal_state(goal_state_raw(sess.metadata))
         normalized = (action or "").strip().lower()
         if normalized not in _GOAL_ACTIONS:
-            return ToolResult.error("Error: action must be one of complete, block, replace, or resume.")
-        if normalized == "resume":
-            if not goal_resume_allowed():
-                return ToolResult.error("Error: resuming a goal requires a fresh user request to continue it.")
-            if not isinstance(prior, dict) or prior.get("status") != "blocked":
-                return ToolResult.error("Error: only a blocked goal can be resumed.")
-            blob = {**prior, "status": "active", "resumed_at": _iso_now()}
-            for key in ("ended_at", "blocked_reason", "failure_error_kind"):
-                blob.pop(key, None)
-            if not await self._save_goal_state(sess, blob, revoke_permission=True):
-                return ToolResult.error("Error: the goal changed before resumption could be committed.")
-            return "Goal resumed. Continue toward the existing objective using ordinary tools."
+            return ToolResult.error("Error: action must be one of complete, block, or replace.")
         if not isinstance(prior, dict) or prior.get("status") != "active":
             return "No active goal to update."
 
@@ -335,8 +330,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
                 "previous_objective": str(prior.get("objective") or ""),
                 "recap": (recap or "").strip(),
             }
-            if not await self._save_goal_state(sess, blob):
-                return ToolResult.error("Error: the goal changed before replacement could be committed.")
+            await self._save_goal_state(sess, blob)
             extra = f"\nSummary line: {summary}" if summary else ""
             return "Goal replaced. Continue toward the new objective using ordinary tools." + extra
 
@@ -350,8 +344,7 @@ class UpdateGoalTool(Tool, _GoalToolsMixin):
         }
         if normalized == "complete":
             blob["completed_at"] = ended
-        if not await self._save_goal_state(sess, blob, revoke_permission=True):
-            return ToolResult.error("Error: the goal changed before the update could be committed.")
+        await self._save_goal_state(sess, blob, revoke_permission=True)
 
         tail = (recap or "").strip()
         label = {"complete": "complete", "block": "blocked"}[normalized]
