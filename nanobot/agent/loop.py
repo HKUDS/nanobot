@@ -1677,7 +1677,10 @@ class AgentLoop:
             await self._pending_queues.join_controls()
             # A scan can schedule archival while shutdown waits for it.
             while self._background_tasks:
-                await asyncio.gather(*self._background_tasks, return_exceptions=True)
+                tasks = tuple(self._background_tasks)
+                await asyncio.gather(*tasks, return_exceptions=True)
+                # Already-complete tasks may return before their done callbacks run.
+                self._background_tasks.difference_update(tasks)
         except BaseException as exc:
             errors.append(exc)
         finally:
