@@ -26,9 +26,13 @@ test("settings reentry reuses tools immediately and refreshes expired catalogs w
   });
   await page.goto("/browser/fixture.html?case=tools-catalog");
   await expect(page.getByRole("heading", { name: "Fixture CLI", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ready", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "Fixture plugin", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Apps", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Fixture plugin", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Leave settings", exact: true }).click();
   await page.getByRole("button", { name: "Open settings", exact: true }).click();
+  await page.getByRole("button", { name: "Apps", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Fixture CLI", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Fixture plugin", exact: true })).toBeVisible();
   expect(counts).toEqual({ cli: 1, mcp: 1 });
@@ -36,6 +40,7 @@ test("settings reentry reuses tools immediately and refreshes expired catalogs w
   refresh = true;
   await page.clock.setFixedTime(new Date(Date.now() + 31_000));
   await page.getByRole("button", { name: "Open settings", exact: true }).click();
+  await page.getByRole("button", { name: "Apps", exact: true }).click();
   await expect.poll(() => counts).toEqual({ cli: 2, mcp: 2 });
   await expect(page.getByRole("heading", { name: "Fixture CLI", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Fixture plugin", exact: true })).toBeVisible();
