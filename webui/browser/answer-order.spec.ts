@@ -57,8 +57,8 @@ async function expectAnswerOrder(page: Page) {
 }
 
 for (const scenario of [
-  { locale: "en", width: 1440, waiting: /Connection failed Retrying in [1-9][0-9]*s/, retrying: "Connection failed Retrying" },
-  { locale: "zh-CN", width: 390, waiting: /连接失败 [1-9][0-9]* 秒后重试/, retrying: "连接失败 正在重试" },
+  { locale: "en", width: 1440, waiting: /Connection failed\. Retrying in [1-9][0-9]*s/, retrying: "Connection failed. Retrying" },
+  { locale: "zh-CN", width: 390, waiting: /连接失败，[1-9][0-9]* 秒后重试/, retrying: "连接失败，正在重试" },
 ]) {
   test(`shows retry progress in the live thread at ${scenario.width}px (${scenario.locale})`, async ({ page }, info) => {
     await page.setViewportSize({ width: scenario.width, height: 900 });
