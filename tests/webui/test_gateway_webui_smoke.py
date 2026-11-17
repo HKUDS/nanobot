@@ -552,9 +552,10 @@ def test_gateway_restart_restores_a_completed_answer_without_replaying_model(
         _stop_gateway(second)
 
 
-@pytest.mark.parametrize("stop_during_checkpoint", [False, True])
-async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during_checkpoint: bool) -> None:
+@pytest.mark.parametrize("ending", ["complete", "stop", "length"])
+async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, ending: str) -> None:
     """Exercise the actual gateway and WebSocket with a synthetic local model."""
+    stop_during_checkpoint = ending == "stop"
     checkpoint_waiting = asyncio.Event()
     release_checkpoint = asyncio.Event()
     closing_request = asyncio.Event()
@@ -582,6 +583,20 @@ async def test_real_gateway_goal_single_run_and_stop(tmp_path: Path, stop_during
                 tool = ("create_goal", {"objective": "Verify the synthetic task."})
             elif number <= 16:
                 tool = ("list_dir", {"path": "."})
+            elif ending == "length":
+                if number <= 20:
+                    text, reason = "Partial work." if number == 17 else "", "length"
+                elif number == 21:
+                    assert "What is the status?" in str(payload["messages"])
+                    text, reason = "The goal is blocked.", "stop"
+                elif number == 22:
+                    assert "Please resume the goal" in str(payload["messages"])
+                    tool = ("update_goal", {"action": "resume"})
+                elif number == 23:
+                    tool = ("update_goal", {"action": "complete", "recap": "Verified after resuming."})
+                else:
+                    assert number == 24
+                    text, reason = "Verified after resuming.", "stop"
             elif stop_during_checkpoint:
                 assert number == 17
                 assert "Handle this independent input" in str(payload["messages"])
@@ -736,6 +751,41 @@ with Path(config).with_name('gateway-stacks.log').open('w') as stacks:
                 followup = await receive_until(lambda event: event.get("event") == "turn_end")
                 assert followup.get("turn_id") == "follow-up"
                 assert len(requests) == 17
+            elif ending == "length":
+                end = await receive_until(lambda event: event.get("event") == "turn_end")
+                assert end["outcome"] == "failed"
+                assert end["goal_state"]["status"] == "blocked"
+                assert "output limit" in end["goal_state"]["recap"]
+                assert len(requests) == 20
+                await receive_until(lambda event: event.get("event") == "goal_status" and event.get("status") == "idle")
+                state_changes = [event["goal_state"] for event in events if event.get("event") == "goal_state"]
+                assert any(state.get("status") == "blocked" for state in state_changes)
+                reconnect_bootstrap = await asyncio.to_thread(_get_bootstrap, f"http://127.0.0.1:{ws_port}/webui/bootstrap")
+                async with websockets.connect(reconnect_bootstrap["ws_url"] + "?token=" + reconnect_bootstrap["token"] + "&client_id=blocked-reconnect") as reconnected:
+                    await _recv_until(reconnected, "ready")
+                    await reconnected.send(json.dumps({"type": "attach", "chat_id": chat_id}))
+                    await _recv_until(reconnected, "attached")
+                    state = await _recv_until(reconnected, "goal_state")
+                    assert state["goal_state"] == end["goal_state"]
+                await ws.send(json.dumps({"type": "message", "chat_id": chat_id,
+                                          "content": "What is the status?", "webui": True,
+                                          "turn_id": "status-question"}))
+                status_end = await receive_until(lambda event: event.get("event") == "turn_end")
+                assert status_end["goal_state"]["status"] == "blocked"
+                assert len(requests) == 21
+                await receive_until(lambda event: event.get("event") == "goal_status" and event.get("status") == "idle")
+                await ws.send(json.dumps({"type": "message", "chat_id": chat_id,
+                                          "content": "Please resume the goal", "webui": True,
+                                          "turn_id": "resume-goal"}))
+                resumed = await receive_until(lambda event: (
+                    event.get("event") == "goal_state" and event.get("goal_state", {}).get("active")
+                ))
+                assert resumed["goal_state"]["objective"] == "Verify the synthetic task."
+                resumed_end = await receive_until(lambda event: event.get("event") == "turn_end")
+                assert resumed_end.get("outcome", "completed") == "completed"
+                assert resumed_end["turn_id"] == "resume-goal"
+                assert not resumed_end["goal_state"]["active"]
+                assert len(requests) == 24
             else:
                 await asyncio.wait_for(closing_request.wait(), 20)
                 waiting = await receive_until(lambda event: (

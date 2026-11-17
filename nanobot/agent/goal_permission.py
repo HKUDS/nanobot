@@ -13,6 +13,11 @@ _GOAL_MUTATION_ALLOWED: ContextVar[bool] = ContextVar(
     "nanobot_goal_mutation_allowed",
     default=False,
 )
+_GOAL_RESUME_ALLOWED: ContextVar[bool] = ContextVar("nanobot_goal_resume_allowed", default=False)
+
+
+def goal_resume_allowed() -> bool:
+    return _GOAL_RESUME_ALLOWED.get()
 
 
 def goal_mutation_allowed() -> bool:
@@ -21,6 +26,7 @@ def goal_mutation_allowed() -> bool:
 
 def revoke_goal_mutation_permission() -> None:
     _GOAL_MUTATION_ALLOWED.set(False)
+    _GOAL_RESUME_ALLOWED.set(False)
 
 
 @contextmanager
@@ -39,21 +45,25 @@ class GoalInputScope(ExitStack):
     def __enter__(self) -> Self:
         super().__enter__()
         self.enter_context(goal_mutation_permission(False))
+        token = _GOAL_RESUME_ALLOWED.set(False)
+        self.callback(_GOAL_RESUME_ALLOWED.reset, token)
         return self
 
     def consume_inputs(self, messages: Iterable[InboundMessage]) -> None:
         """Authorize consumed user requests, never queued or replayed history."""
-        if any(self._authorizes(message) for message in messages):
-            self.enter_context(goal_mutation_permission(True))
+        for message in messages:
+            if self._is_user_input(message):
+                _GOAL_RESUME_ALLOWED.set(True)
+                if message.metadata.get("goal_requested") is True:
+                    self.enter_context(goal_mutation_permission(True))
 
     @staticmethod
-    def _authorizes(message: InboundMessage) -> bool:
+    def _is_user_input(message: InboundMessage) -> bool:
         if (
             not message.is_user_input
             or message.channel == "system"
             or message.sender_id == "subagent"
             or internal_continuation_inbound(message.metadata)
-            or message.metadata.get("goal_requested") is not True
         ):
             return False
         _, automation_metadata = automation_history_overrides(message.metadata)

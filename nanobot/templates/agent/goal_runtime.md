@@ -22,7 +22,7 @@ If material requirements remain ambiguous, ask one concise clarification rather 
 {% if goal_blocked %}
 ## Blocked goal
 
-The goal in Runtime Context is blocked and is not being continued automatically. Only the user can cancel it, using `/cancel_goal` or the WebUI's Cancel goal button. Do not resume it without the user's request.
+The goal in Runtime Context is blocked and is not being continued automatically. If the user explicitly asks to continue this goal, call `update_goal` with `action='resume'` before continuing work; this preserves the existing objective and progress. Do not create a replacement goal just to resume it. Ordinary conversation, status questions, internal continuations, and background notifications are not requests to resume. Only the user can cancel it, using `/cancel_goal` or the WebUI's Cancel goal button.
 {% endif %}
 
 {% if goal_active or goal_start_requested %}

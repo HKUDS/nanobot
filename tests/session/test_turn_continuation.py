@@ -105,3 +105,32 @@ def test_save_skip_unchanged_for_standalone_current_message():
     assert save_skip_for_turn(
         message_metadata=None, initial_message_count=3, input_persisted_early=False,
     ) == 2
+
+
+@pytest.mark.parametrize("operation", ["reset", "delete"])
+async def test_failure_settlement_cannot_block_a_replaced_generation(tmp_path, operation):
+    sessions = SessionManager(tmp_path)
+    old = await sessions.state.get("cli:test")
+    await sessions.state.update_metadata(old.key, {
+        GOAL_STATE_KEY: {"status": "active", "objective": "Old objective."},
+    })
+    policy = GoalExecutionPolicy(sessions.state)
+    request = RequestContext(
+        channel="cli", chat_id="test", session_key=old.key, session_generation=old.generation,
+    )
+    try:
+        if operation == "reset":
+            await sessions.state.reset(old.key)
+        else:
+            assert await sessions.state.delete(old.key)
+        await policy.finish(request, "error")
+        current = await sessions.state.get(old.key)
+        await sessions.state.update_metadata(old.key, {
+            GOAL_STATE_KEY: {"status": "active", "objective": "New objective."},
+        })
+        await policy.finish(request, "exception")
+        saved = await sessions.state.read_header(old.key)
+        assert saved.generation == current.generation != old.generation
+        assert saved.metadata[GOAL_STATE_KEY] == {"status": "active", "objective": "New objective."}
+    finally:
+        await sessions.state.aclose()

@@ -6,6 +6,7 @@ from nanobot.agent.goal_permission import (
     GoalInputScope,
     goal_mutation_allowed,
     goal_mutation_permission,
+    goal_resume_allowed,
     revoke_goal_mutation_permission,
 )
 from nanobot.bus.events import InboundMessage
@@ -35,6 +36,7 @@ def test_consumed_background_input_cannot_authorize_work(overrides):
             assert goal_mutation_allowed() is False
             scope.consume_inputs([message])
             assert goal_mutation_allowed() is False
+            assert goal_resume_allowed() is False
         assert goal_mutation_allowed() is True
 
 
@@ -60,3 +62,16 @@ def test_injected_permission_is_cleared_on_abnormal_exit(error):
             assert goal_mutation_allowed() is True
             raise error()
     assert goal_mutation_allowed() is False
+
+
+def test_resuming_consumes_fresh_user_input_without_authorizing_a_new_goal():
+    with GoalInputScope() as scope:
+        assert goal_resume_allowed() is False
+        scope.consume_inputs([goal_message(content="Please continue", metadata={})])
+        assert goal_resume_allowed() is True
+        assert goal_mutation_allowed() is False
+        revoke_goal_mutation_permission()
+        assert goal_resume_allowed() is False
+        scope.consume_inputs([goal_message(content="Continue once more", metadata={})])
+        assert goal_resume_allowed() is True
+    assert goal_resume_allowed() is False

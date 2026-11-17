@@ -80,7 +80,7 @@ def _bind_events(
 
 
 def _turn_outcome(stop_reason: object) -> tuple[str, str | None]:
-    if stop_reason == "error":
+    if stop_reason in {"error", "length", "empty_final_response", "refusal", "content_filter"}:
         return "failed", "model"
     if stop_reason == "tool_error":
         return "failed", "tool"
