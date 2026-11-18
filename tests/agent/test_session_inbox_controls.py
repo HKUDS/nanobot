@@ -7,6 +7,7 @@ import pytest
 from agent.session_helpers import run_session, stop_loop, visible_message
 from nanobot.agent.automation_turns import AutomationTurnError
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import current_request_context
 from nanobot.agent.tools.cron import CronTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -315,9 +316,8 @@ def _automation_message(kind: str, name: str) -> InboundMessage:
 @pytest.mark.parametrize("kind", ["cron", "local_trigger"])
 async def test_automation_turn_is_deferred_while_session_active(loop, kind):
     key = "websocket:test"
-    pending = asyncio.Queue()
+    pending = SessionInbox()
     loop._pending_queues[key] = pending
-    coordinator = loop._cron_turns if kind == "cron" else loop._local_trigger_turns
     pending_ids = (
         loop.pending_cron_job_ids_for_session
         if kind == "cron"
@@ -329,17 +329,17 @@ async def test_automation_turn_is_deferred_while_session_active(loop, kind):
     try:
         await loop.bus.publish_inbound(msg)
         async with asyncio.timeout(3):
-            while not coordinator.deferred_queues.get(key):
+            while not pending.deferred:
                 await asyncio.sleep(0)
         assert pending.empty()
         assert loop._active_tasks == {}
-        assert coordinator.deferred_queues[key] == [msg]
+        assert pending.deferred == (msg,)
         assert pending_ids(key) == {"deferred"}
 
         loop._process_message = AsyncMock(return_value=None)
         await loop._run_session_queue(key, pending)
         assert loop._process_message.await_args.args[0] is msg
-        assert key not in coordinator.deferred_queues
+        assert not pending.deferred
         assert pending_ids(key) == set()
     finally:
         loop.stop()
@@ -466,7 +466,7 @@ async def test_cancelled_session_completes_queued_automation_waiters(loop):
         ))
         tasks.extend([cron, trigger])
         await asyncio.sleep(0)
-        assert len(loop._deferred_automation_turns["websocket:test"]) == 2
+        assert len(loop._pending_queues["websocket:test"].deferred) == 2
         worker.cancel()
         with pytest.raises(asyncio.CancelledError):
             await worker
@@ -630,6 +630,55 @@ async def test_stop_does_not_strand_automation_submitted_during_cleanup(loop, mo
         await stop_loop(loop, dispatcher, timeout=3)
 
 
+async def test_automation_arriving_during_queue_cancellation_is_not_stranded(loop):
+    started = asyncio.Event()
+    notifying = asyncio.Event()
+    release_notification = asyncio.Event()
+
+    async def chat(**_kwargs):
+        if not started.is_set():
+            started.set()
+            await asyncio.Event().wait()
+        return LLMResponse(content="automation finished")
+
+    async def observe_completion(event):
+        if event.context.metadata.get("message_id") == "queued-compact":
+            notifying.set()
+            await release_notification.wait()
+
+    loop.provider.chat_stream_with_retry = chat
+    loop.bus.subscribe(observe_completion, TurnCompleted)
+    dispatcher = asyncio.create_task(loop.run())
+    submitted = None
+    try:
+        async with asyncio.timeout(5):
+            for content in ("original turn", "/compact", "/stop"):
+                await loop.bus.publish_inbound(InboundMessage(
+                    channel="websocket", sender_id="user", chat_id="test", content=content,
+                    metadata={"message_id": "queued-compact"} if content == "/compact" else {},
+                ))
+                if content == "original turn":
+                    await started.wait()
+            await notifying.wait()
+            msg = _automation_message("cron", "after queue cancellation")
+            submitted = asyncio.create_task(loop.submit_cron_turn(msg))
+            while "after queue cancellation" not in loop.pending_cron_job_ids_for_session(msg.session_key):
+                await asyncio.sleep(0)
+            release_notification.set()
+            while True:
+                reply = await loop.bus.consume_outbound()
+                if reply.event is None and reply.content.startswith("Stopped "):
+                    break
+        result = await asyncio.wait_for(asyncio.shield(submitted), timeout=1)
+        assert result is not None and result.content == "automation finished"
+    finally:
+        release_notification.set()
+        if submitted is not None:
+            submitted.cancel()
+            await asyncio.gather(submitted, return_exceptions=True)
+        await stop_loop(loop, dispatcher, timeout=3)
+
+
 @pytest.mark.parametrize("action", ["stop", "close"])
 async def test_cancel_before_worker_runs_completes_automation(loop, action):
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unused"))
@@ -739,7 +788,6 @@ async def test_ingress_sources_share_one_session_worker(loop, bus_running):
         assert len(set(workers)) == 1
         assert loop.bus.inbound_size == 0
         assert key not in loop._pending_queues
-        assert key not in loop._deferred_automation_turns
     finally:
         release.set()
         for task in tasks:

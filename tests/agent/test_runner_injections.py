@@ -9,6 +9,7 @@ import pytest
 from agent.runner_helpers import make_run_spec
 from agent.session_helpers import run_session, visible_message
 from nanobot.agent.context import TranscriptInput
+from nanobot.agent.session_inbox import SessionInbox
 from nanobot.agent.tools.context import RequestContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
@@ -1084,7 +1085,7 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 
     loop = _make_loop(tmp_path)
 
-    pending = asyncio.Queue(maxsize=20)
+    pending = SessionInbox(maxsize=20)
     loop._pending_queues["discord:c"] = pending
 
     run_task = asyncio.create_task(loop.run())
@@ -1110,7 +1111,7 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
     loop = _make_loop(tmp_path, recovery_admission=admission)
 
     session_key = "websocket:chat"
-    pending = asyncio.Queue(maxsize=20)
+    pending = SessionInbox(maxsize=20)
     loop._pending_queues[session_key] = pending
 
     run_task = asyncio.create_task(loop.run())
@@ -1140,7 +1141,7 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
     loop.turn_delivery_factory.route_policy = route_policy
 
     session_key = "websocket:chat-1"
-    pending = asyncio.Queue(maxsize=20)
+    pending = SessionInbox(maxsize=20)
     loop._pending_queues[session_key] = pending
 
     run_task = asyncio.create_task(loop.run())
@@ -1568,7 +1569,7 @@ async def test_session_worker_processes_leftovers_without_republishing(tmp_path)
 
     loop = _make_loop(tmp_path)
     session_key = "cli:c"
-    pending = asyncio.Queue()
+    pending = SessionInbox()
     processed: list[str] = []
 
     async def _process_message(msg, **_kwargs):
