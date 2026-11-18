@@ -317,7 +317,7 @@ def _automation_message(kind: str, name: str) -> InboundMessage:
 async def test_automation_turn_is_deferred_while_session_active(loop, kind):
     key = "websocket:test"
     pending = SessionInbox()
-    loop._pending_queues[key] = pending
+    loop._pending_queues.install(key, pending)
     pending_ids = (
         loop.pending_cron_job_ids_for_session
         if kind == "cron"
@@ -677,6 +677,40 @@ async def test_automation_arriving_during_queue_cancellation_is_not_stranded(loo
             submitted.cancel()
             await asyncio.gather(submitted, return_exceptions=True)
         await stop_loop(loop, dispatcher, timeout=3)
+
+
+async def test_shutdown_rejects_automation_before_starting_cleanup(loop):
+    started = asyncio.Event()
+    cleaning = asyncio.Event()
+    release = asyncio.Event()
+
+    async def chat(**_kwargs):
+        if not started.is_set():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+        return LLMResponse(content="too late to start")
+
+    loop.provider.chat_stream_with_retry = chat
+    await loop._enqueue_session_message(InboundMessage(
+        channel="websocket", sender_id="user", chat_id="already-active", content="original turn",
+    ))
+    await asyncio.wait_for(started.wait(), timeout=3)
+    close = asyncio.create_task(loop.aclose())
+    try:
+        await asyncio.wait_for(cleaning.wait(), timeout=3)
+        # The snapshot contains another session; both same-key and cross-session
+        # submitters must see the closed runtime, not just its active inboxes.
+        with pytest.raises(RuntimeError, match="Session execution is closing"):
+            await asyncio.wait_for(loop.submit_local_trigger_turn(
+                _automation_message("local_trigger", "during shutdown"),
+            ), timeout=3)
+    finally:
+        release.set()
+        await asyncio.wait_for(close, timeout=3)
 
 
 @pytest.mark.parametrize("action", ["stop", "close"])

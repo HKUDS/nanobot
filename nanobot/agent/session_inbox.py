@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 
 from nanobot.bus.events import InboundMessage
 
@@ -32,3 +32,41 @@ class SessionInbox(asyncio.Queue[InboundMessage]):
         """Only for a detached inbox that can no longer accept work."""
         while (msg := self.next_turn()) is not None:
             yield msg
+
+
+class SessionExecutionClosedError(RuntimeError):
+    """Work cannot enter the session dispatcher once it starts shutting down."""
+
+
+class SessionInboxes(Mapping[str, SessionInbox]):
+    """Own the current inbox per key and the dispatcher-wide admission boundary."""
+
+    def __init__(self) -> None:
+        self._active: dict[str, SessionInbox] = {}
+        self._closed = False
+
+    def __getitem__(self, key: str) -> SessionInbox:
+        return self._active[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._active)
+
+    def __len__(self) -> int:
+        return len(self._active)
+
+    def close_admission(self) -> None:
+        self._closed = True
+
+    def check_admission(self) -> None:
+        if self._closed:
+            raise SessionExecutionClosedError("Session execution is closing")
+
+    def install(self, key: str, inbox: SessionInbox) -> None:
+        self.check_admission()
+        if key in self:
+            raise RuntimeError("Cannot replace a live session inbox")
+        self._active[key] = inbox
+
+    def detach(self, key: str, inbox: SessionInbox) -> None:
+        if self.get(key) is inbox:
+            del self._active[key]

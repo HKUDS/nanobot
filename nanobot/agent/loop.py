@@ -28,7 +28,7 @@ from nanobot.agent.memory import Consolidator
 from nanobot.agent.model_runtime import ModelRuntimeResolver
 from nanobot.agent.pending_inputs import PendingInputs
 from nanobot.agent.runner import AgentCheckpoint, AgentRunner, AgentRunResult, AgentRunSpec
-from nanobot.agent.session_inbox import SessionInbox
+from nanobot.agent.session_inbox import SessionExecutionClosedError, SessionInbox, SessionInboxes
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.context import RequestContext, bind_request_context, reset_request_context
 from nanobot.agent.tools.exec_session import ExecSessionManager
@@ -419,7 +419,7 @@ class AgentLoop:
         # A queue is installed before its single session worker is scheduled.
         # It remains the only admission path until that worker atomically
         # observes the queue empty and removes it.
-        self._pending_queues: dict[str, SessionInbox] = {}
+        self._pending_queues = SessionInboxes()
         self._preserve_inflight_turns_on_shutdown = False
         self._cron_turns = CronTurnCoordinator(enqueue=self._enqueue_session_message)
         self._local_trigger_turns = LocalTriggerTurnCoordinator(enqueue=self._enqueue_session_message)
@@ -1342,6 +1342,8 @@ class AgentLoop:
                 with self.bus.admission.activity():
                     try:
                         await self._dispatch_inbound(msg)
+                    except SessionExecutionClosedError:
+                        break
                     except (SessionOperationQueueFullError, SessionConflictError, ExecutionControlError) as exc:
                         key = msg.session_key
                         logger.warning("Session input rejected for {}: {}", key, exc)
@@ -1431,6 +1433,7 @@ class AgentLoop:
         return pending_msg
 
     async def _enqueue_session_message(self, msg: InboundMessage) -> None:
+        self._pending_queues.check_admission()
         self.bus.admission.check()
         session_key = msg.session_key
         if not self.subagents.accepts_result(msg, session_key):
@@ -1442,6 +1445,7 @@ class AgentLoop:
                 pending.defer(msg)
                 return
             msg = await self._journal_pending_message(session_key, msg)
+            self._pending_queues.check_admission()
             pending = self._pending_queues.get(session_key)
         if pending is not None:
             pending.put_nowait(msg)
@@ -1449,7 +1453,7 @@ class AgentLoop:
 
         new_pending = SessionInbox()
         new_pending.put_nowait(msg)
-        self._pending_queues[session_key] = new_pending
+        self._pending_queues.install(session_key, new_pending)
         task = asyncio.create_task(self._run_session_queue(session_key, new_pending))
         self._track_active_task(session_key, task)
 
@@ -1482,11 +1486,7 @@ class AgentLoop:
             await self._cancel_pending_messages(session_key, pending, exc)
             raise
         finally:
-            self._detach_session_inbox(session_key, pending)
-
-    def _detach_session_inbox(self, session_key: str, pending: SessionInbox) -> None:
-        if self._pending_queues.get(session_key) is pending:
-            del self._pending_queues[session_key]
+            self._pending_queues.detach(session_key, pending)
 
     async def _cancel_pending_messages(
         self,
@@ -1496,7 +1496,7 @@ class AgentLoop:
     ) -> None:
         # End admission before publishing any cancellation notifications. Those
         # callbacks can yield to another submitter for the same session key.
-        self._detach_session_inbox(session_key, pending)
+        self._pending_queues.detach(session_key, pending)
         for item in pending.drain():
             for coordinator in self._automation_turn_coordinators:
                 coordinator.complete(item, error=error)
@@ -1648,6 +1648,8 @@ class AgentLoop:
             await self._aclose_unlocked()
 
     async def _aclose_unlocked(self) -> None:
+        self._pending_queues.close_admission()
+        self._running = False
         errors: list[BaseException] = []
         active_task_groups = getattr(self, "_active_tasks", {})
         current_task = asyncio.current_task()

@@ -1086,7 +1086,7 @@ async def test_followup_routed_to_pending_queue(tmp_path):
     loop = _make_loop(tmp_path)
 
     pending = SessionInbox(maxsize=20)
-    loop._pending_queues["discord:c"] = pending
+    loop._pending_queues.install("discord:c", pending)
 
     run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(channel="discord", sender_id="u", chat_id="c", content="follow-up")
@@ -1112,7 +1112,7 @@ async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
 
     session_key = "websocket:chat"
     pending = SessionInbox(maxsize=20)
-    loop._pending_queues[session_key] = pending
+    loop._pending_queues.install(session_key, pending)
 
     run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(
@@ -1142,7 +1142,7 @@ async def test_mid_turn_subagent_result_does_not_resolve_a_new_turn_route(tmp_pa
 
     session_key = "websocket:chat-1"
     pending = SessionInbox(maxsize=20)
-    loop._pending_queues[session_key] = pending
+    loop._pending_queues.install(session_key, pending)
 
     run_task = asyncio.create_task(loop.run())
     msg = InboundMessage(
@@ -1584,7 +1584,7 @@ async def test_session_worker_processes_leftovers_without_republishing(tmp_path)
             chat_id="c",
             content=content,
         ))
-    loop._pending_queues[session_key] = pending
+    loop._pending_queues.install(session_key, pending)
 
     await loop._run_session_queue(session_key, pending)
 
