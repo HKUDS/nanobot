@@ -54,6 +54,11 @@
     "model": "Model contoh",
     "disabledModel": "Pemilih model yang dinonaktifkan"
   },
+  "codexSpeed": {
+    "title": "Kecepatan Codex",
+    "description": "Pilih Fast atau Ultracepat. Pilih kembali mode yang aktif untuk menonaktifkannya.",
+    "options": "Tampilkan Ultracepat untuk model yang mendukungnya."
+  },
   "segmented": {
     "title": "Pilihan bersegmen",
     "description": "Sekumpulan kecil pilihan yang selalu terlihat.",

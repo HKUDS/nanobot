@@ -54,6 +54,11 @@
     "model": "Example model",
     "disabledModel": "Disabled model"
   },
+  "codexSpeed": {
+    "title": "Codex speed",
+    "description": "Choose Fast or Ultrafast. Select the active speed again to turn it off.",
+    "options": "Show Ultrafast for supported models."
+  },
   "segmented": {
     "title": "Segmented choices",
     "description": "A short, always-visible set of choices.",

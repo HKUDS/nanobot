@@ -54,6 +54,11 @@
     "model": "示例模型",
     "disabledModel": "禁用的模型选择器"
   },
+  "codexSpeed": {
+    "title": "Codex 加速",
+    "description": "选择 Fast 或极速，再点一次当前档位即可关闭。",
+    "options": "仅为支持的模型显示极速档。"
+  },
   "segmented": {
     "title": "分段选择",
     "description": "始终可见的一组简短选项。",

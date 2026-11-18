@@ -54,6 +54,11 @@
     "model": "Mô hình ví dụ",
     "disabledModel": "Bộ chọn mô hình bị vô hiệu hóa"
   },
+  "codexSpeed": {
+    "title": "Tốc độ Codex",
+    "description": "Chọn Fast hoặc Siêu nhanh. Chọn lại chế độ đang bật để tắt.",
+    "options": "Hiển thị Siêu nhanh cho các mô hình được hỗ trợ."
+  },
   "segmented": {
     "title": "Lựa chọn phân đoạn",
     "description": "Một nhóm ít lựa chọn luôn hiển thị.",
