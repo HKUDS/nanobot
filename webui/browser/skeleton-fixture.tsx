@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 
 import { FilePreviewPanelView } from "@/components/FilePreviewPanelView";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
-import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { MarketplaceProviderFilter, SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
+import { CatalogControls, CatalogToolbar } from "@/components/settings/shared/CatalogToolbar";
 import { ModelIdPicker } from "@/components/settings/shared/ModelControls";
 import { AppsCatalogSettings, DEFAULT_CUSTOM_MCP_FORM } from "@/components/settings/system/AppsSettings";
 import { ChannelsSettings } from "@/components/settings/system/ChannelsSettings";
@@ -11,7 +13,7 @@ import { WorkspaceProjectPicker } from "@/components/thread/WorkspaceControls";
 import { settings } from "@/dev/gallery/settings";
 import { useReadingTypography } from "@/hooks/useReadingTypography";
 import { fetchWorkspaceDirectories } from "@/lib/api";
-import type { McpPresetInfo, NanobotFeatureInfo } from "@/lib/types";
+import type { MarketplaceProvider, McpPresetInfo, NanobotFeatureInfo } from "@/lib/types";
 
 const noop = () => {};
 const names = ["Search documentation", "Read repository", "List projects", "Inspect changes", "Review results", "Write notes"];
@@ -24,6 +26,9 @@ const preset: McpPresetInfo = {
 
 export function SkeletonFixture({ surface, loading }: { surface: string; loading: boolean }) {
   useReadingTypography();
+  const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const [provider, setProvider] = useState<MarketplaceProvider>("all");
   const [model, setModel] = useState("");
   const [previewLoading, setPreviewLoading] = useState(loading);
   const feature: NanobotFeatureInfo = {
@@ -42,7 +47,7 @@ export function SkeletonFixture({ surface, loading }: { surface: string; loading
         available: false, status: "not_installed", skill_installed: false,
       })) : [], installed_count: 0 }}
       mcpPresets={loading ? null : { presets: names.map((name, index) => ({ ...preset, name: `docs-${index}`, display_name: name })), installed_count: 6 }}
-      cliAppsLoading={loading} mcpPresetsLoading={loading} query="" filter={surface === "cli" ? "cli" : "mcp"}
+      cliAppsLoading={loading} mcpPresetsLoading={loading} query="" filter={{ kind: surface === "cli" ? "cli" : "mcp", status: "all" }}
       cliActionKey={null} mcpActionKey={null} mcpOAuthFlow={null} mcpOAuthPopupBlocked={false}
       mcpOAuthCallbackUrl="" mcpOAuthCompleting={false} mcpOAuthCallbackError={null}
       cliMessage={null} cliError={null} cliFocusName={null} mcpMessage={null} mcpError={null}
@@ -59,7 +64,12 @@ export function SkeletonFixture({ surface, loading }: { surface: string; loading
       onAction={noop} onFeaturesUpdate={noop} onDismissStatus={noop}
     /> : surface === "skills" ? <SkillsCatalogSettings loading={loading} skills={loading ? [] : names.map((name) => ({
       name, description: "Search, inspect and maintain the project.", source: "builtin", available: true, enabled: true,
-    }))} /> : surface === "marketplace" ? <SkillsMarketplace installedSkills={[]} installing="" onInstallingChange={noop} />
+    }))} /> : surface === "marketplace" ? <div className="catalog-section">
+      <CatalogToolbar search={{ value: query, onChange: (event) => setQuery(event.target.value), placeholder: t("settings.skills.marketplaceSearchPlaceholder") }}>
+        <CatalogControls><MarketplaceProviderFilter value={provider} onChange={setProvider} /></CatalogControls>
+      </CatalogToolbar>
+      <SkillsMarketplace query={query} provider={provider} installedSkills={[]} installing="" onInstallingChange={noop} />
+    </div>
       : surface === "models" || surface === "models-compact" ? <ModelIdPicker token="fixture"
         settings={{ ...settings, providers: settings.providers.map((provider) => provider.name === "openai" ? { ...provider, model_catalog: "official" } : provider) }}
         provider={surface === "models-compact" ? "openai" : "anthropic"}

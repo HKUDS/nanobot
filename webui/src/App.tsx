@@ -28,7 +28,7 @@ import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-dr
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
-import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
+import { isAppsSection, type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import { transitionSession } from "@/components/thread/session-transition";
 import {
@@ -137,7 +137,7 @@ const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "remote";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -195,7 +195,8 @@ function defaultShellRoute(): ShellRoute {
 }
 
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "automations" || section === "skills" || section === "channels") return section;
+  if (isAppsSection(section)) return "apps";
+  if (section === "automations") return "automations";
   return "settings";
 }
 
@@ -272,19 +273,19 @@ function readShellRoute(): ShellRoute {
     };
   }
   if (path === "/apps") {
-    return { view: "apps", activeKey, temporary, settingsSection: "apps" };
+    return { view: "apps", activeKey, temporary, settingsSection: isAppsSection(settingsSection) ? settingsSection : "apps" };
   }
   if (path === "/automations") {
     return { view: "automations", activeKey, temporary, settingsSection: "automations" };
   }
   if (path === "/channels") {
-    return { view: "channels", activeKey, temporary, settingsSection: "channels" };
+    return { view: "apps", activeKey, temporary, settingsSection: "channels" };
   }
   if (path === "/remote") {
     return { view: "remote", activeKey, temporary, settingsSection: "overview" };
   }
   if (path === "/skills") {
-    return { view: "skills", activeKey, temporary, settingsSection: "skills" };
+    return { view: "apps", activeKey, temporary, settingsSection: "skills" };
   }
   if (path.startsWith("/temporary/")) {
     const encoded = path.slice("/temporary/".length);
@@ -330,6 +331,9 @@ function shellRouteHash(route: ShellRoute): string {
   if (route.view === "settings" && route.settingsSection !== "overview") {
     params.set("section", route.settingsSection);
     if (route.settingsSection === "advanced" && route.settingsFocus) params.set("focus", route.settingsFocus);
+  }
+  if (route.view === "apps" && route.settingsSection !== "apps") {
+    params.set("section", route.settingsSection);
   }
   const query = params.toString();
   return `#/${route.view}${query ? `?${query}` : ""}`;
@@ -1816,13 +1820,13 @@ function Shell({
 
   const onOpenChannels = useCallback(() => {
     setSessionSearchOpen(false);
-    navigate({ view: "channels", activeKey, settingsSection: "channels" });
+    navigate({ view: "apps", activeKey, settingsSection: "channels" });
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
   const onOpenSkills = useCallback(() => {
     setSessionSearchOpen(false);
-    navigate({ view: "skills", activeKey, settingsSection: "skills" });
+    navigate({ view: "apps", activeKey, settingsSection: "skills" });
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
@@ -2317,18 +2321,8 @@ function Shell({
       });
       return;
     }
-    if (view === "channels") {
-      document.title = t("app.documentTitle.chat", { title: t("settings.nav.channels") });
-      return;
-    }
     if (view === "remote") {
       document.title = t("app.documentTitle.chat", { title: t("remote.title") });
-      return;
-    }
-    if (view === "skills") {
-      document.title = t("app.documentTitle.chat", {
-        title: t("settings.nav.skills", { defaultValue: "Skills" }),
-      });
       return;
     }
     document.title = activeSession
@@ -2393,11 +2387,9 @@ function Shell({
       : undefined,
     onOpenApps,
     onOpenAutomations,
-    onOpenChannels,
-    onOpenSkills,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: !managingConnections && (view === "apps" || view === "automations" || view === "skills" || view === "channels") ? view : null,
+    activeUtility: !managingConnections && (view === "apps" || view === "automations") ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
@@ -2716,7 +2708,7 @@ function Shell({
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}
-                /> : <Suspense fallback={<StartupShell embedded surface={view} sidebarExpanded={hostSidebarOpen} />}>
+                /> : <Suspense fallback={<StartupShell embedded surface={view === "apps" && isAppsSection(settingsInitialSection) ? settingsInitialSection : view} sidebarExpanded={hostSidebarOpen} />}>
                   <SettingsView
                     registerExitGuard={registerSettingsExitGuard}
                     themePreference={themePreference}

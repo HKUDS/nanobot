@@ -1,8 +1,6 @@
 import {
   ArchiveIcon,
-  SkillsIcon,
   AutomationsIcon,
-  ChannelsIcon,
   SearchIcon,
   SettingsIcon,
   NewChatIcon,
@@ -73,12 +71,10 @@ interface SidebarProps {
   onOpenUpdates?: () => void;
   availableUpdate?: { version: string; onDismiss: () => void; onRequestUpdate?: () => void; installationMethod?: UpdateMethod | null };
   onOpenApps: () => void;
-  onOpenSkills: () => void;
   onOpenAutomations: () => void;
-  onOpenChannels: () => void;
   onSettingsIntent?: () => void;
   onOpenSearch: () => void;
-  activeUtility?: "apps" | "skills" | "automations" | "channels" | null;
+  activeUtility?: "apps" | "automations" | null;
   onToggleArchived: () => void;
   onCollapse?: () => void;
   onExpand?: () => void;
@@ -235,17 +231,6 @@ export function Sidebar(props: SidebarProps) {
         />
         <SidebarActionButton
           collapsed={collapsed}
-          label={t("sidebar.skills.title")}
-          shortcut={sidebarShortcutLabel("skills", apple)}
-          ariaKeyShortcuts={sidebarShortcutAria("skills")}
-          onClick={props.onOpenSkills}
-          onIntent={props.onSettingsIntent}
-          active={props.activeUtility === "skills"}
-          selectionRef={activeActionRef}
-          icon={<SkillsIcon className="h-4 w-4" />}
-        />
-        <SidebarActionButton
-          collapsed={collapsed}
           label={t("sidebar.automations", { defaultValue: "Automations" })}
           shortcut={sidebarShortcutLabel("automations", apple)}
           ariaKeyShortcuts={sidebarShortcutAria("automations")}
@@ -254,17 +239,6 @@ export function Sidebar(props: SidebarProps) {
           active={props.activeUtility === "automations"}
           selectionRef={activeActionRef}
           icon={<AutomationsIcon className="h-4 w-4" />}
-        />
-        <SidebarActionButton
-          collapsed={collapsed}
-          label={t("settings.nav.channels")}
-          shortcut={sidebarShortcutLabel("channels", apple)}
-          ariaKeyShortcuts={sidebarShortcutAria("channels")}
-          onClick={props.onOpenChannels}
-          onIntent={props.onSettingsIntent}
-          active={props.activeUtility === "channels"}
-          selectionRef={activeActionRef}
-          icon={<ChannelsIcon className="h-4 w-4" />}
         />
         {props.archivedCount ? (
           <SidebarActionButton

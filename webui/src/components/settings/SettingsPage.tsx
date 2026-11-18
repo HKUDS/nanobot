@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogLayoutContext, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
-import { isCapabilitySection, type SettingsSectionKey } from "@/components/settings/contracts";
+import { isAppsSection, isCapabilitySection, type AppsSectionKey, type SettingsSectionKey } from "@/components/settings/contracts";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsFeature } from "@/components/settings/shared/SettingsFeature";
 import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { SharedProxySetupDialog } from "@/components/settings/shared/SharedProxySetupDialog";
@@ -519,7 +520,6 @@ export function SettingsPage({
         );
       case "apps":
         return (
-          <div className="settings-stack">
             <AppsCatalogPage
               onConfigureProxy={configureProxy}
               setupName={mcpSetupName}
@@ -581,7 +581,6 @@ export function SettingsPage({
               onRestart={restartViaSettingsSurface}
               isRestarting={restartInProgress}
             />
-          </div>
         );
       case "automations":
         return (
@@ -618,6 +617,7 @@ export function SettingsPage({
     }
   };
   // Appearance reads only browser-local preferences, not the gateway settings snapshot.
+  const appsSection = isAppsSection(activeSection);
   const localSection = activeSection === "appearance";
   const sectionReady = localSection || settings !== null || activeSection === "skills" || activeSection === "apps"
     || activeSection === "channels" || activeSection === "automations";
@@ -731,12 +731,12 @@ export function SettingsPage({
 
       <div
         className={cn(
-          "min-w-0 flex-1 bg-settings-canvas [scrollbar-gutter:stable]",
-          "overflow-y-auto",
+          "min-w-0 flex-1 overflow-y-auto bg-settings-canvas [scrollbar-gutter:stable]",
+          !showSidebar && (appsSection || activeSection === "automations") && "sm:[scrollbar-gutter:stable_both-edges]",
         )}
       >
         <div
-          key={activeSection}
+          key={appsSection ? "apps" : activeSection}
           data-testid="settings-section-transition"
           ref={setDialogLayoutAnchor}
           data-settings-section={activeSection}
@@ -747,7 +747,6 @@ export function SettingsPage({
             "settings-grid",
             activeSection === "about" && "flex min-h-full flex-col",
             !showSidebar && "settings-feature-page",
-            !showSidebar && activeSection === "automations" && "settings-automations-grid",
             hostChromeInset && "pt-[4.25rem] sm:pt-[4.25rem] lg:pt-[4.75rem]",
           )}
         >
@@ -762,7 +761,7 @@ export function SettingsPage({
                 {t("settings.backToChat")}
               </button>
               {activeSection !== "automations" ? <h1 className="text-[24px] font-normal leading-tight tracking-normal text-foreground sm:text-[28px]">
-                {t(`settings.nav.${activeSection}`, {
+                {t(`settings.nav.${appsSection ? "apps" : activeSection}`, {
                   defaultValue: standaloneSectionTitle(activeSection),
                 })}
               </h1> : null}
@@ -781,16 +780,30 @@ export function SettingsPage({
           ) : sectionReady ? (
             <div
               className={cn(
-                "settings-stack",
+                appsSection ? "apps-catalog-layout" : "settings-stack",
                 activeSection === "about" && "flex flex-1 flex-col",
-                activeSection === "channels" &&
-                  "flex min-h-0 flex-1 flex-col xl:overflow-hidden",
               )}
             >
               {error && (!localSection || settings !== null) ? (
-                <div className="rounded-floating border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
+                <div className="col-span-full rounded-floating border border-destructive/20 bg-destructive/5 px-4 py-3 text-[13px] text-destructive">
                   {error}
                 </div>
+              ) : null}
+              {appsSection && !showSidebar ? (
+                <SegmentedControl<AppsSectionKey>
+                  value={activeSection}
+                  onChange={selectSection}
+                  mode="tabs"
+                  ariaLabel={t("settings.nav.apps")}
+                  className="catalog-tabs h-9 shrink-0 rounded-control"
+                  itemClassName="h-7 rounded-compact px-3 py-0"
+                  indicatorClassName="rounded-compact"
+                  options={[
+                    { value: "apps", label: t("settings.apps.featured") },
+                    { value: "skills", label: t("settings.nav.skills") },
+                    { value: "channels", label: t("settings.nav.channels") },
+                  ]}
+                />
               ) : null}
               {renderSection(isCapabilitySection(activeSection) ? "capabilities" : activeSection)}
             </div>

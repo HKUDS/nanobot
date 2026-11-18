@@ -26,19 +26,18 @@ import {
   PauseCircle,
   PlayCircle,
   Plus,
-  Search,
   TriangleAlert,
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
+import { CatalogControls, CatalogFilter, CatalogToggle, CatalogToolbar } from "@/components/settings/shared/CatalogToolbar";
 import { ProxySettingsControl } from "@/components/settings/shared/ProxySettingsControl";
 
 import {
   DismissibleStatusMessage,
   RestartRequiredNotice,
-  SETTINGS_SEARCH_INPUT_CLASS,
   SettingsSectionTitle,
 } from "@/components/settings/shared/SettingsControls";
 import { AgentPluginDialog } from "@/components/settings/system/AgentPluginDialog";
@@ -53,7 +52,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input, SearchInput } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Textarea } from "@/components/ui/textarea";
 import { SettingsTextEditor } from "@/components/settings/shared/SettingsTextEditor";
@@ -68,7 +67,10 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-export type AppsKindFilter = "ready" | "cli" | "plugins" | "mcp";
+export type AppsCatalogFilter = {
+  kind: "all" | "cli" | "plugins" | "mcp";
+  status: "all" | "ready";
+};
 type AppsCatalogItem =
   | { id: string; kind: "cli"; app: CliAppInfo }
   | { id: string; kind: "mcp"; preset: McpPresetInfo };
@@ -104,16 +106,16 @@ export const DEFAULT_CUSTOM_MCP_FORM: CustomMcpForm = {
 };
 
 export function AppsCatalogPage(props: Omit<ComponentProps<typeof AppsCatalogSettings>, "filter" | "onFilterChange">) {
-  const [selection, setSelection] = useState<AppsKindFilter | null>(() => props.setupName ? "mcp" : null);
+  const [selection, setSelection] = useState<AppsCatalogFilter | null>(() => props.setupName ? { kind: "mcp", status: "all" } : null);
   const hasReady = Boolean(
     props.cliApps?.apps.some((app) => app.installed) || props.mcpPresets?.presets.some(mcpPresetReady),
   );
   const waiting = (props.cliAppsLoading && !props.cliApps) || (props.mcpPresetsLoading && !props.mcpPresets);
-  const filter = selection ?? (hasReady || waiting ? "ready" : "cli");
+  const filter: AppsCatalogFilter = selection ?? { kind: "all", status: hasReady || waiting ? "ready" : "all" };
 
   useEffect(() => {
     if (selection === null && (hasReady || (props.cliApps && props.mcpPresets))) {
-      setSelection(hasReady ? "ready" : "cli");
+      setSelection({ kind: "all", status: hasReady ? "ready" : "all" });
     }
   }, [selection, hasReady, props.cliApps, props.mcpPresets]);
 
@@ -175,7 +177,7 @@ export function AppsCatalogSettings({
   cliAppsLoading: boolean;
   mcpPresetsLoading: boolean;
   query: string;
-  filter: AppsKindFilter;
+  filter: AppsCatalogFilter;
   cliActionKey: string | null;
   mcpActionKey: string | null;
   mcpOAuthFlow: McpOAuthFlowPayload | null;
@@ -194,7 +196,7 @@ export function AppsCatalogSettings({
   showBrandLogos: boolean;
   requiresRestartPending: boolean;
   onQueryChange: (value: string) => void;
-  onFilterChange: (value: AppsKindFilter) => void;
+  onFilterChange: (value: AppsCatalogFilter) => void;
   onCliAction: (action: "install" | "update" | "uninstall" | "test", name: string) => void;
   onMcpAction: (action: "enable" | "disable" | "remove" | "test" | "reconnect" | "proxy", name: string, values?: Record<string, string>) => void;
   onMcpOAuthConnect: (name: string, reset?: boolean, values?: Record<string, string>) => void;
@@ -215,12 +217,12 @@ export function AppsCatalogSettings({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
-  const filterOptions = [
-    { value: "ready", label: tx("settings.apps.filterAll", "Ready") },
+  const kindOptions = [
+    { value: "all", label: t("settings.apps.allTypes") },
     { value: "cli", label: tx("settings.apps.filterCli", "CLI Apps") },
     { value: "plugins", label: tx("settings.apps.filterPlugins", "Plugins") },
     { value: "mcp", label: tx("settings.apps.filterMcp", "MCP") },
-  ];
+  ] as const;
   const normalizedQuery = query.trim().toLowerCase();
   const installedCliNames = new Set((cliApps?.apps ?? []).filter((app) => app.installed).map((app) => app.name));
   const managedPlugins = new Map(
@@ -228,50 +230,39 @@ export function AppsCatalogSettings({
       .filter((preset) => preset.source === "agent-plugin" && preset.managed_by_cli)
       .map((preset) => [preset.managed_by_cli!, preset]),
   );
-  const items: AppsCatalogItem[] = [
+  const catalogItems: AppsCatalogItem[] = [
     ...(cliApps?.apps ?? []).map((app) => ({ id: `cli:${app.name}`, kind: "cli" as const, app })),
     ...(mcpPresets?.presets ?? [])
       .filter((preset) => !preset.managed_by_cli || !installedCliNames.has(preset.managed_by_cli))
       .map((preset) => ({ id: `mcp:${preset.name}`, kind: "mcp" as const, preset })),
-  ]
-    .filter((item) => {
-      const matchesFilter = filter === "ready"
-        ? appsReady(item)
-        : filter === "cli"
-          ? item.kind === "cli"
-          : filter === "plugins"
-            ? item.kind === "mcp" && item.preset.source === "agent-plugin"
-            : item.kind === "mcp" && item.preset.source !== "agent-plugin";
-      return matchesFilter && (!normalizedQuery || appsSearchText(item).includes(normalizedQuery));
-    })
-    .sort((left, right) => {
-      const rank = Number(!appsReady(left)) - Number(!appsReady(right));
-      return rank || appsTitle(left).localeCompare(appsTitle(right));
-    });
+  ];
+  const matches = catalogItems.filter((item) => {
+    const matchesKind = filter.kind === "all" || (filter.kind === "cli"
+      ? item.kind === "cli"
+      : filter.kind === "plugins"
+        ? item.kind === "mcp" && item.preset.source === "agent-plugin"
+        : item.kind === "mcp" && item.preset.source !== "agent-plugin");
+    return matchesKind && (!normalizedQuery || appsSearchText(item).includes(normalizedQuery));
+  });
+  const items = (filter.status === "ready" ? matches.filter(appsReady) : matches).sort((left, right) => {
+    const rank = Number(!appsReady(left)) - Number(!appsReady(right));
+    return rank || appsTitle(left).localeCompare(appsTitle(right));
+  });
+  const hiddenByReadyFilter = matches.length > items.length;
   const focusedApp = cliFocusName
     ? (cliApps?.apps ?? []).find((app) => app.name === cliFocusName && app.installed)
     : null;
   const loading = (mcpPresetsLoading && !mcpPresets)
-    || (filter !== "mcp" && cliAppsLoading && !cliApps);
-  const cliAppCount = cliApps?.apps.length ?? 0;
-  const emptyTitle = normalizedQuery
-    ? tx("settings.apps.empty", "No tools match your search.")
-    : filter === "cli"
-      ? tx("settings.apps.emptyApps", "No apps available.")
-      : filter === "plugins"
-        ? tx("settings.apps.emptyPlugins", "No Agent Plugins installed.")
-        : filter === "mcp"
-          ? tx("settings.apps.emptyIntegrations", "No MCP tools available.")
-          : tx("settings.apps.emptyReady", "No tools are ready yet.");
-  const emptyBrowseTarget: AppsKindFilter | null = normalizedQuery || filter === "plugins"
-    ? null
-    : filter === "cli"
-      ? "mcp"
-      : filter === "mcp"
-        ? (cliAppCount ? "cli" : null)
-        : cliAppCount
-          ? "cli"
-          : "mcp";
+    || (filter.kind !== "mcp" && cliAppsLoading && !cliApps);
+  const emptyTitle = hiddenByReadyFilter
+    ? tx("settings.apps.emptyReady", "No tools are ready yet")
+    : normalizedQuery
+      ? tx("settings.apps.empty", "No tools match your search")
+      : filter.kind === "plugins"
+        ? tx("settings.apps.emptyPlugins", "No Agent Plugins installed")
+        : filter.kind === "mcp"
+          ? tx("settings.apps.emptyIntegrations", "No MCP tools available")
+          : tx("settings.apps.emptyApps", "No tools available");
   const statusMessage =
     cliError ||
     mcpError ||
@@ -286,30 +277,20 @@ export function AppsCatalogSettings({
     )
     : "";
   return (
-    <div className="settings-stack">
+    <div className="catalog-section">
+      <CatalogToolbar search={{
+        value: query,
+        onChange: (event) => onQueryChange(event.target.value),
+        placeholder: tx("settings.apps.searchPlaceholder", "Search Apps"),
+      }}>
+        <CatalogControls>
+          <CatalogFilter label={t("settings.apps.typeFilter")} value={filter.kind} options={kindOptions}
+            onChange={(kind) => onFilterChange({ ...filter, kind })} />
+          <CatalogToggle label={t("settings.apps.readyOnly")} checked={filter.status === "ready"}
+            onChange={(ready) => onFilterChange({ ...filter, status: ready ? "ready" : "all" })} />
+        </CatalogControls>
+      </CatalogToolbar>
       <div role="status" className="sr-only">{oauthStatusAnnouncement}</div>
-      <section className="space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <SearchInput
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-              placeholder={tx("settings.apps.searchPlaceholder", "Search Apps")}
-              className={cn(
-                "h-12 pl-11 text-[15px]",
-                SETTINGS_SEARCH_INPUT_CLASS,
-              )}
-            />
-          </div>
-          <SegmentedControl
-            value={filter}
-            options={filterOptions}
-            onChange={(value) => onFilterChange(value as AppsKindFilter)}
-            className="max-[480px]:grid max-[480px]:w-full max-[480px]:grid-cols-2 max-[480px]:rounded-2xl"
-          />
-        </div>
-      </section>
 
       {statusMessage ? (
         <DismissibleStatusMessage
@@ -334,9 +315,9 @@ export function AppsCatalogSettings({
       <section className="rounded-panel bg-settings-surface px-3 py-3 sm:px-4">
         <div className="settings-section-heading border-b border-border/45 pb-2">
           <SettingsSectionTitle>
-            {filter === "mcp"
+            {filter.kind === "mcp"
               ? tx("settings.apps.mcpTools", "MCP tools")
-              : filter === "plugins"
+              : filter.kind === "plugins"
                 ? tx("settings.apps.filterPlugins", "Plugins")
                 : tx("settings.apps.featured", "Tools")}
           </SettingsSectionTitle>
@@ -373,7 +354,7 @@ export function AppsCatalogSettings({
                   oauthCompleting={mcpOAuthCompleting}
                   oauthCallbackError={mcpOAuthCallbackError}
                   showBrandLogos={showBrandLogos}
-                  showTypeBadge={filter !== "mcp"}
+                  showTypeBadge={filter.kind !== "mcp"}
                   onFieldChange={onMcpFieldChange}
                   onAction={onMcpAction}
                   onOAuthConnect={onMcpOAuthConnect}
@@ -389,11 +370,11 @@ export function AppsCatalogSettings({
         ) : null}
         {loading ? (
           <CatalogSkeleton label={tx("settings.apps.loading", "Loading apps…")} layout="apps"
-            appActionLabel={filter === "cli" ? undefined : tx("settings.mcp.manage", "Manage")} />
+            appActionLabel={filter.kind === "cli" ? undefined : tx("settings.mcp.manage", "Manage")} />
         ) : !items.length && !statusIsError ? (
           <div className="px-3 py-12 text-center text-sm text-muted-foreground">
             <p>{emptyTitle}</p>
-            {normalizedQuery ? (
+            {hiddenByReadyFilter ? null : normalizedQuery ? (
               <Button
                 type="button"
                 variant="outline"
@@ -402,29 +383,18 @@ export function AppsCatalogSettings({
               >
                 {tx("settings.apps.clearSearch", "Clear search")}
               </Button>
-            ) : emptyBrowseTarget ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-4 rounded-full"
-                onClick={() => onFilterChange(emptyBrowseTarget)}
-              >
-                {emptyBrowseTarget === "cli"
-                  ? tx("settings.apps.browseApps", "Browse apps")
-                  : tx("settings.apps.browseIntegrations", "Browse MCP tools")}
-              </Button>
-            ) : (
+            ) : filter.kind === "mcp" || filter.kind === "plugins" ? (
               <p className="mx-auto mt-2 max-w-[28rem] text-[12px] leading-5">
-                {filter === "plugins"
-                  ? tx("settings.apps.emptyPluginsHint", "Add a plugin to the workspace plugins directory to enable it here.")
-                  : tx("settings.apps.emptyIntegrationsHint", "Add a custom MCP server below.")}
+                {filter.kind === "mcp"
+                  ? tx("settings.apps.emptyIntegrationsHint", "Add a custom MCP server below")
+                  : tx("settings.apps.emptyPluginsHint", "Add a plugin to the workspace plugins directory to enable it here")}
               </p>
-            )}
+            ) : null}
           </div>
         ) : null}
       </section>
 
-      {filter === "mcp" ? (
+      {filter.kind === "mcp" ? (
         <McpCustomServerPanel
           onConfigureProxy={onConfigureProxy}
           form={customMcpForm}

@@ -15,7 +15,8 @@ function startupSkeleton(): Plugin {
       order: "post",
       handler(html) {
         if (!html.includes("<!--startup-shell-->")) return html;
-        const css = readFileSync(path.resolve(__dirname, "src/components/startup-skeleton.css"), "utf8");
+        const css = ["src/components/content-column.css", "src/components/settings/shared/catalog-layout.css", "src/components/startup-skeleton.css"]
+          .map((file) => readFileSync(path.resolve(__dirname, file), "utf8")).join("\n");
         const initialize = `var shell = document.querySelector('.startup-shell'); var layout = (${readStartupLayout.toString()})();
           shell.dataset.startupSurface = layout.surface; shell.dataset.startupSection = layout.section;
           shell.dataset.sidebarExpanded = String(layout.sidebarExpanded); shell.dataset.existingChat = String(layout.existingChat);
