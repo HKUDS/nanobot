@@ -1,7 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
-import { LayoutGroup, useReducedMotion } from "motion/react";
-import { div as MotionDiv } from "motion/react-m";
-import { DeferredMotion } from "@/components/ui/deferred-motion";
+import { LayoutGroup, motion, useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -28,8 +26,9 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   snapshots: readonly ContextSnapshot[]; onOpenFile?: (path: string) => void; sidebar?: boolean; expandable?: boolean; onClose?: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const layoutId = useId();
+  const panelId = useId();
   const reducedMotion = useReducedMotion();
+  const layoutId = reducedMotion ? undefined : panelId;
   const [expanded, setExpanded] = useState(false);
   const [replay, setReplay] = useState<{ frames: readonly ContextSnapshot[]; index: number; startedAt: number; interval: number } | null>(null);
   const [readyGraph, setReadyGraph] = useState<ContextGraph | null>(null);
@@ -63,7 +62,7 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
   const openFileCallback = useRef(onOpenFile);
   openFileCallback.current = onOpenFile;
   const openFile = useCallback((path: string) => { setExpanded(false); openFileCallback.current?.(path); }, []);
-  const content = (large: boolean) => <MotionDiv layoutId={layoutId} transition={{ duration: reducedMotion ? 0 : 0.25, ease: [0.2, 0, 0, 1] }} className={cn("flex flex-col gap-3", sidebar && !large && "h-full min-h-0")}>
+  const content = (large: boolean) => <motion.div layoutId={layoutId} transition={{ duration: reducedMotion ? 0 : 0.25, ease: [0.2, 0, 0, 1] }} className={cn("flex flex-col gap-3", sidebar && !large && "h-full min-h-0")}>
     <Suspense fallback={<div aria-busy="true" className={cn(surface, "min-h-[300px]", sidebar && !large && "min-h-0 flex-1")} />}>
       <ContextGraphScene graph={snapshot?.graph ?? EMPTY_GRAPH} epoch={epoch} onReady={setReadyGraph} expanded={large} sidebar={sidebar && !large} onExpand={expandable ? toggleExpanded : undefined} onClose={large ? undefined : onClose} onOpenFile={onOpenFile ? openFile : undefined} />
     </Suspense>
@@ -97,8 +96,8 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
         setReplay({ frames: [...snapshots], index: 0, startedAt: performance.now(), interval: 1000 / stepsPerSecond });
       }} />
     </div>
-  </MotionDiv>;
-  return <DeferredMotion><LayoutGroup>
+  </motion.div>;
+  return <LayoutGroup>
     {!expanded && content(false)}
     <Dialog open={expanded} onOpenChange={setExpanded}>
       <DialogContent showCloseButton={false} aria-describedby={undefined} overlayClassName="context-expanded-overlay bg-background/30 backdrop-blur-md" className="w-[min(1440px,calc(100vw-2rem))] max-w-none border-0 bg-transparent p-0 shadow-none !animate-none">
@@ -106,5 +105,5 @@ export function ContextInspector({ context, rounds, snapshots, onOpenFile, sideb
         {content(true)}
       </DialogContent>
     </Dialog>
-  </LayoutGroup></DeferredMotion>;
+  </LayoutGroup>;
 }

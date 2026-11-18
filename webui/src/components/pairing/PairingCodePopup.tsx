@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ShieldCheck, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { channelUiPresentation } from "@/channel-plugins/registry";
+import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Button } from "@/components/ui/button";
 import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
@@ -37,7 +37,6 @@ export function PairingCodePopup({
     !request.delivery_status || request.delivery_status === "sent"
   )) ?? requests[0] ?? null;
   const displayRequest = matchedRequest ?? firstRequest;
-  const presentation = usePairingChannelPresentation(displayRequest?.channel ?? "");
   const deliveryBlocked = displayRequest?.delivery_status === "failed"
     || displayRequest?.delivery_status === "sending";
   const expires = formatPairingExpiry(displayRequest?.expires_in_seconds);
@@ -87,7 +86,7 @@ export function PairingCodePopup({
       )}
     >
       <div className="flex items-start gap-3">
-        <PairingChannelBadge presentation={presentation} />
+        <PairingChannelBadge channel={displayRequest.channel} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -139,7 +138,7 @@ export function PairingCodePopup({
                 {matchedRequest && busyCode === matchedRequest.code
                   ? t("app.pairing.matched", {
                       defaultValue: "Matched {{channel}}. Connecting...",
-                      channel: presentation.label,
+                      channel: channelLabel(matchedRequest.channel),
                     })
                   : deliveryBlocked ? null : t("app.pairing.expiresInline", {
                       defaultValue: "Code expires {{expires}}.",
@@ -186,7 +185,8 @@ export function PairingCodePopup({
   );
 }
 
-function PairingChannelBadge({ presentation }: { presentation: ReturnType<typeof usePairingChannelPresentation> }) {
+function PairingChannelBadge({ channel }: { channel: string }) {
+  const presentation = pairingChannelPresentation(channel);
   const initials = presentation.initials;
   const color = presentation.color;
   const brandLogoUrl = presentation.logoUrl;
@@ -321,20 +321,13 @@ function pairingChannelKey(channel: string): string {
   return raw.split(/[.:]/)[0] ?? raw;
 }
 
-function usePairingChannelPresentation(channel: string) {
-  const [lookup, setLookup] = useState<typeof channelUiPresentation>();
-  const needed = !!channel;
-  useEffect(() => {
-    // The registry also imports channel setup UIs. A real pairing request can
-    // already accept input with the text badge while its branding loads.
-    if (!needed || lookup) return;
-    let active = true;
-    void import("@/channel-plugins/registry").then(({ channelUiPresentation }) => {
-      if (active) setLookup(() => channelUiPresentation);
-    }).catch(() => {});
-    return () => { active = false; };
-  }, [needed, lookup]);
-  const plugin = lookup?.(pairingChannelKey(channel));
+function channelLabel(channel: string): string {
+  return pairingChannelPresentation(channel).label;
+}
+
+function pairingChannelPresentation(channel: string) {
+  const key = pairingChannelKey(channel);
+  const plugin = channelUiPresentation(key);
   return {
     label: plugin?.displayName ?? channel,
     initials: plugin?.initials ?? channel.slice(0, 2).toUpperCase(),
