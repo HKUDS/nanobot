@@ -18,8 +18,7 @@ export default {
     displayName: "Linear",
     initials: "LI",
     color: "#5E6AD2",
-    logoUrl: "https://linear.app/favicon.ico",
-    logoLayout: "tile",
+    logoUrl: "/brand/channels/linear.svg",
     setup: {
       mode: "connect",
       docsUrl: chatAppGuideUrl("linear"),

@@ -245,7 +245,12 @@ test("keeps navigation, control slots and full-width search stable when switchin
 
 test("keeps channel names, local marks and click focus on a narrow viewport", async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 320, height: 800 });
-  await page.route(url => url.origin !== new URL(baseURL!).origin, route => route.abort());
+  const origin = new URL(baseURL!).origin;
+  const externalImages: string[] = [];
+  await page.route(url => url.origin !== origin, route => {
+    if (route.request().resourceType() === "image") externalImages.push(route.request().url());
+    return route.abort();
+  });
   await page.route("**/api/settings/nanobot-features", route => route.fulfill({ json: {
     enabled_count: 1,
     features: [{
@@ -260,7 +265,13 @@ test("keeps channel names, local marks and click focus on a narrow viewport", as
       name: "email", display_name: "Email", type: "channel",
       enabled: false, installed: true, configured: false, status: "not_enabled",
       install_supported: false, requires_restart: false,
-    }],
+    }, ...[
+      ["linear", "Linear"], ["mattermost", "Mattermost"], ["qq", "QQ"], ["slack", "Slack"],
+    ].map(([name, display_name]) => ({
+      name, display_name, type: "channel",
+      enabled: false, installed: true, status: "not_enabled",
+      install_supported: false, requires_restart: false,
+    }))],
   } }));
   await page.goto("/browser/fixture.html?case=tools-catalog&layout&section=channels");
   const name = page.getByRole("heading", { name: "WhatsApp Agent Platform", exact: true });
@@ -282,6 +293,15 @@ test("keeps channel names, local marks and click focus on a narrow viewport", as
   await enabledOnly.click();
   await expect(enabledOnly).not.toBeChecked();
   await expect(enabledOnly).toBeFocused();
+  for (const channel of ["linear", "mattermost", "qq"]) {
+    const image = page.getByTestId(`channel-logo-${channel}`).locator("img");
+    await image.scrollIntoViewIfNeeded();
+    await expect(image).toHaveAttribute("src", `/brand/channels/${channel}.svg`);
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  }
+  const slackMark = page.getByTestId("channel-logo-slack");
+  await slackMark.scrollIntoViewIfNeeded();
+  await expect(slackMark).toHaveText("SL");
   const emailSwitch = page.getByRole("switch", { name: /Email/ });
   await emailSwitch.click();
   await expect(dialog).toBeFocused();
@@ -299,6 +319,7 @@ test("keeps channel names, local marks and click focus on a narrow viewport", as
   await skills.click();
   await expect(page.getByLabel("Search installed skills")).toBeVisible();
   await expect(skills).toBeFocused();
+  expect(externalImages).toEqual([]);
 });
 
 async function catalogGeometry(page: Page, startup = false) {
