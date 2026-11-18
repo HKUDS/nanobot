@@ -5,7 +5,6 @@ import type { ToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { AutomationFilter } from "@/components/settings/system/AutomationsSettings";
 import {
   DEFAULT_CUSTOM_MCP_FORM,
-  type AppsKindFilter,
   type CustomMcpForm,
 } from "@/components/settings/system/AppsSettings";
 import type {
@@ -50,10 +49,10 @@ export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
   const [cliAppsError, setCliAppsError] = useState<string | null>(null);
   const [nanobotFeaturesError, setNanobotFeaturesError] = useState<string | null>(null);
   const [cliAppsFocusName, setCliAppsFocusName] = useState<string | null>(null);
-  const [appsKindFilter, setAppsKindFilter] = useState<AppsKindFilter>("cli");
   const [mcpMessage, setMcpMessage] = useState<string | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [automationsError, setAutomationsError] = useState<string | null>(null);
+  const [automationDialogError, setAutomationDialogError] = useState<string | null>(null);
   const [automationAction, setAutomationAction] = useState<string | null>(null);
   const [automationPendingDelete, setAutomationPendingDelete] =
     useState<SessionAutomationJob | null>(null);
@@ -66,7 +65,6 @@ export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
   return {
     toolsCatalog,
     toolsCatalogInvalidation,
-    appsKindFilter,
     appsQuery,
     automationAction,
     automationPendingDelete,
@@ -103,13 +101,14 @@ export function useSystemSettingsState(toolsCatalog: ToolsCatalog) {
     nanobotFeatures,
     nanobotFeaturesError,
     nanobotFeaturesLoading,
-    setAppsKindFilter,
     setAppsQuery,
     setAutomationAction,
     setAutomationPendingDelete,
     setAutomationPendingEdit,
     setAutomations,
     setAutomationsError,
+    automationDialogError,
+    setAutomationDialogError,
     setAutomationsFilter,
     setAutomationsLoading,
     setCliApps,

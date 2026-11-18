@@ -6,6 +6,8 @@ The WebUI shares its gateway and saved sessions with the native terminal client 
 
 For a visual tour, see the [README feature gallery](../README.md#-webui). This guide follows the current source tree; some features are newer than the published release.
 
+In **Settings → Appearance → Background**, choose a PNG, JPEG, or WebP image up to 6 MiB and 32 megapixels, adjust blur and background fade, then save. The image and settings are shared by devices connected to the same instance; refresh another device to load changes. More fade makes the background subtler and can improve text readability. Images are centered and cropped as needed to fill the window.
+
 ## Open the WebUI
 
 ```bash
@@ -103,6 +105,12 @@ Open a topic's sidebar action menu and choose **Create group** to turn it into a
 
 To use work from another topic, mention it with `@` and tell nanobot what you need. See [Composer](#composer) for how to add a topic reference.
 
+### Model options for a topic
+
+Open the model preset menu beside the composer to choose **Reasoning effort** for the next message in this topic. Drag the slider to choose a known effort level. Codex presets also offer **Fast**, with an **Ultrafast** choice for supported models. The menu selects the current value, such as `medium`, when it opens. Selecting a value applies it to this topic without editing the preset; switching presets clears topic selections. The single lightning button requests Fast; the double lightning button requests Ultrafast. Select the active button again to turn speed boosts off. Faster processing increases Codex usage and depends on model and account availability.
+
+Choices do not edit shared presets or provider settings and do not change an already-running task. Unsent choices are remembered in this browser; the last values sent with an ordinary message are saved with the topic and survive a gateway restart. Switching presets clears both overrides. Temporary chats do not show these controls.
+
 ### Activity and context usage
 
 While nanobot works, **Working for** shows the latest activity beside the timer, or below it on narrow screens. Select the timer to see the full reasoning and tool activity. Set **Settings → Appearance → Activity details** to **Expanded** if you prefer to see the details by default.
@@ -159,13 +167,13 @@ These controls appear when the connected host supports subagent tasks. See [Suba
 
 ## Temporary Chats
 
-Start **New topic → Temporary chat** for a conversation that should not be added to topic history or long-term memory.
+Start **New topic → Temporary chat** to work without saved agent profiles, long-term memory, or the memory skill in the model context. The conversation is not added to topic history or long-term memory. Native file readers and editors cannot access the agent profile or memory files in this mode. Subagents are unavailable; project instructions and ordinary workspace files remain available.
 
 You can keep more than one temporary chat open and switch between them under **Temporary chats** in the sidebar while the current WebUI connection remains open. Reloading or closing the page, restarting the gateway, or losing the WebSocket connection ends all of them. They cannot be recovered afterward.
 
 Temporary chats do not create saved files for oversized text tool results; these stay in memory and are truncated to the configured tool-result limit. Tool-call arguments and execution-error details are hidden from the built-in tool logs, while tool activity remains visible in the current chat.
 
-Temporary does not mean consequence-free. Requests still go to the configured model provider, and tools can still change files, run commands, or affect external services. Files and image artifacts created or exported by tools (including images returned by MCP tools) are not erased when the chat closes. Temporary chats always use the default workspace in Restricted mode; the project picker and Full Access are unavailable. Commands and tools that create durable goals, automations, or subagent work are also unavailable. Use a regular topic when you need reusable context, scheduled work, or a result you must retain.
+Temporary does not mean consequence-free. Requests still go to the configured model provider, and tools can still change files, run commands, or affect external services. Files and image artifacts created or exported by tools (including images returned by MCP tools) are not erased when the chat closes. Temporary chats always use the default workspace in Restricted mode; the project picker and Full Access are unavailable. Commands and tools that create durable goals, automations, or subagent work are also unavailable. Native file tools can read `HEARTBEAT.md` but cannot edit it in a temporary chat. Use a regular topic when you need reusable context, scheduled work, or a result you must retain.
 
 ## Workspace and Access
 
@@ -195,7 +203,7 @@ Project-local `SOUL.md` and `USER.md` files are ignored, and the agent workspace
 
 The access control in the composer controls the local capability level for the chat. It does not bypass your gateway, provider, shell sandbox, or operating system configuration; it only selects among the capabilities that are already available to the current topic.
 
-In Restricted mode, ordinary file and shell work stays inside the selected project. To preserve agent continuity, filesystem/search tools receive narrow, read-only access to built-in skills, custom skills in the agent workspace, and the exact agent `memory/history.jsonl` file. This does not grant access to neighboring memory or profile files, and it does not allow writes outside the selected project. These tool exceptions do not broaden the browser's file preview boundary.
+In Restricted mode, ordinary file and shell work stays inside the selected project. To preserve agent continuity, filesystem/search tools receive narrow, read-only access to built-in skills, custom skills and `memory/wiki/` in the agent workspace, and the exact agent `memory/history.jsonl` file. This does not grant access to neighboring memory or profile files, and it does not allow writes outside the selected project. These tool exceptions do not broaden the browser's file preview boundary.
 
 ## Composer
 
@@ -233,11 +241,13 @@ Test a new channel with a private DM. When a supported channel sends a pairing c
 
 ## Apps
 
-**Apps → Ready** lists capabilities available for use:
+**Apps → Ready** lists capabilities available for use. Use the **CLI Apps**, **Agent Plugins**, and **MCP** filters to manage each kind separately:
 
 - **Agent Plugins** are local packages that can bundle skills, MCP servers, or both. A package under `<workspace>/plugins/` is installed but remains inactive until you enable it in Apps.
 - **CLI Apps** are command-line tool adapters on the nanobot host. Install and enable an adapter before attaching it to a turn.
 - **MCP** lists Model Context Protocol servers. Presets provide known configurations, and the **Add MCP server** panel accepts stdio, HTTP, and SSE servers. Custom HTTP/SSE servers can use no authentication, OAuth, or request headers. After saving an OAuth server, choose **Connect** to open its sign-in page. Presets such as Xmind, Notion, and Linear already use OAuth. HTTPS and localhost WebUIs return automatically; a remote plain-HTTP WebUI shows one field for pasting the complete localhost callback URL.
+
+A plugin generated by a CLI App is managed from that app's entry, including re-enabling it if needed. Other Agent Plugins appear in the **Agent Plugins** filter. Plugin details show declared permissions and MCP servers; declared permissions do not sandbox a plugin from nanobot's operating-system permissions.
 
 CLI Apps run with a limited environment that excludes provider API keys. On Unix, they inherit `XDG_RUNTIME_DIR` when it is set in the gateway's environment, so desktop CLIs such as Obsidian can locate the running application. Start the gateway in the same desktop session as the app to inherit that runtime directory.
 

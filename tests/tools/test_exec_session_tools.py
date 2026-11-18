@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from loguru import logger
@@ -27,7 +27,9 @@ from nanobot.agent.tools.exec_session import (
 )
 from nanobot.agent.tools.registry import is_tool_error_result
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.bus.queue import MessageBus
 from nanobot.execution import processes
+from nanobot.providers.base import GenerationSettings
 
 
 def _python_command(code: str) -> str:
@@ -985,54 +987,44 @@ def test_exec_session_manager_preserves_single_cleanup_error():
     asyncio.run(run())
 
 
-def test_agent_loop_shutdown_closes_exec_sessions(tmp_path):
-    async def run() -> None:
-        manager = ExecSessionManager()
-        tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
-        initial = await tool.execute(
-            command=_waiting_shell_command("ready"),
-            yield_time_ms=100,
-        )
-        sid = _session_id(initial)
-        process = manager._sessions[sid].process
-
-        loop = object.__new__(AgentLoop)
-        loop.sessions = SimpleNamespace(state=SimpleNamespace(aclose=AsyncMock()))
-        loop._background_tasks = set()
-        loop._exec_session_manager = manager
-        loop.runtime_resolver = SimpleNamespace(aclose=AsyncMock())
-        loop.subagents = SimpleNamespace(close=AsyncMock())
-
-        await loop.aclose()
-        await loop.aclose()
-
-        assert process.returncode is not None
-        assert manager._sessions == {}
-        assert loop.subagents.close.await_count == 2
-
-    asyncio.run(run())
+@pytest.fixture
+def shutdown_loop(tmp_path) -> AgentLoop:
+    provider = MagicMock(aclose=AsyncMock(), generation=GenerationSettings())
+    return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
 
 
-def test_agent_loop_shutdown_attempts_all_cleanup_after_errors():
-    async def run() -> None:
-        loop = object.__new__(AgentLoop)
-        loop.sessions = SimpleNamespace(state=SimpleNamespace(aclose=AsyncMock()))
-        loop._background_tasks = set()
-        loop.runtime_resolver = SimpleNamespace(aclose=AsyncMock())
-        loop.subagents = SimpleNamespace(
-            close=AsyncMock(side_effect=RuntimeError("subagent cleanup failed")),
-        )
-        loop._exec_session_manager = SimpleNamespace(
-            close_all=AsyncMock(side_effect=OSError("exec cleanup failed")),
-        )
-        with pytest.raises(BaseExceptionGroup) as exc_info:
-            await loop.aclose()
+async def test_agent_loop_shutdown_closes_exec_sessions(shutdown_loop, tmp_path, monkeypatch):
+    manager = shutdown_loop._exec_session_manager
+    close_subagents = AsyncMock(wraps=shutdown_loop.subagents.close)
+    monkeypatch.setattr(shutdown_loop.subagents, "close", close_subagents)
+    tool = ExecTool(working_dir=str(tmp_path), timeout=30, session_manager=manager)
+    initial = await tool.execute(
+        command=_waiting_shell_command("ready"),
+        yield_time_ms=100,
+    )
+    sid = _session_id(initial)
+    process = manager._sessions[sid].process
 
-        assert len(exc_info.value.exceptions) == 2
-        loop.subagents.close.assert_awaited_once()
-        loop._exec_session_manager.close_all.assert_awaited_once()
+    await shutdown_loop.aclose()
+    await shutdown_loop.aclose()
 
-    asyncio.run(run())
+    assert process.returncode is not None
+    assert manager._sessions == {}
+    assert close_subagents.await_count == 2
+
+
+async def test_agent_loop_shutdown_attempts_all_cleanup_after_errors(shutdown_loop, monkeypatch):
+    close_subagents = AsyncMock(side_effect=RuntimeError("subagent cleanup failed"))
+    close_exec_sessions = AsyncMock(side_effect=OSError("exec cleanup failed"))
+    monkeypatch.setattr(shutdown_loop.subagents, "close", close_subagents)
+    monkeypatch.setattr(shutdown_loop._exec_session_manager, "close_all", close_exec_sessions)
+
+    with pytest.raises(BaseExceptionGroup) as exc_info:
+        await shutdown_loop.aclose()
+
+    assert len(exc_info.value.exceptions) == 2
+    close_subagents.assert_awaited_once()
+    close_exec_sessions.assert_awaited_once()
 
 
 def test_terminate_by_owner_kills_matching_sessions(tmp_path):
@@ -1185,22 +1177,16 @@ def test_terminate_by_owner_skips_sessions_without_owner_key(tmp_path):
     asyncio.run(run())
 
 
-def test_agent_loop_shutdown_preserves_single_cleanup_error():
-    async def run() -> None:
-        loop = object.__new__(AgentLoop)
-        loop.sessions = SimpleNamespace(state=SimpleNamespace(aclose=AsyncMock()))
-        loop._background_tasks = set()
-        loop.runtime_resolver = SimpleNamespace(aclose=AsyncMock())
-        loop.subagents = SimpleNamespace(
-            close=AsyncMock(side_effect=RuntimeError("subagent cleanup failed")),
-        )
-        loop._exec_session_manager = SimpleNamespace(close_all=AsyncMock())
-        with pytest.raises(RuntimeError, match="subagent cleanup failed"):
-            await loop.aclose()
+async def test_agent_loop_shutdown_preserves_single_cleanup_error(shutdown_loop, monkeypatch):
+    close_subagents = AsyncMock(side_effect=RuntimeError("subagent cleanup failed"))
+    close_exec_sessions = AsyncMock(wraps=shutdown_loop._exec_session_manager.close_all)
+    monkeypatch.setattr(shutdown_loop.subagents, "close", close_subagents)
+    monkeypatch.setattr(shutdown_loop._exec_session_manager, "close_all", close_exec_sessions)
 
-        loop._exec_session_manager.close_all.assert_awaited_once()
+    with pytest.raises(RuntimeError, match="subagent cleanup failed"):
+        await shutdown_loop.aclose()
 
-    asyncio.run(run())
+    close_exec_sessions.assert_awaited_once()
 
 
 async def test_exec_session_shared_kill_survives_cancelled_caller(monkeypatch):

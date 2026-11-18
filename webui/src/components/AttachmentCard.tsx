@@ -50,6 +50,8 @@ export function AttachmentCard({ name, description, children, action, invalid = 
           </PopoverTrigger>
           <PopoverContent side="top" aria-label={name}
             onOpenAutoFocus={(event) => event.preventDefault()}
+            // Focus stays on the trigger; delayed restoration must not steal the next Tab.
+            onCloseAutoFocus={(event) => event.preventDefault()}
             className="w-max max-w-[min(20rem,calc(100vw-2rem))] break-words px-3 py-1.5 text-caption">
             {details}
           </PopoverContent>

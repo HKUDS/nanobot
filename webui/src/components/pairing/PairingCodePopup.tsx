@@ -6,7 +6,6 @@ import { channelUiPresentation } from "@/channel-plugins/registry";
 import { Button } from "@/components/ui/button";
 import { floatingSurfaceElevationClassName } from "@/components/ui/floating-surface";
 import { useLogoFallback } from "@/hooks/useLogoFallback";
-import { logoFallbackUrls } from "@/lib/provider-brand";
 import type { PairingRequestInfo } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -190,11 +189,8 @@ function PairingChannelBadge({ channel }: { channel: string }) {
   const presentation = pairingChannelPresentation(channel);
   const initials = presentation.initials;
   const color = presentation.color;
-  const logoUrls = useMemo(
-    () => logoFallbackUrls(presentation?.logoUrl),
-    [presentation?.logoUrl],
-  );
-  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(logoUrls);
+  const brandLogoUrl = presentation.logoUrl;
+  const { logoUrl, onLogoError, onLogoLoad } = useLogoFallback(brandLogoUrl ? [brandLogoUrl] : undefined);
 
   return (
     <div

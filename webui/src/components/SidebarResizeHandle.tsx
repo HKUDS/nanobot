@@ -37,7 +37,7 @@ export function SidebarResizeHandle({ width, open, onResize, onDraggingChange }:
       aria-valuemin={56}
       aria-valuemax={SIDEBAR_MAX_WIDTH}
       aria-valuenow={open ? width : 56}
-      className="host-no-drag absolute inset-y-0 right-0 z-30 w-3 cursor-grab active:cursor-grabbing touch-none select-none outline-none after:absolute after:top-1/2 after:right-1 after:h-12 after:w-1 after:-translate-y-1/2 after:rounded-full after:bg-transparent hover:after:bg-orange-500/70 active:after:bg-orange-500 focus-visible:after:bg-orange-500"
+      className="host-no-drag absolute inset-y-0 right-0 z-30 w-3 cursor-col-resize touch-none select-none outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-muted-foreground/60"
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.preventDefault();

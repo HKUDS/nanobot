@@ -3,7 +3,7 @@ import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
-    logoUrl: "https://discord.com/favicon.ico",
+    logoUrl: "/brand/channels/discord.svg",
     displayName: "Discord",
     initials: "DC",
     color: "#5865F2",

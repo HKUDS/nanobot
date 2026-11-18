@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { McpPresetInfo } from "@/lib/types";
-import { installSettingsViewTestHooks, jsonResponse, renderSettingsView, requestMutationMock, settingsPayload } from "@/tests/settings-test-utils";
+import { installSettingsViewTestHooks, jsonResponse, renderSettingsView, selectToolType, requestMutationMock, settingsPayload } from "@/tests/settings-test-utils";
 
 const preset: McpPresetInfo = {
   name: "docs", display_name: "Docs MCP", category: "productivity", description: "Docs",
@@ -26,7 +26,7 @@ function installProxySettings() {
 }
 
 async function openMcpSetup() {
-  fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+  await selectToolType("MCP");
   fireEvent.click(await screen.findByRole("button", { name: "Manage Docs MCP" }));
   const parent = await screen.findByRole("dialog", { name: "Docs MCP" });
   fireEvent.click(within(parent).getByRole("tab", { name: "Connection" }));
@@ -103,7 +103,7 @@ describe("Inline shared proxy setup", () => {
   it("retains MCP tool selections when setup is cancelled", async () => {
     const { settings } = installProxySettings();
     renderSettingsView({ initialSection: "apps", initialSettings: settings });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
     fireEvent.click(await screen.findByRole("button", { name: "Manage Docs MCP" }));
     const parent = await screen.findByRole("dialog", { name: "Docs MCP" });
     fireEvent.click(within(parent).getByRole("tab", { name: "Tools" }));

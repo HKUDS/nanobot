@@ -2,6 +2,7 @@ import { Component, Suspense, lazy, memo, startTransition, useCallback, useEffec
 import { Check, Copy } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useToast } from "@/components/ui/toast";
 import { useThemeValue } from "@/hooks/useTheme";
 import { hasAnsi, parseAnsiSegments, stripAnsi } from "@/lib/ansi";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -139,6 +140,7 @@ export const CodeBlock = memo(function CodeBlock({
   viewportHighlight = false,
 }: CodeBlockProps) {
   const { t } = useTranslation();
+  const showToast = useToast();
   const rootRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [highlightedSource, setHighlightedSource] = useState<string | null>(null);
@@ -191,11 +193,14 @@ export const CodeBlock = memo(function CodeBlock({
 
   const onCopy = useCallback(() => {
     void copyTextToClipboard(plainCode).then((ok) => {
-      if (!ok) return;
+      if (!ok) {
+        showToast?.({ message: t("fileActions.failed"), tone: "error", dedupeKey: "copy-failed" });
+        return;
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 1_500);
     });
-  }, [plainCode]);
+  }, [plainCode, showToast, t]);
 
   return (
     <div

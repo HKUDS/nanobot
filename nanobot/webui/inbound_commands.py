@@ -13,11 +13,17 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from loguru import logger
 from websockets.asyncio.server import ServerConnection
 
-from nanobot.bus.events import INBOUND_META_LOCAL_MEDIA, INBOUND_META_USER_SHELL
+from nanobot.bus.events import (
+    INBOUND_META_LOCAL_MEDIA,
+    INBOUND_META_MODEL_OPTIONS,
+    INBOUND_META_USER_SHELL,
+)
 from nanobot.channels.websocket.attachment_policy import validate_attachment_batch
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
 from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.providers.model_options import ModelOptions
+from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
     RUNTIME_CONTEXT_INPUT_META,
     WEBUI_QUOTE_METADATA,
@@ -36,6 +42,7 @@ from nanobot.session.webui_turns import (
     websocket_turn_id,
     websocket_turn_wall_started_at,
 )
+from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.prompt_templates import render_template
 from nanobot.webui.attachments import inspect_local_attachment
@@ -159,6 +166,8 @@ class WebUICommandRouter:
         ] = {}
         self.request_operations: dict[str, WebUIRequestOperation] = {}
         self.request_locks: dict[ServerConnection, asyncio.Lock] = {}
+        self._background_lock = asyncio.Lock()
+        self._background_references: set[tuple[str, str]] = set()
         self._accepted_messages: dict[tuple[str, str], float] = {}
         self._message_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
 
@@ -724,6 +733,22 @@ class WebUICommandRouter:
         )
         if is_user_shell:
             metadata[INBOUND_META_USER_SHELL] = True
+        if "model_options" in envelope:
+            if not trusted_webui:
+                await self._transport.webui_send_event(
+                    connection, "error", detail="model_options requires a trusted WebUI message",
+                    **rejection_fields,
+                )
+                return
+            if not is_user_shell and builtin_command_starts_agent_turn(content):
+                try:
+                    options = ModelOptions.parse(envelope["model_options"])
+                except ValueError as exc:
+                    await self._transport.webui_send_event(
+                        connection, "error", detail=str(exc), **rejection_fields,
+                    )
+                    return
+                metadata[INBOUND_META_MODEL_OPTIONS] = options.to_dict()
         dispatch_content = (
             f"{USER_SHELL_COMMAND} {content[1:].lstrip()}" if is_user_shell else content
         )
@@ -755,6 +780,8 @@ class WebUICommandRouter:
                 )
                 for path in local_paths
             ]
+            if any((upload_owner, ref) in self._background_references for ref in references):
+                raise AttachmentUploadError("Attachment is being used for a background")
             uploaded = self._uploads.store.inspect(references, owner=upload_owner) if references else []
             validate_attachment_batch(
                 [item["mime"] for item in local] + [item.mime for item in uploaded],
@@ -1157,6 +1184,55 @@ class WebUICommandRouter:
         try:
             lock = self.request_locks.setdefault(connection, asyncio.Lock())
             async with lock:
+                if action in {"background.update", "background.delete", "background.style"}:
+                    from nanobot.webui.background import (
+                        MAX_BYTES,
+                        save_background,
+                        save_background_style,
+                    )
+
+                    async def mutate_background() -> WebUIRequestResult:
+                        try:
+                            with self._http_router.bus.admission.activity():
+                                directory = self._http_router.settings.config.path.parent / "webui"
+                                if action == "background.delete":
+                                    await asyncio.to_thread((directory / "background.png").unlink, missing_ok=True)
+                                elif action == "background.style":
+                                    try:
+                                        await asyncio.to_thread(save_background_style, directory, payload.get("blur"), payload.get("veil"))
+                                    except ValueError as exc:
+                                        return WebUIRequestResult(status=400, message=str(exc))
+                                else:
+                                    reference = payload.get("reference")
+                                    if not isinstance(reference, str):
+                                        return WebUIRequestResult(status=400, message="Invalid attachment reference")
+                                    owner = self._uploads.owner(connection)
+                                    try:
+                                        entry = self._uploads.store.inspect([reference], owner=owner)[0]
+                                        # Snapshot a bounded staged file before yielding so disconnect cleanup
+                                        # never unlinks an open source handle on Windows.
+                                        with entry.path.open("rb") as source:
+                                            data = source.read(MAX_BYTES + 1)
+                                        key = (owner, reference)
+                                        self._background_references.add(key)
+                                        try:
+                                            await asyncio.to_thread(save_background, directory, data, entry.mime)
+                                        finally:
+                                            self._background_references.discard(key)
+                                            self._uploads.store.discard([reference], owner=owner)
+                                    except (AttachmentUploadError, ValueError) as exc:
+                                        return WebUIRequestResult(status=400, message=str(exc))
+                                return WebUIRequestResult(result={"ok": True})
+                        except RuntimeMaintenanceError:
+                            return WebUIRequestResult(status=503, message="Gateway update is being verified. Retry shortly.")
+                        except Exception:
+                            # shield_and_drain gives cancellation precedence; retain an
+                            # observable failure even when its caller was cancelled.
+                            logger.exception("Background mutation '{}' failed", action)
+                            raise
+
+                    async with self._background_lock:
+                        return await shield_and_drain(mutate_background())
                 response = await self._http_router.dispatch_webui_mutation(
                     connection,
                     action,

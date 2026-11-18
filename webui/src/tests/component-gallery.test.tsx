@@ -146,7 +146,8 @@ it("switches the chat list preview between ready, loading, empty and archived st
   await setMode("loading");
   expect(preview.getByText("Loading…")).toBeVisible();
   await setMode("empty");
-  expect(preview.getByText("No sessions yet.")).toBeVisible();
+  expect(preview.getByRole("combobox", { name: "Chat list state" })).toHaveTextContent("empty");
+  expect(preview.queryByText("Loading…")).not.toBeInTheDocument();
   await setMode("archived");
   const archived = within(preview.getByRole("region", { name: "Archived" }));
   expect(archived.getByRole("button", { name: "@history 历史方案" })).toBeVisible();

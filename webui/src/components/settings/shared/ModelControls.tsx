@@ -137,7 +137,7 @@ export function ProviderPicker({
                 showBrandLogos={showProviderLogos}
               />
             ) : null}
-            <span className="truncate">{selectedProvider?.label ?? emptyLabel}</span>
+            <span className="relative top-px truncate">{selectedProvider?.label ?? emptyLabel}</span>
           </span></SelectValue>
         </SelectTrigger>
       <SelectContent onCloseAutoFocus={(event) => {

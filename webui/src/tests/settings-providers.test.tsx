@@ -945,7 +945,7 @@ describe("Settings providers", () => {
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Manage providers" })).toBeVisible());
 
     fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex" }));
-    fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Fast" }));
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.provider.update",

@@ -18,6 +18,7 @@ from nanobot.command.spec import CommandLifecycle as CommandLifecycle
 from nanobot.command.user_shell import cmd_user_shell
 from nanobot.providers.base import LLMUsage
 from nanobot.utils.cancellation import shield_and_drain
+from nanobot.utils.gitstore import GitStoreDirtyError
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -143,15 +144,6 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     msg = ctx.msg
     total = await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
-    # Also drain pending queue to prevent mid-turn injection deadlock
-    pending = loop._pending_queues.pop(ctx.key, None)  # pyright: ignore[reportPrivateUsage]
-    if pending is not None:
-        while not pending.empty():
-            try:
-                pending.get_nowait()
-                total += 1
-            except Exception:
-                break
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -383,69 +375,24 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        from nanobot.agent.memory import MemoryStore
+        from nanobot.agent.dream import run_dream
 
-        async def _silent(*_args: Any, **_kwargs: Any) -> None:
-            pass
-
-        dream_session_key = MemoryStore.dream_session_key
-        build_dream_commit_message = MemoryStore.build_dream_commit_message
-
-        store = loop.context.memory
-        content = ""
-        resp = None
-        diff_body = ""
         t0 = time.monotonic()
-        try:
-            result = store.build_dream_prompt()
-            if result is None:
-                await loop.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content=_format_dream_no_input_message(),
-                    metadata={"render_as": "text"},
-                ))
-                return
-            prompt, last_cursor = result
-            key = dream_session_key()
-            dream_runtime = loop.dream_runtime()
-            resp = await loop.process_direct(
-                prompt,
-                session_key=key,
-                ephemeral=True,
-                tools=store.build_dream_tools(),
-                on_progress=_silent,
-                runtime=dream_runtime,
-            )
-            elapsed = time.monotonic() - t0
-            # The real file delta grounds the audit record; normal completion
-            # decides whether this history batch has finished processing.
-            diff_body = store.dream_content_diff()
-            completed = MemoryStore.dream_run_completed(resp)
-            if completed:
-                store.set_last_dream_cursor(last_cursor)
-                if diff_body:
-                    content = f"Dream completed in {elapsed:.1f}s."
-                else:
-                    content = f"Dream completed in {elapsed:.1f}s; no memory changes."
-            else:
-                reason = MemoryStore.dream_incompletion_reason(resp)
-                content = (
-                    f"Dream did not complete after {elapsed:.1f}s ({reason}); "
-                    "memory cursor was not advanced."
-                )
-        except Exception as e:
-            elapsed = time.monotonic() - t0
-            content = f"Dream failed after {elapsed:.1f}s: {e}"
-        finally:
-            if store.git.is_initialized():
-                commit_msg = build_dream_commit_message("dream: manual run", diff_body)
-                sha = store.git.auto_commit(commit_msg)
-                if sha:
-                    content += f" (commit {sha})"
-            store.compact_history()
-            await loop.sessions.state.prune_dream_sessions()
+        result = await run_dream(loop, commit_prefix="dream: manual run")
+        elapsed = time.monotonic() - t0
+        if result.error:
+            content = f"Dream did not complete after {elapsed:.1f}s ({result.error})."
+        elif not result.had_input:
+            content = _format_dream_no_input_message()
+        elif result.changed:
+            content = f"Dream completed in {elapsed:.1f}s."
+        else:
+            content = f"Dream completed in {elapsed:.1f}s; no memory changes."
+        if result.commit_sha:
+            content += f" (commit {result.commit_sha})"
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
+            metadata={"render_as": "text"} if not result.had_input else {},
         ))
 
     asyncio.create_task(_run_dream())
@@ -737,20 +684,28 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
                 "Use `/dream-restore` to list recent versions."
             )
         else:
-            changed_files = _format_changed_files(result[1])
-            new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
-            if new_sha:
+            try:
+                async with store.dream_lock:
+                    new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+            except GitStoreDirtyError as exc:
                 content = (
-                    f"Restored Dream memory to the state before `{sha}`.\n\n"
-                    f"- New safety commit: `{new_sha}`\n"
-                    f"- Restored files: {changed_files}\n\n"
-                    f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                    f"Couldn't restore Dream change `{sha}`. {exc}\n\n"
+                    "Commit or undo your changes before trying again."
                 )
             else:
-                content = (
-                    f"Couldn't restore Dream change `{sha}`.\n\n"
-                    "It may be the first saved version with no earlier state to restore."
-                )
+                if new_sha:
+                    changed_files = _format_changed_files(result[1])
+                    content = (
+                        f"Restored Dream memory to the state before `{sha}`.\n\n"
+                        f"- New safety commit: `{new_sha}`\n"
+                        f"- Restored files: {changed_files}\n\n"
+                        f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                    )
+                else:
+                    content = (
+                        f"Couldn't restore Dream change `{sha}`.\n\n"
+                        "It may be the first saved version with no earlier state to restore."
+                    )
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content=content, metadata={"render_as": "text"},

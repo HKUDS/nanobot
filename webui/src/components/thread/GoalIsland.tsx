@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useToast } from "@/components/ui/toast";
 import { useOverlayEscapeFocus } from "@/hooks/useOverlayEscapeFocus";
 import type { GoalStateWsPayload } from "@/lib/types";
 
@@ -18,7 +19,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [cancelFailed, setCancelFailed] = useState(false);
+  const showToast = useToast();
   const [scrollBody, setScrollBody] = useState<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const escapeFocus = useOverlayEscapeFocus();
@@ -53,11 +54,10 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
     title={cancelDisabled ? t("thread.composer.cancelGoalOffline") : undefined}
     onClick={async () => {
       setCancelling(true);
-      setCancelFailed(false);
       try {
         await onCancel();
       } catch {
-        setCancelFailed(true);
+        showToast?.({ message: t("thread.composer.cancelGoalFailed"), tone: "error", dedupeKey: "cancel-goal" });
       } finally {
         setCancelling(false);
       }
@@ -66,7 +66,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
 
   useLayoutEffect(() => {
     if (!scrollBody) return;
-    if (status === "blocked" || cancelFailed) scrollBody.scrollTop = 0;
+    if (status === "blocked") scrollBody.scrollTop = 0;
     const measure = () => {
       scrollBody.toggleAttribute("data-overflow-top", scrollBody.scrollTop > 1);
       scrollBody.toggleAttribute("data-overflow-bottom", scrollBody.scrollHeight - scrollBody.clientHeight - scrollBody.scrollTop > 1);
@@ -80,7 +80,7 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
       observer.disconnect();
       scrollBody.removeEventListener("scroll", measure);
     };
-  }, [scrollBody, status, cancelFailed]);
+  }, [scrollBody, status]);
 
   return (
     <div className="goal-island-position">
@@ -120,7 +120,6 @@ export function GoalIsland({ goal, cancelDisabled, onCancel }: {
             </div> : null}
             <div ref={setScrollBody} className="goal-island-body">
               <div className="goal-island-document">
-                {cancelFailed ? <p role="alert" className="mb-2 text-caption text-destructive">{t("thread.composer.cancelGoalFailed")}</p> : null}
                 {status === "blocked" ? <div className="goal-island-blocked">
                   <CircleAlert className="goal-island-status-icon" strokeWidth={2.5} aria-hidden="true" />
                   <span className="sr-only">{t("thread.composer.goalBlocked")}</span>

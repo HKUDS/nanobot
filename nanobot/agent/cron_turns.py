@@ -18,29 +18,21 @@ class CronTurnCoordinator(AutomationTurnCoordinator):
         self,
         *,
         enqueue: Callable[[InboundMessage], Awaitable[None]],
-        deferred_queues: dict[str, list[InboundMessage]] | None = None,
     ) -> None:
         super().__init__(
             enqueue=enqueue,
             turn_id=lambda msg: cron_run_id(msg.metadata),
             pending_id=_cron_job_id,
-            should_defer_turn=_should_defer_cron_turn,
+            should_defer_turn=lambda msg: defer_cron_until_session_idle(msg.metadata),
             missing_id_error="cron turn metadata must include a run_id",
             duplicate_id_error=lambda run_id: f"cron run {run_id!r} is already pending",
-            deferred_queues=deferred_queues,
         )
 
-    def pending_job_ids_for_session(self, session_key: str) -> set[str]:
+    def pending_job_ids_for_session(
+        self, session_key: str, deferred: Iterable[InboundMessage],
+    ) -> set[str]:
         """Return cron jobs that are waiting for or running in *session_key*."""
-        return self.pending_ids_for_session(session_key)
-
-
-def _should_defer_cron_turn(
-    msg: InboundMessage,
-    session_key: str,
-    active_session_keys: Iterable[str],
-) -> bool:
-    return defer_cron_until_session_idle(msg.metadata) and session_key in active_session_keys
+        return self.pending_ids_for_session(session_key, deferred)
 
 
 def _cron_job_id(msg: InboundMessage) -> str | None:

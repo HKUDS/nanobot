@@ -138,7 +138,7 @@ export function HostSwitcherView({ picker, status, collapsed = false, portalCont
         : remote ? <Server className="h-4 w-4" /> : <Laptop className="h-4 w-4" />}
       {!waiting && !failed && <span aria-hidden className={cn("absolute -bottom-0.5 -right-0.5 h-1.5 w-1.5 rounded-full ring-2 ring-sidebar", currentStatus === "open" ? "bg-emerald-500" : "bg-muted-foreground")} />}
     </span>
-    {!collapsed && <><span className="truncate">{label}</span><ChevronUp className="ml-auto h-3 w-3 shrink-0 opacity-60" /></>}
+    {!collapsed && <><span className="truncate" data-sidebar-host-label>{label}</span><ChevronUp className="ml-auto h-3 w-3 shrink-0 opacity-60" data-sidebar-host-label /></>}
     <span className="sr-only" role="status">{detail}</span>
   </Button>;
   const trigger = <TooltipTrigger asChild>{button}</TooltipTrigger>;

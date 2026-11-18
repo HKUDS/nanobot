@@ -69,22 +69,6 @@ def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
     assert prompt_a == builder.build_system_prompt(workspace=project_a)
 
 
-@pytest.mark.parametrize("selected_project", [False, True])
-def test_system_prompt_reflects_current_dream_memory_contract(tmp_path, selected_project) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-    project = tmp_path / "project" if selected_project else workspace
-    project.mkdir(exist_ok=True)
-
-    prompt = builder.build_system_prompt(workspace=project)
-
-    assert "memory/history.jsonl" in prompt
-    assert (
-        "Only Dream memory-consolidation tasks may edit the profile and long-term memory files "
-        "listed above."
-    ) in prompt
-
-
 def test_provider_context_appended_after_user_content(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -152,14 +136,12 @@ def test_scheduling_contract_reaches_fresh_and_legacy_workspaces(tmp_path, legac
     messages = builder.build_messages(history=[], current_message="每天早上8点提醒我喝水")
     system = messages[0]["content"]
 
-    assert '"Every day at 8am, remind me to drink water" is a cron task, not a heartbeat task.' in system
-    assert "Heartbeat does not guarantee a requested time or interval." in system
-    assert "background checks with flexible timing" in system
-    assert system.count("## Scheduling") == 1
+    assert "Use `cron` for a specified time or interval, even if it repeats" in system
+    assert "Use `HEARTBEAT.md` only for flexible checks" in system
     if legacy_workspace:
         assert "Reply in Chinese." in system
         assert system.index(legacy_rule) < system.index("## Scheduling")
-        assert "even if workspace guidance describes recurring tasks as heartbeat tasks" in system
+        assert "Do not substitute heartbeat for an explicit schedule" in system
     else:
         assert "## AGENTS.md" not in system
     assert "每天早上8点提醒我喝水" in messages[-1]["content"]
@@ -222,16 +204,15 @@ def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
     assert "messaging app" in system
 
 
-def test_memory_skill_is_lazy_loaded_from_skills_index(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
+@pytest.mark.parametrize("disabled", [False, True])
+def test_memory_skill_is_discoverable_and_lazy_only_when_enabled(tmp_path, disabled) -> None:
+    builder = ContextBuilder(_make_workspace(tmp_path), disabled_skills=["memory"] if disabled else None)
+    system, user = builder.build_messages(history=[], current_message="$memory Find the decision")
 
-    prompt = builder.build_system_prompt()
-
-    assert "### Skill: memory" not in prompt
-    assert "**memory**" in prompt
-    assert "Search Past Events" not in prompt
-    assert "Examples (replace `keyword`)" not in prompt
+    assert "memory/wiki/index.md" in system["content"]
+    assert ("**memory**" in system["content"]) is not disabled
+    assert "Search Past Events" not in system["content"]
+    assert ("Search Past Events" in user["content"]) is not disabled
 
 
 def test_fresh_workspace_omits_default_prompt_scaffolding(tmp_path) -> None:
@@ -257,7 +238,6 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
     prompt = builder.build_system_prompt()
 
     assert "# Long-term Memory" not in prompt
-    assert "History log: memory/history.jsonl" in prompt
     assert "This file is automatically updated by nanobot" not in prompt
 
 

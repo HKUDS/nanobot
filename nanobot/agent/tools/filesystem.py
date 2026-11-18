@@ -85,7 +85,7 @@ class _FsTool(Tool):
         return cls(
             workspace=workspace,
             allowed_dir=workspace if restricted or sandboxed else None,
-            extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, root / "skills"],
+            extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, root / "skills", root / "memory" / "wiki"],
             extra_read_allowed_files=[root / "memory" / "history.jsonl"],
             restrict_to_workspace=restricted,
             sandbox_restricts_workspace=sandboxed,

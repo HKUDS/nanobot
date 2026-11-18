@@ -6,6 +6,7 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SettingsGroup, SettingsRow, SettingsSectionTitle } from "@/components/settings/shared/SettingsControls";
 import { SettingsHint } from "@/components/settings/shared/SettingsHint";
 import { ToggleButton } from "@/components/ui/toggle-button";
+import { BackgroundSettings } from "./BackgroundSettings";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { ThemePreference } from "@/hooks/useTheme";
 import type { FileEditDisplayMode, LocalActivityMode, LocalPreferences } from "@/lib/local-preferences";
@@ -71,6 +72,7 @@ export function AppearanceSettingsView({ themePreference, onChangeTheme, localPr
       <SettingsSectionTitle>{t("settings.sections.interface")}</SettingsSectionTitle>
       <SettingsGroup>
         <SettingsRow title={t("settings.rows.language")}><LanguageSwitcher /></SettingsRow>
+        <BackgroundSettings />
         <SettingsRow title={t("settings.rows.brandLogos")} description={t("settings.legal.thirdPartyBrands")}>
           <ToggleButton checked={localPrefs.brandLogos}
             onChange={(brandLogos) => onChangeLocalPrefs((previous) => ({ ...previous, brandLogos }))}

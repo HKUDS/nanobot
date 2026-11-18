@@ -555,17 +555,19 @@ export default function MarkdownTextRenderer({
           return (
             <AvailableFileReferenceChip
               path={raw}
+              display="inline-code"
               onOpen={onOpenFilePreview}
             />
           );
         }
-        const widePlainBlock = raw.includes("\n") || raw.length > 120;
-        if (widePlainBlock) {
+        const multiline = raw.includes("\n");
+        if (multiline || raw.length > 120) {
           return (
             <code
               className={cn(
                 "block min-w-0 max-w-full overflow-x-auto whitespace-pre bg-transparent p-0 font-mono text-code",
                 "text-inherit",
+                !multiline && "markdown-wide-inline-code",
                 cls,
               )}
               {...props}

@@ -126,7 +126,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.skills.marketplaceSearchFailed",
   "settings.skills.marketplaceInstallFailed",
   "settings.skills.marketplaceSearchPlaceholder",
-  "settings.skills.marketplaceSearchLabel",
   "settings.skills.marketplaceSearching",
   "settings.skills.marketplaceProviderFilter",
   "settings.skills.marketplaceProviderAll",
@@ -248,7 +247,7 @@ const LOCALIZED_CHANNEL_SHELL_KEYS = [
   "settings.channels.configuredInstances",
   "settings.channels.connectPreview",
   "settings.channels.copyCommand",
-  "settings.channels.filterAll",
+  "settings.channels.enabledOnly",
   "settings.channels.filterOff",
   "settings.channels.filterOn",
   "settings.channels.helperCopied",
@@ -696,7 +695,7 @@ describe("webui i18n", () => {
     expect(settings.overview.webSearch).toBe("网络搜索");
     expect(settings.overview.workspace).toBe("工作目录");
     expect(settings.skills.installedTab).toBe("已安装");
-    expect(settings.skills.discoverTab).toBe("发现");
+    expect(settings.skills.discoverTab).toBe("技能市场");
     expect(settings.skills.marketplaceProviderFilter).toBe("技能来源");
     expect(settings.skills.marketplaceProviderAll).toBe("全部");
     expect(settings.skills.marketplaceSearchPlaceholder).toBe("搜索技能");

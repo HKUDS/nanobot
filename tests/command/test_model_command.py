@@ -19,7 +19,7 @@ from nanobot.goal.command import cmd_goal, register_goal_command
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
-    model_preset_from_metadata,
+    SessionModelPreset,
 )
 
 
@@ -73,7 +73,7 @@ def _ctx_session(loop: AgentLoop, raw: str, args: str = "") -> CommandContext:
 
 def _saved_model_preset(loop: AgentLoop, session_key: str = "cli:direct") -> str | None:
     session = loop.sessions.get_or_create(session_key)
-    return model_preset_from_metadata(session.metadata)
+    return SessionModelPreset.from_metadata(session.metadata).base_preset
 
 
 @pytest.mark.asyncio

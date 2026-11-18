@@ -1,3 +1,4 @@
+import { useState, type ComponentProps } from "react";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -32,10 +33,18 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 const client = {} as NanobotClient;
 
+function MarketplaceTestView(props: Omit<ComponentProps<typeof SkillsMarketplace>, "query" | "provider">) {
+  const [query, setQuery] = useState("");
+  return <>
+    <input aria-label="Search skills" value={query} onChange={(event) => setQuery(event.target.value)} />
+    <SkillsMarketplace {...props} query={query} provider="all" />
+  </>;
+}
+
 function marketplace(token: string) {
   return (
     <ClientProvider client={client} token={token}>
-      <SkillsMarketplace
+      <MarketplaceTestView
         installedSkills={[]}
         installing=""
         onInstallingChange={() => {}}
@@ -73,7 +82,7 @@ describe("useSkills", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await act(async () => { resolveRetry({ skills: [] }); });
     expect(screen.getByText("No skills are available.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "All 0" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "All 0" })).toBeChecked();
 
     act(() => { requestSkillsRefresh(); });
     expect(screen.getByText("No skills are available.")).toBeInTheDocument();
@@ -87,6 +96,10 @@ describe("useSkills", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Search installed skills" }), {
       target: { value: "" },
     });
+    expect(screen.getByRole("button", { name: "Open details for weather" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Disabled 0" }));
+    expect(screen.getByText("No matching skills.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Enabled 1" }));
     expect(screen.getByRole("button", { name: "Open details for weather" })).toBeInTheDocument();
     expect(fetchSkills).toHaveBeenCalledTimes(3);
   });
@@ -289,7 +302,7 @@ describe("SkillsMarketplace", () => {
         originSkill("new/source", "available"),
       ],
     });
-    render(<ClientProvider client={client} token="tok"><SkillsMarketplace
+    render(<ClientProvider client={client} token="tok"><MarketplaceTestView
       installedSkills={[{ name: "agent-browser", source: "workspace", description: "Local", available: true }]}
       installing="" onInstallingChange={vi.fn()}
     /></ClientProvider>);

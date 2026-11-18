@@ -11,6 +11,7 @@ import { FileActionsProvider } from "@/components/FileActions";
 import { createFilePreviewResource } from "@/lib/file-preview-resource";
 import { SessionHandleLabel } from "@/components/SessionHandleLabel";
 import { PromptNavigator } from "@/components/thread/PromptNavigator";
+import { useSessionModelOptions } from "@/hooks/useSessionModelOptions";
 import { usePromptHistory } from "@/hooks/usePromptHistory";
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { SandboxNotice } from "@/components/thread/SandboxNotice";
@@ -483,7 +484,7 @@ export function ThreadShell({
     dismissed: boolean;
   } | null>(null);
   const sandboxNotice = useSandboxNotice(client, chatId, webuiCapabilities.includes("webui.sandbox-settings.v1"));
-  const [submittedViewportTurnId, setSubmittedViewportTurnId] = useState<string | null>(null);
+  const [submittedViewportTurn, setSubmittedViewportTurn] = useState<{ chatId: string; turnId: string } | null>(null);
   const { state: previewState, openFile, resolveFile, selectTab, closeTab, close: closePreview, setWidth: setFilePreviewWidth } =
     useFilePreviewState(previewSessionKey, filePreviewStore);
   const [contextSidebarOpen, setContextSidebarOpen] = useState(false);
@@ -568,7 +569,6 @@ export function ThreadShell({
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
   const handleTurnEnd = useCallback(() => {
     if (chatId) activeViewportTurnByChatIdRef.current.delete(chatId);
-    setSubmittedViewportTurnId(null);
     onTurnEnd?.();
   }, [chatId, onTurnEnd]);
   const {
@@ -652,7 +652,7 @@ export function ThreadShell({
       filePreviewCloseTimerRef.current = null;
     }
     setClosingPreview(null);
-    setSubmittedViewportTurnId(null);
+    setSubmittedViewportTurn(null);
   }, [previewSessionKey]);
 
   useEffect(() => {
@@ -722,15 +722,12 @@ export function ThreadShell({
       ?? historyActiveTurnId
       ?? restoredViewportTurnId
     : null;
-  const activeTurnStartedHere =
-    viewportTurnId !== null && viewportTurnId === submittedViewportTurnId;
+  const submittedViewportTurnId = submittedViewportTurn?.chatId === chatId
+    ? submittedViewportTurn.turnId : null;
   useEffect(() => {
     if (!chatId || !messagesReady || turnActive) return;
     activeViewportTurnByChatIdRef.current.delete(chatId);
-    setSubmittedViewportTurnId((current) =>
-      current === rememberedViewportTurnId ? null : current,
-    );
-  }, [chatId, messagesReady, rememberedViewportTurnId, turnActive]);
+  }, [chatId, messagesReady, turnActive]);
   const filePreviewAvailabilityCache = useMemo(
     () => new Map<string, FilePreviewAvailabilityCacheEntry>(),
     [previewSessionKey],
@@ -832,12 +829,19 @@ export function ThreadShell({
       });
     });
   }, [activeModelPreset, chatId, client]);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const { data: modelOptionsData, select: selectModelOptions, reset: resetModelOptions,
+    sendValue: selectedModelOptions, moveToSession: moveModelOptionsToSession } = useSessionModelOptions({
+    sessionKey: session?.key ?? null, preset: activeModelPreset, settings,
+    open: modelMenuOpen, disabled: temporary, storedValue: session?.modelOptions,
+  });
   const handleModelPresetChange = useCallback((name: string) => {
+    resetModelOptions(name);
     setLocalModelPreset(name);
     if (chatId) {
       void client.sendSystemCommand(chatId, `/model ${name}`).catch(() => {});
     }
-  }, [chatId, client]);
+  }, [chatId, client, resetModelOptions]);
   const modelPresetOptions = useMemo(
     () => modelPresetOptionsFromSettings(settings),
     [settings],
@@ -857,13 +861,15 @@ export function ThreadShell({
     : modelBadge.label;
   const withWorkspaceScope = useCallback(
     (options?: SendOptions): SendOptions | undefined => {
-      if (!workspaceScope) return options;
+      const modelOptions = selectedModelOptions();
+      if (!workspaceScope && !modelOptions) return options;
       return {
         ...(options ?? {}),
-        workspaceScope,
+        ...(workspaceScope ? { workspaceScope } : {}),
+        ...(modelOptions ? { modelOptions } : {}),
       };
     },
-    [workspaceScope],
+    [selectedModelOptions, workspaceScope],
   );
 
   const refreshModelSettings = useCallback(async () => {
@@ -970,7 +976,7 @@ export function ThreadShell({
     const submitted = send(pending.content, pending.images, pending.options);
     if (submitted && !submitted.sideChannel) {
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-      setSubmittedViewportTurnId(submitted.turnId);
+      setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
     }
     if (submitted?.delivery) {
       void submitted.delivery.then(() => pending.finish?.(true), (error: unknown) => {
@@ -1009,7 +1015,7 @@ export function ThreadShell({
     );
     if (submitted && !submitted.sideChannel) {
       activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-      setSubmittedViewportTurnId(submitted.turnId);
+      setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
     }
     onPendingFirstMessageConsumed?.(pendingFirstMessage.id);
   }, [
@@ -1053,13 +1059,14 @@ export function ThreadShell({
         setBooting(false);
         return false;
       }
+      moveModelOptionsToSession(`websocket:${newId}`, pendingFirstRef.current?.options?.modelOptions);
       if (localModelPreset) {
         await client.sendSystemCommand(newId, `/model ${localModelPreset}`).catch(() => {});
       }
       setPendingFirstTargetChatId(newId);
       return delivery;
     },
-    [booting, client, draftKey, draftStore, localModelPreset, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
+    [booting, client, draftKey, draftStore, localModelPreset, moveModelOptionsToSession, onCreateChat, persistDraft, withWorkspaceScope, workspaceScope],
   );
 
   const inspectAttachment = useCallback(async (path: string) => {
@@ -1084,7 +1091,7 @@ export function ThreadShell({
         && options?.continueActiveTurn !== true
       ) {
         activeViewportTurnByChatIdRef.current.set(chatId, submitted.turnId);
-        setSubmittedViewportTurnId(submitted.turnId);
+        setSubmittedViewportTurn({ chatId, turnId: submitted.turnId });
       }
       return submitted?.delivery ? submitted.delivery.then(() => true) : submitted !== null;
     },
@@ -1325,6 +1332,8 @@ export function ThreadShell({
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
+          modelOptionsControl={{ data: modelOptionsData, onChange: selectModelOptions }}
+          onModelMenuOpenChange={setModelMenuOpen}
           onModelPresetChange={handleModelPresetChange}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
@@ -1379,6 +1388,8 @@ export function ThreadShell({
           modelDetail={modelBadge.model}
           modelPreset={activeModelPreset}
           modelPresets={modelPresetOptions}
+          modelOptionsControl={{ data: modelOptionsData, onChange: selectModelOptions }}
+          onModelMenuOpenChange={setModelMenuOpen}
           onModelPresetChange={handleModelPresetChange}
           modelProvider={modelBadge.provider}
           modelProviderLabel={modelBadge.providerLabel}
@@ -1515,7 +1526,7 @@ export function ThreadShell({
             composer={inlineComposer ? <div ref={setLocalComposerHost} /> : null}
             onComposerLayoutChange={alignSidebar}
             activeTurnId={viewportTurnId}
-            activeTurnStartedHere={activeTurnStartedHere}
+            submittedPromptTurnId={submittedViewportTurnId}
             conversationKey={historyKey}
             conversationReady={messagesReady}
             onVisibleMessagesChange={reportVisibleMessages}

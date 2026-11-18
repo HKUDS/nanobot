@@ -54,6 +54,11 @@
     "model": "Modèle d’exemple",
     "disabledModel": "Sélecteur de modèle désactivé"
   },
+  "codexSpeed": {
+    "title": "Vitesse de Codex",
+    "description": "Choisissez Fast ou Ultrarapide. Sélectionnez de nouveau le mode actif pour le désactiver.",
+    "options": "Affiche Ultrarapide pour les modèles compatibles."
+  },
   "segmented": {
     "title": "Choix segmentés",
     "description": "Un petit ensemble de choix toujours visibles.",
@@ -100,6 +105,15 @@
     "confirm": "Confirmer le retrait",
     "removed": "Exemple retiré.",
     "available": "Exemple disponible."
+  },
+  "toast": {
+    "title": "Notifications temporaires",
+    "description": "De courtes notifications pour les erreurs, les réussites et les actions réversibles.",
+    "options": "Montez ToastProvider et utilisez useToast pour afficher une notification. Une action facultative laisse plus de temps pour réagir.",
+    "showError": "Afficher une erreur",
+    "error": "Impossible d’enregistrer l’exemple.",
+    "pending": "L’exemple va être supprimé.",
+    "restored": "L’exemple a été rétabli."
   },
   "sheet": {
     "title": "Panneaux latéraux",

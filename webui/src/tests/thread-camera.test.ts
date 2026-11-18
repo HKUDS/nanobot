@@ -80,11 +80,11 @@ describe("ThreadCameraController", () => {
     expect(camera.isFollowing()).toBe(false);
   });
 
-  it("pins automatic follow in the geometry frame without camera debt", () => {
+  it("jumps to a target and cancels any earlier navigation", () => {
     const { camera, viewport, frames } = cameraHarness();
-
-    expect(camera.followTo(60)).toBe("settled");
-
+    camera.navigateTo(1_000);
+    expect(frames).toHaveLength(1);
+    camera.jumpTo(60);
     expect(viewport.scrollTop).toBe(60);
     expect(frames).toHaveLength(0);
     expect(camera.isFollowing()).toBe(false);
@@ -102,19 +102,6 @@ describe("ThreadCameraController", () => {
     expect(frames).toHaveLength(1);
     for (let frame = 0; frame < 120; frame += 1) advance(16);
     expect(viewport.scrollTop).toBe(180);
-  });
-
-  it("pins repeated automatic targets without accumulating lag", () => {
-    const { camera, viewport, frames } = cameraHarness();
-
-    camera.followTo(80);
-    expect(viewport.scrollTop).toBe(80);
-    camera.followTo(140);
-    expect(viewport.scrollTop).toBe(140);
-    camera.followTo(220);
-    expect(viewport.scrollTop).toBe(220);
-    expect(frames).toHaveLength(0);
-    expect(camera.isFollowing()).toBe(false);
   });
 
   it("separates external movement from camera writes and layout clamping", () => {

@@ -87,6 +87,7 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
     setDetailOpen(true);
   };
   const handOffDetail = (next: () => void) => {
+    setActionError(null);
     afterDetailClose.current = next;
     setDetailOpen(false);
   };
@@ -249,8 +250,12 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
           <AutomationEditDialog
             job={pendingEdit}
             saving={actionKey === `update:${pendingEdit?.id ?? ""}`}
+            error={pendingEdit ? actionError : null}
             onOpenChange={(nextOpen) => {
-              if (!nextOpen) setPendingEdit(null);
+              if (!nextOpen) {
+                setPendingEdit(null);
+                setActionError(null);
+              }
             }}
             onCancel={(job) => {
               setInspectedJob(job);
@@ -261,8 +266,12 @@ export function SessionInfoPopoverView({ jobs, loading, loadFailed, now, onActio
           <AutomationDeleteDialog
             job={pendingDelete}
             deleting={actionKey === `delete:${pendingDelete?.id ?? ""}`}
+            error={pendingDelete ? actionError : null}
             onOpenChange={(nextOpen) => {
-              if (!nextOpen) setPendingDelete(null);
+              if (!nextOpen) {
+                setPendingDelete(null);
+                setActionError(null);
+              }
             }}
             onConfirm={(job) => handleAction("delete", job)}
           />

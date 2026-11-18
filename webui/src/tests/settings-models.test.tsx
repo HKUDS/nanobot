@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api";
 import type { ProviderModelsPayload, SettingsPayload } from "@/lib/types";
 import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView as renderSettingsViewBase, openPopover, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
@@ -301,6 +302,31 @@ describe("Settings models", () => {
         include_usage: false, name: "primary",
         api: { supported_apis: ["responses"], preferred_api: "responses" },
       }, 20_000,
+    ));
+  });
+
+  it.each([
+    { model: "gpt-5.6-sol", label: "Off", modeValue: false },
+    { model: "openai-codex/gpt-6.2-sol", label: "Ultrafast", modeValue: "ultrafast" },
+  ])("saves $label for the Codex preset without editing its connection", async ({ model, label, modeValue }) => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: "openai_codex", label: "Codex", configured: true, codex_fast_mode_supported: true,
+      codex_ultrafast_models: ["gpt-6.2-sol"], extra_body: { service_tier: "priority" } }];
+    Object.assign(payload.model_presets[0], {
+      provider: "openai_codex", resolved_provider: "openai_codex", model, codex_fast_mode: null,
+    });
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(await screen.findByRole("button", { name: /primary/i }));
+    const mode = within(screen.getByRole("group", { name: "Fast" }));
+    const fast = mode.getByRole("button", { name: /^Fast$/ });
+    expect(fast).toHaveAttribute("aria-pressed", "true");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    if (modeValue === false) expect(mode.queryByRole("button", { name: "Ultrafast" })).not.toBeInTheDocument();
+    fireEvent.click(modeValue === false ? fast : mode.getByRole("button", { name: label }));
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { include_usage: false, name: "primary", codex_fast_mode: modeValue }, 20_000,
     ));
   });
 
@@ -802,12 +828,12 @@ describe("Settings models", () => {
   it.each([true, false])("closes the preset editor only after deletion succeeds (success: %s)", async (success) => {
     const { payload } = settingsPayloadWithBackup();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
-    if (success) requestMutationMock.mockResolvedValueOnce({
-      ...payload,
-      model_presets: payload.model_presets.filter((preset) => preset.name !== "backup"),
-      model_call_order: ["primary"],
-    });
-    else requestMutationMock.mockRejectedValueOnce(new Error("Delete failed"));
+    let finishDelete!: (value: SettingsPayload) => void;
+    let failDelete!: (error: Error) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve, reject) => {
+      finishDelete = resolve;
+      failDelete = reject;
+    }));
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     fireEvent.click(within(screen.getByTestId("model-call-order-row-backup")).getByRole("button", { name: "Configure" }));
     fireEvent.click(within(screen.getByTestId("model-preset-editor")).getByRole("button", { name: "Delete" }));
@@ -816,11 +842,23 @@ describe("Settings models", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.model_configuration.delete", { name: "backup" }, 20_000,
     ));
+    expect(within(confirmation).getByRole("button", { name: /Deleting/ })).toBeDisabled();
+    fireEvent.keyDown(confirmation, { key: "Escape" });
+    expect(confirmation).toBeVisible();
+    fireEvent.pointerDown(confirmation.closest("[data-dialog-backdrop]")!);
+    expect(confirmation).toBeVisible();
     if (success) {
+      await act(async () => finishDelete({
+        ...payload,
+        model_presets: payload.model_presets.filter((preset) => preset.name !== "backup"),
+        model_call_order: ["primary"],
+      }));
       await waitFor(() => expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument());
       expect(screen.queryByTestId("model-call-order-row-backup")).not.toBeInTheDocument();
     } else {
-      await waitFor(() => expect(within(confirmation).getByRole("button", { name: "Delete" })).toBeEnabled());
+      await act(async () => failDelete(new Error("Delete failed")));
+      expect(await within(confirmation).findByRole("alert")).toHaveTextContent("Delete failed");
+      expect(within(confirmation).getByRole("button", { name: "Delete" })).toBeEnabled();
       expect(screen.getByTestId("model-preset-editor")).toBeInTheDocument();
     }
   });
@@ -1073,7 +1111,7 @@ describe("Settings models", () => {
     );
   });
 
-  it("restores the model call order when immediate persistence fails", async () => {
+  it("restores the model call order and announces a transient save failure", async () => {
     const { payload } = settingsPayloadWithBackup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1087,7 +1125,7 @@ describe("Settings models", () => {
       return { ok: false, status: 404, json: async () => ({}) } as Response;
     });
     vi.stubGlobal("fetch", fetchMock);
-    requestMutationMock.mockRejectedValueOnce(new Error("Order update failed"));
+    requestMutationMock.mockRejectedValueOnce(new ApiError(503, "WebUI connection is not open"));
 
     renderSettingsView({ initialSection: "models", initialSettings: payload });
 
@@ -1103,7 +1141,7 @@ describe("Settings models", () => {
       key: "ArrowUp",
     });
 
-    expect(await screen.findByText("Order update failed")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not update agent settings");
     expect(
       screen
         .getAllByTestId(/^model-call-order-row-/)

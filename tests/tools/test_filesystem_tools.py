@@ -12,6 +12,48 @@ from nanobot.agent.tools.filesystem import (
     WriteFileTool,
 )
 from nanobot.execution.files import WorkspaceFiles
+from nanobot.security.workspace_access import (
+    bind_workspace_scope,
+    build_workspace_scope,
+    reset_workspace_scope,
+)
+
+
+@pytest.mark.parametrize("access_mode", ["restricted", "full"])
+async def test_file_tools_treat_runtime_memory_state_as_read_only(tmp_path, access_mode):
+    agent_workspace = tmp_path / "agent"
+    project = agent_workspace if access_mode == "restricted" else tmp_path / "project"
+    (project / "memory").mkdir(parents=True)
+    (agent_workspace / "memory").mkdir(parents=True, exist_ok=True)
+
+    read = ReadFileTool(workspace=agent_workspace)
+    write = WriteFileTool(workspace=agent_workspace)
+    edit = EditFileTool(workspace=agent_workspace)
+    patch = ApplyPatchTool(workspace=agent_workspace)
+    token = bind_workspace_scope(build_workspace_scope(project, access_mode))
+    try:
+        for name in ("history.jsonl", ".cursor", ".dream_cursor"):
+            file = agent_workspace / "memory" / name
+            file.write_text("original runtime state", encoding="utf-8")
+            path = file.relative_to(project).as_posix() if project == agent_workspace else str(file)
+            assert "original runtime state" in await read.execute(path=path)
+            results = (
+                await write.execute(path=path, content="changed"),
+                await edit.execute(path=path, old_text="original runtime state", new_text="changed"),
+                await patch.execute(edits=[{"path": path, "action": "add", "new_text": "changed"}]),
+            )
+            assert all(result.is_error and "managed by the runtime" in result for result in results)
+            assert file.read_text(encoding="utf-8") == "original runtime state"
+
+        for path in ("memory/MEMORY.md", "memory/wiki/topic.md"):
+            await write.execute(path=path, content="Editable notes")
+            assert (project / path).read_text(encoding="utf-8") == "Editable notes"
+        if project != agent_workspace:
+            # Protection belongs to the agent's state, not to every file with the same name.
+            await write.execute(path="memory/.cursor", content="Project-specific cursor")
+            assert (project / "memory" / ".cursor").read_text(encoding="utf-8") == "Project-specific cursor"
+    finally:
+        reset_workspace_scope(token)
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires a POSIX named pipe")

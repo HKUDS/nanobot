@@ -1681,3 +1681,76 @@ def test_image_provider_http_client_kwargs_include_explicit_proxy() -> None:
         "proxy": proxy,
         "trust_env": False,
     }
+
+
+@pytest.mark.asyncio
+async def test_minimax_h3_generation_and_edit(tmp_path: Path) -> None:
+    fake = FakeClient(FakeResponse({"data": [{"b64_json": RAW_B64}]}))
+    client = MiniMaxImageGenerationClient(api_key="test", client=fake)  # type: ignore[arg-type]
+    result = await client.generate(prompt="draw", model="MiniMax-H3-Image", aspect_ratio="16:9", image_size="2K")
+    assert result.images == [PNG_DATA_URL]
+    assert fake.calls[-1]["url"].endswith("/v1/images/generations")
+    assert fake.calls[-1]["json"] == {
+        "model": "MiniMax-H3-Image", "prompt": "draw", "response_format": "b64_json",
+        "aspect_ratio": "16:9", "area": "2K",
+    }
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(PNG_BYTES)
+    await client.generate(prompt="edit", model="MiniMax-H3-Image-Highspeed", reference_images=[str(ref)],
+                          aspect_ratio="1:1", image_size="2720x1536")
+    body = fake.calls[-1]["json"]
+    assert fake.calls[-1]["url"].endswith("/v1/images/edits")
+    assert body["size"] == "2720x1536"
+    assert "area" not in body and "aspect_ratio" not in body
+    assert body["images"] == [{"image_url": "data:image/png;base64," + base64.b64encode(PNG_BYTES).decode("ascii")}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("size,ratio", [("100x100", "1:1"), ("2K", "4:1"), ("3K", "1:1")])
+async def test_minimax_h3_invalid_sizes_fail_before_request(size: str, ratio: str) -> None:
+    fake = FakeClient(FakeResponse({}))
+    client = MiniMaxImageGenerationClient(api_key="test", client=fake)  # type: ignore[arg-type]
+    with pytest.raises(ImageGenerationError):
+        await client.generate(prompt="draw", model="MiniMax-H3-Image", image_size=size, aspect_ratio=ratio)
+    assert not fake.calls
+
+
+@pytest.mark.asyncio
+async def test_minimax_h3_partial_response_and_url_download(generated_image_downloads) -> None:
+    fake = FakeClient(FakeResponse({"data": [{"error": {"message": "failed"}}, {"url": "https://example.com/image.png"}]}))
+    client = MiniMaxImageGenerationClient(api_key="test", client=fake, proxy="http://proxy")  # type: ignore[arg-type]
+    result = await client.generate(prompt="draw", model="MiniMax-H3-Image")
+    assert result.images == [PNG_DATA_URL]
+    assert generated_image_downloads == [("https://example.com/image.png", "http://proxy")]
+
+
+@pytest.mark.asyncio
+async def test_minimax_h3_timeout_warns_about_billing() -> None:
+    class TimeoutClient:
+        async def post(self, url: str, **kwargs: Any) -> None:
+            raise httpx.ReadTimeout("timeout")
+    client = MiniMaxImageGenerationClient(api_key="test", client=TimeoutClient())  # type: ignore[arg-type]
+    with pytest.raises(ImageGenerationError, match="may still complete and be billed"):
+        await client.generate(prompt="draw", model="MiniMax-H3-Image")
+
+
+@pytest.mark.asyncio
+async def test_minimax_h3_client_timeout_and_no_retry(monkeypatch) -> None:
+    calls: list[httpx.Request] = []
+    timeouts: list[float] = []
+    original_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    def make_client(**kwargs: Any) -> httpx.AsyncClient:
+        timeouts.append(kwargs["timeout"])
+        return original_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr("nanobot.providers.image_generation.httpx.AsyncClient", make_client)
+    client = MiniMaxImageGenerationClient(api_key="test")
+    with pytest.raises(ImageGenerationError, match="billed"):
+        await client.generate(prompt="draw", model="MiniMax-H3-Image")
+    assert timeouts == [660.0]
+    assert len(calls) == 1

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RemoteInstances } from "@/components/remote/RemoteInstances";
 import { useRemoteConnections } from "@/components/remote/remote-context";
 import { RemoteConnectionsPage } from "@/components/remote/RemoteConnectionsPage";
+import { PairingCodePopup } from "@/components/pairing/PairingCodePopup";
+import { ToastProvider } from "@/components/ui/toast";
 import { Sidebar } from "@/components/Sidebar";
 import { HOST_BRIDGE } from "@/components/remote/host-bridge";
 import { readSelectedRemote, readRecentRemotes, rememberSelectedRemote, validateRemoteConnection, type RemoteConnection } from "@/lib/remote-instances";
@@ -44,11 +46,11 @@ function LocalShell({ collapsed = false, initialRemote = false }) {
     return () => window.removeEventListener("hashchange", route);
   }, []);
   return <>
-  <Sidebar collapsed={collapsed} sessions={[]} activeKey={null} loading={false} newChatActive={false}
+  <Sidebar collapsed={collapsed} sessions={[]} activeKey={null} loading={false}
     onNewChat={() => { if (connections?.managing) connections.selectLocal(); window.location.hash = "/new"; setRemotePage(false); }} onSelect={noop} onRequestDelete={noop} onTogglePin={noop}
     onRequestRename={async () => {}} onToggleArchive={noop} onToggleGroup={noop}
     onRequestRenameProject={noop} onNewChatInProject={noop} onOpenSettings={noop}
-    onOpenApps={noop} onOpenSkills={noop} onOpenAutomations={noop} onOpenChannels={noop}
+    onOpenApps={noop} onOpenAutomations={noop}
     onOpenSearch={noop} onToggleArchived={noop} />
   <main><div hidden={connections?.managing} aria-hidden={connections?.managing || undefined}>
     {remotePage ? <RemoteConnectionsPage onBackToChat={() => setRemotePage(false)} /> : <><p>Local conversations</p><textarea aria-label="Local draft" /></>}
@@ -155,6 +157,28 @@ describe("remote instance UX", () => {
     expect(within(dialog).queryByRole("textbox", { name: "SSH address" })).not.toBeInTheDocument();
     expect(readSelectedRemote()).toBeNull();
     expect(mocks.request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["toast", "no provider", "pairing popup"])("reports an attempt to open the local gateway (%s)", async (surface) => {
+    mocks.read.mockResolvedValue({ available: true, profiles: [{ ...profile, paired: true }] });
+    mocks.request.mockRejectedValueOnce(new Error("same_instance"));
+    const shell = <>
+      <LocalShell initialRemote />
+      {surface === "pairing popup" && <PairingCodePopup
+        requests={[{ code: "ABCD-EFGH", channel: "telegram", sender_id: "alice" }]}
+        total={1} busyCode={null} error={null} onApprove={noop} onDismiss={noop} />}
+    </>;
+    render(<RemoteInstances>{surface === "no provider" ? shell : <ToastProvider>{shell}</ToastProvider>}</RemoteInstances>);
+
+    const directory = await screen.findByRole("region", { name: i18n.t("remote.title") });
+    const server = await within(directory).findByRole("button", { name: "Team server ubuntu@example.test" });
+    fireEvent.click(server);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(i18n.t("remote.errors.same_instance"));
+    if (surface === "toast") expect(alert.closest("[data-toast-tone]")).toHaveAttribute("data-toast-tone", "error");
+    else expect(within(directory).getByRole("alert")).toBe(alert);
+    expect(server).toBeEnabled();
+    expect(readSelectedRemote()).toBeNull();
   });
 
   it.each([false, true])("renames an open server without reloading its view (paired: %s)", async (paired) => {

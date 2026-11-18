@@ -1,3 +1,6 @@
+@import "./components/content-column.css";
+@import "./components/settings/shared/catalog-layout.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -19,7 +22,7 @@
 }
 
 .thread-composer-stack {
-  --composer-content-width: 49.5rem;
+  --composer-content-width: var(--content-column-width);
 }
 .thread-composer-stack.is-hero {
   --composer-content-width: 58rem;
@@ -133,7 +136,6 @@
     --radius-prominent: 1.75rem;
     --radius-pill: 9999px;
     --corner-shape: superellipse(1.5);
-    --content-column-width: 49.5rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-content: 240 3% 30%;
@@ -941,6 +943,16 @@
     word-wrap: break-word;
   }
 
+  .markdown-content > p code.markdown-inline-code,
+  .markdown-content > p code.markdown-wide-inline-code {
+    white-space: break-spaces;
+  }
+
+  .markdown-content > p code.markdown-wide-inline-code {
+    display: inline;
+    overflow: visible;
+  }
+
   .markdown-content pre,
   .not-prose pre {
     max-width: 100%;
@@ -1458,8 +1470,10 @@
     --settings-margin: 0.75rem;
     max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
   }
-  .settings-grid.settings-feature-page.settings-automations-grid {
-    max-inline-size: calc(60rem + 2 * var(--settings-margin));
+  .catalog-section {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--settings-module-gap, 20px);
   }
   .automations-page {
     --settings-inset: 1rem;
@@ -1485,6 +1499,7 @@
   }
   .automation-create-composer .thread-composer-collapsible-layout {
     padding-block-start: 0;
+    padding-inline: 0;
   }
   /* Match the main sidebar's lg visibility; its collapsed rail has no labels. */
   @media (min-width: 1024px) {
@@ -1863,4 +1878,54 @@
   height: 26px;
   box-sizing: border-box;
   white-space: nowrap;
+}
+
+/* The image is shared by the whole window; foreground surfaces stay translucent. */
+html[data-custom-background] {
+  --custom-background-tint: 0.88;
+  --custom-background-blur: 5px;
+}
+html[data-custom-background] body {
+  background: var(--custom-background-image) center / cover fixed no-repeat;
+}
+html[data-custom-background] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: hsl(var(--background) / var(--custom-background-tint));
+  backdrop-filter: blur(var(--custom-background-blur));
+  pointer-events: none;
+}
+/* Match the class without expanding this rule into Tailwind's @apply bg-background. */
+html[data-custom-background] [data-theme-surface][class~="bg-background"],
+html[data-custom-background] .bg-sidebar,
+html[data-custom-background] .bg-settings-canvas {
+  background-color: transparent;
+}
+html[data-custom-background] .thread-composer-dock {
+  background: transparent;
+}
+html[data-custom-background] .markdown-inline-code {
+  background-color: hsl(var(--muted) / 0.45);
+}
+html[data-custom-background] .thread-history-status {
+  --thread-history-background: hsl(var(--background) / 0.65);
+}
+html[data-custom-background] [data-testid="file-edit-diff"] {
+  background-color: hsl(var(--background) / 0.78);
+  backdrop-filter: blur(12px);
+}
+html[data-custom-background] .nanobot-file-diff {
+  --code-background: transparent;
+}
+html[data-custom-background] .bg-settings-surface,
+html[data-custom-background] .thread-composer-surface,
+html[data-custom-background] .user-message-surface,
+html[data-custom-background] .context-inspector-surface,
+html[data-custom-background] .side-panel-surface {
+  background-color: hsl(var(--settings-surface) / 0.78);
+  backdrop-filter: blur(12px);
+}
+html[data-custom-background] aside.bg-settings-surface {
+  background-color: hsl(var(--settings-surface) / 0.65);
 }

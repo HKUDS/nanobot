@@ -12,7 +12,6 @@ import contextlib
 import hashlib
 import json
 import os
-import shlex
 import shutil
 import socket
 from pathlib import Path
@@ -63,23 +62,22 @@ def transport_arguments(profile: RemoteProfile, remote_port: int, known_hosts: P
 # Frame the result so login banners don't get mistaken for invalid config JSON.
 _PROBE_PREFIX = b"\x1eNANOBOT_REMOTE:"
 
-# Fixed program, quoted as one shell argument. No user-supplied shell commands.
+# Fixed program sent over SSH stdin, not interpreted by the remote shell.
 _PROBE = r'''
-import json, os, pathlib, socket, sys
+import json, pathlib, socket, sys
 def emit(value):
     print("\n\x1eNANOBOT_REMOTE:" + json.dumps(value))
 try:
     path = pathlib.Path(sys.argv[1]).expanduser()
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     ws = data.get("channels", {}).get("websocket", {})
     secret = ws.get("tokenIssueSecret") or ws.get("token_issue_secret") or ws.get("token")
     if not ws.get("enabled"):
         raise ValueError("webui_disabled")
     if not isinstance(secret, str) or not secret.strip() or "${" in secret:
         raise ValueError("webui_auth_required")
-    if ws.get("publicWsUrl") or ws.get("public_ws_url"):
-        raise ValueError("public_ws_unsupported")
-    if ws.get("trustedProxyAuth") or ws.get("trusted_proxy_auth"):
+    certfile = ws.get("sslCertfile") or ws.get("ssl_certfile") or ""
+    if (isinstance(certfile, str) and certfile.strip()) or ws.get("trustedProxyAuth") or ws.get("trusted_proxy_auth"):
         raise ValueError("incompatible_gateway")
     emit({"port": ws.get("port", 8765), "secret": secret,
                       "token_issue_path": ws.get("tokenIssuePath") or ws.get("token_issue_path") or "",
@@ -90,7 +88,7 @@ except PermissionError:
     emit({"error": "config_permission"})
 except ValueError as e:
     code = str(e)
-    emit({"error": code if code in {"webui_disabled", "webui_auth_required", "public_ws_unsupported", "incompatible_gateway"} else "config_invalid"})
+    emit({"error": code if code in {"webui_disabled", "webui_auth_required", "incompatible_gateway"} else "config_invalid"})
 except (AttributeError, TypeError):
     emit({"error": "config_invalid"})
 '''
@@ -141,36 +139,56 @@ async def run_check(
     profile: RemoteProfile, program: str, known_hosts: Path | None = None,
 ) -> dict[str, Any]:
     """Run a fixed read-only program with SSH's existing identity and trust policy."""
-    remote = ["python3", "-c", program, profile.config_path]
-    if profile.runtime_user:
-        remote = ["sudo", "-n", "-H", "-u", profile.runtime_user, "--", *remote]
-    process = await asyncio.create_subprocess_exec(
-        *ssh_arguments(profile, known_hosts), profile.host, shlex.join(remote),
-        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    args = ssh_arguments(profile, known_hosts)
+    sudo = f"sudo -n -H -u {profile.runtime_user} -- " if profile.runtime_user else ""
+    # A Python string literal keeps spaces, Unicode and shell metacharacters
+    # in the path out of the command line on both cmd.exe and Unix shells.
+    script = f"import sys; sys.argv.append({profile.config_path!a})\n{program}".encode("utf-8")
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), 20)
-        if process.returncode:
-            raise RemoteError(ssh_error(stderr))
-        try:
-            records = [line[len(_PROBE_PREFIX):] for line in stdout.split(b"\n")
-                       if line.startswith(_PROBE_PREFIX)]
-            if len(records) != 1:
-                raise ValueError
-            raw = json.loads(records[0])
-            if not isinstance(raw, dict):
-                raise ValueError
-            data = cast(dict[str, Any], raw)
-            if data.get("error"):
-                raise RemoteError(str(data["error"]))
-            return data
-        except (ValueError, TypeError):
-            raise RemoteError("probe_failed") from None
+        async with asyncio.timeout(20):
+            for executable in ("python3", "python"):
+                process = await asyncio.create_subprocess_exec(
+                    *args, profile.host, f"{sudo}{executable} -",
+                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    stdout, stderr = await process.communicate(script)
+                finally:
+                    await stop_process(process)
+                if process.returncode == 0:
+                    break
+                # Windows sshd can return 1. Match the executable in cmd.exe's
+                # trailing one- or two-line diagnostic, after any login banner.
+                diagnostic = b"\n".join(stderr.splitlines()[-2:])
+                if not sudo and (process.returncode in {49, 127, 9009} or (
+                    process.returncode == 1 and (
+                        b"CommandNotFoundException" in stderr
+                        or any(f"{quote}{executable}{quote}".encode() in diagnostic for quote in ("'", '"'))
+                    )
+                )):
+                    continue
+                error = ssh_error(stderr)
+                raise RemoteError("probe_failed" if error == "ssh_unreachable" and process.returncode != 255 else error)
+            else:
+                raise RemoteError("python_unavailable")
     except TimeoutError:
         raise RemoteError("ssh_unreachable") from None
-    finally:
-        await stop_process(process)
+
+    try:
+        records = [line[len(_PROBE_PREFIX):] for line in stdout.split(b"\n")
+                   if line.startswith(_PROBE_PREFIX)]
+        if len(records) != 1:
+            raise ValueError
+        raw = json.loads(records[0])
+        if not isinstance(raw, dict):
+            raise ValueError
+        data = cast(dict[str, Any], raw)
+        if data.get("error"):
+            raise RemoteError(str(data["error"]))
+        return data
+    except (ValueError, TypeError):
+        raise RemoteError("probe_failed") from None
 
 
 async def probe(profile: RemoteProfile, known_hosts: Path | None = None) -> dict[str, Any]:

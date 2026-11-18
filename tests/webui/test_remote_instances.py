@@ -1019,16 +1019,24 @@ async def test_cancellation_reaps_inflight_probe(monkeypatch):
     process.terminate.assert_called_once()
 
 
-@pytest.mark.parametrize("field", ["trustedProxyAuth", "trusted_proxy_auth"])
-def test_ssh_probe_rejects_trusted_assertion_bypass(tmp_path, field):
+@pytest.mark.parametrize(("overrides", "error"), [
+    ({"trustedProxyAuth": {"assertionHeader": "X-User", "trustedPeerCidrs": ["127.0.0.1/32"]}},
+     "incompatible_gateway"),
+    ({"trusted_proxy_auth": {"assertion_header": "X-User", "trusted_peer_cidrs": ["127.0.0.1/32"]}},
+     "incompatible_gateway"),
+    ({"sslCertfile": "/etc/nanobot/cert.pem", "sslKeyfile": "/etc/nanobot/key.pem"}, "incompatible_gateway"),
+    ({"ssl_certfile": "/etc/nanobot/cert.pem", "ssl_keyfile": "/etc/nanobot/key.pem"}, "incompatible_gateway"),
+    ({"tokenIssueSecret": ""}, "webui_auth_required"),
+])
+def test_ssh_probe_keeps_gateway_requirements_with_public_ws_url(tmp_path, overrides, error):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"channels": {"websocket": {
         "enabled": True, "tokenIssueSecret": "synthetic-root",
-        field: {"assertionHeader": "Host", "trustedPeers": ["127.0.0.0/8"]},
+        "publicWsUrl": "wss://public.test/edge/ws", **overrides,
     }}}))
     result = subprocess.run([sys.executable, "-c", remote_ssh._PROBE, str(path)],
                             capture_output=True, text=True, check=True)
-    assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1]) == {"error": "incompatible_gateway"}
+    assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1]) == {"error": error}
 
 
 @pytest.mark.parametrize("banner", [b"", b"Welcome to the server\n", b"{\"port\": 1}\nWelcome without newline"])
@@ -1040,6 +1048,37 @@ async def test_probe_ignores_shell_banners_without_exposing_them(monkeypatch, ba
     ))
     monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
     assert await remote_ssh.probe(RemoteProfile(name="Test", host="example.test")) == data
+
+
+@pytest.mark.parametrize(("returncode", "stderr", "expected_error"), [
+    (127, b"python3: not found", ""),
+    (49, b"'python3' is not recognized as an internal or external command", ""),
+    (1, b"'python3' is not recognized as an internal or external command", ""),
+    (1, b"Authorized users only.\r\n'python3' is not recognized as an internal or external command,\r\n"
+        b"operable program or batch file.\r\n", ""),
+    (1, '"python3" 不是内部或外部命令'.encode(), ""),
+    (1, b"FullyQualifiedErrorId : CommandNotFoundException", ""),
+    (255, b"Permission denied (publickey).", "ssh_auth_failed"),
+    (1, b"Use 'python3' for authorized jobs.\r\nTraceback (most recent call last):\r\n"
+        b"RuntimeError: probe failed\r\n", "probe_failed"),
+])
+async def test_probe_only_retries_when_the_remote_interpreter_is_missing(monkeypatch, returncode, stderr, expected_error):
+    data = {"port": 8765, "secret": "synthetic-root"}
+    attempt = MagicMock(returncode=returncode, communicate=AsyncMock(return_value=(b"", stderr)))
+    fallback = MagicMock(returncode=0, communicate=AsyncMock(return_value=(
+        remote_ssh._PROBE_PREFIX + json.dumps(data).encode() + b"\r\n", b"",
+    )))
+    spawn = AsyncMock(side_effect=[attempt, fallback])
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    profile = RemoteProfile(name="Test", host="example.test", config_path=r"C:\測試 & 100%\config.json")
+    if expected_error:
+        with pytest.raises(RemoteError, match=f"^{expected_error}$"):
+            await remote_ssh.probe(profile)
+        spawn.assert_awaited_once()
+    else:
+        assert await remote_ssh.probe(profile) == data
+        assert [call.args[-1] for call in spawn.await_args_list] == ["python3 -", "python -"]
+        assert attempt.communicate.await_args == fallback.communicate.await_args
 
 
 @pytest.mark.parametrize("output", [
@@ -1055,13 +1094,31 @@ async def test_invalid_probe_protocol_is_not_reported_as_bad_config(monkeypatch,
         await remote_ssh.probe(RemoteProfile(name="Test", host="example.test"))
 
 
-@pytest.mark.parametrize("config", ["invalid JSON", "[]", '{"channels": null}', '{"channels": {"websocket": []}}'])
+@pytest.mark.parametrize("config", [b"invalid JSON", b"[]", b'{"channels": null}', b'{"channels": {"websocket": []}}', b'{"name":"\xff"}'])
 def test_probe_reports_malformed_config_as_config_error(tmp_path, config):
     path = tmp_path / "config.json"
-    path.write_text(config)
+    path.write_bytes(config)
     result = subprocess.run([sys.executable, "-c", remote_ssh._PROBE, str(path)],
                             capture_output=True, text=True, check=True)
     assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1]) == {"error": "config_invalid"}
+
+
+@pytest.mark.parametrize("field", ["publicWsUrl", "public_ws_url"])
+def test_ssh_probe_reads_utf8_config_with_public_ws_url(tmp_path, monkeypatch, field):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"channels": {"websocket": {
+        "enabled": True, "token": "synthetic-root", "port": 8865, "tokenIssuePath": "/测试",
+        field: "wss://public.test/edge/ws",
+    }}}, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setenv("PYTHONUTF8", "0")
+    monkeypatch.setenv("PYTHONCOERCECLOCALE", "0")
+    monkeypatch.setenv("LC_ALL", "C")
+    result = subprocess.run([sys.executable, "-c", remote_ssh._PROBE, str(path)],
+                            capture_output=True, text=True, check=True)
+    assert json.loads(result.stdout.split("NANOBOT_REMOTE:")[1]) == {
+        "port": 8865, "secret": "synthetic-root", "token_issue_path": "/测试",
+        "hostname": socket.gethostname(), "config_path": str(path),
+    }
 
 
 async def test_tunnel_refuses_an_existing_listener(monkeypatch):

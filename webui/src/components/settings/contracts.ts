@@ -20,6 +20,12 @@ export type SettingsSectionKey =
   | "runtime"
   | "advanced";
 
+export type AppsSectionKey = "apps" | "skills" | "channels";
+
+export function isAppsSection(section: SettingsSectionKey): section is AppsSectionKey {
+  return section === "apps" || section === "skills" || section === "channels";
+}
+
 export function isCapabilitySection(section: SettingsSectionKey): boolean {
   return ["capabilities", "image", "voice", "browser", "memory"].includes(section);
 }
