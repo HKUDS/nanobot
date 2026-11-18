@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""Check bounded current-policy models without writing generated files into the checkout."""
+"""Check bounded turn-sync models without writing generated files into the checkout."""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
 import time
-
+from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parent
-EXPECTED_LIMITS = {
-    "lifecycle-failed-read-limit": (13, "Temporal properties were violated"),
-    "lifecycle-fragment-id-limit": (13, "Temporal properties were violated"),
-}
+HISTORY_BASELINES = ("lifecycle-failed-read-limit", "lifecycle-fragment-id-limit")
+ATTACH_BASELINES = ("attach-baseline-no-reconciliation", "attach-baseline-early-recipients")
+ATTACH_CASES = ("attach-fixed-failed-read", "attach-fixed-fragment-id", "attach-fixed-repeated-loss")
+LIMIT_CASES = HISTORY_BASELINES + ATTACH_BASELINES
+EXPECTED_LIMITS = {case: (13, "Temporal properties were violated") for case in LIMIT_CASES}
 REVISED_CASES = (
     "revised-mounted", "revised-unmounted",
     "revised-mounted-fragments", "revised-unmounted-fragments",
@@ -30,16 +30,17 @@ USAGE_CASES = (
 )
 # Larger products are reproducible explicitly, not claimed exhausted by defaults.
 OPTIONAL_CASES = ("requests-two", "lifecycle-fullpage-two-chats")
-LIMIT_CASES = tuple(EXPECTED_LIMITS)
-CASES = REVISED_CASES + USAGE_CASES + OPTIONAL_CASES + LIMIT_CASES
+POSITIVE_CASES = REVISED_CASES + USAGE_CASES + ATTACH_CASES
+CASES = POSITIVE_CASES + OPTIONAL_CASES + LIMIT_CASES
 MODULES = {
     **{case: "RevisedTurnSync.tla" for case in REVISED_CASES},
     **{case: "SharedRequests.tla" for case in ("requests-one", "requests-two-no-invalidations", "requests-two")},
     "authority": "CompletionAuthority.tla",
     **{case: "CacheHandoff.tla" for case in ("handoff-fullpage-active", "handoff-fullpage-idle")},
     **{case: "UsageLifecycle.tla" for case in (
-        "lifecycle-fullpage-dynamic", "lifecycle-fullpage-two-chats", *LIMIT_CASES,
+        "lifecycle-fullpage-dynamic", "lifecycle-fullpage-two-chats", *HISTORY_BASELINES,
     )},
+    **{case: "AttachReconciliation.tla" for case in ATTACH_CASES + ATTACH_BASELINES},
 }
 COUNTS = re.compile(
     r"([\d,]+) states generated, ([\d,]+) distinct states found, ([\d,]+) states left on queue"
@@ -49,7 +50,10 @@ IMPLEMENTATION_FILES = (
     "webui/src/lib/client-run-ledger.ts", "webui/src/lib/nanobot-client.ts",
     "webui/src/lib/canonical-run-snapshot.ts", "webui/src/lib/latest-thread-request.ts",
     "webui/src/lib/thread-transcript.ts", "webui/src/lib/webui-thread-cache.ts",
-    "webui/src/components/thread/ThreadShell.tsx",
+    "webui/src/components/thread/ThreadShell.tsx", "webui/src/lib/types.ts",
+    "nanobot/session/webui_turns.py", "nanobot/webui/inbound_commands.py",
+    "nanobot/webui/session_projection.py", "nanobot/webui/outbound_delivery.py",
+    "nanobot/webui/ws_http.py", "nanobot/channels/websocket/runtime.py",
 )
 
 
@@ -61,10 +65,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jar", required=True, type=Path, help="External official tla2tools.jar; never copied")
     parser.add_argument("--output-root", type=Path, help="New task-owned directory outside this checkout")
-    parser.add_argument("--implementation-root", type=Path, help="Optional read-only TypeScript provenance; not mechanical verification")
+    parser.add_argument("--implementation-root", type=Path, help="Optional read-only implementation provenance; not mechanical verification")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--case", action="append", choices=CASES, dest="cases", help="Repeat to select cases")
-    selection.add_argument("--limits", action="store_true", help="Run ONLY current-policy missing-evidence counterexamples, not positive checks")
+    selection.add_argument("--limits", action="store_true", help="Run ONLY expected baseline counterexamples, not positive checks")
     parser.add_argument("--java", default="java")
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--heap-mb", type=int, default=1536)
@@ -83,7 +87,7 @@ def main() -> int:
         output.mkdir(parents=True, exist_ok=False)
     inputs = sorted((*SOURCE.glob("*.tla"), *SOURCE.glob("*.cfg")))
     manifest = {
-        "scope": "finite fixed-mount, dynamic lifecycle, shared-request and completion partitions; not a checked TypeScript/compositional/all-system proof",
+        "scope": "finite history, request, completion and attach partitions; not a checked implementation/compositional proof",
         "jar": {"path": str(jar), "sha256": sha256(jar)},
         "source_sha256": {path.name: sha256(path) for path in inputs},
         "results": [],
@@ -93,11 +97,11 @@ def main() -> int:
         manifest["implementation_snapshot"] = {
             "root": str(implementation),
             "sha256": {name: sha256(implementation / name) for name in IMPLEMENTATION_FILES},
-            "note": "Read-only provenance, not a checked refinement of TypeScript",
+            "note": "Read-only provenance, not a checked refinement of implementation code",
         }
     print(f"Evidence: {output}", flush=True)
     unexpected = 0
-    selected = args.cases or (LIMIT_CASES if args.limits else REVISED_CASES + USAGE_CASES)
+    selected = args.cases or (LIMIT_CASES if args.limits else POSITIVE_CASES)
     for case in selected:
         case_dir = output / case
         case_dir.mkdir()
@@ -143,7 +147,9 @@ def main() -> int:
         unexpected += not matched
         result = {
             "case": case, "status": status,
-            "category": ("missing-evidence-limit" if case in LIMIT_CASES else
+            "category": ("history-baseline" if case in HISTORY_BASELINES else
+                         "attach-baseline" if case in ATTACH_BASELINES else
+                         "attach-model" if case in ATTACH_CASES else
                          "expanded-usage-model" if case in USAGE_CASES + OPTIONAL_CASES else "fixed-mount-model"),
             "expected_exit": expected_exit, "actual_exit": actual_exit, "required_error": required_error,
             "timed_out": timed_out, "seconds": round(time.monotonic() - started, 3),
@@ -158,7 +164,7 @@ def main() -> int:
             print(text[-5000:], flush=True)
     positive_count = sum(result["status"] == "EXHAUSTED_NO_COUNTEREXAMPLE" for result in manifest["results"])
     limit_count = sum(result["status"] == "LIMITATION_COUNTEREXAMPLE" for result in manifest["results"])
-    print(f"Positive exhausted checks: {positive_count}; missing-evidence counterexamples: {limit_count}; unexpected: {unexpected}")
+    print(f"Positive exhausted checks: {positive_count}; expected baseline counterexamples: {limit_count}; unexpected: {unexpected}")
     return 1 if unexpected else 0
 
 

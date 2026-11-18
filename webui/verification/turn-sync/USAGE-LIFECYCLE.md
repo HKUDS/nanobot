@@ -45,9 +45,9 @@ The handoff cases start at a source-reachable checkpoint: observed turn 1, lost 
 
 The maintained actual-hooks regression exercises the deferred-refresh boundary: a mounted reconnect full page completes 1 while 2 is still open; preflight rejects content adoption; selection away cancels the pending history refresh. Lifecycle observation closes only 1, preserving 2's owner/clock and uncovered content. Ending 2 can then leave idle without another refresh. This concrete regression and the model graph are separate forms of verification.
 
-## Current-policy limits
+## History-only baselines
 
-`--limits` runs two cases separately from positive checks. Each must retain exit 13 and the temporal-property violation signature. Their runner status is `LIMITATION_COUNTEREXAMPLE`, not a passing liveness result; reached-state counts depend on concurrent search order.
+`--limits` includes these two history-only baselines, which deliberately do not model attach absence reconciliation. Each must retain exit 13 and the temporal-property violation signature. Their runner status is `LIMITATION_COUNTEREXAMPLE`, not a passing liveness result; reached-state counts depend on concurrent search order. See [Attach reconciliation](ATTACH-RECONCILIATION.md) for the fixed cases and the two additional attach baselines.
 
 - `lifecycle-failed-read-limit` allows needed reads to fail. A lost terminal plus failed recovery can leave an owner unresolved; fairness cannot manufacture a later retry.
 - `lifecycle-fragment-id-limit` allows fragments with omitted completion IDs and no switches. Without an owner/bridge/future read, completion evidence may never arrive. This is not an assertion about a particular native Gateway payload.

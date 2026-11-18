@@ -1562,6 +1562,7 @@ export type InboundEvent =
       chat_id: string;
       request_id?: string;
       temporary?: boolean;
+      live_turn_ids?: string[];
       recovery_state?: RecoveryState;
       usage?: TurnUsage;
     }

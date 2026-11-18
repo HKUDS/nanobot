@@ -9,7 +9,7 @@ from nanobot.providers.base import LLMUsage
 from nanobot.session.model_selection import SessionModelPreset
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.state import SessionState
-from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
+from nanobot.session.webui_turns import latest_live_websocket_turn
 from nanobot.webui.goal_state import goal_state_ws_blob
 
 if TYPE_CHECKING:
@@ -114,7 +114,4 @@ class WebUISessionProjection:
     @staticmethod
     def active_turn_status(chat_id: str) -> tuple[float, str | None] | None:
         """Return same-process running-turn state for reconnect hydration."""
-        started_at = websocket_turn_wall_started_at(chat_id)
-        if started_at is None:
-            return None
-        return started_at, websocket_turn_id(chat_id)
+        return latest_live_websocket_turn(chat_id)

@@ -333,17 +333,13 @@ class WebUIOutboundDelivery:
             turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
             turn_owner = msg.metadata.get(WEBSOCKET_TURN_OWNER_METADATA_KEY)
             owner = turn_owner if isinstance(turn_owner, str) else None
-            try:
-                if recipients and event.status in ("running", "idle"):
-                    await self._send_goal_status(
-                        msg.chat_id, event.status, started_at=event.started_at,
-                        turn_id=turn_id if isinstance(turn_id, str) else None,
-                    )
-            finally:
-                if event.status == "idle":
-                    clear_websocket_turn_if_current(
-                        msg.chat_id, owner, preserve_persistence_failure=True,
-                    )
+            if event.status == "idle":
+                clear_websocket_turn_if_current(msg.chat_id, owner, preserve_persistence_failure=True)
+            if recipients and event.status in ("running", "idle"):
+                await self._send_goal_status(
+                    msg.chat_id, event.status, started_at=event.started_at,
+                    turn_id=turn_id if isinstance(turn_id, str) else None,
+                )
             return
         if isinstance(event, TurnEndEvent):
             turn_id = msg.metadata.get(WEBUI_TURN_METADATA_KEY)
@@ -591,7 +587,8 @@ class WebUIOutboundDelivery:
         turn_owner: str | None = None,
         context_graph_parts: ContextGraphParts | None = None,
     ) -> None:
-        recipients = self._transport.webui_recipients(ChatAudience(chat_id))
+        audience = ChatAudience(chat_id)
+        recipients = () if persistence == "turn_complete" else self._transport.webui_recipients(audience)
         body: dict[str, Any] = dict(payload)
         if persistence == "turn_activity":
             await self._persist_turn_transcript_event(
@@ -607,10 +604,11 @@ class WebUIOutboundDelivery:
                 chat_id, body, metadata=metadata, phase="complete",
                 transcript_overrides={WEBUI_TRANSCRIPT_INCOMPLETE_KEY: True} if prior_failure else None,
             )
-            if persisted:
-                # A durable incomplete marker allows HTTP recovery after restart.
-                clear_websocket_turn_if_current(chat_id, turn_owner)
+            clear_websocket_turn_if_current(chat_id, turn_owner, preserve_persistence_failure=not persisted)
             self.discard(chat_id, complete=True)
+            # Include connections that may have seen this owner as live while
+            # the terminal write was pending.
+            recipients = self._transport.webui_recipients(audience)
         await self._fanout(recipients, body, label=f" {body['event']} ")
 
     async def _send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:

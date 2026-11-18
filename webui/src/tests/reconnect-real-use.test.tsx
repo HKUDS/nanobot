@@ -307,6 +307,50 @@ describe("reconnect across chat selection and transport generations", () => {
       state: { active: false, unsettled: false }, unsettled: [] });
   });
 
+  it.each(["failed", "fragment"] as const)("clears a completed run after reconnect with a %s history read", async (read) => {
+    const h = harness();
+    h.client.attach("alpha");
+    act(() => h.running("alpha", "turn-1", 100));
+    expect(h.client.getRunState("alpha").active).toBe(true);
+    await h.reopen();
+    await act(async () => {
+      const pending = h.reads.at(-1)!;
+      if (read === "failed") pending.fail(503);
+      else pending.resolve({ ...history("alpha", []), page: {
+        history_generation: "real-use", before_cursor: null, has_more_before: true,
+        record_range: { turn: 1, start: 1, end: 2 },
+      } });
+    });
+    expect(h.client.getRunState("alpha").active).toBe(true);
+    act(() => {
+      h.socket().receive({ event: "attached", chat_id: "alpha", live_turn_ids: [] });
+      h.running("alpha", "turn-1", 100); // An older running frame was still on the bus.
+    });
+    expect(h.client.getRunState("alpha").active).toBe(false);
+    h.close();
+  });
+
+  it("preserves a still-live owner and a newly submitted turn on reattach", async () => {
+    const h = harness();
+    h.client.attach("alpha");
+    act(() => {
+      h.running("alpha", "finished", 100);
+      h.running("alpha", "still-live", 200);
+    });
+    await h.reopen();
+    act(() => {
+      h.client.sendMessage("alpha", "new submission", undefined, { turnId: "new" });
+      h.socket().receive({ event: "attached", chat_id: "alpha", live_turn_ids: ["still-live"] });
+    });
+    expect(h.client.getRunState("alpha").latestTurnId).toBe("new");
+    expect(h.client.isRunCompleted("alpha", "new")).toBe(false);
+    act(() => h.socket().receive({ event: "turn_end", chat_id: "alpha", turn_id: "new" }));
+    expect(h.client.getRunState("alpha").active).toBe(true);
+    act(() => h.socket().receive({ event: "turn_end", chat_id: "alpha", turn_id: "still-live" }));
+    expect(h.client.getRunState("alpha").active).toBe(false);
+    h.close();
+  });
+
   it("recovers six chats beyond the read-concurrency limit after a failed page and repeated drops", async () => {
     const h = harness();
     const chats = Array.from({ length: 6 }, (_, index) => `chat-${index}`);
