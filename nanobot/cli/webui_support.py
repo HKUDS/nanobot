@@ -230,7 +230,7 @@ def _load_webui_setup_config(config_path: Path) -> Config:
 
 
 def _webui_config_dict(config: Config) -> dict[str, Any]:
-    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.channels.websocket.config import WebSocketConfig
 
     current: Any = getattr(config.channels, "websocket", None) or {}
     model = WebSocketConfig.model_validate(current)
@@ -238,7 +238,7 @@ def _webui_config_dict(config: Config) -> dict[str, Any]:
 
 
 def _webui_channel_enabled(config: Config) -> bool:
-    from nanobot.channels.websocket.runtime import WebSocketConfig
+    from nanobot.channels.websocket.config import WebSocketConfig
 
     current: Any = getattr(config.channels, "websocket", None) or {}
     return bool(WebSocketConfig.model_validate(current).enabled)
