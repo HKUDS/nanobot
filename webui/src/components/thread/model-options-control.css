@@ -21,6 +21,10 @@
   touch-action: pan-y pinch-zoom;
 }
 
+.reasoning-effort-slider[data-pending] {
+  cursor: default;
+}
+
 .reasoning-effort-track {
   --effort-lane: #e6e5e6;
   --effort-lane-edge: #dad9da;

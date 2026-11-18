@@ -8,14 +8,14 @@ import type { ModelOptionsCapability, SessionModelOptions } from "@/lib/types";
 import "./model-options-control.css";
 
 export interface ModelOptionsControlProps {
-  data: { value: SessionModelOptions; capability: ModelOptionsCapability; efforts: string[] } | null;
+  data: { value: SessionModelOptions; capability: ModelOptionsCapability; efforts: string[]; effortsPending: boolean } | null;
   onChange: (value: SessionModelOptions) => void;
 }
 
-function ReasoningEffortControl({ options, selected, ordered, onChange }: {
+function ReasoningEffortControl({ options, selected, mode, onChange }: {
   options: (string | null)[];
   selected: number;
-  ordered: boolean;
+  mode: "ordered" | "pending" | "custom";
   onChange: (value: string | null) => void;
 }) {
   const { t } = useTranslation();
@@ -56,7 +56,7 @@ function ReasoningEffortControl({ options, selected, ordered, onChange }: {
     drag.current = null;
     setPreview(null);
   }
-  if (!ordered && last > 0) {
+  if (mode === "custom" && last > 0) {
     return (
       <label className="reasoning-effort flex-1 justify-between text-xs">
         <span className="min-w-0 truncate" title={label}>{label}</span>
@@ -70,7 +70,16 @@ function ReasoningEffortControl({ options, selected, ordered, onChange }: {
   return (
     <div className="reasoning-effort text-xs">
       <span className="min-w-0 truncate" title={label}>{label}</span>
-      {last > 0 ? (
+      {mode === "pending" ? (
+        <div className="reasoning-effort-slider" data-pending style={{ "--effort-steps": Math.max(last, 1) } as CSSProperties}>
+          <div className="reasoning-effort-track col-start-1 row-start-1" aria-hidden="true">
+            <div className="reasoning-effort-lane" />
+          </div>
+          <span className="relative col-start-1 row-start-1 truncate px-2 text-center font-medium text-foreground" title={selectedLabel}>
+            {selectedLabel}
+          </span>
+        </div>
+      ) : last > 0 ? (
         <div className="reasoning-effort-slider" data-dragging={preview !== null || undefined}
           data-at-start={position === 0 || undefined}
           style={{ "--effort-progress": position, "--effort-steps": last } as CSSProperties}
@@ -115,7 +124,7 @@ function ReasoningEffortControl({ options, selected, ordered, onChange }: {
 
 export function ModelOptionsControl({ data, onChange }: ModelOptionsControlProps) {
   if (!data) return null;
-  const { value, capability, efforts } = data;
+  const { value, capability, efforts, effortsPending } = data;
   const defaultEffort = capability.reasoning_effort.default;
   const effectiveEffort = value.reasoning_effort ?? defaultEffort;
   // Keep preset and session values selectable even if they aren't in the model catalog.
@@ -123,11 +132,12 @@ export function ModelOptionsControl({ data, onChange }: ModelOptionsControlProps
   const speed = capability.codex_fast_mode;
   if (!values.length && !speed) return null;
   const options = defaultEffort === null ? [null, ...values] : values;
+  const mode = values.every((effort) => efforts.includes(effort)) ? "ordered" : effortsPending ? "pending" : "custom";
   return (
     <div className="model-options-row mt-1 flex items-center gap-1 border-t border-border/55 px-2 py-1">
       {values.length > 0 ? (
         <ReasoningEffortControl options={options} selected={options.indexOf(effectiveEffort)}
-          ordered={values.every((effort) => efforts.includes(effort))}
+          mode={mode}
           onChange={(reasoning_effort) => onChange({ ...value, reasoning_effort })} />
       ) : null}
       {speed ? (

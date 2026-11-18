@@ -76,11 +76,14 @@ export function useSessionModelOptions({ sessionKey, preset, settings, open, dis
   const providerName = configuration?.resolved_provider ?? configuration?.provider;
   const provider = settings?.providers.find((entry) => entry.name === providerName);
   const model = configuration?.model ?? "";
-  const { payload } = useProviderModelCatalog({
+  const canLoadCatalog = enabled && !!capability && !!model && !!provider?.configured && provider.model_catalog !== "unsupported";
+  const { payload, loading, failed } = useProviderModelCatalog({
     revision: provider ?? NO_PROVIDER, token, provider: provider?.name ?? "",
-    enabled: enabled && open && !!capability && !!model && !!provider?.configured && provider.model_catalog !== "unsupported",
+    enabled: canLoadCatalog && open,
   });
   const efforts = reasoningEffortValues(payload, model, capability?.reasoning_effort.values);
+  // The popover renders its contents before it starts the lazy catalog request.
+  const effortsPending = canLoadCatalog && (loading || (!payload && !failed));
   const select = useCallback((options: SessionModelOptions) => {
     if (enabled) remember(key, { preset, options });
   }, [enabled, key, preset, remember]);
@@ -100,7 +103,7 @@ export function useSessionModelOptions({ sessionKey, preset, settings, open, dis
   // The Gateway owns persisted options. Omission preserves them; null fields explicitly clear them.
   const sendValue = useCallback(() => enabled ? localOptions : undefined, [enabled, localOptions]);
   return {
-    data: enabled && capability ? { value, capability, efforts } : null,
+    data: enabled && capability ? { value, capability, efforts, effortsPending } : null,
     select, reset, moveToSession, sendValue,
   };
 }

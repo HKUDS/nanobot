@@ -12,6 +12,7 @@ import { createStreamClient } from "@/tests/stream-client";
 const params = new URLSearchParams(location.search);
 const isChinese = params.get("lang")?.startsWith("zh");
 const showSettings = params.has("settings");
+const loadCodexCatalog = params.has("codex-catalog");
 const providers = {
   openai_codex: { label: "OpenAI Codex", auth_type: "oauth", codex_fast_mode_supported: true, codex_ultrafast_models: ["gpt-6.2-sol"] },
   github_copilot: { label: "GitHub Copilot", auth_type: "oauth" },
@@ -69,13 +70,15 @@ const groups = [
   ] },
 ];
 const group = groups.find(({ id }) => id === params.get("group")) ?? groups[0]!;
-const base = group.id === "oauth" ? (params.has("ultrafast") ? ultrafastCodex : standardCodex) : group.presets[0]!;
+const base = loadCodexCatalog
+  ? preset("Review", "openai_codex", "openai-codex/gpt-6.2-sol", "xhigh", ["low", "medium", "high"], { default: false, ultrafast_supported: true })
+  : group.id === "oauth" ? (params.has("ultrafast") ? ultrafastCodex : standardCodex) : group.presets[0]!;
 const settings: SettingsPayload = {
   ...baseSettings,
   agent: { ...baseSettings.agent, model: base.model, provider: base.provider, resolved_provider: base.provider,
     reasoning_effort: base.reasoning_effort },
   providers: Object.entries(providers).map(([name, provider]) => ({
-    name, configured: true, model_catalog: "unsupported", ...provider,
+    name, configured: true, model_catalog: loadCodexCatalog && name === "openai_codex" ? "hybrid" : "unsupported", ...provider,
   })),
   model_presets: [{ ...base, name: "default", label: "Default", active: true, is_default: true }, ...group.presets],
   model_call_order: group.presets.map(({ name }) => name),
@@ -109,8 +112,10 @@ function FixtureNav() {
 
 /** Fully task-local fixture: no real gateway, authentication, or network mutations. */
 export function installModelOptionsPreviewApi() {
-  window.fetch = async (input) => {
+  const fetch = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
     const url = String(input);
+    if (loadCodexCatalog && url.includes("/api/settings/provider-models?")) return fetch(input, init);
     if (url.includes("/webui-thread")) return Response.json({ schemaVersion: 3, projection: "events", events: [] });
     if (url.includes("/commands")) return Response.json({ commands: [] });
     if (url.includes("/api/settings")) return Response.json(settings);
