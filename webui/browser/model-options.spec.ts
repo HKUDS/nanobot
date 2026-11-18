@@ -195,6 +195,35 @@ test("provider examples switch from Codex to direct API and gateway capabilities
   await expect(reasoning).toHaveAttribute("aria-valuetext", "Auto");
 });
 
+test("keeps the reasoning slider track visible while a Codex preset awaits its effort levels", async ({ page }) => {
+  const catalogUrl = /\/api\/settings\/provider-models\?provider=openai_codex$/;
+  let releaseCatalog!: () => void;
+  const catalogGated = new Promise<void>((resolve) => { releaseCatalog = resolve; });
+  await page.route(catalogUrl, async (route) => {
+    await catalogGated;
+    await route.fulfill({ json: {
+      provider: "openai_codex", label: "OpenAI Codex", status: "available", catalog_kind: "hybrid", source: "remote", model_count: 1,
+      models: [{ id: "openai-codex/gpt-6.2-sol", reasoning_efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] }],
+    } });
+  });
+  await page.goto("/browser/fixture.html?case=model-options&codex-catalog");
+  const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
+  const effort = dialog.getByRole("slider", { name: "Reasoning effort" });
+  try {
+    await Promise.all([page.waitForRequest(catalogUrl), page.getByRole("button", { name: "Default", exact: true }).click()]);
+    await expect(dialog.locator(".reasoning-effort-track")).toBeVisible();
+    await expect(dialog.getByText("xhigh", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("combobox", { name: "Reasoning effort" })).toHaveCount(0);
+    await expect(effort).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Fast", exact: true })).toBeEnabled();
+  } finally {
+    releaseCatalog();
+  }
+  await expect(effort).toHaveAttribute("aria-valuetext", "xhigh");
+  await effort.press("ArrowLeft");
+  await expect(effort).toHaveAttribute("aria-valuetext", "high");
+});
+
 test("keeps the custom reasoning effort as a concrete value for a self-hosted preset", async ({ page }) => {
   await page.goto("/browser/fixture.html?case=model-options&group=local");
   await page.getByRole("button", { name: "Default", exact: true }).click();
