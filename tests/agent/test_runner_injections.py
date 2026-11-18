@@ -1106,30 +1106,31 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 async def test_websocket_followup_is_admitted_before_recovery_queue(tmp_path):
     from nanobot.bus.events import InboundMessage
 
-    admission = MagicMock()
-    admission.admit = AsyncMock(return_value=True)
-    loop = _make_loop(tmp_path, recovery_admission=admission)
-
-    session_key = "websocket:chat"
     pending = SessionInbox(maxsize=20)
-    loop._pending_queues.install(session_key, pending)
 
-    run_task = asyncio.create_task(loop.run())
+    async def admit(_msg):
+        assert pending.empty(), "follow-up queued before recovery admission"
+        return True
+
+    admission = MagicMock()
+    admission.admit = AsyncMock(side_effect=admit)
+    loop = _make_loop(tmp_path, recovery_admission=admission)
+    loop._pending_queues.install("websocket:chat", pending)
     msg = InboundMessage(
         channel="websocket",
         sender_id="u",
         chat_id="chat",
         content="new request",
     )
-    await loop.bus.publish_inbound(msg)
 
-    queued_msg = await asyncio.wait_for(pending.get(), timeout=2)
-    admission.admit.assert_awaited_once_with(msg)
-    assert queued_msg.content == msg.content
-    assert queued_msg.metadata["_recovery_followup_id"]
-
-    loop.stop()
-    await asyncio.wait_for(run_task, timeout=2)
+    try:
+        await loop._dispatch_inbound(msg)
+        queued_msg = pending.get_nowait()
+        admission.admit.assert_awaited_once_with(msg)
+        assert queued_msg.content == msg.content
+        assert queued_msg.metadata["_recovery_followup_id"]
+    finally:
+        await loop.aclose()
 
 
 @pytest.mark.asyncio
