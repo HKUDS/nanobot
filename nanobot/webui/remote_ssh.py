@@ -159,10 +159,14 @@ async def run_check(
                     await stop_process(process)
                 if process.returncode == 0:
                     break
-                # Missing command: POSIX 127, cmd.exe 9009 (truncated to 49
-                # by POSIX SSH clients), or PowerShell's exception marker.
+                # Windows sshd may report a missing command as 1. Match the
+                # quoted executable in cmd.exe's diagnostic, not its language.
+                first_line = stderr.partition(b"\n")[0]
                 if not sudo and (process.returncode in {49, 127, 9009} or (
-                    process.returncode == 1 and b"CommandNotFoundException" in stderr
+                    process.returncode == 1 and (
+                        b"CommandNotFoundException" in stderr
+                        or any(f"{quote}{executable}{quote}".encode() in first_line for quote in ("'", '"'))
+                    )
                 )):
                     continue
                 error = ssh_error(stderr)
