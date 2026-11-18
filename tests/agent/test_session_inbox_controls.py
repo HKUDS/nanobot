@@ -713,6 +713,52 @@ async def test_shutdown_rejects_automation_before_starting_cleanup(loop):
         await asyncio.wait_for(close, timeout=3)
 
 
+async def test_shutdown_waits_for_worker_already_cancelling_from_stop(loop, monkeypatch):
+    started = asyncio.Event()
+    cancelling = asyncio.Event()
+    release = asyncio.Event()
+    closing_resources = asyncio.Event()
+    close_subagents = loop.subagents.close
+
+    async def chat(**_kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelling.set()
+            await release.wait()
+
+    async def observe_close():
+        closing_resources.set()
+        await close_subagents()
+
+    loop.provider.chat_stream_with_retry = chat
+    monkeypatch.setattr(loop.subagents, "close", observe_close)
+    dispatcher = asyncio.create_task(loop.run())
+    close = None
+    try:
+        async with asyncio.timeout(5):
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="test", content="original turn",
+            ))
+            await started.wait()
+            await loop.bus.publish_inbound(InboundMessage(
+                channel="websocket", sender_id="user", chat_id="test", content="/stop",
+            ))
+            await cancelling.wait()
+            close = asyncio.create_task(loop.aclose())
+            # With no other workers or background tasks, a close that does not
+            # join this worker goes straight to shared resource teardown.
+            await asyncio.sleep(0)
+            assert not closing_resources.is_set()
+    finally:
+        release.set()
+        if close is not None:
+            await asyncio.wait_for(close, timeout=3)
+        await stop_loop(loop, dispatcher, timeout=3)
+    assert closing_resources.is_set()
+
+
 @pytest.mark.parametrize("action", ["stop", "close"])
 async def test_cancel_before_worker_runs_completes_automation(loop, action):
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=LLMResponse(content="unused"))

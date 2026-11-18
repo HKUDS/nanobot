@@ -897,6 +897,12 @@ class AgentLoop:
         if not tasks and self._active_tasks.get(key) is tasks:
             self._active_tasks.pop(key, None)
 
+    @staticmethod
+    def _request_worker_cancellation(tasks: Iterable[asyncio.Task[Any]]) -> int:
+        # A cancelling worker still owns its cleanup. Another controller should
+        # join it instead of interrupting that cleanup with a second cancel().
+        return sum(1 for task in tasks if not task.done() and not task.cancelling() and task.cancel())
+
     async def _cancel_active_tasks(self, key: str) -> int:
         pending = self._pending_queues.get(key)
         current = asyncio.current_task()
@@ -904,10 +910,8 @@ class AgentLoop:
         # A command running on the session worker must keep its task and inbox
         # registered until the worker finishes; only other tasks can be stopped.
         owns_queue = current in tracked
-        if not owns_queue:
-            self._active_tasks.pop(key, None)
         tasks = tuple(task for task in tracked if task is not current)
-        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
+        cancelled = self._request_worker_cancellation(tasks)
         journal_session = await self.sessions.state.read(key)
         journaled_followup_ids = (
             tuple(
@@ -921,13 +925,10 @@ class AgentLoop:
             if journal_session is not None
             else ()
         )
-        for t in tasks:
-            try:
-                await t
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
+        if tasks:
+            await asyncio.shield(asyncio.gather(*tasks, return_exceptions=True))
+            for task in tasks:
+                self._active_task_done(key, tracked, task)
         if tasks and not owns_queue and pending is not None and self._pending_queues.get(key) is pending:
             # A task cancelled before its first step never enters the worker's
             # cleanup handler. Only reclaim that worker's original inbox.
@@ -1659,14 +1660,15 @@ class AgentLoop:
             if key in self._pending_queues and any(task is not current_task for task in tasks)
         }
         active_tasks = tuple({task for tasks in active_task_groups.values() for task in tasks})
-        active_task_groups.clear()
         active_tasks = tuple(task for task in active_tasks if task is not current_task)
-        for task in active_tasks:
-            if not task.done():
-                task.cancel()
+        self._request_worker_cancellation(active_tasks)
         try:
             if active_tasks:
-                await asyncio.gather(*active_tasks, return_exceptions=True)
+                await asyncio.shield(asyncio.gather(*active_tasks, return_exceptions=True))
+            for key, tasks in tuple(active_task_groups.items()):
+                for task in tuple(tasks):
+                    if task.done():
+                        self._active_task_done(key, tasks, task)
             for key, pending in pending_queues.items():
                 if self._pending_queues.get(key) is pending:
                     await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
