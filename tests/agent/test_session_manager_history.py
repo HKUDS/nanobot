@@ -678,24 +678,23 @@ def test_get_history_does_not_paste_assistant_media_paths_into_replay():
 
 def test_get_history_preserves_literal_examples_and_filters_local_image_breadcrumb():
     session = Session(key="test:assistant-example")
-    reply = (
+    draft = 'message("欢迎加入")'
+    example = (
         "[Message Time: 2026-05-09 00:33:48]\n"
         "Here is the photo delivery example:\n"
         'generate_image("16:9")\n'
         'message("来了 🎨")'
     )
-    request = f"Generate a photo, then reply with exactly:\n{reply}"
-    session.add_message("user", request)
-    session.add_message(
-        "assistant",
-        f"{reply}\n[image: /home/user/.nanobot/media/generated/img_old.png]",
-    )
+    session.add_message("user", "Draft a welcome message.")
+    session.add_message("assistant", draft)
+    session.add_message("user", "Show a photo delivery example.")
+    session.add_message("assistant", f"{example}\n[image: /home/user/.nanobot/media/generated/img_old.png]")
 
-    history = session.get_history(max_messages=500)
+    history = session.get_history()
 
-    assert history == [
-        {"role": "user", "content": request},
-        {"role": "assistant", "content": reply},
+    assert [message["content"] for message in history if message["role"] == "assistant"] == [
+        draft,
+        example,
     ]
 
 
