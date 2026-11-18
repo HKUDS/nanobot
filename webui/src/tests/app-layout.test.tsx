@@ -3533,6 +3533,33 @@ describe("App layout", () => {
     expect(settingsHighlight).toHaveAttribute("data-active-id", "capabilities");
   });
 
+  it("defaults to Ready again when returning to Apps from another sidebar page", async () => {
+    const app = {
+      name: "example", display_name: "Example App", category: "productivity", description: "Example",
+      requires: "", source: "catalog", entry_point: "example", install_supported: true,
+      installed: true, available: true, status: "installed", skill_installed: false,
+    };
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [app], installed_count: 1 },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/webui/skills": { skills: [] },
+    });
+    render(<App />);
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    expect(await screen.findByRole("heading", { name: "Example App" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
+    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    expect(await screen.findByRole("heading", { name: "Example App" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("transitions between Apps and Skills without replacing the sidebar", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),

@@ -10,7 +10,8 @@ def results(*domains):
             for domain in ("python", "webui", "tui", "docker", "native")
         }},
         **{job: {"result": "skipped"} for job in (
-            "test", "windows_process", "windows_installers", "webui_checks", "webui_browser", "webui", "tui", "docker", "native",
+            "test", "windows_process", "windows_installers", "webui_checks", "webui_build",
+            "webui_unit", "webui_browser", "webui", "tui", "docker", "native",
         )},
     }
 
@@ -20,12 +21,14 @@ def test_documentation_needs_no_product_jobs():
 
 
 @pytest.mark.parametrize("result", ["failure", "cancelled", "skipped"])
-def test_selected_job_must_succeed(result):
+@pytest.mark.parametrize("job", ["webui_checks", "webui_build", "webui_unit", "webui_browser", "webui"])
+def test_selected_webui_job_must_succeed(job, result):
     needs = results("webui")
-    for job in ("webui_checks", "webui_browser", "webui"):
-        needs[job]["result"] = "success"
-    needs["webui_browser"]["result"] = result
-    assert check_results(needs, "pull_request")
+    for name in ("webui_checks", "webui_build", "webui_unit", "webui_browser", "webui"):
+        needs[name]["result"] = "success"
+    assert check_results(needs, "pull_request") == []
+    needs[job]["result"] = result
+    assert check_results(needs, "pull_request") == [f"{job}: required, got {result}"]
 
 
 def test_native_runs_on_high_risk_pr_but_not_main_push():

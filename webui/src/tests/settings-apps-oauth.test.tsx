@@ -83,7 +83,7 @@ describe("SettingsView Apps catalog", () => {
     expect(screen.getByRole("heading", { name: "Figma local" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Figma connected" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Figma CLI" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Apps" }));
+    fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
     expect(screen.getByRole("heading", { name: "Figma pending" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Figma local" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Photoshop CLI" })).not.toBeInTheDocument();

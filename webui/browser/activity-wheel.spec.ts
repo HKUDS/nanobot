@@ -144,6 +144,8 @@ test("the elapsed label keeps a compact gap before the collapsed activity", asyn
 test("the working label stays in place when activity is expanded and collapsed", async ({ page }) => {
   for (const width of [960, 360]) {
     await page.setViewportSize({ width, height: 740 });
+    // The responsive action row changes height; measure after that resize commits.
+    await expect(page.locator("[data-message-mobile-actions]")).toHaveCount(width < 768 ? 1 : 0);
     const toggle = page.getByRole("button", { name: /处理中/ });
     const labelPosition = () => toggle.evaluate((button) => {
       const label = button.querySelector("[data-sheen-text]")!;

@@ -78,6 +78,7 @@ import { BrowserNotifications, useBrowserNotificationLifecycle } from "@/compone
 import { ThreadMessageCache } from "@/lib/thread-message-cache";
 import { FilePreviewStore } from "@/hooks/useFilePreviewState";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
+import { BackgroundProvider } from "@/providers/BackgroundProvider";
 import { useVersionCheck } from "@/providers/VersionCheckProvider";
 import { useUpdateFlow } from "@/providers/UpdateFlowProvider";
 import type {
@@ -808,12 +809,12 @@ export default function App() {
       allowUpdateFlow={state.runtimeSurface !== "native"}
     >
       <BrowserNotifications client={state.client} />
-      <RemoteInstances><Shell
+      <BackgroundProvider><RemoteInstances><Shell
         runtimeSurface={state.runtimeSurface}
         onModelNameChange={handleModelNameChange}
         onLogout={handleLogout}
         onNativeEngineRestart={handleNativeEngineRestart}
-      /></RemoteInstances>
+      /></RemoteInstances></BackgroundProvider>
     </ClientProvider>
   );
 }

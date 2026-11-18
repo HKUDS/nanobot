@@ -348,7 +348,7 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView();
 
-    expect(await screen.findByText("No apps available.")).toBeInTheDocument();
+    expect(await screen.findByText("No CLI Apps available.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
     expect(await screen.findByText("Add MCP")).toBeInTheDocument();
   });

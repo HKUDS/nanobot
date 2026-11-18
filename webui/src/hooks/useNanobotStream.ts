@@ -544,7 +544,7 @@ export function useNanobotStream(
   }, [chatId, client]);
   const settleFragment = useCallback((owner: ThreadTranscript) => {
     if (!chatId || !owner.fragmentCompletedTurnIds.length) return;
-    client.settleFragmentRunLifecycle(chatId, owner.fragmentCompletedTurnIds);
+    client.settleCompletedRunLifecycle(chatId, owner.fragmentCompletedTurnIds);
     if (!client.getRunState(chatId)?.active) setRetryStatus(null);
   }, [chatId, client]);
 
@@ -575,7 +575,9 @@ export function useNanobotStream(
       if (chatId && canonical && (ownRead || !seed)) {
         if (body?.page?.record_range) {
           if (accepted) settleFragment(owner);
-        } else if (ownRead && !owner.hasPendingFragmentGap) {
+        } else if (!owner.hasPendingFragmentGap) {
+          // A published reconnect page supersedes this owner's shared read.
+          // The owner must reconcile its completion facts after that handoff too.
           reconcileCanonical(generation, canonical, accepted);
         }
       }

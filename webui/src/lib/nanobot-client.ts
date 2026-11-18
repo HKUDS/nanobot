@@ -439,9 +439,9 @@ export class NanobotClient {
     this.applyRunEffects(this.runs.transition({ kind: "fence", chatId, completedTurnIds }));
   }
 
-  /** Settle explicit fragment completions without claiming coverage of live content. */
-  settleFragmentRunLifecycle(chatId: string, completedTurnIds: readonly string[]): void {
-    this.applyRunEffects(this.runs.transition({ kind: "settle-fragment-lifecycle", chatId, completedTurnIds }));
+  /** Settle explicit completions without claiming coverage of live content. */
+  settleCompletedRunLifecycle(chatId: string, completedTurnIds: readonly string[]): void {
+    this.applyRunEffects(this.runs.transition({ kind: "settle-completed-lifecycle", chatId, completedTurnIds }));
   }
 
   /** Whether a mounted transcript owns delivery for this chat. */
@@ -740,6 +740,23 @@ export class NanobotClient {
     if (this.socket?.readyState === WS_OPEN) {
       this.queueSend({ type: "attach", chat_id: chatId });
     }
+  }
+
+  async uploadBackground(file: File): Promise<void> {
+    const socket = this.socket;
+    const capability = this.upload;
+    const stillConnected = () => this.socket === socket
+      && socket?.readyState === WS_OPEN && this.upload === capability;
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image"));
+      reader.onerror = () => reject(new Error("Could not read image"));
+      reader.readAsDataURL(file);
+    });
+    const [attachment] = await uploadAttachments([{ data_url: dataUrl, name: file.name }], capability,
+      typeof window !== "undefined" ? window.location.href : this.currentUrl, stillConnected);
+    if (!attachment || !("reference" in attachment)) throw new Error("Could not upload image");
+    await this.requestMutation("background.update", { reference: attachment.reference });
   }
 
   async sendAttachments(

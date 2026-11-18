@@ -46,6 +46,6 @@ describe("describeMcpActivity", () => {
       { element: "Password", text: "not-for-the-timeline" },
       "done",
       i18n.t,
-    )).toEqual({ action: "已输入文本", target: "至 Password" });
+    )).toEqual({ action: "已输入", target: "在 Password" });
   });
 });

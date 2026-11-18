@@ -109,7 +109,7 @@ describe("localized agent activity contracts", () => {
 
     await act(async () => setAppLanguage("zh-CN"));
     expect(screen.getByText("已运行命令 bun run test")).toBeInTheDocument();
-    expect(screen.getByLabelText("无法搜索 网页, release notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("搜索 网页 失败, release notes")).toBeInTheDocument();
     await act(async () => setAppLanguage("en"));
     expect(screen.getByLabelText("Could not search the web, release notes")).toBeInTheDocument();
     expect(JSON.stringify(messages)).toBe(original);
@@ -124,12 +124,12 @@ describe("localized agent activity contracts", () => {
     const original = JSON.stringify(messages);
     await setAppLanguage("zh-CN");
     render(<AgentActivityCluster messages={messages} isTurnStreaming={false} hasBodyBelow expanded />);
-    for (const label of ["子任务已创建", "已获取子任务状态", "消息已加入子任务队列", "已处理停止请求"]) {
+    for (const label of ["已创建子任务", "已检查子任务", "子任务消息已入队", "已请求停止子任务"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByText("已完成 Subagent")).not.toBeInTheDocument();
     await act(async () => setAppLanguage("en"));
-    for (const label of ["Subtask created", "Subtask status retrieved", "Message queued for subtask", "Stop request processed"]) {
+    for (const label of ["Created subtask", "Checked subtask", "Queued subtask message", "Subtask stop requested"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(JSON.stringify(messages)).toBe(original);

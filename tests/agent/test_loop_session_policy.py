@@ -334,10 +334,6 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
 
     loop = _loop(tmp_path, [])
 
-    async def wait_for_discard(key: str) -> None:
-        while loop.sessions.get_cached(key) is not None or key in loop._discarding_sessions:
-            await asyncio.sleep(0)
-
     loop.provider.chat_stream_with_retry = AsyncMock(side_effect=block_provider)
     monkeypatch.setattr(loop, "aclose", AsyncMock())
     terminate_exec_sessions = AsyncMock(return_value=1)
@@ -372,7 +368,7 @@ async def test_session_discard_control_cancels_active_turn(tmp_path, monkeypatch
 
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(active_task, timeout=2)
-    await asyncio.wait_for(wait_for_discard(key), timeout=2)
+    await asyncio.wait_for(loop._pending_queues.wait_for_controls(key), timeout=2)
     assert loop.sessions.get_cached(key) is None
     assert loop._file_state_store.for_session(key) is not previous_file_state
     terminate_exec_sessions.assert_awaited_once_with(key)

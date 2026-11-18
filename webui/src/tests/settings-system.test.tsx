@@ -138,11 +138,16 @@ describe("Settings system domains", () => {
 
     renderSettingsView();
 
+    fireEvent.click(await screen.findByRole("button", { name: "Agent Plugins" }));
     expect(await screen.findByText("Computer Use")).toBeInTheDocument();
-    expect(screen.getByText("Plugins")).toBeInTheDocument();
     expect(screen.getByText(/Control the desktop/)).toBeInTheDocument();
-    expect(screen.getByText("screen-recording, accessibility")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+    fireEvent.click(screen.getByRole("button", { name: "Computer Use" }));
+    const dialog = screen.getByRole("dialog", { name: "Computer Use" });
+    expect(within(dialog).getByText("Declared permissions")).toBeVisible();
+    expect(within(dialog).getByText("screen-recording, accessibility")).toBeVisible();
+    expect(within(dialog).queryByRole("tab", { name: "Tools" })).not.toBeInTheDocument();
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable" }));
 
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.mcp.enable", { name: "plugin-computer-use" }, 20_000,
@@ -158,6 +163,52 @@ describe("Settings system domains", () => {
     expect(await screen.findByRole("button", { name: "Enable" })).toBeInTheDocument();
   });
 
+
+  it("groups a CLI-managed plugin under its app while keeping other plugins independent", async () => {
+    const managed = { ...agentPlugin, name: "plugin-cli-app-anygen", display_name: "Managed plugin", managed_by_cli: "anygen" };
+    const separate = { ...agentPlugin, name: "plugin-cli-app-other", display_name: "Separate plugin", managed_by_cli: null };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [installedAnyGen], installed_count: 1 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({ presets: [managed, separate], installed_count: 1 });
+      return jsonResponse(settingsPayload());
+    }));
+    requestMutationMock.mockResolvedValue({
+      presets: [{ ...managed, enabled: true, status: "enabled" }, separate], installed_count: 2,
+    });
+    renderSettingsView({ initialSection: "apps" });
+
+    expect(await screen.findByRole("heading", { name: "AnyGen" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Managed plugin" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Agent Plugins" }));
+    expect(screen.getByRole("heading", { name: "Separate plugin" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Managed plugin" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "separate" } });
+    expect(screen.getByRole("heading", { name: "Separate plugin" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
+    expect(screen.queryByRole("heading", { name: "AnyGen" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Agent Plugin disabled" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Managed plugin" })).getByRole("button", { name: "Enable" }));
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.mcp.enable", { name: "plugin-cli-app-anygen" }, 20_000,
+    ));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Agent Plugin disabled" })).not.toBeInTheDocument());
+  });
+
+  it("keeps a managed plugin accessible when its owning app is missing from the loaded catalog", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return jsonResponse({ apps: [], installed_count: 1 });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({
+        presets: [{ ...agentPlugin, managed_by_cli: "missing-app" }], installed_count: 0,
+      });
+      return jsonResponse(settingsPayload());
+    }));
+    renderSettingsView({ initialSection: "apps" });
+    fireEvent.click(await screen.findByRole("button", { name: "Agent Plugins" }));
+    expect(await screen.findByRole("heading", { name: "Computer Use" })).toBeVisible();
+  });
 
   it.each(["apps", "skills", "automations", "channels"] as const)(
     "uses the conversation-width content frame for the standalone %s page",
@@ -487,6 +538,35 @@ describe("Settings system domains", () => {
     });
   });
 
+  it("refreshes plugin ownership after installing a CLI app without replacing its mutation result", async () => {
+    let installed = false;
+    const managed = { ...agentPlugin, name: "plugin-cli-app-anygen", display_name: "Managed plugin", enabled: true, managed_by_cli: "anygen" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings/cli-apps") return jsonResponse({
+        apps: [{ ...installedAnyGen, installed: false }], installed_count: 0,
+      });
+      if (url === "/api/settings/mcp-presets") return jsonResponse({
+        presets: installed ? [managed] : [], installed_count: Number(installed),
+      });
+      return jsonResponse(settingsPayload());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    requestMutationMock.mockImplementation(async () => {
+      installed = true;
+      return { apps: [installedAnyGen], installed_count: 1 };
+    });
+    renderSettingsView({ initialSection: "apps" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Install app" }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/settings/mcp-presets")).toHaveLength(2));
+    const appAction = await screen.findByRole("button", { name: "App ready" });
+    fireEvent.pointerDown(appAction, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Agent Plugin" }));
+    expect(screen.getByRole("dialog", { name: "Managed plugin" })).toBeVisible();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url) === "/api/settings/cli-apps")).toHaveLength(1);
+  });
+
   it("shows a visible uninstall button for installed CLI apps and calls uninstall", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -581,7 +661,8 @@ describe("Settings system domains", () => {
 
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Apps" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "CLI Apps" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Agent Plugins" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "MCP" })).toBeInTheDocument();
   });
 
