@@ -80,6 +80,7 @@ import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 const INITIAL_VISIBLE_SESSIONS = 160;
 const VISIBLE_SESSIONS_INCREMENT = 160;
 const ACTION_MENU_CONTENT_CLASS = "w-[11rem] min-w-[11rem] whitespace-nowrap";
+const TOPIC_BUTTON_FOCUS_CLASS = "rounded-md focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-sidebar-muted-foreground";
 const COLLAPSED_PANE_GROUPS_STORAGE_KEY = "nanobot-webui.collapsed-pane-groups.v1";
 const DETACH_PANE_DROP_TARGET = "__sidebar-standalone__";
 
@@ -1071,6 +1072,7 @@ export const ChatList = memo(function ChatList({
                               aria-pressed={deleteSelectionMode ? tabSelected : undefined}
                               className={cn(
                                 "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left",
+                                TOPIC_BUTTON_FOCUS_CLASS,
                                 canDragSession && "cursor-grab active:cursor-grabbing",
                                 deleteSelectionMode && "cursor-default",
                                 compact ? "py-1" : "py-1.5",
@@ -1553,6 +1555,7 @@ function ActivePaneRows({
                   aria-pressed={deleteSelectionMode ? selected : undefined}
                   className={cn(
                     "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left font-normal leading-5",
+                    TOPIC_BUTTON_FOCUS_CLASS,
                     canDragSession && "cursor-grab active:cursor-grabbing",
                     compact ? "py-1" : "py-1.5",
                     deleteSelectionMode && "cursor-default",
