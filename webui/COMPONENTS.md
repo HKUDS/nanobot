@@ -29,6 +29,8 @@ Every channel registration has a preview. Channels with shared configuration for
 
 Channel fixture fields, defaults, and requirements come from the Python channel setup contracts. Regenerate `src/dev/gallery/channel-fixtures.ts` with `python webui/src/dev/gallery/generate_channel_fixtures.py` from the repository root after changing those contracts; add `--check` to verify the snapshot. This developer command loads channel descriptors without starting a gateway. Running the gallery uses the committed snapshot and requires no Python process.
 
+Bundled channel marks in `public/brand/channels/` use the SVG paths and brand colors from [Simple Icons v16.38.0](https://github.com/simple-icons/simple-icons/tree/16.38.0) ([CC0](https://github.com/simple-icons/simple-icons/blob/16.38.0/LICENSE.md); trademarks belong to their respective owners). Channel packages select a bundled mark or keep their built-in icon or initials. Channel branding does not fetch remote favicons; account avatars supplied by a connected service are separate.
+
 ## Where components belong
 
 | Location | Ownership | Examples |

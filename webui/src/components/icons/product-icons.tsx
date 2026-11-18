@@ -22,7 +22,6 @@ export const SearchIcon = productIcon("search", <><circle cx="10.5" cy="10.5" r=
 export const AppsIcon = productIcon("apps", <><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.75" /><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.75" /><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.75" /><rect x="14" y="14" width="6.5" height="6.5" rx="1.75" /></>);
 export const SkillsIcon = productIcon("skills", <path d="M8 6.5H5.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V16h1a2.5 2.5 0 0 0 0-5h-1V8.5a2 2 0 0 0-2-2H13v-1a2.5 2.5 0 0 0-5 0Z" />);
 export const AutomationsIcon = productIcon("automations", <><rect x="3.5" y="3.5" width="17" height="17" rx="3" /><path d="M12 7.5V12l3 2" /></>);
-export const ChannelsIcon = productIcon("channels", <path d="M6.5 3.5h11a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H9l-4 2v-2.4a3 3 0 0 1-1.5-2.6v-9a3 3 0 0 1 3-3Z" />);
 export const ArchiveIcon = productIcon("archive", <><rect x="3" y="3.5" width="18" height="4.5" rx="1.5" /><path d="M4.5 8v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8M9 12h6" /></>);
 export const SettingsIcon = productIcon("settings", <><path d="M10 3h4l.6 2.4 2.1 1.2 2.4-.7 2 3.5-1.8 1.7v1.8l1.8 1.7-2 3.5-2.4-.7-2.1 1.2L14 21h-4l-.6-2.4-2.1-1.2-2.4.7-2-3.5 1.8-1.7v-1.8L2.9 9.4l2-3.5 2.4.7 2.1-1.2L10 3Z" /><circle cx="12" cy="12" r="3" /></>);
 export const OverviewIcon = productIcon("overview", <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M3 9h18M9 9v12m4-4v-3m4 3v-5" /><path d="M6 6h.01" /></>);

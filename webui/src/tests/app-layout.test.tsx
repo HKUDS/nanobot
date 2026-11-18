@@ -652,7 +652,11 @@ describe("App layout", () => {
     expect(main).not.toHaveAttribute("style");
     expect(screen.getByTestId("sidebar-brand-row")).toHaveClass("pt-3");
     expect(screen.getByTestId("sidebar-brand-mark")).not.toHaveClass("mt-5");
-    expect(screen.getByRole("separator", { name: "Resize sidebar" })).toHaveAttribute("aria-valuenow", "272");
+    const resizeHandle = screen.getByRole("separator", { name: "Resize sidebar" });
+    expect(resizeHandle).toHaveAttribute("aria-valuenow", "56");
+    fireEvent.keyDown(resizeHandle, { key: "Enter" });
+    expect(resizeHandle).toHaveAttribute("aria-valuenow", "272");
+    expect(main).not.toHaveAttribute("style");
 
     const asideClassNames = Array.from(container.querySelectorAll("aside")).map(
       (el) => el.className,
@@ -729,44 +733,67 @@ describe("App layout", () => {
     expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
   });
 
-  it("places Automations after Skills in the main sidebar", async () => {
+  it("opens the Apps catalog from the sidebar's bottom navigation", async () => {
+    mockSessions = [{ key: "websocket:chat-a", channel: "websocket", chatId: "chat-a", createdAt: null, updatedAt: null, preview: "First chat" }];
+    mockFetchRoutes({
+      "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [], installed_count: 0 },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
+      "/api/remote-instances": { available: true, profiles: [] },
+    });
     render(<App />);
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const appsButton = within(sidebar).getByRole("button", { name: "Apps" });
-    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
-    const automationsButton = within(sidebar).getByRole("button", { name: "Automations" });
-
-    expect(appsButton.compareDocumentPosition(skillsButton) & Node.DOCUMENT_POSITION_FOLLOWING)
-      .toBeTruthy();
-    expect(
-      skillsButton.compareDocumentPosition(automationsButton) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    const footer = within(sidebar).getByTestId("sidebar-footer");
+    await within(footer).findByRole("button", { name: "Switch host" });
+    const buttons = within(footer).getAllByRole("button");
+    expect(buttons.map((button) => button.getAttribute("aria-label")))
+      .toEqual(["Apps", "Automations", "Settings", "Switch host"]);
+    expect(buttons.slice(0, 3).map((button) => button.textContent)).toEqual(["Apps", "Automations", "Settings"]);
+    fireEvent.click(within(footer).getByRole("button", { name: "Apps" }));
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    const sections = await screen.findByRole("group", { name: "Apps" });
+    expect(within(sections).getAllByRole("button").map((button) => button.textContent)).toEqual(["Tools", "Skills", "Channels"]);
+    expect(within(sections).getByRole("button", { name: "Tools" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("opens Channels below Automations and supports its keyboard shortcut", async () => {
+  it("keeps focus and independent searches when navigating among Apps sections", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
+      "/api/settings/cli-apps": { apps: [], installed_count: 0 },
+      "/api/settings/mcp-presets": { presets: [], installed_count: 0 },
       "/api/settings/nanobot-features": { features: [], enabled_count: 0 },
     });
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const channels = within(sidebar).getByRole("button", { name: "Channels" });
-    expect(within(sidebar).getByRole("button", { name: "Automations" })
-      .compareDocumentPosition(channels) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(channels);
-    expect(await screen.findByRole("heading", { name: "Channels" })).toBeVisible();
-    expect(window.location.hash).toBe("#/channels");
-    expect(channels).toHaveAttribute("aria-current", "page");
-    expect(document.title).toBe("Channels");
-    fireEvent.click(within(sidebar).getByRole("button", { name: "New topic" }));
-    await waitFor(() => expect(window.location.hash).toBe("#/new"));
-    fireEvent.keyDown(window, { key: "$", code: "Digit4", ctrlKey: true, shiftKey: true });
-    expect(await screen.findByRole("heading", { name: "Channels" })).toBeVisible();
-    expect(window.location.hash).toBe("#/channels");
+    const apps = within(sidebar).getByRole("button", { name: "Apps" });
+    fireEvent.click(apps);
+    await act(async () => { await import("@/components/settings/SettingsView"); });
+    await screen.findByRole("button", { name: "Tools", pressed: true });
+    const search = screen.getByLabelText("Search tools");
+    fireEvent.change(search, { target: { value: "mcp" } });
+    fireEvent.click(screen.getByRole("button", { name: "Channels" }));
+    expect(await screen.findByRole("searchbox", { name: "Search channels" })).toBe(search);
+    expect(search).toHaveValue("");
+    expect(window.location.hash).toBe("#/apps?section=channels");
+    expect(apps).toHaveAttribute("aria-current", "page");
+    expect(document.title).toBe("Apps");
+    fireEvent.change(search, { target: { value: "telegram" } });
+    search.focus();
+
+    act(() => {
+      window.history.replaceState(window.history.state, "", "#/apps?section=skills");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(await screen.findByLabelText("Search installed skills")).toBe(search);
+    expect(search).toHaveFocus();
+    expect(search).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Channels" }));
+    expect(await screen.findByRole("searchbox", { name: "Search channels" })).toHaveValue("telegram");
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    expect(await screen.findByLabelText("Search tools")).toHaveValue("mcp");
   });
 
   it("opens management in the main content area while keeping the standalone deep link", async () => {
@@ -838,7 +865,7 @@ describe("App layout", () => {
     });
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    await user.click(await screen.findByRole("button", { name: "Toggle sidebar" }));
+    await user.click(await within(screen.getByRole("main")).findByRole("button", { name: "Toggle sidebar" }));
     const sheet = await screen.findByRole("dialog");
     fireEvent.pointerDown(await within(sheet).findByRole("button", { name: "Switch host" }), { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Manage connections" }));
@@ -869,7 +896,8 @@ describe("App layout", () => {
       "/api/remote-instances": { available: true, profiles: [profile] },
     });
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Toggle sidebar" }));
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await user.click(await within(screen.getByRole("main")).findByRole("button", { name: "Toggle sidebar" }));
     const sheet = await screen.findByRole("dialog");
     await user.click(await within(sheet).findByRole("button", { name: "Switch host" }));
     await user.click(await screen.findByRole("menuitem", { name: "Team server team" }));
@@ -895,16 +923,26 @@ describe("App layout", () => {
     expect(window.location.hash).toBe("#/remote");
   });
 
-  it("highlights the blank new-topic destination immediately", async () => {
+  it("keeps the compose action in place and hands off keyboard focus between sidebar toggles", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
-    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const newTopicButton = within(sidebar).getByRole("button", { name: "New topic" });
+    const sidebar = within(await screen.findByRole("navigation", { name: "Sidebar navigation" }));
+    const compose = sidebar.getByRole("button", { name: "New topic" });
+    expect(compose).not.toHaveAttribute("aria-current");
+    expect(compose.querySelector("svg")).toHaveAttribute("data-product-icon", "compose");
 
-    expect(newTopicButton).toHaveAttribute("aria-current", "page");
-    expect(newTopicButton).toHaveClass("transition-[width,padding,color,background-color]");
-    expect(newTopicButton).toBeEnabled();
+    const expand = sidebar.getByRole("button", { name: "Toggle sidebar", expanded: false });
+    expand.focus();
+    await user.keyboard("{Enter}");
+    const collapse = sidebar.getByRole("button", { name: "Collapse sidebar", expanded: true });
+    expect(collapse).toHaveFocus();
+    expect(sidebar.getByRole("button", { name: "New topic" })).toBe(compose);
+    expect(compose).toHaveTextContent("New topic");
+
+    await user.keyboard(" ");
+    expect(expand).toHaveFocus();
+    expect(expand).toHaveAttribute("aria-expanded", "false");
   });
 
   it("keeps a just-created topic route while the session list catches up", async () => {
@@ -1325,9 +1363,10 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     expect(
-      await screen.findByRole("heading", { name: "Channels" }),
+      await screen.findByRole("heading", { name: "Apps" }),
     ).toBeInTheDocument();
-    expect(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Channels" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Channels" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByRole("navigation", { name: "Sidebar navigation" })).getByRole("button", { name: "Apps" })).toHaveAttribute("aria-current", "page");
     expect(window.location.hash).toBe("#/settings?section=channels");
   });
 
@@ -1497,11 +1536,10 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    const skillsButton = within(sidebar).getByRole("button", { name: "Skills" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
 
-    fireEvent.click(skillsButton);
-
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("textbox", { name: "Search installed skills" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Custom" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Built-in" })).toBeInTheDocument();
@@ -1510,17 +1548,18 @@ describe("App layout", () => {
     expect(screen.getByText("Needs setup")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
+    expect(within(sidebar).getByRole("button", { name: "Apps" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(document.title).toBe("Skills");
+    expect(document.title).toBe("Apps");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
     expect(await screen.findByTestId("thread-welcome-mark")).toBeInTheDocument();
 
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
+    expect(await screen.findByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: "Open details for github" }));
 
@@ -1592,7 +1631,8 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
     fireEvent.click(
       await screen.findByRole("button", { name: "Open details for custom-skill" }),
     );
@@ -1724,10 +1764,13 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
-    const discoverTab = await screen.findByRole("tab", { name: "Discover" });
-    expect(discoverTab.querySelector("svg")).toBeNull();
-    fireEvent.click(discoverTab);
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Skills" }));
+    const selectView = async (view: string) => {
+      const views = await screen.findByRole("radiogroup", { name: "Skills views" });
+      await userEvent.click(within(views).getByRole("radio", { name: view }));
+    };
+    await selectView("Marketplace");
     expect(
       await screen.findByRole("heading", { name: "Popular skills" }),
     ).toBeInTheDocument();
@@ -1736,11 +1779,12 @@ describe("App layout", () => {
     expect(screen.getByRole("link", { name: "Open ima-skills on SkillHub" })).toHaveAttribute(
       "href", "https://skillhub.cn/skills/tencent-adm/ima-skills",
     );
-    expect(screen.getAllByText("SkillHub")).toHaveLength(2);
-    expect(screen.getAllByText("skills.sh")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "Open SkillHub" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open skills.sh" })).toBeInTheDocument();
     expect(screen.getByText(/14,481 installs \/ 24h/)).toBeInTheDocument();
     expect(screen.queryByText(/11,831 installs/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "SkillHub" }));
+    const sources = within(screen.getByRole("radiogroup", { name: "Skill source" }));
+    fireEvent.click(sources.getByRole("radio", { name: "SkillHub" }));
     expect(screen.getByText("ima-skills")).toBeInTheDocument();
     expect(screen.queryByText("find-skills")).not.toBeInTheDocument();
     expect(
@@ -1749,7 +1793,7 @@ describe("App layout", () => {
           String(input) === "/api/webui/skills/trending?provider=skillhub",
       ),
     ).toBe(false);
-    fireEvent.click(screen.getByRole("tab", { name: "All" }));
+    fireEvent.click(sources.getByRole("radio", { name: "All" }));
     expect(screen.getByText("find-skills")).toBeInTheDocument();
     expect(screen.getByText("ima-skills")).toBeInTheDocument();
     expect(
@@ -1780,8 +1824,10 @@ describe("App layout", () => {
         150_000,
       );
     });
-    fireEvent.click(screen.getByRole("tab", { name: "Installed" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Discover" }));
+    await selectView("Installed");
+    await selectView("Marketplace");
+    expect(screen.getByRole("textbox", { name: "Search skills" })).toHaveValue("React");
+    fireEvent.change(screen.getByRole("textbox", { name: "Search skills" }), { target: { value: "" } });
     expect(
       await screen.findByRole("button", { name: "Install find-skills" }),
     ).toBeDisabled();
@@ -1794,7 +1840,7 @@ describe("App layout", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Install find-skills" })).toBeEnabled();
     });
-    fireEvent.click(screen.getByRole("tab", { name: "Installed" }));
+    await selectView("Installed");
     expect(screen.getByText("react-testing")).toBeInTheDocument();
   });
 
@@ -2184,9 +2230,9 @@ describe("App layout", () => {
 
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const sidebar = screen.getByRole("navigation", { name: "侧边栏导航" });
-    fireEvent.click(within(sidebar).getByRole("button", { name: "自动任务" }));
+    fireEvent.click(within(sidebar).getByRole("button", { name: "任务" }));
 
-    const heading = await screen.findByRole("heading", { name: "自动任务" });
+    const heading = await screen.findByRole("heading", { name: "任务" });
     expect(heading).toBeInTheDocument();
     const automationsMain = heading.closest("main");
     expect(automationsMain).not.toBeNull();
@@ -2204,10 +2250,29 @@ describe("App layout", () => {
     expect(screen.queryByText("近期无问题")).not.toBeInTheDocument();
     expect(screen.queryByText("Workspace automations")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新" })).not.toBeInTheDocument();
-    expect(document.title).toBe("自动任务");
+    expect(document.title).toBe("任务");
+  });
+
+  it("collapses an empty sidebar, then restores the saved width when the first chat is created", async () => {
+    localStorage.setItem("nanobot-webui.sidebar", "1");
+    localStorage.setItem("nanobot-webui.sidebar.width", "320");
+    render(<App />);
+
+    const sidebar = await screen.findByTestId("host-sidebar-flow");
+    expect(sidebar).toHaveStyle({ width: "56px" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Toggle sidebar" }));
+    expect(sidebar).toHaveStyle({ width: "320px" });
+    fireEvent.keyDown(within(sidebar).getByRole("separator"), { key: "Enter" });
+    expect(sidebar).toHaveStyle({ width: "56px" });
+
+    const composer = await screen.findByLabelText("Message input");
+    fireEvent.change(composer, { target: { value: "First message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sidebar).toHaveStyle({ width: "320px" }));
   });
 
   it("resizes the sidebar, collapses at the drag threshold and restores its saved width", async () => {
+    mockSessions = [{ key: "websocket:chat-a", channel: "websocket", chatId: "chat-a", createdAt: null, updatedAt: null, preview: "First chat" }];
     const view = render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
     const handle = screen.getByRole("separator", { name: "Resize sidebar" });
@@ -2251,7 +2316,7 @@ describe("App layout", () => {
     const sidebar = screen.getByTestId("host-sidebar-flow");
     await within(sidebar).findByTestId("chats-selection-highlight");
     const handle = within(sidebar).getByRole("separator", { name: "Resize sidebar" });
-    for (const label of ["Apps", "Skills", "Automations", "Channels"]) {
+    for (const label of ["Apps", "Automations"]) {
       expect(within(sidebar).getByRole("button", { name: label })).toHaveClass(
         "group-data-[resizing=true]/sidebar:transition-none",
       );
@@ -2269,7 +2334,7 @@ describe("App layout", () => {
     expect(sidebar).toHaveStyle({ width: "400px" });
     fireEvent[finish](handle, { pointerId: 1, clientX: 400 });
     expect(sidebar).not.toHaveAttribute("data-resizing");
-    expect(sidebar).toHaveClass("transition-[width]");
+    expect(sidebar).not.toHaveAttribute("data-collapsed");
   });
 
   it("uses the shared sidebar controls and rail on the native host", async () => {
@@ -2415,6 +2480,11 @@ describe("App layout", () => {
     );
     expect(screen.queryByText("Delete this topic?")).not.toBeInTheDocument();
     expect(document.body.style.pointerEvents).not.toBe("none");
+
+    fireEvent.pointerDown(screen.getByLabelText("Topic actions for Second chat"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" }));
   }, 15_000);
 
   it.each([false, true])("archives only persisted selected topics in one sidebar update (draft=%s)", async (includeDraft) => {
@@ -3416,7 +3486,7 @@ describe("App layout", () => {
     await waitFor(() => expect(requestMutationSpy).toHaveBeenCalledWith(
       "settings.channel.configure", expect.objectContaining({ name: "email", values: { "channels.email.imapHost": "imap.changed.test" } }), 150_000,
     ));
-    expect(window.location.hash).toBe("#/channels");
+    expect(window.location.hash).toBe("#/apps?section=channels");
     expect(host).toHaveValue("imap.changed.test");
     await act(async () => {
       if (saved) resolveSave({ name: "email", saved: true, saved_keys: ["channels.email.imapHost"] });
@@ -3426,7 +3496,7 @@ describe("App layout", () => {
       await waitFor(() => expect(window.location.hash).toBe("#/new"));
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     } else {
-      expect(window.location.hash).toBe("#/channels");
+      expect(window.location.hash).toBe("#/apps?section=channels");
       expect(host).toHaveValue("imap.changed.test");
       expect(await screen.findByText("Save failed")).toBeVisible();
     }
@@ -3533,7 +3603,7 @@ describe("App layout", () => {
     expect(settingsHighlight).toHaveAttribute("data-active-id", "capabilities");
   });
 
-  it("defaults to Ready again when returning to Apps from another sidebar page", async () => {
+  it("defaults to Ready again when returning to Tools from another Apps tab", async () => {
     const app = {
       name: "example", display_name: "Example App", category: "productivity", description: "Example",
       requires: "", source: "catalog", entry_point: "example", install_supported: true,
@@ -3551,16 +3621,18 @@ describe("App layout", () => {
     fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
     await act(async () => { await import("@/components/settings/SettingsView"); });
     expect(await screen.findByRole("heading", { name: "Example App" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Apps" }));
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
+    const types = within(screen.getByRole("radiogroup", { name: "Tool type" }));
+    await userEvent.click(types.getByRole("radio", { name: "MCP" }));
+    expect(types.getByRole("radio", { name: "MCP" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Skills" }));
+    expect(screen.getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
     expect(await screen.findByRole("heading", { name: "Example App" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
   });
 
-  it("transitions between Apps and Skills without replacing the sidebar", async () => {
+  it("switches Apps tabs without replacing their navigation or the sidebar", async () => {
     mockFetchRoutes({
       "/api/settings": baseSettingsPayload(),
       "/api/settings/cli-apps": { apps: [], installed_count: 0, catalog_updated_at: "2026-04-18" },
@@ -3601,10 +3673,13 @@ describe("App layout", () => {
       "motion-reduce:animate-none",
     );
     expect(document.title).toBe("Apps");
+    const sections = screen.getByRole("group", { name: "Apps" });
+    fireEvent.click(within(sections).getByRole("button", { name: "Skills" }));
 
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Skills" }));
-
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Apps" })).toBe(sections);
+    expect(within(sections).getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
+    expect(window.location.hash).toBe("#/apps?section=skills");
+    expect(screen.getByRole("textbox", { name: "Search installed skills" })).toBeVisible();
     await waitFor(() => {
       expect(screen.getByTestId("settings-section-transition")).toHaveAttribute(
         "data-settings-section",
@@ -3612,15 +3687,15 @@ describe("App layout", () => {
       );
     });
     expect(screen.getByRole("navigation", { name: "Sidebar navigation" })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "Skills" })).toHaveAttribute(
+    expect(within(sidebar).getByRole("button", { name: "Apps" })).toHaveAttribute(
       "aria-current",
       "page",
     );
     expect(within(sidebar).getByTestId("actions-selection-highlight")).toHaveAttribute(
       "data-active-id",
-      "utility:skills",
+      "utility:apps",
     );
-    expect(document.title).toBe("Skills");
+    expect(document.title).toBe("Apps");
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {
@@ -3796,7 +3871,7 @@ describe("App layout", () => {
     const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
     const searchButton = within(sidebar).getByRole("button", { name: "Search" });
     expect(
-      searchButton.compareDocumentPosition(newChatButton) &
+      newChatButton.compareDocumentPosition(searchButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
@@ -4404,16 +4479,17 @@ describe("App layout", () => {
   });
 
   it.each([
-    ["apps", "1", "Digit1", true],
-    ["skills", "2", "Digit2", true],
-    ["automations", "3", "Digit3", true],
-    ["settings", ",", "Comma", false],
-  ])("opens %s using its sidebar shortcut", async (route, key, code, shiftKey) => {
+    ["Apps", "#/apps", "!", "Digit1", "Meta+Shift+1 Control+Shift+1"],
+    ["Automations", "#/automations", "@", "Digit2", "Meta+Shift+2 Control+Shift+2"],
+    ["Settings", "#/settings", ",", "Comma", "Meta+, Control+,"],
+  ])("opens %s using its sidebar shortcut", async (name, hash, key, code, ariaShortcut) => {
     mockFetchRoutes({ "/api/settings": baseSettingsPayload() });
     render(<App />);
     await waitFor(() => expect(connectSpy).toHaveBeenCalled());
-    fireEvent.keyDown(window, { key, code, shiftKey, ctrlKey: true });
-    await waitFor(() => expect(window.location.hash).toContain("#/" + route));
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    expect(within(sidebar).getByRole("button", { name })).toHaveAttribute("aria-keyshortcuts", ariaShortcut);
+    fireEvent.keyDown(window, { key, code, shiftKey: code !== "Comma", ctrlKey: true });
+    await waitFor(() => expect(window.location.hash).toBe(hash));
   });
 
   it.each([
@@ -4472,7 +4548,6 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
 
     const newChatButton = within(sidebar).getByRole("button", { name: "New topic" });
-    expect(newChatButton).toHaveTextContent("");
     await userEvent.setup().hover(newChatButton);
     const tooltip = await screen.findByRole("tooltip");
     expect(tooltip).toHaveTextContent("New topic");
@@ -4568,7 +4643,7 @@ describe("App layout", () => {
     expect(within(rail).getByRole("button", { name: "New topic" })).toBeInTheDocument();
     expect(within(rail).getByRole("button", { name: "Search" })).toBeInTheDocument();
     expect(within(rail).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
-    expect(within(rail).queryByText("Existing chat")).not.toBeInTheDocument();
+    expect(within(rail).queryByRole("button", { name: "Existing chat" })).not.toBeInTheDocument();
 
     fireEvent.click(within(rail).getByRole("button", { name: "Toggle sidebar" }));
     await waitFor(() => expect(sidebarAside.style.width).toBe("272px"));

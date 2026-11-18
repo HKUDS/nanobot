@@ -454,10 +454,7 @@
       "ariaLabel": "切換語言"
     },
     "apps": "應用程式",
-    "automations": "自動任務",
-    "skills": {
-      "title": "技能"
-    }
+    "automations": "任務"
   },
   "settings": {
     "timezoneNoMatches": "沒有符合的時區。",
@@ -643,7 +640,7 @@
       "cliApps": "CLI 應用",
       "mcp": "MCP",
       "apps": "應用程式",
-      "automations": "自動任務",
+      "automations": "任務",
       "skills": "技能"
     },
     "sections": {
@@ -1256,12 +1253,15 @@
       "thirdPartyBrands": "產品名稱、Logo 與品牌均為各自擁有者的財產。僅供識別之用，不代表任何形式的背書。"
     },
     "apps": {
+      "allTypes": "全部",
+      "typeFilter": "工具類型",
+      "statusFilter": "狀態",
       "description": "管理 CLI Apps、Agent Plugins 和 MCP 工具。",
       "cliLabel": "CLI App",
       "mcpLabel": "MCP",
       "channelLabel": "通訊管道",
       "featureLabel": "功能",
-      "filterAll": "就緒",
+      "readyOnly": "僅顯示就緒",
       "filterPlugins": "Agent 外掛",
       "filterCli": "CLI Apps",
       "filterMcp": "MCP",
@@ -1270,17 +1270,15 @@
       "featured": "工具",
       "mcpTools": "MCP 工具",
       "loading": "正在載入應用程式…",
-      "empty": "沒有符合搜尋條件的工具。",
-      "emptyApps": "沒有可用的 CLI App。",
-      "emptyIntegrations": "沒有可用的 MCP 工具。",
-      "emptyReady": "尚無就緒的工具。",
+      "empty": "沒有符合搜尋條件的工具",
+      "emptyApps": "沒有可用的工具",
+      "emptyIntegrations": "沒有可用的 MCP 工具",
+      "emptyReady": "尚無就緒的工具",
       "clearSearch": "清除搜尋",
-      "browseApps": "瀏覽 CLI Apps",
-      "browseIntegrations": "瀏覽 MCP 工具",
-      "emptyIntegrationsHint": "可在下方新增自訂 MCP 伺服器。",
+      "emptyIntegrationsHint": "可在下方新增自訂 MCP 伺服器",
       "restartRequired": "重新啟動 nanobot 以套用更新後的應用程式與 MCP 工具。",
-      "emptyPlugins": "尚未安裝 Agent 外掛。",
-      "emptyPluginsHint": "將外掛新增至工作區的 plugins 目錄，即可在此啟用。",
+      "emptyPlugins": "尚未安裝 Agent 外掛",
+      "emptyPluginsHint": "將外掛新增至工作區的 plugins 目錄，即可在此啟用",
       "pluginPermissions": "宣告的權限",
       "pluginServers": "MCP 伺服器",
       "pluginTrustNotice": "外掛以 nanobot 的作業系統權限執行；宣告的權限不會隔離外掛。",
@@ -1321,7 +1319,7 @@
       "configuredInstances": "已設定 {{count}} 個執行個體",
       "connectPreview": "請先在終端機執行下方指令，完成連線。",
       "copyCommand": "複製指令",
-      "filterAll": "全部",
+      "enabledOnly": "僅顯示已啟用",
       "filterOff": "未執行",
       "filterOn": "執行中",
       "helperCopied": "已複製 {{name}}。",
@@ -1625,7 +1623,7 @@
       "description": "選擇對話中可用的技能",
       "views": "技能檢視",
       "installedTab": "已安裝",
-      "discoverTab": "探索",
+      "discoverTab": "技能市集",
       "customGroup": "自訂",
       "builtinGroup": "內建",
       "otherGroup": "其他",
@@ -1662,7 +1660,6 @@
       "marketplaceSearchFailed": "暫時無法搜尋技能市集。",
       "marketplaceInstallFailed": "無法安裝此技能。",
       "marketplaceSearchPlaceholder": "搜尋技能",
-      "marketplaceSearchLabel": "搜尋技能",
       "marketplaceSearching": "正在搜尋",
       "marketplaceProviderFilter": "技能來源",
       "marketplaceProviderAll": "全部",

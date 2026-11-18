@@ -9,6 +9,8 @@ import {
   installSettingsViewTestHooks,
   jsonResponse,
   renderSettingsView,
+  selectToolType,
+  showOnlyReadyTools,
   settingsPayload,
 } from "@/tests/settings-test-utils";
 
@@ -57,9 +59,10 @@ describe("catalog loading", () => {
     cleanup();
     fetch.mockClear();
     renderSettingsView({ client, initialSettings: settingsPayload() });
-    fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
+    await selectToolType("CLI Apps");
     expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Agent Plugins" }));
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
     expect(screen.getByRole("heading", { name: "Computer Use" })).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
     expect(fetch.mock.calls.filter(([url]) => String(url).match(/cli-apps|mcp-presets/))).toHaveLength(0);
@@ -68,9 +71,10 @@ describe("catalog loading", () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + TOOLS_CATALOG_TTL_MS + 1);
     try {
       renderSettingsView({ client, initialSettings: settingsPayload() });
-      fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
+      await selectToolType("CLI Apps");
       expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Agent Plugins" }));
+      await selectToolType("Agent Plugins");
+      await showOnlyReadyTools(false);
       expect(screen.getByRole("heading", { name: "Computer Use" })).toBeInTheDocument();
       expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
       expect(fetch.mock.calls.filter(([url]) => String(url).match(/cli-apps|mcp-presets/))).toHaveLength(2);
@@ -79,7 +83,7 @@ describe("catalog loading", () => {
         mcp.resolve(jsonResponse({ presets: [{ ...plugin, display_name: "Updated plugin" }], installed_count: 1 }));
       });
       expect(screen.getByRole("heading", { name: "Updated plugin" })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
+      await selectToolType("CLI Apps");
       expect(screen.getByRole("heading", { name: "Updated app" })).toBeInTheDocument();
     } finally {
       now.mockRestore();
@@ -139,7 +143,7 @@ describe("catalog loading", () => {
       return Promise.resolve(jsonResponse(settingsPayload()));
     }));
     renderSettingsView({ initialSettings: settingsPayload() });
-    fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
+    await selectToolType("CLI Apps");
     expect(screen.getByRole("status", { name: "Loading apps…" })).toHaveAttribute("aria-busy", "true");
 
     await act(async () => { cli.resolve(jsonResponse({ apps: [app], installed_count: 1 })); });
@@ -147,7 +151,8 @@ describe("catalog loading", () => {
     expect(screen.getByRole("status", { name: "Loading apps…" })).toBeInTheDocument();
     await act(async () => { mcp.resolve(jsonResponse({ presets: [plugin], installed_count: 1 })); });
     expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Agent Plugins" }));
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
     expect(screen.getByRole("heading", { name: "Computer Use" })).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
   });
@@ -165,17 +170,18 @@ describe("catalog loading", () => {
     renderSettingsView({ initialSettings: settingsPayload() });
     await act(async () => {});
     expect(screen.getByRole("status", { name: "Loading apps…" })).toBeInTheDocument();
-    expect(screen.queryByText("No CLI Apps available.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No tools available")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
-    expect(screen.getByText("No MCP tools available.")).toBeInTheDocument();
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
+    expect(screen.getByText("No MCP tools available")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "AnyGen" } });
-    expect(screen.getByText("No tools match your search.")).toBeInTheDocument();
+    expect(screen.getByText("No tools match your search")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
+    await selectToolType("CLI Apps");
     expect(screen.getByRole("status", { name: "Loading apps…" })).toBeInTheDocument();
-    expect(screen.queryByText("No tools match your search.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No tools match your search")).not.toBeInTheDocument();
     await act(async () => { cli.resolve(jsonResponse({ apps: [app], installed_count: 1 })); });
     expect(screen.getByRole("heading", { name: "AnyGen" })).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Loading apps…" })).not.toBeInTheDocument();
@@ -191,7 +197,7 @@ describe("catalog loading", () => {
     renderSettingsView({ initialSection: section, initialSettings: settingsPayload() });
     expect(await screen.findByText("Catalog offline")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: /Loading (apps|channels)/ })).not.toBeInTheDocument();
-    expect(screen.queryByText("No CLI Apps available.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No tools available")).not.toBeInTheDocument();
     expect(screen.queryByText("No channels match this filter.")).not.toBeInTheDocument();
   });
 

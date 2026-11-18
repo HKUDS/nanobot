@@ -154,14 +154,20 @@ describe("temporary chat navigation", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each(["settings", "apps", "automations", "skills", "channels"])(
+  it.each([
+    ["settings", "#/settings"],
+    ["apps", "#/apps"],
+    ["automations", "#/automations"],
+    ["skills", "#/apps?section=skills"],
+    ["channels", "#/apps?section=channels"],
+  ])(
     "opens %s directly without mounting chat or retaining a chat query",
-    async (view) => {
+    async (view, canonicalHash) => {
       window.history.replaceState(null, "", `/#/${view}?chat=websocket%3Aregular`);
       render(<App />);
       await screen.findByRole("button", { name: "Back to chat" });
       act(() => TestSocket.current.open());
-      await waitFor(() => expect(window.location.hash).toBe(`#/${view}`));
+      await waitFor(() => expect(window.location.hash).toBe(canonicalHash));
       expect(window.history.state.nanobotReturnChat.key).toBe("websocket:regular");
       expect(screen.queryByTestId("thread-message-region")).not.toBeInTheDocument();
       const requests = vi.mocked(fetch).mock.calls.map(([url]) => String(url));

@@ -7,7 +7,7 @@ import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { SettingsPayload } from "@/lib/types";
 import { DEFAULT_LOCAL_PREFS, LOCAL_PREFS_STORAGE_KEY, readLocalPreferences, writeLocalPreferences } from "@/lib/local-preferences";
-import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
+import { jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks, selectToolType } from "@/tests/settings-test-utils";
 
   const thirdPartyBrandNotice =
     "Product names, logos, and brands are property of their respective owners. Use is for identification only and does not imply endorsement.";
@@ -348,8 +348,8 @@ describe("Settings overview and appearance", () => {
 
     renderSettingsView();
 
-    expect(await screen.findByText("No CLI Apps available.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Browse MCP tools" }));
+    expect(await screen.findByText("No tools available")).toBeInTheDocument();
+    await selectToolType("MCP");
     expect(await screen.findByText("Add MCP")).toBeInTheDocument();
   });
 

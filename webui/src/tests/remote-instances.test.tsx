@@ -44,11 +44,11 @@ function LocalShell({ collapsed = false, initialRemote = false }) {
     return () => window.removeEventListener("hashchange", route);
   }, []);
   return <>
-  <Sidebar collapsed={collapsed} sessions={[]} activeKey={null} loading={false} newChatActive={false}
+  <Sidebar collapsed={collapsed} sessions={[]} activeKey={null} loading={false}
     onNewChat={() => { if (connections?.managing) connections.selectLocal(); window.location.hash = "/new"; setRemotePage(false); }} onSelect={noop} onRequestDelete={noop} onTogglePin={noop}
     onRequestRename={async () => {}} onToggleArchive={noop} onToggleGroup={noop}
     onRequestRenameProject={noop} onNewChatInProject={noop} onOpenSettings={noop}
-    onOpenApps={noop} onOpenSkills={noop} onOpenAutomations={noop} onOpenChannels={noop}
+    onOpenApps={noop} onOpenAutomations={noop}
     onOpenSearch={noop} onToggleArchived={noop} />
   <main><div hidden={connections?.managing} aria-hidden={connections?.managing || undefined}>
     {remotePage ? <RemoteConnectionsPage onBackToChat={() => setRemotePage(false)} /> : <><p>Local conversations</p><textarea aria-label="Local draft" /></>}

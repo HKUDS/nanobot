@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { ArrowRight, ChevronDown, Eye, EyeOff } from "lucide-react";
@@ -28,7 +29,7 @@ import { ComposerDraftStore, clearStoredComposerDrafts } from "@/lib/composer-dr
 import { activateReloadCache, clearReloadCache } from "@/lib/reload-cache";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import { ThreadVisibilityContext } from "@/hooks/useThreadVisibility";
-import type { SettingsExitGuard, SettingsFocusTarget } from "@/components/settings/contracts";
+import { isAppsSection, type SettingsExitGuard, type SettingsFocusTarget } from "@/components/settings/contracts";
 import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import { transitionSession } from "@/components/thread/session-transition";
 import {
@@ -137,7 +138,7 @@ const SIDEBAR_RAIL_WIDTH = 56;
 const MOBILE_SIDEBAR_WIDTH = `min(${SIDEBAR_WIDTH}px, calc(100vw - 0.75rem))`;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings" | "apps" | "automations" | "skills" | "channels" | "remote";
+type ShellView = "chat" | "settings" | "apps" | "automations" | "remote";
 type ShellRoute = {
   view: ShellView;
   activeKey: string | null;
@@ -195,7 +196,8 @@ function defaultShellRoute(): ShellRoute {
 }
 
 function shellViewForSettingsSection(section: SettingsSectionKey): ShellView {
-  if (section === "apps" || section === "automations" || section === "skills" || section === "channels") return section;
+  if (isAppsSection(section)) return "apps";
+  if (section === "automations") return "automations";
   return "settings";
 }
 
@@ -272,19 +274,19 @@ function readShellRoute(): ShellRoute {
     };
   }
   if (path === "/apps") {
-    return { view: "apps", activeKey, temporary, settingsSection: "apps" };
+    return { view: "apps", activeKey, temporary, settingsSection: isAppsSection(settingsSection) ? settingsSection : "apps" };
   }
   if (path === "/automations") {
     return { view: "automations", activeKey, temporary, settingsSection: "automations" };
   }
   if (path === "/channels") {
-    return { view: "channels", activeKey, temporary, settingsSection: "channels" };
+    return { view: "apps", activeKey, temporary, settingsSection: "channels" };
   }
   if (path === "/remote") {
     return { view: "remote", activeKey, temporary, settingsSection: "overview" };
   }
   if (path === "/skills") {
-    return { view: "skills", activeKey, temporary, settingsSection: "skills" };
+    return { view: "apps", activeKey, temporary, settingsSection: "skills" };
   }
   if (path.startsWith("/temporary/")) {
     const encoded = path.slice("/temporary/".length);
@@ -330,6 +332,9 @@ function shellRouteHash(route: ShellRoute): string {
   if (route.view === "settings" && route.settingsSection !== "overview") {
     params.set("section", route.settingsSection);
     if (route.settingsSection === "advanced" && route.settingsFocus) params.set("focus", route.settingsFocus);
+  }
+  if (route.view === "apps" && route.settingsSection !== "apps") {
+    params.set("section", route.settingsSection);
   }
   const query = params.toString();
   return `#/${route.view}${query ? `?${query}` : ""}`;
@@ -897,8 +902,7 @@ function Shell({
   const [settingsInitialSection, setSettingsInitialSection] =
     useState<SettingsSectionKey>(initialRouteRef.current.settingsSection);
   const [settingsFocus, setSettingsFocus] = useState<SettingsFocusTarget | undefined>(initialRouteRef.current.settingsFocus);
-  const [hostSidebarOpen, setHostSidebarOpen] =
-    useState<boolean>(readSidebarOpen);
+  const [preferredSidebarOpen, setPreferredSidebarOpen] = useState(readSidebarOpen);
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   const [sidebarDragging, setSidebarDragging] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -988,6 +992,14 @@ function Shell({
     )),
     [temporarySessions],
   );
+  // Start each confirmed empty period collapsed without overwriting the saved preference.
+  const [emptySidebarOpen, setEmptySidebarOpen] = useState<boolean | null>(null);
+  const hasSessions = sessions.length > 0 || temporarySessionList.length > 0;
+  if (hasSessions && emptySidebarOpen !== null) setEmptySidebarOpen(null);
+  if (!hasSessions && sessionsLoaded && emptySidebarOpen === null) setEmptySidebarOpen(false);
+  const hostSidebarOpen = emptySidebarOpen ?? preferredSidebarOpen;
+  const setHostSidebarOpen = emptySidebarOpen === null ? setPreferredSidebarOpen : setEmptySidebarOpen;
+
   const temporaryChatIds = useMemo(
     () => temporarySessionList.map((session) => session.chatId),
     [temporarySessionList],
@@ -1128,7 +1140,7 @@ function Shell({
     try {
       window.localStorage.setItem(
         SIDEBAR_STORAGE_KEY,
-        hostSidebarOpen ? "1" : "0",
+        preferredSidebarOpen ? "1" : "0",
       );
     } catch {
       // ignore storage errors (private mode, etc.)
@@ -1138,7 +1150,7 @@ function Shell({
     } catch {
       // Storage can be unavailable in private browsing.
     }
-  }, [hostSidebarOpen, sidebarWidth]);
+  }, [preferredSidebarOpen, sidebarWidth]);
 
   useEffect(() => {
     writeSessionUpdateChatIds(updatedChatIds);
@@ -1329,7 +1341,7 @@ function Shell({
 
   const openHostSidebar = useCallback(() => {
     setHostSidebarOpen(true);
-  }, []);
+  }, [setHostSidebarOpen]);
 
   const closeMobileSidebar = useCallback(() => {
     setMobileSidebarOpen(false);
@@ -1340,11 +1352,11 @@ function Shell({
       typeof window !== "undefined" &&
       window.matchMedia("(min-width: 1024px)").matches;
     if (isNativeHost) {
-      setHostSidebarOpen((v) => !v);
+      setHostSidebarOpen(!hostSidebarOpen);
     } else {
       setMobileSidebarOpen((v) => !v);
     }
-  }, []);
+  }, [hostSidebarOpen, setHostSidebarOpen]);
 
   const applyWorkspaceScope = useCallback(
     (scope: WorkspaceScopePayload) => {
@@ -1814,21 +1826,9 @@ function Shell({
     setMobileSidebarOpen(false);
   }, [activeKey, navigate]);
 
-  const onOpenChannels = useCallback(() => {
-    setSessionSearchOpen(false);
-    navigate({ view: "channels", activeKey, settingsSection: "channels" });
-    setMobileSidebarOpen(false);
-  }, [activeKey, navigate]);
-
-  const onOpenSkills = useCallback(() => {
-    setSessionSearchOpen(false);
-    navigate({ view: "skills", activeKey, settingsSection: "skills" });
-    setMobileSidebarOpen(false);
-  }, [activeKey, navigate]);
-
   useEffect(() => {
     const actions = { newChat: onNewChat, search: onOpenSessionSearch, apps: onOpenApps,
-      skills: onOpenSkills, automations: onOpenAutomations, channels: onOpenChannels, settings: () => onOpenSettings() };
+      automations: onOpenAutomations, settings: () => onOpenSettings() };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (!localActive) return;
       const action = matchSidebarShortcut(event);
@@ -1838,7 +1838,7 @@ function Shell({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [localActive, onNewChat, onOpenSessionSearch, onOpenApps, onOpenSkills, onOpenAutomations, onOpenChannels, onOpenSettings]);
+  }, [localActive, onNewChat, onOpenSessionSearch, onOpenApps, onOpenAutomations, onOpenSettings]);
 
   const onSettingsSectionChange = useCallback(
     (section: SettingsSectionKey) => {
@@ -2317,18 +2317,8 @@ function Shell({
       });
       return;
     }
-    if (view === "channels") {
-      document.title = t("app.documentTitle.chat", { title: t("settings.nav.channels") });
-      return;
-    }
     if (view === "remote") {
       document.title = t("app.documentTitle.chat", { title: t("remote.title") });
-      return;
-    }
-    if (view === "skills") {
-      document.title = t("app.documentTitle.chat", {
-        title: t("settings.nav.skills", { defaultValue: "Skills" }),
-      });
       return;
     }
     document.title = activeSession
@@ -2364,7 +2354,6 @@ function Shell({
       : null,
     loading: loading || sidebarStateLoading,
     initialLoading: sessionsInitialLoading || sidebarStateLoading,
-    newChatActive: !managingConnections && view === "chat" && activeKey === null,
     onNewChat,
     onSelect: onSelectSidebarItem,
     onCloseTemporaryChat,
@@ -2393,11 +2382,9 @@ function Shell({
       : undefined,
     onOpenApps,
     onOpenAutomations,
-    onOpenChannels,
-    onOpenSkills,
     onSettingsIntent,
     onOpenSearch: onOpenSessionSearch,
-    activeUtility: !managingConnections && (view === "apps" || view === "automations" || view === "skills" || view === "channels") ? view : null,
+    activeUtility: !managingConnections && (view === "apps" || view === "automations") ? view : null,
     onToggleArchived,
     pinnedKeys: sidebarPinnedTabKeys,
     archivedKeys: sidebarArchivedTabKeys,
@@ -2460,29 +2447,34 @@ function Shell({
             <aside
               data-testid="host-sidebar-flow"
               data-resizing={sidebarDragging || undefined}
+              data-collapsed={!hostSidebarOpen || undefined}
               id="main-sidebar"
               className={cn(
-                "group/sidebar relative z-20 hidden shrink-0 overflow-hidden lg:block",
-                sidebarDragging ? "select-none" : "transition-[width] duration-300 ease-out motion-reduce:transition-none",
+                "sidebar-dock-frame group/sidebar relative z-20 hidden shrink-0 overflow-hidden bg-background lg:block",
+                sidebarDragging && "select-none",
               )}
+              data-theme-surface
               style={{
                 width: hostSidebarFlowWidth,
-              }}
+                "--sidebar-open-width": `${sidebarWidth}px`,
+              } as CSSProperties}
             >
               <div
+                aria-hidden
                 data-theme-surface
                 className={cn(
-                  "absolute inset-y-0 left-0 h-full w-full overflow-hidden",
-                  showHostChrome
-                    ? "host-sidebar-glass"
-                    : "bg-sidebar",
+                  "sidebar-dock-surface pointer-events-none absolute inset-0",
+                  showHostChrome ? "host-sidebar-glass" : "bg-sidebar",
                 )}
-              >
+              />
+              <div className="absolute inset-0">
                 <Sidebar
                   {...sidebarProps}
                   collapsed={!hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onExpand={openHostSidebar}
+                  onCollapse={() => setHostSidebarOpen(false)}
+                  desktopDock
                 />
               </div>
               <SidebarResizeHandle
@@ -2716,7 +2708,7 @@ function Shell({
                   mainNavigationExpanded={showMainSidebar && hostSidebarOpen}
                   hostChromeInset={showHostChrome}
                   onBackToChat={onBackToChat}
-                /> : <Suspense fallback={<StartupShell embedded surface={view} sidebarExpanded={hostSidebarOpen} />}>
+                /> : <Suspense fallback={<StartupShell embedded surface={view === "apps" && isAppsSection(settingsInitialSection) ? settingsInitialSection : view} sidebarExpanded={hostSidebarOpen} />}>
                   <SettingsView
                     registerExitGuard={registerSettingsExitGuard}
                     themePreference={themePreference}

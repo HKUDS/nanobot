@@ -1,3 +1,6 @@
+@import "./components/content-column.css";
+@import "./components/settings/shared/catalog-layout.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -19,7 +22,7 @@
 }
 
 .thread-composer-stack {
-  --composer-content-width: 49.5rem;
+  --composer-content-width: var(--content-column-width);
 }
 .thread-composer-stack.is-hero {
   --composer-content-width: 58rem;
@@ -133,7 +136,6 @@
     --radius-prominent: 1.75rem;
     --radius-pill: 9999px;
     --corner-shape: superellipse(1.5);
-    --content-column-width: 49.5rem;
     --sidebar: 40 8% 96.8%;
     --sidebar-foreground: 0 0% 3.9%;
     --sidebar-content: 240 3% 30%;
@@ -1468,8 +1470,10 @@
     --settings-margin: 0.75rem;
     max-inline-size: calc(var(--content-column-width) + 2 * var(--settings-margin));
   }
-  .settings-grid.settings-feature-page.settings-automations-grid {
-    max-inline-size: calc(60rem + 2 * var(--settings-margin));
+  .catalog-section {
+    display: grid;
+    min-inline-size: 0;
+    gap: var(--settings-module-gap, 20px);
   }
   .automations-page {
     --settings-inset: 1rem;
@@ -1495,6 +1499,7 @@
   }
   .automation-create-composer .thread-composer-collapsible-layout {
     padding-block-start: 0;
+    padding-inline: 0;
   }
   /* Match the main sidebar's lg visibility; its collapsed rail has no labels. */
   @media (min-width: 1024px) {
