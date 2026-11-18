@@ -23,47 +23,12 @@ class TestBuildDreamPrompt:
     def test_returns_none_when_no_history(self, store):
         assert store.build_dream_prompt() is None
 
-    def test_returns_prompt_with_history(self, store):
-        store.append_history("hello")
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, cursor = result
-        assert cursor > 0
-        assert "## Conversation History" in prompt
-        assert "hello" in prompt
-
-    def test_cursor_advances_only_new_entries(self, store):
-        store.append_history("first")
-        r1 = store.build_dream_prompt()
-        assert r1 is not None
-        _, c1 = r1
-
-        assert store.build_dream_prompt() is not None
-
-        store.set_last_dream_cursor(c1)
-        assert store.build_dream_prompt() is None
-
-        store.append_history("second")
-        r2 = store.build_dream_prompt()
-        assert r2 is not None
-        _, c2 = r2
-        assert c2 > c1
-
     def test_prompt_includes_skill_creator_path(self, store):
         store.append_history("test")
         result = store.build_dream_prompt()
         assert result is not None
         prompt, _ = result
         assert "skill-creator" in prompt
-
-    def test_prompt_does_not_duplicate_current_memory_file_contents(self, store):
-        store.append_history("hello")
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, _ = result
-        assert "## Current Memory Files" not in prompt
-        assert "Project X active" not in prompt
-        assert "Helpful" not in prompt
 
     def test_workspace_dream_prompt_overrides_default(self, store):
         store.dream_prompt_file.parent.mkdir(parents=True)
@@ -79,7 +44,8 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert prompt.startswith("Custom Dream prompt.")
         assert "## Conversation History" in prompt
-        assert "keep this fact" in prompt
+        assert f"History file: {store.history_file.resolve()}" in prompt
+        assert "Read lines 1-1" in prompt
 
     def test_workspace_dream_prompt_override_is_capped(self, store):
         store.dream_prompt_file.parent.mkdir(parents=True)
@@ -93,7 +59,7 @@ class TestBuildDreamPrompt:
         assert "x" * 40_000 not in prompt
         assert "... (truncated)" in prompt
         assert "## Conversation History" in prompt
-        assert "keep this fact" in prompt
+        assert "Read lines 1-1" in prompt
 
     def test_empty_workspace_dream_prompt_uses_default(self, store):
         store.dream_prompt_file.parent.mkdir(parents=True)
@@ -106,40 +72,28 @@ class TestBuildDreamPrompt:
         prompt, _ = result
         assert prompt.startswith(store.default_dream_prompt() + "\n\n## Conversation History\n")
 
-    def test_truncates_long_entries_at_1000_chars(self, store):
-        long_content = "x" * 2000
-        store.append_history(long_content)
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, _ = result
-        assert long_content not in prompt
-        assert "x" * 1000 in prompt
-        assert "x" * 1001 not in prompt
-
-    def test_batches_oldest_unprocessed_entries_first(self, store):
-        for i in range(25):
+    def test_range_covers_all_pending_records_after_history_retention(self, store):
+        for i in range(35):
             store.append_history(f"entry-{i + 1:02d}")
+        store.set_last_dream_cursor(10)
+        store.max_history_entries = 30
+        store.compact_history()
 
-        result = store.build_dream_prompt(max_entries=20)
+        result = store.build_dream_prompt()
         assert result is not None
         prompt, cursor = result
 
-        assert cursor == 20
-        assert "entry-01" in prompt
-        assert "entry-20" in prompt
-        assert "entry-21" not in prompt
-
+        assert cursor == 35
+        assert "Read lines 6-30 (inclusive): 25 pending records" in prompt
+        assert "10 < cursor <= 35" in prompt
+        assert store.get_last_dream_cursor() == 10
         store.set_last_dream_cursor(cursor)
-        next_result = store.build_dream_prompt(max_entries=20)
-        assert next_result is not None
-        next_prompt, next_cursor = next_result
-        assert next_cursor == 25
-        assert "entry-21" in next_prompt
-        assert "entry-25" in next_prompt
+        assert store.build_dream_prompt() is None
 
     def test_skips_malformed_history_entries(self, store):
         store.history_file.write_text(
             '{"cursor": 1, "timestamp": "2026-04-01 10:00"}\n'
+            '\nnot-json\n'
             '{"cursor": 2, "timestamp": "2026-04-01 10:01", "content": "usable memory"}\n',
             encoding="utf-8",
         )
@@ -149,7 +103,20 @@ class TestBuildDreamPrompt:
         assert result is not None
         prompt, cursor = result
         assert cursor == 2
-        assert "usable memory" in prompt
+        assert "Read lines 4-4 (inclusive): 1 pending records" in prompt
+
+    async def test_history_range_counts_unicode_separators_as_read_file_lines(self, store):
+        store.append_history("old\u2028record")
+        store.set_last_dream_cursor(1)
+        store.append_history("new\u2028record")
+        prompt, cursor = store.build_dream_prompt()
+        assert "Read lines 3-4" in prompt
+        assert cursor == 2
+        result = await store.build_dream_tools().execute("read_file", {
+            "path": str(store.history_file), "offset": 3, "limit": 2,
+        })
+        assert '"cursor": 2' in result
+        assert '4| record"}' in result
 
     def test_dream_prompt_consumes_consolidator_attribute_tags(self):
         prompt = render_template(
@@ -242,6 +209,23 @@ class TestDreamTools:
         assert "Project Y active" in store.memory_file.read_text(encoding="utf-8")
         assert "Precise" in store.soul_file.read_text(encoding="utf-8")
         assert "**Name**: Ada" in store.user_file.read_text(encoding="utf-8")
+
+    @pytest.mark.asyncio
+    async def test_dream_can_create_and_update_wiki_pages(self, store):
+        tools = store.build_dream_tools()
+        path = "memory/wiki/projects/example.md"
+        assert "Successfully wrote" in await tools.execute(
+            "write_file", {"path": path, "content": "# Example\nRegion east\n"},
+        )
+        assert "Region east" in await tools.execute("read_file", {"path": path})
+        assert "Patch applied" in await tools.execute("apply_patch", {"edits": [{
+            "path": path, "action": "replace", "old_text": "Region east", "new_text": "Region west",
+        }]})
+        await tools.execute("read_file", {"path": path})
+        assert "Patch applied" in await tools.execute("edit_file", {
+            "path": path, "old_text": "Region west", "new_text": "Region north",
+        })
+        assert "Region north" in (store.workspace / path).read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     async def test_dream_can_write_workspace_skills(self, store):
@@ -420,6 +404,24 @@ class TestEphemeralDirect:
         assert loop.model == "test-model"
         assert loop.model_preset is None
 
+    async def test_dream_stays_pending_when_initial_request_cannot_fit(self, _make_loop):
+        from nanobot.agent.dream import run_dream
+
+        loop, _ = _make_loop
+        store = loop.context.memory
+        checkpoint = "[durable] Project knowledge.\n" * 500 + "TAIL: current decision"
+        cursor = store.append_history(checkpoint)
+        loop.provider.estimate_prompt_tokens.return_value = (100_000, "test-provider")
+
+        result = await run_dream(loop, commit_prefix="dream: manual run")
+
+        assert result.error and "context budget" in result.error
+        assert store.get_last_dream_cursor() == 0
+        assert store.read_unprocessed_history(0)[0]["cursor"] == cursor
+        measured = loop.provider.estimate_prompt_tokens.call_args.args[0]
+        assert any("Read lines 1-1" in str(message.get("content")) for message in measured)
+        loop.provider.chat_stream_with_retry.assert_not_awaited()
+
     async def test_ephemeral_skips_raw_archive(self, tmp_path, _make_loop):
         from unittest.mock import patch
 
@@ -573,111 +575,6 @@ class TestEphemeralDirect:
         second_request = loop.provider.chat_stream_with_retry.await_args_list[1].kwargs["messages"]
         tool_result = next(message for message in second_request if message["role"] == "tool")
         assert "Error" in tool_result["content"]
-
-    async def test_dream_turn_can_skip_unbatched_recent_history(self, tmp_path):
-        from unittest.mock import MagicMock
-
-        from nanobot.agent.loop import AgentLoop
-        from nanobot.bus.queue import MessageBus
-
-        store = MemoryStore(tmp_path)
-        for i in range(60):
-            store.append_history(f"entry-{i + 1:02d}")
-
-        result = store.build_dream_prompt(max_entries=20)
-        assert result is not None
-        prompt, cursor = result
-        assert cursor == 20
-
-        captured: dict[str, list[dict]] = {}
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.supports_tools = True
-        provider.generation = MagicMock(max_tokens=4096)
-
-        async def chat_stream_with_retry(**kwargs):
-            captured["messages"] = kwargs["messages"]
-            return LLMResponse(content="done", finish_reason="stop")
-
-        provider.chat_stream_with_retry = chat_stream_with_retry
-        loop = AgentLoop(
-            bus=MessageBus(),
-            provider=provider,
-            workspace=tmp_path,
-            context_window_tokens=32_000,
-        )
-
-        await loop.process_direct(
-            prompt,
-            session_key="dream:test",
-            ephemeral=True,
-            tools=store.build_dream_tools(),
-        )
-
-        messages = captured["messages"]
-        system_prompt = messages[0]["content"]
-        request_text = "\n".join(str(message.get("content", "")) for message in messages)
-        assert "# Recent History" not in system_prompt
-        assert "entry-01" in request_text
-        assert "entry-20" in request_text
-        assert "entry-21" not in request_text
-        assert "entry-60" not in request_text
-
-    async def test_dream_turn_injects_memory_files_once_and_persists_session(self, tmp_path):
-        from unittest.mock import MagicMock
-
-        from nanobot.agent.loop import AgentLoop
-        from nanobot.bus.queue import MessageBus
-
-        markers = {
-            "SOUL.md": "DREAM_SOUL_MARKER",
-            "USER.md": "DREAM_USER_MARKER",
-            "memory/MEMORY.md": "DREAM_MEMORY_MARKER",
-        }
-        store = MemoryStore(tmp_path)
-        store.write_soul(markers["SOUL.md"])
-        store.write_user(markers["USER.md"])
-        store.write_memory(markers["memory/MEMORY.md"])
-        store.append_history("history-marker")
-        (tmp_path / "AGENTS.md").write_text("DREAM_AGENTS_MARKER", encoding="utf-8")
-
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, _ = result
-
-        captured: dict[str, list[dict]] = {}
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.supports_tools = True
-        provider.generation = MagicMock(max_tokens=4096)
-
-        async def chat_stream_with_retry(**kwargs):
-            captured["messages"] = kwargs["messages"]
-            return LLMResponse(content="done", finish_reason="stop")
-
-        provider.chat_stream_with_retry = chat_stream_with_retry
-        loop = AgentLoop(
-            bus=MessageBus(),
-            provider=provider,
-            workspace=tmp_path,
-            context_window_tokens=32_000,
-        )
-        session_key = "dream:single-memory-copy"
-
-        await loop.process_direct(
-            prompt,
-            session_key=session_key,
-            ephemeral=True,
-            tools=store.build_dream_tools(),
-        )
-
-        messages = captured["messages"]
-        system_prompt = str(messages[0]["content"])
-        request_text = "\n".join(str(message.get("content", "")) for message in messages)
-        for marker in [*markers.values(), "DREAM_AGENTS_MARKER"]:
-            assert marker in system_prompt
-            assert request_text.count(marker) == 1
-        assert loop.sessions.read_session_snapshot(session_key) is not None
 
 
 class TestEphemeralHooks:
