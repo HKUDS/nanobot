@@ -2724,6 +2724,7 @@
     "undo": "Undo",
     "pendingDeleteSingle": "Topic will be deleted",
     "archivedSingle": "Topic archived",
+    "archiveFailed": "Could not change archive status.",
     "unarchivedSingle": "Topic unarchived",
     "deleteFailedSingle": "Could not delete the topic",
     "deleteWindow": "You have {{seconds}} seconds to undo.",

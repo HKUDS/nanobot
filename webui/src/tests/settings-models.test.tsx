@@ -828,12 +828,12 @@ describe("Settings models", () => {
   it.each([true, false])("closes the preset editor only after deletion succeeds (success: %s)", async (success) => {
     const { payload } = settingsPayloadWithBackup();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
-    if (success) requestMutationMock.mockResolvedValueOnce({
-      ...payload,
-      model_presets: payload.model_presets.filter((preset) => preset.name !== "backup"),
-      model_call_order: ["primary"],
-    });
-    else requestMutationMock.mockRejectedValueOnce(new Error("Delete failed"));
+    let finishDelete!: (value: SettingsPayload) => void;
+    let failDelete!: (error: Error) => void;
+    requestMutationMock.mockImplementationOnce(() => new Promise<SettingsPayload>((resolve, reject) => {
+      finishDelete = resolve;
+      failDelete = reject;
+    }));
     renderSettingsView({ initialSection: "models", initialSettings: payload });
     fireEvent.click(within(screen.getByTestId("model-call-order-row-backup")).getByRole("button", { name: "Configure" }));
     fireEvent.click(within(screen.getByTestId("model-preset-editor")).getByRole("button", { name: "Delete" }));
@@ -842,10 +842,21 @@ describe("Settings models", () => {
     await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
       "settings.model_configuration.delete", { name: "backup" }, 20_000,
     ));
+    expect(within(confirmation).getByRole("button", { name: /Deleting/ })).toBeDisabled();
+    fireEvent.keyDown(confirmation, { key: "Escape" });
+    expect(confirmation).toBeVisible();
+    fireEvent.pointerDown(confirmation.closest("[data-dialog-backdrop]")!);
+    expect(confirmation).toBeVisible();
     if (success) {
+      await act(async () => finishDelete({
+        ...payload,
+        model_presets: payload.model_presets.filter((preset) => preset.name !== "backup"),
+        model_call_order: ["primary"],
+      }));
       await waitFor(() => expect(screen.queryByTestId("model-preset-editor")).not.toBeInTheDocument());
       expect(screen.queryByTestId("model-call-order-row-backup")).not.toBeInTheDocument();
     } else {
+      await act(async () => failDelete(new Error("Delete failed")));
       expect(await within(confirmation).findByRole("alert")).toHaveTextContent("Delete failed");
       expect(within(confirmation).getByRole("button", { name: "Delete" })).toBeEnabled();
       expect(screen.getByTestId("model-preset-editor")).toBeInTheDocument();

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ToastCard, ToastProvider, ToastViewport, useToast, type ToastNotice } from "@/components/ui/toast";
 import "./toast-fixture.css";
 
@@ -71,6 +72,17 @@ function SceneContent({ scene }: { scene: Scene }) {
               setCommitted(false);
               for (const notice of notices[scene]) showToast?.(notice);
             }}>{chinese ? "播放计时" : "Play timing"}</Button>
+            {new URLSearchParams(location.search).has("modal") && <>
+              {/* Like the app shell, leave a live region outside the modal. Radix then hides the viewport itself. */}
+              <span aria-live="polite" className="sr-only" />
+              <Sheet>
+                <SheetTrigger asChild><Button variant="outline">Open sheet</Button></SheetTrigger>
+                <SheetContent>
+                  <SheetTitle>Navigation sheet</SheetTitle>
+                  <SheetDescription>Toast actions are not reachable while this sheet is open.</SheetDescription>
+                </SheetContent>
+              </Sheet>
+            </>}
             {undone && <p>{chinese ? "已撤销" : "Undo applied"}</p>}
             {committed && <p>{chinese ? "模拟删除完成" : "Simulated delete committed"}</p>}
           </div>

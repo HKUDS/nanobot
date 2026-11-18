@@ -2724,6 +2724,7 @@
     "undo": "撤销",
     "pendingDeleteSingle": "即将删除会话",
     "archivedSingle": "已归档会话",
+    "archiveFailed": "无法更改归档状态。",
     "unarchivedSingle": "已取消归档",
     "deleteFailedSingle": "删除会话失败",
     "deleteWindow": "可在 {{seconds}} 秒内撤销。",

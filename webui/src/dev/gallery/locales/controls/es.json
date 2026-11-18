@@ -106,6 +106,15 @@
     "removed": "Ejemplo eliminado.",
     "available": "Ejemplo disponible."
   },
+  "toast": {
+    "title": "Avisos temporales",
+    "description": "Avisos breves de errores, acciones completadas y acciones que se pueden deshacer.",
+    "options": "Monta ToastProvider y usa useToast para mostrar un aviso. Una acción opcional da más tiempo para responder.",
+    "showError": "Mostrar error",
+    "error": "No se pudo guardar el ejemplo.",
+    "pending": "Se eliminará el ejemplo.",
+    "restored": "Ejemplo restaurado."
+  },
   "sheet": {
     "title": "Paneles laterales",
     "description": "Un panel modal unido a un borde del área visible.",

@@ -163,8 +163,8 @@ export function ModelPresetDeleteDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   return (
-    <Dialog open={preset !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[440px]">
+    <Dialog open={preset !== null} onOpenChange={(open) => { if (open || !deleting) onOpenChange(open); }}>
+      <DialogContent showCloseButton={!deleting} className="max-w-[440px]">
         <DialogHeader className="text-left">
           <DialogTitle>
             {tx("settings.models.deletePresetTitle", "Delete model preset?")}

@@ -2542,6 +2542,7 @@
     "undo": "復原",
     "pendingDeleteSingle": "即將刪除對話",
     "archivedSingle": "已封存對話",
+    "archiveFailed": "無法變更封存狀態。",
     "unarchivedSingle": "已取消封存",
     "deleteFailedSingle": "無法刪除對話",
     "deleteWindow": "可在 {{seconds}} 秒內復原。",

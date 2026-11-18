@@ -88,6 +88,7 @@ import type {
   RuntimeSurface,
   SessionAutomationJob,
   SettingsPayload,
+  SidebarStatePayload,
   WorkspaceScopePayload,
   WorkspacesPayload,
 } from "@/lib/types";
@@ -484,7 +485,7 @@ function AuthForm({ onSecret }: {
                 readOnly={submitting}
                 aria-invalid={validationError ? true : undefined}
                 aria-describedby={validationError ? "webui-auth-error" : undefined}
-                className="h-12 rounded-full border-border bg-background/85 ps-4 pe-14 text-base focus-visible:ring-0"
+                className="h-12 rounded-full border-border bg-background/85 ps-4 pe-14 text-base"
                 autoFocus
               />
               <Button
@@ -827,11 +828,25 @@ export default function App() {
 }
 
 type PendingDelete = {
+  id: number;
   items: SidebarDeleteItem[];
   automations: SessionAutomationJob[];
   automationKeys: Set<string>;
   onDecision?: SidebarDeleteDecision;
 };
+
+function restorePinOrder(pins: readonly string[], previous: readonly string[], restoring: ReadonlySet<string>) {
+  const next = [...pins];
+  previous.forEach((key, index) => {
+    if (!restoring.has(key) || next.includes(key)) return;
+    const successor = previous.slice(index + 1).find((candidate) => next.includes(candidate));
+    const predecessor = previous.slice(0, index).reverse().find((candidate) => next.includes(candidate));
+    const offset = successor !== undefined ? next.indexOf(successor)
+      : predecessor !== undefined ? next.indexOf(predecessor) + 1 : next.length;
+    next.splice(offset, 0, key);
+  });
+  return next;
+}
 
 function Shell({
   runtimeSurface,
@@ -888,6 +903,7 @@ function Shell({
     state: sidebarState,
     loading: sidebarStateLoading,
     update: updateSidebarState,
+    save: saveSidebarState,
     rename: onRequestRename,
   } =
     useSidebarState(sessions, sessionsLoaded);
@@ -937,8 +953,15 @@ function Shell({
   const [deletingKeys, setDeletingKeys] = useState<Set<string>>(() => new Set());
   const topicSessions = useMemo(() => deletingKeys.size === 0 ? sessions
     : sessions.filter((session) => !deletingKeys.has(session.key)), [deletingKeys, sessions]);
-  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
-  const archiveUndoOwners = useRef(new Map<string, symbol>());
+  const [deleteQueue, setDeleteQueue] = useState<PendingDelete[]>([]);
+  const [pendingDelete] = deleteQueue;
+  const nextDeleteId = useRef(0);
+  const archiveUndoOwners = useRef(new Map<string, { operation: symbol; pinOrder?: string[] }>());
+  const canNavigateArchiveRef = useRef(false);
+  useEffect(() => {
+    canNavigateArchiveRef.current = localActive && !managingConnections;
+    return () => { canNavigateArchiveRef.current = false; };
+  }, [localActive, managingConnections]);
   const [pendingTabRename, setPendingTabRename] = useState<{
     key: string;
     label: string;
@@ -1708,67 +1731,75 @@ function Shell({
         .map((session) => [session.key, session]));
       const operation = Symbol();
       const selected = new Set<string>();
-      let previousPins: string[] = [];
-      void updateSidebarState((current) => {
-        const archived = new Set(current.archived_keys);
+      let pinOrder: string[] = [];
+      let removedPins = new Set<string>();
+      let archivedAfterSave: string[] = [];
+      const reportFailure = () => showToast?.({
+        message: t("toast.archiveFailed"), tone: "error", dedupeKey: "archive-failed",
+      });
+      const owned = (key: string) => archiveUndoOwners.current.get(key)?.operation === operation;
+      const release = () => {
+        for (const key of selected) if (owned(key)) archiveUndoOwners.current.delete(key);
+      };
+      const changeArchive = (current: SidebarStatePayload, affected: ReadonlySet<string>, archived: boolean) => ({
+        ...current,
+        archived_keys: archived
+          ? [...new Set([...current.archived_keys, ...affected])]
+          : current.archived_keys.filter((key) => !affected.has(key)),
+      });
+      setMobileSidebarOpen(false);
+      void saveSidebarState((current) => {
         for (const key of keys) {
-          if (!persistedSessions.has(key) || archived.has(key) === archive) continue;
-          selected.add(key);
-          archiveUndoOwners.current.set(key, operation);
-          if (archive) archived.add(key);
-          else archived.delete(key);
+          if (persistedSessions.has(key) && current.archived_keys.includes(key) !== archive) selected.add(key);
         }
-        if (!selected.size) return current;
-        previousPins = current.pinned_keys;
-        return {
-          ...current,
-          pinned_keys: current.pinned_keys.filter((key) => !selected.has(key)),
-          archived_keys: Array.from(archived),
-        };
-      });
-      if (!selected.size) return;
-      const takeOwnedKeys = () => [...selected].filter((key) => {
-        if (archiveUndoOwners.current.get(key) !== operation) return false;
-        archiveUndoOwners.current.delete(key);
-        return true;
-      });
-      const singleTopic = selected.size === 1 ? persistedSessions.get([...selected][0]) : undefined;
-      showToast?.({
-        tone: "success",
-        detail: singleTopic ? titleForSession(singleTopic) : undefined,
-        message: archive
-          ? t(selected.size === 1 ? "toast.archivedSingle" : "toast.archived", { count: selected.size })
-          : t(selected.size === 1 ? "toast.unarchivedSingle" : "toast.unarchived", { count: selected.size }),
-        onExpire: () => { takeOwnedKeys(); },
-        action: { label: t("toast.undo"), run: () => {
-          const owned = takeOwnedKeys();
-          void updateSidebarState((current) => {
-            const archived = new Set(current.archived_keys);
-            const pins = [...current.pinned_keys];
-            const restoring = new Set(owned.filter((key) => archived.has(key) === archive));
-            if (!restoring.size) return current;
-            for (const key of restoring) {
-              if (archive) archived.delete(key);
-              else archived.add(key);
-            }
-            previousPins.forEach((key, index) => {
-              if (restoring.has(key) && !pins.includes(key)) pins.splice(index, 0, key);
-            });
-            return { ...current, archived_keys: [...archived], pinned_keys: pins };
-          });
-        } },
-      });
-      if (archive && activeKey && selected.has(activeKey)) {
-        const archived = new Set([...sidebarState.archived_keys, ...selected]);
-        const next = topicSessions.find((session) => !archived.has(session.key));
-        navigate({
-          view: "chat",
-          activeKey: next?.key ?? null,
-          settingsSection: "overview",
+        if (!selected.size) return null;
+        // Include pins removed by earlier, still-undoable operations so either undo order works.
+        removedPins = new Set(current.pinned_keys.filter((key) => selected.has(key)));
+        pinOrder = current.pinned_keys;
+        for (const [key, previous] of archiveUndoOwners.current) {
+          if (previous.pinOrder) pinOrder = restorePinOrder(pinOrder, previous.pinOrder, new Set([key]));
+        }
+        const apply = (state: SidebarStatePayload) => ({
+          ...changeArchive(state, selected, archive),
+          pinned_keys: state.pinned_keys.filter((key) => !selected.has(key)),
         });
-      }
+        archivedAfterSave = apply(current).archived_keys;
+        return apply;
+      }).then(() => {
+        if (!selected.size) return;
+        for (const key of selected) {
+          archiveUndoOwners.current.set(key, { operation, pinOrder: removedPins.has(key) ? pinOrder : undefined });
+        }
+        const singleTopic = selected.size === 1 ? persistedSessions.get([...selected][0]) : undefined;
+        showToast?.({
+          tone: "success",
+          detail: singleTopic ? titleForSession(singleTopic) : undefined,
+          message: archive
+            ? t(selected.size === 1 ? "toast.archivedSingle" : "toast.archived", { count: selected.size })
+            : t(selected.size === 1 ? "toast.unarchivedSingle" : "toast.unarchived", { count: selected.size }),
+          onExpire: release,
+          action: { label: t("toast.undo"), run: () => {
+            void saveSidebarState((current) => {
+              const restoring = new Set([...selected].filter((key) => (
+                owned(key) && current.archived_keys.includes(key) === archive
+              )));
+              if (!restoring.size) return null;
+              const restoringPins = new Set([...restoring].filter((key) => removedPins.has(key)));
+              return (state) => ({
+                ...changeArchive(state, restoring, !archive),
+                pinned_keys: restorePinOrder(state.pinned_keys, pinOrder, restoringPins),
+              });
+            }).then(release, () => { release(); reportFailure(); });
+          } },
+        });
+        const route = currentShellRouteRef.current;
+        if (archive && canNavigateArchiveRef.current && route.view === "chat" && route.activeKey && selected.has(route.activeKey)) {
+          const next = topicSessions.find((session) => !archivedAfterSave.includes(session.key));
+          navigate({ view: "chat", activeKey: next?.key ?? null, settingsSection: "overview" });
+        }
+      }, reportFailure);
     },
-    [activeKey, navigate, showToast, sidebarState.archived_keys, sidebarStateLoading, t, titleForSession, topicSessions, updateSidebarState],
+    [navigate, saveSidebarState, showToast, sidebarStateLoading, t, titleForSession, topicSessions],
   );
 
   const onToggleArchive = useCallback((key: string) => {
@@ -2054,12 +2085,18 @@ function Shell({
     refresh,
   );
 
+  const finishDeleteConfirmation = useCallback((request: PendingDelete, confirmed: boolean) => {
+    request.onDecision?.(confirmed);
+    setDeleteQueue((queue) => queue.filter((entry) => entry.id !== request.id));
+  }, []);
+
   const onConfirmDelete = useCallback(() => {
     if (!pendingDelete || !showToast) return;
-    const { items, automationKeys } = pendingDelete;
+    const { automationKeys } = pendingDelete;
+    const items = pendingDelete.items.filter((item) => topicSessions.some((session) => session.key === item.key));
+    finishDeleteConfirmation(pendingDelete, items.length > 0);
+    if (!items.length) return;
     const batchKeys = new Set(items.map((item) => item.key));
-    pendingDelete.onDecision?.(true);
-    setPendingDelete(null);
     setDeletingKeys((current) => new Set([...current, ...batchKeys]));
 
     if (activeKey && batchKeys.has(activeKey)) {
@@ -2075,6 +2112,8 @@ function Shell({
     const reveal = () => setDeletingKeys((current) => new Set([...current].filter((key) => !batchKeys.has(key))));
     const commit = async () => {
       let failed = 0;
+      const blockedItems: SidebarDeleteItem[] = [];
+      const blockedJobs: SessionAutomationJob[] = [];
       try {
         for (const item of items) {
           try {
@@ -2082,6 +2121,9 @@ function Shell({
             if (result.deleted) {
               filePreviewStore.delete(item.key);
               draftStore.delete(item.key);
+            } else if (result.blocked_by_automations && result.automations?.length) {
+              blockedItems.push(item);
+              blockedJobs.push(...result.automations);
             } else {
               failed++;
             }
@@ -2092,6 +2134,15 @@ function Shell({
         }
       } finally {
         reveal();
+      }
+      if (blockedItems.length) {
+        const confirmation: PendingDelete = {
+          id: ++nextDeleteId.current,
+          items: blockedItems,
+          automations: blockedJobs,
+          automationKeys: new Set(blockedItems.map((item) => item.key)),
+        };
+        setDeleteQueue((queue) => [...queue, confirmation]);
       }
       if (failed) showToast({
         message: t(failed === 1 ? "toast.deleteFailedSingle" : "toast.deleteFailed", { count: failed }),
@@ -2105,7 +2156,7 @@ function Shell({
       action: { label: t("toast.undo"), run: reveal },
       onExpire: () => { void commit(); },
     });
-  }, [activeKey, activeTabState, deleteChat, draftStore, filePreviewStore, navigate, pendingDelete, showToast, t, topicSessions]);
+  }, [activeKey, activeTabState, deleteChat, draftStore, filePreviewStore, finishDeleteConfirmation, navigate, pendingDelete, showToast, t, topicSessions]);
 
   const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
     const uniqueItems = Array.from(new Map(items.filter((item) => !deletingKeys.has(item.key)).map((item) => [item.key, item])).values());
@@ -2121,7 +2172,8 @@ function Shell({
       return result.value;
     });
     let decision = onDecision;
-    setPendingDelete({
+    const confirmation: PendingDelete = {
+      id: ++nextDeleteId.current,
       items: uniqueItems,
       automations,
       automationKeys,
@@ -2130,7 +2182,8 @@ function Shell({
         decision = undefined;
         notify?.(confirmed);
       },
-    });
+    };
+    setDeleteQueue((queue) => [...queue, confirmation]);
   }, [deletingKeys, getSessionAutomations]);
 
   const onRequestDelete = useCallback((key: string, label: string, onDecision?: SidebarDeleteDecision) => {
@@ -2797,17 +2850,15 @@ function Shell({
           </main>
         </div>
 
-        {pendingDelete ? (
+        {pendingDelete && localActive && !managingConnections ? (
           <Suspense fallback={null}>
             <DeleteConfirm
+              key={pendingDelete.id}
               open
               title={pendingDelete.items[0]?.label ?? ""}
               count={pendingDelete.items.length}
               automations={pendingDelete.automations}
-              onCancel={() => {
-                pendingDelete.onDecision?.(false);
-                setPendingDelete(null);
-              }}
+              onCancel={() => finishDeleteConfirmation(pendingDelete, false)}
               onConfirm={onConfirmDelete}
             />
           </Suspense>

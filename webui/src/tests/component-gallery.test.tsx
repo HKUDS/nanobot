@@ -55,6 +55,23 @@ it("finds a shared component by its name and renders its working variants", asyn
   expect(screen.getByRole("button", { name: "Unavailable" })).toBeDisabled();
 });
 
+it("previews an error alert and a working Undo action with the shared toast provider", async () => {
+  const source = `${foundationPath}toast.tsx`;
+  window.history.replaceState({}, "", `/gallery.html#${new URLSearchParams({ component: source })}`);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => inventory }));
+  render(<Gallery />);
+  const preview = within(await screen.findByRole("region", { name: "Component preview" }));
+  await userEvent.click(preview.getByRole("button", { name: "Show error" }));
+  expect(preview.getByRole("alert")).toHaveTextContent("Could not save the example.");
+
+  const remove = preview.getByRole("button", { name: "Remove example" });
+  await userEvent.click(remove);
+  expect(remove).toBeDisabled();
+  await userEvent.click(preview.getByRole("button", { name: "Undo" }));
+  expect(remove).toBeEnabled();
+  expect(preview.getByRole("status")).toHaveTextContent("Example restored.");
+});
+
 it("lets the developer retry a failed inventory request", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: false })
     .mockResolvedValueOnce({ ok: true, json: async () => inventory }));

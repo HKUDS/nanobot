@@ -22,6 +22,7 @@ import { ExpandableText } from "@/components/ui/expandable-text";
 import { StreamingLabelSheen } from "@/components/ui/streaming-label-sheen";
 import { LoadingRing } from "@/components/ui/loading-ring";
 import { ImageViewport } from "@/components/ui/image-viewport";
+import { ToastProvider, useToast } from "@/components/ui/toast";
 import type { CodexFastMode } from "@/lib/types";
 import { Sample, type ComponentExample } from "./example";
 import { useGalleryTranslation } from "./i18n";
@@ -168,6 +169,33 @@ function Alerts() {
   </div>;
 }
 
+function ToastActions() {
+  const { t } = useGalleryTranslation();
+  const show = useToast();
+  const [removed, setRemoved] = useState(false);
+  const remove = () => {
+    setRemoved(true);
+    show?.({
+      tone: "pending",
+      message: t("controls.toast.pending"),
+      action: {
+        label: t("toast.undo", { ns: "common" }),
+        run: () => {
+          setRemoved(false);
+          show?.({ tone: "success", message: t("controls.toast.restored") });
+        },
+      },
+      onExpire: () => setRemoved(false),
+    });
+  };
+  return <div className="flex flex-wrap gap-3">
+    <Button variant="outline" onClick={() => show?.({ tone: "error", message: t("controls.toast.error"), dedupeKey: "example-error" })}>
+      {t("controls.toast.showError")}
+    </Button>
+    <Button variant="destructive" onClick={remove} disabled={removed}>{t("controls.alert.remove")}</Button>
+  </div>;
+}
+
 function Sheets() {
   const { t } = useGalleryTranslation();
   return <Sheet><SheetTrigger asChild><Button variant="outline">{t("controls.sheet.open")}</Button></SheetTrigger>
@@ -306,6 +334,9 @@ export const foundationExamples: ComponentExample[] = [
   { title: "controls.alert.title", files: ["alert-dialog"], Preview: Alerts,
     description: "controls.alert.description", options: "controls.alert.options",
     code: '<Button onClick={() => setOpen(true)}>Remove</Button>\n<AlertDialog open={open} onOpenChange={setOpen}>\n  <AlertDialogContent><AlertDialogTitle>Remove item?</AlertDialogTitle><AlertDialogDescription>This removes the item.</AlertDialogDescription><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={removeItem}>Remove</AlertDialogAction></AlertDialogContent>\n</AlertDialog>' },
+  { title: "controls.toast.title", files: ["toast"], Preview: () => <ToastProvider><ToastActions /></ToastProvider>,
+    description: "controls.toast.description", options: "controls.toast.options",
+    code: '<ToastProvider><ExampleActions /></ToastProvider>\n\n// Inside ExampleActions\nconst show = useToast();\nshow?.({ tone: "pending", message: "Example will be removed.",\n  action: { label: "Undo", run: restoreExample }, onExpire: removeExample });' },
   { title: "controls.sheet.title", files: ["sheet"], Preview: Sheets,
     description: "controls.sheet.description", options: "controls.sheet.options",
     code: '<Sheet><SheetTrigger asChild><Button>Details</Button></SheetTrigger><SheetContent side="right"><SheetTitle>Details</SheetTitle><SheetDescription>Additional information.</SheetDescription>{content}</SheetContent></Sheet>' },

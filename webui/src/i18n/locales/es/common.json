@@ -2542,6 +2542,7 @@
     "undo": "Deshacer",
     "pendingDeleteSingle": "La conversación se eliminará",
     "archivedSingle": "Conversación archivada",
+    "archiveFailed": "No se pudo cambiar el estado de archivado.",
     "unarchivedSingle": "Conversación desarchivada",
     "deleteFailedSingle": "No se pudo eliminar la conversación",
     "deleteWindow": "Tienes {{seconds}} segundos para deshacer la acción.",

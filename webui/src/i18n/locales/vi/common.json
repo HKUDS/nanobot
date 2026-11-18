@@ -2542,6 +2542,7 @@
     "undo": "Hoàn tác",
     "pendingDeleteSingle": "Sắp xóa cuộc trò chuyện",
     "archivedSingle": "Đã lưu trữ cuộc trò chuyện",
+    "archiveFailed": "Không thể thay đổi trạng thái lưu trữ.",
     "unarchivedSingle": "Đã bỏ lưu trữ cuộc trò chuyện",
     "deleteFailedSingle": "Không thể xóa cuộc trò chuyện",
     "deleteWindow": "Bạn có {{seconds}} giây để hoàn tác.",

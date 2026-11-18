@@ -729,11 +729,13 @@ export function AutomationEditDialog({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (saving) return;
     const payload = automationUpdatePayloadFromDraft(draft, job);
     if (!job || typeof payload === "string") return;
     void onSave(job, payload);
   };
   const changeOpen = (open: boolean) => {
+    if (!open && saving) return;
     onOpenChange(open);
     if (!open && job) onCancel?.(job);
   };
@@ -747,6 +749,7 @@ export function AutomationEditDialog({
         <DialogContent
           {...dialogFocus}
           aria-describedby={undefined}
+          showCloseButton={!saving}
           className="w-[min(calc(100vw-2rem),34rem)]"
           onEscapeKeyDown={(event) => {
             // Escape in the nested date calendar must not cancel the editor.
@@ -928,8 +931,8 @@ export function AutomationDeleteDialog({
   const tx = (key: string, fallback: string, values?: Record<string, unknown>) =>
     t(key, { defaultValue: fallback, ...(values ?? {}) });
   return (
-    <Dialog open={Boolean(job)} onOpenChange={onOpenChange}>
-      <DialogContent {...dialogFocus} className="w-[min(calc(100vw-2rem),26rem)]">
+    <Dialog open={Boolean(job)} onOpenChange={(open) => { if (open || !deleting) onOpenChange(open); }}>
+      <DialogContent {...dialogFocus} showCloseButton={!deleting} className="w-[min(calc(100vw-2rem),26rem)]">
         <DialogHeader>
           <DialogTitle>{tx("settings.automations.deleteTitle", "Delete automation")}</DialogTitle>
           <DialogDescription>

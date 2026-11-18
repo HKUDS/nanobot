@@ -1,5 +1,5 @@
 import { Check, Trash2, TriangleAlert } from "lucide-react";
-import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 
 import { Button } from "@/components/ui/button";
 import "./toast.css";
@@ -24,8 +24,8 @@ type ToastEntry = ToastNotice & { id: number };
 const ToastContext = createContext<((notice: ToastNotice) => void) | null>(null);
 export const useToast = () => useContext(ToastContext);
 
-export function ToastViewport({ children }: { children: ReactNode }) {
-  return <div className="pointer-events-none fixed inset-x-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 mx-auto flex max-w-[22rem] flex-col items-center gap-2 [.native-host_&]:top-12">
+export function ToastViewport({ children, viewportRef, hidden }: { children: ReactNode; viewportRef?: Ref<HTMLDivElement>; hidden?: boolean }) {
+  return <div ref={viewportRef} className="pointer-events-none fixed inset-x-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 mx-auto flex max-w-[22rem] flex-col items-center gap-2 [.native-host_&]:top-12" style={hidden ? { visibility: "hidden" } : undefined}>
     {children}
   </div>;
 }
@@ -63,10 +63,19 @@ export function ToastCard({ notice, paused = false, onAction, onHoverChange, onF
 
 type ToastFinishReason = "action" | "expired";
 
-function TimedToast({ entry, finish }: { entry: ToastEntry; finish: (entry: ToastEntry, reason: ToastFinishReason) => void }) {
+function TimedToast({ entry, finish, unavailable }: {
+  entry: ToastEntry;
+  finish: (entry: ToastEntry, reason: ToastFinishReason) => void;
+  unavailable: boolean;
+}) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const paused = hovered || focused;
+  const paused = unavailable || hovered || focused;
+  useLayoutEffect(() => {
+    if (!unavailable) return;
+    setHovered(false);
+    setFocused(false);
+  }, [unavailable]);
   const remaining = useRef(toastDurationMs(entry));
   useLayoutEffect(() => {
     if (paused) return;
@@ -84,6 +93,24 @@ function TimedToast({ entry, finish }: { entry: ToastEntry; finish: (entry: Toas
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<ToastEntry[]>([]);
+  const [unavailable, setUnavailable] = useState(false);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const visibilityTree: HTMLElement[] = [];
+    for (let node: HTMLElement | null = viewportRef.current; node; node = node.parentElement) visibilityTree.push(node);
+    // Radix dialogs/sheets hide the surrounding tree; inactive remote hosts are inert.
+    const update = () => setUnavailable(document.visibilityState === "hidden" || visibilityTree.some((node) => (
+      node.getAttribute("aria-hidden") === "true" || node.hasAttribute("inert")
+    )));
+    const observer = new MutationObserver(update);
+    for (const node of visibilityTree) observer.observe(node, { attributeFilter: ["aria-hidden", "inert"] });
+    document.addEventListener("visibilitychange", update);
+    update();
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, []);
   const nextId = useRef(0);
   const live = useRef(new Map<number, ToastEntry>());
   const publish = useCallback(() => setEntries([...live.current.values()]), []);
@@ -105,6 +132,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [publish]);
   return <ToastContext.Provider value={show}>
     {children}
-    <ToastViewport>{entries.map((entry) => <TimedToast key={entry.id} entry={entry} finish={finish} />)}</ToastViewport>
+    <ToastViewport viewportRef={viewportRef} hidden={unavailable}>
+      {entries.map((entry) => <TimedToast key={entry.id} entry={entry} finish={finish} unavailable={unavailable} />)}
+    </ToastViewport>
   </ToastContext.Provider>;
 }

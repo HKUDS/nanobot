@@ -8,6 +8,12 @@ test("missing microphone uses a short toast without resizing the mobile composer
   await expect(voice).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
   await voice.hover();
+  // Compact controls can be visible before the footer's padding finishes transitioning.
+  await expect(composer).toHaveAttribute("data-compact-controls", "true");
+  const footer = composer.locator(".thread-composer-footer");
+  await expect.poll(() => footer.evaluate((element) => element.getAnimations().some((animation) =>
+    animation instanceof CSSTransition && animation.transitionProperty === "padding-bottom",
+  ))).toBe(false);
   const bounds = await composer.boundingBox();
   await voice.click();
   const alert = page.locator('[data-toast-tone="error"]').getByRole("alert");

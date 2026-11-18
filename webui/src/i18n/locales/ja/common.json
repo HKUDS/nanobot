@@ -2542,6 +2542,7 @@
     "undo": "元に戻す",
     "pendingDeleteSingle": "会話を削除します",
     "archivedSingle": "会話をアーカイブしました",
+    "archiveFailed": "アーカイブ状態を変更できませんでした。",
     "unarchivedSingle": "会話のアーカイブを解除しました",
     "deleteFailedSingle": "会話を削除できませんでした",
     "deleteWindow": "{{seconds}} 秒以内なら元に戻せます。",

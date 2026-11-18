@@ -2542,6 +2542,7 @@
     "undo": "Urungkan",
     "pendingDeleteSingle": "Percakapan akan dihapus",
     "archivedSingle": "Percakapan diarsipkan",
+    "archiveFailed": "Tidak dapat mengubah status arsip.",
     "unarchivedSingle": "Percakapan dikeluarkan dari arsip",
     "deleteFailedSingle": "Gagal menghapus percakapan",
     "deleteWindow": "Anda punya {{seconds}} detik untuk mengurungkan tindakan.",

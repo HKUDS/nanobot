@@ -2544,6 +2544,7 @@
     "undo": "Desfazer",
     "pendingDeleteSingle": "A conversa será excluída",
     "archivedSingle": "Conversa arquivada",
+    "archiveFailed": "Não foi possível alterar o status de arquivamento.",
     "unarchivedSingle": "Conversa desarquivada",
     "deleteFailedSingle": "Não foi possível excluir a conversa",
     "deleteWindow": "Você tem {{seconds}} segundos para desfazer a ação.",

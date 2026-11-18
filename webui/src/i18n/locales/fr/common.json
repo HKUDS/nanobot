@@ -2542,6 +2542,7 @@
     "undo": "Annuler",
     "pendingDeleteSingle": "La conversation va être supprimée",
     "archivedSingle": "Conversation archivée",
+    "archiveFailed": "Impossible de modifier le statut d’archivage.",
     "unarchivedSingle": "Conversation désarchivée",
     "deleteFailedSingle": "Impossible de supprimer la conversation",
     "deleteWindow": "Vous avez {{seconds}} secondes pour annuler.",

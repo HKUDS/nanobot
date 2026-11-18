@@ -76,3 +76,29 @@ test("a pending delete waits while hovered and commits after leaving the card", 
   await expect(committed).toBeVisible();
   await expect(undo).toHaveCount(0);
 });
+
+test("a modal sheet pauses an unreachable Undo and preserves the remaining time", async ({ page }) => {
+  await page.clock.install();
+  await page.goto(`${fixture}delete&modal`);
+  await page.getByRole("button", { name: "Play timing" }).click();
+  const undo = page.getByRole("button", { name: "Undo" });
+  const card = page.locator('[data-toast-tone="pending"]');
+  const committed = page.getByText("Simulated delete committed");
+  await expect(undo).toBeVisible();
+  await page.clock.runFor(3_000);
+  await page.getByRole("button", { name: "Open sheet" }).click();
+  await expect(page.getByRole("dialog", { name: "Navigation sheet" })).toBeVisible();
+  await expect(undo).toHaveCount(0);
+  await expect.poll(() => shadowStyle(card, "animation-play-state")).toBe("paused");
+  await page.clock.runFor(8_001);
+  await expect(card).toBeAttached();
+  await expect(committed).toHaveCount(0);
+
+  await page.keyboard.press("Escape");
+  await expect(undo).toBeVisible();
+  await page.clock.runFor(4_000);
+  await expect(undo).toBeVisible();
+  await page.clock.runFor(1_100);
+  await expect(committed).toBeVisible();
+  await expect(undo).toHaveCount(0);
+});
