@@ -63,11 +63,11 @@ function ThemeChatFixture({ theme, toggle }: { theme: "light" | "dark"; toggle: 
   if (new URLSearchParams(location.search).has("split")) panes.push({ key: "theme-secondary", title: "Secondary chat" });
   return <main data-theme-surface className="flex bg-background" style={{ height: "100vh" }}>
     <aside className="hidden w-64 shrink-0 sm:block">
-      <Sidebar sessions={sessions} activeKey={activeKey} onSelect={setActiveKey} loading={false} newChatActive={false}
+      <Sidebar sessions={sessions} activeKey={activeKey} onSelect={setActiveKey} loading={false}
         onNewChat={noop} onRequestDelete={noop} onTogglePin={noop} onRequestRename={async () => {}}
         onToggleArchive={noop} onToggleGroup={noop} onRequestRenameProject={noop} onNewChatInProject={noop}
-        onOpenSettings={noop} onOpenApps={noop} onOpenSkills={noop} onOpenAutomations={noop}
-        onOpenChannels={noop} onOpenSearch={noop} onToggleArchived={noop} />
+        onOpenSettings={noop} onOpenApps={noop} onOpenAutomations={noop}
+        onOpenSearch={noop} onToggleArchived={noop} />
     </aside>
     <div className="min-w-0 flex-1">
       <PaneWorkbench panes={panes} activePaneKey="theme" layout="columns"

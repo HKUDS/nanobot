@@ -5,7 +5,7 @@ import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettin
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { McpPresetInfo } from "@/lib/types";
 import { __clearLogoFallbackCacheForTests } from "@/hooks/useLogoFallback";
-import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
+import { requestMutationMock, jsonResponse, settingsPayload, renderSettingsView, selectToolType, showOnlyReadyTools, installSettingsViewTestHooks } from "@/tests/settings-test-utils";
 
 
 const installedAnyGen = {
@@ -138,7 +138,8 @@ describe("Settings system domains", () => {
 
     renderSettingsView();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Agent Plugins" }));
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
     expect(await screen.findByText("Computer Use")).toBeInTheDocument();
     expect(screen.getByText(/Control the desktop/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Computer Use" }));
@@ -180,12 +181,13 @@ describe("Settings system domains", () => {
 
     expect(await screen.findByRole("heading", { name: "AnyGen" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Managed plugin" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Agent Plugins" }));
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
     expect(screen.getByRole("heading", { name: "Separate plugin" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Managed plugin" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "separate" } });
     expect(screen.getByRole("heading", { name: "Separate plugin" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
+    await selectToolType("CLI Apps");
     expect(screen.queryByRole("heading", { name: "AnyGen" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Search tools"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Agent Plugin disabled" }));
@@ -206,7 +208,8 @@ describe("Settings system domains", () => {
       return jsonResponse(settingsPayload());
     }));
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "Agent Plugins" }));
+    await selectToolType("Agent Plugins");
+    await showOnlyReadyTools(false);
     expect(await screen.findByRole("heading", { name: "Computer Use" })).toBeVisible();
   });
 
@@ -267,7 +270,8 @@ describe("Settings system domains", () => {
   it("does not hide a standalone heading when the navigation is collapsed or absent", () => {
     renderSettingsView({ initialSection: "skills", initialSettings: settingsPayload(), showSidebar: false, mainNavigationExpanded: false });
     expect(screen.getByTestId("settings-section-transition")).toHaveAttribute("data-main-navigation-expanded", "false");
-    expect(screen.getByRole("heading", { name: "Skills", level: 1 })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Apps", level: 1 })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Skills" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("uses the inline section heading layout to align Apps titles and counts", async () => {
@@ -288,10 +292,13 @@ describe("Settings system domains", () => {
       expect(title.nextElementSibling).not.toHaveClass(className);
     }
 
-    fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
     const mcpTitle = screen.getByRole("heading", { name: "MCP tools" });
     expect(mcpTitle.parentElement).toHaveClass("settings-section-heading");
     expect(mcpTitle.nextElementSibling).toHaveTextContent("0");
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
+    expect(screen.getByText("No MCP tools available")).toBeVisible();
+    expect(screen.getByText("Add a custom MCP server below")).toBeVisible();
   });
 
   it.each(["cli", "mcp"] as const)(
@@ -320,7 +327,7 @@ describe("Settings system domains", () => {
       }));
       renderSettingsView({ initialSection: "apps", initialSettings: settingsPayload() });
       await screen.findByText("AnyGen");
-      if (kind === "mcp") fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+      if (kind === "mcp") await selectToolType("MCP");
       const row = (await screen.findByText(name)).closest("article")!;
       const image = row.querySelector("img")!;
       expect(image).toHaveAttribute("src", logoUrl);
@@ -660,10 +667,12 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "apps" });
 
     expect(await screen.findByText("AnyGen")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "CLI Apps" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Agent Plugins" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Ready only" })).not.toBeChecked();
+    const filters = within(screen.getByRole("radiogroup", { name: "Tool type" }));
+    expect(filters.getByRole("radio", { name: "All" })).toBeChecked();
+    for (const name of ["CLI Apps", "Agent Plugins", "MCP"]) {
+      expect(filters.getByRole("radio", { name })).toBeInTheDocument();
+    }
   });
 
   it("installs optional channel support before enabling and disabling it", async () => {
@@ -745,7 +754,6 @@ describe("Settings system domains", () => {
     renderSettingsView({ initialSection: "channels" });
 
     const matrixRow = await screen.findByRole("button", { name: "View Matrix settings" });
-    expect(matrixRow).toHaveAttribute("aria-haspopup", "dialog");
     fireEvent.click(matrixRow);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "Matrix channel" })).not.toBeInTheDocument();
@@ -777,7 +785,9 @@ describe("Settings system domains", () => {
     );
     expect(screen.getAllByText("On").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "View Matrix settings" }));
+    const installedRow = screen.getByRole("button", { name: "View Matrix settings" });
+    expect(installedRow).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(installedRow);
     expect(screen.getByLabelText("Homeserver")).toBeInTheDocument();
     expect(screen.getByLabelText("User ID")).toBeInTheDocument();
     expect(screen.getByLabelText("Device ID")).toBeInTheDocument();

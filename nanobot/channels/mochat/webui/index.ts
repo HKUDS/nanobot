@@ -3,7 +3,6 @@ import { chatAppGuideUrl } from "@/channel-plugins/catalog";
 
 export default {
   presentation: {
-    logoUrl: "https://mochat.io/favicon.ico",
     displayName: "MoChat",
     initials: "MC",
     color: "#111827",

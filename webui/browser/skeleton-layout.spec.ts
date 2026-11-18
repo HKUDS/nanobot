@@ -51,6 +51,9 @@ for (const width of [390, 1440]) {
         for (const [surface, [loadedSelector, loadingSelector]] of Object.entries(catalogRows)) {
           await page.goto(fixture(surface));
           const loaded = page.locator(loadedSelector).first();
+          const search = await box(page.locator(".catalog-search input"));
+          const toolbarControls = page.locator(".catalog-controls");
+          const controls = await box(toolbarControls);
           const row = await box(loaded);
           const icon = await box(surface === "channels" ? loaded.locator('[data-testid^="channel-logo"]')
             : loaded.locator(surface === "apps" ? ":scope > :first-child > :first-child" : ":scope > :first-child"));
@@ -58,6 +61,8 @@ for (const width of [390, 1440]) {
           const action = width === 1440 || surface !== "skills" ? await box(loaded.locator(":scope > :last-child")) : null;
           await page.goto(fixture(surface, true));
           const skeleton = status(page).locator(loadingSelector).first();
+          sameBox(await box(page.locator(".catalog-search input")), search);
+          sameBox(await box(toolbarControls), controls);
           sameBox(await box(skeleton), row);
           sameBox(await box(skeleton.locator(surface === "apps" ? ":scope > :first-child > :first-child" : ":scope > :first-child")), icon);
           const placeholder = await box(skeleton.locator(surface === "apps"
@@ -88,8 +93,10 @@ for (const width of [390, 1440]) {
           const requested = page.waitForRequest(view === "search" ? "**/api/webui/skills/search?**" : "**/api/webui/skills/trending?**");
           try {
             await page.goto(fixture("marketplace"));
-            if (view === "single") await page.getByRole("tab", { name: "skills.sh", exact: true }).click();
-            if (view === "search") await page.locator("input").fill("project");
+            if (view === "single") {
+              await page.getByRole("radio", { name: "skills.sh", exact: true }).locator("..").click();
+            }
+            if (view === "search") await page.getByRole("textbox").fill("project");
             await requested;
             const skeletons = status(page).locator(".py-3\\.5");
             const count = view === "single" ? 5 : 10;

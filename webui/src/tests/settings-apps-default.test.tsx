@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { NanobotClient } from "@/lib/nanobot-client";
@@ -6,6 +6,8 @@ import {
   installSettingsViewTestHooks,
   jsonResponse,
   renderSettingsView,
+  selectToolType,
+  showOnlyReadyTools,
   settingsPayload,
 } from "@/tests/settings-test-utils";
 
@@ -42,7 +44,10 @@ describe("Apps default filter", () => {
     renderSettingsView({ initialSettings: settingsPayload() });
 
     expect(await screen.findByRole("heading", { name: "Example App" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "CLI Apps" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Ready only" })).not.toBeChecked();
+    expect(screen.getByRole("heading", { name: "Docs MCP" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Example Plugin" })).toBeInTheDocument();
   });
 
   it("preserves a manual choice while MCP loads, then defaults to the cached Ready items on re-entry", async () => {
@@ -56,14 +61,16 @@ describe("Apps default filter", () => {
     renderSettingsView({ client, initialSettings: settingsPayload() });
     await act(async () => {});
     expect(screen.queryByRole("heading", { name: "Example App" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "CLI Apps" }));
+    await selectToolType("CLI Apps");
+    await showOnlyReadyTools(false);
     await act(async () => { pending.resolve(jsonResponse({ presets: [mcp], installed_count: 1 })); });
-    expect(screen.getByRole("button", { name: "CLI Apps" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("radio", { name: "CLI Apps" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Ready only" })).not.toBeChecked();
     expect(screen.getByRole("heading", { name: "Example App" })).toBeInTheDocument();
 
     cleanup();
     renderSettingsView({ client, initialSettings: settingsPayload() });
-    expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("switch", { name: "Ready only" })).toBeChecked();
     expect(screen.getByRole("heading", { name: "Docs MCP" })).toBeInTheDocument();
   });
 });

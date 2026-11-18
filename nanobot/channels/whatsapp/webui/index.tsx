@@ -7,7 +7,7 @@ import { WhatsAppConnectFlow } from "./WhatsAppConnectFlow";
 
 export default {
   presentation: {
-    logoUrl: "https://static.whatsapp.net/rsrc.php/y1/r/FJbTMJqMap7.svg",
+    logoUrl: "/brand/channels/whatsapp.svg",
     displayName: "WhatsApp",
     initials: "WA",
     color: "#25D366",

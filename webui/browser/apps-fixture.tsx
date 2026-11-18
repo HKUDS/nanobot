@@ -45,7 +45,7 @@ export function AppsFixture() {
   return <main className="mx-auto max-w-4xl p-6" style={connectionLayout ? { maxWidth: 800 } : undefined}><AppsCatalogSettings
     cliApps={{ apps: [], installed_count: 0 }}
     mcpPresets={{ presets, installed_count: connectionLayout ? Number(parameters.has("runtime")) : managing ? 0 : 3 }}
-    cliAppsLoading={false} mcpPresetsLoading={false} query="" filter={managing || connectionLayout ? "mcp" : "ready"}
+    cliAppsLoading={false} mcpPresetsLoading={false} query="" filter={{ kind: managing || connectionLayout ? "mcp" : "all", status: managing || connectionLayout ? "all" : "ready" }}
     cliActionKey={null} mcpActionKey={null}
     mcpOAuthFlow={connecting ? { flow_id: "fixture", name: "linear", status: "authorization_required", expires_in: 300 } : null}
     mcpOAuthPopupBlocked={false}

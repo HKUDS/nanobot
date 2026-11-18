@@ -1,10 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { Search, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { SearchInput } from "@/components/ui/input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
-import { SETTINGS_SEARCH_INPUT_CLASS } from "@/components/settings/shared/SettingsControls";
+import { CatalogControls, CatalogToggle, CatalogToolbar } from "@/components/settings/shared/CatalogToolbar";
 import { CatalogSkeleton } from "@/components/settings/shared/CatalogSkeleton";
 import type { ChannelFeatureAction } from "@/channel-plugins/types";
 import { ChannelCatalogRow } from "@/components/settings/channels/ChannelCatalogRow";
@@ -18,7 +16,7 @@ import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui
 type ChannelFilter = "all" | "enabled";
 
 export function ChannelsSettings({
-  token, nanobotFeatures, loading, actionKey, chatAppsDocsUrl, showBrandLogos,
+  token, nanobotFeatures, loading, actionKey, chatAppsDocsUrl, showBrandLogos, query,
   error, requiresRestartPending, onAction, onFeaturesUpdate, onDismissStatus,
   onRestart, isRestarting, onConfigureMcp, onBeforeCloseChange,
 }: {
@@ -28,6 +26,7 @@ export function ChannelsSettings({
   actionKey: string | null;
   chatAppsDocsUrl?: string;
   showBrandLogos: boolean;
+  query: string;
   error: string | null;
   requiresRestartPending: boolean;
   onAction: ChannelFeatureAction;
@@ -40,11 +39,10 @@ export function ChannelsSettings({
 }) {
   const { t } = useTranslation();
   const [selectedChannelName, setSelectedChannelName] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ChannelFilter>("enabled");
   const [connectRequestId, setConnectRequestId] = useState(0);
   const filterInitializedRef = useRef(false);
-  const triggerRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const beforeCloseRef = useRef<(() => Promise<boolean>) | null>(null);
   const closePendingRef = useRef(false);
@@ -103,23 +101,16 @@ export function ChannelsSettings({
   );
 
   return (
-    <div className="settings-stack">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute start-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-          <SearchInput type="search" value={query} onChange={(event) => setQuery(event.target.value)}
-            aria-label={t("settings.channels.search")}
-            placeholder={t("settings.channels.search")}
-            className={`h-12 ps-11 text-[15px] ${SETTINGS_SEARCH_INPUT_CLASS}`} />
-        </div>
-        <SegmentedControl value={filter} onChange={(value) => {
-          filterInitializedRef.current = true;
-          setFilter(value);
-        }} options={[
-          { value: "all", label: t("settings.channels.filterAll") },
-          { value: "enabled", label: t("settings.channels.filterEnabled") },
-        ]} />
-      </div>
+    <div className="catalog-section">
+      <CatalogToolbar>
+        <CatalogControls>
+          <CatalogToggle label={t("settings.channels.enabledOnly")} checked={filter === "enabled"}
+            onChange={(enabled) => {
+              filterInitializedRef.current = true;
+              setFilter(enabled ? "enabled" : "all");
+            }} />
+        </CatalogControls>
+      </CatalogToolbar>
       {error && !selectedChannel ? <DismissibleStatusMessage message={error} isError onDismiss={onDismissStatus} /> : null}
       {restartRequired && !hasPendingChannelRestart ? (
         <RestartRequiredNotice message={t("settings.channels.restartRequired")}
@@ -146,8 +137,8 @@ export function ChannelsSettings({
             <ChannelCatalogRow key={feature.name} feature={feature} showBrandLogos={showBrandLogos}
               actionKey={actionKey} restartRequired={restartRequired} onAction={onAction}
               onRestart={onRestart} isRestarting={isRestarting}
-              onSelect={(connect = false) => {
-                triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              onSelect={(trigger, connect = false) => {
+                triggerRef.current = trigger;
                 beforeCloseRef.current = null;
                 setConnectRequestId(connect ? 1 : 0);
                 setSelectedChannelName(feature.name);
@@ -168,7 +159,10 @@ export function ChannelsSettings({
             event.preventDefault();
             dialogRef.current?.focus({ preventScroll: true });
           }}
-          onCloseAutoFocus={(event) => { event.preventDefault(); triggerRef.current?.focus(); }}>
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            triggerRef.current?.focus({ preventScroll: true });
+          }}>
           <DialogTitle className="sr-only">{t("settings.nav.channels")}</DialogTitle>
           <div className="max-h-[85dvh] min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="relative">
