@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
+from contextlib import contextmanager
 
 from nanobot.bus.events import InboundMessage
 
@@ -39,10 +40,11 @@ class SessionExecutionClosedError(RuntimeError):
 
 
 class SessionInboxes(Mapping[str, SessionInbox]):
-    """Own the current inbox per key and the dispatcher-wide admission boundary."""
+    """Own inbox admission and the handoff from control cleanup to a new worker."""
 
     def __init__(self) -> None:
         self._active: dict[str, SessionInbox] = {}
+        self._controls: dict[str, dict[asyncio.Event, tuple[asyncio.Task[object] | None, bool]]] = {}
         self._closed = False
 
     def __getitem__(self, key: str) -> SessionInbox:
@@ -70,3 +72,35 @@ class SessionInboxes(Mapping[str, SessionInbox]):
     def detach(self, key: str, inbox: SessionInbox) -> None:
         if self.get(key) is inbox:
             del self._active[key]
+
+    @contextmanager
+    def controlling(self, key: str, *, discard: bool = False) -> Generator[None]:
+        """Accept work into a replacement inbox without starting its worker yet."""
+        self.check_admission()
+        finished = asyncio.Event()
+        controls = self._controls.setdefault(key, {})
+        controls[finished] = (asyncio.current_task(), discard)
+        try:
+            yield
+        finally:
+            del controls[finished]
+            if not controls:
+                del self._controls[key]
+            finished.set()
+
+    def is_discarding(self, key: str) -> bool:
+        return any(discard for _, discard in self._controls.get(key, {}).values())
+
+    async def wait_for_controls(self, key: str) -> None:
+        while controls := self._controls.get(key):
+            await next(iter(controls)).wait()
+
+    async def join_controls(self) -> None:
+        """After admission closes, wait for controls still using runtime resources."""
+        current = asyncio.current_task()
+        pending = [
+            finished for controls in self._controls.values()
+            for finished, (owner, _) in controls.items() if owner is not current
+        ]
+        if pending:
+            await asyncio.gather(*(finished.wait() for finished in pending))

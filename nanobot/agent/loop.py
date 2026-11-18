@@ -410,7 +410,6 @@ class AgentLoop:
         self._running = False
         self._runtime_context_providers: list[RuntimeContextProvider] = []
         self._active_tasks: dict[str, set[asyncio.Task[Any]]] = {}
-        self._discarding_sessions: set[str] = set()
         self._background_tasks: set[asyncio.Task[Any]] = set()
         self._close_lock = asyncio.Lock()
         self._session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
@@ -904,6 +903,10 @@ class AgentLoop:
         return sum(1 for task in tasks if not task.done() and not task.cancelling() and task.cancel())
 
     async def _cancel_active_tasks(self, key: str) -> int:
+        with self._pending_queues.controlling(key):
+            return await self._cancel_session_work(key)
+
+    async def _cancel_session_work(self, key: str) -> int:
         pending = self._pending_queues.get(key)
         current = asyncio.current_task()
         tracked = self._active_tasks.get(key, set())
@@ -944,14 +947,12 @@ class AgentLoop:
 
     async def discard_session(self, key: str) -> None:
         """Stop active work for *key* and forget its cached session."""
-        with self.bus.admission.activity():
-            self._discarding_sessions.add(key)
+        with self.bus.admission.activity(), self._pending_queues.controlling(key, discard=True):
             try:
                 await self.sessions.state.discard(key)
-                await self._cancel_active_tasks(key)
+                await self._cancel_session_work(key)
             finally:
                 self.discard_session_file_state(key)
-                self._discarding_sessions.discard(key)
 
     def discard_session_file_state(self, key: str) -> None:
         """Forget ephemeral file-read state for a reset or removed session."""
@@ -1464,6 +1465,7 @@ class AgentLoop:
         pending: SessionInbox,
     ) -> None:
         try:
+            await self._pending_queues.wait_for_controls(session_key)
             while self._pending_queues.get(session_key) is pending:
                 item = pending.next_turn()
                 if item is None:
@@ -1576,7 +1578,7 @@ class AgentLoop:
                     # shutdown keeps the durable checkpoint untouched instead,
                     # allowing RecoveryCoordinator to offer Continue safely.
                     if (
-                        session_key in self._discarding_sessions
+                        self._pending_queues.is_discarding(session_key)
                         or self._preserve_inflight_turns_on_shutdown
                     ):
                         raise exc
@@ -1672,6 +1674,7 @@ class AgentLoop:
             for key, pending in pending_queues.items():
                 if self._pending_queues.get(key) is pending:
                     await self._cancel_pending_messages(key, pending, asyncio.CancelledError())
+            await self._pending_queues.join_controls()
             # A scan can schedule archival while shutdown waits for it.
             while self._background_tasks:
                 await asyncio.gather(*self._background_tasks, return_exceptions=True)
