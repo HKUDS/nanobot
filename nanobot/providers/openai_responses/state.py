@@ -55,21 +55,22 @@ def prepare_responses_input(
     When no compatible state exists, it is converted normally as a safe
     fallback.
     """
-    instructions, fallback_items = convert_messages(
-        messages,
-        preserve_reasoning=preserve_reasoning,
+    prior_items = (
+        _state_items(state)
+        if state is not None and responses_state_matches(state, provider=provider, model=model)
+        else None
     )
-    if state is None or not responses_state_matches(
-        state,
-        provider=provider,
-        model=model,
-    ):
-        return instructions, fallback_items, False
-
-    prior_items = _state_items(state)
     if prior_items is None:
-        return instructions, fallback_items, False
+        instructions, items = convert_messages(messages, preserve_reasoning=preserve_reasoning)
+        return instructions, items, False
 
+    instructions = ""
+    for message in reversed(messages):
+        if message.get("role") == "system":
+            content = message.get("content")
+            instructions = content if isinstance(content, str) else ""
+            break
+    assert state is not None
     _, delta_items = convert_messages(
         state.pending_messages,
         preserve_reasoning=preserve_reasoning,
@@ -167,7 +168,7 @@ def responses_state_items(
 
 
 def responses_state_context_tokens(state: ProviderConversationState) -> int:
-    """Return the last server-reported active context size."""
+    """Return the reported active size or a locally estimated compacted prefix size."""
     value = state.payload.get(_CONTEXT_TOKENS_KEY)
     if isinstance(value, bool) or not isinstance(value, int):
         return 0

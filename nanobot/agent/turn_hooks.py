@@ -46,6 +46,7 @@ def build_agent_turn_hook(spec: AgentTurnHookSpec) -> AgentHook:
         streaming=spec.streaming,
         session_key=spec.session_key,
         log_content=log_content,
+        workspace=spec.workspace,
     )
     if spec.ephemeral and not spec.run_extra_hooks_for_ephemeral:
         return progress_hook

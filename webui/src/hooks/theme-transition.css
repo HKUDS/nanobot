@@ -6,6 +6,14 @@
   --theme-ink-delay: 100ms;
 }
 
+/* System/storage changes and browsers without snapshots still blend paired artwork.
+   A native snapshot owns the whole frame; do not run a second fade inside it. */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-theme-snapshot]) .theme-art {
+    transition: opacity 200ms ease-in-out;
+  }
+}
+
 /* Paint owners opt in; components with local motion compose these lists instead. */
 :root[data-theme-transition] {
   --theme-paint-duration: 280ms;

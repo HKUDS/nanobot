@@ -24,6 +24,8 @@ class WebUIForkHost(Protocol):
         self,
         connection: ServerConnection,
         detail: str,
+        *,
+        request_id: str | None = None,
     ) -> None: ...
 
     async def attach_webui_fork(
@@ -32,6 +34,7 @@ class WebUIForkHost(Protocol):
         *,
         fork_id: str,
         fork_key: str,
+        request_id: str | None = None,
     ) -> None: ...
 
 
@@ -59,6 +62,8 @@ async def handle_webui_fork_chat(
     channel: WebUIForkHost,
     connection: ServerConnection,
     envelope: Mapping[str, Any],
+    *,
+    request_id: str | None = None,
 ) -> None:
     """Handle the WebUI ``fork_chat`` websocket command.
 
@@ -66,18 +71,19 @@ async def handle_webui_fork_chat(
     validate the request, clone session/transcript state, attach the new chat,
     and hydrate the client.
     """
+    request_fields = {"request_id": request_id} if request_id is not None else {}
     source_chat_id = envelope.get("source_chat_id")
     raw_index = envelope.get("before_user_index")
     if not is_valid_webui_chat_id(source_chat_id):
-        await channel.send_webui_protocol_error(connection, "invalid source_chat_id")
+        await channel.send_webui_protocol_error(connection, "invalid source_chat_id", **request_fields)
         return
     if isinstance(raw_index, bool) or not isinstance(raw_index, int) or raw_index < 0:
-        await channel.send_webui_protocol_error(connection, "invalid before_user_index")
+        await channel.send_webui_protocol_error(connection, "invalid before_user_index", **request_fields)
         return
 
     session_manager = channel.gateway.session_manager
     if session_manager is None:
-        await channel.send_webui_protocol_error(connection, "session_manager_unavailable")
+        await channel.send_webui_protocol_error(connection, "session_manager_unavailable", **request_fields)
         return
 
     try:
@@ -88,16 +94,17 @@ async def handle_webui_fork_chat(
             title=envelope.get("title") if isinstance(envelope.get("title"), str) else None,
         )
         if forked is None:
-            await channel.send_webui_protocol_error(connection, "invalid fork source or index")
+            await channel.send_webui_protocol_error(connection, "invalid fork source or index", **request_fields)
             return
         fork_id, fork_key = forked
     except Exception as exc:
         logger.warning("fork_chat failed: {}", exc)
-        await channel.send_webui_protocol_error(connection, "fork_chat_failed")
+        await channel.send_webui_protocol_error(connection, "fork_chat_failed", **request_fields)
         return
 
     await channel.attach_webui_fork(
         connection,
         fork_id=fork_id,
         fork_key=fork_key,
+        **request_fields,
     )

@@ -1,3 +1,4 @@
+import { surfaceFocusProps } from "@/lib/surface-focus";
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { Minus, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -121,8 +122,8 @@ export function ImageViewport({
   const buttonClass = "grid size-9 shrink-0 place-items-center rounded-full transition-colors hover:text-foreground disabled:opacity-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return <>
-    <div ref={viewport} data-testid={testId} tabIndex={0} role="group" aria-label={t("lightbox.gestures")}
-      className={cn("flex min-h-0 min-w-0 touch-none select-none items-center justify-center overflow-hidden focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring", view.scale > 1 ? dragging ? "cursor-grabbing" : "cursor-grab" : "cursor-zoom-in", className)}
+    <div ref={viewport} data-testid={testId} {...surfaceFocusProps} tabIndex={0} role="group" aria-label={t("lightbox.gestures")}
+      className={cn("flex min-h-0 min-w-0 touch-none select-none items-center justify-center overflow-hidden outline-none data-[keyboard-focus]:ring-1 data-[keyboard-focus]:ring-ring", view.scale > 1 ? dragging ? "cursor-grabbing" : "cursor-grab" : "cursor-zoom-in", className)}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endPointer} onPointerCancel={endPointer} onLostPointerCapture={endPointer}
       onDoubleClick={(event) => zoom(viewRef.current.scale > 1 ? 1 : 2, { x: event.clientX, y: event.clientY })}
       onKeyDown={(event) => {

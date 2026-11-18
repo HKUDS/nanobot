@@ -28,6 +28,7 @@ async def test_attach_fields_restore_session_runtime_metadata() -> None:
 
     assert await projection.attach_fields("websocket:chat-1") == {
         "model_preset": "Deep Research",
+        "model_options": {"reasoning_effort": None, "codex_fast_mode": None},
         "recovery_state": {
             "status": "recovered",
             "recovery_id": "recovery-1",
@@ -47,7 +48,10 @@ async def test_attach_fields_tolerate_missing_or_invalid_session_metadata() -> N
     log = MagicMock()
     projection = WebUISessionProjection(sessions, log=log)
 
-    assert await projection.attach_fields("websocket:invalid") == {"model_preset": None}
+    assert await projection.attach_fields("websocket:invalid") == {
+        "model_preset": None,
+        "model_options": {"reasoning_effort": None, "codex_fast_mode": None},
+    }
     log.warning.assert_called_once()
     assert await WebUISessionProjection(None).attach_fields("websocket:missing") == {}
 
@@ -101,7 +105,7 @@ async def test_hydration_events_restore_goal_and_running_turn(
     )
 
 
-async def test_hydration_events_are_quiet_without_actionable_state(
+async def test_hydration_clears_stale_goal_without_an_active_goal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sessions = MagicMock()
@@ -115,7 +119,7 @@ async def test_hydration_events_are_quiet_without_actionable_state(
     assert await WebUISessionProjection(sessions).hydration_events(
         "websocket:chat-1",
         "chat-1",
-    ) == ()
+    ) == ({"event": "goal_state", "chat_id": "chat-1", "goal_state": {"active": False}},)
 
 
 async def test_hydration_yields_during_metadata_read_and_reads_live_turn_on_loop(
@@ -157,4 +161,5 @@ async def test_hydration_yields_during_metadata_read_and_reads_live_turn_on_loop
     finally:
         release.set()
         events = await task
-    assert events[0]["status"] == "running"
+    assert events[0]["goal_state"] == {"active": False}
+    assert events[1]["status"] == "running"

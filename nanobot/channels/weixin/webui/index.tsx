@@ -25,7 +25,7 @@ export default {
     wechat: {},
   },
   presentation: {
-    logoUrl: "https://weixin.qq.com/favicon.ico",
+    logoUrl: "/brand/channels/wechat.svg",
     displayName: "WeChat",
     initials: "WX",
     color: "#07C160",

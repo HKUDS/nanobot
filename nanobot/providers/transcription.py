@@ -708,8 +708,6 @@ class XiaomiMiMoTranscriptionProvider:
 class StepFunTranscriptionProvider:
     """Voice transcription provider using StepFun ASR SSE endpoint."""
 
-    _DEFAULT_URL = "https://api.stepfun.com/v1/audio/asr/sse"
-
     def __init__(
         self,
         api_key: str | None = None,

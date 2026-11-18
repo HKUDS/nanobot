@@ -9,12 +9,53 @@ from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import AgentRunner
 from nanobot.agent.tools.apply_patch import ApplyPatchTool
 from nanobot.agent.tools.filesystem import EditFileTool, WriteFileTool
+from nanobot.bus.outbound_events import ProgressEvent, StreamDeltaEvent, StreamEndEvent
 from nanobot.config.schema import AgentDefaults
+from nanobot.events import EventSink
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import Indel
 from nanobot.utils.progress_events import output_events
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("segments, expected", [
+    (("line 61\n", "line 62"), "line 61\nline 62"),
+    (("line 61", "\n  line 62"), "line 61\n  line 62"),
+    (("cont", "inuation"), "continuation"),
+])
+async def test_length_continuation_keeps_stream_whitespace(segments, expected):
+    provider = MagicMock()
+    responses = iter(segments)
+    events = []
+
+    async def publish(event):
+        events.append(event)
+
+    async def respond(*, on_content_delta, **kwargs):
+        segment = next(responses)
+        first = segment == segments[0]
+        content = "<think>plan</think>" + segment if first else segment
+        await on_content_delta(content)
+        return LLMResponse(content=content, finish_reason="length" if first else "stop")
+
+    provider.chat_stream_with_retry = respond
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    result = await AgentRunner().run(make_run_spec(
+        provider, initial_messages=[{"role": "user", "content": "continue exactly"}],
+        tools=tools, model="test-model", max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=AgentProgressHook(EventSink(publish=publish), streaming=True),
+    ))
+
+    assert "".join(event.content for event in events if isinstance(event, StreamDeltaEvent)) == expected
+    assert result.final_content == expected
+    assert [event.merge_next for event in events if isinstance(event, StreamEndEvent)] == [True, False]
+    assert "".join(
+        event.content for event in events if isinstance(event, ProgressEvent) and event.reasoning_delta
+    ) == "plan"
 
 
 @pytest.mark.asyncio

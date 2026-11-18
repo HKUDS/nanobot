@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ThreadShell } from "@/components/thread/ThreadShell";
+import { PaneWorkbench } from "@/components/workbench/PaneWorkbench";
 import type { WorkspaceScopePayload } from "@/lib/types";
 import { StartupSkeleton } from "@/components/StartupSkeleton";
 import { settings } from "@/dev/gallery/settings";
@@ -18,11 +19,19 @@ export function NewChatSkeletonFixture() {
     {params.has("loading") ? <StartupSkeleton sidebarExpanded={sidebarExpanded} sidebarWidth={sidebarWidth} /> : <>
       <aside className="hidden shrink-0 bg-sidebar lg:block" style={{ width: sidebarExpanded ? sidebarWidth : 56 }} />
       <main className="thread-workspace relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        <ThreadShell session={null} title="nanobot" onToggleSidebar={noop} theme={dark ? "dark" : "light"}
+        {params.has("split") ? <PaneWorkbench
+          panes={[{ key: "one", title: "One" }, { key: "two", title: "Two" }, { key: "three", title: "Three" }]}
+          activePaneKey="one" layout="columns" showLayoutControl={false} onActivatePane={noop} onAddPane={noop}
+          onLayoutChange={noop} onPaneOrderChange={noop}
+          renderPane={(_pane, context) => <ThreadShell session={null} title="nanobot" onToggleSidebar={noop}
+            headerPortalTarget={context.headerPortalTarget} headerActive={context.active}
+            composerPortalTarget={context.composerPortalTarget} composerActive={context.active} settingsSnapshot={settings}
+            navigationFrame={context.navigationFrame} multiplePanes={context.multiplePanes} emptyComposerVariant="thread" />}
+        /> : <ThreadShell session={null} title="nanobot" onToggleSidebar={noop} theme={dark ? "dark" : "light"}
           hideSidebarToggleForHostChrome onTemporaryChatEnabledChange={noop} settingsSnapshot={settings}
           workspaceScope={workspaceScope}
           workspaceDefaultScope={{ project_path: "/workspace", access_mode: "full" }}
-          workspaceControls={{ can_change_project: true, can_browse_directories: true }} onWorkspaceScopeChange={setWorkspaceScope} />
+          workspaceControls={{ can_change_project: true, can_browse_directories: true }} onWorkspaceScopeChange={setWorkspaceScope} />}
       </main>
     </>}
   </div>;

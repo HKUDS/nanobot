@@ -954,6 +954,37 @@ class TestResponsesConversationState:
         }
         assert "lossy public transcript" not in str(items)
 
+    @pytest.mark.parametrize("last_system, expected", [
+        ("latest instructions", "latest instructions"),
+        ([{"type": "text", "text": "not a string"}], ""),
+    ])
+    def test_replay_uses_the_latest_system_message(self, last_system, expected):
+        state = build_responses_state(
+            provider="openai:test", model="test-model",
+            input_items=[{"role": "user", "content": "accepted"}], output_items=[],
+        ).with_pending_messages([{"role": "user", "content": "new"}])
+        messages = [
+            {"role": "system", "content": "old instructions"},
+            {"role": "user", "content": "historical"},
+            {"role": "system", "content": last_system},
+        ]
+
+        instructions, items, replayed = prepare_responses_input(
+            messages, state=state, provider="openai:test", model="test-model",
+        )
+        assert replayed is True
+        assert instructions == expected
+        assert items == [
+            {"role": "user", "content": "accepted"},
+            {"role": "user", "content": [{"type": "input_text", "text": "new"}]},
+        ]
+
+        fallback_instructions, fallback_items, replayed = prepare_responses_input(
+            messages, state=state, provider="openai:other", model="test-model",
+        )
+        assert replayed is False
+        assert (fallback_instructions, fallback_items) == convert_messages(messages)
+
     def test_replayed_and_delta_reasoning_items_keep_array_content(self):
         # Regression for PR #5214: token consolidation clears
         # ``provider_state``, so the next turn converts the full history

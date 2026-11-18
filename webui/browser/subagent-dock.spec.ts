@@ -10,6 +10,27 @@ async function settledMotion(target: Locator) {
 }
 
 for (const width of [1440, 390]) {
+  test(`opens a session without detached past results at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/browser/fixture.html?case=subagent-dock&past&saved");
+    const messages = page.getByTestId("thread-message-region");
+    const archives = messages.locator("[data-subagent-results]");
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toContainText("Running: 3");
+    await expect(archives).toHaveCount(0);
+    await page.getByRole("button", { name: "全部完成", exact: true }).click();
+    await expect(archives).toHaveCount(1);
+    await expect(archives).toContainText("Completed: 3");
+    await archives.locator("[data-subagent-results-summary]").click();
+    await expect(archives.locator("[data-subagent-id]")).toHaveCount(3);
+    await messages.evaluate(node => { node.scrollTop = 0; });
+    await settledMotion(messages);
+    await page.screenshot({ path: info.outputPath("results-with-prompt.png") });
+    await page.reload();
+    await expect(archives).toHaveCount(1);
+    await expect(archives).toContainText("Completed: 3");
+    await expect(page.getByTestId("subagent-task-dock-trigger")).toHaveCount(0);
+  });
+
   test(`keeps subtasks reachable through long replies, independent list scrolling and detail handoff at ${width}px`, async ({ page }, info) => {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
@@ -349,13 +370,12 @@ test("does not retire a completed list or detail while it is being read", async 
 for (const width of [1440, 390]) {
   test(`keeps the reading position when results are archived and the live entry retires at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto("/browser/fixture.html?case=subagent-dock");
+    await page.goto("/browser/fixture.html?case=subagent-dock&long-history");
     const body = page.getByTestId("thread-message-region");
     const paragraphs = body.getByText("主对话仍然可以正常输出和滚动。任务列表与消息区分别滚动，展开详情也不会取消正在执行的任务。", { exact: true });
-    await expect(paragraphs).toHaveCount(12);
+    await expect(paragraphs).toHaveCount(20);
     await settledMotion(body);
-    const anchor = paragraphs.nth(6);
-    await anchor.scrollIntoViewIfNeeded();
+    const anchor = paragraphs.nth(13);
     await body.hover();
     await page.mouse.wheel(0, -160);
     await expect.poll(() => body.evaluate(node => node.scrollHeight - node.clientHeight - node.scrollTop)).toBeGreaterThan(100);
@@ -682,7 +702,7 @@ for (const width of [1440, 390]) {
     await trigger.click();
     await settledMotion(page.getByTestId("subagent-task-dock"));
     const input = page.getByRole("textbox").first();
-    for (const [query, inserted] of [["/", "/history"], ["@ref", "@reference "]]) {
+    for (const [query, inserted] of [["/", "/inspect"], ["@ref", "@reference "]]) {
       await input.fill(query);
       const option = page.getByRole("option").first();
       await expect(option).toBeVisible();

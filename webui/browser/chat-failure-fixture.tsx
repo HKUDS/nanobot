@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { ModelFallbackNotice } from "@/components/thread/ModelFallbackNotice";
 import { RecoveryNotice } from "@/components/thread/RecoveryNotice";
+import { SandboxNotice } from "@/components/thread/SandboxNotice";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
@@ -24,6 +25,8 @@ export function ChatFailureFixture({ parameters }: { parameters: URLSearchParams
   const variant = parameters.get("variant") === "hero" ? "hero" : "thread";
   const dismiss = () => { setVisible(false); setAction("dismissed"); };
   const settings = () => setAction("settings");
+  const gateway = parameters.get("gateway") ?? "bwrap";
+  const backend = gateway === "bwrap" || gateway === "seatbelt" ? gateway : null;
   return <main className="min-h-screen bg-background p-4 text-foreground">
     <section className="mx-auto max-w-3xl py-8">
       <ThreadMessages messages={messages} isStreaming={false} />
@@ -33,6 +36,8 @@ export function ChatFailureFixture({ parameters }: { parameters: URLSearchParams
         ? <StreamErrorNotice error={{ kind: "model_request_failed", chatId: "fixture", errorKind: "authentication" }} onDismiss={dismiss} onOpenSettings={settings} />
         : parameters.get("notice") === "fallback"
         ? <ModelFallbackNotice model="Fallback model" onDismiss={dismiss} onOpenSettings={settings} />
+        : parameters.get("notice") === "sandbox"
+        ? <SandboxNotice issue="missing" backend={backend} onDismiss={dismiss} onOpenSettings={settings} />
         : <RecoveryNotice
           state={{ recovery_id: "fixture-recovery", status: "awaiting_user", reason: "model_request_failed", failure_error_kind: "authentication" }}
           onContinue={async () => { setVisible(false); setAction("continued"); }}

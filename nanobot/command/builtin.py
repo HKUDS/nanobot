@@ -4,19 +4,21 @@ import asyncio
 import os
 import subprocess
 import sys
-import time
 from contextlib import suppress
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, cast
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot import __version__
-from nanobot.bus.events import INBOUND_META_USER_SHELL, InboundMessage, OutboundMessage
-from nanobot.command.router import CommandContext, CommandRouter, normalize_command_text
+from nanobot.bus.events import OutboundMessage
+from nanobot.command.router import CommandContext, CommandRouter
+from nanobot.command.spec import BuiltinCommandSpec
+from nanobot.command.spec import CommandLifecycle as CommandLifecycle
+from nanobot.command.user_shell import cmd_user_shell
 from nanobot.providers.base import LLMUsage
-from nanobot.session.history_visibility import HIDDEN_HISTORY_META
 from nanobot.utils.cancellation import shield_and_drain
+from nanobot.utils.gitstore import GitStoreDirtyError
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -26,46 +28,10 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session
     from nanobot.utils.gitstore import CommitInfo
 
-# WebUI protocol contract for how a slash command participates in turn state:
-# - side_channel: returns control text without starting or ending an agent turn.
-# - finalize_active_turn: side-channel command that also closes the active UI turn.
-# - stop_active_turn: cancels the active turn; WebUI may intercept exact submits.
-# - agent_turn: always enters the normal agent path.
-# - agent_turn_with_args: no args is side-channel usage; args enter the agent path.
-CommandLifecycle = Literal[
-    "side_channel",
-    "finalize_active_turn",
-    "stop_active_turn",
-    "agent_turn",
-    "agent_turn_with_args",
-]
-
 USER_SHELL_COMMAND = "/__shell"
 
 
-@dataclass(frozen=True)
-class BuiltinCommandSpec:
-    command: str
-    title: str
-    description: str
-    icon: str
-    arg_hint: str = ""
-    lifecycle: CommandLifecycle = "side_channel"
-    accepts_args: bool = False
-
-    def as_dict(self) -> dict[str, str | bool]:
-        return {
-            "command": self.command,
-            "title": self.title,
-            "description": self.description,
-            "icon": self.icon,
-            "arg_hint": self.arg_hint,
-            "lifecycle": self.lifecycle,
-            "accepts_args": self.accepts_args,
-        }
-
-
-BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
+CORE_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
     BuiltinCommandSpec(
         "/new",
         "New chat",
@@ -104,23 +70,6 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Show or switch the active model preset.",
         "brain",
         "[preset]",
-        accepts_args=True,
-    ),
-    BuiltinCommandSpec(
-        "/history",
-        "Show conversation history",
-        "Print the last N persisted conversation messages.",
-        "history",
-        "[n]",
-        accepts_args=True,
-    ),
-    BuiltinCommandSpec(
-        "/goal",
-        "Start long-running goal",
-        "Tell the agent to treat the request as a long-running goal.",
-        "activity",
-        "<goal>",
-        lifecycle="agent_turn_with_args",
         accepts_args=True,
     ),
     BuiltinCommandSpec(
@@ -190,40 +139,11 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
 )
 
 
-def builtin_command_palette() -> list[dict[str, str | bool]]:
-    """Return structured command metadata for UI command palettes."""
-    return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
-
-
-def builtin_command_starts_agent_turn(text: str) -> bool:
-    """Return whether WebUI ingress should expect a normal agent lifecycle."""
-    normalized = normalize_command_text(text)
-    command, separator, args = normalized.partition(" ")
-    spec = next(
-        (item for item in BUILTIN_COMMAND_SPECS if item.command == command.lower()),
-        None,
-    )
-    if spec is None or (separator and not spec.accepts_args):
-        return True
-    if spec.lifecycle == "agent_turn":
-        return True
-    return spec.lifecycle == "agent_turn_with_args" and bool(args.strip())
-
-
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
     total = await loop._cancel_active_tasks(ctx.key)  # pyright: ignore[reportPrivateUsage]
-    # Also drain pending queue to prevent mid-turn injection deadlock
-    pending = loop._pending_queues.pop(ctx.key, None)  # pyright: ignore[reportPrivateUsage]
-    if pending is not None:
-        while not pending.empty():
-            try:
-                pending.get_nowait()
-                total += 1
-            except Exception:
-                break
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
@@ -455,69 +375,24 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     msg = ctx.msg
 
     async def _run_dream():
-        from nanobot.agent.memory import MemoryStore
+        from nanobot.agent.dream import run_dream
 
-        async def _silent(*_args: Any, **_kwargs: Any) -> None:
-            pass
-
-        dream_session_key = MemoryStore.dream_session_key
-        build_dream_commit_message = MemoryStore.build_dream_commit_message
-
-        store = loop.context.memory
-        content = ""
-        resp = None
-        diff_body = ""
         t0 = time.monotonic()
-        try:
-            result = store.build_dream_prompt()
-            if result is None:
-                await loop.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content=_format_dream_no_input_message(),
-                    metadata={"render_as": "text"},
-                ))
-                return
-            prompt, last_cursor = result
-            key = dream_session_key()
-            dream_runtime = loop.dream_runtime()
-            resp = await loop.process_direct(
-                prompt,
-                session_key=key,
-                ephemeral=True,
-                tools=store.build_dream_tools(),
-                on_progress=_silent,
-                runtime=dream_runtime,
-            )
-            elapsed = time.monotonic() - t0
-            # The real file delta grounds the audit record; normal completion
-            # decides whether this history batch has finished processing.
-            diff_body = store.dream_content_diff()
-            completed = MemoryStore.dream_run_completed(resp)
-            if completed:
-                store.set_last_dream_cursor(last_cursor)
-                if diff_body:
-                    content = f"Dream completed in {elapsed:.1f}s."
-                else:
-                    content = f"Dream completed in {elapsed:.1f}s; no memory changes."
-            else:
-                reason = MemoryStore.dream_incompletion_reason(resp)
-                content = (
-                    f"Dream did not complete after {elapsed:.1f}s ({reason}); "
-                    "memory cursor was not advanced."
-                )
-        except Exception as e:
-            elapsed = time.monotonic() - t0
-            content = f"Dream failed after {elapsed:.1f}s: {e}"
-        finally:
-            if store.git.is_initialized():
-                commit_msg = build_dream_commit_message("dream: manual run", diff_body)
-                sha = store.git.auto_commit(commit_msg)
-                if sha:
-                    content += f" (commit {sha})"
-            store.compact_history()
-            await loop.sessions.state.prune_dream_sessions()
+        result = await run_dream(loop, commit_prefix="dream: manual run")
+        elapsed = time.monotonic() - t0
+        if result.error:
+            content = f"Dream did not complete after {elapsed:.1f}s ({result.error})."
+        elif not result.had_input:
+            content = _format_dream_no_input_message()
+        elif result.changed:
+            content = f"Dream completed in {elapsed:.1f}s."
+        else:
+            content = f"Dream completed in {elapsed:.1f}s; no memory changes."
+        if result.commit_sha:
+            content += f" (commit {result.commit_sha})"
         await loop.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
+            metadata={"render_as": "text"} if not result.had_input else {},
         ))
 
     asyncio.create_task(_run_dream())
@@ -809,123 +684,31 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
                 "Use `/dream-restore` to list recent versions."
             )
         else:
-            changed_files = _format_changed_files(result[1])
-            new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
-            if new_sha:
+            try:
+                async with store.dream_lock:
+                    new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+            except GitStoreDirtyError as exc:
                 content = (
-                    f"Restored Dream memory to the state before `{sha}`.\n\n"
-                    f"- New safety commit: `{new_sha}`\n"
-                    f"- Restored files: {changed_files}\n\n"
-                    f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                    f"Couldn't restore Dream change `{sha}`. {exc}\n\n"
+                    "Commit or undo your changes before trying again."
                 )
             else:
-                content = (
-                    f"Couldn't restore Dream change `{sha}`.\n\n"
-                    "It may be the first saved version with no earlier state to restore."
-                )
+                if new_sha:
+                    changed_files = _format_changed_files(result[1])
+                    content = (
+                        f"Restored Dream memory to the state before `{sha}`.\n\n"
+                        f"- New safety commit: `{new_sha}`\n"
+                        f"- Restored files: {changed_files}\n\n"
+                        f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                    )
+                else:
+                    content = (
+                        f"Couldn't restore Dream change `{sha}`.\n\n"
+                        "It may be the first saved version with no earlier state to restore."
+                    )
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content=content, metadata={"render_as": "text"},
-    )
-
-
-_HISTORY_DEFAULT_COUNT = 10
-_HISTORY_MAX_COUNT = 50
-_HISTORY_MAX_CONTENT_CHARS = 200
-
-
-def _format_history_message(msg: dict[str, Any]) -> str | None:
-    role = msg.get("role")
-    if role not in ("user", "assistant"):
-        return None
-    content = msg.get("content") or ""
-    if isinstance(content, list):
-        parts = [
-            text
-            for block in cast(list[object], content)
-            if (item := cast(dict[str, Any], block) if isinstance(block, dict) else None)
-            and item.get("type") == "text"
-            and isinstance(text := item.get("text"), str)
-        ]
-        content = " ".join(parts)
-    content = str(content).strip()
-    if not content:
-        return None
-    if len(content) > _HISTORY_MAX_CONTENT_CHARS:
-        content = content[:_HISTORY_MAX_CONTENT_CHARS] + "…"
-    label = "👤 You" if role == "user" else "🤖 Bot"
-    return f"{label}: {content}"
-
-
-async def cmd_history(ctx: CommandContext) -> OutboundMessage:
-    """Show the last N messages of the current session (default 10, max 50).
-
-    Usage: /history [count]
-    """
-    count = _HISTORY_DEFAULT_COUNT
-    if ctx.args.strip():
-        try:
-            count = max(1, min(int(ctx.args.strip()), _HISTORY_MAX_COUNT))
-        except ValueError:
-            return OutboundMessage(
-                channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-                content="Usage: /history [count] — e.g. /history 5 (default: 10, max: 50)",
-                metadata=dict(ctx.msg.metadata or {}),
-            )
-
-    session = ctx.session or await ctx.loop.sessions.state.get(ctx.key)
-    history = session.get_history(max_messages=0, include_runtime_context=False)
-    visible = [_format_history_message(m) for m in history]
-    visible = [m for m in visible if m is not None]
-    recent = visible[-count:]
-
-    if not recent:
-        return OutboundMessage(
-            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-            content="No conversation history yet.",
-            metadata=dict(ctx.msg.metadata or {}),
-        )
-
-    header = f"Last {len(recent)} message(s):\n"
-    return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
-        content=header + "\n".join(recent),
-        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-    )
-
-
-async def cmd_goal(ctx: CommandContext) -> InboundMessage | OutboundMessage:
-    """Expand an explicit goal command into model-only input."""
-    goal = ctx.args.strip()
-    if not goal:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Usage: /goal <long-running task description>",
-            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-        )
-    if not ctx.is_user_turn:
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Goal mode can only be started by a user `/goal <task>` command.",
-            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
-        )
-
-    session = ctx.session or await ctx.loop.sessions.state.get(ctx.key)
-    session.add_message("user", ctx.msg.content, _command=True, media=list(ctx.msg.media))
-    await ctx.loop.sessions.state.prepare_input(session)
-    return replace(
-        ctx.msg,
-        content=goal,
-        metadata={
-            **ctx.msg.metadata,
-            "original_command": "/goal",
-            "original_content": ctx.msg.content,
-            "goal_requested": True,
-            "goal_started_at": time.time(),
-            HIDDEN_HISTORY_META: {"kind": "goal_request"},
-        },
     )
 
 
@@ -987,18 +770,11 @@ async def cmd_trigger(ctx: CommandContext) -> OutboundMessage:
     if store is None:
         store = LocalTriggerStore(loop.workspace)
 
-    from nanobot.session.keys import UNIFIED_SESSION_KEY
-
-    session_key = (
-        ctx.msg.session_key
-        if ctx.key == UNIFIED_SESSION_KEY
-        else ctx.key
-    )
     trigger = store.create(
         name=name,
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        session_key=session_key,
+        session_key=ctx.key,
         sender_id="trigger",
         origin_metadata=dict(ctx.msg.metadata or {}),
     )
@@ -1019,39 +795,15 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        content=build_help_text(),
+        content=build_help_text(ctx.loop.commands.specs),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
-async def cmd_user_shell(ctx: CommandContext) -> OutboundMessage:
-    """Run a trusted local ``!command`` through nanobot's exec policy."""
-    metadata = dict(ctx.msg.metadata or {})
-    if (
-        ctx.msg.channel != "websocket"
-        or metadata.get("webui") is not True
-        or metadata.get(INBOUND_META_USER_SHELL) is not True
-    ):
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Shell commands are only available from a trusted local client.",
-            metadata={**metadata, "render_as": "text"},
-        )
-    if not ctx.args.strip():
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content="Type a command after `!`, for example `!pwd`.",
-            metadata={**metadata, "render_as": "text"},
-        )
-    return await ctx.loop.execute_user_shell_command(ctx)
-
-
-def build_help_text() -> str:
-    """Build canonical help text shared across channels."""
+def build_help_text(specs: tuple[BuiltinCommandSpec, ...] = CORE_COMMAND_SPECS) -> str:
+    """Build help text for the commands registered in one application."""
     lines = ["🐈 nanobot commands:"]
-    for spec in BUILTIN_COMMAND_SPECS:
+    for spec in specs:
         command = spec.command
         if spec.arg_hint:
             command = f"{command} {spec.arg_hint}"
@@ -1059,8 +811,10 @@ def build_help_text() -> str:
     return "\n".join(lines)
 
 
-def register_builtin_commands(router: CommandRouter) -> None:
-    """Register the default set of slash commands."""
+def register_core_commands(router: CommandRouter) -> None:
+    """Register slash commands owned by the core runtime."""
+    for spec in CORE_COMMAND_SPECS:
+        router.add_spec(spec)
     router.priority("/stop", cmd_stop)
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
@@ -1069,10 +823,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)
-    router.exact("/history", cmd_history)
-    router.prefix("/history ", cmd_history)
-    router.exact("/goal", cmd_goal)
-    router.prefix("/goal ", cmd_goal)
     router.exact("/trigger", cmd_trigger)
     router.prefix("/trigger ", cmd_trigger)
     router.exact("/dream", cmd_dream)

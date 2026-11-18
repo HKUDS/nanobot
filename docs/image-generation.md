@@ -222,7 +222,11 @@ Configure:
 
 ### MiniMax
 
-MiniMax `image-01` supports text-to-image and reference-image (subject reference) edits. Supported aspect ratios are `1:1`, `16:9`, `4:3`, `3:2`, `2:3`, `3:4`, `9:16`, and `21:9`.
+MiniMax supports text-to-image and reference-image edits with `MiniMax-H3-Image` and `MiniMax-H3-Image-Highspeed`. Set the image size to `1K`, `2K`, `4K`, or an explicit size such as `2720x1536`. Explicit sizes take precedence over the aspect ratio. H3 accepts up to 16 reference images. See [MiniMax's image generation documentation](https://platform.minimax.io/docs/guides/image-generation) for size limits and pricing.
+
+A timed-out or interrupted H3 request may still complete and be billed. Retrying starts another billable generation.
+
+The legacy `image-01` model remains available, with aspect ratios `1:1`, `16:9`, `4:3`, `3:2`, `2:3`, `3:4`, `9:16`, and `21:9`.
 
 <details>
 <summary>Manual configuration</summary>
@@ -238,7 +242,7 @@ MiniMax `image-01` supports text-to-image and reference-image (subject reference
     "imageGeneration": {
       "enabled": true,
       "provider": "minimax",
-      "model": "image-01",
+      "model": "MiniMax-H3-Image",
       "defaultAspectRatio": "1:1"
     }
   }

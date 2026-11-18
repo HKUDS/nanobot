@@ -2,7 +2,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, cast, overload
+from typing import Any, TypeVar, cast, overload
 
 from pydantic import BaseModel, ValidationError
 from pydantic_settings import SettingsError
@@ -180,14 +180,15 @@ def merge_missing_defaults(existing: object, defaults: object) -> object:
 
 
 _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_ConfigValue = TypeVar("_ConfigValue")
 
 
 def resolve_config_env_vars(
-    config: Config,
+    config: _ConfigValue,
     *,
     config_path: Path | None = None,
-) -> Config:
-    """Return *config* with ``${VAR}`` env-var references resolved.
+) -> _ConfigValue:
+    """Return a config or config subtree with ``${VAR}`` references resolved.
 
     Walks in place so fields declared with ``exclude=True`` survive;
     returns the same instance when no references are present.

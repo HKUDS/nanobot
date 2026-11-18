@@ -127,6 +127,23 @@ class TestLoadBootstrapFiles:
         assert "project soul collision" not in result
         assert "project user collision" not in result
 
+    def test_resident_memory_keeps_navigation_without_loading_wiki_pages(self, tmp_path):
+        builder = _builder(tmp_path)
+        builder.memory.write_soul("Always verify corrections.")
+        builder.memory.write_user("Prefer concise Chinese replies.")
+        builder.memory.write_memory("Deployment details: [Wiki](wiki/index.md).")
+        builder.memory.wiki_dir.mkdir()
+        (builder.memory.wiki_dir / "index.md").write_text(
+            "Detailed deployment uses region-west.\n", encoding="utf-8",
+        )
+
+        prompt = builder.build_system_prompt()
+
+        assert "Always verify corrections." in prompt
+        assert "Prefer concise Chinese replies." in prompt
+        assert "Deployment details: [Wiki](wiki/index.md)." in prompt
+        assert "Detailed deployment uses region-west." not in prompt
+
     def test_selected_project_without_agents_does_not_fall_back(self, tmp_path):
         agent_home = tmp_path / "agent-home"
         project = tmp_path / "project"
@@ -268,14 +285,11 @@ class TestBuildSystemPrompt:
         result = builder.build_system_prompt()
 
         assert "## Runtime\n" in result
-        assert "Agent profile: SOUL.md and USER.md" in result
-        assert "History log: memory/history.jsonl" in result
 
     def test_default_identity_uses_relative_agent_paths(self, tmp_path):
         result = ContextBuilder(tmp_path)._get_identity()
 
-        assert "Agent profile: SOUL.md and USER.md" in result
-        assert "History log: memory/history.jsonl" in result
+        assert "`memory/wiki/index.md` in the agent workspace" in result
         assert "Custom skills: skills/{skill-name}/SKILL.md" in result
 
     def test_selected_project_identity_keeps_agent_data_in_agent_workspace(self, tmp_path):
@@ -287,7 +301,7 @@ class TestBuildSystemPrompt:
         result = ContextBuilder(agent_home)._get_identity(workspace=project)
 
         assert f"agent workspace is at: {agent_home.resolve()}" in result
-        assert f"{agent_home.resolve()}/SOUL.md" in result
+        assert "`memory/wiki/index.md` in the agent workspace" in result
         assert f"Custom skills: {agent_home.resolve()}/skills/" in result
 
     def test_includes_bootstrap_files(self, tmp_path):

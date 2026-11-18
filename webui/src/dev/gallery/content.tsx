@@ -65,7 +65,7 @@ function SessionPreview() {
   }}>
     <StatePicker label={t("previews.session.state")} value={mode} options={["ready", "loading", "error", "empty", "action_error"]}
       onChange={(next) => { setMode(next); setJobs(exampleJobs(now)); setAction(null); }} />
-    <SessionInfoPopoverView title="组件设计" jobs={mode === "ready" || mode === "action_error" ? displayJobs(jobs) : []} loading={mode === "loading"} loadFailed={mode === "error"} now={now}
+    <SessionInfoPopoverView jobs={mode === "ready" || mode === "action_error" ? displayJobs(jobs) : []} loading={mode === "loading"} loadFailed={mode === "error"} now={now}
       onOpenCalendar={() => setAction({ key: "previews.session.openedCalendar" })}
       onAction={(operation, job) => {
         if (mode === "action_error") return Promise.reject(new Error(t("previews.session.actionError")));
@@ -106,7 +106,7 @@ export const contentExamples: ComponentExample[] = [
     code: '<FilePreviewPanelView path={path} state={previewState} imageOpen={imageOpen} onImageOpenChange={setImageOpen} onImageError={reportImageError} />' },
   { title: "previews.session.title", files: ["webui/src/components/thread/SessionInfoPopoverView.tsx"], Preview: SessionPreview,
     description: "previews.session.description", options: "previews.session.options",
-    code: '<SessionInfoPopoverView title={title} jobs={jobs} loading={loading} loadFailed={failed} now={now} onAction={act} onEdit={edit} onOpenCalendar={openCalendar} />' },
+    code: '<SessionInfoPopoverView jobs={jobs} loading={loading} loadFailed={failed} now={now} onAction={act} onEdit={edit} onOpenCalendar={openCalendar} />' },
   { title: "previews.subagent.title", files: ["webui/src/components/thread/SubagentThreadView.tsx"], Preview: SubagentPreview,
     description: "previews.subagent.description", options: "previews.subagent.options",
     code: '<SubagentThreadView messages={messages} loading={loading} error={error} isStreaming={running} runStartedAt={startedAt} onRetry={retry} />' },

@@ -7,6 +7,7 @@ import pytest
 
 from agent.runner_helpers import make_run_spec
 from nanobot.config.schema import AgentDefaults
+from nanobot.events import EventSink, ModelRequestEvent
 from nanobot.providers.base import LLMProvider, LLMResponse, LLMUsage, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
@@ -147,13 +148,14 @@ async def test_runner_measures_stream_generation_without_time_to_first_token():
     from nanobot.agent.runner import AgentRunner
 
     provider = MagicMock(spec=LLMProvider)
+    publish = AsyncMock()
 
     async def chat_stream_with_retry(*, on_content_delta, **kwargs):
         await on_content_delta("he")
         await on_content_delta("llo")
         return LLMResponse(
             content="hello",
-            usage=LLMUsage.reported(input_tokens=100, output_tokens=12),
+            usage=LLMUsage.reported(input_tokens=100, output_tokens=12, cache_read_tokens=4),
         )
 
     provider.chat_stream_with_retry = chat_stream_with_retry
@@ -177,6 +179,7 @@ async def test_runner_measures_stream_generation_without_time_to_first_token():
             max_iterations=1,
             max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             hook=StreamingHook(),
+            events=EventSink(publish),
         ))
 
     assert result.usage is not None
@@ -184,6 +187,11 @@ async def test_runner_measures_stream_generation_without_time_to_first_token():
     assert result.usage.measured_output_tokens == 12
     assert result.usage.ttft_ms == 200
     assert result.usage.timed_requests == 1
+    assert result.usage.cache_read_tokens == 4
+    [completed] = [call.args[0] for call in publish.await_args_list
+                   if isinstance(call.args[0], ModelRequestEvent) and call.args[0].phase == "completed"]
+    assert completed.usage == result.usage
+    assert completed.round_usages == tuple(result.round_usages)
 
 
 @pytest.mark.asyncio

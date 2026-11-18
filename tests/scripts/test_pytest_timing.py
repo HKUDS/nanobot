@@ -24,6 +24,7 @@ def test_timing_report_preserves_phases_and_failed_results(pytester: pytest.Pyte
     cases = {key.rsplit("::", 1)[-1]: value for key, value in report["cases"].items()}
     assert cases["test_pass"]["phases"]["call"]["outcome"] == "passed"
     assert cases["test_fail"]["phases"]["call"]["outcome"] == "failed"
+    assert "AssertionError" in cases["test_fail"]["phases"]["call"]["failure"]
     assert cases["test_skip"]["phases"]["setup"]["outcome"] == "skipped"
     assert sum(phase["seconds"] for case in cases.values()
                for phase in case["phases"].values()) > 0

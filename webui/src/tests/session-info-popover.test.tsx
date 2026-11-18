@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -58,7 +58,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -93,7 +92,7 @@ describe("SessionInfoPopover", () => {
     let finish!: (response: Response) => void;
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     const user = userEvent.setup();
-    const view = render(<SessionInfoPopover client={client} sessionKey="websocket:chat-1" token="tok" title="Release work" />);
+    const view = render(<SessionInfoPopover client={client} sessionKey="websocket:chat-1" token="tok" />);
     await user.click(screen.getByRole("button", { name: "Session details" }));
     expect(screen.getByRole("status", { name: "Loading automations..." })).toHaveAttribute("aria-busy", "true");
     await act(async () => finish(automationsResponse([automationJob()])));
@@ -107,7 +106,7 @@ describe("SessionInfoPopover", () => {
     await act(async () => fail(new Error("Refresh failed")));
     expect(screen.getByRole("button", { name: /Morning check/ })).toBeVisible();
     vi.mocked(fetch).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    view.rerender(<SessionInfoPopover client={client} sessionKey="websocket:chat-2" token="tok" title="Other project" />);
+    view.rerender(<SessionInfoPopover client={client} sessionKey="websocket:chat-2" token="tok" />);
     expect(screen.queryByRole("button", { name: /Morning check/ })).not.toBeInTheDocument();
     expect(screen.getByRole("status", { name: "Loading automations..." })).toBeVisible();
     await act(async () => finish(automationsResponse([])));
@@ -128,7 +127,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -158,14 +156,15 @@ describe("SessionInfoPopover", () => {
     expect(within(detail).getByRole("button", { name: "More actions" })).toHaveFocus();
   });
 
-  it("returns from the shared editor to the same task detail", async () => {
+  it("blocks Escape and outside clicks while saving, then keeps the error and draft in the editor", async () => {
+    let failSave!: (error: Error) => void;
+    requestMutation.mockImplementationOnce(() => new Promise((_, reject) => { failSave = reject; }));
     const user = userEvent.setup();
     render(
       <SessionInfoPopover
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -174,10 +173,52 @@ describe("SessionInfoPopover", () => {
     await user.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("dialog", { name: "Edit task" });
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    const name = within(editor).getByRole("textbox", { name: "Name" });
+    await user.clear(name);
+    await user.type(name, "Edited task name");
+    const save = within(editor).getByRole("button", { name: "Save" });
+    await user.click(save);
+    expect(save).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(editor).toBeVisible();
+    fireEvent.pointerDown(editor.closest("[data-dialog-backdrop]")!);
+    expect(editor).toBeVisible();
+
+    await act(async () => failSave(new Error("Could not save schedule")));
+    expect(await within(editor).findByRole("alert")).toHaveTextContent("Could not save schedule");
+    expect(save).toBeEnabled();
+    expect(name).toHaveValue("Edited task name");
     await user.click(within(editor).getByRole("button", { name: "Cancel" }));
 
     expect(await screen.findByRole("dialog", { name: "Morning check" })).toBeVisible();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it("keeps the delete confirmation open until the request settles so failures can be retried", async () => {
+    let failDelete!: (error: Error) => void;
+    requestMutation.mockImplementationOnce(() => new Promise((_, reject) => { failDelete = reject; }));
+    const user = userEvent.setup();
+    render(<SessionInfoPopover client={client} sessionKey="websocket:chat-1" token="tok" />);
+    await user.click(screen.getByRole("button", { name: "Session details" }));
+    await user.click(await screen.findByRole("button", { name: /Morning check/ }));
+    const detail = await screen.findByRole("dialog", { name: "Morning check" });
+    await user.click(within(detail).getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const confirmation = await screen.findByRole("dialog", { name: "Delete automation" });
+    const remove = within(confirmation).getByRole("button", { name: "Delete" });
+    await user.click(remove);
+    expect(remove).toBeDisabled();
+    fireEvent.pointerDown(confirmation.closest("[data-dialog-backdrop]")!);
+    expect(confirmation).toBeVisible();
+    await user.keyboard("{Escape}");
+    expect(confirmation).toBeVisible();
+
+    await act(async () => failDelete(new Error("Could not delete schedule")));
+    expect(within(confirmation).getByRole("alert")).toHaveTextContent("Could not delete schedule");
+    expect(remove).toBeEnabled();
+    requestMutation.mockResolvedValueOnce({ jobs: [] });
+    await user.click(remove);
+    await waitFor(() => expect(confirmation).not.toBeInTheDocument());
   });
 
   it("localizes the panel chrome in Simplified Chinese", async () => {
@@ -189,14 +230,12 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="@hyperframes 使用指南"
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "会话详情" }));
 
-    expect(await screen.findByText("会话")).toBeInTheDocument();
-    expect(screen.getByText("自动任务")).toBeInTheDocument();
+    expect(await screen.findByText("自动任务")).toBeInTheDocument();
     expect(screen.getByText("Morning check")).toBeInTheDocument();
     expect(screen.getByText(/下次/)).toBeInTheDocument();
     expect(screen.queryByText("Session")).not.toBeInTheDocument();
@@ -217,7 +256,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -255,7 +293,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -284,7 +321,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 
@@ -314,7 +350,6 @@ describe("SessionInfoPopover", () => {
         client={client}
         sessionKey="websocket:chat-1"
         token="tok"
-        title="Release work"
       />,
     );
 

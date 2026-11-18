@@ -1,0 +1,172 @@
+name: Publish approved release to PyPI
+
+on:
+  workflow_run:
+    workflows: [Validate published release for PyPI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published, signed stable release version (without v)
+        required: true
+        type: string
+      destination:
+        description: Package index
+        required: true
+        type: choice
+        default: testpypi
+        options:
+          - testpypi
+          - pypi
+
+permissions: {}
+
+concurrency:
+  group: publish-pypi-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || format('v{0}', inputs.version) }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.repository == 'HKUDS/nanobot' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'release' &&
+      (github.event.workflow_run.path == '.github/workflows/trigger-pypi.yml' ||
+      startsWith(github.event.workflow_run.path, '.github/workflows/trigger-pypi.yml@'))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.staged.outputs.artifact-id }}
+      upload_required: ${{ steps.reconcile.outputs.upload_required }}
+      release_actor: ${{ steps.release.outputs.release_actor }}
+      release_version: ${{ steps.release.outputs.release_version }}
+      destination: ${{ steps.release.outputs.destination }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - name: Install locked verification dependencies
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r .github/release-signing-requirements.txt
+      - name: Download and verify the approved public release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_INPUT: ${{ inputs.version }}
+          DESTINATION_INPUT: ${{ inputs.destination }}
+          UPSTREAM_TAG: ${{ github.event.workflow_run.head_branch }}
+          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          UPSTREAM_ACTOR: ${{ github.event.workflow_run.actor.login }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            [[ "$UPSTREAM_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid release tag.' >&2; exit 1; }
+            VERSION="${UPSTREAM_TAG#v}"
+            destination=pypi
+            release_actor="$UPSTREAM_ACTOR"
+          else
+            VERSION="$VERSION_INPUT"
+            destination="$DESTINATION_INPUT"
+            release_actor="$GITHUB_ACTOR"
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a final X.Y.Z version.' >&2; exit 1; }
+          [[ "$destination" == pypi || "$destination" == testpypi ]] || { echo 'Invalid destination.' >&2; exit 1; }
+          [[ "$release_actor" =~ ^[A-Za-z0-9-]+$ ]] || { echo 'A human release actor is required.' >&2; exit 1; }
+          tag="v$VERSION"
+          gh release view "$tag" --repo HKUDS/nanobot --json tagName,isDraft,isPrerelease \
+            | jq -e --arg tag "$tag" '.tagName == $tag and .isDraft == false and .isPrerelease == false' >/dev/null
+          git fetch --no-tags origin "refs/tags/$tag:refs/tags/$tag"
+          commit="$(git rev-parse "refs/tags/$tag^{commit}")"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
+            [[ "$UPSTREAM_SHA" == "$commit" ]] || { echo 'Release tag no longer matches the trigger.' >&2; exit 1; }
+          fi
+          echo "release_actor=$release_actor" >> "$GITHUB_OUTPUT"
+          echo "release_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "destination=$destination" >> "$GITHUB_OUTPUT"
+          gh release download "$tag" --repo HKUDS/nanobot --dir "$RUNNER_TEMP/release" \
+            --pattern 'release-manifest.json' --pattern 'release-manifest.json.sigstore.json' \
+            --pattern 'nanobot_ai-*.whl' --pattern 'nanobot_ai-*.tar.gz' \
+            --pattern 'nanobot-tui-*.zip' --pattern 'nanobot-tui-*.zip.sha256'
+          python -m scripts.prepare_pypi_release --release-dir "$RUNNER_TEMP/release" \
+            --output "$RUNNER_TEMP/pypi" --version "$VERSION" --tag-commit "$commit"
+      - name: Check for an interrupted upload
+        id: reconcile
+        env:
+          VERSION: ${{ steps.release.outputs.release_version }}
+          DESTINATION: ${{ steps.release.outputs.destination }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m scripts.reconcile_pypi_release --directory "$RUNNER_TEMP/pypi" \
+            --version "$VERSION" --destination "$DESTINATION"
+          if [[ -n "$(find "$RUNNER_TEMP/pypi" -type f -print -quit)" ]]; then
+            echo 'upload_required=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'upload_required=false' >> "$GITHUB_OUTPUT"
+            echo 'The complete release is already present with matching hashes.'
+          fi
+      - name: Transfer verified PyPI files
+        if: steps.reconcile.outputs.upload_required == 'true'
+        id: staged
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-pypi-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pypi/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: verify
+    if: needs.verify.outputs.upload_required == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.verify.outputs.destination }}
+    timeout-minutes: 20
+    permissions:
+      id-token: write
+      actions: read
+    steps:
+      - name: Require a fresh run and verify PyPI approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESTINATION: ${{ needs.verify.outputs.destination }}
+          RELEASE_ACTOR: ${{ needs.verify.outputs.release_actor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # GitHub can reuse job outputs and the approval API is scoped to the run, not the attempt.
+          [[ "$GITHUB_RUN_ATTEMPT" == 1 ]] || { echo 'To retry, start a new workflow run for the same version and destination.' >&2; exit 1; }
+          if [[ "$DESTINATION" == testpypi ]]; then
+            exit 0
+          fi
+          [[ "$DESTINATION" == pypi ]]
+          gh api "repos/HKUDS/nanobot/actions/runs/$GITHUB_RUN_ID/approvals" | jq -e \
+            --arg actor "$RELEASE_ACTOR" \
+            'any(.[]; .state == "approved" and ([.environments[]?.name] | index("pypi")) != null and (.user.login | ascii_downcase) != ($actor | ascii_downcase))' >/dev/null \
+            || { echo 'A different maintainer must approve this release in the pypi environment.' >&2; exit 1; }
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          path: dist
+          merge-multiple: true
+      - name: Publish with PyPI Trusted Publishing
+        if: needs.verify.outputs.destination == 'pypi'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
+      - name: Publish to TestPyPI
+        if: needs.verify.outputs.destination == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+      - name: Show safe retry instructions
+        if: failure()
+        shell: bash
+        run: |
+          message='To resume, use "Run workflow" on main with the same version and destination. Do not rerun the old run. Preserve the original approved release files.'
+          echo "::notice title=Retry the complete publication workflow::$message"
+          printf '### Resume publication\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"

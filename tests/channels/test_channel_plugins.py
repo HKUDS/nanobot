@@ -2614,7 +2614,7 @@ def test_optional_dependency_metadata_for_enable():
     assert "boto3>=1.43.0" not in data["project"]["dependencies"]
     assert deps["bedrock"] == ["boto3>=1.43.0", "botocore>=1.43.0,<2.0.0"]
     assert "aiohttp>=3.14.3,<4.0.0" in required
-    assert deps["api"] == ["aiohttp>=3.9.0,<4.0.0"]
+    assert deps["api"] == []  # Older updaters preserve this recorded extra.
     for dep_name in (
         "dingtalk-stream",
         "lark-oapi",
@@ -2701,7 +2701,7 @@ def test_optional_dependency_metadata_for_enable():
         "wecom": ("wecom-aibot-sdk-python>=0.1.7,<0.2.0",),
         "weixin": ("qrcode[pil]>=8.0", "pycryptodome>=3.20.0"),
         "whatsapp": (
-            "neonize>=0.4.3.post0,<0.5.0",
+            "neonize>=0.5.2,<1.0.0",
             "python-magic>=0.4.27; sys_platform != 'win32'",
             "python-magic-bin>=0.4.14; sys_platform == 'win32'",
             "segno>=1.6.1,<2.0.0",
@@ -2713,6 +2713,7 @@ def test_optional_dependency_metadata_for_enable():
         assert plugin.dependencies == expected
 
     visible = optional_features.optional_dependency_groups()
+    assert "api" not in visible
     assert "documents" not in visible
     assert "pdf" not in visible
 
@@ -2723,7 +2724,7 @@ def test_optional_dependency_groups_falls_back_to_package_metadata(monkeypatch):
     class _Metadata:
         def get_all(self, key: str):
             assert key == "Provides-Extra"
-            return ["bedrock", "dev"]
+            return ["api", "bedrock", "dev"]
 
     monkeypatch.setattr(optional_features, "load_pyproject", lambda _path: {})
     monkeypatch.setattr("importlib.metadata.metadata", lambda _name: _Metadata())
@@ -3755,7 +3756,9 @@ async def test_restart_notice_retries_until_running_channel_accepts_delivery():
 
     notice = RestartNotice(channel="discord", chat_id="123", started_at_raw="")
     with patch("nanobot.channels.manager._SEND_RETRY_DELAYS", (0,)):
-        await mgr._send_restart_notice_when_started(notice, timeout_s=0.1, poll_s=0.01)
+        # Test delivery retries, not a 100 ms scheduling deadline under CI load.
+        async with asyncio.timeout(3):
+            await mgr._send_restart_notice_when_started(notice)
 
     assert channel.attempts == 2
     assert channel.sent is not None

@@ -73,10 +73,11 @@ async def test_handle_message_dm_sends_pairing_code(monkeypatch) -> None:
         "nanobot.channels.base.generate_code", lambda _ch, sid, **_kwargs: "ABCD-EFGH"
     )
 
-    await channel._handle_message(
+    delivered = await channel._handle_message(
         sender_id="stranger", chat_id="chat1", content="hello", is_dm=True
     )
 
+    assert delivered is False
     assert len(channel._sent) == 1
     msg = channel._sent[0]
     assert "ABCD-EFGH" in msg.content
@@ -185,3 +186,20 @@ async def test_dm_publishes_pairing_changes_without_a_file_watcher(monkeypatch, 
     assert observed and observed[-1][0]["delivery_status"] == "sent"
     assert observed[-1][0]["code"] in channel._sent[0].content
     assert not store.is_approved("dummy", "alice")
+
+
+@pytest.mark.asyncio
+async def test_handle_message_reports_bus_acceptance_and_denial(monkeypatch) -> None:
+    bus = MessageBus()
+    channel = _DummyChannel({"allowFrom": ["alice"]}, bus)
+    monkeypatch.setattr("nanobot.channels.base.is_approved", lambda *_: False)
+    assert await channel._handle_message("alice", "chat", "hello") is True
+    assert await channel._handle_message("stranger", "chat", "hello") is False
+    assert bus.inbound_size == 1
+
+    async def fail(_message):
+        raise RuntimeError("bus unavailable")
+
+    monkeypatch.setattr(bus, "publish_inbound", fail)
+    with pytest.raises(RuntimeError, match="bus unavailable"):
+        await channel._handle_message("alice", "chat", "hello")

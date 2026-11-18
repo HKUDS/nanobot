@@ -198,7 +198,7 @@ Reasoning frames only flow when the channel's `showReasoning` is `true` (default
 
 The event contains no pairing codes or account data. Read the current state from `GET /api/settings/pairing`; notifications are not replayed, so read a fresh snapshot on initial connection and reconnect. Existing polling continues to discover changes made by another process and expired requests. Approval, denial and authentication checks are unchanged.
 
-**`attached`** — confirmation for `new_chat` / `attach` inbound envelopes (see [Multi-chat multiplexing](#multi-chat-multiplexing)):
+**`attached`** — confirmation for `new_chat`, `new_temporary_chat`, `fork_chat`, or `attach` inbound envelopes (see [Multi-chat multiplexing](#multi-chat-multiplexing)):
 
 ```json
 {"event": "attached", "chat_id": "uuid-v4"}
@@ -228,11 +228,23 @@ Recognized fields: `content`, `text`, `message` (checked in that order). Invalid
 
 | `type` | Fields | Effect |
 |--------|--------|--------|
-| `new_chat` | — | Server mints a new `chat_id`, subscribes this connection, replies with `attached`. |
+| `new_chat` | Optional `workspace_scope`, `request_id` | Server mints a new `chat_id`, subscribes this connection, replies with `attached`. |
+| `new_temporary_chat` | Optional `request_id` | Authenticated WebUI only; creates a connection-owned temporary chat and replies with `attached` and `temporary: true`. |
+| `fork_chat` | `source_chat_id`, `before_user_index`; optional `title`, `request_id` | Creates and attaches a non-destructive fork before the selected user message. |
 | `attach` | `chat_id` | Subscribe to an existing `chat_id` (e.g. after a page reload). Replies with `attached`. |
 | `message` | `chat_id`, `content` | Send `content` on `chat_id`. First use auto-attaches; no explicit `attach` needed. |
 
 See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
+
+### Chat-request correlation
+
+WebUI sends a `request_id` with every `new_chat`, `new_temporary_chat`, and `fork_chat`; the gateway echoes it on `attached` and expected `error` responses. IDs must match `[A-Za-z0-9._:-]{1,128}`; malformed IDs are rejected before creation. The shared WebSocket API also accepts requests without IDs for callers such as the TUI; those responses have no `request_id`.
+
+Clients must correlate tagged responses by ID, not by arrival order or the temporary-chat flag. Ordinary `attach` replies cannot complete a creation request. IDs provide correlation, not deduplication: a sent request that times out has an unknown outcome and must not be automatically replayed. Expired unsent requests must be removed before reconnecting.
+
+A timeout ends the client's pending request, allowing a new user-initiated request with a different ID. A late response cannot complete that newer request. Late temporary-chat creations are discarded rather than selected.
+
+Support and testing cover same-version WebUI/gateway combinations. Cross-version combinations may work, but a passing protocol check does not guarantee all features work; align versions first when troubleshooting. See [Versions and updating the right machine](guides/remote-instances.md#versions-and-updating-the-right-machine).
 
 ### Binary attachments (WebUI and TUI)
 

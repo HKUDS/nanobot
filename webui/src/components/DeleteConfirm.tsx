@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { TOAST_ACTION_MS } from "@/components/ui/toast";
 import type { TFunction } from "i18next";
 import { Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -65,11 +66,7 @@ export function DeleteConfirm({
                     defaultValue: "Linked automations will also be deleted.",
                   })
                 : t("deleteConfirm.automationsDescription")
-              : multiple
-                ? t("deleteConfirm.descriptionMany", {
-                    defaultValue: "This action cannot be undone.",
-                  })
-                : t("deleteConfirm.description")}
+              : t("toast.deleteWindow", { seconds: TOAST_ACTION_MS / 1_000 })}
           </AlertDialogDescription>
           {hasAutomations ? (
             <div className="mt-4 max-h-40 w-full overflow-y-auto rounded-2xl bg-muted/55 px-3 py-2 text-left">

@@ -54,6 +54,11 @@
     "model": "Modelo de exemplo",
     "disabledModel": "Seletor de modelo desativado"
   },
+  "codexSpeed": {
+    "title": "Velocidade do Codex",
+    "description": "Escolha Fast ou Ultrarrápido. Selecione o modo ativo novamente para desativá-lo.",
+    "options": "Mostra Ultrarrápido nos modelos compatíveis."
+  },
   "segmented": {
     "title": "Escolhas segmentadas",
     "description": "Um pequeno conjunto de escolhas sempre visíveis.",
@@ -100,6 +105,15 @@
     "confirm": "Confirmar remoção",
     "removed": "Exemplo removido.",
     "available": "Exemplo disponível."
+  },
+  "toast": {
+    "title": "Avisos temporários",
+    "description": "Avisos breves de erros, sucessos e ações que podem ser desfeitas.",
+    "options": "Monte ToastProvider e use useToast para exibir um aviso. Uma ação opcional dá mais tempo para responder.",
+    "showError": "Mostrar erro",
+    "error": "Não foi possível salvar o exemplo.",
+    "pending": "O exemplo será removido.",
+    "restored": "Exemplo restaurado."
   },
   "sheet": {
     "title": "Painéis laterais",
@@ -504,5 +518,12 @@
     "view": "Ver convite",
     "dismissed": "Nunca mais lembrar selecionado na prévia",
     "starred": "Link do GitHub selecionado na prévia"
+  },
+  "sidebarPanel": {
+    "title": "Painel lateral",
+    "toggle": "Alternar painel",
+    "content": "Os detalhes permanecem no painel atual.",
+    "description": "Um painel lateral não modal com uma transição de abertura compartilhada.",
+    "options": "width, header, isClosing, floating, contentClassName"
   }
 }

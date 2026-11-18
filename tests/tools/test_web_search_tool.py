@@ -71,7 +71,8 @@ def test_search_concurrency_without_api_key(
 
 
 @pytest.mark.asyncio
-async def test_brave_search(monkeypatch):
+@pytest.mark.parametrize("count", [1, 1.0])
+async def test_brave_search(monkeypatch, count):
     async def mock_get(self, url, **kw):
         assert "brave" in url
         assert kw["headers"]["X-Subscription-Token"] == "brave-key"
@@ -82,7 +83,7 @@ async def test_brave_search(monkeypatch):
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
     tool = _tool(provider="brave", api_key="brave-key", user_agent="nanobot-search-test")
-    result = await tool.execute(query="nanobot", count=1)
+    result = await tool.execute(query="nanobot", count=count)
     assert "NanoBot" in result
     assert "https://example.com" in result
 

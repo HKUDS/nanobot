@@ -16,6 +16,7 @@ from nanobot.agent.tools.rg import RgTool
 from nanobot.agent.tools.search import FindFilesTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool, _PreparedCommand
 from nanobot.config.schema import ToolsConfig
+from nanobot.execution import processes
 
 
 @pytest.mark.parametrize("installed", [True, False])
@@ -187,16 +188,16 @@ async def test_direct_process_timeout(tmp_path):
 
 async def test_direct_process_cancellation_reaps_child(tmp_path, monkeypatch):
     spawned = asyncio.Event()
-    processes = []
-    original_spawn = ExecTool._spawn
+    children = []
+    original_spawn = processes.spawn_process_tree
 
     async def capture(*args, **kwargs):
-        process = await original_spawn(*args, **kwargs)
-        processes.append(process)
+        tree = await original_spawn(*args, **kwargs)
+        children.append(tree.process)
         spawned.set()
-        return process
+        return tree
 
-    monkeypatch.setattr(ExecTool, "_spawn", staticmethod(capture))
+    monkeypatch.setattr(processes, "spawn_process_tree", capture)
     task = asyncio.create_task(ExecTool(working_dir=str(tmp_path)).execute(
         command=[sys.executable, "-c", "import time; time.sleep(20)"],
     ))
@@ -204,7 +205,7 @@ async def test_direct_process_cancellation_reaps_child(tmp_path, monkeypatch):
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert isinstance(processes[0].returncode, int)
+    assert isinstance(children[0].returncode, int)
 
 
 @pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep not installed")
@@ -223,12 +224,14 @@ async def test_direct_search_uses_configured_path(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("backend", ["bwrap", "seatbelt"])
 def test_direct_search_preserves_sandbox_and_arguments(tmp_path, monkeypatch, backend):
+    trusted_bin = tmp_path / "trusted-bin"
     monkeypatch.setattr("nanobot.agent.tools.shell._IS_WINDOWS", False)
+    monkeypatch.setattr("nanobot.agent.tools.shell.shutil.which", lambda name, **_kwargs: str(trusted_bin / os.path.basename(name)))
     args = ["rg", "-F", "hello | $HOME; 'world'", "."]
     prepared = RgTool(working_dir=str(tmp_path), sandbox=backend)._prepare_command(args)
     assert isinstance(prepared, _PreparedCommand)
     assert isinstance(prepared.command, list)
-    assert prepared.command[0] == ("bwrap" if backend == "bwrap" else "/usr/bin/sandbox-exec")
+    assert prepared.command[0] == str(trusted_bin / ("bwrap" if backend == "bwrap" else "sandbox-exec"))
     assert prepared.command[-2] == "-c"
     inner_command = prepared.command[-1].split("\n")[-1]
     assert shlex.split(inner_command) == args

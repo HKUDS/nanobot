@@ -358,6 +358,8 @@ async def test_real_gateway_move_run_reload_and_previous_result(tmp_path, target
 @pytest.mark.asyncio
 async def test_late_subagent_result_stays_with_moved_task(tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.agent.loop._SUBAGENT_TERMINAL_WAIT_SECONDS", 0.02)
+    # Real session writes are part of this routing check, not a latency requirement.
+    timeout = 30
     sessions, cron, job = seed(tmp_path)
     release = asyncio.Event()
     entered = asyncio.Event()
@@ -395,11 +397,11 @@ async def test_late_subagent_result_stays_with_moved_task(tmp_path, monkeypatch)
     try:
         moved = cron.change_binding(job.id, revision=binding_revision(job),
                                     binding=target_binding(), message="Prepare the report")
-        await asyncio.wait_for(run_bound_cron_job(moved, agent=agent, cron=cron), 5)
-        await asyncio.wait_for(entered.wait(), 5)
+        await asyncio.wait_for(run_bound_cron_job(moved, agent=agent, cron=cron), timeout)
+        await asyncio.wait_for(entered.wait(), timeout)
         release.set()
         delivered = []
-        async with asyncio.timeout(5):
+        async with asyncio.timeout(timeout):
             while not any(msg.content.startswith("Final report:") for msg in delivered):
                 msg = await bus.consume_outbound()
                 if msg.event is None and msg.content:

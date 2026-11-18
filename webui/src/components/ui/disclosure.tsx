@@ -47,15 +47,16 @@ export function DisclosureContent({
 }
 
 export function Disclosure({
-  summary, children, className, summaryClassName, contentClassName,
+  summary, children, className, summaryClassName, contentClassName, initialOpen = false,
 }: {
   summary: ReactNode;
   children: ReactNode;
   className?: string;
   summaryClassName?: string;
   contentClassName?: string;
+  initialOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const id = useId();
   return (
     <div className={className}>

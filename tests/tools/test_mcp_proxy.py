@@ -104,6 +104,7 @@ class _RecordingMCPProxy:
             result = {"tools": [{
                 "name": "echo", "description": "Echo over the selected route",
                 "inputSchema": {"type": "object", "properties": {}},
+                "annotations": {"readOnlyHint": True},
             }]}
         elif method == "tools/call":
             if self.terminate_next_call:

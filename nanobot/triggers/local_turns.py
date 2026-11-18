@@ -14,31 +14,23 @@ class LocalTriggerTurnCoordinator(AutomationTurnCoordinator):
         self,
         *,
         enqueue: Callable[[InboundMessage], Awaitable[None]],
-        deferred_queues: dict[str, list[InboundMessage]] | None = None,
     ) -> None:
         super().__init__(
             enqueue=enqueue,
             turn_id=lambda msg: local_trigger_delivery_id(msg.metadata),
             pending_id=_local_trigger_id,
-            should_defer_turn=_should_defer_local_trigger_turn,
+            should_defer_turn=lambda msg: local_trigger(msg.metadata) is not None,
             missing_id_error="local trigger turn metadata must include a delivery_id",
             duplicate_id_error=lambda delivery_id: (
                 f"local trigger delivery {delivery_id!r} is already pending"
             ),
-            deferred_queues=deferred_queues,
         )
 
-    def pending_trigger_ids_for_session(self, session_key: str) -> set[str]:
+    def pending_trigger_ids_for_session(
+        self, session_key: str, deferred: Iterable[InboundMessage],
+    ) -> set[str]:
         """Return local triggers waiting for or running in *session_key*."""
-        return self.pending_ids_for_session(session_key)
-
-
-def _should_defer_local_trigger_turn(
-    msg: InboundMessage,
-    session_key: str,
-    active_session_keys: Iterable[str],
-) -> bool:
-    return local_trigger(msg.metadata) is not None and session_key in active_session_keys
+        return self.pending_ids_for_session(session_key, deferred)
 
 
 def _local_trigger_id(msg: InboundMessage) -> str | None:

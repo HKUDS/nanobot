@@ -29,7 +29,6 @@ RATE_LIMITS = {
 
 # error.code values that carry a specific recovery contract.
 CODE_INVALID_TOKEN = 100
-CODE_MISSING_AUTH = 190
 CODE_RATE_LIMITED = 130429
 CODE_NOT_CREATOR = 131005
 CODE_BAD_REQUEST = 131009

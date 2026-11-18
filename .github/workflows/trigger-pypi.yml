@@ -1,0 +1,22 @@
+name: Validate published release for PyPI
+
+on:
+  release:
+    types: [released]
+
+permissions: {}
+
+jobs:
+  release:
+    if: github.repository == 'HKUDS/nanobot' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate the stable release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a final vX.Y.Z tag.' >&2; exit 1; }
+          echo 'The protected main-branch publisher will check this release and request approval.' >> "$GITHUB_STEP_SUMMARY"

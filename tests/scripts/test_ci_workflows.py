@@ -46,7 +46,7 @@ def test_accepted_handoff_uses_the_producer_id_and_requires_native_success():
     jobs = workflow("release-candidate.yml")["jobs"]
     assert jobs["candidate"]["outputs"]["prepared_artifact_id"] == "${{ steps.prepared.outputs.artifact-id }}"
     verified = jobs["verified"]
-    assert set(verified["needs"]) == {"candidate", "native"}
+    assert set(verified["needs"]) == {"plan", "candidate", "native"}
     gate = verified["steps"][0]
     assert gate["env"]["NATIVE_RESULT"] == "${{ needs.native.result }}"
     assert gate["run"] == 'test "$BUILD_RESULT" = success && test "$NATIVE_RESULT" = success'
@@ -69,7 +69,43 @@ def test_windows_installer_matrix_has_an_independent_required_job():
     assert "native_required" in installer["if"] and "python_required" in installer["if"]
     assert "github.event_name != 'push'" in installer["if"]
     commands = [step.get("run", "") for step in installer["steps"]]
-    assert any("tests/test_install_scripts.py" in command and "-n 4" in command for command in commands)
+    assert any("tests/test_install_scripts.py" in command and "-n 2" in command for command in commands)
     assert not any("tests/test_install_scripts.py" in step.get("run", "")
                    for step in jobs["windows_process"]["steps"])
     assert "windows_installers" in jobs["required"]["needs"]
+
+
+def test_windows_gateway_stop_checks_run_serially_without_losing_coverage():
+    job = workflow("ci.yml")["jobs"]["test"]
+    path = "tests/test_update_stop.py"
+    for item in job["strategy"]["matrix"]["include"]:
+        assert (f"--ignore={path}" in item["pytest_args"]) == (item["os"] == "windows-latest")
+    steps = [step for step in job["steps"] if path in step.get("run", "").split()]
+    assert len(steps) == 1
+    assert steps[0]["if"] == "runner.os == 'Windows'"
+    assert "-n" not in steps[0]["run"].split()
+
+
+def test_webui_full_suite_lanes_run_in_parallel_and_are_all_required():
+    jobs = workflow("ci.yml")["jobs"]
+    lanes = {"webui_checks", "webui_build", "webui_unit", "webui_browser"}
+    assert set(jobs["webui"]["needs"]) == {"changes", *lanes}
+    assert lanes <= set(jobs["required"]["needs"])
+    for name in lanes:
+        assert jobs[name]["needs"] == "changes"
+    strategy = jobs["webui_browser"]["strategy"]
+    assert strategy["fail-fast"] == "false"
+    assert strategy["matrix"]["shard"] == ["1", "2", "3", "4"]
+
+
+def test_webui_coverage_runs_the_full_suite_and_retains_native_reports():
+    steps = workflow("ci.yml")["jobs"]["webui_unit"]["steps"]
+    run = next(step for step in steps if step.get("name") == "Run all unit tests with original coverage thresholds")
+    assert run["run"] == (
+        "bun run test:coverage --reporter=default --reporter=json "
+        "--outputFile.json=test-results/unit/results.json"
+    )
+    upload = next(step for step in steps if step.get("uses") == "actions/upload-artifact@v4")
+    assert upload["if"] == "always()"
+    assert "webui/coverage/coverage-summary.json" in upload["with"]["path"].splitlines()
+    assert upload["with"]["if-no-files-found"] == "error"

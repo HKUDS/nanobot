@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -27,7 +27,14 @@ from nanobot.events import (
     RetryWaitEvent,
 )
 from nanobot.llm_usage.types import LLMUsage as LLMUsage
+from nanobot.providers.compaction import (
+    NativeCompaction,
+    ProviderCompactionEvents,
+    ProviderStateCommitError,
+    provider_compaction_scope,
+)
 from nanobot.providers.generation import GenerationSettings as GenerationSettings
+from nanobot.providers.model_options import ModelOptions
 from nanobot.utils.cancellation import shield_and_drain
 from nanobot.utils.helpers import sanitize_surrogates_deep
 
@@ -276,8 +283,32 @@ class ProviderCallContext:
     # None opts out (auxiliary calls); an empty name denotes an unnamed preset.
     response_preset: str | None = None
     response_is_fallback: bool = False
+    model_options: ModelOptions = ModelOptions()
     # A pre-request compactor must fit this budget before sending the pending input.
     compaction_input_budget: int | None = None
+    # Owned by one retry chain, shared only by its provider attempts.
+    compaction: ProviderCompactionEvents | None = field(default=None, repr=False, compare=False)
+    on_native_compaction: Callable[[ProviderConversationState], Awaitable[None]] | None = field(
+        default=None, repr=False, compare=False,
+    )
+
+    @property
+    def accepted_compaction(self) -> NativeCompaction | None:
+        initial = self.conversation_state
+        accepted = self.compaction.accepted if self.compaction is not None else None
+        if initial is None or accepted is None:
+            return None
+        current = accepted.state
+        if (initial.kind, initial.provider, initial.model, initial.version) != (
+            current.kind, current.provider, current.model, current.version,
+        ):
+            return None
+        return accepted
+
+    @property
+    def current_conversation_state(self) -> ProviderConversationState | None:
+        accepted = self.accepted_compaction
+        return accepted.state if accepted is not None else self.conversation_state
 
 
 @dataclass
@@ -438,6 +469,7 @@ class LLMProvider(ABC):
         self.api_base = api_base
         self.provider_name = provider_name
         self.generation: GenerationSettings = GenerationSettings()
+        self.supports_images = True
         self._llm_call_observer: LLMCallObserver | None = None
         self._usage_estimation_slots = asyncio.Semaphore(2)
 
@@ -983,31 +1015,6 @@ class LLMProvider(ABC):
         return merged
 
     @staticmethod
-    def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
-        """Replace image_url blocks with text placeholder. Returns None if no images found."""
-        found = False
-        result: list[dict[str, Any]] = []
-        for msg in messages:
-            content = msg.get("content")
-            if isinstance(content, list):
-                new_content: list[Any] = []
-                for raw_block in cast(list[object], content):
-                    block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
-                    if block is not None and block.get("type") == "image_url":
-                        placeholder = (
-                            "[Image not delivered to model — "
-                            "do not describe or reference it]"
-                        )
-                        new_content.append({"type": "text", "text": placeholder})
-                        found = True
-                    else:
-                        new_content.append(raw_block)
-                result.append({**msg, "content": new_content})
-            else:
-                result.append(msg)
-        return result if found else None
-
-    @staticmethod
     def _contains_image_content(value: object) -> bool:
         """Return whether a JSON-like provider payload contains an input image."""
         if isinstance(value, dict):
@@ -1023,27 +1030,22 @@ class LLMProvider(ABC):
         return False
 
     @staticmethod
-    def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
-        """Replace image_url blocks with text placeholder *in-place*.
+    def _request_contains_images(messages: list[dict[str, Any]], context: ProviderCallContext | None = None) -> bool:
+        state = context.current_conversation_state if context is not None else None
+        return LLMProvider._contains_image_content([
+            messages, state.payload if state else None, state.pending_messages if state else None,
+        ])
 
-        Mutates the content lists of the original message dicts so that
-        callers holding references to those dicts also see the stripped
-        version.
-        """
-        found = False
-        for msg in messages:
-            content = msg.get("content")
-            if isinstance(content, list):
-                for i, raw_block in enumerate(cast(list[object], content)):
-                    block = cast(dict[str, Any], raw_block) if isinstance(raw_block, dict) else None
-                    if block is not None and block.get("type") == "image_url":
-                        placeholder = (
-                            "[Image not delivered to model — "
-                            "do not describe or reference it]"
-                        )
-                        content[i] = {"type": "text", "text": placeholder}
-                        found = True
-        return found
+    def _image_input_error(
+        self, messages: list[dict[str, Any]], context: ProviderCallContext | None = None,
+    ) -> LLMResponse | None:
+        if self.supports_images or not self._request_contains_images(messages, context):
+            return None
+        return LLMResponse(
+            content="This model preset does not support image input. Select an image-capable preset in model settings.",
+            finish_reason="error", error_kind="invalid_request", error_code="unsupported_image",
+            error_should_retry=False,
+        )
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         started_at_ms = time.time_ns() // 1_000_000
@@ -1069,6 +1071,8 @@ class LLMProvider(ABC):
                 started_at_ns=started_at_ns,
                 stream=False,
             )
+            raise
+        except ProviderStateCommitError:
             raise
         except Exception as exc:
             response = self._error_response_from_exception(exc)
@@ -1214,6 +1218,8 @@ class LLMProvider(ABC):
                 stream=True,
             )
             raise
+        except ProviderStateCommitError:
+            raise
         except Exception as exc:
             response = self._error_response_from_exception(exc)
         return await self._observe_llm_call_async(
@@ -1283,7 +1289,6 @@ class LLMProvider(ABC):
         )
         return await self._run_chat_with_retry(
             kw,
-            messages,
             stream=True,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
@@ -1336,7 +1341,6 @@ class LLMProvider(ABC):
         )
         return await self._run_chat_with_retry(
             kw,
-            messages,
             stream=False,
             retry_mode=retry_mode,
             on_retry_wait=on_retry_wait,
@@ -1371,7 +1375,6 @@ class LLMProvider(ABC):
     async def _run_chat_with_retry(
         self,
         kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
         *,
         stream: bool,
         retry_mode: str,
@@ -1381,6 +1384,8 @@ class LLMProvider(ABC):
         should_retry_guard: Callable[[], bool] | None = None,
         on_stream_recover: Callable[[], Awaitable[None]] | None = None,
     ) -> LLMResponse:
+        if error := self._image_input_error(kw["messages"], kw.get("provider_context")):
+            return error
         call = self._safe_chat_stream if stream else self._safe_chat
 
         async def attributed_call(**kwargs: Any) -> LLMResponse:
@@ -1421,17 +1426,23 @@ class LLMProvider(ABC):
             ))
             return response
 
-        return await self._run_with_retry(
-            attributed_call,
-            kw,
-            original_messages,
-            retry_mode=retry_mode,
-            on_retry_wait=on_retry_wait,
-            on_retry_exhausted=on_retry_exhausted,
-            on_retry_status=on_retry_status,
-            should_retry_guard=should_retry_guard,
-            on_stream_recover=on_stream_recover,
-        )
+        context = kw.get("provider_context")
+        events = context.events if isinstance(context, ProviderCallContext) else NO_EVENTS
+        async with provider_compaction_scope(
+            events, context.compaction if isinstance(context, ProviderCallContext) else None,
+        ) as compaction:
+            if isinstance(context, ProviderCallContext):
+                kw["provider_context"] = replace(context, compaction=compaction)
+            return await self._run_with_retry(
+                attributed_call,
+                kw,
+                retry_mode=retry_mode,
+                on_retry_wait=on_retry_wait,
+                on_retry_exhausted=on_retry_exhausted,
+                on_retry_status=on_retry_status,
+                should_retry_guard=should_retry_guard,
+                on_stream_recover=on_stream_recover,
+            )
 
     @classmethod
     def _extract_retry_after(cls, content: str | None) -> float | None:
@@ -1577,7 +1588,6 @@ class LLMProvider(ABC):
         self,
         call: Callable[..., Awaitable[LLMResponse]],
         kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
         *,
         retry_mode: str,
         on_retry_wait: RetryEventCallback | None,
@@ -1641,13 +1651,7 @@ class LLMProvider(ABC):
                 identical_error_count = 1 if error_key else 0
 
             if not self.is_transient_response(response):
-                response = await self._retry_without_images(
-                    call, kw, original_messages, response,
-                )
-                await _finish_retry_status(
-                    "recovered" if response.finish_reason != "error" else "cleared",
-                    response,
-                )
+                await _finish_retry_status("cleared", response)
                 return response
 
             if (
@@ -1706,52 +1710,6 @@ class LLMProvider(ABC):
             await on_retry_exhausted(exhausted_message)
         await _finish_retry_status("exhausted", response)
         return response
-
-    async def _retry_without_images(
-        self,
-        call: Callable[..., Awaitable[LLMResponse]],
-        kw: dict[str, Any],
-        original_messages: list[dict[str, Any]],
-        response: LLMResponse,
-    ) -> LLMResponse:
-        # Removing the user's images cannot repair account access.
-        if (
-            (response.error_kind or "").lower() in {"authentication", "oauth_auth_required"}
-            or response.error_status_code in {401, 403}
-            or self.is_arrearage_response(response)
-        ):
-            return response
-        stripped = self._strip_image_content(kw["messages"])
-        provider_context = kw.get("provider_context")
-        stripped_context: ProviderCallContext | None = None
-        if isinstance(provider_context, ProviderCallContext):
-            state = provider_context.conversation_state
-            if state is not None and (
-                stripped is not None
-                or self._strip_image_content(state.pending_messages) is not None
-                or self._contains_image_content(state.payload)
-            ):
-                # Native payloads may retain images: rebuild from the public transcript.
-                stripped_context = ProviderCallContext(
-                    context_window_tokens=provider_context.context_window_tokens,
-                    session_id=provider_context.session_id,
-                    events=provider_context.events,
-                    response_preset=provider_context.response_preset,
-                    response_is_fallback=provider_context.response_is_fallback,
-                )
-        if stripped is None and stripped_context is None:
-            return response
-        logger.warning("Non-transient LLM error with image content, retrying without images")
-        retry_kw = dict(kw)
-        if stripped is not None:
-            retry_kw["messages"] = stripped
-        if stripped_context is not None:
-            retry_kw["provider_context"] = stripped_context
-        result = await call(**retry_kw)
-        # Keep later iterations from repeating the same image repair.
-        if result.finish_reason != "error":
-            self._strip_image_content_inplace(original_messages)
-        return result
 
     async def aclose(self) -> None:
         """Close provider-owned transports after their active requests have stopped."""

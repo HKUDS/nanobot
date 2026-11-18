@@ -29,6 +29,24 @@ nanobot/channels/*/webui/        channel-owned interface code
 nanobot/channels/*/tests/webui/  channel interface tests
 ```
 
+## Change a behavior
+
+Choose the behavior first, then follow the owning module and its existing tests. Paths below are relative to `webui/` unless they start with `../`. Read [component ownership](COMPONENTS.md#where-components-belong) when introducing or moving a boundary.
+
+| Change | Owning source | Start verification with |
+| --- | --- | --- |
+| Composer input, attachments, or mentions | [`ThreadComposer.tsx`](src/components/thread/ThreadComposer.tsx) and its input hooks | [`thread-composer.test.tsx`](src/tests/thread-composer.test.tsx), [`thread-composer-attach.test.tsx`](src/tests/thread-composer-attach.test.tsx) |
+| Waiting prompts: merging, persistence, sending, or turn completion | [`useQueuedPrompt.ts`](src/components/thread/useQueuedPrompt.ts); Composer supplies draft content and UI feedback | [`queued-guidance.test.tsx`](src/tests/queued-guidance.test.tsx) and queue scenarios in [`thread-composer.test.tsx`](src/tests/thread-composer.test.tsx); completion integration in [`turn-completion.test.tsx`](src/tests/turn-completion.test.tsx), browser flow in [`queued-guidance.spec.ts`](browser/queued-guidance.spec.ts) |
+| Chat-channel pairing prompts and approval | [`ChannelPairing.tsx`](src/components/pairing/ChannelPairing.tsx) owns requests and subscriptions; [`PairingCodePopup.tsx`](src/components/pairing/PairingCodePopup.tsx) owns the input/display; backend [`nanobot/pairing/`](../nanobot/pairing/) | Pairing scenarios in [`app-layout.test.tsx`](src/tests/app-layout.test.tsx), [`pairing-refresh.spec.ts`](browser/pairing-refresh.spec.ts) |
+| Startup, authentication, navigation, or session selection | [`App.tsx`](src/App.tsx), [`useSessions.ts`](src/hooks/useSessions.ts), [`ClientProvider.tsx`](src/providers/ClientProvider.tsx) | [`app-layout.test.tsx`](src/tests/app-layout.test.tsx); keep shell integration checks when moving an owner |
+| Live messages, delivery, or completion | [`nanobot-client.ts`](src/lib/nanobot-client.ts), [`useNanobotStream.ts`](src/hooks/useNanobotStream.ts), [`ThreadShell.tsx`](src/components/thread/ThreadShell.tsx) | [`nanobot-client.test.ts`](src/tests/nanobot-client.test.ts), [`useNanobotStream.test.tsx`](src/tests/useNanobotStream.test.tsx), [`thread-shell.test.tsx`](src/tests/thread-shell.test.tsx) |
+| History pagination, reading position, or boundary motion | [`usePromptHistory.ts`](src/hooks/usePromptHistory.ts), [`ThreadViewport.tsx`](src/components/thread/ThreadViewport.tsx); [motion ownership](COMPONENTS.md#history-boundary-motion) | [`thread-viewport.test.tsx`](src/tests/thread-viewport.test.tsx), [`thread-history-spring.test.ts`](src/tests/thread-history-spring.test.ts), [`thread-loading.spec.ts`](browser/thread-loading.spec.ts) |
+| Settings forms or persistence | The feature under [`components/settings/`](src/components/settings/) and [`useSettingsController.ts`](src/components/settings/useSettingsController.ts) | Matching `settings-*.test.tsx` in [`src/tests/`](src/tests/); backend settings tests in [`tests/webui/`](../tests/webui/) |
+| A channel's setup interface | Its package under [`nanobot/channels/`](../nanobot/channels/), including `webui/` and translations | The same package's `tests/webui/`, plus [`settings-channels.test.tsx`](src/tests/settings-channels.test.tsx) |
+| A shared control or content renderer | [Component guide and gallery](COMPONENTS.md) | Its existing component tests and affected production caller; browser tests for layout, focus, or motion |
+
+For a focused component check, run `bun run test src/tests/thread-composer.test.tsx`; for the pairing browser flow, run `bun run test:browser browser/pairing-refresh.spec.ts`. These are examples, not a substitute for [full checks](#test). HTTP/WebSocket, host, or persisted-state changes also require the [client/host compatibility review](../.agent/review-guide.md).
+
 ## Develop the WebUI (Vite HMR)
 
 ### 1. Install nanobot from source
@@ -51,7 +69,7 @@ nanobot webui --dev
 
 The command safely prepares the local WebSocket channel, starts both the gateway and Vite, and opens `http://127.0.0.1:5173`. Vite proxies HTTP requests to the gateway and applies frontend changes with HMR; the application WebSocket connects directly to the gateway. Ctrl+C stops Vite and releases this gateway client. An on-demand gateway stops when its last interactive client exits; a persistent gateway keeps running.
 
-Use `--no-open` to skip opening a browser. `--dev` is foreground-only and cannot be combined with `--background`.
+Use `--no-open` to skip opening a browser. `--dev-port 5174` selects a different Vite port when running multiple development instances; each instance also needs its own config, workspace, WebUI port, and gateway port. `--dev` is foreground-only and cannot be combined with `--background`.
 
 ## Manual development setup
 
@@ -121,6 +139,14 @@ bun run build
 ```
 
 `lint` runs ESLint; `typecheck` checks application and unit-test TypeScript, including channel-owned frontend code and tests; `test` runs Vitest; `test:browser` typechecks and runs Chromium tests with the real components and stylesheet to check tall-dialog reachability and completed-history motion without a gateway; `build` checks production TypeScript and produces the production bundle. Keep tests near the changed behavior and exercise settings save/reload in the browser. Browser-only preferences stay in the frontend; persistent configuration and security policy belong to the Python gateway. When changing that boundary, also run the relevant Python tests from [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+### CI shards
+
+CI runs the full selected suite. Static checks, production build, full unit coverage, and four browser shards run independently; every lane must pass. Unit coverage uses the original full-suite configuration and thresholds. Browser shards verify their executed test identities against full discovery. Test isolation, real browser motion, timeouts, and zero retries are unchanged.
+
+To reproduce the coverage gate, run `bun run test:coverage` from `webui/`. For a browser shard, run `bun run typecheck:browser` and then `bun run test:browser:shard --shard=1/4` (repeat with indices 2–4 for the full suite). Use separate checkouts and `NANOBOT_BROWSER_TEST_PORT` values when running browser shards concurrently: each invocation owns its Vite server and clears the browser output directory. JSON results, coverage summaries, and browser failure details are uploaded as CI artifacts.
+
+`test-timings.json` contains per-file browser millisecond weights and their source run. It affects balancing, not selection: every newly discovered test is included even before it has a timing. When refreshing the weights from CI's browser JSON artifacts, sum result durations per file and update the source run and commit together. The ordinary unsharded commands above remain available for local development.
 
 ## Acknowledgements
 

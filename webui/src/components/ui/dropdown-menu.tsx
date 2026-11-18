@@ -37,7 +37,7 @@ const DropdownMenuContent = React.forwardRef<
       className={cn(
         floatingSurfaceClassName,
         floatingSurfaceMotionClassName,
-        "max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem]",
+        "origin-[var(--radix-dropdown-menu-content-transform-origin)] max-h-[min(var(--radix-dropdown-menu-content-available-height),28rem)] min-w-[10rem]",
         className,
       )}
       {...props}
@@ -147,7 +147,7 @@ const DropdownMenuSubContent = React.forwardRef<
     className={cn(
       floatingSurfaceClassName,
       floatingSurfaceMotionClassName,
-      "max-h-[min(var(--radix-dropdown-menu-content-available-height),22rem)] min-w-[11rem] overflow-y-auto",
+      "origin-[var(--radix-dropdown-menu-content-transform-origin)] max-h-[min(var(--radix-dropdown-menu-content-available-height),22rem)] min-w-[11rem] overflow-y-auto",
       className,
     )}
     {...props}

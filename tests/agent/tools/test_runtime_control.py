@@ -28,13 +28,11 @@ from nanobot.security.workspace_access import (
     build_workspace_scope,
     reset_workspace_scope,
 )
-from nanobot.session.keys import UNIFIED_SESSION_KEY
 from nanobot.utils.llm_runtime import LLMRuntime
 
 
 def _make_loop(
     tmp_path: Path, *, allow_set: bool = False, restricted: bool = False, sandbox: str = "",
-    unified_session: bool = False,
 ) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -49,7 +47,6 @@ def _make_loop(
         model="test-model",
         tools_config=tools_config,
         restrict_to_workspace=restricted,
-        unified_session=unified_session,
     )
 
 
@@ -500,11 +497,12 @@ async def test_access_changes_refresh_only_new_message_and_preserve_prefix(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) -> None:
+@pytest.mark.parametrize("same_scope", [True, False])
+async def test_followup_only_joins_matching_tool_scope(tmp_path: Path, same_scope: bool) -> None:
     project = tmp_path / "project"
     project.mkdir()
     (project / "marker.txt").write_text("active project", encoding="utf-8")
-    loop = _make_loop(tmp_path / "agent", unified_session=True)
+    loop = _make_loop(tmp_path / "agent")
     loop.provider.generation = GenerationSettings()
     loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
         LLMResponse(content=None, tool_calls=[
@@ -512,12 +510,13 @@ async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) 
         ]),
         LLMResponse(content="done"),
     ])
-    session = await loop.sessions.state.get(UNIFIED_SESSION_KEY)
+    session = await loop.sessions.state.get("websocket:chat")
     session.metadata["workspace_scope"] = {"project_path": str(project), "access_mode": "restricted"}
     session.add_message("user", "Start")
     await loop.sessions.state.prepare_input(session)
     pending = asyncio.Queue()
-    await pending.put(InboundMessage("telegram", "user", "chat", "Read marker.txt"))
+    followup = InboundMessage("websocket" if same_scope else "telegram", "user", "chat", "Read marker.txt")
+    await pending.put(followup)
     await loop._run_agent_loop(
         TranscriptInput(history=session.get_history(), current_message=None),
         runtime=loop.llm_runtime(), session=session, pending_queue=pending,
@@ -525,8 +524,14 @@ async def test_injected_channel_input_reports_active_tool_scope(tmp_path: Path) 
     )
     calls = loop.provider.chat_stream_with_retry.await_args_list
     context = calls[0].kwargs["messages"][-1]["content"]
-    assert json.dumps(str(project.resolve())) in context
-    assert "File access: project and tool-specific allowed paths only." in context
+    if same_scope:
+        assert json.dumps(str(project.resolve())) in context
+        assert "File access: project and tool-specific allowed paths only." in context
+        assert pending.empty()
+    else:
+        assert context == "Start"
+        assert pending.get_nowait() is followup
+        assert pending.empty()
     assert any(message.get("role") == "tool" and "active project" in message["content"]
                for message in calls[1].kwargs["messages"])
 

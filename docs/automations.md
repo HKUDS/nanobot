@@ -166,7 +166,7 @@ Future runs use the new chat's history and reply there by default. Previous mess
 
 You can discuss each new result in that same chat. Background task results also return there. If you delete that chat, nanobot asks you to confirm deletion of its scheduled tasks as well. Cancelling the deletion keeps the chat and tasks.
 
-The list shows chats available on this gateway that use the same workspace and access permissions. A chat-app destination appears only after its channel is running and nanobot has received a message there. If the chat you want is missing, first send nanobot a message in that chat, then confirm its channel is running. You cannot choose a raw recipient ID, a chat on another host, a unified session, a system job, or a local trigger. Older gateway versions show this list as read-only.
+The list shows chats available on this gateway that use the same workspace and access permissions. A chat-app destination appears only after its channel is running and nanobot has received a message there. If the chat you want is missing, first send nanobot a message in that chat, then confirm its channel is running. You cannot choose a raw recipient ID, a chat on another host, a system job, or a local trigger. Older gateway versions show this list as read-only.
 
 If a scheduled turn is running or queued, wait for it to finish before changing the chat. The current scheduler also rejects a change while another scheduled turn is active. If another editor changes the task, reopen the task and review the latest instructions. A rejected save leaves the draft visible.
 

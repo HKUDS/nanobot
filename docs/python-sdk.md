@@ -197,19 +197,6 @@ For most users, the mental model is:
 4. Read `RunResult` or stream events.
 5. Use session/memory/runtime helpers only when you need more control.
 
-## SDK Or OpenAI-Compatible API?
-
-nanobot has two programming surfaces:
-
-| Use | Choose | Why |
-|-----|--------|-----|
-| Python code running in the same process as nanobot | Python SDK | Direct access to `RunResult`, sessions, memory, runtime helpers, hooks, and stream events. |
-| Existing OpenAI-compatible clients, another language, or a separate process | [OpenAI-Compatible API](openai-api.md) | HTTP `/v1/chat/completions` compatibility with familiar client libraries. |
-
-The Python SDK is best when you are writing evals, notebooks, benchmark runners, product backends, local scripts, or integrations that should control nanobot directly.
-
-The OpenAI-compatible API is best when you already have an HTTP client, want process isolation, or need to call nanobot from a non-Python service.
-
 ## Common Patterns
 
 ### Use a specific config or workspace
@@ -426,7 +413,6 @@ The SDK page is the programming entry point. The fuller conceptual and configura
 | Pasteable provider recipes | [Provider Cookbook](provider-cookbook.md) |
 | Complete configuration reference | [Configuration](configuration.md) |
 | Long-term memory design | [Memory](memory.md) |
-| HTTP API instead of Python SDK | [OpenAI-Compatible API](openai-api.md) |
 | Debugging install, config, provider, or runtime failures | [Troubleshooting](troubleshooting.md) |
 
 ## API Reference

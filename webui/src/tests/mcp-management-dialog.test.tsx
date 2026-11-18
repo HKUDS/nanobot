@@ -10,11 +10,14 @@ import { createSystemSettingsActions } from "@/components/settings/system/create
 import { useSystemSettingsState } from "@/components/settings/system/useSystemSettingsState";
 import i18n from "@/i18n";
 import { NanobotClient } from "@/lib/nanobot-client";
+import { getToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { McpPresetInfo, McpPresetsPayload } from "@/lib/types";
 import {
   installSettingsViewTestHooks,
   jsonResponse,
   renderSettingsView,
+  selectToolType,
+  showOnlyReadyTools,
   requestMutationMock,
   settingsPayload,
 } from "@/tests/settings-test-utils";
@@ -271,7 +274,8 @@ describe("MCP connection draft lifecycle", () => {
       return { ok: false, status: 404, text: async () => "Not found" } as Response;
     }));
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     fireEvent.click(await screen.findByRole("button", { name: "Metabase" }));
     const dialog = await screen.findByRole("dialog", { name: "Metabase" });
     expect(within(dialog).getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
@@ -348,7 +352,8 @@ describe("MCP connection draft lifecycle", () => {
     });
 
     renderSettingsView({ initialSection: "apps" });
-    fireEvent.click(await screen.findByRole("button", { name: "MCP" }));
+    await selectToolType("MCP");
+    await showOnlyReadyTools(false);
     fireEvent.click(await screen.findByRole("button", { name: "Connect Xmind" }));
     fireEvent.click(screen.getByRole("switch", { name: "Use proxy" }));
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
@@ -490,15 +495,13 @@ function renderMcpActions() {
   const client = new NanobotClient({ url: "ws://example.test" });
   client.requestMutation = requestMutationMock;
   return renderHook(() => {
-    const state = useSystemSettingsState();
+    const state = useSystemSettingsState(getToolsCatalog(client, "tok"));
     const actions = createSystemSettingsActions({
       state,
       featureCatalog: [],
       client,
-      token: "tok",
       getToken: () => "tok",
       t: i18n.t,
-      applyPayload: vi.fn(),
       maybeRestartHostEngine: vi.fn(),
       setPendingRestartSections: vi.fn(),
       refreshAutomations: vi.fn(),

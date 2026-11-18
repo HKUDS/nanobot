@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 
@@ -61,11 +61,13 @@ def record_llm_call(call: LLMCallRecord) -> None:
 def llm_usage_payload(
     *,
     days: int = 371,
+    view: Literal["history", "overview", "models"] = "history",
     timezone_name: str | None = None,
 ) -> dict[str, Any]:
     try:
         return get_llm_usage_store().usage_payload(
             days=days,
+            view=view,
             timezone_name=timezone_name,
         )
     except Exception:

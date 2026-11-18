@@ -6,10 +6,11 @@ import { SettingsGroup, SettingsRow } from "@/components/settings/shared/Setting
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Disclosure } from "@/components/ui/disclosure";
 
-export function SettingsAdvancedOptions({ children }: { children: ReactNode }) {
+export function SettingsAdvancedOptions({ children, initialOpen = false }: { children: ReactNode; initialOpen?: boolean }) {
   const { t } = useTranslation();
   return (
     <Disclosure
+      initialOpen={initialOpen}
       summaryClassName="settings-list-inset flex min-h-12 cursor-pointer items-center justify-between gap-4 rounded-xl text-[13px] leading-5 text-muted-foreground settings-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       summary={<>
         {t("settings.runtimeConfig.advancedOptions")}
@@ -22,7 +23,7 @@ export function SettingsAdvancedOptions({ children }: { children: ReactNode }) {
 }
 
 export function SettingsFeature({
-  title, enabled, onChange, disabled, initialOpen = false, error, children, onBeforeClose,
+  title, enabled, onChange, disabled, initialOpen = false, error, children, onClose,
 }: {
   title: string;
   enabled: boolean;
@@ -31,11 +32,16 @@ export function SettingsFeature({
   initialOpen?: boolean;
   error?: string;
   children?: ReactNode;
-  onBeforeClose?: () => Promise<boolean>;
+  onClose?: () => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(initialOpen && enabled);
   const section = useRef<HTMLElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const changeOpen = (next: boolean) => {
+    if (next) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setOpen(next);
+  };
   useEffect(() => {
     if (initialOpen && enabled) {
       setOpen(true);
@@ -45,9 +51,8 @@ export function SettingsFeature({
   return (
     <section ref={section} aria-label={title}>
       <Dialog open={Boolean(children) && open} onOpenChange={(next) => {
-        if (!next && onBeforeClose) {
-          void onBeforeClose().then((saved) => { if (saved) setOpen(false); });
-        } else setOpen(next);
+        changeOpen(next);
+        if (!next) onClose?.();
       }}>
       <SettingsGroup>
         <SettingsRow title={children ? (
@@ -65,10 +70,17 @@ export function SettingsFeature({
             </button>
           </DialogTrigger> : null}
           <ToggleButton checked={enabled} disabled={disabled} ariaLabel={title} label={title}
-            onChange={(next) => { setOpen(next); onChange(next); }} />
+            onChange={(next) => { changeOpen(next); onChange(next); }} />
         </SettingsRow>
       </SettingsGroup>
-      {children ? <DialogContent aria-describedby={undefined} className="settings-grid max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto p-0 [--settings-surface:var(--background)]">
+      {children ? <DialogContent aria-describedby={undefined} onCloseAutoFocus={(event) => {
+        if (opener.current?.isConnected && !opener.current.matches(":disabled")) {
+          opener.current.focus({ preventScroll: true });
+          // Saving on close can disable the switch that opened this dialog.
+          // Let Radix restore its Configure trigger if the opener cannot focus.
+          if (document.activeElement === opener.current) event.preventDefault();
+        }
+      }} className="settings-grid max-h-[85dvh] w-[min(calc(100vw-2rem),40rem)] max-w-none overflow-y-auto p-0 [--settings-surface:var(--background)]">
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <div className="pb-4 pt-8">{children}</div>
       </DialogContent> : null}

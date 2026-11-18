@@ -8,13 +8,24 @@ import { ClientProvider } from "@/providers/ClientProvider";
 
 export function AnswerOrderFixture() {
   const [client] = useState(() => new NanobotClient({
-    url: `ws://${location.host}/answer-order-socket`, reconnect: false,
+    url: `ws://${location.host}/answer-order-socket`,
+    reconnect: new URLSearchParams(location.search).get("reconnect") === "1",
   }));
   const [cache] = useState(() => new ThreadMessageCache(() => false));
   const [chatId, setChatId] = useState("answer-order");
   const [revision, setRevision] = useState(0);
   const [, setCompletedRevision] = useState(0);
   const onTurnEnd = useCallback(() => setCompletedRevision(revision), [revision]);
+  const fixtureSettings = new URLSearchParams(location.search).get("sendable") === "1" ? {
+    ...settings,
+    agent: { ...settings.agent, model_preset: "default" },
+    model_presets: [{
+      name: "default", label: "Default", active: true, is_default: true,
+      model: "gpt-5.4", provider: "openai", resolved_provider: "openai",
+      max_tokens: 8192, context_window_tokens: 200_000, temperature: 0.1, reasoning_effort: null,
+    }],
+    model_call_order: ["default"],
+  } : settings;
   useEffect(() => {
     client.connect();
     return () => client.close();
@@ -28,7 +39,7 @@ export function AnswerOrderFixture() {
       <ThreadShell
         session={{ key: `websocket:${chatId}`, channel: "websocket", chatId, createdAt: null, updatedAt: null, preview: "" }}
         title={chatId} onToggleSidebar={() => {}} onTurnEnd={onTurnEnd}
-        settingsSnapshot={settings} messageCache={cache}
+        settingsSnapshot={fixtureSettings} messageCache={cache}
       />
     </main>
   </ClientProvider>;

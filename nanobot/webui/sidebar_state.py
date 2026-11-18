@@ -1,23 +1,29 @@
-"""Persisted WebUI sidebar workspace state.
+"""Compose sidebar preferences with session archive state.
 
-This state is UI-only metadata, scoped to the active nanobot instance data
-directory (the directory containing the current config.json). It deliberately
-does not modify agent sessions.
+Layout and display preferences stay in the config-scoped JSON file. Archive
+flags live in the session database; the public sidebar payload combines both.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import os
 import threading
 import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
+from nanobot.utils.cancellation import shield_and_drain
+
+if TYPE_CHECKING:
+    from nanobot.session.state import SessionState
 
 WEBUI_SIDEBAR_STATE_SCHEMA_VERSION = 1
 _MAX_STATE_FILE_BYTES = 256 * 1024
@@ -41,7 +47,6 @@ def default_webui_sidebar_state() -> dict[str, Any]:
     return {
         "schema_version": WEBUI_SIDEBAR_STATE_SCHEMA_VERSION,
         "pinned_keys": [],
-        "archived_keys": [],
         "session_order": [],
         "title_overrides": {},
         "project_name_overrides": {},
@@ -202,7 +207,6 @@ def normalize_webui_sidebar_state(raw: Any) -> dict[str, Any]:
     raw = cast(dict[str, Any], raw)
     state = default_webui_sidebar_state()
     state["pinned_keys"] = _clean_string_list(raw.get("pinned_keys"))
-    state["archived_keys"] = _clean_string_list(raw.get("archived_keys"))
     state["session_order"] = _clean_string_list(raw.get("session_order"))
     state["title_overrides"] = _clean_title_overrides(raw.get("title_overrides"))
     state["project_name_overrides"] = _clean_title_overrides(
@@ -233,13 +237,64 @@ def read_webui_sidebar_state() -> dict[str, Any]:
     return normalize_webui_sidebar_state(raw)
 
 
+def read_legacy_archived_keys() -> list[str]:
+    """Do not mark the import complete when the source cannot be read."""
+    path = webui_sidebar_state_path()
+    try:
+        with path.open(encoding="utf-8") as source:
+            raw = json.load(source)
+    except FileNotFoundError:
+        return []
+    if not isinstance(raw, dict):
+        raise ValueError("sidebar state must be an object")
+    return _clean_string_list(cast(dict[str, Any], raw).get("archived_keys"))
+
+
+def remove_legacy_archived_keys() -> None:
+    with _SIDEBAR_STATE_WRITE_LOCK:
+        path = webui_sidebar_state_path()
+        try:
+            with path.open(encoding="utf-8") as source:
+                raw = json.load(source)
+        except FileNotFoundError:
+            return
+        if isinstance(raw, dict) and "archived_keys" in raw:
+            _write_webui_sidebar_state(cast(dict[str, Any], raw))
+
+
 def write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     with _SIDEBAR_STATE_WRITE_LOCK:
         return _write_webui_sidebar_state(raw)
 
 
+def write_webui_sidebar_preferences(raw: dict[str, Any]) -> dict[str, Any]:
+    """Archive-only changes must not rewrite the unchanged preference file."""
+    with _SIDEBAR_STATE_WRITE_LOCK:
+        target = normalize_webui_sidebar_state(raw)
+        current: object = None
+        try:
+            with webui_sidebar_state_path().open("rb") as source:
+                encoded = source.read(_MAX_STATE_FILE_BYTES + 1)
+            if len(encoded) <= _MAX_STATE_FILE_BYTES:
+                current = json.loads(encoded)
+        except (OSError, ValueError):
+            # Comparison is optional; the normal write still validates and
+            # reports errors, and can replace a missing or damaged file.
+            pass
+        if isinstance(current, dict) and "archived_keys" not in current:
+            previous_timestamp = cast(dict[str, Any], current).get("updated_at")
+            if previous_timestamp is None or isinstance(previous_timestamp, str):
+                target["updated_at"] = previous_timestamp
+                if target == current:
+                    return target
+        return _persist_webui_sidebar_state(target)
+
+
 def _write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
-    state = normalize_webui_sidebar_state(raw)
+    return _persist_webui_sidebar_state(normalize_webui_sidebar_state(raw))
+
+
+def _persist_webui_sidebar_state(state: dict[str, Any]) -> dict[str, Any]:
     state["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     encoded = json.dumps(
         state,
@@ -268,3 +323,75 @@ def _write_webui_sidebar_state(raw: dict[str, Any]) -> dict[str, Any]:
     finally:
         os.close(dir_fd)
     return state
+
+
+async def ensure_webui_archives_imported(sessions: SessionState) -> None:
+    if not await sessions.archives_imported():
+        legacy = await asyncio.to_thread(read_legacy_archived_keys)
+        await sessions.import_archives(legacy)
+        await asyncio.to_thread(remove_legacy_archived_keys)
+
+
+async def ensure_webui_session_archives(sessions: SessionState) -> list[str]:
+    await ensure_webui_archives_imported(sessions)
+    return await sessions.archived_keys()
+
+
+class WebUISidebarState:
+    def __init__(self, sessions: SessionState | None) -> None:
+        self._sessions = sessions
+        self._lock = asyncio.Lock()
+        self._readers = 0
+        self._readers_drained = asyncio.Event()
+        self._readers_drained.set()
+
+    @asynccontextmanager
+    async def _read_snapshot(self) -> AsyncGenerator[None, None]:
+        # The FIFO admission lock lets readers overlap without overtaking a writer.
+        async with self._lock:
+            self._readers += 1
+            self._readers_drained.clear()
+        try:
+            yield
+        finally:
+            self._readers -= 1
+            if not self._readers:
+                self._readers_drained.set()
+
+    async def read(self) -> dict[str, Any]:
+        async with self._read_snapshot():
+            if self._sessions is None:
+                preferences = await asyncio.to_thread(read_webui_sidebar_state)
+                return {**preferences, "archived_keys": []}
+            await ensure_webui_archives_imported(self._sessions)
+            preferences, archived = await asyncio.gather(
+                asyncio.to_thread(read_webui_sidebar_state), self._sessions.archived_keys(),
+            )
+            return {**preferences, "archived_keys": archived}
+
+    async def write(self, raw: dict[str, Any]) -> dict[str, Any]:
+        # Keep each successful wire snapshot ordered across the two stores.
+        async with self._lock:
+            await self._readers_drained.wait()
+            return await shield_and_drain(self._write_snapshot(raw))
+
+    async def _write_snapshot(self, raw: dict[str, Any]) -> dict[str, Any]:
+        if self._sessions is None:
+            preferences = await asyncio.to_thread(write_webui_sidebar_preferences, raw)
+            return {**preferences, "archived_keys": []}
+        await ensure_webui_archives_imported(self._sessions)
+        preferences, archived = await asyncio.gather(
+            asyncio.to_thread(write_webui_sidebar_preferences, raw), self._sessions.archived_keys(),
+            return_exceptions=True,
+        )
+        # Settle both branches before releasing admission, including failed reads.
+        if isinstance(preferences, BaseException):
+            raise preferences
+        if isinstance(archived, BaseException):
+            raise archived
+        if "archived_keys" in raw:
+            target = _clean_string_list(raw["archived_keys"])
+            # Unchanged flags complete at the committed read, without a writer.
+            if set(target) != set(archived):
+                archived = await self._sessions.set_archived_keys(target)
+        return {**preferences, "archived_keys": archived}

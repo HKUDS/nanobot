@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · Goal",
+    "description": "Preview the goal and its details.",
+    "options": "Pass the goal status, summary, objective and optional recap.",
+    "state": "Status",
+    "summary": "Prepare the release",
+    "objective": "Review the changes and verify the release.\n\n- Check tests\n- Review documentation\n- Confirm readiness",
+    "recap": "Waiting for approval."
+  },
   "rename": {
     "title": "RenameDialog · Rename groups and projects",
     "description": "Try the rename dialog for groups and projects. Topics are renamed inline in the chat list.",
@@ -178,6 +187,18 @@
     "dismissed": "Recovery notice dismissed.",
     "reset": "Reset preview",
     "hint": "Select a recovery state, then try continuing or dismissing."
+  },
+  "sandbox": {
+    "gateway": "Example gateway",
+    "unknownGateway": "Not specified",
+    "title": "Command notice",
+    "description": "Use the production notice to compare missing components, unprotected installations, and startup failures.",
+    "options": "The notice does not take focus or retry commands. Change its state, dismiss it, and keep typing.",
+    "missing": "Component not found",
+    "permissions": "Installation needs attention",
+    "startup": "Startup unavailable",
+    "hint": "Component demo only. No commands run and no settings change.",
+    "settingsAction": "Requested sandbox settings (demo)."
   },
   "fallback": {
     "title": "ModelFallbackNotice · Model fallback",

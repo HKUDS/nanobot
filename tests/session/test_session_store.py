@@ -1,8 +1,13 @@
 from datetime import datetime
 
 from nanobot.providers.base import ProviderConversationState
+from nanobot.providers.model_options import ModelOptions
 from nanobot.session.manager import Session, SessionManager
-from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.model_selection import (
+    SESSION_MODEL_OPTIONS_METADATA_KEY,
+    SESSION_MODEL_PRESET_METADATA_KEY,
+    SessionModelPreset,
+)
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
 
@@ -22,22 +27,25 @@ def test_manager_roundtrips_full_history_and_private_state(tmp_path):
 
 def test_rename_model_preset_is_atomic(tmp_path, monkeypatch):
     manager = SessionManager(tmp_path)
-    for key in ("cli:one", "cli:two"):
-        manager.save(Session(key=key, metadata={SESSION_MODEL_PRESET_METADATA_KEY: "old"}))
-    original = manager._store.update_metadata
+    choices = ModelOptions("low", False)
+    manager.save(Session(key="cli:one", metadata={
+        SESSION_MODEL_PRESET_METADATA_KEY: "old", SESSION_MODEL_OPTIONS_METADATA_KEY: choices.to_dict(),
+    }))
+    manager.save(Session(key="cli:two", metadata=SessionModelPreset("old", choices).metadata_update()))
+    original = manager._store.replace_metadata
     def fail_second(key, values, **kwargs):
         if key == "cli:two":
             raise OSError("disk full")
         return original(key, values, **kwargs)
     import pytest
     with monkeypatch.context() as patch:
-        patch.setattr(manager._store, "update_metadata", fail_second)
+        patch.setattr(manager._store, "replace_metadata", fail_second)
         with pytest.raises(OSError):
             manager.rename_model_preset("old", "new")
-    assert all(manager.get_or_create(key).metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "old"
+    assert all(SessionModelPreset.from_metadata(manager.get_or_create(key).metadata) == SessionModelPreset("old", choices)
                for key in ("cli:one", "cli:two"))
     assert manager.rename_model_preset("old", "new") == 2
-    assert all(manager.get_or_create(key).metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "new"
+    assert all(SessionModelPreset.from_metadata(manager.get_or_create(key).metadata) == SessionModelPreset("new", choices)
                for key in ("cli:one", "cli:two"))
 
 

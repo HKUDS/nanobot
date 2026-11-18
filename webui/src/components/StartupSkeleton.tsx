@@ -21,7 +21,8 @@ export function readStartupLayout() {
   }
   const [path, query = ""] = hash.split("?", 2);
   const section = new URLSearchParams(query).get("section") || "overview";
-  const page = path === "/settings" ? section : path.slice(1);
+  const page = path === "/settings" || (path === "/apps" && (section === "skills" || section === "channels"))
+    ? section : path.slice(1);
   let surface: StartupSurface = "chat";
   if (page === "skills" || page === "apps" || page === "channels" || page === "automations" || page === "remote") surface = page;
   else if (path === "/settings") surface = "settings";
@@ -72,7 +73,7 @@ export function StartupSkeleton({
           <div className="startup-chat-viewport">
             <div className="startup-chat-layout">
               <div className="startup-messages"><Block /><Block /><Block /></div>
-              <div className="startup-welcome"><div className="startup-welcome-line"><Block /></div></div>
+              <div className="startup-chat-empty" />
               <div className="startup-composer">
                 <div className="startup-composer-surface">
                   <div className="startup-composer-input"><Block /></div>
@@ -90,10 +91,14 @@ export function StartupSkeleton({
         <div className="startup-scroll">
           <div className="startup-page">
             <div className="startup-page-header"><div className="startup-back"><Block /></div><div className="startup-title"><Block /></div></div>
-            <div className="startup-tabs"><Block /></div>
-            <div className="startup-panel">
-              <div className="startup-toolbar"><Block className="startup-search" /><Block className="startup-filters" /></div>
-              <div className="startup-catalog-frame">
+            <div className="startup-panel apps-catalog-layout">
+              <div className="catalog-tabs startup-tabs"><Block /><Block /><Block /></div>
+              <div className="catalog-controls startup-controls">
+                <div className="catalog-choices startup-primary-choices"><Block /><Block /><Block /><Block /></div>
+                <div className="catalog-choices startup-secondary-choices"><Block /><Block /><Block /></div>
+              </div>
+              <Block className="catalog-search startup-search" />
+              <div className="catalog-body startup-catalog-frame">
               <div className="startup-catalog-heading"><Block /></div>
               <div className="startup-catalog">
                 <div className="startup-catalog-group"><Block /></div>

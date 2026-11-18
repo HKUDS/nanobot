@@ -117,9 +117,9 @@ test("multiline drafts resize after reading typography changes", async ({ page }
   await input.fill("First line\nSecond line\nThird line");
   const standardHeight = await input.evaluate(node => node.clientHeight);
   const sizes = [
-    ["large", "Large reading text", 20],
+    ["large", "Large reading text", 18],
     ["small", "Small reading text", 16],
-    ["standard", "Standard reading text", 18],
+    ["standard", "Standard reading text", 16],
   ] as const;
   for (const [size, label, fontSize] of sizes) {
     await page.getByRole("radio", { name: label, exact: true }).click();
@@ -128,7 +128,6 @@ test("multiline drafts resize after reading typography changes", async ({ page }
     expect(await input.evaluate(node => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
     const height = await input.evaluate(node => node.clientHeight);
     if (size === "large") expect(height).toBeGreaterThan(standardHeight);
-    else if (size === "small") expect(height).toBeLessThan(standardHeight);
     else expect(height).toBe(standardHeight);
   }
 });

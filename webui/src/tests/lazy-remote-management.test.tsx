@@ -25,6 +25,7 @@ const connection = {
 
 class TestSocket {
   static current: TestSocket;
+  static connected = false;
   readyState = 0;
   sent: Outbound[] = [];
   onopen: (() => void) | null = null;
@@ -41,6 +42,7 @@ class TestSocket {
     const frame = JSON.parse(data) as Outbound;
     this.sent.push(frame);
     if (frame.type !== "webui_request") return;
+    if (frame.action === "remote.connect") TestSocket.connected = true;
     const result = frame.action === "remote.connect" ? connection
       : frame.action === "remote.pair_start" ? { id: "test-pair", command: "nanobot remote pair nbpr1.test", expires: Date.now() / 1000 + 600 }
       : frame.action === "remote.discover" ? { hosts: [], files: [], incomplete: false } : {};
@@ -101,10 +103,12 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   window.history.replaceState(null, "", "/#/new");
+  TestSocket.connected = false;
   vi.stubGlobal("WebSocket", TestSocket);
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-    const path = String(input);
-    if (path === "/api/remote-instances") return Response.json({ available: true, machine_name: "Local machine", profiles: [profile] });
+    const path = String(input).split("?")[0];
+    if (path === "/api/remote-instances") return Response.json({ available: true, machine_name: "Local machine",
+      profiles: [TestSocket.connected ? { ...connection, connected: true, health_check: 1 } : profile] });
     if (path === "/api/sessions") return Response.json({ sessions: [] });
     if (path === "/api/webui/sidebar-state") return Response.json({});
     return new Response(null, { status: 404 });

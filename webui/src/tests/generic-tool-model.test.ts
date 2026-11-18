@@ -34,18 +34,18 @@ describe("generic tool activity semantics", () => {
   });
 
   it.each([
-    ['find_files({"glob":"*.tsx"})', "File search complete", "*.tsx"],
+    ['find_files({"glob":"*.tsx"})', "Found files", "*.tsx"],
     ['grep({"pattern":"dream_cursor"})', "Searched files", "“dream_cursor”"],
     ['list_dir({"path":"memory"})', "Listed files", "memory"],
     ['read_file({"path":"docs/guide.md"})', "Read file", "docs/guide.md"],
     ['memory_search({"query":"launch date"})', "Searched memory", "“launch date”"],
     ['generate_image({"prompt":"private launch art"})', "Generated image", ""],
-    ['spawn({"label":"Research competitors","task":"private task"})', "Subtask created", "Research competitors"],
-    ['subagent("create")', "Subtask created", ""],
-    ['subagent({"action":"create","label":"Research competitors","task":"private task"})', "Subtask created", "Research competitors"],
-    ['subagent("check")', "Subtask status retrieved", ""],
-    ['subagent("send")', "Message queued for subtask", ""],
-    ['subagent("cancel")', "Stop request processed", ""],
+    ['spawn({"label":"Research competitors","task":"private task"})', "Created subtask", "Research competitors"],
+    ['subagent("create")', "Created subtask", ""],
+    ['subagent({"action":"create","label":"Research competitors","task":"private task"})', "Created subtask", "Research competitors"],
+    ['subagent("check")', "Checked subtask", ""],
+    ['subagent("send")', "Queued subtask message", ""],
+    ['subagent("cancel")', "Subtask stop requested", ""],
     ['message({"channel":"telegram","content":"private message"})', "Sent message", "telegram"],
     ['my({"action":"check","key":"context_window_tokens"})', "Checked agent settings", "context_window_tokens"],
     ['my({"action":"set","key":"model","value":"private-model"})', "Updated agent settings", "model"],
@@ -53,7 +53,6 @@ describe("generic tool activity semantics", () => {
     ['cron({"action":"remove","name":"Daily digest"})', "Removed automation", "Daily digest"],
     ['create_goal({"objective":"private objective","ui_summary":"Benchmark memory"})', "Started long task", "Benchmark memory"],
     ['update_goal({"action":"complete","recap":"private recap"})', "Updated long task", "complete"],
-    ['exec_session({"session_id":"session-1234567890-secret","until_exit":true})', "Continued command", "session…ecret"],
     ['write_stdin({"session_id":"legacy-1234567890-secret","chars":"private input"})', "Completed Write stdin", ""],
     ['list_exec_sessions({})', "Checked running commands", ""],
     ['screenshot({"path":"artifacts/home.png"})', "Captured screenshot", ""],
@@ -94,6 +93,7 @@ describe("generic tool activity semantics", () => {
       'web_search({"query":"nanobot"})',
       'web_fetch({"url":"https://example.com"})',
       'exec({"command":"date"})',
+      'exec_session({"session_id":"012345abcdef"})',
       'write_file({"path":"README.md"})',
       'edit_file({"path":"README.md"})',
       'apply_patch({"patch":"private"})',
@@ -113,22 +113,9 @@ describe("generic tool activity semantics", () => {
       { trace: first, status: "done" },
       { trace: second, status: "done" },
     ], i18n.t)).toMatchObject({
-      label: "文件搜索完成",
-      aside: "2 次",
+      label: "已搜索文件",
+      aside: "2 次搜索",
     });
-  });
-
-  it("localizes command continuation events", async () => {
-    await setAppLanguage("zh-CN");
-    const line = 'exec_session({"session_id":"session-1234567890-secret"})';
-    for (const status of ["running", "done", "error"] as const) {
-      const key = status === "running" ? "continuingCommand"
-        : status === "done" ? "continuedCommand" : "continueCommandFailed";
-      expect(describeRun(line, status)).toMatchObject({
-        label: i18n.t(`message.agentActivity.${key}`),
-        detail: "session…ecret",
-      });
-    }
   });
 
   it("keeps different subtask actions separate while grouping repeated status checks", () => {

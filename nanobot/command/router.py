@@ -1,19 +1,37 @@
 from __future__ import annotations
 
 import re
-from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.command.spec import BuiltinCommandSpec
 
 if TYPE_CHECKING:
     from nanobot.agent.loop import AgentLoop
     from nanobot.session.manager import Session
     from nanobot.utils.llm_runtime import LLMRuntime
 
-Handler = Callable[["CommandContext"], Awaitable["InboundMessage | OutboundMessage | None"]]
+Handler = Callable[["CommandContext"], Awaitable["CommandExpansion | InboundMessage | OutboundMessage | None"]]
+InputHandler = Callable[["CommandInput"], Awaitable["CommandExpansion | OutboundMessage"]]
 _BOT_SUFFIX_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+@dataclass(frozen=True, slots=True)
+class CommandInput:
+    """Inputs available to a command that only transforms a user request."""
+
+    msg: InboundMessage
+    args: str
+    is_user_turn: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CommandExpansion:
+    """A transformed input whose original command is persisted by the runtime."""
+
+    message: InboundMessage
+    temporary_session_error: str | None = None
 
 
 def command_text(message: InboundMessage) -> str:
@@ -52,7 +70,6 @@ class CommandContext:
     loop: AgentLoop = field(kw_only=True)
     runtime: LLMRuntime | None = None
     is_user_turn: bool = False
-    turn_scopes: list[AbstractContextManager[Any]] = field(default_factory=list)
 
 
 class CommandRouter:
@@ -70,6 +87,24 @@ class CommandRouter:
         self._exact: dict[str, Handler] = {}
         self._prefix: list[tuple[str, Handler]] = []
         self._session_commands: set[str] = set()
+        self._specs: list[BuiltinCommandSpec] = []
+
+    @property
+    def specs(self) -> tuple[BuiltinCommandSpec, ...]:
+        return tuple(self._specs)
+
+    def add_spec(self, spec: BuiltinCommandSpec, *, after: str | None = None) -> None:
+        self._specs = [item for item in self._specs if item.command != spec.command]
+        index = next((i + 1 for i, item in enumerate(self._specs) if item.command == after), len(self._specs))
+        self._specs.insert(index, spec)
+
+    def input_command(self, cmd: str, handler: InputHandler) -> None:
+        """Register a command that receives only input facts and returns an expansion."""
+        async def invoke(ctx: CommandContext) -> CommandExpansion | OutboundMessage:
+            return await handler(CommandInput(ctx.msg, ctx.args, ctx.is_user_turn))
+
+        self.exact(cmd, invoke)
+        self.prefix(f"{cmd} ", invoke)
 
     def priority(self, cmd: str, handler: Handler) -> None:
         self._priority[cmd] = handler
@@ -119,7 +154,9 @@ class CommandRouter:
                 return True
         return self.command_name(text) is not None
 
-    async def dispatch_priority(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
+    async def dispatch_priority(
+        self, ctx: CommandContext,
+    ) -> CommandExpansion | InboundMessage | OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
         ctx.raw = normalize_command_text(ctx.raw)
         handler = self._priority.get(ctx.raw.lower())
@@ -127,7 +164,9 @@ class CommandRouter:
             return await handler(ctx)
         return None
 
-    async def dispatch(self, ctx: CommandContext) -> InboundMessage | OutboundMessage | None:
+    async def dispatch(
+        self, ctx: CommandContext,
+    ) -> CommandExpansion | InboundMessage | OutboundMessage | None:
         """Try exact and prefix handlers, then validate registered commands."""
         if ctx.msg.metadata.get("original_command"):
             return None

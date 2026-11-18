@@ -42,7 +42,6 @@ body:
         - Skills / Plugins
         - Configuration
         - CLI
-        - API Server
         - Documentation
         - Other
     validations:

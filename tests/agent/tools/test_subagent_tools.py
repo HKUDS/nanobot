@@ -304,10 +304,12 @@ async def test_background_spawn_waits_for_concurrency_capacity(tmp_path):
     )):
         first_result = await tool.execute(action="create", task="first task")
         assert "started" in first_result
+        assert first_result.endswith("Don't duplicate its work.")
         await asyncio.wait_for(first_entered.wait(), timeout=1.0)
 
         second_result = await tool.execute(action="create", task="second task")
         assert "started" in second_result
+        assert second_result.endswith("Don't duplicate its work.")
         tasks = list(mgr._running_tasks.values())
         await asyncio.sleep(0)
         assert not second_entered.is_set()
@@ -470,6 +472,7 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
         ),
     ]
 
+    settled = []
     with request_context(RequestContext(
         channel="test",
         chat_id="c1",
@@ -484,14 +487,15 @@ async def test_runner_executes_inline_spawn_batch_concurrently(tmp_path):
             workspace_violation_counts={},
             hook=AgentHook(),
             context=AgentHookContext(iteration=0, messages=[], session_key="test:c1"),
+            on_settled=AsyncMock(side_effect=settled.extend),
         ))
         await asyncio.wait_for(both_entered.wait(), timeout=1.0)
         release.set()
-        results, events = await execution
+        await execution
 
     assert set(entered) == {"first", "second"}
-    assert results == ["first", "second"]
-    assert [event["status"] for event in events] == ["ok", "ok"]
+    assert [completed.result for completed in settled] == ["first", "second"]
+    assert [completed.event["status"] for completed in settled] == ["ok", "ok"]
     assert manager._running_tasks == {}
 
 
@@ -726,7 +730,7 @@ async def test_terminal_drain_timeout(tmp_path):
         awaitable.close()
         raise asyncio.TimeoutError
 
-    with patch("nanobot.agent.loop.asyncio.wait_for", side_effect=_timeout):
+    with patch("nanobot.agent.pending_inputs.asyncio.wait_for", side_effect=_timeout):
         results = await terminal_injection_callback()
         assert results == []
 
@@ -796,10 +800,10 @@ async def test_terminal_drain_reuses_one_timeout_budget(tmp_path):
     loop.tools.get_runtime_context_providers = MagicMock(return_value=[])
     fake_loop = MagicMock(wraps=asyncio.get_running_loop())
     fake_loop.time = clock
-    loop_asyncio = SimpleNamespace(**vars(asyncio))
-    loop_asyncio.get_running_loop = lambda: fake_loop
-    loop_asyncio.wait_for = _deliver
-    with patch("nanobot.agent.loop.asyncio", loop_asyncio):
+    pending_asyncio = SimpleNamespace(**vars(asyncio))
+    pending_asyncio.get_running_loop = lambda: fake_loop
+    pending_asyncio.wait_for = _deliver
+    with patch("nanobot.agent.pending_inputs.asyncio", pending_asyncio):
         assert await terminal_injection_callback()
         assert await terminal_injection_callback()
 

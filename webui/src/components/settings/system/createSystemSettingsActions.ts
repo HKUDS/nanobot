@@ -2,7 +2,6 @@ import type { Dispatch, SetStateAction } from "react";
 import type { TFunction } from "i18next";
 
 import type {
-  ApplySettingsPayload,
   MaybeRestartHostEngine,
   PendingRestartSections,
 } from "@/components/settings/contracts";
@@ -15,8 +14,6 @@ import {
   completeMcpOAuth,
   disableNanobotFeature,
   enableNanobotFeature,
-  fetchNanobotFeatures,
-  fetchSettings,
   fetchMcpOAuthStatus,
   fetchMcpPresets,
   importMcpConfig,
@@ -25,8 +22,6 @@ import {
   runMcpPresetAction,
   saveCustomMcpServer,
   startMcpOAuth,
-  startApiService,
-  stopApiService,
   updateAutomation,
   updateMcpServerTools,
 } from "@/lib/api";
@@ -71,10 +66,8 @@ interface SystemSettingsActionsOptions {
   state: SystemSettingsState;
   featureCatalog: NanobotFeatureInfo[];
   client: NanobotClient;
-  token: string;
   getToken: () => string;
   t: TFunction;
-  applyPayload: ApplySettingsPayload;
   maybeRestartHostEngine: MaybeRestartHostEngine;
   setPendingRestartSections: Dispatch<SetStateAction<PendingRestartSections>>;
   refreshAutomations: (showLoading?: boolean) => Promise<void>;
@@ -84,16 +77,13 @@ export function createSystemSettingsActions({
   state,
   featureCatalog,
   client,
-  token,
   getToken,
   t,
-  applyPayload,
   maybeRestartHostEngine,
   setPendingRestartSections,
   refreshAutomations,
 }: SystemSettingsActionsOptions) {
   const {
-    apiServiceAction,
     customMcpForm,
     mcpConfigImport,
     mcpOAuthCallbackUrl,
@@ -102,10 +92,8 @@ export function createSystemSettingsActions({
     mcpOAuthPopupRef,
     nanobotFeatureActionRef,
     nanobotFeatures,
-    setApiService,
-    setApiServiceAction,
-    setApiServiceError,
     setAutomationAction,
+    setAutomationDialogError,
     setAutomationPendingDelete,
     setAutomationPendingEdit,
     setAutomations,
@@ -172,29 +160,6 @@ export function createSystemSettingsActions({
     }
   };
 
-  const handleApiServiceAction = async (
-    action: "start" | "stop",
-    values?: { host: string; port: number; timeout: number; apiKey?: string },
-  ) => {
-    if (apiServiceAction) return;
-    setApiServiceAction(action);
-    setApiServiceError(null);
-    try {
-      const payload = action === "start"
-        ? await startApiService(client, values!)
-        : await stopApiService(client);
-      setApiService(payload);
-      const refreshed = await fetchNanobotFeatures(token);
-      setNanobotFeatures(refreshed);
-      const nextSettings = await fetchSettings(token);
-      applyPayload(nextSettings);
-    } catch (err) {
-      setApiServiceError((err as Error).message);
-    } finally {
-      setApiServiceAction(null);
-    }
-  };
-
   const handleCliAppAction = async (
     action: "install" | "update" | "uninstall" | "test",
     name: string,
@@ -208,6 +173,7 @@ export function createSystemSettingsActions({
       setCliApps(payload);
       if (action !== "test") {
         notifyCliAppsChanged(payload);
+        state.toolsCatalog.invalidateMcpPresets();
       }
       setCliAppsMessage(payload.last_action?.message ?? null);
       setCliAppsFocusName(action === "uninstall" ? null : name);
@@ -265,8 +231,9 @@ export function createSystemSettingsActions({
     job: SessionAutomationJob,
   ) => {
     const key = `${action}:${job.id}`;
+    const reportError = action === "delete" ? setAutomationDialogError : setAutomationsError;
     setAutomationAction(key);
-    setAutomationsError(null);
+    reportError(null);
     try {
       const payload = await runAutomationAction(client, action, job.id);
       setAutomations(payload);
@@ -276,7 +243,7 @@ export function createSystemSettingsActions({
         window.setTimeout(() => void refreshAutomations(false), 4000);
       }
     } catch (err) {
-      setAutomationsError((err as Error).message);
+      reportError(err instanceof Error ? err.message : String(err));
     } finally {
       setAutomationAction(null);
     }
@@ -288,13 +255,13 @@ export function createSystemSettingsActions({
   ) => {
     const key = `update:${job.id}`;
     setAutomationAction(key);
-    setAutomationsError(null);
+    setAutomationDialogError(null);
     try {
       const payload = await updateAutomation(client, job.id, values);
       setAutomations(payload);
       setAutomationPendingEdit(null);
     } catch (err) {
-      setAutomationsError((err as Error).message);
+      setAutomationDialogError(err instanceof Error ? err.message : String(err));
     } finally {
       setAutomationAction(null);
     }
@@ -414,6 +381,7 @@ export function createSystemSettingsActions({
       return;
     }
 
+    state.toolsCatalog.invalidate();
     if (flow.status === "authorized" && flow.hot_reload) {
       if (flow.hot_reload.requires_restart) {
         setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
@@ -487,7 +455,8 @@ export function createSystemSettingsActions({
     setMcpOAuthCompleting(false);
     setMcpOAuthCallbackError(null);
     try {
-      const flow = await startMcpOAuth(client, name, reset, values);
+      const flow = await startMcpOAuth(client, name, reset, values)
+        .finally(() => state.toolsCatalog.invalidate());
       mcpOAuthFlowRef.current = flow;
       setMcpOAuthFlow(flow);
       navigateMcpOAuthPopup(flow);
@@ -707,7 +676,6 @@ export function createSystemSettingsActions({
   };
 
   return {
-    handleApiServiceAction,
     handleAutomationAction,
     handleAutomationEdit,
     handleAutomationChat,

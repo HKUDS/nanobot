@@ -76,7 +76,7 @@ jobs:
             # scheduling below so one file cannot serialize all real venv work.
             # Bound real persistence contention: six workers can delay session
             # startup beyond its watchdog. Keep every assertion and test enabled.
-            pytest_args: "-n 4 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py"
+            pytest_args: "-n 4 --dist loadfile --ignore=tests/cli/test_commands.py --ignore=tests/cli/test_cli_input.py --ignore=tests/cli/test_desktop_target.py --ignore=tests/cli/test_desktop_target_entrypoints.py --ignore=tests/tools/test_exec_platform.py --ignore=tests/cli/test_wsl_browser.py --ignore=tests/test_install_scripts.py --ignore=tests/test_update_jobs.py --ignore=tests/test_update_profiles.py --ignore=tests/test_update_stop.py"
 
     steps:
       - uses: actions/checkout@v4
@@ -136,10 +136,13 @@ jobs:
 
       - name: Check Windows update coordination before the full suite
         if: runner.os == 'Windows'
+        # Real gateway startup/stop must not compete with the parallel package
+        # and session-index fixtures. Keep its startup and lease assertions intact.
         run: >-
           uv run --no-sync python -m pytest
           tests/test_installation_lock.py
           tests/test_update_profiles.py
+          tests/test_update_stop.py
           tests/utils/test_helpers.py::test_atomic_record_reader_does_not_block_concurrent_replacement
           tests/gateway/test_runtime.py::test_runtime_state_publish_keeps_existing_snapshot_readable
           tests/gateway/test_runtime.py::test_runtime_state_reader_does_not_block_publish_while_decoding
@@ -148,12 +151,13 @@ jobs:
       # Each update job owns its venv, HOME, profile and lock directory. Preserve
       # the real installation/restore checks, but avoid a loadfile straggler and
       # disk contention with timing-sensitive runtime-registration checks.
-      # Keep three update workers; the six-worker trial exceeded supervisor deadlines.
+      # Three concurrent offline pip fixture installs exceeded their 60s bounds.
+      # Reduce startup contention; keep every command deadline and lease assertion.
       - name: Run Windows isolated update jobs
         if: runner.os == 'Windows' && github.event_name != 'push' && needs.changes.outputs.native_required == 'true'
         run: >-
           uv run --no-sync python -m pytest tests/test_update_jobs.py
-          -n 3 --dist load -vv --durations=25 --durations-min=1.0
+          -n 2 --dist load -vv --durations=25 --durations-min=1.0
           --junitxml=test-results/update-jobs.xml --timing-report=test-results/update-jobs.json
 
       - name: Run tests with coverage
@@ -181,6 +185,7 @@ jobs:
         run: >-
           uv run --no-sync python -m pytest
           ${{ matrix.pytest_args }}
+          -o faulthandler_timeout=60
           --junitxml=test-results/main.xml --timing-report=test-results/main.json
           --durations=25 --durations-min=1.0
 
@@ -257,9 +262,9 @@ jobs:
     needs: changes
     if: github.event_name != 'push' && needs.changes.outputs.python_required == 'true' && needs.changes.outputs.native_required == 'true'
     runs-on: windows-latest
-    # The real installer matrix took 18m06s alone; process checks and teardown
-    # previously pushed the combined job beyond its 20-minute bound.
-    timeout-minutes: 25
+    # Two installer workers retain the per-command 90s deadline without four
+    # concurrent PowerShell/venv cold starts competing on the same Windows VM.
+    timeout-minutes: 40
     env:
       PYTEST_ADDOPTS: "-o tmp_path_retention_policy=failed -p scripts.pytest_timing"
     steps:
@@ -279,12 +284,12 @@ jobs:
           uv tool install pipx==1.17.12
           uv tool dir --bin >> "$GITHUB_PATH"
 
-      # Each case owns an isolated manager/config root. Keep four workers:
-      # eight-way installer startup exceeded the existing command deadlines in CI.
+      # Each case owns an isolated manager/config root. Four concurrent starts
+      # exceeded the command deadlines; reduce contention, not test coverage.
       - name: Run Windows installer checks
         run: >-
           uv run --no-sync python -m pytest tests/test_install_scripts.py
-          -n 4 --dist load -x -vv --durations=10
+          -n 2 --dist load -x -vv --durations=10
           --junitxml=test-results/installers.xml --timing-report=test-results/installers.json
 
       - name: Upload Windows process test timings
@@ -296,7 +301,7 @@ jobs:
           retention-days: 7
 
   webui_checks:
-    name: WebUI checks and build
+    name: WebUI static checks
     needs: changes
     if: needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
@@ -326,6 +331,10 @@ jobs:
         working-directory: webui
         run: bun run test:imports
 
+      - name: Test CI shard planning and failure gates
+        working-directory: webui
+        run: bun run test:ci
+
       - name: Lint WebUI
         working-directory: webui
         run: bun run lint
@@ -334,20 +343,69 @@ jobs:
         working-directory: webui
         run: bun run typecheck
 
-      - name: Test WebUI
+      - name: Type check browser tests and fixtures
         working-directory: webui
-        run: bun run test:coverage
+        run: bun run typecheck:browser
 
-      - name: Build WebUI
+  webui_build:
+    name: WebUI production build
+    needs: changes
+    if: needs.changes.outputs.webui_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Install WebUI dependencies
+        working-directory: webui
+        run: bun install --frozen-lockfile
+      - name: Type check production sources and build WebUI
         working-directory: webui
         run: bun run build
 
+  webui_unit:
+    name: WebUI unit and coverage
+    needs: changes
+    if: needs.changes.outputs.webui_required == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Install WebUI dependencies
+        working-directory: webui
+        run: bun install --frozen-lockfile
+      # Vitest 2's Istanbul blob merge can mark an unhit inner branch covered
+      # using another shard's outer range. Keep the original full V8 coverage gate.
+      - name: Run all unit tests with original coverage thresholds
+        working-directory: webui
+        run: bun run test:coverage --reporter=default --reporter=json --outputFile.json=test-results/unit/results.json
+      - name: Retain unit and coverage results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-unit-coverage
+          path: |
+            webui/test-results/unit/results.json
+            webui/coverage/coverage-summary.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
   webui_browser:
-    name: WebUI browser
+    name: WebUI browser (${{ matrix.shard }}/4)
     needs: changes
     if: needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - uses: actions/checkout@v4
@@ -365,22 +423,44 @@ jobs:
         working-directory: webui
         run: bun x playwright install --with-deps chromium
 
-      - name: Test browser layout and history motion
+      - name: Test full-suite browser shard with real layout and motion
         working-directory: webui
-        run: bun run test:browser
+        run: bun run test:browser:shard --shard=${{ matrix.shard }}/4
+
+      - name: Retain browser timings and failure details
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-results-${{ matrix.shard }}
+          path: |
+            webui/test-results/browser/results-*.json
+            webui/test-results/browser/**/trace.zip
+            webui/test-results/browser/**/test-failed-*.png
+            webui/test-results/browser/**/error-context.md
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
 
   webui:
-    needs: [changes, webui_checks, webui_browser]
+    needs: [changes, webui_checks, webui_build, webui_unit, webui_browser]
     if: always() && needs.changes.outputs.webui_required == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 1
 
     steps:
-      - name: Require both WebUI jobs to pass
+      - name: Require every full-suite WebUI lane to pass
         env:
-          CHECKS_RESULT: ${{ needs.webui_checks.result }}
-          BROWSER_RESULT: ${{ needs.webui_browser.result }}
-        run: test "$CHECKS_RESULT" = success && test "$BROWSER_RESULT" = success
+          CHECK_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          failed = {name: job["result"] for name, job in json.loads(os.environ["CHECK_RESULTS"]).items()
+                    if job["result"] != "success"}
+          if failed:
+              raise SystemExit(f"WebUI checks did not all pass: {failed}")
+          PY
 
   tui:
     needs: changes
@@ -491,13 +571,13 @@ jobs:
       - name: Build image with default channel dependencies
         run: docker build -t nanobot:test .
 
-      - name: Verify first-boot WebUI and API
+      - name: Verify first-boot gateway and WebUI
         run: python scripts/docker_compose_smoke.py --image nanobot:test
 
       - name: Check out the real previous release for retained-volume acceptance
         uses: actions/checkout@v4
         with:
-          ref: 8f7a7d17590de7ab187650381894dba2b9e060ab # v0.4.0
+          ref: 1bb712d3488915ca4ed9ccc1a93067ff722f5ab9 # v0.3.5
           path: .docker-baseline
           persist-credentials: false
 
@@ -549,7 +629,7 @@ jobs:
           from pathlib import Path
 
           config = json.loads(Path(os.environ["RUNNER_TEMP"], "bwrap-compose.json").read_text())
-          for service_name in ("nanobot-gateway", "nanobot-api", "nanobot-cli"):
+          for service_name in ("nanobot-gateway", "nanobot-cli"):
               service = config["services"][service_name]
               assert {"CHOWN", "SETGID", "SETUID", "SYS_ADMIN"} <= set(service["cap_add"])
               assert "no-new-privileges:true" in service["security_opt"]
@@ -566,7 +646,7 @@ jobs:
 
   required:
     name: CI required
-    needs: [changes, test, windows_process, windows_installers, webui_checks, webui_browser, webui, tui, docker, native]
+    needs: [changes, test, windows_process, windows_installers, webui_checks, webui_build, webui_unit, webui_browser, webui, tui, docker, native]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2

@@ -56,8 +56,9 @@ def test_interactive_agent_routes_a_complete_user_turn(
         channels_config = None
 
         @classmethod
-        def from_config(cls, _config, bus, **_kwargs):
+        def from_config(cls, _config, bus, **kwargs):
             instance = cls(bus)
+            seen["builtin_assembly"] = kwargs["builtin_assembly"]
             seen["loop"] = instance
             return instance
 
@@ -109,6 +110,8 @@ def test_interactive_agent_routes_a_complete_user_turn(
     monkeypatch.setattr("nanobot.cli.agent._model_display", lambda *_args: ("test-model", ""))
     monkeypatch.setattr("nanobot.cli.agent.consume_restart_notice_from_env", lambda: None)
     monkeypatch.setattr("nanobot.cli.agent.AgentLoop", _AgentLoop)
+    install_goal = MagicMock()
+    monkeypatch.setattr("nanobot.goal.assembly.install_goal", install_goal)
     monkeypatch.setattr("nanobot.cli.agent.StreamRenderer", _Renderer)
     monkeypatch.setattr("nanobot.providers.factory.make_provider", lambda *_args: object())
     monkeypatch.setattr(
@@ -136,6 +139,7 @@ def test_interactive_agent_routes_a_complete_user_turn(
     assert inbound.metadata == {"_wants_stream": True}
     loop = seen["loop"]
     assert isinstance(loop, _AgentLoop)
+    assert seen["builtin_assembly"] is install_goal
     assert loop.aclose_calls == 1
     assert len(renderers) == 1
     renderer = renderers[0]

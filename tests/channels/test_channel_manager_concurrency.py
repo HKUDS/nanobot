@@ -12,9 +12,9 @@ from nanobot.config.schema import Config
 from nanobot.runtime_admission import RuntimeBusyError
 
 
-def make_manager():
+def make_manager(*, config_path=None):
     config = Config.model_validate({"channels": {"websocket": {"enabled": False}}})
-    manager = ChannelManager(config, MessageBus())
+    manager = ChannelManager(config, MessageBus(), config_path=config_path)
     channel = MagicMock(spec=BaseChannel)
     channel.send = AsyncMock()
     channel.stop = AsyncMock()
@@ -112,6 +112,181 @@ async def test_ten_chats_keep_order_while_one_destination_is_blocked():
         assert manager._outbound_tails == {}
     finally:
         await manager.stop_all()
+
+
+async def test_ready_batches_are_capped_at_32_and_keep_fifo():
+    manager, channel = make_manager()
+    channel.can_batch_send.return_value = True
+    delivered = []
+
+    async def send(msg):
+        delivered.append([msg])
+
+    async def send_batch(messages):
+        delivered.append(list(messages))
+
+    channel.send.side_effect = send
+    channel.send_batch.side_effect = send_batch
+    messages = [OutboundMessage("websocket", "chat", str(i)) for i in range(65)]
+    try:
+        for msg in messages:
+            await manager._queue_outbound(channel, msg)
+        await wait_until(lambda: not manager._outbound_tasks)
+        assert delivered == [messages[:32], messages[32:64], messages[64:]]
+        assert channel.send_batch.await_count == 2
+        channel.send.assert_awaited_once_with(messages[-1])
+    finally:
+        await manager._cancel_outbound()
+
+
+async def test_batches_keep_fifo_across_noneligible_and_scheduled_boundaries(tmp_path):
+    from nanobot.bus.delivery import DeliveryRequest
+
+    manager, channel = make_manager(config_path=tmp_path / "config.json")
+    channel.can_batch_send.side_effect = lambda previous, following: (
+        previous.content != "boundary" and following.content != "boundary"
+    )
+    delivered = []
+
+    async def send(msg):
+        delivered.append([msg])
+
+    async def send_batch(messages):
+        delivered.append(list(messages))
+
+    channel.send.side_effect = send
+    channel.send_batch.side_effect = send_batch
+    messages = [OutboundMessage("websocket", "chat", content) for content in (
+        "first-a", "first-b", "boundary", "second-a", "second-b",
+        "scheduled", "third-a", "third-b",
+    )]
+    scheduled = messages[5]
+    scheduled.delivery = DeliveryRequest("run", "websocket:chat", None)
+    manager._outbox.record(scheduled)
+    try:
+        for msg in messages:
+            await manager._queue_outbound(channel, msg)
+        await wait_until(lambda: not manager._outbound_tasks)
+        assert delivered == [messages[:2], messages[2:3], messages[3:5], messages[5:6], messages[6:]]
+        assert [call.args[0] for call in channel.send.await_args_list] == [messages[2], scheduled]
+        assert manager._outbox.ready() == []
+        assert not manager._scheduled_deliveries
+    finally:
+        await manager._cancel_outbound()
+
+
+@pytest.mark.parametrize("start_batch", [False, True], ids=["before-start", "active"])
+async def test_batch_admission_counts_envelopes_and_cancellation_releases_them(monkeypatch, start_batch):
+    monkeypatch.setattr(manager_module, "_OUTBOUND_PENDING_LIMIT", 4)
+    monkeypatch.setattr(manager_module, "_OUTBOUND_CONCURRENCY", 1)
+    manager, channel = make_manager()
+    channel.can_batch_send.return_value = True
+    started, release = asyncio.Event(), asyncio.Event()
+    extra = None
+
+    async def send_batch(messages):
+        started.set()
+        await release.wait()
+
+    channel.send_batch.side_effect = send_batch
+    try:
+        for i in range(4):
+            await manager._queue_outbound(channel, OutboundMessage("websocket", "chat", str(i)))
+        assert manager.has_pending_delivery
+        if start_batch:
+            await asyncio.wait_for(started.wait(), 2)
+        else:
+            # No yielding since queueing: cancel before the batch task starts.
+            channel.send_batch.assert_not_awaited()
+        await manager._cancel_outbound()
+        assert not manager.has_pending_delivery
+
+        started.clear()
+        recovered = [OutboundMessage("websocket", "chat", f"recovered-{i}") for i in range(4)]
+        async with asyncio.timeout(2):
+            for msg in recovered:
+                await manager._queue_outbound(channel, msg)
+        await asyncio.wait_for(started.wait(), 2)
+        extra = asyncio.create_task(manager._queue_outbound(
+            channel, OutboundMessage("websocket", "other", "blocked admission"),
+        ))
+        await asyncio.sleep(0)
+        assert not extra.done()
+        extra.cancel()
+        await asyncio.gather(extra, return_exceptions=True)
+        release.set()
+        await wait_until(lambda: not manager.has_pending_delivery)
+        channel.send_batch.assert_awaited_with(tuple(recovered))
+        assert channel.send_batch.await_count == 1 + int(start_batch)
+        channel.send.assert_not_awaited()
+    finally:
+        if extra is not None:
+            extra.cancel()
+            await asyncio.gather(extra, return_exceptions=True)
+        release.set()
+        await manager._cancel_outbound()
+
+
+async def test_batch_waiting_for_send_permit_cannot_absorb_later_envelopes(monkeypatch):
+    monkeypatch.setattr(manager_module, "_OUTBOUND_CONCURRENCY", 1)
+    manager, channel = make_manager()
+    channel.can_batch_send.return_value = True
+    messages = [OutboundMessage("websocket", "chat", str(i)) for i in range(4)]
+    try:
+        async with manager._outbound_sends:
+            for msg in messages[:2]:
+                await manager._queue_outbound(channel, msg)
+            await asyncio.sleep(0)
+            channel.send_batch.assert_not_awaited()
+            for msg in messages[2:]:
+                await manager._queue_outbound(channel, msg)
+        await wait_until(lambda: not manager._outbound_tasks)
+        assert [list(call.args[0]) for call in channel.send_batch.await_args_list] == [
+            messages[:2], messages[2:],
+        ]
+        channel.send.assert_not_awaited()
+    finally:
+        await manager._cancel_outbound()
+
+
+async def test_partially_failed_batch_is_not_replayed_and_later_message_proceeds(monkeypatch):
+    monkeypatch.setattr(manager_module, "_SEND_RETRY_DELAYS", (0,))
+    manager, channel = make_manager()
+    manager.config.channels.send_max_retries = 3
+    channel.can_batch_send.return_value = True
+    channel.should_retry_send_error.return_value = True
+    started, fail = asyncio.Event(), asyncio.Event()
+    delivered = []
+
+    async def send_batch(messages):
+        delivered.append(messages[0].content)
+        started.set()
+        await fail.wait()
+        raise OSError("transport failed after the first envelope")
+
+    async def send(msg):
+        delivered.append(msg.content)
+
+    channel.send_batch.side_effect = send_batch
+    channel.send.side_effect = send
+    batch = [OutboundMessage("websocket", "chat", content) for content in ("first", "unsent")]
+    later = OutboundMessage("websocket", "chat", "later")
+    try:
+        for msg in batch:
+            await manager._queue_outbound(channel, msg)
+        await asyncio.wait_for(started.wait(), 2)
+        await manager._queue_outbound(channel, later)
+        await asyncio.sleep(0)
+        assert delivered == ["first"]
+        fail.set()
+        await wait_until(lambda: not manager._outbound_tasks)
+        channel.send_batch.assert_awaited_once_with(tuple(batch))
+        channel.send.assert_awaited_once_with(later)
+        assert delivered == ["first", "later"]
+        assert not manager.has_pending_delivery
+    finally:
+        fail.set()
+        await manager._cancel_outbound()
 
 
 async def test_retry_does_not_block_other_chats(monkeypatch):

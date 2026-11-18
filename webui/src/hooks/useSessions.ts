@@ -206,8 +206,8 @@ export function useSessions(): {
 }
 
 export function useSessionHistory(key: string | null) {
-  const { messages, history, refreshHistory, loadOlder } = useNanobotStream(
+  const { messages, messagesKey, messagesReady, history, refreshHistory, loadOlder } = useNanobotStream(
     null, undefined, false, undefined, undefined, undefined, { key },
   );
-  return { messages, ...history, refresh: refreshHistory, loadOlder };
+  return { messages, messagesKey, messagesReady, ...history, refresh: refreshHistory, loadOlder };
 }

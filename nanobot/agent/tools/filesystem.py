@@ -1,30 +1,40 @@
 # pyright: reportPrivateUsage=false, reportUnusedFunction=false
 
+import codecs
 import difflib
 import hashlib
 import mimetypes
+from collections.abc import Iterator, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
+from itertools import accumulate
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
+from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.base import Tool, ToolResult, tool_parameters
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates, current_file_states
 from nanobot.agent.tools.filesystem_config import FileToolsConfig
-from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.security.workspace_access import current_tool_workspace
+from nanobot.execution.files import NotRegularFileError, ReadableFile, WorkspaceFiles, WritableFile
 from nanobot.utils.file_edit_events import FileDiff, FileEditResult, display_file_edit_path
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
+def _plugin_skill_roots(workspace: Path, target: Path) -> tuple[Path, ...]:
+    from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
+
+    return enabled_agent_plugin_skill_dirs(workspace, requested_path=target)
+
+
 class _FsTool(Tool):
-    """Shared base for filesystem tools — common init and path resolution."""
+    """Wire file tools to workspace execution and call-local read receipts."""
 
     config_key = "file"
 
@@ -49,51 +59,37 @@ class _FsTool(Tool):
         sandbox_restricts_workspace: bool = False,
         extra_read_allowed_files: list[Path] | None = None,
     ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
-        # Legacy alias: extra_allowed_dirs is read-only. Write-capable tools
-        # must opt in via extra_write_allowed_dirs.
-        self._extra_read_allowed_dirs = [
-            *(extra_allowed_dirs or []),
-            *(extra_read_allowed_dirs or []),
-        ]
-        self._extra_read_allowed_files = list(extra_read_allowed_files or [])
-        self._extra_write_allowed_dirs = list(extra_write_allowed_dirs or [])
-        self._extra_write_allowed_files = list(extra_write_allowed_files or [])
-        self._restrict_to_workspace = (
-            bool(restrict_to_workspace)
-            if restrict_to_workspace is not None
-            else allowed_dir is not None
+        self._files = WorkspaceFiles(
+            workspace=workspace,
+            allowed_dir=allowed_dir,
+            # The legacy extra_allowed_dirs option grants reads only.
+            extra_read_allowed_dirs=(*(extra_allowed_dirs or ()), *(extra_read_allowed_dirs or ())),
+            extra_write_allowed_dirs=extra_write_allowed_dirs,
+            extra_write_allowed_files=extra_write_allowed_files,
+            restrict_to_workspace=restrict_to_workspace,
+            sandbox_restricts_workspace=sandbox_restricts_workspace,
+            extra_read_allowed_files=extra_read_allowed_files,
+            builtin_skills=BUILTIN_SKILLS_DIR,
+            plugin_skill_roots=_plugin_skill_roots,
         )
-        self._sandbox_restricts_workspace = sandbox_restricts_workspace
-        # Explicit state is used by isolated runners like Dream/subagents.
-        # Main AgentLoop tools leave this unset and resolve state from the
-        # current async task, which keeps shared tool instances session-safe.
+        # Dream and isolated runners can supply their own receipt store.
         self._explicit_file_states = file_states
         self._fallback_file_states = FileStates()
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
-
-        agent_workspace = Path(ctx.workspace)
-        resolved_agent_workspace = agent_workspace.expanduser().resolve(strict=False)
-        restrict = (
-            ctx.config.restrict_to_workspace
-            or ctx.config.exec.sandbox
-        )
-        sandbox_restricts = bool(ctx.config.exec.sandbox)
-        allowed_dir = agent_workspace if restrict else None
-        # Agent-owned skills stay available from project scopes. History is a narrower
-        # capability: expose only the append-only log, not the surrounding memory directory.
+        workspace = Path(ctx.workspace)
+        root = workspace.expanduser().resolve()
+        restricted = ctx.config.restrict_to_workspace
+        sandboxed = bool(ctx.config.exec.sandbox)
         return cls(
-            workspace=agent_workspace,
-            allowed_dir=allowed_dir,
-            extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, resolved_agent_workspace / "skills"],
-            extra_read_allowed_files=[resolved_agent_workspace / "memory" / "history.jsonl"],
+            workspace=workspace,
+            allowed_dir=workspace if restricted or sandboxed else None,
+            extra_read_allowed_dirs=[BUILTIN_SKILLS_DIR, root / "skills", root / "memory" / "wiki"],
+            extra_read_allowed_files=[root / "memory" / "history.jsonl"],
+            restrict_to_workspace=restricted,
+            sandbox_restricts_workspace=sandboxed,
             file_states=ctx.file_state_store,
-            restrict_to_workspace=ctx.config.restrict_to_workspace,
-            sandbox_restricts_workspace=sandbox_restricts,
         )
 
     @property
@@ -102,134 +98,130 @@ class _FsTool(Tool):
             return self._explicit_file_states
         return current_file_states(self._fallback_file_states)
 
-    def _effective_allowed_root(self, access_allowed_root: Path | None) -> Path | None:
-        if self._allowed_dir is None or self._workspace is None:
-            return access_allowed_root
-        try:
-            allowed_dir = Path(self._allowed_dir).expanduser().resolve(strict=False)
-            workspace = Path(self._workspace).expanduser().resolve(strict=False)
-        except (OSError, RuntimeError, TypeError, ValueError):
-            return access_allowed_root if access_allowed_root is not None else self._allowed_dir
-        if allowed_dir == workspace:
-            return access_allowed_root
-        return allowed_dir
 
-    def _resolve_with_extra(
-        self,
-        path: str,
-        extra_allowed_dirs: list[Path] | None,
-        extra_allowed_files: list[Path] | None,
-        *,
-        include_media_dir: bool,
-        extra_files_require_allowed_root: bool = False,
-    ) -> Path:
-        access = current_tool_workspace(
-            self._workspace,
-            restrict_to_workspace=self._restrict_to_workspace,
-            sandbox_restricts_workspace=self._sandbox_restricts_workspace,
-        )
-        allowed_root = self._effective_allowed_root(access.allowed_root)
-        if extra_files_require_allowed_root and allowed_root is None:
-            extra_allowed_files = None
-        return resolve_workspace_path(
-            path,
-            access.project_path,
-            allowed_root,
-            extra_allowed_dirs,
-            extra_allowed_files,
-            include_media_dir=include_media_dir,
-        )
+class _WritableFsTool(_FsTool):
+    """Expose the same write target to execution and edit activity tracking."""
 
-    def _resolve_read(self, path: str) -> Path:
-        plugin_skill_dirs: list[Path] = []
-        if self._workspace is not None:
-            from nanobot.agent.plugins import enabled_agent_plugin_skill_dirs
+    def _file_edit_paths(self, params: Mapping[str, object]) -> Iterator[str]:
+        path = params.get("path")
+        if isinstance(path, str) and path.strip():
+            yield path
 
+    def file_edit_targets(self, params: Mapping[str, object]) -> Iterator[WritableFile]:
+        for path in self._file_edit_paths(params):
             try:
-                access = current_tool_workspace(
-                    self._workspace,
-                    restrict_to_workspace=self._restrict_to_workspace,
-                    sandbox_restricts_workspace=self._sandbox_restricts_workspace,
-                )
-                if self._effective_allowed_root(access.allowed_root) is not None:
-                    candidate = Path(path).expanduser()
-                    if not candidate.is_absolute() and access.project_path is not None:
-                        candidate = access.project_path / candidate
-                    plugin_skill_dirs = list(
-                        enabled_agent_plugin_skill_dirs(
-                            Path(self._workspace),
-                            requested_path=candidate.resolve(strict=False),
-                        )
-                    )
-            except (OSError, RuntimeError):
-                pass
-        return self._resolve_with_extra(
-            path,
-            [*self._extra_read_allowed_dirs, *plugin_skill_dirs],
-            self._extra_read_allowed_files,
-            include_media_dir=True,
-            extra_files_require_allowed_root=True,
-        )
+                yield self._files.edit_target(path)
+            except (OSError, RuntimeError, ValueError):
+                continue  # Execution reports the error; activity must not read this target.
 
-    def _resolve_write(self, path: str) -> Path:
-        return self._resolve_with_extra(
-            path,
-            self._extra_write_allowed_dirs,
-            self._extra_write_allowed_files,
-            include_media_dir=False,
-        )
-
-    def _resolve(self, path: str) -> Path:
-        return self._resolve_read(path)
-
-    def _display_workspace(self) -> Path | None:
-        return current_tool_workspace(self._workspace).project_path
+    @property
+    def file_edit_workspace(self) -> Path | None:
+        return self._files.display_workspace
 
 
-_BLOCKED_DEVICE_PATHS = frozenset({
-    "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
-    "/dev/stdin", "/dev/stdout", "/dev/stderr",
-    "/dev/tty", "/dev/console",
-    "/dev/fd/0", "/dev/fd/1", "/dev/fd/2",
-})
+_LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
 
 
-def _is_blocked_device(path: str | Path) -> bool:
-    """Check if path is a blocked device that could hang or produce infinite output."""
-    import re
-    raw = str(path)
+class _TextRange:
+    """Count splitlines and retain only the requested, displayable text."""
 
-    try:
-        resolved = str(Path(raw).resolve())
-    except (OSError, ValueError):
-        resolved = raw
+    def __init__(self, offset: int, limit: int, max_chars: int):
+        self.offset = offset
+        self.limit = limit
+        self.max_chars = max_chars
+        self.total = 0
+        self.numbered: list[str] = []
+        self.line_truncated = False
+        self._output_chars = 0
+        self._fragments: list[str] = []
+        self._fragment_chars = 0
+        self._stopped = False
+        self._incomplete = False
+        self._normalize_cr = False
+        self._pending_cr = False
 
-    if raw in _BLOCKED_DEVICE_PATHS or resolved in _BLOCKED_DEVICE_PATHS:
-        return True
-    if re.match(r"/proc/\d+/fd/[012]$", raw) or re.match(r"/proc/self/fd/[012]$", raw):
-        return True
-    if re.match(r"/proc/\d+/fd/[012]$", resolved) or re.match(r"/proc/self/fd/[012]$", resolved):
-        return True
+    def feed(self, text: str) -> None:
+        if not text:
+            return
+        # The existing CRLF replacement runs before splitlines: for example,
+        # CR-CR-LF becomes CR-LF and therefore counts as one separator.
+        if self._normalize_cr:
+            text = "\r" + text
+        self._normalize_cr = text.endswith("\r")
+        if self._normalize_cr:
+            text = text[:-1]
+        self._feed_normalized(text.replace("\r\n", "\n"))
 
-    if resolved.startswith("/dev/"):
-        return True
-    return False
+    def _feed_normalized(self, text: str) -> None:
+        if not text:
+            return
+        if self._pending_cr and text.startswith("\n"):
+            text = text[1:]
+        self._pending_cr = False
+        if not text:
+            return
+
+        self._pending_cr = text.endswith("\r")
+        self._incomplete = text[-1] not in _LINE_BREAKS
+        parts = text.splitlines(keepends=True)
+        completed = len(parts) - int(self._incomplete)
+
+        if not self._stopped:
+            first = max(0, self.offset - self.total - 1)
+            last = min(len(parts), self.offset + self.limit - self.total - 1)
+            for i in range(first, last):
+                line_no = self.total + i + 1
+                part = parts[i]
+                if i < completed:
+                    part = part[:-2] if part.endswith("\r\n") else part[:-1]
+                self._accept(part, line_no, complete=i < completed)
+                if self._stopped:
+                    break
+
+        self.total += completed
+
+    def _accept(self, part: str, line_no: int, *, complete: bool) -> None:
+        prefix = f"{line_no}| "
+        separator = 1 if self.numbered else 0
+        available = self.max_chars - self._output_chars - separator - len(prefix)
+        if self._fragment_chars + len(part) > available:
+            if not self.numbered:
+                fragment = part[:max(0, available - self._fragment_chars)]
+                self.numbered.append((prefix + "".join(self._fragments) + fragment)[:self.max_chars])
+                self.line_truncated = True
+            self._fragments.clear()
+            self._stopped = True
+            return
+
+        if part:
+            self._fragments.append(part)
+            self._fragment_chars += len(part)
+        if complete:
+            line = prefix + "".join(self._fragments)
+            self._output_chars += len(line) + separator
+            self.numbered.append(line)
+            self._fragments.clear()
+            self._fragment_chars = 0
+            if len(self.numbered) >= self.limit:
+                self._stopped = True
+
+    def finish(self) -> None:
+        if self._normalize_cr:
+            self._feed_normalized("\r")
+        if self._incomplete:
+            self.total += 1
+            if not self._stopped and self.offset <= self.total < self.offset + self.limit:
+                self._accept("", self.total, complete=True)
 
 
-def _builtin_skill_read_path(path: str) -> Path | None:
-    from nanobot.agent.skill_metadata import BUILTIN_SKILLS_DIR
-
-    requested = Path(path)
-    if requested.is_absolute():
-        return None
-    parts = requested.parts
-    if len(parts) < 2 or parts[0] != "skills":
-        return None
-    root = BUILTIN_SKILLS_DIR.resolve()
-    candidate = (root / Path(*parts[1:])).resolve()
-    if candidate != root and root not in candidate.parents:
-        return None
-    return candidate if candidate.is_file() else None
+def _decode_error_message(error: UnicodeDecodeError, offset: int) -> str:
+    """Render the whole-input decode error position for an incremental BOM decoder."""
+    start, end = offset + error.start, offset + error.end
+    if end - start == 1:
+        where = f"byte 0x{error.object[error.start]:02x} in position {start}"
+    else:
+        where = f"bytes in position {start}-{end - 1}"
+    return f"'{error.encoding}' codec can't decode {where}: {error.reason}"
 
 
 @tool_parameters(
@@ -257,6 +249,8 @@ class ReadFileTool(_FsTool):
 
     _MAX_CHARS = 128_000
     _MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
+    _READ_CHUNK_SIZE = 64 * 1024
+    _IMAGE_READ_CHUNK_SIZE = 1024 * 1024
     _DEFAULT_LIMIT = 2000
     _MAX_PDF_PAGES = 20
 
@@ -285,152 +279,209 @@ class ReadFileTool(_FsTool):
         **kwargs: Any,
     ) -> Any:
         try:
+            # JSON Schema integers include 2.0; Python indices require int objects.
+            offset = int(offset)
+            limit = int(limit) if limit is not None else None
             if not path:
                 return ToolResult.error("Error reading file: Unknown path")
 
-            if _is_blocked_device(path):
-                return ToolResult.error(f"Error: Reading {path} is blocked (device path that could hang or produce infinite output).")
-
-            fp = self._resolve_read(path)
-            if not fp.exists():
-                fp = _builtin_skill_read_path(path) or fp
-            if _is_blocked_device(fp):
-                return ToolResult.error(f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output).")
-            if not fp.exists():
+            try:
+                source = self._files.read_file(path)
+            except FileNotFoundError:
                 return ToolResult.error(f"Error: File not found: {path}")
-            if not fp.is_file():
-                return ToolResult.error(f"Error: Not a file: {path}")
-
-            file_size = fp.stat().st_size
-            if file_size > self._MAX_FILE_SIZE_BYTES:
-                size_mib = file_size / (1024 * 1024)
-                max_mib = self._MAX_FILE_SIZE_BYTES // (1024 * 1024)
-                return ToolResult.error(
-                    f"Error: File too large to read ({size_mib:.1f} MiB). "
-                    f"Maximum is {max_mib} MiB."
-                )
+            fp = source.path
+            if source.size > self._MAX_FILE_SIZE_BYTES:
+                return self._file_too_large(source.size)
 
             if fp.suffix.lower() == ".pdf":
-                return self._read_pdf(fp, pages)
+                return self._read_pdf(source, pages)
 
             if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
-                return self._read_office_doc(fp, offset, limit)
+                return self._read_office_doc(source, offset, limit)
 
-            raw = fp.read_bytes()
-            if not raw:
-                return f"(Empty file: {path})"
+            with source.open() as (stream, opened_size):
+                if opened_size > self._MAX_FILE_SIZE_BYTES:
+                    return self._file_too_large(opened_size)
 
-            mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-            if mime and mime.startswith("image/"):
-                return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
+                check_previous = not force
+                while True:
+                    first = stream.read(min(max(16, self._READ_CHUNK_SIZE), self._MAX_FILE_SIZE_BYTES + 1))
+                    if not first:
+                        return f"(Empty file: {path})"
+                    if len(first) > self._MAX_FILE_SIZE_BYTES:
+                        return self._file_too_large(len(first))
 
-            content_hash = hashlib.sha256(raw).hexdigest()
-            if not force and self._file_states.is_unchanged(
-                fp, offset=offset, limit=limit, content_hash=content_hash,
-            ):
-                return f"[File unchanged since last read: {path}]"
-            from nanobot.utils.document import _decode_bom_text
+                    mime = detect_image_mime(first) or mimetypes.guess_type(path)[0]
+                    if mime and mime.startswith("image/"):
+                        chunks = [first]
+                        bytes_read = len(first)
+                        # Bound each read without preallocating from a size that
+                        # may have become stale during the receipt check.
+                        remaining = source.open_size(stream) - bytes_read
+                        chunk_size = min(self._IMAGE_READ_CHUNK_SIZE, max(self._READ_CHUNK_SIZE, remaining))
+                        while chunk := stream.read(min(
+                            chunk_size, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
+                        )):
+                            bytes_read += len(chunk)
+                            if bytes_read > self._MAX_FILE_SIZE_BYTES:
+                                return self._file_too_large(bytes_read)
+                            chunks.append(chunk)
+                        raw = b"".join(chunks)
+                        del chunks
+                        return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
-            text_content = _decode_bom_text(raw)
-            if text_content is None:
-                try:
-                    text_content = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    # Match the former eager extractor for known text formats while
-                    # keeping arbitrary binary files on the guarded error path.
-                    from nanobot.utils.document import _is_text_extension
-
-                    if _is_text_extension(fp.suffix.lower()):
-                        text_content = raw.decode("latin-1")
-                    else:
-                        mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-                        if mime and mime.startswith("image/"):
-                            return build_image_content_blocks(
-                                raw,
-                                mime,
-                                str(fp),
-                                f"(Image file: {path})",
-                            )
-                        return ToolResult.error(
-                            f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
-                            "Only supported text files and images can be read."
-                        )
-
-            if not text_content:
-                return f"(Empty file: {path})"
-
-            # Normalize CRLF -> LF before line-splitting. Primarily a Windows
-            # concern (git checkouts with autocrlf, editors saving CRLF) but
-            # applied on all platforms so downstream StrReplace/Grep behavior
-            # is consistent regardless of where the file was written.
-            text_content = text_content.replace("\r\n", "\n")
-
-            all_lines = text_content.splitlines()
-            total = len(all_lines)
-
-            if offset < 1:
-                offset = 1
-            if offset > total:
-                return ToolResult.error(f"Error: offset {offset} is beyond end of file ({total} lines)")
-
-            start = offset - 1
-            end = min(start + (limit or self._DEFAULT_LIMIT), total)
-            numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(all_lines[start:end])]
-            result = "\n".join(numbered)
-            line_truncated = False
-
-            if len(result) > self._MAX_CHARS:
-                trimmed: list[str] = []
-                chars = 0
-                for line in numbered:
-                    extra = len(line) + (1 if trimmed else 0)
-                    if chars + extra > self._MAX_CHARS:
-                        if not trimmed:
-                            trimmed.append(line[: self._MAX_CHARS])
-                            line_truncated = True
-                        break
-                    trimmed.append(line)
-                    chars += extra
-                end = start + len(trimmed)
-                result = "\n".join(trimmed)
-
-            if line_truncated:
-                result += (
-                    f"\n\n(Line {offset} truncated; its remaining characters are not shown. "
-                    "Use exec with a targeted command to inspect the omitted content.)"
-                )
-            if end < total:
-                result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
-            else:
-                result += f"\n\n(End of file — {total} lines total)"
-            self._file_states.record_read(
-                fp, offset=offset, limit=limit, content_hash=content_hash, result=result,
-            )
-            return result
+                    previous_hash = (
+                        self._file_states.visible_read_hash(fp, offset=offset, limit=limit)
+                        if check_previous else None
+                    )
+                    if previous_hash is None:
+                        return self._read_text(stream, first, fp, path, mime, offset, limit)
+                    digest = hashlib.sha256(first)
+                    bytes_read = len(first)
+                    while chunk := stream.read(min(
+                        self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read,
+                    )):
+                        bytes_read += len(chunk)
+                        if bytes_read > self._MAX_FILE_SIZE_BYTES:
+                            return self._file_too_large(bytes_read)
+                        digest.update(chunk)
+                    if digest.hexdigest() == previous_hash:
+                        return f"[File unchanged since last read: {path}]"
+                    # Re-detect the file after rewinding: it may have changed
+                    # type while the previous receipt was being checked.
+                    stream.seek(0)
+                    check_previous = False
+        except NotRegularFileError:
+            return ToolResult.error(f"Error: Not a file: {path}")
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
             return ToolResult.error(f"Error reading file: {e}")
 
-    def _read_pdf(self, fp: Path, pages: str | None) -> str:
-        from nanobot.utils.document import PdfPageRangeError, PdfSafetyError, extract_pdf_pages
+    def _file_too_large(self, size: int) -> str:
+        size_mib = size / (1024 * 1024)
+        max_mib = self._MAX_FILE_SIZE_BYTES // (1024 * 1024)
+        return ToolResult.error(
+            f"Error: File too large to read ({size_mib:.1f} MiB). Maximum is {max_mib} MiB."
+        )
+
+    def _read_text(
+        self, stream: BinaryIO, first: bytes, fp: Path, path: str, mime: str | None,
+        offset: int, limit: int | None,
+    ) -> str:
+        from nanobot.utils.document import _is_text_extension
+
+        bom_length = 0
+        if first.startswith(codecs.BOM_UTF8):
+            encoding, bom_length = "utf-8", len(codecs.BOM_UTF8)
+        elif first.startswith(codecs.BOM_UTF32_LE):
+            encoding, bom_length = "utf-32-le", len(codecs.BOM_UTF32_LE)
+        elif first.startswith(codecs.BOM_UTF32_BE):
+            encoding, bom_length = "utf-32-be", len(codecs.BOM_UTF32_BE)
+        elif first.startswith(codecs.BOM_UTF16_LE):
+            encoding, bom_length = "utf-16-le", len(codecs.BOM_UTF16_LE)
+        elif first.startswith(codecs.BOM_UTF16_BE):
+            encoding, bom_length = "utf-16-be", len(codecs.BOM_UTF16_BE)
+        else:
+            encoding = "utf-8"
+
+        selected_offset = max(1, offset)
+        selected_limit = limit or self._DEFAULT_LIMIT
+        text = _TextRange(selected_offset, selected_limit, self._MAX_CHARS)
+        # ASCII is identical in UTF-8 and Latin-1. Fork the accumulated range
+        # only when a non-ASCII byte makes the two interpretations differ.
+        allow_latin = not bom_length and _is_text_extension(fp.suffix.lower())
+        latin: _TextRange | None = None
+        decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
+        digest = hashlib.sha256()
+        bytes_read = 0
+        decoded_bytes = 0
+        decode_error: str | None = None
+        chunk = first
+        while chunk:
+            bytes_read += len(chunk)
+            if bytes_read > self._MAX_FILE_SIZE_BYTES:
+                return self._file_too_large(bytes_read)
+            digest.update(chunk)
+            payload = chunk[bom_length:] if bytes_read == len(chunk) else chunk
+            if allow_latin:
+                if latin is None and not payload.isascii():
+                    latin = deepcopy(text)
+                if latin is not None:
+                    latin.feed(payload.decode("latin-1"))
+            if decode_error is None:
+                buffered = len(decoder.getstate()[0])
+                try:
+                    text.feed(decoder.decode(payload, final=False))
+                except UnicodeDecodeError as e:
+                    # utf-8-sig reports positions after the BOM; utf-16/32
+                    # report them in the complete original byte sequence.
+                    base = bom_length if encoding != "utf-8" else 0
+                    decode_error = _decode_error_message(e, base + decoded_bytes - buffered)
+                decoded_bytes += len(payload)
+            chunk = stream.read(min(self._READ_CHUNK_SIZE, self._MAX_FILE_SIZE_BYTES + 1 - bytes_read))
+
+        if decode_error is None:
+            buffered = len(decoder.getstate()[0])
+            try:
+                text.feed(decoder.decode(b"", final=True))
+            except UnicodeDecodeError as e:
+                base = bom_length if encoding != "utf-8" else 0
+                decode_error = _decode_error_message(e, base + decoded_bytes - buffered)
+
+        content_hash = digest.hexdigest()
+        if decode_error is not None:
+            if bom_length:
+                return ToolResult.error(f"Error reading file: {decode_error}")
+            if latin is None:
+                return ToolResult.error(
+                    f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). "
+                    "Only supported text files and images can be read."
+                )
+            text = latin
+
+        text.finish()
+        total = text.total
+        if total == 0:
+            return f"(Empty file: {path})"
+        offset = selected_offset
+        if offset > total:
+            return ToolResult.error(f"Error: offset {offset} is beyond end of file ({total} lines)")
+
+        numbered = text.numbered
+        line_truncated = text.line_truncated
+        end = offset - 1 + len(numbered)
+        result = "\n".join(numbered)
+        if line_truncated:
+            result += (
+                f"\n\n(Line {offset} truncated; its remaining characters are not shown. "
+                "Use exec with a targeted command to inspect the omitted content.)"
+            )
+        if end < total:
+            result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
+        else:
+            result += f"\n\n(End of file — {total} lines total)"
+        self._file_states.record_read(
+            fp, offset=offset, limit=limit, content_hash=content_hash, result=result,
+        )
+        return result
+
+    def _read_pdf(self, source: ReadableFile, pages: str | None) -> str:
+        from nanobot.utils.document import PdfPageRangeError
 
         try:
-            extraction = extract_pdf_pages(
-                fp,
-                pages=pages,
+            extraction = source.pdf_pages(
+                pages,
                 max_pages=self._MAX_PDF_PAGES,
                 max_chars=self._MAX_CHARS,
             )
         except PdfPageRangeError as e:
             return ToolResult.error(f"Error: Invalid page range '{pages}': {e!s}.")
-        except PdfSafetyError as e:
-            return ToolResult.error(f"Error reading PDF: {e}")
         except Exception as e:
             return ToolResult.error(f"Error reading PDF: {e}")
 
         if not extraction.text:
-            return f"(PDF has no extractable text: {fp})"
+            return f"(PDF has no extractable text: {source.path})"
 
         result = extraction.text
         if extraction.truncated:
@@ -449,20 +500,18 @@ class ReadFileTool(_FsTool):
 
     def _read_office_doc(
         self,
-        fp: Path,
+        file: ReadableFile,
         offset: int,
         limit: int | None,
     ) -> str:
-        from nanobot.utils.document import open_document_line_source
-
+        fp = file.path
         offset = max(1, offset)
         requested_limit = limit or self._DEFAULT_LIMIT
-        source_iterator = None
+        source = None
         try:
-            source = open_document_line_source(fp)
+            source = file.document_lines()
             if source is None:
                 return ToolResult.error(f"Error: Unsupported file format: {fp.suffix}")
-            source_iterator = source.lines
             numbered: list[str] = []
             output_chars = 0
             total_seen = 0
@@ -470,7 +519,7 @@ class ReadFileTool(_FsTool):
             has_more = False
             line_was_clipped = False
 
-            for line in source_iterator:
+            for line in source.lines:
                 total_seen = line.extracted_line
                 if line.extracted_line < offset:
                     continue
@@ -523,9 +572,8 @@ class ReadFileTool(_FsTool):
         except Exception as e:
             return ToolResult.error(f"Error reading {fp.suffix.upper()} file: {e!s}")
         finally:
-            close = getattr(source_iterator, "close", None)
-            if close is not None:
-                close()
+            if source is not None:
+                source.close()
 
 
 @tool_parameters(
@@ -535,7 +583,7 @@ class ReadFileTool(_FsTool):
         required=["path", "content"],
     )
 )
-class WriteFileTool(_FsTool):
+class WriteFileTool(_WritableFsTool):
     """Write content to a file."""
     _scopes = {"core", "subagent", "memory"}
 
@@ -557,11 +605,10 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown path")
             if content is None:
                 raise ValueError("Unknown content")
-            fp = self._resolve_write(path)
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8", newline="")
-            self._file_states.record_write(fp)
-            return f"Successfully wrote {len(content)} characters to {fp}"
+            target = self._files.edit_target(path)
+            target.write(content, create_parents=True)
+            self._file_states.record_write(target.path)
+            return f"Successfully wrote {len(content)} characters to {target.path}"
         except PermissionError as e:
             return ToolResult.error(f"Error: {e}")
         except Exception as e:
@@ -677,22 +724,19 @@ def _match_covers_line(match: _MatchSpan, line: int) -> bool:
     return match.line <= line <= _match_end_line(match)
 
 
-def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
+def _find_literal_matches(content: str, search_text: str, needle: str) -> list[_MatchSpan]:
+    """Locate matches in original text or its length-preserving quote normalization."""
     matches: list[_MatchSpan] = []
-    start = 0
-    while True:
-        idx = content.find(old_text, start)
-        if idx == -1:
-            break
-        matches.append(
-            _MatchSpan(
-                start=idx,
-                end=idx + len(old_text),
-                text=content[idx : idx + len(old_text)],
-                line=content.count("\n", 0, idx) + 1,
-            )
-        )
-        start = idx + max(1, len(old_text))
+    start = previous = 0
+    line = 1
+    size = len(needle)
+    step = size or 1
+    while (idx := search_text.find(needle, start)) != -1:
+        line += content.count("\n", previous, idx)
+        end = idx + size
+        matches.append(_MatchSpan(idx, end, content[idx:end], line))
+        previous = idx
+        start = idx + step
     return matches
 
 
@@ -701,17 +745,11 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
     if not old_lines:
         return []
 
-    content_lines = content.splitlines()
-    content_lines_keepends = content.splitlines(keepends=True)
+    content_lines = content.splitlines(keepends=True)
     if len(content_lines) < len(old_lines):
         return []
 
-    offsets: list[int] = []
-    pos = 0
-    for line in content_lines_keepends:
-        offsets.append(pos)
-        pos += len(line)
-    offsets.append(pos)
+    offsets = list(accumulate(map(len, content_lines), initial=0))
 
     if normalize_quotes:
         stripped_old = [_normalize_quotes(line.strip()) for line in old_lines]
@@ -734,7 +772,7 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
         # Include the line terminator only when the requested match includes it.
         if (
             not old_text.endswith("\n")
-            and content_lines_keepends[i + window_size - 1].endswith("\n")
+            and content_lines[i + window_size - 1].endswith("\n")
         ):
             end -= 1
         matches.append(
@@ -748,38 +786,13 @@ def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = 
     return matches
 
 
-def _find_quote_matches(content: str, old_text: str) -> list[_MatchSpan]:
-    norm_content = _normalize_quotes(content)
-    norm_old = _normalize_quotes(old_text)
-    matches: list[_MatchSpan] = []
-    start = 0
-    while True:
-        idx = norm_content.find(norm_old, start)
-        if idx == -1:
-            break
-        matches.append(
-            _MatchSpan(
-                start=idx,
-                end=idx + len(old_text),
-                text=content[idx : idx + len(old_text)],
-                line=content.count("\n", 0, idx) + 1,
-            )
-        )
-        start = idx + max(1, len(norm_old))
-    return matches
-
-
 def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
-    for matcher in (
-        lambda: _find_exact_matches(content, old_text),
-        lambda: _find_trim_matches(content, old_text),
-        lambda: _find_trim_matches(content, old_text, normalize_quotes=True),
-        lambda: _find_quote_matches(content, old_text),
-    ):
-        matches = matcher()
-        if matches:
-            return matches
-    return []
+    return (
+        _find_literal_matches(content, content, old_text)
+        or _find_trim_matches(content, old_text)
+        or _find_trim_matches(content, old_text, normalize_quotes=True)
+        or _find_literal_matches(content, _normalize_quotes(content), _normalize_quotes(old_text))
+    )
 
 
 def _collapse_internal_whitespace(text: str) -> str:
@@ -850,7 +863,7 @@ def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], li
         required=["path", "old_text", "new_text"],
     )
 )
-class EditFileTool(_FsTool):
+class EditFileTool(_WritableFsTool):
     """Edit a file by replacing text with fallback matching."""
     _scopes = {"core", "subagent", "memory"}
 
@@ -886,7 +899,7 @@ class EditFileTool(_FsTool):
         added, deleted = diff.added, diff.deleted
         action = "add" if created else "update"
         stats = f" (+{added}/-{deleted})" if added or deleted else ""
-        path = display_file_edit_path(resolved_path, self._display_workspace())
+        path = display_file_edit_path(resolved_path, self._files.display_workspace)
         text = f"Patch applied:\n- {action} {path}{stats}"
         return FileEditResult(text, {resolved_path: diff})
 
@@ -910,38 +923,37 @@ class EditFileTool(_FsTool):
             if expected_replacements is not None and expected_replacements < 1:
                 return ToolResult.error("Error: expected_replacements must be >= 1.")
 
-            fp = self._resolve_write(path)
-            file_exists = fp.exists()
+            target = self._files.edit_target(path)
+            fp = target.path
+            file_exists = target.exists()
             if file_exists and old_text == new_text:
                 return ToolResult.error("Error: new_text must be different from old_text.")
 
             if not file_exists:
                 if old_text == "":
-                    fp.parent.mkdir(parents=True, exist_ok=True)
-                    fp.write_text(new_text, encoding="utf-8", newline="")
+                    target.write(new_text, create_parents=True)
                     self._file_states.record_write(fp)
-                    return self._format_summary(fp, "", fp.read_bytes().decode("utf-8"), created=True)
-                return self._file_not_found_msg(path, fp)
+                    return self._format_summary(fp, "", new_text, created=True)
+                return self._file_not_found_msg(path, target)
 
             try:
-                fsize = fp.stat().st_size
+                fsize = target.size()
             except OSError:
                 fsize = 0
             if fsize > self._MAX_EDIT_FILE_SIZE:
                 return ToolResult.error(f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB.")
 
+            raw = target.read_bytes()
+            content = raw.decode("utf-8")
             if old_text == "":
-                raw = fp.read_bytes()
-                content = raw.decode("utf-8")
                 if content.strip():
                     return ToolResult.error(f"Error: Cannot create file — {path} already exists and is not empty.")
-                fp.write_text(new_text, encoding="utf-8", newline="")
+                target.write(new_text)
                 self._file_states.record_write(fp)
-                return self._format_summary(fp, content, fp.read_bytes().decode("utf-8"))
+                return self._format_summary(fp, content, new_text)
 
-            raw = fp.read_bytes()
             uses_crlf = b"\r\n" in raw
-            content = raw.decode("utf-8").replace("\r\n", "\n")
+            content = content.replace("\r\n", "\n")
             norm_old = old_text.replace("\r\n", "\n")
             matches = _find_matches(content, norm_old)
 
@@ -976,7 +988,7 @@ class EditFileTool(_FsTool):
             if replace_all:
                 selected = matches
             elif occurrence is not None:
-                selected = [matches[occurrence - 1]]
+                selected = [matches[int(occurrence) - 1]]
             elif line_hint is not None:
                 candidates = [match for match in matches if _match_covers_line(match, line_hint)]
                 if not candidates:
@@ -1032,7 +1044,7 @@ class EditFileTool(_FsTool):
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
 
-            fp.write_bytes(new_content.encode("utf-8"))
+            target.write(new_content)
             self._file_states.record_write(fp)
             return self._format_summary(fp, content, new_content)
         except PermissionError as e:
@@ -1040,13 +1052,10 @@ class EditFileTool(_FsTool):
         except Exception as e:
             return ToolResult.error(f"Error editing file: {e}")
 
-    def _file_not_found_msg(self, path: str, fp: Path) -> str:
-        parent = fp.parent
-        suggestions: list[str] = []
-        if parent.is_dir():
-            siblings = [f.name for f in parent.iterdir() if f.is_file()]
-            close = difflib.get_close_matches(fp.name, siblings, n=3, cutoff=0.6)
-            suggestions = [str(parent / c) for c in close]
+    def _file_not_found_msg(self, path: str, target: WritableFile) -> str:
+        siblings = self._files.sibling_files(target)
+        close = difflib.get_close_matches(target.path.name, siblings, n=3, cutoff=0.6)
+        suggestions = [str(target.path.parent / name) for name in close]
         parts = [f"Error: File not found: {path}"]
         if suggestions:
             parts.append("Did you mean: " + ", ".join(suggestions) + "?")
@@ -1124,32 +1133,21 @@ class ListDirTool(_FsTool):
         try:
             if path is None:
                 raise ValueError("Unknown path")
-            dp = self._resolve(path)
-            if not dp.exists():
-                return ToolResult.error(f"Error: Directory not found: {path}")
-            if not dp.is_dir():
-                return ToolResult.error(f"Error: Not a directory: {path}")
-
             cap = max_entries or self._DEFAULT_MAX
-            items: list[str] = []
-            total = 0
-
-            if recursive:
-                for item in sorted(dp.rglob("*")):
-                    rel = item.relative_to(dp)
-                    if any(p in self._IGNORE_DIRS for p in rel.parts):
-                        continue
-                    total += 1
-                    if len(items) < cap:
-                        items.append(f"{rel}/" if item.is_dir() else str(rel))
-            else:
-                for item in sorted(dp.iterdir()):
-                    if item.name in self._IGNORE_DIRS:
-                        continue
-                    total += 1
-                    if len(items) < cap:
-                        pfx = "📁 " if item.is_dir() else "📄 "
-                        items.append(f"{pfx}{item.name}")
+            try:
+                listing = self._files.list_directory(
+                    path, recursive=recursive, ignored=self._IGNORE_DIRS, limit=cap,
+                )
+            except FileNotFoundError:
+                return ToolResult.error(f"Error: Directory not found: {path}")
+            except NotADirectoryError:
+                return ToolResult.error(f"Error: Not a directory: {path}")
+            total = listing.total
+            items = [
+                (f"{item}/" if is_dir else str(item)) if recursive
+                else f"{'📁' if is_dir else '📄'} {item.name}"
+                for item, is_dir in listing.entries
+            ]
 
             if not items and total == 0:
                 return f"Directory {path} is empty"

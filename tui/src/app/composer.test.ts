@@ -840,9 +840,9 @@ describe("NanobotTui composer", () => {
       }
     }
     ui.commandMenu.setCommands([{
-      command: "/history",
+      command: "/inspect",
       title: "History",
-      description: "Show recent messages",
+      description: "Inspect a session",
       argHint: "[n]",
       lifecycle: "side_channel",
       acceptsArgs: true,
@@ -852,7 +852,7 @@ describe("NanobotTui composer", () => {
     expect(ui.commandMenu.visible).toBe(true)
     setup.mockInput.pressTab()
 
-    expect(ui.composer.plainText).toBe("/history ")
+    expect(ui.composer.plainText).toBe("/inspect ")
     expect(ui.commandMenu.visible).toBe(false)
     expect(sent).toEqual([])
   })

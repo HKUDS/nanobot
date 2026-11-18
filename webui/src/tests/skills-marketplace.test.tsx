@@ -1,3 +1,4 @@
+import { useState, type ComponentProps } from "react";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -5,11 +6,15 @@ import { SkillsMarketplace } from "@/components/settings/SkillsMarketplace";
 import { SkillsCatalogSettings } from "@/components/settings/SkillsCatalogSettings";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import {
+  ApiError,
+  fetchMarketplaceSkillTrends,
   fetchSkills,
   fetchTrendingMarketplaceSkills,
+  installMarketplaceSkill,
   searchMarketplaceSkills,
 } from "@/lib/api";
 import type { NanobotClient } from "@/lib/nanobot-client";
+import type { MarketplaceSkillSummary } from "@/lib/types";
 import { requestSkillsRefresh, SKILLS_CHANGED_EVENT } from "@/lib/skill-events";
 import { ClientProvider } from "@/providers/ClientProvider";
 import { useSkills } from "@/hooks/useSkills";
@@ -19,17 +24,27 @@ vi.mock("@/lib/api", async (importOriginal) => {
   return {
     ...actual,
     fetchSkills: vi.fn(),
+    fetchMarketplaceSkillTrends: vi.fn(),
     fetchTrendingMarketplaceSkills: vi.fn(),
+    installMarketplaceSkill: vi.fn(),
     searchMarketplaceSkills: vi.fn(),
   };
 });
 
 const client = {} as NanobotClient;
 
+function MarketplaceTestView(props: Omit<ComponentProps<typeof SkillsMarketplace>, "query" | "provider">) {
+  const [query, setQuery] = useState("");
+  return <>
+    <input aria-label="Search skills" value={query} onChange={(event) => setQuery(event.target.value)} />
+    <SkillsMarketplace {...props} query={query} provider="all" />
+  </>;
+}
+
 function marketplace(token: string) {
   return (
     <ClientProvider client={client} token={token}>
-      <SkillsMarketplace
+      <MarketplaceTestView
         installedSkills={[]}
         installing=""
         onInstallingChange={() => {}}
@@ -67,7 +82,7 @@ describe("useSkills", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await act(async () => { resolveRetry({ skills: [] }); });
     expect(screen.getByText("No skills are available.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "All 0" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "All 0" })).toBeChecked();
 
     act(() => { requestSkillsRefresh(); });
     expect(screen.getByText("No skills are available.")).toBeInTheDocument();
@@ -81,6 +96,10 @@ describe("useSkills", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Search installed skills" }), {
       target: { value: "" },
     });
+    expect(screen.getByRole("button", { name: "Open details for weather" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Disabled 0" }));
+    expect(screen.getByText("No matching skills.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Enabled 1" }));
     expect(screen.getByRole("button", { name: "Open details for weather" })).toBeInTheDocument();
     expect(fetchSkills).toHaveBeenCalledTimes(3);
   });
@@ -243,6 +262,8 @@ describe("useSkills", () => {
 describe("SkillsMarketplace", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.mocked(fetchMarketplaceSkillTrends).mockReset().mockResolvedValue({ trends: {} });
+    vi.mocked(installMarketplaceSkill).mockReset();
     vi.mocked(fetchTrendingMarketplaceSkills).mockReset().mockResolvedValue({
       period: "mixed",
       provider: "all",
@@ -261,6 +282,76 @@ describe("SkillsMarketplace", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  const originSkill = (source: string, status?: MarketplaceSkillSummary["installation_status"]): MarketplaceSkillSummary => ({
+    id: `${source}/agent-browser`, skill_id: "agent-browser", name: "agent-browser",
+    source, provider: "skills_sh", installs: 42, url: `https://skills.sh/${source}/agent-browser`,
+    installed: status === "installed", installation_status: status,
+    install_supported: true, metric: "installs_total",
+  });
+
+  it("shows source matches, conflicts and unconfirmed legacy hosts without inferring from local names", async () => {
+    vi.mocked(fetchTrendingMarketplaceSkills).mockResolvedValue({
+      period: "mixed", provider: "all", install_supported: true,
+      skills: [
+        originSkill("vercel-labs/agent-browser", "installed"),
+        originSkill("101-skills/superpowers", "conflict"),
+        originSkill("local/unknown", "unknown"),
+        { ...originSkill("legacy/host"), installed: true },
+        originSkill("new/source", "available"),
+      ],
+    });
+    render(<ClientProvider client={client} token="tok"><MarketplaceTestView
+      installedSkills={[{ name: "agent-browser", source: "workspace", description: "Local", available: true }]}
+      installing="" onInstallingChange={vi.fn()}
+    /></ClientProvider>);
+    await act(async () => {});
+    expect(screen.getAllByRole("button", { name: "Installed agent-browser" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Name already in use agent-browser" })).toHaveLength(3);
+    expect(screen.getAllByText("Installed source unknown")).toHaveLength(2);
+    const available = screen.getByRole("button", { name: "Install agent-browser" });
+    expect(available).toBeEnabled();
+    fireEvent.click(available);
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("new/source");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(installMarketplaceSkill).not.toHaveBeenCalled();
+  });
+
+  it("refreshes server identity after installation instead of marking every same-name result", async () => {
+    const response = (installed: boolean) => ({
+      period: "mixed" as const, provider: "all" as const, install_supported: true,
+      skills: [originSkill("vercel-labs/agent-browser", installed ? "installed" : "available"),
+        originSkill("101-skills/superpowers", installed ? "conflict" : "available")],
+    });
+    vi.mocked(fetchTrendingMarketplaceSkills).mockResolvedValueOnce(response(false)).mockResolvedValue(response(true));
+    vi.mocked(installMarketplaceSkill).mockResolvedValue({
+      skills: [], last_action: { name: "agent-browser", installed: true, already_installed: false },
+    });
+    render(marketplace("tok"));
+    await act(async () => {});
+    fireEvent.click(screen.getAllByRole("button", { name: "Install agent-browser" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Install skill" }));
+    await act(async () => {});
+    expect(installMarketplaceSkill).toHaveBeenCalledWith(client, "skills_sh", "vercel-labs/agent-browser", "agent-browser", undefined);
+    expect(screen.getAllByRole("button", { name: "Installed agent-browser" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Name already in use agent-browser" })).toBeDisabled();
+  });
+
+  it("keeps a localized conflict error visible after refreshing a stale search result", async () => {
+    vi.mocked(searchMarketplaceSkills).mockResolvedValue({
+      query: "browser", provider: "all", install_supported: true,
+      skills: [originSkill("vercel-labs/agent-browser", "available")],
+    });
+    vi.mocked(installMarketplaceSkill).mockRejectedValue(new ApiError(409, "a skill with this name already exists"));
+    render(marketplace("tok"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search skills" }), { target: { value: "browser" } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    fireEvent.click(screen.getByRole("button", { name: "Install agent-browser" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install skill" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Installation conflict.");
+    expect(screen.queryByRole("button", { name: "Installed agent-browser" })).not.toBeInTheDocument();
   });
 
   it("shows discovery skeletons while trending or the first search is pending and keeps loaded search results", async () => {

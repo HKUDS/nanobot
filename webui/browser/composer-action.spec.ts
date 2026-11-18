@@ -1,5 +1,29 @@
 import { expect, test } from "@playwright/test";
 
+test("missing microphone uses a short toast without resizing the mobile composer", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/browser/fixture.html?case=composer-action&voiceError=noDevice");
+  const voice = page.getByRole("button", { name: "Voice input" });
+  const composer = page.locator(".thread-composer-form");
+  await expect(voice).toBeVisible();
+  await page.evaluate(async () => { await document.fonts.ready; });
+  await voice.hover();
+  // Compact controls can be visible before the footer's padding finishes transitioning.
+  await expect(composer).toHaveAttribute("data-compact-controls", "true");
+  const footer = composer.locator(".thread-composer-footer");
+  await expect.poll(() => footer.evaluate((element) => element.getAnimations().some((animation) =>
+    animation instanceof CSSTransition && animation.transitionProperty === "padding-bottom",
+  ))).toBe(false);
+  const bounds = await composer.boundingBox();
+  await voice.click();
+  const alert = page.locator('[data-toast-tone="error"]').getByRole("alert");
+  await expect(alert).toHaveText("Connect a microphone to record.");
+  expect(await alert.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await composer.boundingBox()).toEqual(bounds);
+  await expect(alert).toBeHidden();
+  await expect(voice).toBeEnabled();
+});
+
 for (const width of [1280, 390]) {
   for (const variant of ["hero", "thread"]) {
     test(`composer edge presses send and stop without losing the click (${width}px, ${variant})`, async ({ page }) => {
@@ -32,19 +56,32 @@ for (const width of [1280, 390]) {
       expect(bounds!.y + bounds!.height / 2).toBe(pillBounds!.y + pillBounds!.height / 2);
       const model = page.getByText("Preview", { exact: true });
       const modelBounds = await model.boundingBox();
+      const send = action.locator('[data-action-icon="send"]');
+      await expect(send).toHaveCSS("opacity", "0");
+      const capture = await send.evaluateHandle((icon) => {
+        // Sample the real transition at activation, before a test round trip can outlast it.
+        const sample = { opacity: 0 };
+        const observer = new MutationObserver(() => {
+          if (!icon.hasAttribute("data-active")) return;
+          observer.disconnect();
+          const fade = icon.getAnimations().find((animation) => animation instanceof CSSTransition
+            && animation.transitionProperty === "opacity");
+          if (!fade || !fade.effect) return;
+          fade.pause();
+          fade.currentTime = Number(fade.effect.getTiming().duration) / 2;
+          sample.opacity = Number(getComputedStyle(icon).opacity);
+          fade.play();
+        });
+        observer.observe(icon, { attributes: true, attributeFilter: ["data-active"] });
+        return sample;
+      });
       await input.fill("Please work");
       await expect(action).toHaveAccessibleName("Send message");
-      const samples = await action.evaluate((button) => new Promise<number[]>((resolve) => {
-        const values: number[] = [];
-        const start = performance.now();
-        const sample = () => {
-          values.push(Number(getComputedStyle(button.querySelector('[data-action-icon="send"]')!).opacity));
-          if (performance.now() - start < 200) requestAnimationFrame(sample);
-          else resolve(values);
-        };
-        requestAnimationFrame(sample);
-      }));
-      expect(samples.some((opacity) => opacity > 0 && opacity < 1)).toBe(true);
+      const { opacity } = await capture.jsonValue();
+      await capture.dispose();
+      expect(opacity).toBeGreaterThan(0);
+      expect(opacity).toBeLessThan(1);
+      await expect(send).toHaveCSS("opacity", "1");
       expect(await action.boundingBox()).toEqual(bounds);
       expect(await model.boundingBox()).toEqual(modelBounds);
 
@@ -147,3 +184,71 @@ test("idle voice and ready send remain distinct from the composer in both themes
   }
   await test.info().attach("action-contrast", { body: JSON.stringify(measurements, null, 2), contentType: "application/json" });
 });
+
+
+test("a compact mobile composer preserves its placeholder, focus, and sizing", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, viewport: { width: 314, height: 844 }, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => localStorage.setItem("nanobot.locale", "fr"));
+    await page.goto("/browser/fixture.html?case=composer-action&composerVariant=thread");
+    await page.evaluate(() => document.fonts.ready);
+    const input = page.locator(".thread-composer-input textarea");
+    const action = page.locator(".composer-primary-action");
+    await expect(input).toHaveAttribute("placeholder", "Votre message…");
+    await expect.poll(() => input.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+    const placeholder = (await input.getAttribute("aria-description"))!;
+    expect(placeholder).toContain("compétences");
+    const before = (await action.boundingBox())!;
+    const initialHeight = await input.evaluate(node => node.clientHeight);
+
+    await input.tap();
+    await expect(input).toBeFocused();
+    expect(await action.boundingBox()).toEqual(before);
+
+    await input.fill("Bonjour");
+    expect(await action.boundingBox()).toEqual(before);
+    await input.fill("Première ligne\nDeuxième ligne\nTroisième ligne");
+    await expect.poll(() => input.evaluate(node => node.clientHeight)).toBeGreaterThan(initialHeight);
+    await input.fill("");
+    await expect.poll(() => input.evaluate(node => node.clientHeight)).toBe(initialHeight);
+    expect(await action.boundingBox()).toEqual(before);
+
+    await page.locator(".thread-composer-footer button").first().focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(input).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
+for (const variant of ["hero", "thread"]) {
+  test(`placeholder follows available input width in a ${variant} composer`, async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 900 });
+    await page.addInitScript(() => localStorage.setItem("nanobot.locale", "en"));
+    await page.goto(`/browser/fixture.html?case=composer-action&composerVariant=${variant}`);
+    await page.evaluate(() => document.fonts.ready);
+    const container = page.locator("main");
+    const input = page.locator(".thread-composer-input textarea");
+    const fullHint = "Type / for commands, @ for chats or apps, $ for skills";
+    await expect(input).toHaveAttribute("placeholder", fullHint);
+
+    await container.evaluate(node => { node.style.maxWidth = "340px"; });
+    await expect(input).toHaveAttribute("placeholder", "Type a message…");
+    await expect(input).toHaveAttribute("aria-description", fullHint);
+    await expect.poll(() => input.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+
+    await input.fill("Keep this draft");
+    await container.evaluate(node => { node.style.maxWidth = "600px"; });
+    await expect(input).toHaveAttribute("placeholder", fullHint);
+    await container.evaluate(node => { node.style.setProperty("--text-reading-size", "28px"); });
+    await expect(input).toHaveAttribute("placeholder", "Type a message…");
+    await container.evaluate(node => { node.style.maxWidth = "900px"; });
+    await expect(input).toHaveAttribute("placeholder", fullHint);
+    await expect(input).toHaveValue("Keep this draft");
+
+    await page.goto(`/browser/fixture.html?case=composer-action&composerVariant=${variant}&opening`);
+    await page.locator("main").evaluate(node => { node.style.maxWidth = "340px"; });
+    await expect(input).toHaveAttribute("placeholder", "Opening a new topic…");
+  });
+}

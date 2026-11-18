@@ -46,6 +46,8 @@ class _TimingReport:
         case["phases"][report.when] = {
             "seconds": report.duration, "outcome": report.outcome,
         }
+        if report.failed:
+            case["phases"][report.when]["failure"] = report.longreprtext
 
     def pytest_sessionfinish(self, exitstatus: int) -> None:
         elapsed = time.perf_counter() - self.started

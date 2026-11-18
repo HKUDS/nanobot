@@ -398,7 +398,7 @@ class SignalChannel(BaseChannel):
                     return True
         return False
 
-    async def _handle_message(
+    async def _publish_policy_checked_message(
         self,
         sender_id: str,
         chat_id: str,
@@ -411,8 +411,10 @@ class SignalChannel(BaseChannel):
         require_existing_session: bool = False,
         session_generation: str | None = None,
     ) -> None:
-        """Handle an inbound message whose policy has already been checked.
+        """Publish only an inbound message whose Signal policy has already been checked.
 
+        This is not the base ``_handle_message`` authorization contract; never
+        call it for a message that has not passed ``_check_inbound_policy``.
         ``_check_inbound_policy`` is the authoritative gate for DM/group
         access, so we skip the base-class ``is_allowed()`` check and publish
         directly to the bus.  The denied-DM pairing path calls
@@ -764,7 +766,7 @@ class SignalChannel(BaseChannel):
 
         await self._start_typing(chat_id)
         try:
-            await self._handle_message(
+            await self._publish_policy_checked_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=content,

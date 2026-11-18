@@ -63,7 +63,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.command.builtin import BUILTIN_COMMAND_SPECS
+from nanobot.command.application import BUILTIN_COMMAND_SPECS
 from nanobot.command.router import normalize_command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.paths import get_data_dir, get_media_dir

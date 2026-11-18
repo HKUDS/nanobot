@@ -72,60 +72,30 @@ def test_agent_timezones_use_packaged_data_without_system_database() -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("field", ["apiType", "api_type"])
-@pytest.mark.parametrize("legacy", ["auto", "chat_completions", "responses"])
-def test_legacy_provider_api_migrates_and_saves_current_format(tmp_path, field, legacy):
+def test_old_installation_defaults_load_without_changing_provider_api(tmp_path):
     from nanobot.config.loader import load_config, save_config
 
     path = tmp_path / "config.json"
-    path.write_text(json.dumps({"providers": {"openai": {"apiKey": "sk-test", field: legacy}}}), encoding="utf-8")
+    path.write_text(json.dumps({"providers": {
+        "openai": {"apiType": "auto", "apiKey": "fixture"},
+        "custom": {"apiType": "auto", "apiBase": "https://example.test/v1"},
+    }}), encoding="utf-8")
     config = load_config(path)
-    expected = None if legacy == "auto" else {
-        "supportedApis": [legacy], "preferredApi": legacy,
-    }
+    assert config.providers.openai.api is None
+    assert config.providers.custom.api is None
     save_config(config, path)
-    saved = json.loads(path.read_text(encoding="utf-8"))["providers"]["openai"]
-    assert saved.get("api") == expected
-    assert field not in saved
-    assert load_config(path).providers.openai.api == config.providers.openai.api
+    assert load_config(path).providers.custom.api_base == "https://example.test/v1"
 
 
 @pytest.mark.parametrize("api", [None, {"supportedApis": ["chat_completions"]}])
-def test_current_provider_api_takes_precedence_over_legacy_input(api):
+def test_current_provider_api_stays_authoritative_if_old_key_remains(api):
     config = Config.model_validate({"providers": {"openai": {
         "apiType": "responses", "api": api,
     }}})
-    if api is None:
-        assert config.providers.openai.api is None
-    else:
-        assert config.providers.openai.api.to_capabilities().preferred_api == "chat_completions"
-
-
-def test_legacy_provider_api_rejects_invalid_selector():
-    with pytest.raises(ValueError, match="apiType must be"):
-        Config.model_validate({"providers": {"openai": {"apiType": "response"}}})
-
-
-def test_provider_api_type_is_openai_only() -> None:
-    with pytest.raises(ValueError, match="only supported"):
-        Config.model_validate({
-            "providers": {
-                "custom": {
-                    "apiBase": "https://example.test/v1",
-                    "apiType": "responses",
-                }
-            }
-        })
-
-    with pytest.raises(ValueError, match="only supported"):
-        Config.model_validate({
-            "providers": {
-                "my-company-api": {
-                    "apiBase": "https://example.test/v1",
-                    "apiType": "responses",
-                }
-            }
-        })
+    resolved = config.providers.openai.api
+    assert (resolved.to_capabilities().preferred_api if resolved else None) == (
+        "chat_completions" if api else None
+    )
 
 
 @pytest.mark.parametrize("provider_name", ["openai-codex", "github-copilot", "lm-studio"])
@@ -455,3 +425,20 @@ def test_transcription_only_provider_is_not_chat_fallback() -> None:
     })
 
     assert config.get_provider_name() is None
+
+
+@pytest.mark.parametrize("supports_images", [False, True])
+def test_image_capability_round_trip_for_defaults_named_and_inline_presets(supports_images):
+    config = Config.model_validate({
+        "agents": {"defaults": {"supportsImages": supports_images, "fallbackModels": [
+            "vision", {"model": "inline", "provider": "custom", "supportsImages": supports_images},
+        ]}},
+        "modelPresets": {"vision": {"model": "vision", "supportsImages": supports_images}},
+    })
+    restored = Config.model_validate(config.model_dump(mode="json", by_alias=True))
+    assert restored.resolve_default_preset().supports_images is supports_images
+    assert restored.resolve_preset("vision").supports_images is supports_images
+    inline = restored.agents.defaults.fallback_models[1]
+    assert not isinstance(inline, str)
+    assert inline.supports_images is supports_images
+    assert Config().resolve_preset().supports_images is True

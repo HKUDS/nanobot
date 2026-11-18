@@ -21,7 +21,6 @@ import {
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
-const HERO_GREETING_KEYS = ["workOn", "start", "build", "tackle"];
 const SLASH_COMMAND_KEYS = [
   "new",
   "compact",
@@ -29,7 +28,6 @@ const SLASH_COMMAND_KEYS = [
   "restart",
   "status",
   "model",
-  "history",
   "dream",
   "dream_log",
   "dream_restore",
@@ -128,7 +126,6 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.skills.marketplaceSearchFailed",
   "settings.skills.marketplaceInstallFailed",
   "settings.skills.marketplaceSearchPlaceholder",
-  "settings.skills.marketplaceSearchLabel",
   "settings.skills.marketplaceSearching",
   "settings.skills.marketplaceProviderFilter",
   "settings.skills.marketplaceProviderAll",
@@ -213,6 +210,7 @@ const LOCALIZED_SETTINGS_COPY_KEYS = [
   "settings.help.webuiDefaultAccess",
   "settings.values.light",
   "settings.values.dark",
+  "settings.values.collapsed",
   "settings.values.expanded",
   "settings.values.enabled",
   "settings.values.disabled",
@@ -249,7 +247,7 @@ const LOCALIZED_CHANNEL_SHELL_KEYS = [
   "settings.channels.configuredInstances",
   "settings.channels.connectPreview",
   "settings.channels.copyCommand",
-  "settings.channels.filterAll",
+  "settings.channels.enabledOnly",
   "settings.channels.filterOff",
   "settings.channels.filterOn",
   "settings.channels.helperCopied",
@@ -478,12 +476,32 @@ describe("webui i18n", () => {
     }
   });
 
-  it("defaults to English until the user chooses another language", () => {
+  it("follows the browser until the user chooses another language", () => {
     localStorage.removeItem(LOCALE_STORAGE_KEY);
-    expect(resolveInitialLocale()).toBe("en");
+    vi.stubGlobal("navigator", { languages: ["zh-CN"], language: "zh-CN" });
+    try {
+      expect(resolveInitialLocale()).toBe("zh-CN");
+      localStorage.setItem(LOCALE_STORAGE_KEY, "fr");
+      expect(resolveInitialLocale()).toBe("fr");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
-    localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
-    expect(resolveInitialLocale()).toBe("zh-CN");
+  it("falls back to English for an unsupported browser language", () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    vi.stubGlobal("navigator", { languages: ["de-DE"], language: "de-DE" });
+    try {
+      expect(resolveInitialLocale()).toBe("en");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("persists an explicit selection even when it matches the current language", async () => {
+    localStorage.removeItem(LOCALE_STORAGE_KEY);
+    await setAppLanguage("en");
+    expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("en");
   });
 
   it("lists each language by its native name", async () => {
@@ -508,7 +526,7 @@ describe("webui i18n", () => {
     );
 
     expect(
-      screen.getByPlaceholderText("Type your message…"),
+      screen.getByPlaceholderText("Type / for commands, @ for chats or apps, $ for skills"),
     ).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");
 
@@ -519,7 +537,7 @@ describe("webui i18n", () => {
       expect(document.documentElement.lang).toBe("zh-CN");
     });
     expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
-    expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("输入 / 查看命令，@ 引用会话或应用，$ 选择技能")).toBeInTheDocument();
   });
 
   it("updates the composer aria label when the language changes", async () => {
@@ -566,9 +584,6 @@ describe("webui i18n", () => {
   it("keeps empty landing resources localized for every registered locale", () => {
     for (const resource of Object.values(resources)) {
       const empty = resource.common.thread.empty;
-      for (const key of HERO_GREETING_KEYS) {
-        expect(empty.greetings[key as keyof typeof empty.greetings]).toBeTruthy();
-      }
       for (const key of QUICK_ACTION_KEYS) {
         const action = empty.quickActions[key as keyof typeof empty.quickActions];
         expect(action.title).toBeTruthy();
@@ -612,7 +627,6 @@ describe("webui i18n", () => {
       expect(slash.badges.recent).toBeTruthy();
       expect(slash.details.goalActive).toBeTruthy();
       expect(slash.details.goalReady).toBeTruthy();
-      expect(slash.details.history).toBeTruthy();
       expect(slash.details.stopRunning).toBeTruthy();
       for (const key of SLASH_COMMAND_KEYS) {
         const command = slash.commands[key as keyof typeof slash.commands];
@@ -681,7 +695,7 @@ describe("webui i18n", () => {
     expect(settings.overview.webSearch).toBe("网络搜索");
     expect(settings.overview.workspace).toBe("工作目录");
     expect(settings.skills.installedTab).toBe("已安装");
-    expect(settings.skills.discoverTab).toBe("发现");
+    expect(settings.skills.discoverTab).toBe("技能市场");
     expect(settings.skills.marketplaceProviderFilter).toBe("技能来源");
     expect(settings.skills.marketplaceProviderAll).toBe("全部");
     expect(settings.skills.marketplaceSearchPlaceholder).toBe("搜索技能");

@@ -26,7 +26,8 @@ def _job(service: CronService):
     )
 
 
-async def test_history_reads_recent_runs_without_changing_job(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("limit", [2, 2.0])
+async def test_history_reads_recent_runs_without_changing_job(tmp_path: Path, monkeypatch, limit) -> None:
     now = 1773673200000
     monkeypatch.setattr(cron_service, "_now_ms", lambda: now)
     outcomes = iter(["ok"] * 5 + ["error", "skipped"])
@@ -56,7 +57,7 @@ async def test_history_reads_recent_runs_without_changing_job(tmp_path: Path, mo
 
     default = await registry.execute("cron", {"action": "history", "job_id": job.id})
     assert len([line for line in default.splitlines() if line.startswith("- ")]) == 5
-    limited = await registry.execute("cron", {"action": "history", "job_id": job.id, "limit": 2})
+    limited = await registry.execute("cron", {"action": "history", "job_id": job.id, "limit": limit})
     assert "Report failed" in limited and "Chat busy" in limited
     assert "125ms" in limited and "America/Denver" in limited
     assert "ok" not in limited
@@ -87,9 +88,12 @@ async def test_history_reports_unknown_job(tmp_path: Path) -> None:
     assert "job missing not found" in result
 
 
-@pytest.mark.parametrize("limit", [0, 21])
-async def test_history_validates_limit(tmp_path: Path, limit: int) -> None:
+@pytest.mark.parametrize("limit, reason", [
+    (0, "is less than the minimum of 1"),
+    (21, "is greater than the maximum of 20"),
+])
+async def test_history_validates_limit(tmp_path: Path, limit: int, reason: str) -> None:
     result = await _registry(CronService(tmp_path / "jobs.json")).execute(
         "cron", {"action": "history", "job_id": "test", "limit": limit},
     )
-    assert "limit must be" in result
+    assert f"limit: {limit} {reason}" in result

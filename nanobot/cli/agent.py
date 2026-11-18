@@ -179,6 +179,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
     mcp_provider = MCPProvider.from_config(runtime_config, tools)
 
     _set_nanobot_logs(logs)
+    from nanobot.goal.assembly import install_goal
 
     try:
         agent_loop = agent_loop_class.from_config(
@@ -188,6 +189,7 @@ def _run_classic(runtime_config: Config, *, message: str | None, session_id: str
             cron_service=cron,
             hook_factories=[create_file_edit_activity_hook],
             tool_registry=tools,
+            builtin_assembly=install_goal,
         )
     except ValueError as exc:
         _print_agent_start_error(exc)

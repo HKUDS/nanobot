@@ -57,7 +57,7 @@ async def test_document_attachment_is_referenced_and_read_on_demand(
     media_dir.mkdir()
     csv_path = media_dir / "report.csv"
     csv_path.write_text("name,value\nnanobot,1", encoding="utf-8")
-    monkeypatch.setattr("nanobot.agent.tools.path_utils.get_media_dir", lambda: media_dir)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "config.json")
 
     loop = _make_loop(
         workspace,

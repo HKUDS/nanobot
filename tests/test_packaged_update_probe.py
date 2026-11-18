@@ -18,6 +18,8 @@ from nanobot.release_feed import ReleaseFeed
 from scripts import verify_packaged_update as probe
 from scripts.verify_packaged_update import (
     Timings,
+    assert_canonical_preserved,
+    assert_history_preserved,
     canonical_records,
     digest,
     feed_records,
@@ -26,42 +28,69 @@ from scripts.verify_packaged_update import (
 )
 
 
-@pytest.fixture
-def history_root(tmp_path, monkeypatch):
-    from nanobot.config.paths import get_runtime_subdir
-
-    monkeypatch.setattr("nanobot.config.loader._current_config_path", tmp_path / "account/.nanobot/config.json")
-    monkeypatch.setattr("nanobot.session.location.get_runtime_subdir", get_runtime_subdir)
-    return tmp_path
-
-
-async def test_native_history_fixture_reopens_without_mixing_model_and_display_data(history_root):
-    from nanobot.session.manager import SessionManager
-    from nanobot.webui.transcript import build_webui_thread_response
-
-    probe.seed_history(history_root)
-    sessions = SessionManager(history_root / "workspace")
-    assert sessions.sessions_dir.is_relative_to(history_root / "account/.nanobot")
-    records = canonical_records(sessions.sessions_dir / "sessions.sqlite3")
-    assert len(records["sessions"]) == 3
-    for key in ("websocket:mixed-history", "websocket:canonical-only"):
-        assert sessions.read_session_file(key)["messages"] == [{"role": "user", "content": "配置和聊天不能丢失"}]
-    assert sessions.read_session_file("websocket:display-only")["messages"] == []
-    assert sessions.project_history("websocket:canonical-only", lambda history: history.all_facts()) == []
-    for key in ("websocket:mixed-history", "websocket:display-only"):
-        response = sessions.project_history(key, lambda history, key=key: build_webui_thread_response(key, history=history))
-        assert response["completed_turn_ids"] == ["fixture-" + key.split(":", 1)[1]]
-        assert {event.get("text") for event in response["events"]} >= {"配置和聊天不能丢失", "独立验收数据"}
-    assert canonical_records(sessions.sessions_dir / "sessions.sqlite3") == records
+def test_historical_projection_defaults_do_not_mask_history_loss():
+    # Real retained packages omit unknown timestamps and an inactive goal from
+    # their public projection, although the latter is already in their JSONL.
+    events = [{"event": "user_message", "projection_id": "input", "text": "Keep this"},
+              {"event": "turn_end", "projection_id": "complete"}]
+    before = {"events": events, "completed_turn_ids": ["turn"]}
+    projected = [{**events[0], "created_at_ms": 0},
+                 {**events[1], "created_at_ms": 0, "goal_state": {"active": False}}]
+    after = {**before, "events": projected}
+    assert_history_preserved(before, after)
+    assert_history_preserved(after, after)
+    for change in ({"text": "Changed"}, {"projection_id": "changed"}, {"created_at_ms": 123}):
+        with pytest.raises(AssertionError):
+            assert_history_preserved(before, {**after, "events": [{**projected[0], **change}, projected[1]]})
+    with pytest.raises(AssertionError):
+        assert_history_preserved(before, {**after, "events": [projected[0], {**projected[1], "goal_state": {"active": True}}]})
+    with pytest.raises(AssertionError):
+        assert_history_preserved(before, {**after, "events": projected[:1]})
+    with pytest.raises(AssertionError):
+        assert_history_preserved(before, {**after, "completed_turn_ids": []})
+    with pytest.raises(AssertionError):
+        assert_history_preserved(after, before)
 
 
-def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n"):
+def test_display_migration_allows_an_empty_owner_without_masking_context_loss(tmp_path):
+    from nanobot.session.display_history import HistoryFact, HistoryImport, HistoryKind
+    from nanobot.session.manager import Session
+    from nanobot.session.sqlite_store import SqliteSessionStore
+
+    store = SqliteSessionStore(tmp_path)
+    store.initialize(tmp_path)
+    session = Session(key="websocket:canonical-only")
+    session.add_message("user", "Keep this original context")
+    store.save(session)
+    before = canonical_records(store.path)
+    store.migrate_history("acceptance-import", lambda _: [HistoryImport(
+        key="websocket:display-only", facts=[HistoryFact(HistoryKind.ANSWER, {"text": "Display only"})],
+    )])
+    after = canonical_records(store.path)
+    assert_canonical_preserved(before, after)
+    assert_canonical_preserved(after, after)
+    # The real /api/sessions read allocates the newly imported owner's handle.
+    store.update_metadata("websocket:display-only", {"session_handle": "jeno"})
+    after = canonical_records(store.path)
+    assert_canonical_preserved(before, after)
+    with pytest.raises(AssertionError):
+        assert_canonical_preserved(before, {**after, "messages": []})
+    with pytest.raises(AssertionError):
+        assert_canonical_preserved(before, {**after, "sessions": after["sessions"][1:]})
+    store.update_metadata("websocket:display-only", {"unexpected": "context"})
+    with pytest.raises(AssertionError):
+        assert_canonical_preserved(before, canonical_records(store.path))
+
+
+def wheel(tmp_path, version, *, worker=b"# worker\n", fallback=b"# fallback\n",
+          handoff=b"async def _prepare(directory):\n    try:\n        pass\n    except Exception:\n        raise\n"):
     path = tmp_path / f"nanobot_ai-{version}-py3-none-manylinux_2_17_x86_64.whl"
     with ZipFile(path, "w") as archive:
         archive.writestr(f"nanobot_ai-{version}.dist-info/METADATA", f"Name: nanobot-ai\nVersion: {version}\n")
         archive.writestr("nanobot/__init__.py", "# unchanged application\n")
         archive.writestr("nanobot/release_feed.py", "transport=transport or PinnedDNSAsyncTransport(),\n")
         archive.writestr("nanobot/update_worker.py", worker)
+        archive.writestr("nanobot/update_handoff.py", handoff)
         archive.writestr("nanobot/update_fallback.py", fallback)
         binary = ZipInfo("nanobot/tui/bin/nanobot-tui")
         binary.external_attr = 0o100755 << 16
@@ -234,6 +263,58 @@ def test_worker_count_must_be_positive_before_creating_output(tmp_path):
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 2 and "--workers" in result.stderr
     assert not output.exists()
+
+
+def test_fixture_preflight_observer_records_location_and_preserves_refusal(tmp_path):
+    secret = "sensitive-preflight-detail"
+    handoff = f'''from pathlib import Path
+async def _prepare(directory):
+    try:
+        raise ValueError({secret!r})
+    except Exception:
+        raise
+'''.encode()
+    source = wheel(tmp_path, "0.4.1", handoff=handoff)
+    baseline = fixture_wheel(source, tmp_path / "baseline", "0.4.0", feed=tmp_path / "feed.json")
+    namespace = {}
+    with ZipFile(baseline) as archive:
+        exec(compile(archive.read("nanobot/update_handoff.py"), "update_handoff.py", "exec"), namespace)
+    with pytest.raises(ValueError, match=secret):
+        asyncio.run(namespace["_prepare"](tmp_path))
+    document = (tmp_path / "acceptance-preflight.json").read_text()
+    assert json.loads(document) == {"error_type": "ValueError", "frames": [["update_handoff.py", 4]],
+                                    "stop_states": []}
+    assert secret not in document
+
+
+@pytest.mark.parametrize("update_phase", ["handoff_failed", "private-value-must-not-be-exported"])
+def test_phase_failure_identifies_failed_assertion_without_exporting_private_values(tmp_path, update_phase):
+    job = tmp_path / "private-job"
+    job.mkdir()
+    secret = "sensitive-token-must-stay-local"
+    probe.write(tmp_path / "launch.json", {"directory": str(job), "command": [secret]})
+    probe.write(job / "status.json", {"phase": update_phase, "mutation_started": False, "message": secret})
+    probe.write(job / "supervision.json", {"state": "needs_attention", "confirmation_id": secret})
+    probe.write(job / "acceptance-preflight.json", {"error_type": "ReleaseFeedError", "message": secret,
+                                                  "frames": [["release_feed.py", 300, secret], [secret, 2]],
+                                                  "stop_states": ["busy", secret, "busy"]})
+    probe.write(job / "acceptance-busy.json", {"active": True, "channel_delivery": False,
+                                              "pending_queues": secret, "message": secret})
+    try:
+        probe.replace_once(b"missing seam", b"needle", secret.encode())
+    except ValueError as error:
+        probe.phase_failure(tmp_path, "verify", error)
+    document = (tmp_path / "phase-failure.json").read_text()
+    record = json.loads(document)
+    assert record["phase"] == "verify" and record["error_type"] == "ValueError"
+    assert record["probe_lines"] and all(isinstance(line, int) for line in record["probe_lines"])
+    assert record["update_phase"] == ("handoff_failed" if update_phase == "handoff_failed" else "incomplete")
+    assert record["mutation_started"] is False and record["recovery_needs_attention"] is True
+    assert record["preflight_error"] == "ReleaseFeedError" and record["preflight_frames"] == [["release_feed.py", 300]]
+    assert record["stop_states"] == ["busy"]
+    assert record["busy_flags"] == {"active": True, "channel_delivery": False}
+    assert secret not in document and str(tmp_path) not in document
+    assert "private-value-must-not-be-exported" not in document
 
 
 def test_lanes_balance_all_nine_scenarios_without_splitting_fifteen_journeys():

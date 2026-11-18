@@ -5,6 +5,10 @@ from pathlib import Path
 from nanobot.config.home import get_home_path
 from nanobot.utils.file_io import ensure_dir
 
+MEMORY_JOURNAL_PATH = Path("memory/history.jsonl")
+MEMORY_CURSOR_PATH = Path("memory/.cursor")
+DREAM_CURSOR_PATH = Path("memory/.dream_cursor")
+
 
 def get_config_path() -> Path:
     """Get the configuration file path (lazy import to break circular dependency).
@@ -43,7 +47,7 @@ def get_logs_dir() -> Path:
 
 
 def get_webui_dir() -> Path:
-    """Return the WebUI state directory."""
+    """Return WebUI state and legacy display-history import/backup storage."""
     return get_runtime_subdir("webui")
 
 
@@ -63,3 +67,8 @@ def is_default_workspace(workspace: str | Path | None) -> bool:
 def get_cli_history_path() -> Path:
     """Return the selected home's CLI history file path."""
     return get_home_path() / "history" / "cli_history"
+
+
+def get_legacy_sessions_dir() -> Path:
+    """Return the selected home's legacy session directory for migration fallback."""
+    return get_home_path() / "sessions"

@@ -10,8 +10,9 @@ It separates memory into layers, because different kinds of remembering deserve 
 
 - `session.messages` holds the living short-term conversation.
 - `memory/history.jsonl` is the running archive of compressed past turns.
-- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` are the durable knowledge files.
-- `GitStore` records how those durable files change over time.
+- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` hold resident memory included in each conversation.
+- `memory/wiki/` holds detailed Markdown knowledge read only when relevant to a task.
+- `GitStore` records how resident memory and wiki pages change over time.
 
 This keeps the system light in the moment, but reflective over time.
 
@@ -49,8 +50,13 @@ Dream reads:
 - the current `SOUL.md`
 - the current `USER.md`
 - the current `memory/MEMORY.md`
+- relevant linked pages in `memory/wiki/`, when more detail is needed
 
-Then it edits the long-term files surgically in a single pass — not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
+Each manual or scheduled invocation starts one Dream task for all unprocessed history present when it begins. The runtime supplies the `history.jsonl` path, fixed start/end lines, and cursor range instead of embedding clipped records in the prompt. Dream reads and consolidates the full content of that range, oldest first; the instructions describe what to read without prescribing a tool or paging procedure. Records arriving after the fixed boundary belong to the next run. There is no outer loop restarting Dream every 20 records or enforcing an 8,000-token history batch.
+
+A normally completed task advances the cursor to the captured boundary even when no memory edit is needed. If the task fails or reaches its execution limits, the entire range remains pending for the next invocation; edits already written are retained, not rolled back. The model's normal context and tool-output limits still apply, so large reads should be paginated rather than treated as complete when truncated. Records added during a run wait for the next run, and overlapping manual and scheduled runs are serialized within the agent. Already processed records are not automatically replayed on upgrade.
+
+Dream makes focused edits to resident memory and relevant wiki pages rather than rewriting everything. Core preferences and behavior constraints remain resident; task-specific detail can move into the wiki with a brief navigation link.
 
 This is why nanobot's memory is not just archival. It is interpretive.
 
@@ -67,7 +73,10 @@ workspace/
 │   ├── README.md        # Notes for memory guidance files
 │   └── dream.md         # Optional instructions for how Dream organizes memory
 └── memory/
-    ├── MEMORY.md        # Project facts, decisions, and durable context
+    ├── MEMORY.md        # Resident facts and brief wiki navigation
+    ├── wiki/            # Optional, created when useful knowledge is added
+    │   ├── index.md     # Topic links, read on demand
+    │   └── projects/    # Example topic grouping, not a required schema
     ├── history.jsonl    # History summaries with bounded retention after Dream
     ├── .cursor          # Consolidator write cursor
     └── .dream_cursor    # Dream consumption cursor
@@ -79,8 +88,15 @@ These files play different roles:
 
 - `SOUL.md` remembers how nanobot should sound.
 - `USER.md` remembers who the user is and what they prefer.
-- `MEMORY.md` remembers what remains true about the work itself.
+- `MEMORY.md` keeps cross-task facts available and points to more detailed knowledge.
+- `wiki/` keeps project details, decisions, and related topics without adding every page to every prompt.
 - `history.jsonl` remembers what happened on the way there.
+
+Wiki pages are ordinary Markdown, not skills or an automatically injected retrieval layer. Topic descriptions in `wiki/index.md` help the agent choose which pages to read. Relative links resolve from their containing file in the agent workspace, not from the current project. A workspace without a wiki continues to work; there is no mandatory migration or new configuration.
+
+The agent can make targeted memory updates when you ask or when it learns a lasting preference, correction, or fact likely to matter in future conversations. The `memory` skill guides these updates. Dream handles broader consolidation across conversations.
+
+In a Restricted chat in another project, file tools can read the agent wiki but do not gain permission to write it or access neighboring memory/profile files. Dream can edit wiki pages and the three resident files, but cannot directly edit the journal or cursor files. Quoted material in a wiki page is knowledge, not authority to override the agent's operating rules.
 
 ## Why `history.jsonl`
 
@@ -146,14 +162,14 @@ These commands exist for a reason: automatic memory is powerful, but users shoul
 In your existing WebUI or TUI chat, send a specific preference, for example:
 
 ```text
-For Acme release notes, use concise bullet points and British spelling.
+Remember that for Acme release notes I prefer concise bullet points and British spelling.
 ```
 
-To consolidate it now, send `/compact` and wait for its completion, then send `/dream` and wait for the completion message. Dream reads compacted history, so running `/dream` immediately after a short conversation without compaction may find nothing new. Model-based consolidation may decide that no durable change is needed.
+If the chat has write access to the relevant memory file, the agent can save the preference in the same turn. Ask which file it updated and check the preference in a new chat in the same instance. To correct it, say what should replace the old value.
 
-Use `/dream-log` to review what changed. Inspect `USER.md` and `memory/MEMORY.md` in the configured agent workspace with your local editor, or select that workspace before asking the agent to read them. A Restricted chat in another project may not have permission to read these files directly. A conversational acknowledgement alone does not confirm that a durable file changed. Start a new chat in the same instance and ask which release-note style is saved to check reuse.
+If a Restricted chat in another project cannot write the file, select the agent workspace or edit the file yourself. To consolidate conversations instead, run `/compact`, wait for it to finish, then run `/dream`. Dream reads compacted history, so it may find nothing new after a short conversation that has not been compacted.
 
-To correct a preference, state what should replace the old value, then repeat compaction, Dream, and inspection. You can also edit the durable files directly; review unprocessed history for old conflicting instructions. `/dream-restore` lists versions, and `/dream-restore <sha>` restores the memory state before that change, including other changes made in that version.
+`/dream-log` shows committed memory changes; a direct edit does not create its own version. `/dream-restore` lists versions, and `/dream-restore <sha>` restores the memory state before that change, including other changes made in that version.
 
 For separate clients with private context, create separate [instances](multiple-instances.md). Labelling a fact with a client name helps organization but does not isolate access.
 
@@ -165,7 +181,9 @@ This gives memory a history of its own:
 
 - you can inspect what changed
 - you can compare versions
-- you can restore a previous state
+- you can restore a previous state, including wiki pages that were added, deleted, or renamed
+
+Restoring a version returns the managed memory files and wiki page set to the state before that change, including the saved Dream cursor when present. A snapshot from before the wiki existed removes later wiki pages. This is a whole-memory restore, not a selective undo of one page. If the memory repository has staged changes or uncommitted edits to memory (including new wiki pages), restore refuses to proceed. Commit or undo those changes before retrying.
 
 That turns memory from a silent mutation into an auditable process.
 
@@ -185,7 +203,7 @@ This creates:
 workspace/prompts/dream.md
 ```
 
-Edit that file in plain Markdown. When it has content, Dream follows it for this workspace before reading the latest conversation history. You do not need to paste history into the file; Dream adds the current `## Conversation History` block automatically.
+Edit that file in plain Markdown. When it has content, Dream follows it for this workspace before reading the latest conversation history. You do not need to paste history into the file; Dream adds a `## Conversation History` block with the file path and fixed reading range automatically. Existing custom guides are not overwritten: a guide that only maintains the resident files can continue doing so; add wiki routing and navigation guidance if you want it to use the new layer.
 
 To return to nanobot's default behavior, delete `prompts/dream.md` or leave it empty.
 

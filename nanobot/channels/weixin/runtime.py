@@ -670,13 +670,10 @@ class WeixinChannel(BaseChannel):
         endpoint: str,
         params: dict[str, Any] | None = None,
         auth: bool = True,
-        extra_headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         assert self._client is not None
         url = f"{base_url.rstrip('/')}/{endpoint}"
         hdrs = self._make_headers(auth=auth)
-        if extra_headers:
-            hdrs.update(extra_headers)
         return await self._request_json(
             "GET", url, endpoint=endpoint, params=params, headers=hdrs,
         )

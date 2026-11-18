@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -18,6 +19,7 @@ import httpx
 from nanobot.agent.skills import SkillsLoader
 from nanobot.security.network import PinnedDNSAsyncTransport
 from nanobot.security.workspace_policy import WorkspaceBoundaryError, require_path_within
+from nanobot.utils.atomic_file import atomic_write_text
 
 _PROVIDER_ALL = "all"
 _PROVIDER_SKILLS_SH = "skills_sh"
@@ -50,6 +52,7 @@ _SKILLHUB_MAX_UNPACKED_BYTES = 100 * 1024 * 1024
 _SKILLHUB_MAX_FILES = 1_000
 # The skills CLI's OpenClaw adapter copies into <workspace>/skills, nanobot's layout too.
 _CLI_AGENT = "openclaw"
+_ORIGIN_FILE = ".nanobot-origin.json"
 _weekly_cache: dict[tuple[str, str], list[int]] = {}
 _weekly_cache_expires_at = 0.0
 
@@ -126,7 +129,7 @@ async def _trending_skills_sh_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_names(workspace_path)
+    installed = _installed_skill_origins(workspace_path)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     seen_sources: set[str] = set()
@@ -217,7 +220,7 @@ async def _search_skills_sh_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_names(workspace_path)
+    installed = _installed_skill_origins(workspace_path)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     for row in rows:
@@ -255,7 +258,7 @@ async def _search_skillhub_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_names(workspace_path)
+    installed = _installed_skill_origins(workspace_path)
     rows = payload.get("results", [])
     skills = [
         skill
@@ -287,7 +290,7 @@ async def _trending_skillhub_skills(
             status=502,
         ) from exc
 
-    installed = _installed_skill_names(workspace_path)
+    installed = _installed_skill_origins(workspace_path)
     rows = payload.get("skills", [])
     skills: list[dict[str, Any]] = []
     for rank, row in enumerate(rows, start=1):
@@ -352,21 +355,10 @@ async def _install_skills_sh_skill(
     if not _valid_skill_id(skill_id):
         raise SkillsMarketplaceError("invalid skill name")
 
-    loader = SkillsLoader(workspace_path)
-    existing = {entry["name"]: entry for entry in loader.list_skills(filter_unavailable=False)}
-    if skill_id in existing:
+    if _already_installed(workspace_path, skill_id, _PROVIDER_SKILLS_SH, source):
         return {"installed": True, "already_installed": True, "name": skill_id}
 
-    workspace = workspace_path.expanduser().resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
-    try:
-        require_path_within(
-            workspace / "skills",
-            workspace,
-            message="skills directory must stay inside the workspace",
-        )
-    except WorkspaceBoundaryError as exc:
-        raise SkillsMarketplaceError(str(exc), status=403) from exc
+    target = _install_target(workspace_path, skill_id)
 
     npx = shutil.which("npx")
     if npx is None:
@@ -391,42 +383,41 @@ async def _install_skills_sh_skill(
         "--yes",
     )
 
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=str(workspace),
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    try:
-        output, _ = await asyncio.wait_for(
-            process.communicate(),
-            timeout=_INSTALL_TIMEOUT_SECONDS,
+    # Stage the CLI's output too: it must not overwrite a same-name installation.
+    with tempfile.TemporaryDirectory(prefix=".nanobot-install-", dir=target.parent) as temporary:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=temporary,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
         )
-    except TimeoutError as exc:
-        process.kill()
-        await process.communicate()
-        raise SkillsMarketplaceError("skill installation timed out", status=504) from exc
+        try:
+            output, _ = await asyncio.wait_for(
+                process.communicate(), timeout=_INSTALL_TIMEOUT_SECONDS,
+            )
+        except (TimeoutError, asyncio.CancelledError) as exc:
+            process.kill()
+            await process.communicate()
+            if isinstance(exc, asyncio.CancelledError):
+                raise
+            raise SkillsMarketplaceError("skill installation timed out", status=504) from exc
 
-    if process.returncode != 0:
-        detail = _safe_output_tail(output)
-        message = "skill installation failed"
-        if detail:
-            message = f"{message}: {detail}"
-        raise SkillsMarketplaceError(message, status=502)
+        if process.returncode != 0:
+            detail = _safe_output_tail(output)
+            message = "skill installation failed"
+            if detail:
+                message = f"{message}: {detail}"
+            raise SkillsMarketplaceError(message, status=502)
 
-    installed = next(
-        (
-            entry
-            for entry in loader.list_skills(filter_unavailable=False)
-            if entry["source"] == "workspace" and entry["name"] == skill_id
-        ),
-        None,
-    )
-    if installed is None:
-        raise SkillsMarketplaceError(
-            "installer completed but the skill was not found in this workspace",
-            status=502,
+        stage = Path(temporary) / "skills" / skill_id
+        try:
+            require_path_within(stage, Path(temporary))
+            require_path_within(stage / "SKILL.md", stage)
+        except WorkspaceBoundaryError as exc:
+            raise SkillsMarketplaceError("installer returned an unsafe skill path", status=403) from exc
+        _publish_skill(
+            stage, target, provider=_PROVIDER_SKILLS_SH, source=source, skill_id=skill_id,
         )
     return {"installed": True, "already_installed": False, "name": skill_id}
 
@@ -441,9 +432,7 @@ async def _install_skillhub_skill(
     if requested_version and _VERSION_RE.fullmatch(requested_version) is None:
         raise SkillsMarketplaceError("invalid SkillHub skill version")
 
-    loader = SkillsLoader(workspace_path)
-    existing = {entry["name"]: entry for entry in loader.list_skills(filter_unavailable=False)}
-    if skill_id in existing:
+    if _already_installed(workspace_path, skill_id, _PROVIDER_SKILLHUB):
         return {
             "installed": True,
             "already_installed": True,
@@ -451,18 +440,7 @@ async def _install_skillhub_skill(
             "provider": _PROVIDER_SKILLHUB,
         }
 
-    workspace = workspace_path.expanduser().resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
-    try:
-        skills_root = require_path_within(
-            workspace / "skills",
-            workspace,
-            message="skills directory must stay inside the workspace",
-        )
-    except WorkspaceBoundaryError as exc:
-        raise SkillsMarketplaceError(str(exc), status=403) from exc
-    skills_root.mkdir(parents=True, exist_ok=True)
-    target = skills_root / skill_id
+    target = _install_target(workspace_path, skill_id)
 
     try:
         async with _skillhub_client() as client:
@@ -480,7 +458,7 @@ async def _install_skillhub_skill(
 
             with tempfile.TemporaryDirectory(
                 prefix=".skillhub-install-",
-                dir=skills_root,
+                dir=target.parent,
             ) as temporary:
                 temporary_path = Path(temporary)
                 archive_path = temporary_path / f"{skill_id}.zip"
@@ -498,14 +476,9 @@ async def _install_skillhub_skill(
                         status=502,
                     )
                 _extract_skillhub_archive(archive_path, stage_path)
-                if target.exists():
-                    return {
-                        "installed": True,
-                        "already_installed": True,
-                        "name": skill_id,
-                        "provider": _PROVIDER_SKILLHUB,
-                    }
-                os.replace(stage_path, target)
+                _publish_skill(
+                    stage_path, target, provider=_PROVIDER_SKILLHUB, source="", skill_id=skill_id,
+                )
     except SkillsMarketplaceError:
         raise
     except (httpx.HTTPError, OSError, zipfile.BadZipFile) as exc:
@@ -514,19 +487,6 @@ async def _install_skillhub_skill(
             status=502,
         ) from exc
 
-    installed = next(
-        (
-            entry
-            for entry in loader.list_skills(filter_unavailable=False)
-            if entry["source"] == "workspace" and entry["name"] == skill_id
-        ),
-        None,
-    )
-    if installed is None:
-        raise SkillsMarketplaceError(
-            "installer completed but the skill was not found in this workspace",
-            status=502,
-        )
     return {
         "installed": True,
         "already_installed": False,
@@ -736,16 +696,95 @@ def _skillhub_client() -> httpx.AsyncClient:
     )
 
 
-def _installed_skill_names(workspace_path: Path) -> set[str]:
-    return {
-        entry["name"]
-        for entry in SkillsLoader(workspace_path).list_skills(filter_unavailable=False)
-    }
+def _installed_skill_origins(workspace_path: Path) -> dict[str, tuple[str, str] | None]:
+    """Read optional installation receipts, never infer origin from a skill name."""
+    installed: dict[str, tuple[str, str] | None] = {}
+    for entry in SkillsLoader(workspace_path).list_skills(filter_unavailable=False):
+        name = entry["name"]
+        installed[name] = None
+        if entry["source"] != "workspace":
+            continue
+        try:
+            receipt = require_path_within(
+                Path(entry["path"]).parent / _ORIGIN_FILE, workspace_path.expanduser().resolve(),
+            )
+            with receipt.open(encoding="utf-8") as handle:
+                raw: object = json.loads(handle.read(4097))
+        except (OSError, ValueError, WorkspaceBoundaryError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        data = cast(dict[str, object], raw)
+        if data.get("skill_id") != name:
+            continue
+        provider, source = data.get("provider"), data.get("source")
+        if provider == _PROVIDER_SKILLS_SH and isinstance(source, str) and _SOURCE_RE.fullmatch(source):
+            installed[name] = (_PROVIDER_SKILLS_SH, source.lower())
+        elif provider == _PROVIDER_SKILLHUB and source == "":
+            # SkillHub's download API addresses a globally unique slug, not its display handle.
+            installed[name] = (_PROVIDER_SKILLHUB, "")
+    return installed
+
+
+def _installation_status(
+    installed: dict[str, tuple[str, str] | None],
+    skill_id: str,
+    provider: str,
+    source: str = "",
+) -> str:
+    if skill_id not in installed:
+        return "available"
+    origin = installed[skill_id]
+    if origin is None:
+        return "unknown"
+    return "installed" if origin == (provider, source.lower()) else "conflict"
+
+
+def _already_installed(workspace: Path, skill_id: str, provider: str, source: str = "") -> bool:
+    status = _installation_status(_installed_skill_origins(workspace), skill_id, provider, source)
+    if status in {"conflict", "unknown"}:
+        raise SkillsMarketplaceError(
+            "a skill with this name already exists; review it in Installed before removing it",
+            status=409,
+        )
+    return status == "installed"
+
+
+def _install_target(workspace_path: Path, skill_id: str) -> Path:
+    workspace = workspace_path.expanduser().resolve()
+    try:
+        root = require_path_within(
+            workspace / "skills", workspace,
+            message="skills directory must stay inside the workspace",
+        )
+    except WorkspaceBoundaryError as exc:
+        raise SkillsMarketplaceError(str(exc), status=403) from exc
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / skill_id
+    if os.path.lexists(target):
+        raise SkillsMarketplaceError("skill directory already exists; no files were replaced", status=409)
+    return target
+
+
+def _publish_skill(stage: Path, target: Path, *, provider: str, source: str, skill_id: str) -> None:
+    if not (stage / "SKILL.md").is_file():
+        raise SkillsMarketplaceError("installer completed but the skill was not found in this workspace", status=502)
+    atomic_write_text(stage / _ORIGIN_FILE, json.dumps({
+        "provider": provider, "source": source, "skill_id": skill_id,
+    }))
+    if os.path.lexists(target):
+        raise SkillsMarketplaceError("skill directory already exists; no files were replaced", status=409)
+    try:
+        stage.rename(target)
+    except OSError as exc:
+        if os.path.lexists(target):
+            raise SkillsMarketplaceError("skill directory already exists; no files were replaced", status=409) from exc
+        raise
 
 
 def _marketplace_skill(
     row: dict[str, Any],
-    installed: set[str],
+    installed: dict[str, tuple[str, str] | None],
     *,
     rank: int | None = None,
 ) -> dict[str, Any] | None:
@@ -759,6 +798,7 @@ def _marketplace_skill(
     if not isinstance(display_name, str) or not display_name.strip():
         display_name = skill_id
     installs = row.get("installs")
+    status = _installation_status(installed, skill_id, _PROVIDER_SKILLS_SH, source)
     skill: dict[str, Any] = {
         "id": f"{source}/{skill_id}",
         "skill_id": skill_id,
@@ -767,7 +807,8 @@ def _marketplace_skill(
         "provider": _PROVIDER_SKILLS_SH,
         "installs": installs if isinstance(installs, int) and installs >= 0 else 0,
         "url": f"https://skills.sh/{source}/{skill_id}",
-        "installed": skill_id in installed,
+        "installed": status == "installed",
+        "installation_status": status,
         "install_supported": skills_install_supported(),
         "metric": "installs_24h" if rank is not None else "installs_total",
     }
@@ -778,7 +819,7 @@ def _marketplace_skill(
 
 def _skillhub_skill(
     row: dict[str, Any],
-    installed: set[str],
+    installed: dict[str, tuple[str, str] | None],
     *,
     rank: int | None = None,
 ) -> dict[str, Any] | None:
@@ -809,6 +850,7 @@ def _skillhub_skill(
     if not isinstance(version, str) or _VERSION_RE.fullmatch(version) is None:
         version = ""
 
+    status = _installation_status(installed, skill_id, _PROVIDER_SKILLHUB)
     skill: dict[str, Any] = {
         "id": f"{_PROVIDER_SKILLHUB}:{skill_id}",
         "skill_id": skill_id,
@@ -819,7 +861,8 @@ def _skillhub_skill(
         "downloads": downloads if isinstance(downloads, int) and downloads >= 0 else 0,
         "url": f"{_SKILLHUB_PAGE_BASE_URL}/skills/{quote(handle.strip(), safe='')}/"
         f"{quote(skill_id, safe='')}",
-        "installed": skill_id in installed,
+        "installed": status == "installed",
+        "installation_status": status,
         "install_supported": True,
         "metric": "installs_total",
         "version": version,

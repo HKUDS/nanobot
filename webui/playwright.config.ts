@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { defineConfig, devices } from "@playwright/test";
 
 const port = Number(process.env.NANOBOT_BROWSER_TEST_PORT ?? 4178);
@@ -5,7 +6,8 @@ const port = Number(process.env.NANOBOT_BROWSER_TEST_PORT ?? 4178);
 export default defineConfig({
   testDir: "./browser",
   fullyParallel: false,
-  workers: 2,
+  forbidOnly: !!process.env.CI,
+  workers: process.env.CI ? Math.min(3, availableParallelism()) : 2,
   retries: 0,
   timeout: 30_000,
   reporter: "list",

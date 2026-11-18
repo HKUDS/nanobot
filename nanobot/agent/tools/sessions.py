@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Mapping
 from typing import Any
@@ -104,13 +103,10 @@ class SearchSessionsTool(_SessionTool):
         query = query.strip()
         if not query:
             return ToolResult.error("Error: search query must not be empty")
-        matches = await asyncio.to_thread(
-            self._access.search,
-            query,
-            _SEARCH_LIMIT,
+        validated = await self._access.asearch(
+            query, _SEARCH_LIMIT, handles=self._handles,
             exclude_session_key=current_request_session_key(),
         )
-        handles = await self._handles.alist_all_by_key() if matches else {}
         needle = query.casefold()
         result = {
             "notice": _UNTRUSTED_NOTICE,
@@ -119,10 +115,7 @@ class SearchSessionsTool(_SessionTool):
                 {
                     "session_key": match["session_key"],
                     "session_ref": _session_ref(match["session_key"]),
-                    "handle": (
-                        f"@{handles[match['session_key']].name}"
-                        if match["session_key"] in handles else None
-                    ),
+                    "handle": f"@{handle}" if handle is not None else None,
                     "title": match["title"],
                     "updated_at": match["updated_at"],
                     "excerpts": [
@@ -136,7 +129,7 @@ class SearchSessionsTool(_SessionTool):
                         for message in match["messages"]
                     ],
                 }
-                for match in matches
+                for match, handle in validated
             ],
         }
         return json.dumps(result, ensure_ascii=False)
@@ -180,7 +173,7 @@ class ReadSessionTool(_SessionTool):
         session_key = session_key.strip()
         if not session_key:
             return ToolResult.error("Error: session_key must not be empty")
-        session_handle: str | None = None
+        handle_name: str | None = None
         if session_key.startswith("@"):
             try:
                 handle_name = normalize_session_handle(session_key)
@@ -189,7 +182,6 @@ class ReadSessionTool(_SessionTool):
             handle = await self._handles.aresolve(handle_name)
             if handle is None:
                 return ToolResult.error(f"Error: session @{handle_name} was not found")
-            session_handle = f"@{handle_name}"
             session_key = handle.session_key
         query_text = query.strip() if query else ""
         if query_text in _UNSUPPORTED_MATCH_ALL_QUERIES:
@@ -197,17 +189,19 @@ class ReadSessionTool(_SessionTool):
                 "Error: query matches literal substrings; '*' and '.*' do not mean match all. "
                 "Omit query to read the latest messages."
             )
-        match = await asyncio.to_thread(
-            self._access.read,
+        match = await self._access.aread(
             session_key,
             query=query_text,
             limit=_READ_LIMIT,
             exclude_session_key=current_request_session_key(),
         )
-        if match is None:
-            return ToolResult.error(
-                f"Error: session not found: {session_handle or session_key}"
-            )
+        validated = await self._access.avalidate(
+            [match], {session_key: handle_name} if handle_name is not None else {},
+        ) if match is not None else []
+        if not validated or (handle_name is not None and validated[0][1] is None):
+            reference = f"@{handle_name}" if handle_name is not None else session_key
+            return ToolResult.error(f"Error: session not found: {reference}")
+        match = validated[0][0]
         needle = query_text.casefold()
         result: dict[str, Any] = {
             "notice": _UNTRUSTED_NOTICE,
@@ -218,8 +212,8 @@ class ReadSessionTool(_SessionTool):
                 for message in match["messages"]
             ],
         }
-        if session_handle is not None:
-            result["handle"] = session_handle
+        if handle_name is not None:
+            result["handle"] = f"@{handle_name}"
         else:
             result.update({
                 "session_key": match["session_key"],

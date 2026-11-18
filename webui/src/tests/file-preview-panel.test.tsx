@@ -227,7 +227,7 @@ describe("FilePreviewPanel", () => {
       await setAppLanguage("zh-CN");
     });
 
-    expect(screen.getByRole("button", { name: "预览" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible();
     expect(screen.getByRole("button", { name: "原文" })).toBeInTheDocument();
     expect(fetchFilePreview).toHaveBeenCalledTimes(1);
   });
@@ -246,7 +246,7 @@ describe("FilePreviewPanel", () => {
     source.focus();
     fireEvent.click(source);
     expect(source).toHaveFocus();
-    expect(source).toHaveAttribute("aria-pressed", "true");
+    expect(source).toHaveAccessibleName("Preview");
     expect(screen.getByTestId("mock-code-block").textContent).toBe(content);
     expect(CodeBlock).toHaveBeenLastCalledWith(expect.objectContaining({
       code: content, chrome: "none", showLineNumbers: true, wrapLongLines: false, viewportHighlight: true,
@@ -267,7 +267,8 @@ describe("FilePreviewPanel", () => {
     await screen.findByRole("heading", { name: "Notes" });
     fireEvent.click(screen.getByRole("button", { name: "Source" }));
     rerender(view("notes.md", "a", "new"));
-    expect(screen.getByRole("button", { name: "Source" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Preview" })).toBeVisible();
+    expect(screen.getByTestId("mock-code-block")).toHaveTextContent("# Notes");
     expect(fetchFilePreview).toHaveBeenCalledTimes(1);
     rerender(view("other.md"));
     await screen.findByRole("heading", { name: "Notes" });

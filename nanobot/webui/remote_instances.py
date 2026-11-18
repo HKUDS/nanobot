@@ -21,6 +21,7 @@ from nanobot.webui.remote_proxy import RemoteProxy
 from nanobot.webui.remote_ssh import RemoteError, RemoteProfile, Tunnel
 
 _HEALTH_TIMEOUT_SECONDS = 12
+_HEALTH_FRESH_SECONDS = 5
 
 
 class _SavedProfile(RemoteProfile):
@@ -42,6 +43,8 @@ class Connection:
     proxy: RemoteProxy
     error: str = ""
     paired: bool = False
+    health_check: int | None = None
+    health_checked_at: float = 0
 
 
 class RemoteInstances:
@@ -60,6 +63,7 @@ class RemoteInstances:
         self._unverified: dict[str, tuple[str, str, float]] = {}
         self._unknown_hosts: set[str] = set()
         self._closed = False
+        self._health_revision = 0
         self._compatibility: dict[str, Compatibility] = {}
         from nanobot.webui.remote_pairing import PairStore
 
@@ -136,6 +140,8 @@ class RemoteInstances:
             if connection:
                 item["gateway_id"] = connection.gateway_id
                 item["view_id"] = self._view_session
+                if connection.health_check is not None:
+                    item["health_check"] = connection.health_check
             if key in self._compatibility:
                 item["compatibility"] = self._compatibility[key]
                 if not connection and (compatibility_failure := compatibility_error(self._compatibility[key])):
@@ -157,22 +163,37 @@ class RemoteInstances:
         return {"available": True, "machine_name": socket.gethostname(),
                 "client_version": __version__, "profiles": profiles}
 
-    async def health(self) -> dict[str, Any]:
+    async def health(self, check: set[str] | None = None) -> dict[str, Any]:
+        selected = {key: (item, item.health_check) for key, item in self.connections.items()
+                    if check is None or key in check}
         # Hold a lifetime lease through every credential-bearing request. Final
         # shutdown cannot release the listeners halfway through a health check.
         try:
             # Includes lock contention and all response reads, not just each
             # socket read. Return the directory before the browser's 20s budget.
-            async with asyncio.timeout(_HEALTH_TIMEOUT_SECONDS):
+            async with asyncio.timeout(_HEALTH_TIMEOUT_SECONDS) as budget:
                 async with self._lock:
-                    await asyncio.gather(*(self._check(item) for item in self.connections.values()))
+                    if not self._closed:
+                        # Another tab may have checked, disconnected or replaced
+                        # this connection while we waited for its lifetime lease.
+                        due = [item for key, (item, revision) in selected.items()
+                               if self.connections.get(key) is item and item.health_check == revision
+                               and (item.health_check is None
+                                    or time.monotonic() - item.health_checked_at >= _HEALTH_FRESH_SECONDS)]
+                        await asyncio.gather(*(self._check(item, budget=budget) for item in due))
         except TimeoutError:
             pass
         return self.snapshot()
 
-    async def _check(self, connection: Connection) -> None:
+    def _record_health_check(self, connection: Connection) -> None:
+        self._health_revision += 1
+        connection.health_check = self._health_revision
+        connection.health_checked_at = time.monotonic()
+
+    async def _check(self, connection: Connection, *, budget: asyncio.Timeout | None = None) -> None:
         if not connection.tunnel.active:
             connection.error = "ssh_unreachable"
+            self._record_health_check(connection)
             return
         try:
             async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
@@ -205,8 +226,13 @@ class RemoteInstances:
             if connection.paired and connection.error == "ssh_auth_failed":
                 connection.error = "pair_authorization_rejected"
         except asyncio.CancelledError:
-            connection.error = "remote_unreachable"
+            # A spent probe budget is a completed failure; a cancelled browser
+            # request is not evidence of a distinct remote failure.
+            if budget is not None and budget.expired():
+                connection.error = "remote_unreachable"
+                self._record_health_check(connection)
             raise
+        self._record_health_check(connection)
 
     async def action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "pick_file":

@@ -20,6 +20,7 @@ export interface HostPicker {
   cancel: () => void;
   clearError: () => void;
   restoreFocus: () => void;
+  watchDirectory?: () => () => void;
 }
 export interface EmbeddedPicker extends EmbeddedHost {
   kind: "embedded";

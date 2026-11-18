@@ -17,7 +17,6 @@ Use this page when you know what you want to run and need the command shape. For
 | Chat in the terminal | `nanobot` | Interactive local chat; `nanobot agent` remains an explicit alias |
 | Run the gateway directly | `nanobot gateway` | Service/ops command for WebUI, chat apps, cron, and heartbeat |
 | Deliver a local trigger | `nanobot trigger <id> "message"` | Created first with `/trigger <name>` in the target chat/session |
-| Serve an OpenAI-compatible API | `nanobot serve` | Starts `/v1/chat/completions`, `/v1/models`, and `/health` |
 | Check chat channel setup | `nanobot channels status` | Useful before starting `nanobot gateway` |
 | Manage optional features | `nanobot plugins list` | Shows channels and optional capabilities you can turn on |
 | Log in to QR/OAuth-style channels | `nanobot channels login <channel>` | Used by channels such as WhatsApp and WeChat |
@@ -79,17 +78,15 @@ Most day-to-day commands use the default config and workspace. Advanced or multi
 ```bash
 nanobot agent --config ./bot-a/config.json --workspace ./bot-a/workspace -m "Hello"
 nanobot gateway --config ./bot-a/config.json --workspace ./bot-a/workspace
-nanobot serve --config ./bot-a/config.json --workspace ./bot-a/workspace
 ```
 
 Use `--verbose` on long-running processes when you need startup or runtime logs:
 
 ```bash
 nanobot gateway --verbose
-nanobot serve --verbose
 ```
 
-Long-running commands keep working until you stop them. Press `Ctrl+C` in that terminal to stop foreground `nanobot gateway` or `nanobot serve`. If you started the gateway with `--background`, use `nanobot gateway stop`.
+Long-running commands keep working until you stop them. Press `Ctrl+C` in that terminal to stop a foreground `nanobot gateway`. If you started the gateway with `--background`, use `nanobot gateway stop`.
 
 ## Setup
 
@@ -135,9 +132,15 @@ Inside the native TUI, `/sessions` switches saved conversations, `/new-chat` sta
 
 ## Session Storage
 
-Model and WebUI chat history live in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. The `webui` directory contains sidebar preferences and other saved WebUI state.
+Session state lives in `<config-dir>/sessions/<workspace-id>/sessions.sqlite3`, outside the agent-readable workspace. Existing JSONL conversations are imported on the first startup. JSONL migration is available from 0.3.6 through 0.4.x and is removed in **0.5.0**; installations with only JSONL data must upgrade through that window before using 0.5.0.
 
-Before changing versions, stop all nanobot instances using the same config directory and back up that entire directory and the workspace together. Copying only `sessions.sqlite3` while nanobot is running can miss recent messages. To downgrade, restore a complete pre-upgrade backup compatible with the older release.
+After a successful import, JSONL files and their checkpoints from `<workspace>/sessions/` move to `<config-dir>/sessions/<workspace-id>/jsonl-backup/`, preserving their contents outside the agent-readable workspace. JSONL files already in the private session directory remain there. An interrupted migration resumes on startup before nanobot serves conversations; failed imports leave their source files unchanged.
+
+WebUI chat history is saved in the same session database. The gateway automatically imports old `<config-dir>/webui/*.jsonl` files and numbered JSONL files inside `<config-dir>/webui/*.segments/` directories. If old history is damaged or cannot be matched to one conversation, startup stops with an error; resolve the reported problem before restarting.
+
+The old WebUI history files remain unchanged as backups. Imported chats deleted after the upgrade stay deleted on restart. Keep the `webui` directory: it still contains sidebar preferences and other saved WebUI state.
+
+Before changing versions, stop all nanobot instances using the same config directory and back up that entire directory and the workspace together. Copying only `sessions.sqlite3` while nanobot is running can miss recent messages. To downgrade, restore a complete pre-upgrade backup compatible with the older release. Older releases cannot read newly saved WebUI history; do not combine the current session database with old WebUI history files.
 
 Interactive mode uses nanobot's native TypeScript terminal UI. It talks to the same local gateway as the WebUI, so streaming, tool progress, and WebSocket sessions share one protocol instead of maintaining a second agent loop. If no gateway is running, either client starts it on demand. The TUI paints immediately while the local gateway starts, then obtains fresh bootstrap credentials and connects in the background. Exiting one TUI or WebUI launcher releases only that client; the last interactive launcher stops the on-demand gateway. A small gateway watchdog also reclaims an on-demand process if its last client crashes. `/detach` promotes the shared gateway to persistent background mode before closing the TUI, so active agent work continues without a connected client. An explicit `nanobot gateway --background` starts or promotes the gateway the same way before opening a client. `nanobot gateway restart` restarts a detached gateway without changing that lifetime; restart an attached foreground gateway in its owning terminal. `nanobot gateway stop` ends either mode.
 
@@ -246,28 +249,6 @@ For webhooks or other external systems, run your own small service and have it c
 
 See [Automations](./automations.md) for the broader automation model, WebUI management, and delivery behavior.
 
-## OpenAI-Compatible API
-
-| Command | Description |
-|---|---|
-| `nanobot serve` | Start `/v1/chat/completions`, `/v1/models`, and `/health` |
-| `nanobot serve --host <host>` | Override API bind host |
-| `nanobot serve --port <port>` | Override API port |
-| `nanobot serve --timeout <seconds>` | Override per-request timeout |
-| `nanobot serve --verbose` | Show runtime logs |
-| `nanobot serve --workspace <path>` | Override workspace |
-| `nanobot serve --config <path>` | Use a specific config file |
-
-Default API endpoint:
-
-```text
-http://127.0.0.1:8900
-```
-
-Public binds (`0.0.0.0` or `::`) require `api.apiKey`; send it as a Bearer token on API routes.
-
-See [`openai-api.md`](./openai-api.md) for request examples.
-
 ## Status
 
 ```bash
@@ -311,7 +292,6 @@ The `plugins` command name is retained for compatibility, but these entries are 
 
 | Feature name | What it enables |
 |---|---|
-| `api` | Dependencies required by the OpenAI-compatible `nanobot serve` process |
 | `azure` | Azure identity support for Azure-hosted models |
 | `bedrock` | AWS Bedrock model provider support |
 | `langfuse` | Langfuse tracing support for OpenAI-compatible providers and the Codex OAuth provider |

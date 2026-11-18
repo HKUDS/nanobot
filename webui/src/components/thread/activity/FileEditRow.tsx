@@ -14,7 +14,6 @@ import {
   hasRenderableFileDiff,
   parseRenderableFileDiff,
   type RenderableFileDiff,
-  type RenderableFileDiffHunk,
 } from "@/lib/file-diff";
 import type { FileEditDisplayMode } from "@/lib/local-preferences";
 import type { UIFileDiff, UIFileEdit } from "@/lib/types";
@@ -27,18 +26,6 @@ import { DiffSyntaxHighlight } from "./DiffSyntaxHighlight";
 
 const INITIAL_VISIBLE_DIFF_LINES = 160;
 const AUTO_COLLAPSE_DIFF_LINES = INITIAL_VISIBLE_DIFF_LINES;
-
-interface VisibleDiffHunk {
-  hunk: RenderableFileDiffHunk;
-  skippedBefore: number;
-}
-
-interface VisibleDiff {
-  hunks: VisibleDiffHunk[];
-  hiddenLineCount: number;
-}
-
-const EMPTY_VISIBLE_DIFF: VisibleDiff = { hunks: [], hiddenLineCount: 0 };
 
 export interface FileEditSummary {
   key: string;
@@ -192,12 +179,7 @@ function FileUnifiedDiff({
   const lineLimit = expandedLines || !shouldLimitLines
     ? totalLineCount
     : INITIAL_VISIBLE_DIFF_LINES;
-  const visibleDiff = useMemo(
-    () => shouldRenderBody
-      ? selectVisibleDiffLines(renderableDiff, lineLimit, totalLineCount)
-      : EMPTY_VISIBLE_DIFF,
-    [lineLimit, renderableDiff, shouldRenderBody, totalLineCount],
-  );
+  const hiddenLineCount = totalLineCount - lineLimit;
   const viewDiffLabel = shouldAutoCollapse
     ? tx("message.fileEditViewLargeDiff", "View large diff")
     : tx("message.fileEditViewDiff", "View diff");
@@ -227,18 +209,8 @@ function FileUnifiedDiff({
       className="mt-1 overflow-hidden rounded-md border border-border/55 bg-background/80 shadow-[0_1px_0_rgba(15,23,42,0.03)]"
       data-testid="file-edit-diff"
     >
-      {visibleDiff.hunks.map(({ hunk, skippedBefore }, index) => (
-        <div
-          key={`${hunk.old_start}-${hunk.new_start}-${index}`}
-          className={cn("min-w-0", index > 0 && "border-t border-border/45")}
-        >
-          {skippedBefore > 0 ? <DiffHunkGap lineCount={skippedBefore} /> : null}
-          <div className="overflow-x-auto">
-            <DiffSyntaxHighlight language={language} lines={hunk.lines} />
-          </div>
-        </div>
-      ))}
-      {visibleDiff.hiddenLineCount > 0 ? (
+      <DiffSyntaxHighlight language={language} text={diff.text!} diff={renderableDiff} lineLimit={lineLimit} />
+      {hiddenLineCount > 0 ? (
         <div className="border-t border-border/45 bg-muted/30 px-2 py-1">
           <button
             type="button"
@@ -251,7 +223,7 @@ function FileUnifiedDiff({
           >
             <ChevronDown className="h-3 w-3" aria-hidden />
             {t("message.fileEditShowMoreLines", {
-              count: visibleDiff.hiddenLineCount,
+              count: hiddenLineCount,
               defaultValue: "Show {{count}} more lines",
             })}
           </button>
@@ -329,73 +301,4 @@ function FileUnifiedDiff({
 
 function countDiffLines(diff: RenderableFileDiff): number {
   return diff.hunks.reduce((total, hunk) => total + hunk.lines.length, 0);
-}
-
-function selectVisibleDiffLines(
-  diff: RenderableFileDiff,
-  lineLimit: number,
-  totalLineCount: number,
-): VisibleDiff {
-  if (lineLimit >= totalLineCount) {
-    return {
-      hunks: diff.hunks.map((hunk, index) => ({
-        hunk,
-        skippedBefore: index > 0 ? countSkippedUnchangedLines(diff.hunks[index - 1], hunk) : 0,
-      })),
-      hiddenLineCount: 0,
-    };
-  }
-
-  let remaining = Math.max(0, lineLimit);
-  const hunks: VisibleDiffHunk[] = [];
-  let previousHunk: RenderableFileDiffHunk | null = null;
-  for (const hunk of diff.hunks) {
-    if (remaining <= 0) break;
-    const skippedBefore = previousHunk ? countSkippedUnchangedLines(previousHunk, hunk) : 0;
-    if (hunk.lines.length <= remaining) {
-      hunks.push({ hunk, skippedBefore });
-      remaining -= hunk.lines.length;
-      previousHunk = hunk;
-      continue;
-    }
-    hunks.push({ hunk: { ...hunk, lines: hunk.lines.slice(0, remaining) }, skippedBefore });
-    remaining = 0;
-    previousHunk = hunk;
-  }
-  return {
-    hunks,
-    hiddenLineCount: Math.max(0, totalLineCount - lineLimit),
-  };
-}
-
-function countSkippedUnchangedLines(
-  previous: RenderableFileDiffHunk,
-  current: RenderableFileDiffHunk,
-): number {
-  const oldGap = current.old_start - (previous.old_start + previous.old_lines);
-  const newGap = current.new_start - (previous.new_start + previous.new_lines);
-  return Math.max(0, oldGap, newGap);
-}
-
-function DiffHunkGap({ lineCount }: { lineCount: number }) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="flex items-center gap-2 bg-muted/35 px-2 py-1 text-[11px] text-muted-foreground"
-      data-testid="file-edit-diff-hunk-gap"
-    >
-      <span
-        className="select-none rounded border border-border/45 bg-background/70 px-1 font-mono text-muted-foreground/70"
-        aria-hidden
-      >
-        ...
-      </span>
-      <span>
-        {t("message.fileEditUnchangedLinesHidden", {
-          count: lineCount,
-          defaultValue: "{{count}} unchanged lines hidden",
-        })}
-      </span>
-    </div>
-  );
 }

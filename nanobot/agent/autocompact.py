@@ -40,9 +40,13 @@ class AutoCompact:
         self._bind_events = bind_events
         self._session_lock = session_lock
 
+    @property
+    def enabled(self) -> bool:
+        return self._ttl > 0
+
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
-        if self._ttl <= 0 or not ts:
+        if not self.enabled or not ts:
             return False
         try:
             if isinstance(ts, str):
@@ -65,6 +69,8 @@ class AutoCompact:
         active_session_keys: Collection[str] = (),
     ) -> None:
         """Schedule idle archival without blocking the event loop."""
+        if not self.enabled:
+            return
         now = datetime.now()
         active_keys = set(active_session_keys)
         for info in await self.sessions.state.list_sessions():

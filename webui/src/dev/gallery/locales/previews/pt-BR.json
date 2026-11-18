@@ -1,4 +1,13 @@
 {
+  "goal": {
+    "title": "GoalIsland · Objetivo",
+    "description": "Visualize o objetivo e seus detalhes.",
+    "options": "Informe o estado, resumo, objetivo e um balanço opcional.",
+    "state": "Estado",
+    "summary": "Preparar o lançamento",
+    "objective": "Revise as alterações e verifique o lançamento.\n\n- Verificar os testes\n- Revisar a documentação\n- Confirmar que está pronto",
+    "recap": "Aguardando aprovação."
+  },
   "rename": {
     "title": "RenameDialog · Renomear grupos e projetos",
     "description": "Teste a renomeação de grupos e projetos. Os tópicos são renomeados na lista de conversas.",
@@ -178,6 +187,18 @@
     "dismissed": "Aviso de recuperação fechado.",
     "reset": "Redefinir prévia",
     "hint": "Selecione um estado de recuperação e teste continuar ou fechar."
+  },
+  "sandbox": {
+    "gateway": "Gateway de exemplo",
+    "unknownGateway": "Não especificado",
+    "title": "Aviso de comandos",
+    "description": "Compare componentes ausentes, instalações desprotegidas e falhas de inicialização com o componente real.",
+    "options": "O aviso não toma o foco nem repete comandos. Mude o estado, feche-o e continue digitando.",
+    "missing": "Componente não encontrado",
+    "permissions": "Verificar instalação",
+    "startup": "Inicialização indisponível",
+    "hint": "Apenas demonstração. Nenhum comando é executado ou ajuste alterado.",
+    "settingsAction": "Configurações do sandbox solicitadas (demonstração)."
   },
   "fallback": {
     "title": "ModelFallbackNotice · Modelo alternativo",

@@ -35,7 +35,7 @@ export type FileReferenceKind =
 interface FileReferenceChipProps {
   path: string;
   tooltipPath?: string;
-  display?: "name" | "path";
+  display?: "name" | "path" | "inline-code";
   showIcon?: boolean;
   truncateFromStart?: boolean;
   active?: boolean;
@@ -62,7 +62,8 @@ export function FileReferenceChip({
   const { t } = useTranslation();
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const { directory, name } = splitFilePath(path);
-  const displayText = display === "path" ? path.replace(/\\/g, "/") : name;
+  const inlineCode = display === "inline-code";
+  const displayText = inlineCode ? path : display === "path" ? path.replace(/\\/g, "/") : name;
   const fullPath = tooltipPath || path;
   const targetPath = previewPath || tooltipPath || path;
   const kind = fileKindForPath(targetPath);
@@ -75,19 +76,19 @@ export function FileReferenceChip({
     setTooltipOpen(false);
     onOpen(targetPath);
   };
-  const Text = truncateFromStart ? StartTruncatedText : "span";
+  const Text = inlineCode ? "code" : truncateFromStart ? StartTruncatedText : "span";
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     openPreview(event);
   };
   return (
-    <FileActions path={targetPath} className={truncateFromStart ? "min-w-0" : undefined}>
+    <FileActions path={targetPath} className={cn(truncateFromStart && "min-w-0", inlineCode && "inline")}>
     <TooltipProvider>
       <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
         <TooltipTrigger asChild>
           <span
             onContextMenuCapture={() => setTooltipOpen(false)}
-            className={cn("not-prose inline-flex max-w-full align-baseline leading-[inherit]", truncateFromStart && "min-w-0", className)}
+            className={cn("not-prose inline-flex max-w-full align-baseline leading-[inherit]", truncateFromStart && "min-w-0", inlineCode && "inline", className)}
           >
             <span
               data-testid={testId}
@@ -99,6 +100,7 @@ export function FileReferenceChip({
               className={cn(
                 "inline-flex max-w-full items-baseline gap-[0.28em] font-medium leading-[inherit]",
                 truncateFromStart && "min-w-0",
+                inlineCode && "inline",
                 interactive
                   ? "text-content-link transition-colors hover:text-content-link-hover"
                   : "text-muted-foreground",
@@ -108,12 +110,13 @@ export function FileReferenceChip({
                 ],
               )}
             >
-              {showIcon ? <FileReferenceIcon kind={kind} className="translate-y-[0.12em]" /> : null}
+              {showIcon ? <FileReferenceIcon kind={kind} className={cn("translate-y-[0.12em]", inlineCode && "mr-[0.28em] inline-block")} /> : null}
               <Text
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
                   "min-w-0 max-w-full",
-                  !truncateFromStart && "[overflow-wrap:anywhere] sm:truncate",
+                  !inlineCode && !truncateFromStart && "[overflow-wrap:anywhere] sm:truncate",
+                  inlineCode && "markdown-inline-code whitespace-break-spaces font-mono text-inherit [overflow-wrap:anywhere]",
                   active && !truncateFromStart && "streaming-text-sheen file-reference-sheen",
                   textClassName,
                 )}
@@ -160,11 +163,18 @@ function StartTruncatedText({ children, className, ...props }: HTMLAttributes<HT
   const content = useRef<HTMLSpanElement>(null);
   const [clipped, setClipped] = useState(false);
   useLayoutEffect(() => {
-    const update = () => setClipped(content.current!.getBoundingClientRect().width > container.current!.getBoundingClientRect().width);
-    const observer = new ResizeObserver(update);
-    observer.observe(container.current!);
-    observer.observe(content.current!);
-    update();
+    let availableWidth = 0;
+    let contentWidth = 0;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.borderBoxSize[0].inlineSize;
+        if (entry.target === container.current) availableWidth = width;
+        else contentWidth = width;
+      }
+      setClipped(contentWidth > availableWidth);
+    });
+    observer.observe(container.current!, { box: "border-box" });
+    observer.observe(content.current!, { box: "border-box" });
     return () => observer.disconnect();
   }, []);
   return <span ref={container} className={cn("inline-flex items-baseline overflow-hidden whitespace-nowrap", className)}>

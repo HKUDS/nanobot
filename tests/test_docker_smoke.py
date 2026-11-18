@@ -15,6 +15,10 @@ pytestmark = pytest.mark.skipif(
     reason="the Docker smoke script runs under Unix Bash",
 )
 SCRIPT = Path(__file__).with_name("test_docker.sh")
+STATUS_OUTPUT = (
+    "nanobot Status\nConfig: configured\nWorkspace: ready\nModel: test\n"
+    "OpenRouter API: unset\nAnthropic API: unset\nOpenAI API: unset"
+)
 
 
 @pytest.fixture
@@ -30,14 +34,13 @@ def docker_boundary(tmp_path):
         "stage = args[0]\n"
         "if stage == 'run': stage = args[-1]\n"
         "if stage == 'status':\n"
-        "    print('nanobot Status\\nConfig: configured\\nWorkspace: ready\\nModel: test\\n'\n"
-        "          'OpenRouter API: unset\\nAnthropic API: unset\\nOpenAI API: unset')\n"
+        "    print(os.environ['DOCKER_STATUS_OUTPUT'])\n"
         "if stage == os.environ.get('DOCKER_FAIL_STAGE'): sys.exit(23)\n",
         encoding="utf-8",
     )
     executable.chmod(0o755)
 
-    def run(name, *, fail_stage=""):
+    def run(name, *, fail_stage="", status_output=STATUS_OUTPUT):
         log = tmp_path / f"{name}.jsonl"
         result = subprocess.run(
             ["bash", str(SCRIPT)],
@@ -46,6 +49,7 @@ def docker_boundary(tmp_path):
                 "PATH": f"{executable.parent}{os.pathsep}{os.environ.get('PATH', '')}",
                 "DOCKER_CALLS": str(log),
                 "DOCKER_FAIL_STAGE": fail_stage,
+                "DOCKER_STATUS_OUTPUT": status_output,
             },
             capture_output=True,
             text=True,
@@ -94,3 +98,19 @@ def test_concurrent_smoke_runs_use_distinct_resources_and_cleanup(docker_boundar
         assert "All checks passed" in result.stdout
         resources.append(_assert_owned_cleanup(calls))
     assert resources[0].isdisjoint(resources[1])
+
+
+def test_smoke_accepts_markers_before_large_diagnostic_output(docker_boundary):
+    # Status captures stderr too. Early grep exit must not turn valid output into SIGPIPE failure.
+    result, calls = docker_boundary("large", status_output=STATUS_OUTPUT + "\ndiagnostic" * 8192)
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr
+    assert "All checks passed" in result.stdout
+    _assert_owned_cleanup(calls)
+
+
+def test_smoke_rejects_successful_status_with_missing_marker(docker_boundary):
+    result, calls = docker_boundary("missing", status_output=STATUS_OUTPUT.replace("Model:", ""))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "FAIL: missing 'Model:'" in result.stdout
+    assert "All checks passed" not in result.stdout
+    _assert_owned_cleanup(calls)

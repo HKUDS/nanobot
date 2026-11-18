@@ -1,30 +1,22 @@
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, TypedDict
 
 from nanobot.agent.tools.web import SEARCH_PROVIDER_OPTIONS
-from nanobot.api.runtime import ApiRuntime, ApiStartOptions
 from nanobot.audio.transcription import resolve_transcription_config
 from nanobot.audio.transcription_registry import (
     resolve_transcription_provider,
     transcription_provider_names,
 )
 from nanobot.config.schema import Config
-from nanobot.optional_features import (
-    OptionalFeatureError,
-    extra_installed,
-    optional_dependency_groups,
-)
 from nanobot.providers.image_generation import (
     get_image_gen_provider,
     image_gen_provider_names,
 )
 from nanobot.providers.registry import find_by_name
-from nanobot.security.network import is_loopback_host
 from nanobot.webui.request_settings import (
     parse_request_object,
     redact_request_secrets,
@@ -59,19 +51,15 @@ SettingsOperation = Callable[..., dict[str, Any]]
 @dataclass(frozen=True)
 class CapabilitySettingsOperations:
     update_web_search: SettingsOperation
-    update_api: SettingsOperation
     update_image: SettingsOperation
     update_transcription: SettingsOperation
     update_network: SettingsOperation
-    nanobot_features_action: SettingsOperation
-    api_runtime: Callable[[], ApiRuntime]
     reload_image: Callable[[], Awaitable[dict[str, Any]]]
 
 
 class CapabilitySettingsPayload(TypedDict):
     web_search: dict[str, Any]
     web: dict[str, Any]
-    api: dict[str, Any]
     observability: dict[str, Any]
     image_generation: dict[str, Any]
     transcription: dict[str, Any]
@@ -193,12 +181,6 @@ def capability_settings_payload(
             "fetch": {
                 "use_jina_reader": config.tools.web.fetch.use_jina_reader,
             },
-        },
-        "api": {
-            "host": config.api.host,
-            "port": config.api.port,
-            "timeout": config.api.timeout,
-            "api_key_hint": mask_secret_hint(config.api.api_key),
         },
         "observability": {
             "provider": "langfuse",
@@ -363,45 +345,6 @@ def update_web_search_settings(config: Config, query: QueryParams) -> tuple[bool
         if web_config.fetch.use_jina_reader != previous_jina_reader:
             restart_required = True
     return changed, restart_required
-
-
-def update_api_settings(config: Config, query: QueryParams) -> None:
-    """Update the managed OpenAI-compatible API configuration."""
-    api = config.api
-    host = query_first(query, "host")
-    if host is not None:
-        host = host.strip()
-        if not host:
-            raise WebUISettingsError("host is required")
-        api.host = host
-
-    port = query_first(query, "port")
-    if port is not None:
-        try:
-            parsed_port = int(port)
-        except ValueError:
-            raise WebUISettingsError("port must be an integer") from None
-        if parsed_port < 1 or parsed_port > 65535:
-            raise WebUISettingsError("port must be between 1 and 65535")
-        api.port = parsed_port
-
-    timeout = query_first(query, "timeout")
-    if timeout is not None:
-        try:
-            parsed_timeout = float(timeout)
-        except ValueError:
-            raise WebUISettingsError("timeout must be a number") from None
-        if parsed_timeout < 1 or parsed_timeout > 3600:
-            raise WebUISettingsError("timeout must be between 1 and 3600")
-        api.timeout = parsed_timeout
-
-    api_key = query_first_alias(query, "api_key", "apiKey")
-    if api_key is not None:
-        api.api_key = api_key.strip()
-    if not is_loopback_host(api.host) and not api.api_key.strip():
-        raise WebUISettingsError(
-            "an API key is required when the API is available on the network"
-        )
 
 
 def update_image_generation_settings(
@@ -603,55 +546,6 @@ def network_safety_payload(config: Config) -> dict[str, Any]:
     }
 
 
-def masked_api_secret(value: str) -> str | None:
-    value = value.strip()
-    if not value:
-        return None
-    return f"{value[:3]}...{value[-4:]}" if len(value) > 8 else "configured"
-
-
-def api_runtime_message(message: str) -> str:
-    known = {
-        "api_exited_during_startup": "API server exited during startup. Check its log for details.",
-        "api_stop_timeout": "API server did not stop in time.",
-        "api_state_stale": "API server state was stale; try starting it again.",
-    }
-    if message in known:
-        return known[message]
-    if message.startswith("api_"):
-        return f"API server {message.removeprefix('api_').replace('_', ' ')}"
-    return message.replace("_", " ")
-
-
-def api_service_payload(
-    settings: WebUISettingsServices,
-    runtime: ApiRuntime,
-    *,
-    last_action: str | None = None,
-) -> dict[str, Any]:
-    config = settings.config.load()
-    status = runtime.status()
-    extras = optional_dependency_groups()
-    connect_host = (
-        "127.0.0.1" if config.api.host in {"0.0.0.0", "::"} else config.api.host
-    )
-    payload = {
-        "installed": extra_installed("api", extras.get("api")),
-        "running": status.running,
-        "managed": status.running,
-        "host": config.api.host,
-        "port": config.api.port,
-        "timeout": config.api.timeout,
-        "api_key_hint": masked_api_secret(config.api.api_key),
-        "endpoint": f"http://{connect_host}:{config.api.port}/v1",
-        "command": "nanobot serve",
-        "log_path": str(status.log_path),
-    }
-    if last_action:
-        payload["last_action"] = last_action
-    return payload
-
-
 class CapabilitySettingsHandler:
     """Handle capability commands after transport authentication and decoding."""
 
@@ -665,15 +559,6 @@ class CapabilitySettingsHandler:
         request: SettingsRequest,
         operations: CapabilitySettingsOperations,
     ) -> SettingsRouteResult:
-        if action == "api-status":
-            return SettingsRouteResult.success(
-                api_service_payload(self.settings, operations.api_runtime())
-            )
-        if action == "api-start":
-            return await self._start_api(request, operations)
-        if action == "api-stop":
-            return await self._stop_api(operations)
-
         mutation = {
             "web-search-update": (
                 operations.update_web_search,
@@ -741,91 +626,3 @@ class CapabilitySettingsHandler:
                 result.get("message") or "hot reload failed",
             )
         return updated, applied
-
-    async def _start_api(
-        self,
-        request: SettingsRequest,
-        operations: CapabilitySettingsOperations,
-    ) -> SettingsRouteResult:
-        api_key = (request.payload or {}).get("api_key")
-        if api_key is not None and not isinstance(api_key, str):
-            return SettingsRouteResult.failure(
-                400,
-                "API service API key must be a string",
-            )
-        try:
-            await asyncio.to_thread(
-                self.settings.mutate,
-                operations.nanobot_features_action,
-                "enable",
-                {"name": ["api"]},
-                allow_install=self._allow_feature_package_install(request),
-            )
-            self.settings.mutate(operations.update_api, request.query)
-            config = self.settings.config.load()
-            runtime = operations.api_runtime()
-            options = ApiStartOptions(
-                host=config.api.host,
-                port=config.api.port,
-                workspace=str(config.workspace_path),
-                config_path=str(self.settings.config.path),
-            )
-            current = runtime.status()
-            result = await asyncio.to_thread(
-                runtime.restart if current.running else runtime.start_background,
-                options,
-            )
-            if not result.ok:
-                return SettingsRouteResult.failure(
-                    500,
-                    api_runtime_message(result.message),
-                )
-        except (WebUISettingsError, OptionalFeatureError) as exc:
-            return SettingsRouteResult.failure(
-                getattr(exc, "status", 400),
-                getattr(exc, "message", str(exc)),
-            )
-        except Exception as exc:
-            self.logger.exception("failed to start managed API service")
-            return SettingsRouteResult.failure(500, str(exc))
-        return SettingsRouteResult.success(
-            api_service_payload(
-                self.settings,
-                operations.api_runtime(),
-                last_action="started",
-            )
-        )
-
-    async def _stop_api(
-        self,
-        operations: CapabilitySettingsOperations,
-    ) -> SettingsRouteResult:
-        runtime = operations.api_runtime()
-        try:
-            result = await asyncio.to_thread(runtime.stop)
-        except Exception as exc:
-            self.logger.exception("failed to stop managed API service")
-            return SettingsRouteResult.failure(500, str(exc))
-        if not result.ok and result.message != "api_not_running":
-            return SettingsRouteResult.failure(
-                500,
-                api_runtime_message(result.message),
-            )
-        return SettingsRouteResult.success(
-            api_service_payload(
-                self.settings,
-                operations.api_runtime(),
-                last_action="stopped",
-            )
-        )
-
-    def _allow_feature_package_install(self, request: SettingsRequest) -> bool:
-        if request.local_browser:
-            return True
-        try:
-            return bool(
-                self.settings.config.load().tools.webui_allow_remote_package_install
-            )
-        except Exception:
-            self.logger.exception("failed to load remote package install policy")
-            return False
