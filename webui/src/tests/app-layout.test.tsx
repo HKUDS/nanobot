@@ -2495,6 +2495,7 @@ describe("App layout", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS - 1); });
     expect(deleteChatSpy).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    vi.useRealTimers();
     expect(deleteChatSpy).toHaveBeenCalledTimes(1);
     expect(deleteChatSpy).toHaveBeenCalledWith("websocket:chat-a");
     expect(within(sidebar).getByRole("button", { name: /^Second chat$/ })).toBeInTheDocument();
@@ -2503,8 +2504,11 @@ describe("App layout", () => {
 
     fireEvent.pointerDown(screen.getByLabelText("Topic actions for Second chat"), { button: 0 });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
-    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" }));
+    const lastDelete = await screen.findByRole("alertdialog", { name: "Delete this topic?" });
+    vi.useFakeTimers();
+    await confirmTopicDeletion(within(lastDelete).getByRole("button", { name: "Delete" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOAST_ACTION_MS); });
+    expect(screen.getByTestId("host-sidebar-flow")).toHaveStyle({ width: "56px" });
   }, 15_000);
 
   it.each([false, true])("archives only persisted selected topics in one sidebar update (draft=%s)", async (includeDraft) => {
