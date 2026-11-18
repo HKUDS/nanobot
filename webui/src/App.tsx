@@ -860,7 +860,7 @@ function Shell({
   onNativeEngineRestart: () => Promise<string>;
 }) {
   const { t, i18n } = useTranslation();
-  const showToast = useToast();
+  const showToast = useToast()!; // App always renders Shell inside ToastProvider.
   const remoteConnections = useRemoteConnections();
   const versionCheck = useVersionCheck();
   const updateFlow = useUpdateFlow();
@@ -1734,7 +1734,7 @@ function Shell({
       let pinOrder: string[] = [];
       let removedPins = new Set<string>();
       let archivedAfterSave: string[] = [];
-      const reportFailure = () => showToast?.({
+      const reportFailure = () => showToast({
         message: t("toast.archiveFailed"), tone: "error", dedupeKey: "archive-failed",
       });
       const owned = (key: string) => archiveUndoOwners.current.get(key)?.operation === operation;
@@ -1771,7 +1771,7 @@ function Shell({
           archiveUndoOwners.current.set(key, { operation, pinOrder: removedPins.has(key) ? pinOrder : undefined });
         }
         const singleTopic = selected.size === 1 ? persistedSessions.get([...selected][0]) : undefined;
-        showToast?.({
+        showToast({
           tone: "success",
           detail: singleTopic ? titleForSession(singleTopic) : undefined,
           message: archive
@@ -2070,7 +2070,7 @@ function Shell({
       const refreshGeneration = ++settingsRefreshGenerationRef.current;
       restartStartedAtRef.current = 0;
       setIsRestarting(false);
-      showToast?.({ message: t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }), tone: "success", dedupeKey: "restart-completed" });
+      showToast({ message: t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }), tone: "success", dedupeKey: "restart-completed" });
       refreshSettings(refreshGeneration);
     });
     return () => {
@@ -2091,7 +2091,7 @@ function Shell({
   }, []);
 
   const onConfirmDelete = useCallback(() => {
-    if (!pendingDelete || !showToast) return;
+    if (!pendingDelete) return;
     const { automationKeys } = pendingDelete;
     const items = pendingDelete.items.filter((item) => topicSessions.some((session) => session.key === item.key));
     finishDeleteConfirmation(pendingDelete, items.length > 0);

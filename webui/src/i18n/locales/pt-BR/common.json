@@ -1771,8 +1771,6 @@
   "deleteConfirm": {
     "title": "Excluir esta conversa?",
     "titleMany": "Excluir {{count}} conversas?",
-    "description": "Esta ação não pode ser desfeita.",
-    "descriptionMany": "Esta ação não pode ser desfeita.",
     "cancel": "Cancelar",
     "confirm": "Excluir",
     "automationsDescription": "Excluir este tópico também exclui suas automações vinculadas.",

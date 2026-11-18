@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "刪除這個話題？",
     "titleMany": "刪除這 {{count}} 個對話？",
-    "description": "此操作無法復原。",
-    "descriptionMany": "此操作無法復原。",
     "cancel": "取消",
     "confirm": "刪除",
     "automationsDescription": "刪除話題也會刪除關聯的自動任務",

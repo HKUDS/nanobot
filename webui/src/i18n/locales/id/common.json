@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "Hapus obrolan ini?",
     "titleMany": "Hapus {{count}} percakapan?",
-    "description": "Tindakan ini tidak dapat dibatalkan.",
-    "descriptionMany": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
     "confirm": "Hapus",
     "automationsDescription": "Menghapus topik ini juga menghapus tugas otomatis terkait.",

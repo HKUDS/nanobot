@@ -1769,8 +1769,6 @@
   "deleteConfirm": {
     "title": "このチャットを削除しますか？",
     "titleMany": "{{count}} 件の会話を削除しますか？",
-    "description": "この操作は元に戻せません。",
-    "descriptionMany": "この操作は元に戻せません。",
     "cancel": "キャンセル",
     "confirm": "削除",
     "automationsDescription": "このトピックを削除すると、関連する自動タスクも削除されます。",

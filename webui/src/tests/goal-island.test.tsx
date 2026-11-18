@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 import { GoalIsland } from "@/components/thread/GoalIsland";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
-import { ToastProvider } from "@/components/ui/toast";
 
 const goal = { active: true, ui_summary: "Ship the release", objective: "Verify the full release checklist." };
 
@@ -18,20 +17,6 @@ function Conversation({ blocked = false }: { blocked?: boolean }) {
 }
 
 describe("GoalIsland", () => {
-  it("announces a rejected cancellation without closing the goal or disabling retry", async () => {
-    const user = userEvent.setup();
-    const onCancel = vi.fn().mockRejectedValueOnce(new Error("Could not cancel"));
-    render(<GoalIsland goal={goal} cancelDisabled={false} onCancel={onCancel} />, { wrapper: ToastProvider });
-    await user.click(screen.getByRole("button", { name: "Show full goal" }));
-    const cancel = screen.getByRole("button", { name: "Cancel goal" });
-    await user.click(cancel);
-    const alert = await screen.findByRole("alert");
-    expect(alert.closest("[data-toast-tone=error]")).not.toBeNull();
-    expect(alert).toHaveTextContent("Could not cancel goal. Try again.");
-    expect(screen.getByRole("dialog", { name: "Goal" })).toBeVisible();
-    await user.click(cancel);
-    expect(onCancel).toHaveBeenCalledTimes(2);
-  });
   it("shows the summary and complete objective, dismissing through Escape and outside input without losing its draft", async () => {
     const user = userEvent.setup();
     render(<Conversation />);

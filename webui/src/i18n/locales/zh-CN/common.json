@@ -1951,8 +1951,6 @@
   "deleteConfirm": {
     "title": "删除这个话题？",
     "titleMany": "删除这 {{count}} 个对话？",
-    "description": "此操作无法撤销。",
-    "descriptionMany": "此操作无法撤销。",
     "cancel": "取消",
     "confirm": "删除",
     "automationsDescription": "删除话题也会删除关联的自动任务",

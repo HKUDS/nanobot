@@ -7,7 +7,7 @@ import "./toast.css";
 const TOAST_NOTICE_MS = 3_000;
 export const TOAST_ACTION_MS = 8_000;
 
-export type ToastNotice = {
+type ToastNotice = {
   message: string;
   detail?: string;
   tone: "success" | "error" | "pending";
@@ -24,15 +24,15 @@ type ToastEntry = ToastNotice & { id: number };
 const ToastContext = createContext<((notice: ToastNotice) => void) | null>(null);
 export const useToast = () => useContext(ToastContext);
 
-export function ToastViewport({ children, viewportRef, hidden }: { children: ReactNode; viewportRef?: Ref<HTMLDivElement>; hidden?: boolean }) {
+function ToastViewport({ children, viewportRef, hidden }: { children: ReactNode; viewportRef: Ref<HTMLDivElement>; hidden: boolean }) {
   return <div ref={viewportRef} className="pointer-events-none fixed inset-x-3 top-[calc(0.75rem+env(safe-area-inset-top))] z-50 mx-auto flex max-w-[22rem] flex-col items-center gap-2 [.native-host_&]:top-12" style={hidden ? { visibility: "hidden" } : undefined}>
     {children}
   </div>;
 }
 
-export function ToastCard({ notice, paused = false, onAction, onHoverChange, onFocusChange }: {
+function ToastCard({ notice, paused, onAction, onHoverChange, onFocusChange }: {
   notice: ToastNotice;
-  paused?: boolean;
+  paused: boolean;
   onAction: () => void;
   onHoverChange?: (hovered: boolean) => void;
   onFocusChange?: (focused: boolean) => void;

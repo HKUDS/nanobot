@@ -1951,8 +1951,6 @@
   "deleteConfirm": {
     "title": "Delete this topic?",
     "titleMany": "Delete {{count}} conversations?",
-    "description": "This action cannot be undone.",
-    "descriptionMany": "This action cannot be undone.",
     "cancel": "Cancel",
     "confirm": "Delete",
     "automationsDescription": "Deleting this topic also deletes its linked automations.",
