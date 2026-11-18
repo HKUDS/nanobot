@@ -275,7 +275,7 @@ export function RemoteConnectionsPage({ mainNavigationExpanded = false, hostChro
     finally { if (mounted.current) setBusy(""); }
   };
   const pageError = error || (directoryError ? t("remote.errors.directory_unavailable") : "");
-  const nanobotError = /^(config_|runtime_user_|webui_|remote_auth_|remote_unreachable|incompatible_gateway|public_ws_|python_|probe_failed)/.test(errorCode);
+  const nanobotError = /^(config_|runtime_user_|webui_|remote_auth_|remote_unreachable|incompatible_gateway|python_|probe_failed)/.test(errorCode);
   const locationStep = !!inspection || manualLocation || nanobotError;
   const openingProfile = !editorOpen && !fingerprint && !removing && !disconnecting
     ? directory?.profiles.find((profile) => profile.id === busy) : null;

@@ -76,9 +76,8 @@ try:
         raise ValueError("webui_disabled")
     if not isinstance(secret, str) or not secret.strip() or "${" in secret:
         raise ValueError("webui_auth_required")
-    if ws.get("publicWsUrl") or ws.get("public_ws_url"):
-        raise ValueError("public_ws_unsupported")
-    if ws.get("trustedProxyAuth") or ws.get("trusted_proxy_auth"):
+    certfile = ws.get("sslCertfile") or ws.get("ssl_certfile") or ""
+    if (isinstance(certfile, str) and certfile.strip()) or ws.get("trustedProxyAuth") or ws.get("trusted_proxy_auth"):
         raise ValueError("incompatible_gateway")
     emit({"port": ws.get("port", 8765), "secret": secret,
                       "token_issue_path": ws.get("tokenIssuePath") or ws.get("token_issue_path") or "",
@@ -89,7 +88,7 @@ except PermissionError:
     emit({"error": "config_permission"})
 except ValueError as e:
     code = str(e)
-    emit({"error": code if code in {"webui_disabled", "webui_auth_required", "public_ws_unsupported", "incompatible_gateway"} else "config_invalid"})
+    emit({"error": code if code in {"webui_disabled", "webui_auth_required", "incompatible_gateway"} else "config_invalid"})
 except (AttributeError, TypeError):
     emit({"error": "config_invalid"})
 '''
