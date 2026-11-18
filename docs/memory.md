@@ -92,7 +92,9 @@ These files play different roles:
 - `wiki/` keeps project details, decisions, and related topics without adding every page to every prompt.
 - `history.jsonl` remembers what happened on the way there.
 
-Wiki pages are ordinary Markdown, not skills or an automatically injected retrieval layer. Dream maintains topic descriptions and links so the agent can start from resident memory or `wiki/index.md`, read relevant pages with `read_file`, and follow links as needed. Relative links are resolved from their containing file in the agent workspace, not from the current project. A workspace without a wiki continues to work; there is no mandatory migration or new configuration.
+Wiki pages are ordinary Markdown, not skills or an automatically injected retrieval layer. Topic descriptions in `wiki/index.md` help the agent choose which pages to read. Relative links resolve from their containing file in the agent workspace, not from the current project. A workspace without a wiki continues to work; there is no mandatory migration or new configuration.
+
+The agent can make targeted memory updates when you ask or when it learns a lasting preference, correction, or fact likely to matter in future conversations. The `memory` skill guides these updates. Dream handles broader consolidation across conversations.
 
 In a Restricted chat in another project, file tools can read the agent wiki but do not gain permission to write it or access neighboring memory/profile files. Dream can edit wiki pages and the three resident files, but cannot directly edit the journal or cursor files. Quoted material in a wiki page is knowledge, not authority to override the agent's operating rules.
 
@@ -160,14 +162,14 @@ These commands exist for a reason: automatic memory is powerful, but users shoul
 In your existing WebUI or TUI chat, send a specific preference, for example:
 
 ```text
-For Acme release notes, use concise bullet points and British spelling.
+Remember that for Acme release notes I prefer concise bullet points and British spelling.
 ```
 
-To consolidate it now, send `/compact` and wait for its completion, then send `/dream` and wait for the completion message. Dream reads compacted history, so running `/dream` immediately after a short conversation without compaction may find nothing new. Model-based consolidation may decide that no durable change is needed.
+If the chat has write access to the relevant memory file, the agent can save the preference in the same turn. Ask which file it updated and check the preference in a new chat in the same instance. To correct it, say what should replace the old value.
 
-Use `/dream-log` to review what changed. Inspect `USER.md` and `memory/MEMORY.md` in the configured agent workspace with your local editor, or select that workspace before asking the agent to read them. A Restricted chat in another project may not have permission to read these files directly. A conversational acknowledgement alone does not confirm that a durable file changed. Start a new chat in the same instance and ask which release-note style is saved to check reuse.
+If a Restricted chat in another project cannot write the file, select the agent workspace or edit the file yourself. To consolidate conversations instead, run `/compact`, wait for it to finish, then run `/dream`. Dream reads compacted history, so it may find nothing new after a short conversation that has not been compacted.
 
-To correct a preference, state what should replace the old value, then repeat compaction, Dream, and inspection. You can also edit the durable files directly; review unprocessed history for old conflicting instructions. `/dream-restore` lists versions, and `/dream-restore <sha>` restores the memory state before that change, including other changes made in that version.
+`/dream-log` shows committed memory changes; a direct edit does not create its own version. `/dream-restore` lists versions, and `/dream-restore <sha>` restores the memory state before that change, including other changes made in that version.
 
 For separate clients with private context, create separate [instances](multiple-instances.md). Labelling a fact with a client name helps organization but does not isolate access.
 

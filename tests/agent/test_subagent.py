@@ -169,6 +169,7 @@ def test_subagent_prompt_keeps_agent_paths_for_selected_project(tmp_path):
     assert f"Nanobot's agent workspace: {agent_workspace.resolve()}" in prompt
     assert f"History log: {agent_workspace.resolve() / 'memory' / 'history.jsonl'}" in prompt
     assert f"Memory wiki: {agent_workspace.resolve()}/memory/wiki/" in prompt
+    assert "Update durable memory only if the main agent assigns that work" in prompt
     assert "global-custom" in prompt
     assert "project-custom" not in prompt
 
