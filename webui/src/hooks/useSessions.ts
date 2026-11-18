@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
@@ -46,6 +46,10 @@ export function useSessions(): {
   const refreshPendingRef = useRef(false);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   tokenRef.current = token;
+
+  useLayoutEffect(() => {
+    client.setChannelSessions(sessions);
+  }, [client, sessions]);
 
   useEffect(() => {
     if (sessions.length || !loading) writeReloadCache("sessions", sessions.slice(0, 200));

@@ -1070,6 +1070,13 @@ class AgentLoop:
         if message.is_user_input:
             active_session_key = session.key if session is not None else request.session_key
             route = self.turn_delivery_factory.input_route(message, active_session_key or message.session_key)
+            if message.channel != "system" and (route.channel, route.chat_id) != (request.channel, request.chat_id):
+                # Cross-entry follow-ups need their own turn and reply address.
+                return None
+            if message.session_generation is not None and (
+                session is None or message.session_generation != session.generation
+            ):
+                return None
             scope = await self.runner.prepare_prompt(
                 self.workspace_scopes.for_turn,
                 channel=route.channel,
@@ -1421,11 +1428,12 @@ class AgentLoop:
         if msg.metadata.get(INBOUND_META_RUNTIME_CONTROL) == RUNTIME_CONTROL_SESSION_DISCARD:
             await self.discard_session(key)
             return
-        if (
-            msg.require_existing_session
-            and await self.sessions.state.read_metadata(key) is None
-        ):
-            return
+        if msg.require_existing_session:
+            header = await self.sessions.state.read_header(key)
+            if header is None or (
+                msg.session_generation is not None and msg.session_generation != header.generation
+            ):
+                return
         if msg.is_user_input:
             await self.runtime_event_publisher.user_input_accepted(msg, key)
         if msg.channel != "system" and self.commands.is_priority(raw):

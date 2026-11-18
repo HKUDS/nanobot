@@ -22,6 +22,7 @@ from nanobot.channels.websocket.attachment_policy import validate_attachment_bat
 from nanobot.channels.websocket.attachment_store import AttachmentUploadError
 from nanobot.command.application import builtin_command_starts_agent_turn
 from nanobot.command.builtin import USER_SHELL_COMMAND
+from nanobot.command.router import normalize_command_text
 from nanobot.providers.model_options import ModelOptions
 from nanobot.runtime_admission import RuntimeMaintenanceError
 from nanobot.runtime_context import (
@@ -66,7 +67,11 @@ from nanobot.webui.session_access import (
     WebuiSessionAccess,
     session_mentions_runtime_context,
 )
-from nanobot.webui.session_identity import is_valid_webui_chat_id, webui_session_key
+from nanobot.webui.session_identity import (
+    channel_session_key,
+    is_valid_webui_chat_id,
+    webui_session_key,
+)
 from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcription_ws import webui_transcription_event
 
@@ -134,6 +139,7 @@ class WebUICommandTransport(Protocol):
         is_dm: bool,
         require_existing_session: bool,
         session_generation: str | None,
+        session_key: str | None = None,
     ) -> None: ...
 
 
@@ -170,6 +176,15 @@ class WebUICommandRouter:
         self._background_references: set[tuple[str, str]] = set()
         self._accepted_messages: dict[tuple[str, str], float] = {}
         self._message_locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
+
+    async def _channel_generation(self, key: str) -> str | None:
+        sessions = self.gateway.session_manager
+        if sessions is None:
+            return None
+        header = await sessions.state.read_header(key)
+        if header is None or not header.policy.persist or not sessions.types.public_history(header.metadata):
+            return None
+        return header.generation
 
     def workspace_project_selection_available(self, connection: ServerConnection) -> bool:
         return connection in self._webui_connections
@@ -262,6 +277,8 @@ class WebUICommandRouter:
         if turn_id is not None:
             body["turn_id"] = turn_id
             body["input_id"] = f"user:{turn_id}"
+        if channel_session_key(chat_id) is not None:
+            body["entry_channel"] = "WebUI"
         if media:
             body["media_urls"] = media
         if cli_apps:
@@ -427,6 +444,21 @@ class WebUICommandRouter:
             return
         if command_type == "attach":
             chat_id = envelope.get("chat_id")
+            channel_key = channel_session_key(chat_id)
+            if channel_key is not None and isinstance(chat_id, str):
+                if (connection not in self._webui_connections
+                        or not self._transport.is_allowed(client_id)
+                        or await self._channel_generation(channel_key) is None):
+                    await self._transport.webui_send_event(
+                        connection, "error", detail="session_unavailable", chat_id=chat_id,
+                    )
+                    return
+                self._transport.webui_attach(connection, chat_id)
+                fields = await self._session_projection.attach_fields(channel_key)
+                fields.pop("recovery_state", None)
+                await self._transport.webui_send_event(connection, "attached", chat_id=chat_id, **fields)
+                await self._outbound.hydrate(chat_id)
+                return
             if not is_valid_webui_chat_id(chat_id):
                 await self._transport.webui_send_event(
                     connection,
@@ -567,9 +599,11 @@ class WebUICommandRouter:
     ) -> None:
         chat_id = envelope.get("chat_id")
         content = envelope.get("content")
-        if not is_valid_webui_chat_id(chat_id):
+        channel_key = channel_session_key(chat_id)
+        if not isinstance(chat_id, str) or (channel_key is None and not is_valid_webui_chat_id(chat_id)):
             await self._transport.webui_send_event(connection, "error", detail="invalid chat_id")
             return
+        session_key = channel_key or webui_session_key(chat_id)
         raw_turn_id = envelope.get("turn_id")
         turn_id = raw_turn_id if isinstance(raw_turn_id, str) and raw_turn_id else None
         rejection_fields = {
@@ -592,6 +626,24 @@ class WebUICommandRouter:
                 **rejection_fields,
             )
             return
+        session_generation: str | None = None
+        linked_stop = False
+        if channel_key is not None:
+            if (connection not in self._webui_connections or envelope.get("webui") is not True
+                    or (session_generation := await self._channel_generation(channel_key)) is None):
+                await self._transport.webui_send_event(
+                    connection, "error", detail="session_unavailable", **rejection_fields,
+                )
+                return
+            command = normalize_command_text(content).lower()
+            linked_stop = command == "/stop"
+            if command.partition(" ")[0] in {"/new", "/restart"} or (
+                envelope.get("user_shell") is True and content.startswith("!")
+            ):
+                await self._transport.webui_send_event(
+                    connection, "error", detail="command_unavailable", **rejection_fields,
+                )
+                return
         message_rejection = self._ingress.validate_text(content)
         if message_rejection is not None:
             await self._transport.webui_send_event(
@@ -621,7 +673,7 @@ class WebUICommandRouter:
                 connection,
                 chat_id,
                 content,
-            )
+            ) if channel_key is None else None
         except TemporaryChatError as exc:
             await self._transport.webui_send_event(
                 connection,
@@ -683,8 +735,14 @@ class WebUICommandRouter:
         if temporary_policy is None:
             await self._outbound.hydrate(chat_id)
 
-        scope = temporary_policy.workspace_scope if temporary_policy is not None else (
-            await self.workspace_scope_or_error(
+        if channel_key is not None:
+            # External turns use the gateway default scope. Do not let a WebUI
+            # request change the shared session's workspace or tool authority.
+            scope = self._workspaces.gateway_default_scope()
+        elif temporary_policy is not None:
+            scope = temporary_policy.workspace_scope
+        else:
+            scope = await self.workspace_scope_or_error(
                 connection,
                 lambda: self._workspaces.scope_for_message(
                     envelope,
@@ -695,7 +753,6 @@ class WebUICommandRouter:
                 chat_id=chat_id,
                 turn_id=turn_id,
             )
-        )
         if scope is None:
             return
 
@@ -765,7 +822,7 @@ class WebUICommandRouter:
         if trusted_webui and self._session_access is not None:
             session_mentions = await self._session_access.normalize_mentions(
                 envelope.get("session_mentions"),
-                exclude_session_key=webui_session_key(chat_id),
+                exclude_session_key=session_key,
             )
             if session_mentions:
                 metadata["session_mentions"] = session_mentions
@@ -813,10 +870,9 @@ class WebUICommandRouter:
                 metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
 
         accepted = False
-        session_generation: str | None = None
         session_created = False
         try:
-            if not restart_control:
+            if not restart_control and channel_key is None:
                 admission = await self.workspace_scope_or_error(
                     connection,
                     lambda: self._workspaces.persist_scope(
@@ -836,7 +892,7 @@ class WebUICommandRouter:
                 session_generation, session_created = admission
             if session_generation is not None:
                 metadata[HISTORY_GENERATION_METADATA_KEY] = session_generation
-            if is_webui and not restart_control and temporary_policy is None:
+            if is_webui and not restart_control and temporary_policy is None and channel_key is None:
                 await self._transcripts.append_user_message(
                     chat_id,
                     content,
@@ -870,8 +926,9 @@ class WebUICommandRouter:
                 media=media_paths or None,
                 metadata=metadata,
                 is_dm=False,
-                require_existing_session=temporary_policy is not None,
+                require_existing_session=temporary_policy is not None or channel_key is not None,
                 session_generation=session_generation,
+                session_key=channel_key,
             )
             accepted = True
             if turn_id:
@@ -879,11 +936,12 @@ class WebUICommandRouter:
                 if len(self._accepted_messages) > 1024:
                     del self._accepted_messages[next(iter(self._accepted_messages))]
         except BaseException:
-            await self._workspaces.rollback_scope_admission(
-                chat_id,
-                session_generation,
-                created=session_created,
-            )
+            if channel_key is None:
+                await self._workspaces.rollback_scope_admission(
+                    chat_id,
+                    session_generation,
+                    created=session_created,
+                )
             raise
         finally:
             if not accepted and queued_owner is not None:
@@ -891,12 +949,12 @@ class WebUICommandRouter:
 
         media = self._media.augment_transcript_user_media(
             media_paths, local_paths=[item["path"] for item in local],
-            session_key=webui_session_key(chat_id),
+            session_key=session_key,
         ) if is_webui else []
         for attachment, name in zip(media, media_names, strict=False):
             if name:
                 attachment["name"] = name
-        if is_webui and not restart_control:
+        if is_webui and not restart_control and not linked_stop:
             if session_created:
                 await self._outbound.session_updated(chat_id, scope="metadata")
             await self.broadcast_user_message(
@@ -981,13 +1039,25 @@ class WebUICommandRouter:
             # Read-only and connection-scoped: never retain filesystem results in
             # the mutation replay cache. Send admission always checks again.
             chat_id, path = payload.get("chat_id"), payload.get("path")
-            if (chat_id is not None and not is_valid_webui_chat_id(chat_id)) or not isinstance(path, str):
+            channel_key = channel_session_key(chat_id)
+            if not isinstance(path, str) or (
+                chat_id is not None and not (isinstance(chat_id, str) and (
+                    channel_key is not None or is_valid_webui_chat_id(chat_id)
+                ))
+            ):
                 await self.send_webui_response(
                     connection, request_id, status=400, message="invalid attachment request",
                 )
                 return
             try:
-                if chat_id is None:
+                if channel_key is not None:
+                    if await self._channel_generation(channel_key) is None:
+                        await self.send_webui_response(
+                            connection, request_id, status=404, message="Session unavailable",
+                        )
+                        return
+                    scope = self._workspaces.gateway_default_scope()
+                elif chat_id is None:
                     scope = await self._workspaces.scope_for_new_chat(
                         payload, can_change_project=self.workspace_project_selection_available(connection),
                     )
@@ -1011,7 +1081,7 @@ class WebUICommandRouter:
                 await self.send_webui_response(
                     connection, request_id,
                     result={**result, "url": self._media.local_attachment_url(
-                        result["path"], session_key=webui_session_key(chat_id),
+                        result["path"], session_key=channel_key or webui_session_key(chat_id),
                     ) if chat_id is not None else ""},
                 )
             return

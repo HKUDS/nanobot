@@ -126,7 +126,7 @@ class RecoveryCoordinator:
             )
         from nanobot.session.session_messages import session_message_input
 
-        chat_id = message.chat_id if message.channel == "websocket" else None
+        chat_id = webui_chat_id(message.session_key) if message.channel == "websocket" else None
         if session_message_input(message) is not None:
             chat_id = webui_chat_id(message.session_key)
         if chat_id is None:

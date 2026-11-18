@@ -407,6 +407,7 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = temporary ? null : session?.key ?? null;
+  const channelSession = !!session && session.channel !== "websocket";
   const [visibleWindow, setVisibleWindow] = useState<{ key: string | null; turnIds: string[]; hasMessages: boolean } | null>(null);
   const reportVisibleMessages = useCallback((messages: UIMessage[]) => {
     // Saved results attach to turns, so only the rendered user turns matter here.
@@ -620,14 +621,14 @@ export function ThreadShell({
   );
   const expandNavigationTraceDetail = promptNavigation.expandTraceDetail;
   useEffect(() => {
-    if (!chatId || !messagesReady) return;
-    messageCacheRef.current.setLoadedMessages(chatId, promptNavigation.window
+    if (!historyKey || !messagesReady) return;
+    messageCacheRef.current.setLoadedMessages(historyKey, promptNavigation.window
       ? [displayMessages, promptNavigation.window.messages] : [displayMessages]);
-  }, [chatId, messagesReady, displayMessages, promptNavigation.window]);
+  }, [historyKey, messagesReady, displayMessages, promptNavigation.window]);
   useEffect(() => {
     const cache = messageCacheRef.current;
-    return () => { if (chatId) cache.deleteLoadedMessages(chatId); };
-  }, [chatId]);
+    return () => { if (historyKey) cache.deleteLoadedMessages(historyKey); };
+  }, [historyKey]);
 
   const loadTraceDetails = useCallback(async (refs: string[]) => {
     const details = await loadBodyTraceDetails(refs);
@@ -702,8 +703,8 @@ export function ThreadShell({
   );
   const currentGoalState = messagesReady ? goalState : undefined;
   // Recovery decisions gate queued input, not the ledger-owned run state.
-  const recoveryNeedsDecision = recoveryState?.status === "awaiting_user"
-    || recoveryState?.status === "failed";
+  const recoveryNeedsDecision = !channelSession && (recoveryState?.status === "awaiting_user"
+    || recoveryState?.status === "failed");
   const currentRunStartedAt = messagesReady ? runStartedAt : null;
   const turnActive = messagesReady && isStreaming;
   const restoredViewportTurnId = useMemo(
@@ -849,8 +850,10 @@ export function ThreadShell({
   const availableSlashCommands = useMemo(
     () => temporary
       ? slashCommands.filter(({ command }) => command === "/model" || command === "/stop")
-      : slashCommands,
-    [slashCommands, temporary],
+      : channelSession
+        ? slashCommands.filter(({ command }) => command !== "/new" && command !== "/restart")
+        : slashCommands,
+    [channelSession, slashCommands, temporary],
   );
   const modelBadge = useMemo(
     () => toModelBadgeInfo(modelName, settings, activeModelPreset),
@@ -862,14 +865,15 @@ export function ThreadShell({
   const withWorkspaceScope = useCallback(
     (options?: SendOptions): SendOptions | undefined => {
       const modelOptions = selectedModelOptions();
-      if (!workspaceScope && !modelOptions) return options;
+      const scope = channelSession ? null : workspaceScope;
+      if (!scope && !modelOptions) return options;
       return {
         ...(options ?? {}),
-        ...(workspaceScope ? { workspaceScope } : {}),
+        ...(scope ? { workspaceScope: scope } : {}),
         ...(modelOptions ? { modelOptions } : {}),
       };
     },
-    [selectedModelOptions, workspaceScope],
+    [channelSession, selectedModelOptions, workspaceScope],
   );
 
   const refreshModelSettings = useCallback(async () => {
@@ -1071,11 +1075,11 @@ export function ThreadShell({
 
   const inspectAttachment = useCallback(async (path: string) => {
     const result = await client.requestMutation("attachment.inspect", {
-      chat_id: chatId, path, ...(workspaceScope ? { workspace_scope: workspaceScope } : {}),
+      chat_id: chatId, path, ...(!channelSession && workspaceScope ? { workspace_scope: workspaceScope } : {}),
     });
     if (!isLocalAttachment(result)) throw new Error("Invalid attachment metadata");
     return result;
-  }, [chatId, client, workspaceScope]);
+  }, [channelSession, chatId, client, workspaceScope]);
 
   const handleThreadSend = useCallback(
     (content: string, images?: SendAttachment[], options?: SendOptions) => {
@@ -1289,7 +1293,7 @@ export function ThreadShell({
           onDismiss={() => setModelFallback((current) => current && { ...current, dismissed: true })}
         />
       ) : null}
-      {recoveryState ? (
+      {!channelSession && recoveryState ? (
         <RecoveryNotice
           state={recoveryState}
           onContinue={continueRecovery}
@@ -1350,6 +1354,8 @@ export function ThreadShell({
           sessions={mentionSessions}
           skills={skills}
           onStop={stop}
+          stopHint={channelSession ? t("thread.composer.stopSharedTurn") : undefined}
+          userShellEnabled={!channelSession}
           onInspectAttachment={inspectAttachment}
           onTranscribeAudio={transcribeAudio}
           goalState={currentGoalState}
@@ -1362,11 +1368,11 @@ export function ThreadShell({
           workspaceControlsHidden={temporary}
           workspaceDefaultScope={workspaceDefaultScope}
           workspaceControls={workspaceControls}
-          workspaceScopeDisabled={workspaceScopeDisabled}
+          workspaceScopeDisabled={workspaceScopeDisabled || channelSession}
           workspaceProjectLocked={projectLocked}
           workspaceError={workspaceError}
-          onWorkspaceScopeChange={onWorkspaceScopeChange}
-          pendingQueueKey={temporary ? null : chatId}
+          onWorkspaceScopeChange={channelSession ? undefined : onWorkspaceScopeChange}
+          pendingQueueKey={historyKey}
           transcriptionProvider={settingsSnapshot?.transcription?.provider}
           ingressLimits={ingressLimits}
           quotedContext={quotedContext}
@@ -1438,7 +1444,7 @@ export function ThreadShell({
       <ThreadWelcomeMark />
     </>
   );
-  const sessionInfoAction = historyKey ? (
+  const sessionInfoAction = historyKey && !channelSession ? (
     <SessionInfoPopover client={client} sessionKey={historyKey} token={token} />
   ) : undefined;
   const promptNavigatorAction = historyKey ? (
@@ -1543,7 +1549,7 @@ export function ThreadShell({
             traceDetailScope={historyKey}
             onLoadTraceDetails={messagesReady ? loadTraceDetails : undefined}
             onOpenFilePreview={previewSessionKey ? openFilePreview : undefined}
-            onForkFromMessage={onForkChat ? handleForkFromMessage : undefined}
+            onForkFromMessage={onForkChat && !channelSession ? handleForkFromMessage : undefined}
             onQuoteSelection={session ? handleQuoteSelection : undefined}
           />
           </ExecSessionCommandsContext.Provider>

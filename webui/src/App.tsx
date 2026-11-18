@@ -21,6 +21,7 @@ import { LazyRemoteConnectionsPage } from "@/components/remote/LazyRemoteConnect
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { SidebarResizeHandle, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from "@/components/SidebarResizeHandle";
 import { matchSidebarShortcut } from "@/lib/sidebar-shortcuts";
+import { isChannelChatAlias } from "@/lib/session-identity";
 import { invalidateToolsCatalog } from "@/lib/tools-catalog-cache";
 import type { SidebarDeleteDecision, SidebarDeleteItem } from "@/components/ChatList";
 import type { SettingsSectionKey } from "@/components/settings/SettingsView";
@@ -949,6 +950,9 @@ function Shell({
   const [deletingKeys, setDeletingKeys] = useState<Set<string>>(() => new Set());
   const topicSessions = useMemo(() => deletingKeys.size === 0 ? sessions
     : sessions.filter((session) => !deletingKeys.has(session.key)), [deletingKeys, sessions]);
+  const nativeSessionKeys = useMemo(() => new Set(sessions
+    .filter((session) => session.channel === "websocket")
+    .map((session) => session.key)), [sessions]);
   const [deleteQueue, setDeleteQueue] = useState<PendingDelete[]>([]);
   const [pendingDelete] = deleteQueue;
   const nextDeleteId = useRef(0);
@@ -1230,6 +1234,9 @@ function Shell({
         ? normalizeWorkspaceScope(scopeWithAccessMode(workspaces.default_scope, "restricted"))
         : null;
     }
+    if (activePaneSession && activePaneSession.channel !== "websocket") {
+      return activePaneSession.workspaceScope ?? null;
+    }
     if (activeChatId && workspaceOverrides[activeChatId]) {
       return workspaceOverrides[activeChatId];
     }
@@ -1239,7 +1246,7 @@ function Shell({
     return draftWorkspaceScope ?? workspaces?.default_scope ?? null;
   }, [
     activeChatId,
-    activePaneSession?.workspaceScope,
+    activePaneSession,
     draftWorkspaceScope,
     temporaryChatRequested,
     workspaceOverrides,
@@ -1277,16 +1284,8 @@ function Shell({
 
   useEffect(() => {
     if (!sessionsLoaded || sidebarStateLoading) return;
-    const validKeys = new Set(sessions.map((session) => session.key));
-    updateWorkbenchState((current) => {
-      return reconcileWorkbench(current, validKeys);
-    });
-  }, [
-    sessionsLoaded,
-    sidebarStateLoading,
-    sessions,
-    updateWorkbenchState,
-  ]);
+    updateWorkbenchState((current) => reconcileWorkbench(current, nativeSessionKeys));
+  }, [nativeSessionKeys, sessionsLoaded, sidebarStateLoading, updateWorkbenchState]);
 
   useEffect(() => {
     if (loading) return;
@@ -1320,7 +1319,15 @@ function Shell({
 
   useEffect(() => {
     return client.onSessionUpdate((chatId, scope, workspaceScope) => {
+      const channelSession = isChannelChatAlias(chatId);
       if (scope === "thread") {
+        if (channelSession && !client.hasTranscript(chatId)) {
+          const key = client.sessionKeyForChat(chatId);
+          if (key) {
+            threadMessageCache.delete(key);
+            webuiThreadCache.delete(key);
+          }
+        }
         setUpdatedChatIds((current) => {
           const next = new Set(current);
           if (activeChatIdRef.current === chatId) {
@@ -1333,7 +1340,7 @@ function Shell({
             : next;
         });
       }
-      if (!workspaceScope) return;
+      if (channelSession || !workspaceScope) return;
       const next = normalizeWorkspaceScope(workspaceScope);
       setWorkspaceOverrides((current) => ({
         ...current,
@@ -1343,7 +1350,7 @@ function Shell({
       setWorkspaceError(null);
       void refreshWorkspaces();
     });
-  }, [client, refreshWorkspaces]);
+  }, [client, refreshWorkspaces, threadMessageCache]);
 
   useEffect(() => {
     return client.onError((error) => {
@@ -1390,6 +1397,7 @@ function Shell({
       const next = normalizeWorkspaceScope(scope);
       setWorkspaceError(null);
       if (activeChatId) {
+        if (isChannelChatAlias(activeChatId)) return;
         if (temporaryChatActive) {
           setTemporarySessions((current) => {
             if (!activeKey || !current[activeKey]) return current;
@@ -1513,9 +1521,8 @@ function Shell({
   ) => {
     try {
       const sourceSession = sessions.find((session) => session.chatId === sourceChatId);
-      const sourceTitle = sourceSession
-        ? displayTitle(sourceSession, sidebarState.title_overrides, t("chat.newChat"))
-        : t("chat.newChat");
+      if (!sourceSession || sourceSession.channel !== "websocket") return null;
+      const sourceTitle = displayTitle(sourceSession, sidebarState.title_overrides, t("chat.newChat"));
       const chatId = await forkChat(
         sourceChatId,
         beforeUserIndex,
@@ -1587,7 +1594,7 @@ function Shell({
           return next;
         });
       }
-      if (selected?.workspaceScope) {
+      if (selected?.channel === "websocket" && selected.workspaceScope) {
         setDraftWorkspaceScope(normalizeWorkspaceScope(selected.workspaceScope));
       } else {
         setDraftWorkspaceScope(null);
@@ -1823,6 +1830,7 @@ function Shell({
       !tabKey
       || !activeKey
       || !activeSession
+      || activeSession.channel !== "websocket"
       || creatingPane
       || (activeTabState?.paneKeys.length ?? 0) >= MAX_WORKBENCH_PANES
       || temporarySessionsRef.current[activeKey]
@@ -1948,7 +1956,7 @@ function Shell({
   }, [activeKey, navigate, topicSessions]);
 
   const onRestart = useCallback(() => {
-    const chatId = activeSession?.chatId ?? client.defaultChatId;
+    const chatId = activeSession?.channel === "websocket" ? activeSession.chatId : client.defaultChatId;
     if (!chatId) return;
     restartSawDisconnectRef.current = false;
     restartStartedAtRef.current = Date.now();
@@ -1960,7 +1968,7 @@ function Shell({
       // ignore storage errors
     }
     void client.sendSystemCommand(chatId, "/restart").catch(() => {});
-  }, [activeSession?.chatId, client]);
+  }, [activeSession, client]);
 
   useEffect(() => {
     return client.onRuntimeModelUpdate((modelName) => {
@@ -2155,7 +2163,9 @@ function Shell({
   }, [activeKey, activeTabState, deleteChat, draftStore, filePreviewStore, finishDeleteConfirmation, navigate, pendingDelete, showToast, t, topicSessions]);
 
   const onRequestDeleteMany = useCallback(async (items: SidebarDeleteItem[], onDecision?: SidebarDeleteDecision) => {
-    const uniqueItems = Array.from(new Map(items.filter((item) => !deletingKeys.has(item.key)).map((item) => [item.key, item])).values());
+    const uniqueItems = Array.from(new Map(items
+      .filter((item) => nativeSessionKeys.has(item.key) && !deletingKeys.has(item.key))
+      .map((item) => [item.key, item])).values());
     if (uniqueItems.length === 0) {
       onDecision?.(false);
       return;
@@ -2180,7 +2190,7 @@ function Shell({
       },
     };
     setDeleteQueue((queue) => [...queue, confirmation]);
-  }, [deletingKeys, getSessionAutomations]);
+  }, [deletingKeys, getSessionAutomations, nativeSessionKeys]);
 
   const onRequestDelete = useCallback((key: string, label: string, onDecision?: SidebarDeleteDecision) => {
     void onRequestDeleteMany([{ key, label }], onDecision);
@@ -2268,7 +2278,7 @@ function Shell({
       .filter((session): session is ChatSummary => session !== undefined);
   }, [activeTabKey, activeTabState, orderedWorkbenchTabsByKey, topicSessions]);
   const paneChromeEnabled = Boolean(
-    activeKey && activeSession && !temporaryChatActive && activeTabState,
+    activeKey && activeSession?.channel === "websocket" && !temporaryChatActive && activeTabState,
   );
   const activeTabVisible = Boolean(
     activeTabState
@@ -2373,8 +2383,9 @@ function Shell({
   }, [updateWorkbenchState]);
 
   const onCreateWorkbenchTab = useCallback((paneKey: string) => {
+    if (!nativeSessionKeys.has(paneKey)) return;
     updateWorkbenchState((current) => createWorkbenchTab(current, paneKey));
-  }, [updateWorkbenchState]);
+  }, [nativeSessionKeys, updateWorkbenchState]);
 
   const onDissolveWorkbenchTab = useCallback((tabKey: string) => {
     updateWorkbenchState((current) => dissolveWorkbenchTab(current, tabKey));
@@ -2384,6 +2395,7 @@ function Shell({
     paneKey: string,
     tabKey: string,
   ) => {
+    if (!nativeSessionKeys.has(paneKey)) return;
     updateWorkbenchState((current) => {
       const target = workbenchTab(current, tabKey);
       if (
@@ -2393,7 +2405,7 @@ function Shell({
       ) return current;
       return attachWorkbenchPane(current, tabKey, paneKey);
     });
-  }, [updateWorkbenchState]);
+  }, [nativeSessionKeys, updateWorkbenchState]);
 
   useEffect(() => {
     if (!localActive) return;

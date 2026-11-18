@@ -10,15 +10,22 @@ from typing import Any
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.bus.events import InboundMessage
+from nanobot.agent.turn_delivery import TurnDeliveryFactory
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
 from nanobot.channels.websocket.runtime import WebSocketChannel
 from nanobot.config.schema import Config
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.runtime_context import public_history_message
 from nanobot.session.manager import SessionManager
-from nanobot.session.webui_turns import clear_websocket_turns
+from nanobot.session.webui_turns import (
+    WebuiTurnCoordinator,
+    WebuiTurnRoutePolicy,
+    clear_websocket_turns,
+)
+from nanobot.webui.session_identity import channel_session_chat_id, webui_session_key
 
 
 class _Provider(LLMProvider):
@@ -53,13 +60,14 @@ class _Runtime:
     connection: _Connection
     provider: _Provider
 
-    async def message(self, chat_id: str, text: str = "hello") -> InboundMessage:
+    async def frame(self, kind: str, chat_id: str, **fields: Any) -> None:
         await self.channel._dispatch_envelope(
-            self.connection,
-            "webui-client",
-            {"type": "message", "chat_id": chat_id, "content": text, "webui": True},
+            self.connection, "webui-client", {"type": kind, "chat_id": chat_id, **fields},
         )
-        return await self.bus.consume_inbound()
+
+    async def message(self, chat_id: str, text: str = "hello", **fields: Any) -> InboundMessage:
+        await self.frame("message", chat_id, content=text, webui=True, **fields)
+        return await asyncio.wait_for(self.bus.consume_inbound(), timeout=3)
 
     async def execute(self, message: InboundMessage) -> None:
         await self.loop._enqueue_session_message(message)
@@ -77,9 +85,10 @@ async def runtime(tmp_path: Path) -> AsyncIterator[_Runtime]:
     bus = MessageBus()
     sessions = SessionManager(workspace)
     provider = _Provider()
+    routing = WebuiTurnRoutePolicy(sessions)
     loop = AgentLoop(
-        bus=bus, provider=provider, workspace=workspace,
-        session_manager=sessions,
+        bus=bus, provider=provider, workspace=workspace, session_manager=sessions,
+        turn_delivery_factory=TurnDeliveryFactory(bus, route_policy=routing, route_admission=routing.admit),
     )
     manager = ChannelManager(
         config, bus, session_manager=sessions, webui_static_dist=False,
@@ -171,3 +180,150 @@ async def test_temporary_chat_retains_its_own_generation(history, runtime: _Runt
     assert {row["key"] for row in await state.list_sessions()} == {retired.key}
     saved = runtime.sessions.read_session_snapshot(retired.key)
     assert saved is not None and saved.messages == retired.messages
+
+
+_TELEGRAM_CHAT = "-100123"
+_TOPIC = f"telegram:{_TELEGRAM_CHAT}:topic:17"
+
+
+class _TelegramIngress(BaseChannel):
+    """Use the adapter admission seam with an actual topic key and no platform credentials."""
+
+    name = "telegram"
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def send(self, msg: OutboundMessage) -> None:
+        pass
+
+    async def input(self, text: str) -> InboundMessage:
+        assert await self._handle_message(
+            "user", _TELEGRAM_CHAT, text, session_key=_TOPIC, metadata={"message_thread_id": 17},
+        )
+        return await self.bus.consume_inbound()
+
+
+@pytest.fixture
+async def channel_runtime(runtime: _Runtime) -> AsyncIterator[_Runtime]:
+    coordinator = WebuiTurnCoordinator(runtime.bus, runtime.sessions, runtime.loop.schedule_background)
+    with coordinator.connected():
+        yield runtime
+
+
+@pytest.mark.parametrize("first_origin", ["telegram", "websocket"])
+async def test_shared_channel_turns_share_context_but_keep_reply_routes(
+    channel_runtime: _Runtime, monkeypatch: pytest.MonkeyPatch, first_origin: str,
+) -> None:
+    runtime = channel_runtime
+    state = runtime.sessions.state
+    original = await state.get(_TOPIC)
+    original.add_message("user", "Earlier channel context")
+    original.add_message("assistant", "Earlier reply")
+    original.metadata["_compaction_route"] = {
+        "channel": "telegram", "chat_id": _TELEGRAM_CHAT, "metadata": {"message_thread_id": 17},
+    }
+    await state.finish_turn(original)
+    sibling = await state.get(f"telegram:{_TELEGRAM_CHAT}:topic:18")
+    sibling.add_message("user", "Other topic context")
+    await state.finish_turn(sibling)
+    alias = channel_session_chat_id(_TOPIC)
+    assert alias is not None
+    await runtime.frame("attach", alias)
+    assert any(frame["event"] == "attached" and frame["chat_id"] == alias for frame in runtime.connection.sent)
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls: list[str] = []
+    web_text, external_text = "Web question", "Telegram question"
+
+    async def generate(messages, **_kwargs):
+        calls.append("\n".join(str(row["content"]) for row in messages if row["role"] == "user"))
+        if len(calls) == 1:
+            entered.set()
+            await release.wait()
+        text = web_text if web_text in str(messages[-1]["content"]) else external_text
+        return LLMResponse(content=f"Answer: {text}", finish_reason="stop")
+
+    monkeypatch.setattr(runtime.provider, "chat", generate)
+    telegram = _TelegramIngress({"allowFrom": ["user"]}, runtime.bus)
+    prompts = {
+        "websocket": lambda: runtime.message(alias, web_text, turn_id="browser-turn"),
+        "telegram": lambda: telegram.input(external_text),
+    }
+    second_origin = "websocket" if first_origin == "telegram" else "telegram"
+    await runtime.loop._dispatch_inbound(await prompts[first_origin]())
+    await asyncio.wait_for(entered.wait(), timeout=3)
+    queued = await prompts[second_origin]()
+    assert queued.session_key == _TOPIC
+    await runtime.loop._dispatch_inbound(queued)
+    tasks = tuple(runtime.loop._active_tasks[_TOPIC])
+    release.set()
+    await asyncio.wait_for(asyncio.gather(*tasks), timeout=5)
+
+    assert len(calls) == 2
+    first_text, second_text = (external_text, web_text) if first_origin == "telegram" else (web_text, external_text)
+    assert "Earlier channel context" in calls[0] and second_text not in calls[0]
+    assert first_text in calls[1] and second_text in calls[1] and "Other topic context" not in calls[1]
+    answers: dict[str, tuple[str, str]] = {}
+    while runtime.bus.outbound_size:
+        reply = await runtime.bus.consume_outbound()
+        if reply.content.startswith("Answer:"):
+            answers[reply.content] = (reply.channel, reply.chat_id)
+        if reply.channel == "websocket":
+            await runtime.channel.send(reply)
+    assert answers == {
+        f"Answer: {web_text}": ("websocket", alias), f"Answer: {external_text}": ("telegram", _TELEGRAM_CHAT),
+    }
+    assert any(frame["event"] == "session_updated" and frame.get("scope") == "thread"
+               and frame["chat_id"] == alias for frame in runtime.connection.sent)
+
+    snapshot = await state.read(_TOPIC)
+    assert snapshot is not None
+    assert snapshot.metadata["_compaction_route"]["channel"] == "telegram"
+    user, assistant, next_user, next_assistant = snapshot.messages[-4:]
+    first_label = "telegram" if first_origin == "telegram" else "webui"
+    assert (user["entry_channel"], next_user["entry_channel"]) == (
+        first_label, "webui" if first_label == "telegram" else "telegram",
+    )
+    assert assistant["response_input_ids"] == [user["input_id"]]
+    assert next_assistant["response_input_ids"] == [next_user["input_id"]]
+    assert await state.read(webui_session_key(alias)) is None
+    assert await state.project_history(_TOPIC, lambda reader: reader.all_facts()) == []
+
+
+async def test_shared_channel_web_stop_cancels_external_turn_without_reset(
+    channel_runtime: _Runtime, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = channel_runtime
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def generate(*_args, **_kwargs):
+        entered.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(runtime.provider, "chat", generate)
+    telegram = _TelegramIngress({"allowFrom": ["user"]}, runtime.bus)
+    await runtime.loop._dispatch_inbound(await telegram.input("Keep this input"))
+    await asyncio.wait_for(entered.wait(), timeout=3)
+    alias = channel_session_chat_id(_TOPIC)
+    assert alias is not None
+    non_webui = _Connection()
+    try:
+        await runtime.channel._dispatch_envelope(non_webui, "tui", {"type": "attach", "chat_id": alias})
+        assert non_webui.sent[-1]["detail"] == "session_unavailable"
+    finally:
+        await runtime.channel._cleanup_connection(non_webui)
+    await runtime.frame("message", alias, content="/new@bot", webui=True)
+    assert runtime.connection.sent[-1]["detail"] == "command_unavailable"
+    await asyncio.wait_for(runtime.loop._dispatch_inbound(await runtime.message(alias, "/stop")), timeout=5)
+    assert cancelled.is_set()
+    snapshot = await runtime.sessions.state.read(_TOPIC)
+    assert snapshot is not None
+    assert "Keep this input" in public_history_message(snapshot.messages[0])["content"]

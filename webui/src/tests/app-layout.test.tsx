@@ -304,6 +304,7 @@ vi.mock("@/lib/nanobot-client", async (importOriginal) => {
     restorePendingRun = vi.fn();
     getRunTurnId = () => null;
     getUnsettledRunChatIds = () => [];
+    setChannelSessions = vi.fn();
     getRunGeneration = () => 0;
     hasUnsettledRun = () => false;
     canReconcileCanonicalCompletion = () => true;

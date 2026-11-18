@@ -272,6 +272,9 @@ class TurnDelivery:
         if is_internal_session(self.session_key):
             session_metadata.pop("_compaction_route", None)
             return
+        if self.input_message.channel == "websocket" and not self.session_key.startswith("websocket:"):
+            # Continuing another channel's session does not rebind idle notifications.
+            return
         # Keep the storage key readable by older gateways.
         session_metadata["_compaction_route"] = {
             "channel": self.route.channel,

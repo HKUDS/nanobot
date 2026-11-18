@@ -5,10 +5,11 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 from loguru import logger
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import INBOUND_META_INPUT_ID, InboundMessage, OutboundMessage
 from nanobot.bus.outbound_events import ProgressEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.config.network import NetworkConfig
@@ -374,6 +375,8 @@ class BaseChannel(ABC):
             return False
 
         meta = metadata or {}
+        if self.name != "websocket" or (session_key is not None and not session_key.startswith("websocket:")):
+            meta = {**meta, INBOUND_META_INPUT_ID: f"input:{uuid4().hex}"}
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
 

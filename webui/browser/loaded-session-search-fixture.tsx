@@ -16,7 +16,7 @@ export function LoadedSessionSearchFixture() {
   const [selected, setSelected] = useState<string | null>(null);
   const [cache] = useState(() => {
     const value = new ThreadMessageCache(() => false);
-    value.set("topic-1", new ThreadTranscript([
+    value.set(sessions[1].key, new ThreadTranscript([
       { id: "user", role: "user", content: "我们讨论权限与配对", createdAt: 1 },
     ]).save());
     return value;

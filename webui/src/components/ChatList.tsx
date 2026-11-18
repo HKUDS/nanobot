@@ -201,7 +201,7 @@ function droppablePaneKey(
   if (group.panes.length >= MAX_WORKBENCH_PANES
     || !hasDraggedSession(dataTransfer)) return null;
   const paneKey = readDraggedSession(dataTransfer);
-  if (!paneKey || group.panes.some((pane) => pane.key === paneKey)) return null;
+  if (!paneKey?.startsWith("websocket:") || group.panes.some((pane) => pane.key === paneKey)) return null;
   return paneKey;
 }
 
@@ -398,11 +398,12 @@ export const ChatList = memo(function ChatList({
     const items = new Map<string, SidebarDeleteItem>();
     for (const group of Object.values(paneGroups)) {
       for (const pane of group.panes) {
+        if (!pane.key.startsWith("websocket:")) continue;
         items.set(pane.key, { key: pane.key, label: pane.title });
       }
     }
     for (const session of sessions) {
-      if (items.has(session.key)) continue;
+      if (session.channel !== "websocket" || items.has(session.key)) continue;
       items.set(session.key, {
         key: session.key,
         label: displayTitle(session, titleOverrides, t("chat.newChat")),
@@ -656,10 +657,11 @@ export const ChatList = memo(function ChatList({
         ? paneGroup?.panes.map((pane) => pane.key) ?? [session.key]
         : [session.key];
     })
-  ))));
+  )).filter((key) => deleteItemsByKey.has(key))));
 
   const beginDeleteSelection = (keys: string[]) => {
     const validKeys = keys.filter((key) => deleteItemsByKey.has(key));
+    if (!validKeys.length) return;
     setDeleteSelectionMode(true);
     setSelectedDeleteKeys(new Set(validKeys));
     deleteSelectionAnchorRef.current = validKeys[0] ?? null;
@@ -1003,6 +1005,7 @@ export const ChatList = memo(function ChatList({
 
                     const isPinned = pinned.has(s.key);
                     const isArchived = archived.has(s.key);
+                    const nativeSession = s.channel === "websocket";
                     const activityState = running.has(s.chatId)
                       ? "running"
                       : recovery.has(s.chatId)
@@ -1010,7 +1013,7 @@ export const ChatList = memo(function ChatList({
                         : updated.has(s.chatId) && !topicActive
                           ? "updated"
                           : null;
-                    const hasPaneMoveTarget = Boolean(onAttachPane)
+                    const hasPaneMoveTarget = nativeSession && Boolean(onAttachPane)
                       && paneGroupTargets.some((target) => (
                         target.key !== paneGroup?.tabKey && !target.atCapacity
                       ));
@@ -1052,6 +1055,7 @@ export const ChatList = memo(function ChatList({
                             />
                           ) : <button
                               type="button"
+                              disabled={deleteSelectionMode && !nativeSession}
                               onClick={(event) => {
                                 if (deleteSelectionMode) {
                                   toggleDeleteSelection(tabDeleteKeys, event.shiftKey, s.key);
@@ -1069,7 +1073,7 @@ export const ChatList = memo(function ChatList({
                               }}
                               onDragEnd={clearDraggedSession}
                               aria-current={topicActive ? "page" : undefined}
-                              aria-pressed={deleteSelectionMode ? tabSelected : undefined}
+                              aria-pressed={deleteSelectionMode && nativeSession ? tabSelected : undefined}
                               className={cn(
                                 "flex min-w-0 flex-1 items-center gap-2 overflow-hidden text-left",
                                 TOPIC_BUTTON_FOCUS_CLASS,
@@ -1078,7 +1082,7 @@ export const ChatList = memo(function ChatList({
                                 compact ? "py-1" : "py-1.5",
                               )}
                             >
-                              {deleteSelectionMode ? (
+                              {deleteSelectionMode && nativeSession ? (
                                 <SelectionIndicator
                                   checked={tabSelected}
                                   partial={tabPartiallySelected}
@@ -1122,12 +1126,12 @@ export const ChatList = memo(function ChatList({
                                 )}
                                 {isPinned ? t("chat.unpin") : t("chat.pin")}
                               </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => beginRename(s.key)}
-                              >
-                                <Pencil className="h-4 w-4 shrink-0" />
-                                {t("chat.rename")}
-                              </DropdownMenuItem>
+                              {nativeSession ? (
+                                <DropdownMenuItem onSelect={() => beginRename(s.key)}>
+                                  <Pencil className="h-4 w-4 shrink-0" />
+                                  {t("chat.rename")}
+                                </DropdownMenuItem>
+                              ) : null}
                               {s.projectLocked !== false ? (
                                 <DropdownMenuItem onSelect={() => onToggleArchive(s.key)}>
                                   {isArchived ? (
@@ -1138,13 +1142,13 @@ export const ChatList = memo(function ChatList({
                                   {isArchived ? t("chat.unarchive") : t("chat.archive")}
                                 </DropdownMenuItem>
                               ) : null}
-                              {paneGroup && onCreateTab ? (
+                              {nativeSession && paneGroup && onCreateTab ? (
                                 <DropdownMenuItem onSelect={() => onCreateTab(s.key)}>
                                   <PanelsTopLeft className="h-4 w-4 shrink-0" aria-hidden />
                                   {t("workbench.createGroup")}
                                 </DropdownMenuItem>
                               ) : null}
-                              {paneGroup && onAttachPane ? (
+                              {nativeSession && paneGroup && onAttachPane ? (
                                 <MoveToGroupSubmenu
                                   targets={paneGroupTargets.filter((target) => (
                                     target.key !== paneGroup.tabKey
@@ -1152,21 +1156,21 @@ export const ChatList = memo(function ChatList({
                                   onMove={(targetKey) => onAttachPane(s.key, targetKey)}
                                 />
                               ) : null}
-                              <DropdownMenuItem
-                                onSelect={() => beginDeleteSelection(tabDeleteKeys)}
-                              >
-                                <ListChecks className="h-4 w-4 shrink-0" />
-                                {t("chat.select", { defaultValue: "Select" })}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                tone="destructive"
-                                onSelect={() => {
-                                  window.setTimeout(() => requestDeleteKeys(tabDeleteKeys), 0);
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4 shrink-0" />
-                                {t("chat.delete")}
-                              </DropdownMenuItem>
+                              {nativeSession ? (
+                                <>
+                                  <DropdownMenuItem onSelect={() => beginDeleteSelection(tabDeleteKeys)}>
+                                    <ListChecks className="h-4 w-4 shrink-0" />
+                                    {t("chat.select", { defaultValue: "Select" })}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    tone="destructive"
+                                    onSelect={() => window.setTimeout(() => requestDeleteKeys(tabDeleteKeys), 0)}
+                                  >
+                                    <Trash2 className="h-4 w-4 shrink-0" />
+                                    {t("chat.delete")}
+                                  </DropdownMenuItem>
+                                </>
+                              ) : null}
                             </SidebarActionMenuContent>
                           </DropdownMenu>
                           ) : null}

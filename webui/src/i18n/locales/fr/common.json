@@ -1953,6 +1953,7 @@
       "cancelGoalOffline": "Reconnectez-vous pour annuler l’objectif.",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
+      "stopSharedTurn": "Arrête le tour en cours dans cette session partagée, même s’il a commencé sur un autre canal.",
       "quotedContext": "Contexte cité",
       "removeQuotedContext": "Retirer la citation",
       "modelNotConfigured": "Modèle non configuré",

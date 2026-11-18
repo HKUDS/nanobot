@@ -5,7 +5,8 @@ import { NanobotClient } from "@/lib/nanobot-client";
 import { webuiThreadCache } from "@/lib/webui-thread-cache";
 import type { WebuiThreadPersistedPayload } from "@/lib/types";
 
-const KEY = "websocket:shared";
+const CHAT_ID = "shared";
+const KEY = `websocket:${CHAT_ID}`;
 
 function connectedClient(url: string): NanobotClient {
   const socket = { readyState: 1, onopen: null as (() => void) | null, send() {}, close() {} };
@@ -39,8 +40,8 @@ describe("shared latest thread requests", () => {
     const fetchMock = vi.fn().mockReturnValue(read.promise);
     vi.stubGlobal("fetch", fetchMock);
     const mounted = new AbortController();
-    const first = fetchLatestWebuiThread(client, "token", KEY, mounted.signal);
-    const surviving = fetchLatestWebuiThread(client, "token", KEY);
+    const first = fetchLatestWebuiThread(client, "token", KEY, CHAT_ID, mounted.signal);
+    const surviving = fetchLatestWebuiThread(client, "token", KEY, CHAT_ID);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/sessions/websocket%3Ashared/webui-thread?limit=40&direction=latest&include_model_requests=1&context_graph_encoding=references-v1",
@@ -60,19 +61,23 @@ describe("shared latest thread requests", () => {
     const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
-    const cancelled = fetchLatestWebuiThread(client, "token", KEY, controller.signal);
+    const cancelled = fetchLatestWebuiThread(client, "token", KEY, CHAT_ID, controller.signal);
     const rejected = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
     controller.abort();
     await rejected;
     expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
-    const recovered = fetchLatestWebuiThread(client, "token", KEY);
+    const recovered = fetchLatestWebuiThread(client, "token", KEY, CHAT_ID);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const body = cachedThread("new");
     for (const read of reads) read.resolve(new Response(JSON.stringify(body), { status: 200 }));
     await expect(recovered).resolves.toEqual(body);
   });
 
-  it.each(["thread update", "turn end"] as const)("replaces surviving reads only for their own chat's %s", async (invalidation) => {
+  it.each([
+    { invalidation: "thread update", key: KEY, chatId: CHAT_ID },
+    { invalidation: "turn end", key: KEY, chatId: CHAT_ID },
+    { invalidation: "thread update", key: "telegram:123:topic:5", chatId: "channel.dGVsZWdyYW06MTIzOnRvcGljOjU" },
+  ])("replaces surviving reads only for $key's $invalidation", async ({ invalidation, key, chatId }) => {
     const socket = {
       readyState: 1, onopen: null as (() => void) | null,
       onmessage: null as ((event: MessageEvent) => void) | null, send() {}, close() {},
@@ -83,19 +88,20 @@ describe("shared latest thread requests", () => {
     const reads = [deferredResponse(), deferredResponse()];
     const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
-    const first = fetchLatestWebuiThread(client, "token", KEY);
-    const surviving = fetchLatestWebuiThread(client, "token", KEY);
+    const first = fetchLatestWebuiThread(client, "token", key, chatId);
+    const surviving = fetchLatestWebuiThread(client, "token", key, chatId);
     const receive = (chatId: string, scope: string) => socket.onmessage?.({
       data: JSON.stringify({ event: "session_updated", chat_id: chatId, scope }),
     } as MessageEvent);
-    receive("shared", "metadata");
-    receive("another-chat", "thread");
+    receive(chatId, "metadata");
+    receive("123:topic:5", "thread");
+    receive("channel.dGVsZWdyYW06MTIzOnRvcGljOjY", "thread");
     expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(false);
-    if (invalidation === "thread update") receive("shared", "thread");
+    if (invalidation === "thread update") receive(chatId, "thread");
     else socket.onmessage?.({
       data: JSON.stringify({ event: "turn_end", chat_id: "shared", turn_id: "turn-shared" }),
     } as MessageEvent);
-    const fresh = fetchLatestWebuiThread(client, "token", KEY);
+    const fresh = fetchLatestWebuiThread(client, "token", key, chatId);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const body = cachedThread("complete");
     reads[0].resolve(new Response(JSON.stringify(cachedThread("stale")), { status: 200 }));
@@ -113,9 +119,9 @@ describe("shared latest thread requests", () => {
       .mockReturnValueOnce(reads[2].promise);
     vi.stubGlobal("fetch", fetchMock);
     const requests = [
-      fetchLatestWebuiThread(firstHost, "old-token", KEY),
-      fetchLatestWebuiThread(firstHost, "new-token", KEY),
-      fetchLatestWebuiThread(secondHost, "old-token", KEY),
+      fetchLatestWebuiThread(firstHost, "old-token", KEY, CHAT_ID),
+      fetchLatestWebuiThread(firstHost, "new-token", KEY, CHAT_ID),
+      fetchLatestWebuiThread(secondHost, "old-token", KEY, CHAT_ID),
     ];
     expect(fetchMock).toHaveBeenCalledTimes(3);
     for (const read of reads) read.resolve(new Response(JSON.stringify(cachedThread()), { status: 200 }));
@@ -130,9 +136,9 @@ describe("shared latest thread requests", () => {
     const reads = [deferredResponse(), deferredResponse()];
     const fetchMock = vi.fn().mockReturnValueOnce(reads[0].promise).mockReturnValueOnce(reads[1].promise);
     vi.stubGlobal("fetch", fetchMock);
-    const oldRead = fetchLatestWebuiThread(client, "token", KEY);
+    const oldRead = fetchLatestWebuiThread(client, "token", KEY, CHAT_ID);
     webuiThreadCache.set(KEY, newBody);
-    const newRead = fetchLatestWebuiThread(client, "token", KEY);
+    const newRead = fetchLatestWebuiThread(client, "token", KEY, CHAT_ID);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const read of reads) read.resolve(new Response(null, { status: 304 }));
     await expect(oldRead).resolves.toBe(oldBody);

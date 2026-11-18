@@ -4145,7 +4145,7 @@ describe("ThreadShell", () => {
     cachedEvents.forEach((event, index) => owner.project(event, {
       createId: () => `cached-${index}`, now: index + 2,
     }));
-    messageCache.set(chatId, owner.save());
+    messageCache.set(`websocket:${chatId}`, owner.save());
     client._emitChat(chatId, {
       event: "goal_status", chat_id: chatId, turn_id: newerTurnId, status: "running", started_at: 2_000,
     });
@@ -4210,7 +4210,7 @@ describe("ThreadShell", () => {
     cachedEvents.forEach((event, index) => owner.project(event, {
       createId: () => `cached-${index}`, now: index + 3,
     }));
-    messageCache.set(chatId, owner.save());
+    messageCache.set(`websocket:${chatId}`, owner.save());
     client._emitChat(chatId, {
       event: "goal_status", chat_id: chatId, turn_id: "new", status: "running", started_at: 2_000,
     });

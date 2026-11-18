@@ -1953,6 +1953,7 @@
       "cancelGoalOffline": "다시 연결한 후 목표를 취소하세요.",
       "send": "메시지 보내기",
       "stop": "응답 중지",
+      "stopSharedTurn": "다른 채널에서 시작했어도 이 공유 세션에서 진행 중인 턴을 중지합니다.",
       "quotedContext": "인용한 문맥",
       "removeQuotedContext": "인용 삭제",
       "modelNotConfigured": "모델이 설정되지 않음",

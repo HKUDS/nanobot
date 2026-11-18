@@ -56,7 +56,12 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.recovery import RecoveryCoordinator
-from nanobot.webui.session_identity import is_webui_session_key, webui_session_key
+from nanobot.webui.session_identity import (
+    channel_session_chat_id,
+    is_webui_session_key,
+    webui_display_session_key,
+    webui_session_key,
+)
 from nanobot.webui.star_prompt import update_star_prompt
 from nanobot.webui.transcript import WebUITranscriptRecorder
 
@@ -444,7 +449,7 @@ class WebuiTurnRoutePolicy:
         """Bind replies to the display destination's admitted lifetime."""
         if route.channel != "websocket":
             return route
-        target_key = webui_session_key(route.chat_id)
+        target_key = webui_display_session_key(route.chat_id)
         metadata = dict(route.metadata)
         if target_key == session_key and generation is not None:
             metadata.setdefault(HISTORY_GENERATION_METADATA_KEY, generation)
@@ -608,6 +613,7 @@ class WebuiTurnCoordinator:
 
     async def _handle_session_turn_started(self, event: SessionTurnStarted) -> None:
         if (self._is_websocket_event(event.context)
+                and is_webui_session_key(event.context.session_key)
                 and event.context.metadata.get(WEBUI_SESSION_METADATA_KEY) is True):
             await self.sessions.state.update_metadata(
                 event.context.session_key,
@@ -617,13 +623,36 @@ class WebuiTurnCoordinator:
             )
 
     async def _handle_run_status_changed(self, event: TurnRunStatusChanged) -> None:
-        if not self._is_websocket_event(event.context):
+        ctx = event.context
+        if self._is_websocket_event(ctx):
+            await publish_turn_run_status(
+                self.bus, self._ctx_msg(ctx), event.status, started_at=event.started_at,
+            )
             return
+        chat_id = channel_session_chat_id(ctx.session_key)
+        if chat_id is None or ctx.session_generation is None:
+            return
+        owner = f"channel:{ctx.session_generation}"
+        if event.status == "running":
+            header = await self.sessions.state.read_header(ctx.session_key)
+            if (header is None or header.generation != ctx.session_generation
+                    or not self.sessions.types.public_history(header.metadata)):
+                return
+        elif event.status != "idle" or not clear_websocket_turn_if_current(chat_id, owner):
+            return
+        # Mirror lifecycle only. External text still goes to the actual channel,
+        # and the WebUI reads the durable result when that turn finishes.
         await publish_turn_run_status(
             self.bus,
-            self._ctx_msg(event.context),
-            event.status,
-            started_at=event.started_at,
+            InboundMessage(
+                channel="websocket", sender_id="runtime", chat_id=chat_id, content="",
+                metadata={WEBSOCKET_TURN_OWNER_METADATA_KEY: owner},
+            ),
+            event.status, started_at=event.started_at,
+        )
+        await self.bus.publish_event(
+            SessionUpdatedEvent(scope="metadata" if event.status == "running" else "thread"),
+            channel="websocket", chat_id=chat_id,
         )
 
     async def _handle_turn_runtime_admitted(self, event: TurnRuntimeAdmitted) -> None:
@@ -660,7 +689,7 @@ class WebuiTurnCoordinator:
             failure_error_kind=event.failure_error_kind,
             failure_attempts=event.failure_attempts,
         )
-        if self.recovery is not None:
+        if self.recovery is not None and is_webui_session_key(event.context.session_key):
             await self.recovery.turn_completed(
                 event.context.session_key,
                 failure_kind=event.failure_kind,
@@ -727,7 +756,12 @@ class WebuiTurnCoordinator:
         if msg.channel != "websocket":
             return
 
-        session = await self.sessions.state.get_header(session_key)
+        if is_webui_session_key(session_key):
+            session = await self.sessions.state.get_header(session_key)
+        else:
+            session = await self.sessions.state.read_header(session_key)
+            if session is None or (msg.session_generation is not None and session.generation != msg.session_generation):
+                return
         await self.bus.publish_outbound(
             outbound_message_for_event(
                 channel=msg.channel,

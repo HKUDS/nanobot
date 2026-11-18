@@ -2135,6 +2135,7 @@
       "cancelGoalOffline": "Reconnect to cancel the goal.",
       "send": "Send message",
       "stop": "Stop response",
+      "stopSharedTurn": "Stops the current turn in this shared session, even if it started on another channel.",
       "quotedContext": "Quoted context",
       "removeQuotedContext": "Remove quote",
       "modelNotConfigured": "Model not configured",

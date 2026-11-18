@@ -2,6 +2,7 @@ import { uploadAttachments, uploadCapability, type AttachmentReference, type Upl
 import { DeliveryReceipts } from "../../../packages/client-events/delivery";
 import { decodeNotification } from "../../../packages/client-events/notifications";
 import type {
+  ChatSummary,
   ConnectionStatus,
   InboundEvent,
   Outbound,
@@ -15,6 +16,7 @@ import type {
   WorkspaceScopePayload,
 } from "./types";
 import { createHostWebSocket } from "./runtime";
+import { isChannelChatAlias } from "./session-identity";
 import { ClientRunLedger } from "./client-run-ledger";
 import type { CanonicalRunSnapshot, RunEffect, RunObservation, RunState } from "./client-run-ledger";
 
@@ -76,6 +78,7 @@ type EventHandler = (ev: InboundEvent) => void;
 export interface TaskNotice {
   event: Extract<InboundEvent, { event: "turn_end" | "recovery_state" }>;
   temporary: boolean;
+  sessionKey?: string;
 }
 type StatusHandler = (status: ConnectionStatus) => void;
 type RunCompletionHandler = (chatId: string) => void;
@@ -250,6 +253,7 @@ export class NanobotClient {
   private knownChats = new Set<string>();
   /** Temporary chats are connection-owned and intentionally not reattached. */
   private temporaryChatIds = new Set<string>();
+  private sessionKeysByAlias = new Map<string, string>();
   private readonly runs = new ClientRunLedger();
   /** Last tracked application frame written, for conservative transport-error attribution. */
   private lastSocketMessageSend: { chatId: string; turnId: string } | null = null;
@@ -287,6 +291,17 @@ export class NanobotClient {
 
   get defaultChatId(): string | null {
     return this.readyChatId;
+  }
+
+  /** Channel aliases are scoped to this client's session list, never decoded. */
+  setChannelSessions(sessions: readonly ChatSummary[]): void {
+    this.sessionKeysByAlias = new Map(sessions
+      .filter(({ channel }) => channel !== "websocket")
+      .map(({ chatId, key }) => [chatId, key]));
+  }
+
+  sessionKeyForChat(chatId: string): string | null {
+    return isChannelChatAlias(chatId) ? this.sessionKeysByAlias.get(chatId) ?? null : `websocket:${chatId}`;
   }
 
   /** Stable browser preference namespace without authentication or query parameters. */
@@ -988,6 +1003,8 @@ export class NanobotClient {
     if (
       (parsed.event === "goal_status" || parsed.event === "turn_end")
       && !parsed.turn_id
+      // An external turn is anonymous, not a legacy report about a WebUI send.
+      && !isChannelChatAlias(parsed.chat_id)
     ) {
       const fallbackTurnId = this.runs.soleUnsettledTurn(parsed.chat_id);
       if (fallbackTurnId) parsed = { ...parsed, turn_id: fallbackTurnId };
@@ -1118,10 +1135,14 @@ export class NanobotClient {
       this.recordGoalStateSnapshot(correlatedChatId, parsed);
       if ((parsed.event === "turn_end" || parsed.event === "recovery_state")
         && (this.knownChats.has(correlatedChatId) || this.temporaryChatIds.has(correlatedChatId))) {
-        for (const handler of this.taskNoticeHandlers) {
-          // Optional browser features must not interrupt delivery or cleanup.
-          try { handler({ event: parsed, temporary: this.temporaryChatIds.has(correlatedChatId) }); }
-          catch { /* The notification owner reports its own delivery failure. */ }
+        const channelSession = isChannelChatAlias(correlatedChatId);
+        const sessionKey = this.sessionKeysByAlias.get(correlatedChatId);
+        if (!channelSession || sessionKey) {
+          for (const handler of this.taskNoticeHandlers) {
+            // Optional browser features must not interrupt delivery or cleanup.
+            try { handler({ event: parsed, temporary: this.temporaryChatIds.has(correlatedChatId), ...(sessionKey ? { sessionKey } : {}) }); }
+            catch { /* The notification owner reports its own delivery failure. */ }
+          }
         }
       }
       this.dispatch(correlatedChatId, parsed);

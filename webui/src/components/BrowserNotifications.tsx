@@ -14,7 +14,7 @@ export function BrowserNotifications({ client }: { client: Pick<NanobotClient, "
       : event.status === "failed" ? "failed" : "interrupted";
     // Never expose conversation text, titles, model errors, or paths on a lock screen.
     void showBrowserNotification(t(`settings.notifications.${outcome}`), {
-      key, url: notificationChatUrl(event.chat_id, notice.temporary),
+      key, url: notificationChatUrl(event.chat_id, notice.temporary, notice.sessionKey),
     });
   }), [client, t]);
   return null;

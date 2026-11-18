@@ -1953,6 +1953,7 @@
       "cancelGoalOffline": "請重新連線後取消目標。",
       "send": "送出訊息",
       "stop": "停止回覆",
+      "stopSharedTurn": "停止共用工作階段的目前回合，包括從其他管道發起的回合。",
       "quotedContext": "引用內容",
       "removeQuotedContext": "移除引用",
       "modelNotConfigured": "尚未設定模型",

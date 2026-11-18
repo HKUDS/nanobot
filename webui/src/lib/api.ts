@@ -57,6 +57,8 @@ import type {
   WorkspaceScopePayload,
 } from "./types";
 import { fetchWithTimeout } from "./http";
+import { normalizeSessionHandle } from "./session-handle";
+import { isChannelChatAlias, isSessionKey } from "./session-identity";
 import { isSubagentTask } from "./subagent-tasks";
 
 const API_READ_TIMEOUT_MS = 20_000;
@@ -175,31 +177,13 @@ function compactMcpValues(values: Record<string, unknown>): Record<string, unkno
   return payload;
 }
 
-function splitKey(key: string): { channel: string; chatId: string } {
-  const idx = key.indexOf(":");
-  if (idx === -1) return { channel: "", chatId: key };
-  return { channel: key.slice(0, idx), chatId: key.slice(idx + 1) };
-}
-
-function normalizeSessionHandle(value: unknown): SessionHandle | null {
-  if (!value || typeof value !== "object") return null;
-  const handle = value as Partial<SessionHandle>;
-  const id = typeof handle.id === "string" ? handle.id.trim() : "";
-  const name = typeof handle.name === "string" ? handle.name.trim() : "";
-  if (
-    !/^handle_[a-f0-9]{32}$/i.test(id)
-    || !name
-    || !/^[\p{L}\p{N}_-]+$/u.test(name)
-  ) return null;
-  return { id, name };
-}
-
 export async function listSessions(
   token: string,
   base: string = "",
 ): Promise<ChatSummary[]> {
   type Row = {
     key: string;
+    chat_id?: string;
     created_at: string | null;
     updated_at: string | null;
     title?: string;
@@ -218,11 +202,17 @@ export async function listSessions(
     undefined,
     API_READ_TIMEOUT_MS,
   );
-  return body.sessions.map((s) => {
-    const handle = normalizeSessionHandle(s.handle);
-    return {
+  return body.sessions.flatMap((s): ChatSummary[] => {
+    if (typeof s.key !== "string" || !isSessionKey(s.key)) return [];
+    const separator = s.key.indexOf(":");
+    const channel = s.key.slice(0, separator);
+    const channelSession = channel !== "websocket";
+    const chatId = channelSession ? s.chat_id : s.key.slice(separator + 1);
+    if (!chatId || (channelSession && !isChannelChatAlias(chatId))) return [];
+    return [{
       key: s.key,
-      ...splitKey(s.key),
+      channel,
+      chatId,
       createdAt: s.created_at,
       updatedAt: s.updated_at,
       title: s.title ?? "",
@@ -230,11 +220,11 @@ export async function listSessions(
       modelPreset: s.model_preset ?? null,
       modelOptions: s.model_options ?? { reasoning_effort: null, codex_fast_mode: null },
       runStartedAt: s.run_started_at ?? null,
-      recoveryState: s.recovery_state ?? null,
+      recoveryState: channelSession ? null : s.recovery_state ?? null,
       workspaceScope: s.workspace_scope ?? null,
-      projectLocked: s.project_locked ?? true,
-      handle,
-    };
+      projectLocked: channelSession || (s.project_locked ?? true),
+      handle: normalizeSessionHandle(s.handle, channelSession),
+    }];
   });
 }
 
@@ -282,6 +272,7 @@ function hasValidProjectionMetadata(value: Record<string, unknown>): boolean {
   return (
     (value.projection_id === undefined || typeof value.projection_id === "string")
     && (value.created_at_ms === undefined || typeof value.created_at_ms === "number")
+    && (value.entry_channel === undefined || typeof value.entry_channel === "string")
     && (value.turn_id === undefined || typeof value.turn_id === "string")
     && (value.turn_phase === undefined || [
       "user", "reasoning", "activity", "answer", "complete",

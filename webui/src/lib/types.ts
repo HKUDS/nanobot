@@ -171,6 +171,8 @@ export interface UIMessage {
   contextWindowTokens?: number;
   /** Lightweight provenance for proactive assistant messages. */
   source?: UIMessageSource;
+  /** Gateway-supplied source label in a shared channel session. */
+  entryChannel?: string;
   /** Structured provenance for a message delivered by another session. */
   sessionMessage?: UISessionMessage;
   /** Stable protocol metadata for grouping all activity emitted by one user turn. */
@@ -502,10 +504,10 @@ export interface ModelOptionsCapability {
 }
 
 export interface ChatSummary {
-  /** Server-side session key, e.g. ``websocket:abcd-...``. */
+  /** Canonical persisted key for HTTP, routing, and caches. */
   key: string;
-  /** Local channel + chat_id parts derived from ``key`` for convenience. */
   channel: string;
+  /** WebSocket address: native chat ID or a server-issued opaque channel alias. */
   chatId: string;
   createdAt: string | null;
   updatedAt: string | null;
@@ -1552,6 +1554,7 @@ interface InboundTurnMetadata {
   turn_id?: string;
   turn_phase?: UITurnPhase;
   turn_seq?: number;
+  entry_channel?: string;
 }
 
 export type InboundEvent =

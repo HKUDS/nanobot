@@ -1953,6 +1953,7 @@
       "cancelGoalOffline": "Hubungkan kembali untuk membatalkan tujuan.",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
+      "stopSharedTurn": "Menghentikan giliran saat ini dalam sesi bersama, meskipun dimulai di kanal lain.",
       "quotedContext": "Konteks kutipan",
       "removeQuotedContext": "Hapus kutipan",
       "modelNotConfigured": "Model belum dikonfigurasi",

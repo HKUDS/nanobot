@@ -43,7 +43,7 @@ import type {
 } from "@/lib/types";
 
 type PendingStreamEvent =
-  | { kind: "delta"; text: string; turn: UIMessageTurnFields; streamId?: string; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"]; responseInputIds?: string[] }
+  | { kind: "delta"; text: string; turn: UIMessageTurnFields; streamId?: string; entryChannel?: string; source?: UIMessage["source"]; responseSources?: UIMessage["responseSources"]; responseInputIds?: string[] }
   | { kind: "reasoning"; text: string; turn: UIMessageTurnFields; streamId?: string };
 
 const BACKGROUND_STREAM_FLUSH_INTERVAL_MS = 1_000;
@@ -165,8 +165,9 @@ export function useNanobotStream(
   const historyKey = history?.key ?? null;
   const temporary = history?.temporary === true;
   const messageCache = history?.cache;
+  const messageCacheKey = historyKey ?? chatId;
   const [initialTranscript] = useState(() => createTranscript(initialMessages,
-    chatId ? messageCache?.get(chatId) : undefined, historyKey, temporary));
+    messageCacheKey ? messageCache?.get(messageCacheKey) : undefined, historyKey, temporary));
   const transcriptRef = useRef(initialTranscript);
   const [historyState, setHistoryState] = useState(initialTranscript.paging);
   const publishHistory = useCallback(() => setHistoryState(transcriptRef.current.paging), []);
@@ -329,6 +330,7 @@ export function useNanobotStream(
             || nextEvent.streamId !== event.streamId
             || (nextEvent.kind === "delta" && event.kind === "delta"
               && (nextEvent.source !== event.source
+                || nextEvent.entryChannel !== event.entryChannel
                 || JSON.stringify(nextEvent.responseSources) !== JSON.stringify(event.responseSources)
                 || JSON.stringify(nextEvent.responseInputIds) !== JSON.stringify(event.responseInputIds)))) break;
           chunks.push(nextEvent.text);
@@ -346,6 +348,7 @@ export function useNanobotStream(
               turn_id: turn.turnId,
               turn_phase: turn.turnPhase,
               turn_seq: turn.turnSeq,
+              entry_channel: event.entryChannel,
               source: event.source,
               response_sources: event.responseSources,
               response_input_ids: event.responseInputIds,
@@ -489,7 +492,7 @@ export function useNanobotStream(
   // ``initialMessages`` update: a brand-new chat can receive an empty/404
   // history response after the optimistic first message has already rendered.
   useEffect(() => {
-    transcriptRef.current = createTranscript(initialMessages, chatId ? messageCache?.get(chatId) : undefined, historyKey, temporary);
+    transcriptRef.current = createTranscript(initialMessages, messageCacheKey ? messageCache?.get(messageCacheKey) : undefined, historyKey, temporary);
     setMessages(transcriptRef.current.messages);
     setExecSourceMessages(transcriptRef.current.messages);
     setMessageScope({ chatId, historyKey, client });
@@ -499,7 +502,7 @@ export function useNanobotStream(
     setGoalState(chatId ? client.getGoalState(chatId) : undefined);
     setRecoveryState(null);
     clearPendingStreamWork();
-  }, [chatId, client, historyKey, temporary, clearActivitySegment, clearPendingStreamWork, setMessages]);
+  }, [chatId, client, historyKey, messageCacheKey, temporary, clearActivitySegment, clearPendingStreamWork, setMessages]);
 
   useEffect(() => {
     if (!chatId || (!hasPendingToolCalls && !initialStreaming)) return;
@@ -567,7 +570,7 @@ export function useNanobotStream(
       // Commit the received owner before cache listeners/ledger callbacks can reenter.
       setMessages(owner.messages);
       setExecSourceMessages(owner.messages);
-      if (accepted && chatId) messageCache?.set(chatId, owner.save());
+      if (accepted) messageCache?.set(historyKey, owner.save());
       if (ownRead) {
         publishing = true;
         if (body) webuiThreadCache.set(historyKey, body);
@@ -597,7 +600,7 @@ export function useNanobotStream(
       cancelOlderRead();
       install(body, false);
     });
-    void fetchLatestWebuiThread(client, getToken(), historyKey, controller.signal)
+    void fetchLatestWebuiThread(client, getToken(), historyKey, chatId, controller.signal)
       .then((body) => install(body, true))
       .catch((error: unknown) => {
         if (disposed || superseded || controller.signal.aborted || transcriptRef.current !== owner) return;
@@ -634,7 +637,7 @@ export function useNanobotStream(
         setMessages(owner.messages);
         setExecSourceMessages(owner.messages);
         if (accepted) {
-          if (chatId) messageCache?.set(chatId, owner.save());
+          messageCache?.set(historyKey, owner.save());
           settleFragment(owner);
         }
         if (!needsContent) break;
@@ -761,6 +764,7 @@ export function useNanobotStream(
           text: chunk,
           turn: turnFieldsFromEvent(ev, "answer"),
           streamId: ev.stream_id,
+          entryChannel: ev.entry_channel,
           source: ev.source,
           responseSources: ev.response_sources,
           responseInputIds: ev.response_input_ids,
@@ -950,7 +954,7 @@ export function useNanobotStream(
         : messagesRef.current;
       onStreamDetach?.(snapshot);
       if (pending.length > 0) setMessages(snapshot);
-      messageCache?.set(chatId, transcriptRef.current.save());
+      if (messageCacheKey) messageCache?.set(messageCacheKey, transcriptRef.current.save());
       clearPendingStreamWork();
     };
   }, [
@@ -967,6 +971,7 @@ export function useNanobotStream(
     onTurnEnd,
     onStreamDetach,
     messageCache,
+    messageCacheKey,
     schedulePendingStreamFlush,
     setMessages,
   ]);
