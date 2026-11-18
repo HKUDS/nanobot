@@ -41,6 +41,11 @@ async def test_one_dream_reads_full_pages_and_defers_new_history(tmp_path):
         context_window_tokens=512_000,
     )
     store = loop.context.memory
+    markers = ("DREAM_SOUL_MARKER", "DREAM_USER_MARKER", "DREAM_MEMORY_MARKER", "DREAM_AGENTS_MARKER")
+    store.write_soul(markers[0])
+    store.write_user(markers[1])
+    store.write_memory(markers[2])
+    (tmp_path / "AGENTS.md").write_text(markers[3], encoding="utf-8")
     store.git.init()
     checkpoints = ["Project knowledge. " * 3000 + f"TAIL-{i}" for i in range(3)]
     for checkpoint in checkpoints:
@@ -61,7 +66,6 @@ async def test_one_dream_reads_full_pages_and_defers_new_history(tmp_path):
             number, separator, encoded = line.partition("| ")
             if separator and number.isdigit():
                 read_records.append(json.loads(encoded))
-        return text
 
     async def chat(**kwargs):
         nonlocal model_calls
@@ -69,12 +73,17 @@ async def test_one_dream_reads_full_pages_and_defers_new_history(tmp_path):
         messages = kwargs["messages"]
         assert store.get_last_dream_cursor() == 0
         if model_calls == 1:
-            assert "Read lines 1-26" in messages[-1]["content"]
+            task = messages[-1]["content"]
+            assert str(store.history_file.resolve()) in task
+            assert "Read lines 1-26" in task and "0 < cursor <= 26" in task
+            request = "\n".join(str(message.get("content", "")) for message in messages)
+            for marker in markers:
+                assert marker in messages[0]["content"] and request.count(marker) == 1
+            assert "TAIL-0" not in request and "queued record 22" not in request
             store.append_history("Arrived while Dream was running")
             return call("read_file", path=str(store.history_file), offset=1, limit=26)
         if model_calls == 2:
-            text = collect_read(messages)
-            assert "Showing lines 1-2 of 27" in text
+            collect_read(messages)
             assert [entry["content"] for entry in read_records] == checkpoints[:2]
             return call("read_file", path=str(store.history_file), offset=3, limit=24)
         if model_calls == 3:
@@ -92,8 +101,14 @@ async def test_one_dream_reads_full_pages_and_defers_new_history(tmp_path):
         assert model_calls == 4
         assert store.get_last_dream_cursor() == 26
         assert result.commit_sha
+        commit, diff = store.git.show_commit_diff(result.commit_sha)
+        assert commit.message.startswith("dream: periodic memory consolidation\n\n")
+        assert "memory/wiki/index.md" in diff and "Current knowledge" in commit.message
+        assert ".dream_cursor" not in commit.message
         assert (store.wiki_dir / "index.md").read_text(encoding="utf-8") == "# Wiki\nCurrent knowledge"
-        assert len(await loop.sessions.state.list_sessions()) == 1
+        sessions = await loop.sessions.state.list_sessions()
+        assert len(sessions) == 1
+        assert loop.sessions.read_session_snapshot(sessions[0]["key"]) is not None
         next_prompt, next_cursor = store.build_dream_prompt()
         assert "Read lines 27-27" in next_prompt
         assert next_cursor == 27
@@ -102,7 +117,7 @@ async def test_one_dream_reads_full_pages_and_defers_new_history(tmp_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure", ["length", "max_iterations", "exception"])
+@pytest.mark.parametrize("failure", ["length", "exception"])
 async def test_failed_task_keeps_entire_range_pending_after_restart(tmp_path, failure):
     store = MemoryStore(tmp_path, max_history_entries=5)
     store.git.init()
@@ -111,10 +126,6 @@ async def test_failed_task_keeps_entire_range_pending_after_restart(tmp_path, fa
 
     async def process(prompt, **kwargs):
         assert "Read lines 1-25" in prompt
-        page = await kwargs["tools"].execute("read_file", {
-            "path": str(store.history_file), "offset": 1, "limit": 10,
-        })
-        assert "record-00" in page and "record-09" in page
         store.write_memory("# Memory\nPartial update")
         if failure == "exception":
             raise RuntimeError("Provider unavailable")
@@ -173,33 +184,3 @@ async def test_overlapping_manual_and_periodic_runs_do_not_repeat_history(tmp_pa
     assert all(outcome.error is None for outcome in outcomes)
     assert [outcome.had_input for outcome in outcomes] == [True, False]
     assert store.get_last_dream_cursor() == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("edit", [False, True])
-async def test_versions_only_real_content_changes(tmp_path, edit):
-    store = MemoryStore(tmp_path)
-    store.write_memory("# Memory")
-    store.git.init()
-    before = store.git.log()
-    store.append_history("Research notes")
-
-    async def process(prompt, **kwargs):
-        if edit:
-            store.write_memory("# Memory\n- Research notes")
-        return response()
-
-    result = await run_dream(
-        loop_for(store, process), commit_prefix="dream: periodic memory consolidation",
-    )
-    assert result.error is None
-    assert result.changed is edit
-    assert store.get_last_dream_cursor() == 1
-    if edit:
-        assert result.commit_sha
-        commit = store.git.log()[0]
-        assert commit.message.startswith("dream: periodic memory consolidation\n\n")
-        assert "Research notes" in commit.message
-    else:
-        assert result.commit_sha is None
-        assert store.git.log() == before

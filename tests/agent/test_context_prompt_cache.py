@@ -69,23 +69,6 @@ def test_selected_project_path_follows_shared_cache_prefix(tmp_path) -> None:
     assert prompt_a == builder.build_system_prompt(workspace=project_a)
 
 
-@pytest.mark.parametrize("selected_project", [False, True])
-def test_system_prompt_guides_memory_updates_within_workspace_access(tmp_path, selected_project) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-    project = tmp_path / "project" if selected_project else workspace
-    project.mkdir(exist_ok=True)
-
-    prompt = builder.build_system_prompt(workspace=project)
-
-    assert "memory/history.jsonl" in prompt
-    assert "memory/wiki/ (read on demand)" in prompt
-    assert "Use the `memory` skill when the user asks you to remember, correct, or edit stored knowledge" in prompt
-    assert "Make targeted updates when workspace access permits" in prompt
-    assert "update memory on request" in prompt
-    assert "Leave the history journal and its cursors to the runtime" in prompt
-
-
 def test_provider_context_appended_after_user_content(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -258,7 +241,6 @@ def test_template_memory_md_is_skipped(tmp_path) -> None:
     prompt = builder.build_system_prompt()
 
     assert "# Long-term Memory" not in prompt
-    assert "History log: memory/history.jsonl" in prompt
     assert "This file is automatically updated by nanobot" not in prompt
 
 

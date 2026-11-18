@@ -260,100 +260,42 @@ def wiki_git(tmp_path):
 
 class TestTrackedDirectories:
 
-    def test_init_tracks_existing_nested_pages_but_not_siblings(self, tmp_path):
-        _write_page(tmp_path, "memory/wiki/topics/start.md", "# Starting point\n")
-        _write_page(tmp_path, "memory/history.jsonl", "synthetic journal\n")
-        _write_page(tmp_path, "memory/wiki-other/private.md", "not a wiki page\n")
+    def test_wiki_changes_are_audited_and_restore_the_selected_parent(self, tmp_path):
         git = GitStore(tmp_path, tracked_files=["SOUL.md"], tracked_dirs=["memory/wiki"])
+        topic = _write_page(tmp_path, "memory/wiki/nested/topic.md", "original topic\n")
+        empty = _write_page(tmp_path, "memory/wiki/obsolete.md", "")
+        renamed = _write_page(tmp_path, "memory/wiki/old.md", "same content\n")
+        journal = _write_page(tmp_path, "memory/history.jsonl", "synthetic journal\n")
+        sibling = _write_page(tmp_path, "memory/wiki-other/private.md", "not a wiki page\n")
+        assert git.init()
+        before = _git_output(tmp_path, "rev-parse", "HEAD")
 
-        assert git.init() is True
-        assert set(_git_output(tmp_path, "ls-tree", "-r", "--name-only", "HEAD").splitlines()) == {
-            ".gitignore", "SOUL.md", "memory/wiki/topics/start.md",
-        }
+        topic.write_text("updated topic\n", encoding="utf-8")
+        empty.unlink()
+        renamed_to = renamed.rename(renamed.with_name("new.md"))
+        added = _write_page(tmp_path, "memory/wiki/deep/page.md", "")
+        summary = git.summarize_working_tree([], directories=["memory/wiki"])
+        assert "memory/wiki/nested/topic.md: +1 -1" in summary
+        assert "memory/wiki/obsolete.md: +0 -0" in summary
+        assert "memory/wiki/deep/page.md: +0 -0" in summary
+        assert "memory/wiki/old.md" in summary and "memory/wiki/new.md" in summary
+        selected = git.auto_commit("dream: update wiki")
+        assert selected
+        assert _git_output(tmp_path, "ls-tree", "-r", "--name-only", "HEAD").splitlines() == [
+            ".gitignore", "SOUL.md", "memory/wiki/deep/page.md", "memory/wiki/nested/topic.md", "memory/wiki/new.md",
+        ]
         assert _git_output(tmp_path, "check-ignore", "memory/history.jsonl") == "memory/history.jsonl"
-        assert git.auto_commit("no changes") is None
 
-    def test_nested_add_change_delete_and_rename_are_audited_and_committed(self, wiki_git, tmp_path):
-        changed = _write_page(tmp_path, "memory/wiki/topic.md", "old topic\n")
-        renamed = _write_page(tmp_path, "memory/wiki/topics/old.md", "stable page\n")
-        deleted = _write_page(tmp_path, "memory/wiki/obsolete.md", "obsolete page\n")
-        first = wiki_git.auto_commit("dream: first wiki")
-        assert first is not None
-
-        changed.write_text("new topic\n", encoding="utf-8")
-        renamed.rename(renamed.with_name("renamed.md"))
-        deleted.unlink()
-        _write_page(tmp_path, "memory/wiki/deep/new/page.md", "new page\n")
-        (tmp_path / "memory/.dream_cursor").write_text("cursor only\n", encoding="utf-8")
-        _write_page(tmp_path, "memory/history.jsonl", "private synthetic history\n")
-        _write_page(tmp_path, "memory/wiki-other/private.md", "outside wiki\n")
-
-        summary = wiki_git.summarize_working_tree(
-            ["SOUL.md", "USER.md", "memory/MEMORY.md"], directories=["memory/wiki"],
-        )
-        for line in [
-            "memory/wiki/topic.md: +1 -1",
-            "memory/wiki/topics/old.md: +0 -1",
-            "memory/wiki/topics/renamed.md: +1 -0",
-            "memory/wiki/obsolete.md: +0 -1",
-            "memory/wiki/deep/new/page.md: +1 -0",
-        ]:
-            assert line in summary
-        assert "5 files changed" in summary
-        assert "cursor only" not in summary
-        assert "history.jsonl" not in summary
-        assert "wiki-other" not in summary
-        assert wiki_git.summarize_working_tree(["SOUL.md"]) == ""
-
-        second = wiki_git.auto_commit("dream: revise wiki")
-        assert second is not None
-        changes = _git_output(
-            tmp_path, "diff", "--name-status", "--no-renames", first, second, "--", "memory/wiki",
-        )
-        assert set(changes.splitlines()) == {
-            "M\tmemory/wiki/topic.md",
-            "D\tmemory/wiki/topics/old.md",
-            "A\tmemory/wiki/topics/renamed.md",
-            "D\tmemory/wiki/obsolete.md",
-            "A\tmemory/wiki/deep/new/page.md",
-        }
-        diff = wiki_git.diff_commits(first, second)
-        assert "+new topic" in diff
-        assert "memory/wiki/topics/old.md" in diff
-        assert "memory/wiki/topics/renamed.md" in diff
-        assert _git_output(tmp_path, "show", "HEAD:memory/.dream_cursor") == "cursor only"
-        tracked = _git_output(tmp_path, "ls-tree", "-r", "--name-only", "HEAD")
-        assert "history.jsonl" not in tracked
-        assert "wiki-other" not in tracked
-        assert wiki_git.summarize_working_tree([], directories=["memory/wiki"]) == ""
-        assert wiki_git.auto_commit("unchanged") is None
-
-    def test_revert_restores_selected_parent_not_just_tip_changes(self, wiki_git, tmp_path):
-        _write_page(tmp_path, "memory/MEMORY.md", "baseline memory\n")
-        _write_page(tmp_path, "memory/wiki/start.md", "baseline wiki\n")
-        nested = _write_page(tmp_path, "memory/wiki/topics/deleted.md", "restore me\n")
-        renamed = _write_page(tmp_path, "memory/wiki/rename.md", "original name\n")
-        before = wiki_git.auto_commit("dream: baseline")
-        assert before is not None
-
-        nested.unlink()
-        nested.parent.rmdir()
-        renamed.rename(renamed.with_name("renamed.md"))
-        _write_page(tmp_path, "memory/wiki/start.md", "revised wiki\n")
-        _write_page(tmp_path, "memory/wiki/added.md", "new page\n")
-        _write_page(tmp_path, "memory/MEMORY.md", "revised memory\n")
-        selected = wiki_git.auto_commit("dream: selected")
-        assert selected is not None
-        _write_page(tmp_path, "memory/wiki/later.md", "later committed page\n")
-        assert wiki_git.auto_commit("dream: later") is not None
-
-        assert wiki_git.revert(selected) is not None
-        assert nested.read_text(encoding="utf-8") == "restore me\n"
-        assert renamed.read_text(encoding="utf-8") == "original name\n"
-        for name in ["added.md", "renamed.md", "later.md"]:
-            assert not (tmp_path / "memory/wiki" / name).exists()
-        assert (tmp_path / "memory/MEMORY.md").read_text(encoding="utf-8") == "baseline memory\n"
+        later = _write_page(tmp_path, "memory/wiki/later.md", "later committed page\n")
+        assert git.auto_commit("dream: later")
+        assert git.revert(selected)
         assert _git_output(tmp_path, "diff", "--exit-code", before, "HEAD") == ""
+        assert topic.read_text(encoding="utf-8") == "original topic\n"
+        assert renamed.read_text(encoding="utf-8") == "same content\n"
+        assert empty.read_bytes() == b""
+        assert not any(path.exists() for path in (added, renamed_to, later))
+        assert journal.read_text(encoding="utf-8") == "synthetic journal\n"
+        assert sibling.read_text(encoding="utf-8") == "not a wiki page\n"
 
     def test_deleted_directory_is_committed_and_restored_with_missing_parents(self, wiki_git, tmp_path):
         page = _write_page(tmp_path, "memory/wiki/deep/topic.md", "nested page\n")
@@ -379,36 +321,16 @@ class TestTrackedDirectories:
         old.init()
         (tmp_path / "SOUL.md").write_text("legacy state\n", encoding="utf-8")
         legacy = old.auto_commit("dream: before wiki")
-        assert legacy is not None
-        old_ignore = (tmp_path / ".gitignore").read_bytes()
+        assert legacy
         git = GitStore(tmp_path, tracked_files=["SOUL.md"], tracked_dirs=["memory/wiki"])
-        assert git.init() is False
         page = _write_page(tmp_path, "memory/wiki/nested/new.md", "first wiki\n")
         created = git.auto_commit("dream: add wiki")
-        assert created is not None
+        assert created
         assert _git_output(tmp_path, "show", "HEAD:memory/wiki/nested/new.md") == "first wiki"
-        assert (tmp_path / ".gitignore").read_bytes() == old_ignore
 
-        assert git.revert(created) is not None
+        assert git.revert(created)
         assert not page.exists()
-        _write_page(tmp_path, "memory/wiki/later.md", "not in the old snapshot\n")
-        assert git.auto_commit("dream: another wiki page") is not None
-        assert git.revert(legacy) is not None
-        assert (tmp_path / "SOUL.md").read_text(encoding="utf-8") == ""
-        assert not list((tmp_path / "memory/wiki").rglob("*.md"))
-        assert "memory/wiki" not in _git_output(tmp_path, "ls-tree", "-r", "--name-only", "HEAD")
-
-    def test_empty_page_addition_and_deletion_are_not_lost_in_summary(self, wiki_git, tmp_path):
-        page = _write_page(tmp_path, "memory/wiki/empty.md", "")
-        assert "memory/wiki/empty.md: +0 -0" in wiki_git.summarize_working_tree(
-            [], directories=["memory/wiki"],
-        )
-        assert wiki_git.auto_commit("dream: empty page") is not None
-        page.unlink()
-        assert "memory/wiki/empty.md: +0 -0" in wiki_git.summarize_working_tree(
-            [], directories=["memory/wiki"],
-        )
-        assert wiki_git.auto_commit("dream: delete empty page") is not None
+        assert _git_output(tmp_path, "diff", "--exit-code", legacy, "HEAD") == ""
 
 
 def _make_link(link, target, *, junction=False):

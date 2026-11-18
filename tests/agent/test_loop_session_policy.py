@@ -81,8 +81,7 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     calls = loop.provider.chat_stream_with_retry.await_args_list
     private_markers = (
         "private durable memory", "private agent profile", "private user profile",
-        "Memory skill discovery cue", "Memory skill body", "memory/history.jsonl",
-        "Make targeted updates when workspace access permits",
+        "Memory skill discovery cue", "Memory skill body", "memory/wiki/index.md",
     )
     for call in calls[:2]:
         provider_context = str(call.kwargs["messages"])

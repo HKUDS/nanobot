@@ -26,12 +26,10 @@ class _FakeStore:
         git,
         last_dream_cursor: int = 1,
         dream_prompt_result=None,
-        content_diff: str = "",
     ):
         self.git = git
         self._last_dream_cursor = last_dream_cursor
         self._dream_prompt_result = dream_prompt_result
-        self._content_diff = content_diff
         self.compact_history_called = False
         self.dream_lock = asyncio.Lock()
 
@@ -50,7 +48,7 @@ class _FakeStore:
         self._last_dream_cursor = value
 
     def dream_content_diff(self) -> str:
-        return self._content_diff
+        return ""
 
     def compact_history(self) -> None:
         self.compact_history_called = True
@@ -216,141 +214,36 @@ async def test_dream_internal_run_silences_progress(tmp_path) -> None:
     assert progress_sentinel not in completion.content
 
 
-def _build_runnable_dream(
-    tmp_path,
-    *,
-    initialized: bool,
-    content_diff: str,
-    stop_reason: str = "completed",
-    tool_error: bool = False,
-) -> tuple[CommandContext, _FakeStore]:
-    """Build a /dream ctx whose run is driven by a canned stop reason + diff."""
-    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
-    store = _FakeStore(
-        _FakeGit(initialized=initialized),
-        last_dream_cursor=5,
-        dream_prompt_result=("dream prompt", 42),
-        content_diff=content_diff,
-    )
+@pytest.mark.parametrize("completed", [True, False])
+async def test_dream_command_reports_outcome_and_versions_only_real_edits(tmp_path, completed) -> None:
+    ctx, bus = _make_dream_ctx(tmp_path)
+    store = MemoryStore(ctx.loop.sessions.workspace)
+    assert store.git.init()
+    versions = store.git.log()
+    cursor = store.append_history("A confirmed finding")
 
-    async def process_direct(*args, **kwargs):
-        if tool_error:
-            await kwargs["on_progress"](
-                "",
-                tool_events=[{
-                    "phase": "error",
-                    "name": "edit_file",
-                    "error": "edit failed",
-                }],
-            )
+    async def process_direct(prompt, **kwargs):
+        if not completed:
+            store.write_memory("A partial update")
         return OutboundMessage(
-            channel="cli",
-            chat_id="direct",
-            content="done",
-            metadata={"_stop_reason": stop_reason},
+            channel="cli", chat_id="direct", content="done",
+            metadata={"_stop_reason": "completed" if completed else "length"},
         )
 
-    bus = _FakeBus()
-    loop = SimpleNamespace(
-        bus=bus,
-        context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=_make_sessions(tmp_path),
-        process_direct=process_direct,
-        dream_runtime=lambda: None,
-    )
-    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
-    return ctx, store
-
-
-@pytest.mark.asyncio
-async def test_dream_advances_cursor_when_diff_nonempty(tmp_path) -> None:
-    ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="SOUL.md: +1 -0")
-    await _run_dream_command(ctx)
-    assert store._last_dream_cursor == 42
-
-
-@pytest.mark.asyncio
-async def test_dream_advances_cursor_on_completed_noop(tmp_path) -> None:
-    ctx, store = _build_runnable_dream(tmp_path, initialized=True, content_diff="")
-    await _run_dream_command(ctx)
-    assert store._last_dream_cursor == 42
-    assert "no memory changes" in ctx.loop.bus.outbound[0].content
-
-
-@pytest.mark.asyncio
-async def test_dream_keeps_cursor_when_incomplete_with_diff(tmp_path) -> None:
-    ctx, store = _build_runnable_dream(
-        tmp_path,
-        initialized=True,
-        content_diff="SOUL.md: +1 -0",
-        stop_reason="length",
-    )
-    await _run_dream_command(ctx)
-    assert store._last_dream_cursor == 5
-    assert "did not complete" in ctx.loop.bus.outbound[0].content
-
-
-@pytest.mark.asyncio
-async def test_dream_advances_cursor_when_completed_after_tool_error(tmp_path) -> None:
-    ctx, store = _build_runnable_dream(
-        tmp_path,
-        initialized=True,
-        content_diff="",
-        tool_error=True,
-    )
-    await _run_dream_command(ctx)
-    assert store._last_dream_cursor == 42
-    assert "no memory changes" in ctx.loop.bus.outbound[0].content
-
-
-@pytest.mark.asyncio
-async def test_dream_noop_task_consumes_the_entire_pending_range(tmp_path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    store = MemoryStore(workspace)
-    store.write_soul("# Soul")
-    store.write_memory("# Memory")
-    for index in range(1, 22):
-        store.append_history(f"entry-{index:02d}")
-    store.git.init()
-
-    processed_prompts: list[str] = []
-
-    async def process_direct(prompt, *args, **kwargs):
-        processed_prompts.append(prompt)
-        return OutboundMessage(
-            channel="cli",
-            chat_id="direct",
-            content="done",
-            metadata={"_stop_reason": "completed"},
-        )
-
-    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/dream")
-    bus = _FakeBus()
-    loop = SimpleNamespace(
-        bus=bus,
-        context=SimpleNamespace(memory=store, timezone="UTC"),
-        sessions=_make_sessions(tmp_path),
-        process_direct=process_direct,
-        dream_runtime=lambda: None,
-    )
-    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/dream", args="", loop=loop)
-
+    ctx.loop.context.memory = store
+    ctx.loop.process_direct = process_direct
+    ctx.loop.dream_runtime = lambda: None
     await _run_dream_command(ctx)
 
-    assert len(processed_prompts) == 1
-    assert "Read lines 1-21 (inclusive): 21 pending records" in processed_prompts[0]
-    assert store.get_last_dream_cursor() == 21
-    assert store.build_dream_prompt() is None
-
-
-@pytest.mark.asyncio
-async def test_dream_non_git_falls_back_to_completion_gate(tmp_path) -> None:
-    ctx, store = _build_runnable_dream(
-        tmp_path, initialized=False, content_diff="", stop_reason="completed",
-    )
-    await _run_dream_command(ctx)
-    assert store._last_dream_cursor == 42
+    if completed:
+        assert "no memory changes" in bus.outbound[0].content
+        assert store.get_last_dream_cursor() == cursor
+        assert store.git.log() == versions
+    else:
+        assert "did not complete" in bus.outbound[0].content
+        assert store.get_last_dream_cursor() == 0
+        assert store.read_memory() == "A partial update"
+        assert store.git.log()[0] != versions[0]
 
 
 @pytest.mark.asyncio

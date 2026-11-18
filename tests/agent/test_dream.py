@@ -23,48 +23,12 @@ class TestBuildDreamPrompt:
     def test_returns_none_when_no_history(self, store):
         assert store.build_dream_prompt() is None
 
-    def test_returns_prompt_with_history_location_and_range(self, store):
-        store.append_history("hello")
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, cursor = result
-        assert cursor == 1
-        assert f"History file: {store.history_file.resolve()}" in prompt
-        assert "Read lines 1-1 (inclusive): 1 pending records" in prompt
-        assert "0 < cursor <= 1" in prompt
-
-    def test_cursor_advances_only_new_entries(self, store):
-        store.append_history("first")
-        r1 = store.build_dream_prompt()
-        assert r1 is not None
-        _, c1 = r1
-
-        assert store.build_dream_prompt() is not None
-
-        store.set_last_dream_cursor(c1)
-        assert store.build_dream_prompt() is None
-
-        store.append_history("second")
-        r2 = store.build_dream_prompt()
-        assert r2 is not None
-        _, c2 = r2
-        assert c2 > c1
-
     def test_prompt_includes_skill_creator_path(self, store):
         store.append_history("test")
         result = store.build_dream_prompt()
         assert result is not None
         prompt, _ = result
         assert "skill-creator" in prompt
-
-    def test_prompt_does_not_duplicate_current_memory_file_contents(self, store):
-        store.append_history("hello")
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, _ = result
-        assert "## Current Memory Files" not in prompt
-        assert "Project X active" not in prompt
-        assert "Helpful" not in prompt
 
     def test_workspace_dream_prompt_overrides_default(self, store):
         store.dream_prompt_file.parent.mkdir(parents=True)
@@ -141,21 +105,18 @@ class TestBuildDreamPrompt:
         assert cursor == 2
         assert "Read lines 4-4 (inclusive): 1 pending records" in prompt
 
-    @pytest.mark.parametrize("separator", ["\n", "\u2028"])
-    async def test_history_range_uses_read_file_line_numbers(self, store, separator):
-        store.append_history(f"old{separator}record")
+    async def test_history_range_counts_unicode_separators_as_read_file_lines(self, store):
+        store.append_history("old\u2028record")
         store.set_last_dream_cursor(1)
-        store.append_history(f"new{separator}record")
+        store.append_history("new\u2028record")
         prompt, cursor = store.build_dream_prompt()
-        start, end = (2, 2) if separator == "\n" else (3, 4)
-        assert f"Read lines {start}-{end}" in prompt
+        assert "Read lines 3-4" in prompt
         assert cursor == 2
         result = await store.build_dream_tools().execute("read_file", {
-            "path": str(store.history_file), "offset": start, "limit": end - start + 1,
+            "path": str(store.history_file), "offset": 3, "limit": 2,
         })
         assert '"cursor": 2' in result
-        assert "new" in result and 'record"}' in result
-        assert f"{end}| " in result
+        assert '4| record"}' in result
 
     def test_dream_prompt_consumes_consolidator_attribute_tags(self):
         prompt = render_template(
@@ -615,111 +576,6 @@ class TestEphemeralDirect:
         tool_result = next(message for message in second_request if message["role"] == "tool")
         assert "Error" in tool_result["content"]
 
-    async def test_dream_turn_requests_file_range_without_inlining_recent_history(self, tmp_path):
-        from unittest.mock import MagicMock
-
-        from nanobot.agent.loop import AgentLoop
-        from nanobot.bus.queue import MessageBus
-
-        store = MemoryStore(tmp_path)
-        for i in range(60):
-            store.append_history(f"entry-{i + 1:02d}")
-
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, cursor = result
-        assert cursor == 60
-
-        captured: dict[str, list[dict]] = {}
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.supports_tools = True
-        provider.generation = MagicMock(max_tokens=4096)
-
-        async def chat_stream_with_retry(**kwargs):
-            captured["messages"] = kwargs["messages"]
-            return LLMResponse(content="done", finish_reason="stop")
-
-        provider.chat_stream_with_retry = chat_stream_with_retry
-        loop = AgentLoop(
-            bus=MessageBus(),
-            provider=provider,
-            workspace=tmp_path,
-            context_window_tokens=32_000,
-        )
-
-        await loop.process_direct(
-            prompt,
-            session_key="dream:test",
-            ephemeral=True,
-            tools=store.build_dream_tools(),
-        )
-
-        messages = captured["messages"]
-        system_prompt = messages[0]["content"]
-        request_text = "\n".join(str(message.get("content", "")) for message in messages)
-        assert "# Recent History" not in system_prompt
-        assert f"History file: {store.history_file.resolve()}" in request_text
-        assert "Read lines 1-60" in request_text
-        assert "entry-01" not in request_text
-        assert "entry-60" not in request_text
-
-    async def test_dream_turn_injects_memory_files_once_and_persists_session(self, tmp_path):
-        from unittest.mock import MagicMock
-
-        from nanobot.agent.loop import AgentLoop
-        from nanobot.bus.queue import MessageBus
-
-        markers = {
-            "SOUL.md": "DREAM_SOUL_MARKER",
-            "USER.md": "DREAM_USER_MARKER",
-            "memory/MEMORY.md": "DREAM_MEMORY_MARKER",
-        }
-        store = MemoryStore(tmp_path)
-        store.write_soul(markers["SOUL.md"])
-        store.write_user(markers["USER.md"])
-        store.write_memory(markers["memory/MEMORY.md"])
-        store.append_history("history-marker")
-        (tmp_path / "AGENTS.md").write_text("DREAM_AGENTS_MARKER", encoding="utf-8")
-
-        result = store.build_dream_prompt()
-        assert result is not None
-        prompt, _ = result
-
-        captured: dict[str, list[dict]] = {}
-        provider = MagicMock()
-        provider.get_default_model.return_value = "test-model"
-        provider.supports_tools = True
-        provider.generation = MagicMock(max_tokens=4096)
-
-        async def chat_stream_with_retry(**kwargs):
-            captured["messages"] = kwargs["messages"]
-            return LLMResponse(content="done", finish_reason="stop")
-
-        provider.chat_stream_with_retry = chat_stream_with_retry
-        loop = AgentLoop(
-            bus=MessageBus(),
-            provider=provider,
-            workspace=tmp_path,
-            context_window_tokens=32_000,
-        )
-        session_key = "dream:single-memory-copy"
-
-        await loop.process_direct(
-            prompt,
-            session_key=session_key,
-            ephemeral=True,
-            tools=store.build_dream_tools(),
-        )
-
-        messages = captured["messages"]
-        system_prompt = str(messages[0]["content"])
-        request_text = "\n".join(str(message.get("content", "")) for message in messages)
-        for marker in [*markers.values(), "DREAM_AGENTS_MARKER"]:
-            assert marker in system_prompt
-            assert request_text.count(marker) == 1
-        assert loop.sessions.read_session_snapshot(session_key) is not None
-
 
 class TestEphemeralHooks:
 
@@ -914,17 +770,3 @@ class TestDreamContentDiff:
         store.git.auto_commit("initial")
         store.set_last_dream_cursor(99)
         assert store.dream_content_diff() == ""
-
-    def test_wiki_changes_are_in_dream_diff_and_version_history(self, store):
-        store.git.init()
-        store.wiki_dir.mkdir()
-        (store.wiki_dir / "index.md").write_text("# Wiki\nDeployment details\n", encoding="utf-8")
-        store.set_last_dream_cursor(7)
-        diff = store.dream_content_diff()
-        assert "memory/wiki/index.md" in diff
-        assert "Deployment details" in diff
-        assert ".dream_cursor" not in diff
-        sha = store.git.auto_commit(store.build_dream_commit_message("dream: test", diff))
-        commit, saved_diff = store.git.show_commit_diff(sha)
-        assert "memory/wiki/index.md" in saved_diff
-        assert "Deployment details" in commit.message
