@@ -93,6 +93,7 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     tool_names = {item["function"]["name"] for item in calls[0].kwargs["tools"]}
     assert "read_session" in tool_names
     assert {"create_goal", "update_goal", "subagent", "cron"}.isdisjoint(tool_names)
+    assert "subagent" in {item["function"]["name"] for item in calls[2].kwargs["tools"]}
     assert "first answer" in str(calls[1].kwargs["messages"])
     session = loop.sessions.get_cached(key)
     assert session is not None
@@ -105,6 +106,34 @@ async def test_transient_session_keeps_history_without_persisting_or_durable_too
     assert loop.sessions.read_session_file(key) is None
     temporary_chats.close()
     await loop.aclose()
+
+
+async def test_temporary_chat_does_not_execute_unadvertised_subagent_call(tmp_path) -> None:
+    loop = _loop(tmp_path, [])
+    chats = WebUITemporaryChats(
+        bus=loop.bus, session_manager=loop.sessions, logger=logger,
+        workspaces=WebUIWorkspaceController(
+            session_manager=loop.sessions, default_workspace=tmp_path,
+            default_restrict_to_workspace=True,
+        ),
+    )
+    loop.provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content=None, finish_reason="tool_calls", tool_calls=[ToolCallRequest(
+            id="delegate", name="subagent", arguments={"action": "create", "task": "Synthetic task", "wait": True},
+        )]),
+        LLMResponse(content="Done without delegating."),
+    ])
+    try:
+        key = f"websocket:{await chats.create(object(), trusted_webui=True)}"
+        await loop._process_message(_message(key, "Do a small task."))
+        calls = loop.provider.chat_stream_with_retry.await_args_list
+        assert len(calls) == 2
+        tool_result = next(message for message in calls[1].kwargs["messages"] if message["role"] == "tool")
+        assert "Tool 'subagent' not found" in tool_result["content"]
+        assert not loop.subagents.statuses_for_session(key)
+    finally:
+        chats.close()
+        await loop.aclose()
 
 
 async def test_transient_session_file_tools_keep_shared_memory_out_of_the_turn(tmp_path) -> None:

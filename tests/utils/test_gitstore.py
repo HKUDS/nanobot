@@ -346,12 +346,11 @@ class TestTrackedDirectories:
         assert selected is not None
         _write_page(tmp_path, "memory/wiki/later.md", "later committed page\n")
         assert wiki_git.auto_commit("dream: later") is not None
-        _write_page(tmp_path, "memory/wiki/dirty.md", "uncommitted page\n")
 
         assert wiki_git.revert(selected) is not None
         assert nested.read_text(encoding="utf-8") == "restore me\n"
         assert renamed.read_text(encoding="utf-8") == "original name\n"
-        for name in ["added.md", "renamed.md", "later.md", "dirty.md"]:
+        for name in ["added.md", "renamed.md", "later.md"]:
             assert not (tmp_path / "memory/wiki" / name).exists()
         assert (tmp_path / "memory/MEMORY.md").read_text(encoding="utf-8") == "baseline memory\n"
         assert _git_output(tmp_path, "diff", "--exit-code", before, "HEAD") == ""
@@ -392,7 +391,8 @@ class TestTrackedDirectories:
 
         assert git.revert(created) is not None
         assert not page.exists()
-        _write_page(tmp_path, "memory/wiki/uncommitted.md", "not in the old snapshot\n")
+        _write_page(tmp_path, "memory/wiki/later.md", "not in the old snapshot\n")
+        assert git.auto_commit("dream: another wiki page") is not None
         assert git.revert(legacy) is not None
         assert (tmp_path / "SOUL.md").read_text(encoding="utf-8") == ""
         assert not list((tmp_path / "memory/wiki").rglob("*.md"))

@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from dulwich import porcelain
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -554,3 +555,58 @@ async def test_dream_restore_rejects_non_dream_commit_clearly() -> None:
     assert "Only Dream memory versions can be restored." in out.content
     assert "Use `/dream-restore` to list recent versions." in out.content
     assert git.revert_calls == []
+
+
+@pytest.mark.parametrize("dirty", ["untracked", "edited", "deleted", "staged", None])
+async def test_dream_restore_preserves_uncommitted_memory(tmp_path, dirty) -> None:
+    store = MemoryStore(tmp_path)
+    assert store.git.init()
+    store.wiki_dir.mkdir()
+    page = store.wiki_dir / "known.md"
+    page.write_bytes(b"before\n")
+    store.write_memory("before")
+    store.set_last_dream_cursor(1)
+    assert store.git.auto_commit("dream: before")
+    page.write_bytes(b"current\n")
+    store.write_memory("current")
+    store.set_last_dream_cursor(2)
+    sha = store.git.auto_commit("dream: current")
+    assert sha
+    store.set_last_dream_cursor(3)  # A no-op Dream does not create a commit.
+
+    draft = store.wiki_dir / "draft.md"
+    if dirty == "untracked":
+        draft.write_bytes(b"uncommitted draft\n")
+    elif dirty == "edited":
+        store.write_memory("user edit")
+    elif dirty == "deleted":
+        page.unlink()
+    elif dirty == "staged":
+        page.write_bytes(b"staged page\n")
+        porcelain.add(str(tmp_path), paths=[str(page)])
+        page.write_bytes(b"current\n")  # Only the index differs from HEAD.
+
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=f"/dream-restore {sha}")
+    loop = SimpleNamespace(consolidator=SimpleNamespace(store=store))
+    ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=msg.content, args=sha, loop=loop)
+    out = await cmd_dream_restore(ctx)
+
+    if dirty is None:
+        assert "Restored Dream memory" in out.content
+        assert store.read_memory() == "before"
+        assert store.get_last_dream_cursor() == 1
+        assert page.read_bytes() == b"before\n"
+    else:
+        assert "Couldn't restore" in out.content
+        assert "Commit or undo your changes" in out.content
+        assert store.git.log()[0].sha == sha
+        assert store.get_last_dream_cursor() == 3
+        assert store.read_memory() == ("user edit" if dirty == "edited" else "current")
+        if dirty == "deleted":
+            assert not page.exists()
+        else:
+            assert page.read_bytes() == b"current\n"
+        if dirty == "untracked":
+            assert draft.read_bytes() == b"uncommitted draft\n"
+        if dirty == "staged":
+            assert porcelain.get_tree_changes(str(tmp_path))["modify"] == [b"memory/wiki/known.md"]

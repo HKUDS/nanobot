@@ -24,6 +24,10 @@ class GitStoreError(RuntimeError):
     """Raised when the memory Git repository cannot complete an operation."""
 
 
+class GitStoreDirtyError(GitStoreError):
+    """Restore was refused before changing any files or Git state."""
+
+
 @dataclass
 class CommitInfo:
     sha: str  # Short SHA (8 chars)
@@ -52,9 +56,11 @@ class GitStore:
         tracked_files: list[str],
         *,
         tracked_dirs: list[str] | None = None,
+        tracked_state_files: tuple[str, ...] = (),
     ):
         self._workspace = workspace
-        self._tracked_files = tracked_files
+        self._content_files = tracked_files
+        self._tracked_files = [*tracked_files, *tracked_state_files]
         self._tracked_dirs = [Path(path).as_posix() for path in tracked_dirs or []]
 
     def is_initialized(self) -> bool:
@@ -529,6 +535,36 @@ class GitStore:
             raise GitStoreError(f"Git commit display failed for {short_sha}") from exc
 
 
+    def _require_clean_restore(self, repo: "Repo", current_pages: set[str]) -> None:
+        from dulwich import porcelain
+        from dulwich.objects import Blob
+
+        # A restore commit uses the whole index. Do not consume pre-staged changes.
+        if any(porcelain.get_tree_changes(repo).values()):
+            raise GitStoreDirtyError("The memory repository has staged changes.")
+
+        head = self._head_tree(repo)
+        head_pages = self._directory_tree_files(repo, head, self._tracked_dirs)
+        normalizer = repo.get_blob_normalizer()
+        for path in sorted({*self._content_files, *current_pages, *head_pages}):
+            git_path = path.encode("utf-8")
+            try:
+                mode, sha = head.lookup_path(repo.__getitem__, git_path) if head else (0, None)
+            except KeyError:
+                mode, sha = 0, None
+            dest = self._workspace / path
+            try:
+                worktree_mode = dest.lstat().st_mode
+            except FileNotFoundError:
+                if sha is None:
+                    continue
+            else:
+                if sha is not None and stat.S_ISREG(mode) and stat.S_ISREG(worktree_mode):
+                    blob = normalizer.checkin_normalize(Blob.from_string(dest.read_bytes()), git_path)
+                    if blob.id == sha:
+                        continue
+            raise GitStoreDirtyError(f"Memory has uncommitted changes in `{path}`.")
+
     def revert(self, commit: str, *, message_prefix: str | None = None) -> str | None:
         """Revert (undo) the changes introduced by the given commit.
 
@@ -537,6 +573,8 @@ class GitStore:
         is provided, commits outside that history are rejected before any files
         are changed.
 
+        Refuses staged changes or uncommitted content changes before restoring.
+        Unstaged runtime state may differ from HEAD between versions.
         Returns the new commit SHA, or ``None`` when the commit cannot be reverted.
         Repository and filesystem failures raise :class:`GitStoreError`.
         """
@@ -577,6 +615,7 @@ class GitStore:
                 tree = cast("Tree", repo[parent_obj.tree])
 
                 current_pages = self._directory_files(self._tracked_dirs)
+                self._require_clean_restore(repo, current_pages)
                 target_pages = self._directory_tree_files(repo, tree, self._tracked_dirs)
                 # Validate the complete restore before changing even the fixed files.
                 for filepath in target_pages:
@@ -602,6 +641,8 @@ class GitStore:
 
             msg = f"revert: undo {commit}"
             return self.auto_commit(msg)
+        except GitStoreDirtyError:
+            raise
         except Exception as exc:
             raise GitStoreError(f"Git revert failed for {commit}") from exc
 

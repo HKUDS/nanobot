@@ -183,7 +183,7 @@ This gives memory a history of its own:
 - you can compare versions
 - you can restore a previous state, including wiki pages that were added, deleted, or renamed
 
-Restoring a version returns the managed memory files and wiki page set to the state before that change, including the saved Dream cursor when present. A snapshot from before the wiki existed removes later wiki pages. This is a whole-memory restore, not a selective undo of one page.
+Restoring a version returns the managed memory files and wiki page set to the state before that change, including the saved Dream cursor when present. A snapshot from before the wiki existed removes later wiki pages. This is a whole-memory restore, not a selective undo of one page. If the memory repository has staged changes or uncommitted edits to memory (including new wiki pages), restore refuses to proceed. Commit or undo those changes before retrying.
 
 That turns memory from a silent mutation into an auditable process.
 

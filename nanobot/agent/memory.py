@@ -82,9 +82,10 @@ class MemoryStore:
         self._dream_prompt_oversize_logged = False
         self._append_lock = threading.Lock()
         self.dream_lock = asyncio.Lock()
-        self._git = GitStore(workspace, tracked_files=[
-            *self._DREAM_CONTENT_PATHS, DREAM_CURSOR_PATH.as_posix(),
-        ], tracked_dirs=["memory/wiki"])
+        self._git = GitStore(
+            workspace, tracked_files=list(self._DREAM_CONTENT_PATHS),
+            tracked_dirs=["memory/wiki"], tracked_state_files=(DREAM_CURSOR_PATH.as_posix(),),
+        )
         self._maybe_migrate_legacy_history()
 
     @property

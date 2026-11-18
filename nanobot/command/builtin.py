@@ -18,6 +18,7 @@ from nanobot.command.spec import CommandLifecycle as CommandLifecycle
 from nanobot.command.user_shell import cmd_user_shell
 from nanobot.providers.base import LLMUsage
 from nanobot.utils.cancellation import shield_and_drain
+from nanobot.utils.gitstore import GitStoreDirtyError
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
 from nanobot.utils.workspace_prompts import initialize_workspace_prompt
@@ -683,20 +684,28 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
                 "Use `/dream-restore` to list recent versions."
             )
         else:
-            changed_files = _format_changed_files(result[1])
-            new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
-            if new_sha:
+            try:
+                async with store.dream_lock:
+                    new_sha = git.revert(sha, message_prefix=_DREAM_COMMIT_PREFIX)
+            except GitStoreDirtyError as exc:
                 content = (
-                    f"Restored Dream memory to the state before `{sha}`.\n\n"
-                    f"- New safety commit: `{new_sha}`\n"
-                    f"- Restored files: {changed_files}\n\n"
-                    f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                    f"Couldn't restore Dream change `{sha}`. {exc}\n\n"
+                    "Commit or undo your changes before trying again."
                 )
             else:
-                content = (
-                    f"Couldn't restore Dream change `{sha}`.\n\n"
-                    "It may be the first saved version with no earlier state to restore."
-                )
+                if new_sha:
+                    changed_files = _format_changed_files(result[1])
+                    content = (
+                        f"Restored Dream memory to the state before `{sha}`.\n\n"
+                        f"- New safety commit: `{new_sha}`\n"
+                        f"- Restored files: {changed_files}\n\n"
+                        f"Use `/dream-log {new_sha}` to inspect the restore diff."
+                    )
+                else:
+                    content = (
+                        f"Couldn't restore Dream change `{sha}`.\n\n"
+                        "It may be the first saved version with no earlier state to restore."
+                    )
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content=content, metadata={"render_as": "text"},

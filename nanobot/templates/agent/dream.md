@@ -42,4 +42,4 @@ Create a skill only when a workflow has appeared at least twice, has concrete re
 
 ## Finish
 
-Make focused edits and verify the saved text and changed links. Leave current memory unchanged. Briefly report confirmed changes or say that none were needed. If any history was unread or an edit could not be verified, report the run as incomplete and say what remains.
+Make focused edits and verify the saved text and changed links. Leave memory unchanged if nothing needs updating. Report completion only after reviewing the full history range and verifying any edits. If any record is unread or truncated, or an edit cannot be verified, report the run as incomplete and say what remains. Otherwise, briefly report confirmed changes or say that none were needed.
