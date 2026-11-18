@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from loguru import logger
 
+from nanobot.config.paths import DREAM_CURSOR_PATH, MEMORY_CURSOR_PATH, MEMORY_JOURNAL_PATH
 from nanobot.events import NO_EVENTS, CompactionReason, ContextCompactionEvent, EventSink
 from nanobot.llm_usage.context import llm_usage_source
 from nanobot.providers.base import LLMResponse, ProviderConversationState
@@ -69,12 +70,12 @@ class MemoryStore:
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.wiki_dir = self.memory_dir / "wiki"
-        self.history_file = self.memory_dir / "history.jsonl"
+        self.history_file = workspace / MEMORY_JOURNAL_PATH
         self.legacy_history_file = self.memory_dir / "HISTORY.md"
         self.soul_file = workspace / "SOUL.md"
         self.user_file = workspace / "USER.md"
-        self._cursor_file = self.memory_dir / ".cursor"
-        self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        self._cursor_file = workspace / MEMORY_CURSOR_PATH
+        self._dream_cursor_file = workspace / DREAM_CURSOR_PATH
         self._corruption_logged = False
         self._malformed_entry_logged = False
         self._oversize_logged = False
@@ -82,7 +83,7 @@ class MemoryStore:
         self._append_lock = threading.Lock()
         self.dream_lock = asyncio.Lock()
         self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
+            *self._DREAM_CONTENT_PATHS, DREAM_CURSOR_PATH.as_posix(),
         ], tracked_dirs=["memory/wiki"])
         self._maybe_migrate_legacy_history()
 

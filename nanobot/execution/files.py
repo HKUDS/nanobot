@@ -14,7 +14,12 @@ from operator import itemgetter
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
-from nanobot.config.paths import get_media_dir
+from nanobot.config.paths import (
+    DREAM_CURSOR_PATH,
+    MEMORY_CURSOR_PATH,
+    MEMORY_JOURNAL_PATH,
+    get_media_dir,
+)
 from nanobot.security.workspace_access import current_tool_workspace
 from nanobot.security.workspace_policy import (
     WorkspaceBoundaryError,
@@ -556,6 +561,14 @@ class WorkspaceFiles:
             extra_allowed_files=self._write_files,
         )
         _require_visible(target, _FILE_EXCLUSIONS.get())
+        if self._workspace is not None:
+            agent_workspace = resolve_path(self._workspace)
+            for relative_path in (MEMORY_JOURNAL_PATH, MEMORY_CURSOR_PATH, DREAM_CURSOR_PATH):
+                state_path = agent_workspace / relative_path
+                if target == state_path or target == state_path.resolve():
+                    raise WorkspaceBoundaryError(
+                        f"{relative_path.as_posix()} is managed by the runtime and is read-only to file tools."
+                    )
         try:
             mode = target.stat().st_mode
         except FileNotFoundError:

@@ -20,7 +20,7 @@ When the user asks you to remember something or change a memory, make the target
 - `memory/MEMORY.md`: stable facts needed across tasks, plus a brief Wiki entry linking to `wiki/index.md`.
 - `memory/wiki/`: knowledge only relevant to certain projects or tasks. Keep project-specific rules here rather than making them global. Put page links and reading cues in the index, not in `MEMORY.md`.
 
-Use the paths in the system prompt. Read the relevant file first, replace superseded information in place, and update affected index links. Verify the change before saying it was saved. If workspace access prevents the edit, tell the user what was not saved without trying to bypass the restriction. Do not edit `history.jsonl`, `.cursor`, or `.dream_cursor`.
+Use the paths in the system prompt. Read the relevant file first, replace superseded information in place, and update affected index links. Verify the change before saying it was saved. If workspace access prevents the edit, tell the user what was not saved without trying to bypass the restriction. The runtime owns the history journal and its cursors.
 
 ## Search Past Events
 
