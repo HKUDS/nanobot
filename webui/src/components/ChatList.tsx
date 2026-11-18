@@ -224,6 +224,7 @@ function isWorkbenchTabSurface(target: EventTarget | null): boolean {
 }
 
 interface ChatListProps {
+  listHeader?: ReactNode;
   sessions: ChatSummary[];
   temporarySessions?: ChatSummary[];
   activeKey: string | null;
@@ -269,6 +270,7 @@ interface ChatListProps {
 }
 
 export const ChatList = memo(function ChatList({
+  listHeader,
   sessions,
   temporarySessions = [],
   activeKey,
@@ -313,6 +315,7 @@ export const ChatList = memo(function ChatList({
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_VISIBLE_SESSIONS);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const selectionBarRef = useRef<HTMLDivElement>(null);
+  const hasListHeader = Boolean(listHeader);
   useLayoutEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport) return;
@@ -332,14 +335,14 @@ export const ChatList = memo(function ChatList({
     viewport.addEventListener("scroll", onScroll, { passive: true });
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateEdges);
     observer?.observe(viewport);
-    if (viewport.firstElementChild) observer?.observe(viewport.firstElementChild);
+    for (const child of viewport.children) observer?.observe(child);
     return () => {
       viewport.removeEventListener("scroll", onScroll);
       clearTimeout(idleTimer);
       delete viewport.dataset.scrolling;
       observer?.disconnect();
     };
-  }, [loading, sessions.length, temporarySessions.length]);
+  }, [hasListHeader, loading, sessions.length, temporarySessions.length]);
   const layoutRowRefs = useRef(new Map<string, HTMLElement>());
   const pendingLayoutRectsRef = useRef<Map<string, DOMRect> | null>(null);
   const layoutAnimationsRef = useRef(new Map<string, Animation>());
@@ -709,6 +712,7 @@ export const ChatList = memo(function ChatList({
     && selectedArchiveKeys.every((key) => archivedPanes.has(key) || archived.has(key));
   return (
     <div ref={scrollViewportRef} className="sidebar-scroll-fade sidebar-scrollbar h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pb-2">
+      {listHeader}
       <SidebarSelectionHighlight
         scope="chats"
         activeId={activeKey}

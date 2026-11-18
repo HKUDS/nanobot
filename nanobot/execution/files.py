@@ -7,18 +7,53 @@ import re
 import stat
 from collections.abc import Callable, Generator, Iterable
 from contextlib import AbstractContextManager, ExitStack, contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from heapq import nsmallest
 from operator import itemgetter
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
-from nanobot.config.paths import get_media_dir
+from nanobot.config.paths import (
+    DREAM_CURSOR_PATH,
+    MEMORY_CURSOR_PATH,
+    MEMORY_JOURNAL_PATH,
+    get_media_dir,
+)
 from nanobot.security.workspace_access import current_tool_workspace
-from nanobot.security.workspace_policy import resolve_allowed_path, resolve_path
+from nanobot.security.workspace_policy import (
+    WorkspaceBoundaryError,
+    resolve_allowed_path,
+    resolve_path,
+)
 
 if TYPE_CHECKING:
     from nanobot.utils.document import DocumentLineSource, PdfExtraction
+
+
+_FILE_EXCLUSIONS: ContextVar[tuple[Path, ...]] = ContextVar("file_exclusions", default=())
+_FILE_WRITE_EXCLUSIONS: ContextVar[tuple[Path, ...]] = ContextVar("file_write_exclusions", default=())
+
+
+@contextmanager
+def exclude_file_paths(*paths: Path, writes_only: bool = False) -> Generator[None]:
+    """Exclude files or subtrees from native file tools in this request."""
+    exclusions = _FILE_WRITE_EXCLUSIONS if writes_only else _FILE_EXCLUSIONS
+    token = exclusions.set((*exclusions.get(), *(resolve_path(path) for path in paths)))
+    try:
+        yield
+    finally:
+        exclusions.reset(token)
+
+
+def _is_excluded(path: Path, exclusions: tuple[Path, ...]) -> bool:
+    return any(path.is_relative_to(excluded) for excluded in exclusions)
+
+
+def _require_visible(path: Path, exclusions: tuple[Path, ...]) -> Path:
+    if _is_excluded(path, exclusions):
+        raise WorkspaceBoundaryError("This path is not available in this session.")
+    return path
 
 
 class NotRegularFileError(OSError):
@@ -220,14 +255,19 @@ class FileSearch:
     root: Path
     is_directory: bool
     _authorize_read: Callable[[str | Path], Path]
+    _exclusions: tuple[Path, ...] = ()
 
     def entries(self, directory: Path) -> Generator[SearchEntry]:
         target = resolve_path(directory)
         if not self.is_directory or not target.is_relative_to(self.root) or target != directory:
             return
+        if self._exclusions and _is_excluded(target, self._exclusions):
+            return
         with os.scandir(target) as entries:
             for entry in entries:
                 try:
+                    if self._exclusions and _is_excluded(target / entry.name, self._exclusions):
+                        continue
                     is_directory = entry.is_dir(follow_symlinks=False)
                     directory_link = not is_directory and entry.is_symlink() and entry.is_dir()
                     if os.name == "nt" and is_directory:
@@ -242,7 +282,7 @@ class FileSearch:
     def _candidate(self, path: Path) -> Path:
         target = Path(os.path.realpath(path, strict=True))
         if target == self.root or (self.is_directory and target.is_relative_to(self.root)):
-            return target
+            return _require_visible(target, self._exclusions) if self._exclusions else target
         return self._authorize_read(path)
 
     def modified(self, path: Path) -> float:
@@ -350,6 +390,8 @@ class FileSearch:
     def _read_search_bytes(
         self, path: Path, limit: int, fd: int | None = None, *, checked_parent: bool = False,
     ) -> SearchBytes | None:
+        if self._exclusions and _is_excluded(path, self._exclusions):
+            return None
         expected: os.stat_result | None = None
         if fd is None and not checked_parent:
             try:
@@ -502,13 +544,14 @@ class WorkspaceFiles:
                     extra_roots.extend(self._plugin_skill_roots(self._workspace, resolve_path(path, workspace)))
                 except (OSError, RuntimeError):
                     pass
-        return resolve_allowed_path(
+        target = resolve_allowed_path(
             path,
             workspace=workspace,
             allowed_root=root,
             extra_allowed_roots=extra_roots,
             extra_allowed_files=self._read_files if root is not None and include_file_grants else (),
         )
+        return _require_visible(target, _FILE_EXCLUSIONS.get())
 
     def edit_target(self, path: str) -> WritableFile:
         workspace, root = self._roots()
@@ -519,6 +562,17 @@ class WorkspaceFiles:
             extra_allowed_roots=self._write_dirs if root is not None else (),
             extra_allowed_files=self._write_files,
         )
+        _require_visible(target, _FILE_EXCLUSIONS.get())
+        if _is_excluded(target, _FILE_WRITE_EXCLUSIONS.get()):
+            raise WorkspaceBoundaryError("This path is read-only to file tools in this session.")
+        if self._workspace is not None:
+            agent_workspace = resolve_path(self._workspace)
+            for relative_path in (MEMORY_JOURNAL_PATH, MEMORY_CURSOR_PATH, DREAM_CURSOR_PATH):
+                state_path = agent_workspace / relative_path
+                if target == state_path or target == state_path.resolve():
+                    raise WorkspaceBoundaryError(
+                        f"{relative_path.as_posix()} is managed by the runtime and is read-only to file tools."
+                    )
         try:
             mode = target.stat().st_mode
         except FileNotFoundError:
@@ -538,7 +592,7 @@ class WorkspaceFiles:
                 builtin = self._builtin_skills.resolve()
                 candidate = (builtin / Path(*parts[1:])).resolve()
                 if candidate.is_relative_to(builtin) and candidate.is_file():
-                    target = candidate
+                    target = _require_visible(candidate, _FILE_EXCLUSIONS.get())
         if not target.exists():
             _reject_device(target, resolved=True)
             raise FileNotFoundError(path)
@@ -553,7 +607,7 @@ class WorkspaceFiles:
         if not directory.is_dir():
             raise NotADirectoryError(path)
         directory = self._read_path(directory, include_file_grants=False)
-        tree = FileSearch(directory, True, self._read_path)
+        tree = FileSearch(directory, True, self._read_path, _FILE_EXCLUSIONS.get())
         total = 0
 
         def walk() -> Generator[tuple[Path, bool]]:
@@ -593,4 +647,4 @@ class WorkspaceFiles:
             target = self._read_path(target, include_file_grants=False)
         elif not stat.S_ISREG(mode):
             raise NotRegularFileError
-        return FileSearch(target, stat.S_ISDIR(mode), self._read_path)
+        return FileSearch(target, stat.S_ISDIR(mode), self._read_path, _FILE_EXCLUSIONS.get())

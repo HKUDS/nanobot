@@ -1,10 +1,12 @@
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from nanobot.utils.gitstore import GitStore
+from nanobot.utils.gitstore import GitStore, GitStoreError
 
 
 @pytest.fixture
@@ -229,3 +231,223 @@ class TestCommitIdEncoding:
             capture_output=True, text=True, check=True,
         ).stdout.strip()
         assert git._resolve_sha(real) is not None
+
+
+def _git_output(workspace, *args):
+    return subprocess.run(
+        ["git", "-C", str(workspace), *args],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _write_page(workspace, relative, content):
+    path = workspace / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def wiki_git(tmp_path):
+    git = GitStore(
+        tmp_path,
+        tracked_files=["SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor"],
+        tracked_dirs=["memory/wiki"],
+    )
+    git.init()
+    return git
+
+
+class TestTrackedDirectories:
+
+    def test_wiki_changes_are_audited_and_restore_the_selected_parent(self, tmp_path):
+        git = GitStore(tmp_path, tracked_files=["SOUL.md"], tracked_dirs=["memory/wiki"])
+        topic = _write_page(tmp_path, "memory/wiki/nested/topic.md", "original topic\n")
+        empty = _write_page(tmp_path, "memory/wiki/obsolete.md", "")
+        renamed = _write_page(tmp_path, "memory/wiki/old.md", "same content\n")
+        journal = _write_page(tmp_path, "memory/history.jsonl", "synthetic journal\n")
+        sibling = _write_page(tmp_path, "memory/wiki-other/private.md", "not a wiki page\n")
+        assert git.init()
+        before = _git_output(tmp_path, "rev-parse", "HEAD")
+
+        topic.write_text("updated topic\n", encoding="utf-8")
+        empty.unlink()
+        renamed_to = renamed.rename(renamed.with_name("new.md"))
+        added = _write_page(tmp_path, "memory/wiki/deep/page.md", "")
+        summary = git.summarize_working_tree([], directories=["memory/wiki"])
+        assert "memory/wiki/nested/topic.md: +1 -1" in summary
+        assert "memory/wiki/obsolete.md: +0 -0" in summary
+        assert "memory/wiki/deep/page.md: +0 -0" in summary
+        assert "memory/wiki/old.md" in summary and "memory/wiki/new.md" in summary
+        selected = git.auto_commit("dream: update wiki")
+        assert selected
+        assert _git_output(tmp_path, "ls-tree", "-r", "--name-only", "HEAD").splitlines() == [
+            ".gitignore", "SOUL.md", "memory/wiki/deep/page.md", "memory/wiki/nested/topic.md", "memory/wiki/new.md",
+        ]
+        assert _git_output(tmp_path, "check-ignore", "memory/history.jsonl") == "memory/history.jsonl"
+
+        later = _write_page(tmp_path, "memory/wiki/later.md", "later committed page\n")
+        assert git.auto_commit("dream: later")
+        assert git.revert(selected)
+        assert _git_output(tmp_path, "diff", "--exit-code", before, "HEAD") == ""
+        assert topic.read_text(encoding="utf-8") == "original topic\n"
+        assert renamed.read_text(encoding="utf-8") == "same content\n"
+        assert empty.read_bytes() == b""
+        assert not any(path.exists() for path in (added, renamed_to, later))
+        assert journal.read_text(encoding="utf-8") == "synthetic journal\n"
+        assert sibling.read_text(encoding="utf-8") == "not a wiki page\n"
+
+    def test_deleted_directory_is_committed_and_restored_with_missing_parents(self, wiki_git, tmp_path):
+        page = _write_page(tmp_path, "memory/wiki/deep/topic.md", "nested page\n")
+        _write_page(tmp_path, "memory/MEMORY.md", "fixed memory\n")
+        assert wiki_git.auto_commit("dream: populate") is not None
+        shutil.rmtree(tmp_path / "memory")
+
+        assert "memory/wiki/deep/topic.md: +0 -1" in wiki_git.summarize_working_tree(
+            [], directories=["memory/wiki"],
+        )
+        deleted = wiki_git.auto_commit("dream: remove directory")
+        assert deleted is not None
+        assert "memory/" not in _git_output(tmp_path, "ls-tree", "-r", "--name-only", "HEAD")
+
+        assert wiki_git.revert(deleted) is not None
+        assert page.read_text(encoding="utf-8") == "nested page\n"
+        assert (tmp_path / "memory/MEMORY.md").read_text(encoding="utf-8") == "fixed memory\n"
+        assert (tmp_path / "memory/.dream_cursor").is_file()
+        assert _git_output(tmp_path, "show", "HEAD:memory/wiki/deep/topic.md") == "nested page"
+
+    def test_old_repository_and_snapshots_without_wiki_need_no_migration(self, tmp_path):
+        old = GitStore(tmp_path, tracked_files=["SOUL.md"])
+        old.init()
+        (tmp_path / "SOUL.md").write_text("legacy state\n", encoding="utf-8")
+        legacy = old.auto_commit("dream: before wiki")
+        assert legacy
+        git = GitStore(tmp_path, tracked_files=["SOUL.md"], tracked_dirs=["memory/wiki"])
+        page = _write_page(tmp_path, "memory/wiki/nested/new.md", "first wiki\n")
+        created = git.auto_commit("dream: add wiki")
+        assert created
+        assert _git_output(tmp_path, "show", "HEAD:memory/wiki/nested/new.md") == "first wiki"
+
+        assert git.revert(created)
+        assert not page.exists()
+        assert _git_output(tmp_path, "diff", "--exit-code", legacy, "HEAD") == ""
+
+
+def _make_link(link, target, *, junction=False):
+    if junction:
+        if os.name != "nt":
+            pytest.skip("junctions are Windows-only")
+        subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True, text=True, check=True,
+        )
+    else:
+        try:
+            link.symlink_to(target, target_is_directory=target.is_dir())
+        except OSError as exc:
+            pytest.skip(f"symlinks unavailable: {exc}")
+
+
+class TestDirectoryBoundaries:
+
+    @pytest.mark.parametrize(("kind", "location", "target_scope"), [
+        ("symlink", "root", "history"),
+        ("symlink", "nested", "outside"),
+        ("symlink", "ancestor", "outside"),
+        ("junction", "root", "history"),
+        ("junction", "nested", "outside"),
+        ("junction", "ancestor", "outside"),
+    ])
+    def test_directory_links_fail_before_staging_reading_or_restoring(
+        self, tmp_path, kind, location, target_scope,
+    ):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        git = GitStore(workspace, tracked_files=["SOUL.md"], tracked_dirs=["memory/wiki"])
+        git.init()
+        _write_page(workspace, "memory/wiki/page.md", "safe page\n")
+        assert git.auto_commit("dream: safe page") is not None
+        (workspace / "SOUL.md").write_text("latest soul\n", encoding="utf-8")
+        latest = git.auto_commit("dream: latest")
+        assert latest is not None
+
+        target = workspace / "memory" if target_scope == "history" else tmp_path / "outside"
+        target.mkdir(exist_ok=True)
+        secret = _write_page(target, "history.jsonl", "synthetic private journal\n")
+        link = {
+            "root": workspace / "memory/wiki",
+            "nested": workspace / "memory/wiki/escape",
+            "ancestor": workspace / "memory",
+        }[location]
+        if link.exists():
+            shutil.rmtree(link)
+        _make_link(link, target, junction=kind == "junction")
+        try:
+            with pytest.raises(GitStoreError, match="auto-commit failed"):
+                git.auto_commit("must not capture journal")
+            with pytest.raises(GitStoreError, match="summary failed"):
+                git.summarize_working_tree(["SOUL.md"], directories=["memory/wiki"])
+            with pytest.raises(GitStoreError, match="revert failed"):
+                git.revert(latest)
+            assert git.log()[0].sha == latest
+            assert (workspace / "SOUL.md").read_text(encoding="utf-8") == "latest soul\n"
+            assert secret.read_text(encoding="utf-8") == "synthetic private journal\n"
+            assert _git_output(workspace, "diff", "--cached", "--exit-code") == ""
+        finally:
+            if kind == "junction":
+                link.rmdir()
+            else:
+                link.unlink()
+
+    @pytest.mark.parametrize("target_scope", ["history", "outside"])
+    def test_page_symlink_does_not_read_or_overwrite_its_target(self, tmp_path, target_scope):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        git = GitStore(workspace, tracked_files=["SOUL.md"], tracked_dirs=["memory/wiki"])
+        git.init()
+        page = _write_page(workspace, "memory/wiki/page.md", "safe page\n")
+        latest = git.auto_commit("dream: safe page")
+        assert latest is not None
+        if target_scope == "history":
+            secret = _write_page(workspace, "memory/history.jsonl", "synthetic private journal\n")
+        else:
+            secret = _write_page(tmp_path, "outside/secret.md", "synthetic outside data\n")
+        original = secret.read_bytes()
+        page.unlink()
+        _make_link(page, secret)
+        try:
+            with pytest.raises(GitStoreError, match="auto-commit failed"):
+                git.auto_commit("must not capture link")
+            with pytest.raises(GitStoreError, match="summary failed"):
+                git.summarize_working_tree([], directories=["memory/wiki"])
+            with pytest.raises(GitStoreError, match="summary failed"):
+                git.summarize_working_tree(["memory/wiki/page.md"])
+            with pytest.raises(GitStoreError, match="revert failed"):
+                git.revert(latest)
+            assert secret.read_bytes() == original
+            assert git.log()[0].sha == latest
+        finally:
+            page.unlink()
+
+    @pytest.mark.parametrize("kind", ["symlink", "junction"])
+    def test_init_rejects_linked_ancestor_before_creating_fixed_files(self, tmp_path, kind):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / "outside"
+        sentinel = _write_page(outside, "wiki/private.md", "outside page\n")
+        link = workspace / "memory"
+        _make_link(link, outside, junction=kind == "junction")
+        git = GitStore(
+            workspace, tracked_files=["memory/MEMORY.md"], tracked_dirs=["memory/wiki"],
+        )
+        try:
+            with pytest.raises(GitStoreError, match="init failed"):
+                git.init()
+            assert not (workspace / ".git").exists()
+            assert not (outside / "MEMORY.md").exists()
+            assert sentinel.read_text(encoding="utf-8") == "outside page\n"
+        finally:
+            if kind == "junction":
+                link.rmdir()
+            else:
+                link.unlink()

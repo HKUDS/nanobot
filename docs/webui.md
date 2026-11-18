@@ -167,13 +167,13 @@ These controls appear when the connected host supports subagent tasks. See [Suba
 
 ## Temporary Chats
 
-Start **New topic → Temporary chat** for a conversation that should not be added to topic history or long-term memory.
+Start **New topic → Temporary chat** to work without saved agent profiles, long-term memory, or the memory skill in the model context. The conversation is not added to topic history or long-term memory. Native file readers and editors cannot access the agent profile or memory files in this mode. Subagents are unavailable; project instructions and ordinary workspace files remain available.
 
 You can keep more than one temporary chat open and switch between them under **Temporary chats** in the sidebar while the current WebUI connection remains open. Reloading or closing the page, restarting the gateway, or losing the WebSocket connection ends all of them. They cannot be recovered afterward.
 
 Temporary chats do not create saved files for oversized text tool results; these stay in memory and are truncated to the configured tool-result limit. Tool-call arguments and execution-error details are hidden from the built-in tool logs, while tool activity remains visible in the current chat.
 
-Temporary does not mean consequence-free. Requests still go to the configured model provider, and tools can still change files, run commands, or affect external services. Files and image artifacts created or exported by tools (including images returned by MCP tools) are not erased when the chat closes. Temporary chats always use the default workspace in Restricted mode; the project picker and Full Access are unavailable. Commands and tools that create durable goals, automations, or subagent work are also unavailable. Use a regular topic when you need reusable context, scheduled work, or a result you must retain.
+Temporary does not mean consequence-free. Requests still go to the configured model provider, and tools can still change files, run commands, or affect external services. Files and image artifacts created or exported by tools (including images returned by MCP tools) are not erased when the chat closes. Temporary chats always use the default workspace in Restricted mode; the project picker and Full Access are unavailable. Commands and tools that create durable goals, automations, or subagent work are also unavailable. Native file tools can read `HEARTBEAT.md` but cannot edit it in a temporary chat. Use a regular topic when you need reusable context, scheduled work, or a result you must retain.
 
 ## Workspace and Access
 
@@ -203,7 +203,7 @@ Project-local `SOUL.md` and `USER.md` files are ignored, and the agent workspace
 
 The access control in the composer controls the local capability level for the chat. It does not bypass your gateway, provider, shell sandbox, or operating system configuration; it only selects among the capabilities that are already available to the current topic.
 
-In Restricted mode, ordinary file and shell work stays inside the selected project. To preserve agent continuity, filesystem/search tools receive narrow, read-only access to built-in skills, custom skills in the agent workspace, and the exact agent `memory/history.jsonl` file. This does not grant access to neighboring memory or profile files, and it does not allow writes outside the selected project. These tool exceptions do not broaden the browser's file preview boundary.
+In Restricted mode, ordinary file and shell work stays inside the selected project. To preserve agent continuity, filesystem/search tools receive narrow, read-only access to built-in skills, custom skills and `memory/wiki/` in the agent workspace, and the exact agent `memory/history.jsonl` file. This does not grant access to neighboring memory or profile files, and it does not allow writes outside the selected project. These tool exceptions do not broaden the browser's file preview boundary.
 
 ## Composer
 

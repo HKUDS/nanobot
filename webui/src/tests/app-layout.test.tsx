@@ -3108,7 +3108,11 @@ describe("App layout", () => {
     expect(within(sidebar).getByRole("button", { name: /^Roadmap$/ })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
 
-    fireEvent.click(within(sidebar).getByRole("button", { name: "Show archived" }));
+    const scrollViewport = within(sidebar).getByRole("button", { name: /^Roadmap$/ }).closest(".sidebar-scrollbar");
+    const archiveButton = within(sidebar).getByRole("button", { name: "Show archived" });
+    expect(scrollViewport).toContainElement(archiveButton);
+    expect(scrollViewport).toContainElement(within(sidebar).getByRole("button", { name: /^Search$/ }));
+    fireEvent.click(archiveButton);
     await waitFor(() =>
       expect(within(sidebar).getByText("Archived")).toBeInTheDocument(),
     );

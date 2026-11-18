@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import io
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
+
+from nanobot.config.paths import DREAM_CURSOR_PATH
 
 if TYPE_CHECKING:
     from dulwich.objects import Blob, Commit, ObjectID, Tree
@@ -17,10 +20,16 @@ if TYPE_CHECKING:
 # are tiny in practice, but a pathological rewrite must not blow up the audit
 # record. The structured per-file summary is always emitted in full regardless.
 _WORKING_TREE_DIFF_MAX_CHARS = 6000
+MEMORY_CONTENT_PATHS = ("SOUL.md", "USER.md", "memory/MEMORY.md")
+MEMORY_WIKI_PATH = "memory/wiki"
 
 
 class GitStoreError(RuntimeError):
     """Raised when the memory Git repository cannot complete an operation."""
+
+
+class GitStoreDirtyError(GitStoreError):
+    """Restore was refused before changing any files or Git state."""
 
 
 @dataclass
@@ -43,11 +52,30 @@ class CommitInfo:
 
 
 class GitStore:
-    """Git-backed version control for memory files."""
+    """Git-backed memory files and optional recursive, link-free directories."""
 
-    def __init__(self, workspace: Path, tracked_files: list[str]):
+    def __init__(
+        self,
+        workspace: Path,
+        tracked_files: list[str],
+        *,
+        tracked_dirs: list[str] | None = None,
+        tracked_state_files: tuple[str, ...] = (),
+    ):
         self._workspace = workspace
-        self._tracked_files = tracked_files
+        self._content_files = tracked_files
+        self._state_files = tracked_state_files
+        self._tracked_files = [*tracked_files, *tracked_state_files]
+        self._tracked_dirs = [Path(path).as_posix() for path in tracked_dirs or []]
+
+    @classmethod
+    def for_memory(cls, workspace: Path) -> GitStore:
+        return cls(
+            workspace,
+            tracked_files=list(MEMORY_CONTENT_PATHS),
+            tracked_dirs=[MEMORY_WIKI_PATH],
+            tracked_state_files=(DREAM_CURSOR_PATH.as_posix(),),
+        )
 
     def is_initialized(self) -> bool:
         """Check if the git repo has been initialized."""
@@ -74,6 +102,8 @@ class GitStore:
         try:
             from dulwich import porcelain
 
+            # Validate directory grants before creating any files through their ancestors.
+            self._directory_files(self._tracked_dirs)
             porcelain.init(str(self._workspace))
 
             gitignore = self._workspace / ".gitignore"
@@ -98,10 +128,7 @@ class GitStore:
                 if not p.exists():
                     p.write_text("", encoding="utf-8")
 
-            porcelain.add(
-                str(self._workspace),
-                paths=self._staging_paths(".gitignore", *self._tracked_files),
-            )
+            self._stage(".gitignore")
             porcelain.commit(
                 str(self._workspace),
                 message=b"init: nanobot memory store",
@@ -128,7 +155,7 @@ class GitStore:
             # Stage first so Dulwich refreshes the content hashes.  A status
             # check can miss rapid same-size rewrites when the filesystem also
             # preserves the file's mtime.
-            porcelain.add(str(self._workspace), paths=self._staging_paths(*self._tracked_files))
+            self._stage()
             st = porcelain.status(str(self._workspace))
             staged = cast(dict[object, list[object]], st.staged)
             if not any(staged.values()):
@@ -160,6 +187,91 @@ class GitStore:
 
     def _staging_paths(self, *paths: str) -> list[str]:
         return [str((self._workspace / path).absolute()) for path in paths]
+
+    def _directory_path(self, relative: str) -> Path:
+        """Reject links (including Windows junctions) anywhere in a directory grant.
+
+        Like the workspace file guards, this is not confinement against concurrent
+        replacement of ancestor directories by another process.
+        """
+        path = Path(relative)
+        if path.anchor or not path.parts or any(
+            part == ".." or part.lower() == ".git" for part in path.parts
+        ):
+            raise GitStoreError(f"Invalid managed directory path: {relative}")
+        dest = self._workspace
+        for part in path.parts:
+            dest = dest / part
+            try:
+                info = dest.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(info.st_mode) or (
+                getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            ):
+                raise GitStoreError(f"Links are not allowed in managed directories: {relative}")
+            if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                raise GitStoreError(f"Unsupported managed directory entry: {relative}")
+        return dest
+
+    def _directory_files(self, directories: list[str]) -> set[str]:
+        """Enumerate only regular files, checking before descending or opening."""
+        files: set[str] = set()
+        for directory in directories:
+            root = self._directory_path(directory)
+            if not root.exists():
+                continue
+            if not root.is_dir():
+                raise GitStoreError(f"Managed directory is not a directory: {directory}")
+            pending = [root]
+            while pending:
+                for path in pending.pop().iterdir():
+                    relative = path.relative_to(self._workspace).as_posix()
+                    self._directory_path(relative)
+                    if path.is_dir():
+                        pending.append(path)
+                    else:
+                        files.add(relative)
+        return files
+
+    @staticmethod
+    def _in_directories(path: str, directories: list[str]) -> bool:
+        return any(path == directory or path.startswith(directory + "/") for directory in directories)
+
+    def _directory_tree_files(
+        self, repo: "Repo", tree: "Tree | None", directories: list[str],
+    ) -> dict[str, "ObjectID"]:
+        from dulwich.object_store import iter_tree_contents
+
+        files: dict[str, ObjectID] = {}
+        if tree is not None and directories:
+            for entry in iter_tree_contents(repo.object_store, tree.id):
+                relative = entry.path.decode("utf-8")
+                if self._in_directories(relative, directories):
+                    if not stat.S_ISREG(entry.mode):
+                        raise GitStoreError(f"Unsupported managed directory snapshot: {relative}")
+                    files[relative] = entry.sha
+        return files
+
+    def _stage(self, *extra_files: str) -> None:
+        from dulwich import porcelain
+        from dulwich.repo import Repo
+
+        with Repo(str(self._workspace)) as repo:
+            paths = self._directory_files(self._tracked_dirs)
+            paths.update(self._directory_tree_files(repo, self._head_tree(repo), self._tracked_dirs))
+            paths.update(
+                path.decode("utf-8") for path in repo.open_index()
+                if self._in_directories(path.decode("utf-8"), self._tracked_dirs)
+            )
+            for path in paths:
+                self._directory_path(path)
+            porcelain.add(
+                str(self._workspace),
+                paths=self._staging_paths(*extra_files, *self._content_files),
+            )
+            # Older workspaces may ignore newly managed wiki and cursor files.
+            repo.get_worktree().stage(sorted(paths.union(self._state_files)))
 
     def _resolve_sha(self, short_sha: str) -> bytes | None:
         try:
@@ -201,15 +313,15 @@ class GitStore:
 
     def _build_gitignore(self) -> str:
         dirs: set[str] = set()
-        for f in self._tracked_files:
-            parent = str(Path(f).parent)
-            if parent != ".":
-                dirs.add(parent)
+        for path in [*self._tracked_files, *self._tracked_dirs]:
+            dirs.update(parent.as_posix() for parent in Path(path).parents if parent != Path("."))
         lines = ["/*"]
         for d in sorted(dirs):
-            lines.append(f"!{d}/")
+            lines.extend([f"!{d}/", f"{d}/*"])
         for f in self._tracked_files:
             lines.append(f"!{f}")
+        for d in self._tracked_dirs:
+            lines.extend([f"!{d}/", f"!{d}/**"])
         lines.append("!.gitignore")
         return "\n".join(lines) + "\n"
 
@@ -284,12 +396,16 @@ class GitStore:
         except Exception as exc:
             raise GitStoreError(f"Git diff failed for {sha1}..{sha2}") from exc
 
-    def summarize_working_tree(self, paths: list[str]) -> str:
-        """Structured summary of working-tree changes vs HEAD for *paths*.
+    def summarize_working_tree(
+        self, paths: list[str], *, directories: list[str] | None = None,
+    ) -> str:
+        """Structured summary of working-tree changes vs HEAD for selected paths.
 
+        *directories* recursively includes both current and deleted files; it does
+        not implicitly include every tracked file (such as the Dream cursor).
         Pure filesystem/git ground truth — never LLM narrative — suitable as a
         truthful audit record. Returns "" when the repo is not initialized or
-        none of *paths* differ from HEAD.
+        none of the selected files differ from HEAD.
 
         Format::
 
@@ -325,21 +441,26 @@ class GitStore:
         try:
             with Repo(str(self._workspace)) as repo:
                 head_tree = self._head_tree(repo)
-                for path in paths:
+                directories = [Path(path).as_posix() for path in directories or []]
+                directory_paths = self._directory_files(directories)
+                directory_paths.update(self._directory_tree_files(repo, head_tree, directories))
+                for path in directory_paths:
+                    self._directory_path(path)
+                for path in dict.fromkeys([*paths, *sorted(directory_paths)]):
+                    if self._in_directories(Path(path).as_posix(), self._tracked_dirs):
+                        self._directory_path(path)
                     head_text = (
                         self._read_blob_from_tree(repo, head_tree, path)
                         if head_tree is not None
                         else None
                     )
+                    head_exists = head_text is not None
                     if head_text is None:
                         head_text = ""
                     wt_path = self._workspace / path
+                    wt_exists = wt_path.exists()
                     try:
-                        wt_text = (
-                            wt_path.read_bytes().decode("utf-8")
-                            if wt_path.exists()
-                            else ""
-                        )
+                        wt_text = wt_path.read_bytes().decode("utf-8") if wt_exists else ""
                     except UnicodeDecodeError:
                         # Non-UTF-8 (binary/corrupt) working-tree file: record
                         # the change without a unified diff, which would
@@ -350,7 +471,7 @@ class GitStore:
                         continue
                     # Treat CRLF and LF as equivalent without hiding other
                     # newline changes, such as a missing final newline.
-                    if head_text.replace("\r\n", "\n") == wt_text.replace("\r\n", "\n"):
+                    if head_exists == wt_exists and head_text.replace("\r\n", "\n") == wt_text.replace("\r\n", "\n"):
                         continue
                     head_lines = head_text.splitlines()
                     wt_lines = wt_text.splitlines()
@@ -427,14 +548,46 @@ class GitStore:
             raise GitStoreError(f"Git commit display failed for {short_sha}") from exc
 
 
+    def _require_clean_restore(self, repo: "Repo", current_pages: set[str]) -> None:
+        from dulwich import porcelain
+        from dulwich.objects import Blob
+
+        # A restore commit uses the whole index. Do not consume pre-staged changes.
+        if any(porcelain.get_tree_changes(repo).values()):
+            raise GitStoreDirtyError("The memory repository has staged changes.")
+
+        head = self._head_tree(repo)
+        head_pages = self._directory_tree_files(repo, head, self._tracked_dirs)
+        normalizer = repo.get_blob_normalizer()
+        for path in sorted({*self._content_files, *current_pages, *head_pages}):
+            git_path = path.encode("utf-8")
+            try:
+                mode, sha = head.lookup_path(repo.__getitem__, git_path) if head else (0, None)
+            except KeyError:
+                mode, sha = 0, None
+            dest = self._workspace / path
+            try:
+                worktree_mode = dest.lstat().st_mode
+            except FileNotFoundError:
+                if sha is None:
+                    continue
+            else:
+                if sha is not None and stat.S_ISREG(mode) and stat.S_ISREG(worktree_mode):
+                    blob = normalizer.checkin_normalize(Blob.from_string(dest.read_bytes()), git_path)
+                    if blob.id == sha:
+                        continue
+            raise GitStoreDirtyError(f"Memory has uncommitted changes in `{path}`.")
+
     def revert(self, commit: str, *, message_prefix: str | None = None) -> str | None:
         """Revert (undo) the changes introduced by the given commit.
 
-        Restores all tracked memory files to the state at the commit's parent,
-        then creates a new commit recording the revert. When *message_prefix*
+        Restores tracked files and directory contents to the commit's parent,
+        removing directory files absent there, then commits the restore. When *message_prefix*
         is provided, commits outside that history are rejected before any files
         are changed.
 
+        Refuses staged changes or uncommitted content changes before restoring.
+        Unstaged runtime state may differ from HEAD between versions.
         Returns the new commit SHA, or ``None`` when the commit cannot be reverted.
         Repository and filesystem failures raise :class:`GitStoreError`.
         """
@@ -474,19 +627,35 @@ class GitStore:
                 parent_obj = cast("Commit", repo[typed_commit.parents[0]])
                 tree = cast("Tree", repo[parent_obj.tree])
 
+                current_pages = self._directory_files(self._tracked_dirs)
+                self._require_clean_restore(repo, current_pages)
+                target_pages = self._directory_tree_files(repo, tree, self._tracked_dirs)
+                # Validate the complete restore before changing even the fixed files.
+                for filepath in target_pages:
+                    self._directory_path(filepath)
+
                 restored: list[str] = []
                 for filepath in self._tracked_files:
                     content = self._read_blob_from_tree(repo, tree, filepath)
                     if content is not None:
                         dest = self._workspace / filepath
+                        dest.parent.mkdir(parents=True, exist_ok=True)
                         dest.write_text(content, encoding="utf-8")
                         restored.append(filepath)
+                for filepath in current_pages - target_pages.keys():
+                    self._directory_path(filepath).unlink()
+                for filepath, blob_id in target_pages.items():
+                    dest = self._directory_path(filepath)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(cast("Blob", repo[blob_id]).data)
 
-            if not restored:
+            if not restored and not self._tracked_dirs:
                 return None
 
             msg = f"revert: undo {commit}"
             return self.auto_commit(msg)
+        except GitStoreDirtyError:
+            raise
         except Exception as exc:
             raise GitStoreError(f"Git revert failed for {commit}") from exc
 

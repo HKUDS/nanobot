@@ -6,7 +6,7 @@ import {
   ComposeIcon,
   AppsIcon,
 } from "@/components/icons/product-icons";
-import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -124,22 +124,32 @@ export function Sidebar(props: SidebarProps) {
   const collapseLabel = t("sidebar.collapse");
   const apple = isApplePlatform();
   const activeUtilityId = props.activeUtility ? `utility:${props.activeUtility}` : null;
-  const { desktopDock } = props;
+  const { archivedCount, desktopDock, onOpenSearch, onToggleArchived, showArchived } = props;
   const footerActionProps = { collapsed, dockLabel: desktopDock, onIntent: props.onSettingsIntent, tooltipSide: "top" } as const;
+  const actionInset = desktopDock || collapsed ? "px-3" : "px-2";
 
-  const searchButton = (
-    <SidebarActionButton
-      collapsed={collapsed}
-      label={t("sidebar.searchAria")}
-      shortcut={sidebarShortcutLabel("search", apple)}
-      ariaKeyShortcuts={sidebarShortcutAria("search")}
-      iconOnly={!desktopDock}
-      dockLabel={desktopDock}
-      onClick={props.onOpenSearch}
-      icon={<SearchIcon className="h-4 w-4" />}
-    />
-  );
-
+  const sessionActions = useMemo(() => (
+    <div className={cn("flex shrink-0 flex-col gap-0.5 pb-1 pt-0.5", actionInset)}>
+      <SidebarActionButton
+        collapsed={collapsed}
+        label={t("sidebar.searchAria")}
+        shortcut={sidebarShortcutLabel("search", apple)}
+        ariaKeyShortcuts={sidebarShortcutAria("search")}
+        dockLabel={desktopDock}
+        onClick={onOpenSearch}
+        icon={<SearchIcon className="h-4 w-4" />}
+      />
+      {archivedCount ? (
+        <SidebarActionButton
+          collapsed={collapsed}
+          dockLabel={desktopDock}
+          label={showArchived ? t("chat.hideArchived") : t("chat.showArchived")}
+          onClick={onToggleArchived}
+          icon={<ArchiveIcon className="h-4 w-4" />}
+        />
+      ) : null}
+    </div>
+  ), [actionInset, apple, archivedCount, collapsed, desktopDock, onOpenSearch, onToggleArchived, showArchived, t]);
 
   return (
     <nav
@@ -200,7 +210,6 @@ export function Sidebar(props: SidebarProps) {
         </HoverHint>
         {!collapsed && (
           <div className={cn("flex min-w-0 flex-1 items-center justify-end gap-1", props.hostChromeInset && "mt-5")}>
-            {!desktopDock && searchButton}
             {props.onCollapse && (
               <HoverHint content={collapseLabel} side="right">
                 <Button
@@ -224,7 +233,7 @@ export function Sidebar(props: SidebarProps) {
         )}
       </div>
 
-      <div className={cn("flex flex-col gap-0.5 pb-1", desktopDock || collapsed ? "px-3" : "px-2")}>
+      <div className={cn("flex shrink-0 flex-col", actionInset)}>
         <SidebarActionButton
           collapsed={collapsed}
           label={t("sidebar.newChat")}
@@ -234,17 +243,8 @@ export function Sidebar(props: SidebarProps) {
           shortcut={sidebarShortcutLabel("newChat", apple)}
           ariaKeyShortcuts={sidebarShortcutAria("newChat")}
         />
-        {(desktopDock || collapsed) && searchButton}
-        {props.archivedCount ? (
-          <SidebarActionButton
-            collapsed={collapsed}
-            dockLabel={desktopDock}
-            label={props.showArchived ? t("chat.hideArchived") : t("chat.showArchived")}
-            onClick={props.onToggleArchived}
-            icon={<ArchiveIcon className="h-4 w-4" />}
-          />
-        ) : null}
       </div>
+      {collapsed && sessionActions}
       <div
         aria-hidden={collapsed || undefined}
         {...(collapsed ? { inert: "" } : {})}
@@ -255,6 +255,7 @@ export function Sidebar(props: SidebarProps) {
       >
         {(desktopDock || !collapsed) && (
           <ChatList
+            listHeader={collapsed ? undefined : sessionActions}
             sessions={props.sessions}
             temporarySessions={props.temporarySessions}
             activeKey={props.activeKey}
@@ -362,7 +363,6 @@ export function Sidebar(props: SidebarProps) {
 
 function SidebarActionButton({
   collapsed,
-  iconOnly = false,
   dockLabel = false,
   label,
   icon,
@@ -375,7 +375,6 @@ function SidebarActionButton({
   tooltipSide,
 }: {
   collapsed: boolean;
-  iconOnly?: boolean;
   dockLabel?: boolean;
   label: string;
   icon: ReactNode;
@@ -387,7 +386,7 @@ function SidebarActionButton({
   onIntent?: () => void;
   tooltipSide?: "top" | "bottom";
 }) {
-  const compact = collapsed || iconOnly;
+  const compact = collapsed;
 
   const button = (
     <Button

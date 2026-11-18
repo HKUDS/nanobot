@@ -12,7 +12,7 @@ function Control({ fast = true, defaultEffort = "medium", onChange }: {
 }) {
   const [value, setValue] = useState<SessionModelOptions>({ reasoning_effort: null, codex_fast_mode: null });
   const efforts = ["low", "medium", "high"];
-  return <ModelOptionsControl data={{ value, efforts, capability: {
+  return <ModelOptionsControl data={{ value, efforts, effortsPending: false, capability: {
     reasoning_effort: { default: defaultEffort, values: efforts },
     ...(fast ? { codex_fast_mode: { default: true } } : {}),
   } }} onChange={(next) => { setValue(next); onChange?.(next); }} />;

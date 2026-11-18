@@ -62,6 +62,7 @@ from nanobot.command.router import CommandExpansion, command_text
 from nanobot.config.network import NetworkConfig
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.events import NO_EVENTS, AgentEvent, EventSink
+from nanobot.execution.files import exclude_file_paths
 from nanobot.llm_usage.context import source_from_request
 from nanobot.providers.base import LLMProvider, LLMUsage, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
@@ -390,7 +391,7 @@ class AgentLoop:
         self.consolidator = Consolidator(
             store=self.context.memory,
             sessions=self.sessions,
-            build_messages=self.context.build_messages,
+            build_messages=self._build_compaction_messages,
             get_tool_definitions=self.tools.get_definitions,
             resolve_prompt_context=PersistedPromptContextResolver(
                 workspace_scopes=self.workspace_scopes,
@@ -672,6 +673,24 @@ class AgentLoop:
 
         logger.info("Registered {} tools: {}", len(registered), registered)
 
+    def _build_compaction_messages(
+        self,
+        *,
+        history: list[dict[str, Any]],
+        current_message: str | None,
+        channel: str | None = None,
+        session_summary: SessionSummary | None = None,
+        workspace: Path | None = None,
+    ) -> list[dict[str, Any]]:
+        return self.context.build_messages(
+            history=history,
+            current_message=current_message,
+            channel=channel,
+            session_summary=session_summary,
+            workspace=workspace,
+            has_cron=self.tools.has("cron"),
+        )
+
     def register_runtime_context_provider(
         self,
         provider: RuntimeContextProvider,
@@ -813,16 +832,19 @@ class AgentLoop:
         self,
         ctx: TurnContext,
     ) -> list[RuntimeContextBlock]:
-        assert ctx.request_context is not None
+        assert ctx.request_context is not None and ctx.session is not None
         return await self._resolve_runtime_context_for_request(
             ctx.request_context,
             ctx.tools if ctx.tools is not None else self.tools,
+            include_memory=ctx.session.policy.persist,
         )
 
     async def _resolve_runtime_context_for_request(
         self,
         request: RequestContext,
         tools: ToolRegistry,
+        *,
+        include_memory: bool,
     ) -> list[RuntimeContextBlock]:
         providers = [
             *tools.get_runtime_context_providers(),
@@ -832,7 +854,10 @@ class AgentLoop:
         blocks.extend(await resolve_runtime_context(providers, request))
         text = request.original_user_text or ""
         skill_context = (
-            await self.runner.prepare_prompt(self.context.skills.build_explicit_skill_runtime_context, text)
+            await self.runner.prepare_prompt(
+                self.context.build_explicit_skill_context, text,
+                include_memory=include_memory, has_cron=tools.has("cron"),
+            )
             if "$" in text else None
         )
         if skill_context is not None and skill_context not in blocks:
@@ -1071,7 +1096,9 @@ class AgentLoop:
                 workspace_scope=request.workspace_scope,
                 log_content=request.log_content,
             )
-            blocks = await self._resolve_runtime_context_for_request(pending_request, tools)
+            blocks = await self._resolve_runtime_context_for_request(
+                pending_request, tools, include_memory=session is None or session.policy.persist,
+            )
             row["content"], runtime_marker = append_runtime_context(user_content, blocks)
             if runtime_marker is not None:
                 row["_meta"][RUNTIME_CONTEXT_MESSAGE_META] = runtime_marker
@@ -1150,11 +1177,15 @@ class AgentLoop:
             message_metadata=_prompt_scope_metadata(request_metadata),
             session_metadata=_prompt_scope_metadata(session.metadata) if session is not None else None,
         )
+        include_memory = session is None or session.policy.persist
+        effective_tools = tools if tools is not None else self.tools
+        has_cron = effective_tools.has("cron")
         transcript_builder = partial(
             self.context.build_transcript,
             channel=request_ctx.channel,
             workspace=effective_scope.project_path,
-            include_memory=session.policy.persist if session is not None else True,
+            include_memory=include_memory,
+            has_cron=has_cron,
         )
         if initial_message is not None and turn_continuation.internal_continuation_inbound(initial_message.metadata):
             build_transcript = transcript_builder
@@ -1185,13 +1216,23 @@ class AgentLoop:
                 and (session is None or session.policy.persist)
             ),
         )
-        effective_tools = tools if tools is not None else self.tools
         with ExitStack() as turn_scope_stack:
             turn_scope_stack.callback(
                 reset_file_states, bind_file_states(self._file_state_store.for_session(active_session_key)),
             )
             turn_scope_stack.callback(reset_request_context, bind_request_context(request_ctx))
             turn_scope_stack.callback(reset_workspace_scope, bind_workspace_scope(effective_scope))
+            if not include_memory:
+                memory = self.context.memory
+                skills = self.context.skills
+                turn_scope_stack.enter_context(exclude_file_paths(
+                    memory.soul_file, memory.user_file, memory.memory_dir,
+                    skills.workspace_skills / "memory", skills.builtin_skills / "memory",
+                ))
+                if not has_cron:
+                    turn_scope_stack.enter_context(exclude_file_paths(
+                        self.workspace / "HEARTBEAT.md", writes_only=True,
+                    ))
             execution_scope: ExecutionScope | None = None
             if self.execution_policy is not None:
                 execution_scope = turn_scope_stack.enter_context(self.execution_policy.scope(
@@ -1696,7 +1737,10 @@ class AgentLoop:
             await self._pending_queues.join_controls()
             # A scan can schedule archival while shutdown waits for it.
             while self._background_tasks:
-                await asyncio.gather(*self._background_tasks, return_exceptions=True)
+                tasks = tuple(self._background_tasks)
+                await asyncio.gather(*tasks, return_exceptions=True)
+                # Already-complete tasks may return before their done callbacks run.
+                self._background_tasks.difference_update(tasks)
         except BaseException as exc:
             errors.append(exc)
         finally:
@@ -2145,6 +2189,8 @@ class AgentLoop:
                 ctx.msg.content,
                 media=ctx.msg.media if ctx.kind is TurnKind.USER and ctx.msg.media else None,
                 runtime_context_blocks=ctx.runtime_context_blocks,
+                include_memory=session.policy.persist,
+                has_cron=(ctx.tools if ctx.tools is not None else self.tools).has("cron"),
             )
             task_id = ctx.msg.metadata.get("subagent_task_id") if is_subagent else None
             already_staged = False

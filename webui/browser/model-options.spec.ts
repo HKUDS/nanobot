@@ -1,4 +1,15 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
+
+async function expectSpeedCircle(button: Locator, track: { y: number; height: number }) {
+  const face = button.locator(":scope > [aria-hidden]");
+  await expect(face).toHaveCSS("corner-shape", /^(round|superellipse\(1\))$/);
+  const { y, width, height } = (await face.boundingBox())!;
+  expect(height).toBe(track.height);
+  expect(width).toBe(height);
+  expect(y).toBeCloseTo(track.y, 0);
+  expect(await face.evaluate((element) => Number.parseFloat(getComputedStyle(element).borderTopLeftRadius))).toBeGreaterThanOrEqual(height / 2);
+  await expect(button).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+}
 
 for (const width of [390, 1280]) {
   test(`current-chat model options preserve the compact preset menu at ${width}px`, async ({ page }, testInfo) => {
@@ -29,6 +40,7 @@ for (const width of [390, 1280]) {
     const thumb = (await dialog.locator(".reasoning-effort-thumb").boundingBox())!;
     expect(track.height).toBe(20);
     expect(thumb.height).toBe(24);
+    await expectSpeedCircle(fast, track);
     const stops = await dialog.locator(".reasoning-effort-tick").evaluateAll((elements) =>
       elements.map((element) => element.getBoundingClientRect().x),
     );
@@ -84,9 +96,9 @@ test("Temporary Chats do not expose model option controls", async ({ page }) => 
   await expect(page.getByRole("button", { name: "Fast", exact: true })).toHaveCount(0);
 });
 
-test("reselecting medium and choosing Ultrafast sends and remembers both concrete values", async ({ page }) => {
+test("reselecting medium and choosing Ultrafast sends and remembers both concrete values", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 800 });
-  await page.goto("/browser/fixture.html?case=model-options&ultrafast");
+  await page.goto("/browser/fixture.html?case=model-options&ultrafast&dark");
   const open = page.getByRole("button", { name: "Default", exact: true });
   await open.click();
   const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
@@ -134,9 +146,13 @@ test("reselecting medium and choosing Ultrafast sends and remembers both concret
   await ultrafast.click();
   await expect(ultrafast).toHaveAttribute("aria-pressed", "true");
   await expect(fast).toHaveAttribute("aria-pressed", "false");
+  const track = (await dialog.locator(".reasoning-effort-track").boundingBox())!;
+  await expectSpeedCircle(fast, track);
+  await expectSpeedCircle(ultrafast, track);
   expect(await speeds.evaluate((group) => [...group.querySelectorAll("button")].every((button) =>
     button.scrollWidth <= button.clientWidth + 1 && button.offsetWidth >= 44 && button.offsetHeight >= 44,
   ))).toBe(true);
+  await dialog.locator(".model-options-row").screenshot({ path: testInfo.outputPath("model-options-ultrafast-320.png") });
   await dialog.press("Escape");
   await page.getByLabel("Message input").fill("Test this speed");
   await page.getByRole("button", { name: "Send message", exact: true }).click();
@@ -177,6 +193,35 @@ test("provider examples switch from Codex to direct API and gateway capabilities
   await navigation.getByRole("link", { name: "Gateways" }).click();
   await page.getByRole("button", { name: "Default", exact: true }).click();
   await expect(reasoning).toHaveAttribute("aria-valuetext", "Auto");
+});
+
+test("keeps the reasoning slider track visible while a Codex preset awaits its effort levels", async ({ page }) => {
+  const catalogUrl = /\/api\/settings\/provider-models\?provider=openai_codex$/;
+  let releaseCatalog!: () => void;
+  const catalogGated = new Promise<void>((resolve) => { releaseCatalog = resolve; });
+  await page.route(catalogUrl, async (route) => {
+    await catalogGated;
+    await route.fulfill({ json: {
+      provider: "openai_codex", label: "OpenAI Codex", status: "available", catalog_kind: "hybrid", source: "remote", model_count: 1,
+      models: [{ id: "openai-codex/gpt-6.2-sol", reasoning_efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] }],
+    } });
+  });
+  await page.goto("/browser/fixture.html?case=model-options&codex-catalog");
+  const dialog = page.getByRole("dialog", { name: "Switch model", exact: true });
+  const effort = dialog.getByRole("slider", { name: "Reasoning effort" });
+  try {
+    await Promise.all([page.waitForRequest(catalogUrl), page.getByRole("button", { name: "Default", exact: true }).click()]);
+    await expect(dialog.locator(".reasoning-effort-track")).toBeVisible();
+    await expect(dialog.getByText("xhigh", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("combobox", { name: "Reasoning effort" })).toHaveCount(0);
+    await expect(effort).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "Fast", exact: true })).toBeEnabled();
+  } finally {
+    releaseCatalog();
+  }
+  await expect(effort).toHaveAttribute("aria-valuetext", "xhigh");
+  await effort.press("ArrowLeft");
+  await expect(effort).toHaveAttribute("aria-valuetext", "high");
 });
 
 test("keeps the custom reasoning effort as a concrete value for a self-hosted preset", async ({ page }) => {
