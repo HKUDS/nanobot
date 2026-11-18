@@ -872,6 +872,13 @@ class SessionState:
             None, lambda: self._store.set_archived_keys(values), operation_name="set_archived_keys",
         )
 
+    async def recovery_candidates(self, key_prefix: str) -> list[tuple[str, bool]]:
+        """Take one ordered read snapshot before startup admits new work."""
+        return await self._execute(
+            None, lambda: self._store.recovery_candidates(key_prefix),
+            operation_name="recovery_candidates", write=False,
+        )
+
     async def list_sessions(self) -> list[dict[str, Any]]:
         return await self._execute(
             None,
