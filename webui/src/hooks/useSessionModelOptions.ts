@@ -17,7 +17,7 @@ function readPreference(key: string): Preference | null {
     const options = value?.options;
     return typeof value?.preset === "string" && options
       && (options.reasoning_effort === null || typeof options.reasoning_effort === "string")
-      && (options.codex_fast_mode === null || typeof options.codex_fast_mode === "boolean")
+      && (options.codex_fast_mode === null || typeof options.codex_fast_mode === "boolean" || options.codex_fast_mode === "ultrafast")
       ? { preset: value.preset, options: { reasoning_effort: options.reasoning_effort, codex_fast_mode: options.codex_fast_mode } } : null;
   } catch { return null; }
 }

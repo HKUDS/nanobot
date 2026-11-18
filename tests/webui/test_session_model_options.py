@@ -23,7 +23,7 @@ from nanobot.providers.factory import ProviderSnapshot, provider_signature
 from nanobot.providers.fallback_provider import FallbackProvider
 from nanobot.providers.model_options import ModelOptions
 from nanobot.session.manager import SessionManager
-from nanobot.session.model_selection import SESSION_MODEL_OPTIONS_METADATA_KEY
+from nanobot.session.model_selection import SESSION_LOCAL_PRESET_KEY, SessionModelPreset
 from nanobot.session.webui_turns import clear_websocket_turns
 from nanobot.webui.gateway_services import GatewayServices, build_gateway_services
 from nanobot.webui.session_projection import WebUISessionProjection
@@ -175,7 +175,9 @@ async def test_draft_then_ordinary_send_persists_and_projects_choices(gateway):
     options = ModelOptions("none", False)
     await gateway.run(gateway.loop(provider), model_options=options.to_dict())
     saved = await gateway.sessions.state.read("websocket:chat")
-    assert saved.metadata[SESSION_MODEL_OPTIONS_METADATA_KEY] == options.to_dict()
+    assert saved.metadata[SESSION_LOCAL_PRESET_KEY] == {
+        "base_preset": None, "overrides": options.to_dict(),
+    }
     assert [message["role"] for message in saved.messages] == ["user", "assistant"]
     assert provider.calls == [("none", options)]
     response = await gateway.services.http.dispatch(
@@ -249,11 +251,13 @@ async def test_pending_preset_switch_and_messages_save_choices_in_execution_orde
         await loop._dispatch_one(message, asyncio.Queue())
     assert provider.calls[-1] == ("high", choice)
     saved = await gateway.sessions.state.read("websocket:chat")
-    assert saved.metadata.get(SESSION_MODEL_OPTIONS_METADATA_KEY) == (choice.to_dict() if switch_first else None)
+    assert SessionModelPreset.from_metadata(saved.metadata) == SessionModelPreset(
+        "deep", choice if switch_first else ModelOptions(),
+    )
 
 
 async def test_reload_recovers_last_used_choices_and_preset_switch_clears_both(gateway, tmp_path):
-    options = ModelOptions("max", False)
+    options = ModelOptions("max", "ultrafast")
     await gateway.run(gateway.loop(RecordingProvider()), model_options=options.to_dict())
     fresh = SessionManager(gateway.config.workspace_path, sessions_root=tmp_path / "sessions")
     other = SessionManager(tmp_path / "other-workspace", sessions_root=tmp_path / "other-sessions")
@@ -267,7 +271,8 @@ async def test_reload_recovers_last_used_choices_and_preset_switch_clears_both(g
         await loop.set_session_model_preset("websocket:chat", "deep")
         await loop.process_direct("after switch", session_key="websocket:chat")
         assert provider.calls[-1] == ("low", ModelOptions())
-        assert SESSION_MODEL_OPTIONS_METADATA_KEY not in (await fresh.state.read("websocket:chat")).metadata
+        saved = await fresh.state.read("websocket:chat")
+        assert SessionModelPreset.from_metadata(saved.metadata) == SessionModelPreset("deep")
     finally:
         await fresh.state.aclose()
         await other.state.aclose()
@@ -279,7 +284,8 @@ async def test_shell_and_commands_do_not_consume_composer_choices(gateway, conte
     await gateway.run(gateway.loop(RecordingProvider()), model_options=options.to_dict())
     message = await gateway.incoming(content=content, model_options=ModelOptions("low", False).to_dict(), **fields)
     assert INBOUND_META_MODEL_OPTIONS not in message.metadata
-    assert (await gateway.sessions.state.read("websocket:chat")).metadata[SESSION_MODEL_OPTIONS_METADATA_KEY] == options.to_dict()
+    saved = await gateway.sessions.state.read("websocket:chat")
+    assert SessionModelPreset.from_metadata(saved.metadata).overrides == options
 
 
 async def test_fallback_uses_its_own_settings_not_primary_options(gateway):

@@ -476,10 +476,10 @@ describe("ThreadShell", () => {
     return settings;
   }
 
-  async function changeOptions(label = "Default", effort = "high", fast = "Off") {
-    fireEvent.click(await screen.findByRole("button", { name: label }));
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Reasoning effort" })).getByRole("radio", { name: effort }));
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Codex Fast mode" })).getByRole("radio", { name: fast }));
+  async function changeOptions() {
+    fireEvent.click(await screen.findByRole("button", { name: "Default" }));
+    fireEvent.change(screen.getByRole("slider", { name: "Reasoning effort" }), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
     fireEvent.keyDown(screen.getByRole("dialog", { name: "Switch model" }), { key: "Escape" });
   }
 
@@ -498,9 +498,8 @@ describe("ThreadShell", () => {
     fireEvent.click(screen.getByRole("button", { name: "Default" }));
     fireEvent.click(await screen.findByRole("option", { name: "fast" }));
     fireEvent.click(screen.getByRole("button", { name: "fast" }));
-    for (const label of ["Reasoning effort", "Codex Fast mode"]) {
-      expect(within(screen.getByRole("radiogroup", { name: label })).getByRole("radio", { name: "Inherit" })).toBeChecked();
-    }
+    expect(screen.getByRole("slider", { name: "Reasoning effort" })).toHaveAttribute("aria-valuetext", "low");
+    expect(screen.getByRole("button", { name: "Fast" })).toHaveAttribute("aria-pressed", "true");
     expect(client.sendSystemCommand).toHaveBeenCalledWith("model-options", "/model fast");
     expect(client.sendMessage).toHaveBeenCalledTimes(1);
   });
@@ -521,8 +520,8 @@ describe("ThreadShell", () => {
     await waitFor(() => expect(client.sendMessage).toHaveBeenCalledWith("options-created", "first selection", undefined,
       expect.objectContaining({ modelOptions: { reasoning_effort: "high", codex_fast_mode: false } })));
     fireEvent.click(await screen.findByRole("button", { name: "Default" }));
-    expect(within(screen.getByRole("radiogroup", { name: "Reasoning effort" })).getByRole("radio", { name: "high" })).toBeChecked();
-    expect(within(screen.getByRole("radiogroup", { name: "Codex Fast mode" })).getByRole("radio", { name: "Off" })).toBeChecked();
+    expect(screen.getByRole("slider", { name: "Reasoning effort" })).toHaveAttribute("aria-valuetext", "high");
+    expect(screen.getByRole("button", { name: "Fast" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("sends edited queued prompts using current options, while cancelling the queue sends nothing", async () => {

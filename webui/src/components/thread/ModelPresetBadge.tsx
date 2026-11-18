@@ -26,6 +26,7 @@ import { inferProviderFromModelName, providerBrand } from "@/lib/provider-brand"
 import { cn } from "@/lib/utils";
 
 const pickerWidthClassName = "w-[min(18rem,calc(100vw-2rem))]";
+const speedPickerWidthClassName = "w-max max-w-[min(22rem,calc(100vw-1rem))]";
 const LONG_PRESS_MS = 400;
 const PRESS_SLOP_PX = 8;
 const PILL_GAP_PX = 4;
@@ -158,6 +159,7 @@ export function ModelPresetBadge({
   const opensSetup = Boolean(onClick);
   const canSwitch = !opensSetup && Boolean(onPresetChange) && activeName !== "" && presets.length > 1;
   const canOpenPicker = !opensSetup && (canSwitch || Boolean(onManageModels) || Boolean(modelOptionsControl?.data));
+  const showsSpeedControl = Boolean(modelOptionsControl?.data?.capability.codex_fast_mode);
   const pickerPresets = activeName && onPresetChange ? presets : [activePreset];
   const currentIndex = Math.max(0, presets.findIndex((preset) => preset.name === activeName));
   const pillHeight = isHero ? 32 : 36;
@@ -407,7 +409,7 @@ export function ModelPresetBadge({
         align="end"
         side="top"
         sideOffset={10}
-        collisionPadding={12}
+        collisionPadding={showsSpeedControl ? 8 : 12}
         role="dialog"
         aria-label={switchModelLabel}
         onEscapeKeyDown={escapeFocus.contentProps.onEscapeKeyDown}
@@ -430,7 +432,7 @@ export function ModelPresetBadge({
           selected?.focus();
         }}
         className={cn(
-          pickerWidthClassName,
+          showsSpeedControl ? speedPickerWidthClassName : pickerWidthClassName,
           "max-h-[var(--radix-popover-content-available-height)] overflow-y-auto",
           "origin-[var(--radix-popover-content-transform-origin)] p-1.5 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-bottom-1 data-[state=open]:slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none",
         )}

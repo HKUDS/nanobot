@@ -6,7 +6,7 @@ from loguru import logger as default_logger
 
 from nanobot.agent.subagent import SubagentControlError
 from nanobot.providers.base import LLMUsage
-from nanobot.session.model_selection import model_options_from_metadata, model_preset_from_metadata
+from nanobot.session.model_selection import SessionModelPreset
 from nanobot.session.recovery import recovery_state_from_metadata
 from nanobot.session.state import SessionState
 from nanobot.session.webui_turns import websocket_turn_id, websocket_turn_wall_started_at
@@ -54,13 +54,15 @@ class WebUISessionProjection:
         raw_metadata = snapshot.get("metadata") if snapshot is not None else None
         metadata = cast(dict[str, object], raw_metadata) if isinstance(raw_metadata, dict) else None
 
-        fields: dict[str, Any] = {}
         try:
-            fields["model_preset"] = model_preset_from_metadata(metadata)
+            selection = SessionModelPreset.from_metadata(metadata)
         except ValueError:
             self._log.warning("ignoring invalid model preset metadata for session_key={}", session_key)
-            fields["model_preset"] = None
-        fields["model_options"] = model_options_from_metadata(metadata).to_dict()
+            selection = SessionModelPreset()
+        fields: dict[str, Any] = {
+            "model_preset": selection.base_preset,
+            "model_options": selection.overrides.to_dict(),
+        }
         if metadata is None:
             return fields
 

@@ -12,7 +12,7 @@ from nanobot.providers.factory import ProviderSnapshot
 from nanobot.sdk.types import SessionSnapshot
 from nanobot.session.model_selection import (
     SESSION_MODEL_PRESET_METADATA_KEY,
-    model_preset_from_metadata,
+    SessionModelPreset,
 )
 from nanobot.utils.llm_runtime import LLMRuntime
 
@@ -89,7 +89,7 @@ async def test_sessions_run_concurrently_with_isolated_model_presets(tmp_path) -
 
     loop.sessions.invalidate("sdk:fast")
     restored = loop.sessions.get_or_create("sdk:fast")
-    assert model_preset_from_metadata(restored.metadata) == "fast"
+    assert SessionModelPreset.from_metadata(restored.metadata).base_preset == "fast"
 
     override = RecordingProvider("override-model")
     override_runtime = LLMRuntime.capture(
@@ -133,7 +133,7 @@ async def test_removed_session_model_preset_falls_back_and_clears_metadata(tmp_p
     assert base.calls == ["base-model"]
     loop.sessions.invalidate(session_key)
     restored = loop.sessions.get_or_create(session_key)
-    assert model_preset_from_metadata(restored.metadata) is None
+    assert SessionModelPreset.from_metadata(restored.metadata).base_preset is None
 
 
 async def test_async_runtime_resolution_publishes_model_refresh_on_event_loop(

@@ -1012,7 +1012,7 @@
       "extraHeaders": "En-têtes",
       "extraBody": "Paramètres du corps",
       "extraQuery": "Paramètres de requête",
-      "capabilityFastMode": "Mode rapide",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Réponses plus rapides, consommation accrue.",
       "capabilityXSearch": "Recherche sur X",
       "capabilityXSearchHelp": "Les modèles Grok compatibles peuvent rechercher sur X.\n\nPermet aux modèles Grok compatibles d’utiliser X Search hébergé par xAI. L’activité de recherche apparaît dans le chat.",
@@ -1970,11 +1970,10 @@
       "chooseAI": "Choisir le modèle",
       "modelOptions": {
         "title": "Pour cette discussion",
-        "inherit": "Hériter",
         "on": "Activé",
         "off": "Désactivé",
-        "codexFast": "Mode rapide Codex",
-        "scope": "S’applique au prochain message, pas aux tâches en cours. Hériter utilise la valeur du préréglage ou du fournisseur affichée à droite."
+        "codexFast": "Fast",
+        "ultrafast": "Ultrarapide"
       },
       "switchModel": "Changer de modèle",
       "manageModels": "Gérer les préréglages",

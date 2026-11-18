@@ -304,6 +304,31 @@ describe("Settings models", () => {
     ));
   });
 
+  it.each([
+    { model: "gpt-5.6-sol", label: "Off", modeValue: false },
+    { model: "openai-codex/gpt-6.2-sol", label: "Ultrafast", modeValue: "ultrafast" },
+  ])("saves $label for the Codex preset without editing its connection", async ({ model, label, modeValue }) => {
+    const payload = settingsPayload();
+    payload.providers = [{ name: "openai_codex", label: "Codex", configured: true, codex_fast_mode_supported: true,
+      codex_ultrafast_models: ["gpt-6.2-sol"], extra_body: { service_tier: "priority" } }];
+    Object.assign(payload.model_presets[0], {
+      provider: "openai_codex", resolved_provider: "openai_codex", model, codex_fast_mode: null,
+    });
+    requestMutationMock.mockResolvedValue(payload);
+    renderSettingsView({ initialSection: "models", initialSettings: payload });
+    fireEvent.click(await screen.findByRole("button", { name: /primary/i }));
+    const mode = within(screen.getByRole("group", { name: "Fast" }));
+    const fast = mode.getByRole("button", { name: /^Fast$/ });
+    expect(fast).toHaveAttribute("aria-pressed", "true");
+    expect(requestMutationMock).not.toHaveBeenCalled();
+    if (modeValue === false) expect(mode.queryByRole("button", { name: "Ultrafast" })).not.toBeInTheDocument();
+    fireEvent.click(modeValue === false ? fast : mode.getByRole("button", { name: label }));
+    fireEvent.click(presetSaveButton());
+    await waitFor(() => expect(requestMutationMock).toHaveBeenCalledWith(
+      "settings.model_configuration.update", { include_usage: false, name: "primary", codex_fast_mode: modeValue }, 20_000,
+    ));
+  });
+
   it("shows the host's automatic API and discards an older reasoning resolution", async () => {
     const payload = settingsPayload();
     payload.model_api_resolution_supported = true;

@@ -19,7 +19,7 @@ from nanobot.providers.oauth_model_catalog import OAuthModelCatalogSnapshot
 from nanobot.providers.registry import ProviderModelSpec, find_by_name
 from nanobot.providers.routing import resolve_provider_route
 from nanobot.session.manager import SessionManager
-from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
+from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY, SessionModelPreset
 from nanobot.webui.settings_api import (
     WebUISettingsError,
     _docs_version,
@@ -544,7 +544,7 @@ def test_update_model_configuration_renames_preset_and_config_references(
         tmp_path / "workspace",
         sessions_root=tmp_path / "sessions",
     ).get_or_create("websocket:selected")
-    assert persisted.metadata[SESSION_MODEL_PRESET_METADATA_KEY] == "Codex"
+    assert SessionModelPreset.from_metadata(persisted.metadata) == SessionModelPreset("Codex")
 
 
 def test_update_model_configuration_rejects_duplicate_rename(
@@ -860,6 +860,26 @@ def test_fixed_responses_provider_rejects_chat_without_saving(tmp_path, monkeypa
         "name": ["codex"], "api": [json.dumps({"supportedApis": ["responses"]})],
     })
     assert load_config(config_path).model_presets["codex"].api.supported_apis == ("responses",)
+
+
+def test_preset_fast_mode_can_override_and_restore_connection_default(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.json"
+    config = Config.model_validate({
+        "modelPresets": {"codex": {"provider": "openai_codex", "model": "openai-codex/gpt-6.2-sol"}},
+        "providers": {"openaiCodex": {"extraBody": {"service_tier": "priority"}}},
+    })
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+    for value, saved, effective in (
+        ("false", False, False), ("true", True, True), ("ultrafast", "ultrafast", "ultrafast"), ("", None, True),
+    ):
+        payload = update_model_configuration({"name": ["codex"], "codex_fast_mode": [value]})
+        preset = next(row for row in payload["model_presets"] if row["name"] == "codex")
+        assert preset["codex_fast_mode"] == saved
+        assert preset["model_options"]["codex_fast_mode"] == {"default": effective, "ultrafast_supported": True}
+        current = load_config(config_path)
+        assert current.model_presets["codex"].codex_fast_mode == saved
+        assert current.providers.openai_codex.extra_body == {"service_tier": "priority"}
 
 
 def test_legacy_migration_preserves_primary_and_fallback_apis(tmp_path, monkeypatch):

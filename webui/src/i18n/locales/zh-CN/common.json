@@ -1402,7 +1402,7 @@
       "extraHeaders": "请求头",
       "extraBody": "请求体参数",
       "extraQuery": "查询参数",
-      "capabilityFastMode": "快速模式",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "更快响应，用量更高",
       "capabilityXSearch": "X 搜索",
       "capabilityXSearchHelp": "支持的 Grok 模型可搜索 X\n\n允许受支持的 Grok 模型使用 xAI 托管的 X Search，并在对话中展示搜索过程。",
@@ -2152,11 +2152,10 @@
       "chooseAI": "选择模型",
       "modelOptions": {
         "title": "当前会话",
-        "inherit": "继承",
         "on": "开启",
         "off": "关闭",
-        "codexFast": "Codex 快速模式",
-        "scope": "随下一条消息生效，不影响运行中的任务。继承使用右侧的预设或服务商默认值。"
+        "codexFast": "Fast",
+        "ultrafast": "极速"
       },
       "switchModel": "切换模型",
       "manageModels": "管理预设",

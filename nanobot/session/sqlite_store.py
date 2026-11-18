@@ -24,6 +24,7 @@ from nanobot.session.manager import (
     message_preview_text,
     metadata_title,
 )
+from nanobot.session.model_selection import SESSION_MODEL_KEYS, SessionModelPreset
 from nanobot.session.summary import is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY
 
@@ -472,6 +473,24 @@ class SqliteSessionStore:
                 return False
             self._write_metadata(db, key, {**payload["metadata"], **updates})
             return True
+
+    def rename_model_preset(self, old_name: str, new_name: str) -> list[str]:
+        changed: list[str] = []
+        with self.transaction():
+            for row in self.list_metadata():
+                metadata = row["metadata"]
+                try:
+                    selection = SessionModelPreset.from_metadata(metadata)
+                except ValueError:
+                    continue
+                if selection.base_preset != old_name:
+                    continue
+                for key in SESSION_MODEL_KEYS:
+                    metadata.pop(key, None)
+                metadata.update(SessionModelPreset(new_name, selection.overrides).metadata_update())
+                self.replace_metadata(row["key"], metadata)
+                changed.append(row["key"])
+        return changed
 
     def replace_metadata(
         self, key: str, metadata: dict[str, Any], *, updated_at: datetime | None = None,

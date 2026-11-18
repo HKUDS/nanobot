@@ -1012,7 +1012,7 @@
       "extraHeaders": "Header",
       "extraBody": "Parameter body",
       "extraQuery": "Parameter kueri",
-      "capabilityFastMode": "Mode cepat",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Respons lebih cepat, penggunaan meningkat.",
       "capabilityXSearch": "Pencarian X",
       "capabilityXSearchHelp": "Model Grok yang didukung dapat mencari di X.\n\nIzinkan model Grok yang didukung menggunakan X Search yang dihosting xAI. Aktivitas pencarian ditampilkan di chat.",
@@ -1970,11 +1970,10 @@
       "chooseAI": "Pilih model",
       "modelOptions": {
         "title": "Untuk chat ini",
-        "inherit": "Warisi",
         "on": "Aktif",
         "off": "Nonaktif",
-        "codexFast": "Mode cepat Codex",
-        "scope": "Berlaku pada pesan berikutnya, bukan tugas yang sedang berjalan. Warisi memakai nilai preset atau penyedia yang ditampilkan di kanan."
+        "codexFast": "Fast",
+        "ultrafast": "Ultracepat"
       },
       "switchModel": "Ganti model",
       "manageModels": "Kelola preset",

@@ -34,6 +34,11 @@ from nanobot.config.schema import (
     ProviderConfig,
 )
 from nanobot.providers.image_generation import get_image_gen_provider
+from nanobot.providers.model_options import (
+    CODEX_ULTRAFAST_MODELS,
+    CodexFastMode,
+    codex_supports_ultrafast,
+)
 from nanobot.providers.oauth_guidance import OAUTH_CLI_KIT_MISSING_MESSAGE
 from nanobot.providers.oauth_model_catalog import (
     get_oauth_model_catalog,
@@ -388,6 +393,7 @@ def _provider_settings_row(
         "api": provider_config.api.model_dump(mode="json") if provider_config.api else None,
         "provider_api_configurable": spec.provider_api_configurable,
         "model_api_configurable": len(request_apis) > 1,
+        "codex_fast_mode_supported": spec.backend == "openai_codex",
         "advanced_fields": _provider_advanced_field_names(spec),
         "extra_headers": request_settings.redact_request_secrets(provider_config.extra_headers),
         "extra_body": request_settings.redact_request_secrets(provider_config.extra_body),
@@ -397,6 +403,8 @@ def _provider_settings_row(
         "profile": getattr(provider_config, "profile", None),
         "use_proxy": provider_config.use_proxy,
     }
+    if spec.backend == "openai_codex":
+        row["codex_ultrafast_models"] = list(CODEX_ULTRAFAST_MODELS)
     if oauth_status is not None:
         row["oauth_account"] = oauth_status["account"]
         row["oauth_expires_at"] = oauth_status["expires_at"]
@@ -1046,7 +1054,8 @@ class ReasoningOption(TypedDict):
 
 
 class FastModeOption(TypedDict):
-    default: bool
+    default: CodexFastMode
+    ultrafast_supported: NotRequired[bool]
 
 
 class ModelOptionsCapabilities(TypedDict):
@@ -1065,9 +1074,14 @@ def model_options_capabilities(config: Config, preset: ModelPresetConfig) -> Mod
     spec = find_by_name(provider_name)
     if spec is not None and spec.backend == "openai_codex":
         connection = apply_request_overrides(config.get_provider(preset.model, preset=preset), preset)
-        options["codex_fast_mode"] = {
-            "default": bool(connection and (connection.extra_body or {}).get("service_tier") == "priority"),
+        tier = (connection.extra_body or {}).get("service_tier") if connection else None
+        inherited = "ultrafast" if tier == "ultrafast" else tier == "priority"
+        fast: FastModeOption = {
+            "default": inherited if preset.codex_fast_mode is None else preset.codex_fast_mode,
         }
+        if codex_supports_ultrafast(preset.model):
+            fast["ultrafast_supported"] = True
+        options["codex_fast_mode"] = fast
     return options
 
 
@@ -1172,6 +1186,7 @@ def model_settings_payload(
                 "temperature": preset.temperature,
                 "supports_images": preset.supports_images,
                 "reasoning_effort": preset.reasoning_effort,
+                "codex_fast_mode": preset.codex_fast_mode,
                 "model_options": model_options_capabilities(config, preset),
                 "api": preset.api.model_dump(mode="json") if preset.api is not None else None,
                 **{
@@ -1238,7 +1253,13 @@ def _preset_with_request_updates(
     # The provider validator already owns structured JSON validation and safe errors.
     validated = request_settings.validate_request_config(None, updates)
     candidate = preset.model_copy(update={key: getattr(validated, key) for key in updates})
-    if any(getattr(candidate, key) for key in _PROVIDER_STRUCTURED_FIELDS):
+    if query_has_alias(query, "codex_fast_mode", "codexFastMode"):
+        value = query_first_alias(query, "codex_fast_mode", "codexFastMode")
+        if value == "ultrafast":
+            candidate.codex_fast_mode = "ultrafast"
+        else:
+            candidate.codex_fast_mode = parse_bool(value, "codex_fast_mode") if value else None
+    if candidate.codex_fast_mode is not None or any(getattr(candidate, key) for key in _PROVIDER_STRUCTURED_FIELDS):
         try:
             resolve_provider_route(config, preset=candidate)
         except ValueError as exc:
@@ -1416,7 +1437,9 @@ def update_model_configuration(
     if preset is None:
         raise WebUISettingsError("unknown model configuration")
 
-    has_request_settings = any((preset.extra_headers, preset.extra_query, preset.extra_body))
+    has_request_settings = preset.codex_fast_mode is not None or any(
+        (preset.extra_headers, preset.extra_query, preset.extra_body),
+    )
     previous_provider = None
     if has_request_settings:
         resolved_config = resolve_config_env_vars(config)

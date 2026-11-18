@@ -1012,7 +1012,7 @@
       "extraHeaders": "헤더",
       "extraBody": "본문 매개변수",
       "extraQuery": "쿼리 매개변수",
-      "capabilityFastMode": "고속 모드",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "응답이 빨라지고 사용량이 늘어납니다.",
       "capabilityXSearch": "X 검색",
       "capabilityXSearchHelp": "지원되는 Grok 모델은 X를 검색할 수 있습니다.\n\n지원되는 Grok 모델이 xAI 호스팅 X Search를 사용하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
@@ -1970,11 +1970,10 @@
       "chooseAI": "모델 선택",
       "modelOptions": {
         "title": "현재 채팅",
-        "inherit": "상속",
         "on": "켜기",
         "off": "끄기",
-        "codexFast": "Codex 빠른 모드",
-        "scope": "다음 메시지부터 적용되며 실행 중인 작업에는 영향을 주지 않습니다. 상속은 오른쪽에 표시된 프리셋 또는 공급자 기본값을 사용합니다."
+        "codexFast": "Fast",
+        "ultrafast": "초고속"
       },
       "switchModel": "모델 전환",
       "manageModels": "프리셋 관리",

@@ -19,7 +19,6 @@ from nanobot.runtime_context import (
 from nanobot.session.display_history import HistoryFact, HistoryReader
 from nanobot.session.history_visibility import HIDDEN_HISTORY_META, is_hidden_history_message
 from nanobot.session.location import SessionLocation
-from nanobot.session.model_selection import SESSION_MODEL_PRESET_METADATA_KEY
 from nanobot.session.summary import SUMMARY_CONTINUATION_TEXT, is_summary_checkpoint
 from nanobot.session.types import PARENT_SESSION_KEY, SESSION_TYPE_KEY, SessionTypes
 from nanobot.utils.helpers import (
@@ -556,18 +555,7 @@ class SessionManager:
             return 0
         self._require_offline_mutation()
 
-        def rename() -> int:
-            changed = 0
-            for row in self._store.list_metadata():
-                if row["metadata"].get(SESSION_MODEL_PRESET_METADATA_KEY) == old_name:
-                    self._store.update_metadata(
-                        row["key"],
-                        {SESSION_MODEL_PRESET_METADATA_KEY: new_name},
-                    )
-                    changed += 1
-            return changed
-
-        return self._store.run_write(rename)
+        return len(self._store.rename_model_preset(old_name, new_name))
 
     def invalidate(self, key: str) -> None:
         if self._state is not None:

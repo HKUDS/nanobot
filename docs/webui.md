@@ -107,7 +107,7 @@ To use work from another topic, mention it with `@` and tell nanobot what you ne
 
 ### Model options for a topic
 
-Open the model preset menu beside the composer to choose **Reasoning effort** for the next message in this topic. Codex presets also offer **Fast mode**. Each option can follow its preset/provider configuration or use an explicit choice. Turning Fast mode off overrides a configured priority tier; turning it on requests faster processing with increased Codex usage, subject to model and account availability.
+Open the model preset menu beside the composer to choose **Reasoning effort** for the next message in this topic. Drag the slider to choose a known effort level. Codex presets also offer **Fast**, with an **Ultrafast** choice for supported models. The menu selects the current value, such as `medium`, when it opens. Selecting a value applies it to this topic without editing the preset; switching presets clears topic selections. The single lightning button requests Fast; the double lightning button requests Ultrafast. Select the active button again to turn speed boosts off. Faster processing increases Codex usage and depends on model and account availability.
 
 Choices do not edit shared presets or provider settings and do not change an already-running task. Unsent choices are remembered in this browser; the last values sent with an ordinary message are saved with the topic and survive a gateway restart. Switching presets clears both overrides. Temporary chats do not show these controls.
 

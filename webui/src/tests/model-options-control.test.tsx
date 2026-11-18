@@ -1,35 +1,63 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { ModelOptionsControl } from "@/components/thread/ModelOptionsControl";
 import type { SessionModelOptions } from "@/lib/types";
 
-function Control({ fast = true }: { fast?: boolean }) {
+function Control({ fast = true, defaultEffort = "medium", onChange }: {
+  fast?: boolean;
+  defaultEffort?: string | null;
+  onChange?: (value: SessionModelOptions) => void;
+}) {
   const [value, setValue] = useState<SessionModelOptions>({ reasoning_effort: null, codex_fast_mode: null });
-  return <ModelOptionsControl data={{ value, efforts: ["low", "high"], capability: {
-    reasoning_effort: { default: "low", values: ["low", "high"] },
+  const efforts = ["low", "medium", "high"];
+  return <ModelOptionsControl data={{ value, efforts, capability: {
+    reasoning_effort: { default: defaultEffort, values: efforts },
     ...(fast ? { codex_fast_mode: { default: true } } : {}),
-  } }} onChange={setValue} />;
+  } }} onChange={(next) => { setValue(next); onChange?.(next); }} />;
 }
-it("keeps explicit inherit separate from the default, and allows on, off and inherit for Codex Fast mode", () => {
-  render(<Control />);
-  const effort = within(screen.getByRole("radiogroup", { name: "Reasoning effort" }));
-  const fast = within(screen.getByRole("radiogroup", { name: "Codex Fast mode" }));
-  expect(effort.getByRole("radio", { name: "Inherit" })).toBeChecked();
-  expect(fast.getByRole("radio", { name: "Inherit" })).toBeChecked();
-  fireEvent.click(effort.getByRole("radio", { name: "low" }));
-  expect(effort.getByRole("radio", { name: "low" })).toBeChecked();
-  expect(effort.getByRole("radio", { name: "Inherit" })).not.toBeChecked();
-  for (const name of ["On", "Off", "Inherit"]) {
-    fireEvent.click(fast.getByRole("radio", { name }));
-    expect(fast.getByRole("radio", { name })).toBeChecked();
-  }
-  fireEvent.keyDown(effort.getByRole("radio", { name: "low" }), { key: "Home" });
-  expect(effort.getByRole("radio", { name: "Inherit" })).toBeChecked();
+
+it("preselects the actual preset values without writing them and saves a reselected value explicitly", () => {
+  const onChange = vi.fn();
+  render(<Control onChange={onChange} />);
+  const effort = screen.getByRole("slider", { name: "Reasoning effort" });
+  const fast = screen.getByRole("button", { name: "Fast" });
+  expect(effort).toHaveAttribute("aria-valuetext", "medium");
+  expect(fast).toHaveAttribute("aria-pressed", "true");
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.change(effort, { target: { value: "0" } });
+  expect(effort).toHaveAttribute("aria-valuetext", "low");
+  fireEvent.click(fast);
+  expect(fast).toHaveAttribute("aria-pressed", "false");
+  fireEvent.change(effort, { target: { value: "1" } });
+  expect(onChange).toHaveBeenLastCalledWith({ reasoning_effort: "medium", codex_fast_mode: false });
 });
+
+it("lets the model choose the effort when no concrete preset value is known", () => {
+  const onChange = vi.fn();
+  render(<Control defaultEffort={null} onChange={onChange} />);
+  const effort = screen.getByRole("slider", { name: "Reasoning effort" });
+  expect(effort).toHaveAttribute("aria-valuetext", "Auto");
+  fireEvent.change(effort, { target: { value: "3" } });
+  expect(effort).toHaveAttribute("aria-valuetext", "high");
+  fireEvent.change(effort, { target: { value: "0" } });
+  expect(onChange).toHaveBeenLastCalledWith({ reasoning_effort: null, codex_fast_mode: null });
+});
+
+it("keeps a custom preset effort selectable without giving it a position on the scale", () => {
+  const onChange = vi.fn();
+  render(<Control defaultEffort="extended" onChange={onChange} />);
+  const effort = screen.getByRole("combobox", { name: "Reasoning effort" });
+  expect(effort).toHaveDisplayValue("extended");
+  fireEvent.change(effort, { target: { value: "1" } });
+  expect(effort).toHaveDisplayValue("medium");
+  fireEvent.change(effort, { target: { value: "3" } });
+  expect(onChange).toHaveBeenLastCalledWith({ reasoning_effort: "extended", codex_fast_mode: null });
+});
+
 it("uses the capability description rather than the provider name to expose Fast mode", () => {
   render(<Control fast={false} />);
-  expect(screen.getByRole("radiogroup", { name: "Reasoning effort" })).toBeVisible();
-  expect(screen.queryByRole("radiogroup", { name: "Codex Fast mode" })).not.toBeInTheDocument();
+  expect(screen.getByRole("slider", { name: "Reasoning effort" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Fast" })).not.toBeInTheDocument();
 });

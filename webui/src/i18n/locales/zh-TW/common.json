@@ -1012,7 +1012,7 @@
       "extraHeaders": "請求頭",
       "extraBody": "請求體引數",
       "extraQuery": "查詢引數",
-      "capabilityFastMode": "快速模式",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "回應更快，用量更高",
       "capabilityXSearch": "X 搜尋",
       "capabilityXSearchHelp": "支援的 Grok 模型可搜尋 X\n\n允許受支援的 Grok 模型使用 xAI 託管的 X Search，並在對話中展示搜尋過程。",
@@ -1970,11 +1970,10 @@
       "chooseAI": "選擇模型",
       "modelOptions": {
         "title": "目前對話",
-        "inherit": "繼承",
         "on": "開啟",
         "off": "關閉",
-        "codexFast": "Codex 快速模式",
-        "scope": "隨下一則訊息生效，不影響執行中的任務。繼承使用右側的預設或服務商預設值。"
+        "codexFast": "Fast",
+        "ultrafast": "極速"
       },
       "switchModel": "切換模型",
       "manageModels": "管理預設",

@@ -4,6 +4,7 @@ import { useAutomaticModelAPI } from "@/components/settings/models/useAutomaticM
 import { useModelPresetDrag } from "@/components/settings/models/useModelPresetDrag";
 import { ReasoningEffortPicker } from "@/components/settings/models/ReasoningEffortPicker";
 import { RemoveActionButton } from "@/components/settings/shared/RemoveActionButton";
+import { CodexSpeedControl } from "@/components/ui/codex-speed-control";
 import { ToggleButton } from "@/components/ui/toggle-button";
 import type { EditCompletion } from "@/components/settings/shared/useEditCompletion";
 import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -47,9 +48,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { ModelAPIConfig, SettingsPayload } from "@/lib/types";
+import type { CodexFastMode, ModelAPIConfig, SettingsPayload } from "@/lib/types";
 import { ProviderParameterFields, type RequestParameterDraft } from "@/components/settings/models/ProviderParameterFields";
-import { providerJsonValue } from "@/components/settings/models/providerForm";
+import { parseProviderObject, providerJsonValue } from "@/components/settings/models/providerForm";
 
 export interface AgentSettingsDraft {
   model: string;
@@ -59,6 +60,7 @@ export interface AgentSettingsDraft {
   contextWindowTokens: number;
   temperature: number;
   reasoningEffort: string;
+  codexFastMode: CodexFastMode | null;
   supportsImages: boolean;
   api: ModelAPIConfig | null;
   extraHeaders: string;
@@ -104,6 +106,7 @@ export const DEFAULT_AGENT_SETTINGS_DRAFT: AgentSettingsDraft = {
   contextWindowTokens: 200_000,
   temperature: 0.1,
   reasoningEffort: "",
+  codexFastMode: null,
   supportsImages: true,
   api: null,
   extraHeaders: "",
@@ -132,6 +135,7 @@ export function agentDraftFromPayload(
     ),
     temperature: activePreset?.temperature ?? payload.agent.temperature,
     reasoningEffort: activePreset?.reasoning_effort ?? "",
+    codexFastMode: activePreset?.codex_fast_mode ?? null,
     supportsImages: (activePreset ? activePreset.supports_images : payload.agent.supports_images) ?? true,
     api: activePreset ? activePreset.api ?? null : payload.agent.api ?? null,
     extraHeaders: providerJsonValue(activePreset?.extra_headers),
@@ -325,6 +329,19 @@ export function ModelsSettings({
 
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const selectedProvider = settings.providers.find((provider) => provider.name === form.provider);
+  const savedSpeed = form.provider === selectedPreset?.provider && form.model === selectedPreset.model
+    ? selectedPreset.model_options?.codex_fast_mode : undefined;
+  const speedProvider = selectedProvider ?? (savedSpeed
+    ? settings.providers.find((provider) => provider.name === selectedPreset?.resolved_provider)
+    : undefined);
+  const supportsCodexSpeed = selectedProvider?.codex_fast_mode_supported || !!savedSpeed;
+  const speedTier = supportsCodexSpeed
+    ? { ...speedProvider?.extra_body, ...parseProviderObject(form.extraBody) }.service_tier
+    : undefined;
+  const shownSpeed = form.codexFastMode ?? (speedTier === "ultrafast" ? speedTier : speedTier === "priority");
+  const supportsUltrafast = (model: string) => selectedProvider?.codex_ultrafast_models?.includes(
+    model.trim().toLowerCase().replace(/^openai[-_]codex\//, ""),
+  );
   const selectableProviders = uniqueProviders([
     ...configuredProviders,
     ...(selectedProvider ? [selectedProvider] : []),
@@ -352,6 +369,7 @@ export function ModelsSettings({
       extraHeaders: provider === prev.provider ? prev.extraHeaders : "",
       extraQuery: provider === prev.provider ? prev.extraQuery : "",
       extraBody: provider === prev.provider ? prev.extraBody : "",
+      codexFastMode: provider === prev.provider ? prev.codexFastMode : null,
       modelPreset: clearSuggestedName ? "" : prev.modelPreset,
     }));
   };
@@ -406,6 +424,7 @@ export function ModelsSettings({
       contextWindowTokens: normalizeContextWindowTokens(preset.context_window_tokens),
       temperature: preset.temperature,
       reasoningEffort: preset.reasoning_effort ?? "",
+      codexFastMode: preset.codex_fast_mode ?? null,
       supportsImages: preset.supports_images ?? true,
       api: preset.api ?? null,
       extraHeaders: providerJsonValue(preset.extra_headers),
@@ -541,6 +560,8 @@ export function ModelsSettings({
               model,
               contextWindowTokens: initializeContext ? contextWindow : prev.contextWindowTokens,
               api: model === prev.model ? prev.api : null,
+              codexFastMode: prev.codexFastMode === "ultrafast" && model !== prev.model && !supportsUltrafast(model)
+                ? null : prev.codexFastMode,
               modelPreset: canSuggestName ? suggestion : prev.modelPreset,
             }));
           }}
@@ -572,6 +593,21 @@ export function ModelsSettings({
           onChange={(reasoningEffort) => setForm((prev) => ({ ...prev, reasoningEffort }))}
         />
       </SettingsRow>
+      {supportsCodexSpeed && (
+        <SettingsRow
+          title={t("thread.composer.modelOptions.codexFast")}
+          description={t("settings.providers.capabilityFastModeHelp")}
+        >
+          <CodexSpeedControl
+            value={shownSpeed}
+            ultrafastSupported={supportsUltrafast(form.model) || savedSpeed?.ultrafast_supported}
+            onChange={(codexFastMode) => {
+              edits.complete();
+              setForm((prev) => ({ ...prev, codexFastMode }));
+            }}
+          />
+        </SettingsRow>
+      )}
       <Dialog open={advancedOpen} onOpenChange={(open) => {
         if (!open && !creating && edits.needsCompletion()) {
           void edits.commit().then((saved) => { if (saved) setAdvancedOpen(false); });

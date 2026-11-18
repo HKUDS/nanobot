@@ -1402,7 +1402,7 @@
       "extraHeaders": "Headers",
       "extraBody": "Body parameters",
       "extraQuery": "Query parameters",
-      "capabilityFastMode": "Fast mode",
+      "capabilityFastMode": "Fast",
       "capabilityFastModeHelp": "Faster responses, increased usage.",
       "capabilityXSearch": "X Search",
       "capabilityXSearchHelp": "Supported Grok models can search X.\n\nAllow supported Grok models to use xAI-hosted X Search. Search activity appears in chat.",
@@ -2152,11 +2152,10 @@
       "chooseAI": "Choose model",
       "modelOptions": {
         "title": "For this chat",
-        "inherit": "Inherit",
         "on": "On",
         "off": "Off",
-        "codexFast": "Codex Fast mode",
-        "scope": "Applies with your next message, not to tasks already running. Inherit uses the preset or provider default shown on the right."
+        "codexFast": "Fast",
+        "ultrafast": "Ultrafast"
       },
       "switchModel": "Switch model",
       "manageModels": "Manage presets",

@@ -209,6 +209,7 @@ export function useModelSettingsActions({
           contextWindowTokens: form.contextWindowTokens,
           temperature: form.temperature,
           reasoningEffort: form.reasoningEffort || null,
+          codexFastMode: form.codexFastMode ?? undefined,
           supportsImages: form.supportsImages,
           api: form.api ?? undefined,
           ...(settings.model_request_overrides_supported ? {
@@ -273,6 +274,8 @@ export function useModelSettingsActions({
           form.temperature !== selectedPreset.temperature ? form.temperature : undefined,
         reasoningEffort:
           reasoningEffort !== selectedPreset.reasoning_effort ? reasoningEffort : undefined,
+        codexFastMode: form.codexFastMode !== (selectedPreset.codex_fast_mode ?? null)
+          ? form.codexFastMode : undefined,
         supportsImages: form.supportsImages !== (selectedPreset.supports_images ?? true)
           ? form.supportsImages : undefined,
         api: modelAPISelection(form.api) !== modelAPISelection(selectedPreset.api)
@@ -350,6 +353,7 @@ export function useModelSettingsActions({
       ),
       temperature: primaryPreset?.temperature ?? settings.agent.temperature,
       reasoningEffort: primaryPreset?.reasoning_effort ?? settings.agent.reasoning_effort ?? "",
+      codexFastMode: null,
     }));
     setModelPresetCreating(true);
   };
