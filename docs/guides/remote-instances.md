@@ -51,6 +51,8 @@ After SSH signs in, a read-only check looks for the selected account's config an
 
 If nothing is found, the dialog confirms **SSH connected** and asks for the server's config path and optional service account. Docker, custom service names, user services and non-systemd deployments may need this manual step. Failure to find a config is not proof that nanobot is absent. Finding a config is also not proof that its WebUI is running: the normal authenticated gateway check still happens before opening.
 
+For an existing Windows SSH setup, make Python 3 available to the SSH login as `python` or `python3`. The server's nanobot configuration must be UTF-8 JSON. Windows support here does not extend to the quick-pairing command.
+
 SSH failures keep the entered address and offer **SSH login settings** for the local key path, SSH config and port. Connection refusal, name resolution, connection closure and authentication rejection have distinct messages. The application does not infer a missing key from a closed connection, nor change VPN, proxy or network-interface settings automatically. A custom SSH config outside standard locations must still be explicitly supplied by its owner.
 
 ## Find a server you already use
